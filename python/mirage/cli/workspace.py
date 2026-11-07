@@ -220,6 +220,84 @@ def _format_asks(items: list[dict[str, Any]]) -> str:
     return format_table(["ID", "SESSION", "COMMAND", "STATUS", "REASON"], rows)
 
 
+def _exit_cell(item: dict[str, Any]) -> str:
+    return "-" if item["exit"] is None else str(item["exit"])
+
+
+def _format_lines(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "No lines."
+    rows = [
+        [
+            item["id"],
+            item["session_id"],
+            item["state"],
+            _exit_cell(item),
+            item["command"],
+        ]
+        for item in items
+    ]
+    return format_table(["ID", "SESSION", "STATE", "EXIT", "COMMAND"], rows)
+
+
+def _format_jobs(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "No jobs."
+    rows = [
+        [
+            item["id"],
+            f"%{item['number']}",
+            item["session_id"],
+            item["state"],
+            _exit_cell(item),
+            item["command"],
+        ]
+        for item in items
+    ]
+    return format_table(
+        ["ID", "JOB", "SESSION", "STATE", "EXIT", "COMMAND"], rows
+    )
+
+
+def _format_processes(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "No processes."
+    rows = [
+        [
+            str(item["pid"]),
+            str(item["parent"] or 0),
+            item["session_id"],
+            item["state"],
+            _exit_cell(item),
+            item["command"],
+        ]
+        for item in items
+    ]
+    return format_table(
+        ["PID", "PPID", "SESSION", "STATE", "EXIT", "COMMAND"], rows
+    )
+
+
+def _list_records(
+    workspace_id: str, kind: str, params: dict[str, str]
+) -> dict[str, Any] | list[Any]:
+    """One of the workspace's record lists, by its route.
+
+    Args:
+        workspace_id (str): the workspace.
+        kind (str): ``lines``, ``jobs`` or ``processes``.
+        params (dict[str, str]): the list's filters.
+    """
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "GET",
+            f"/v1/workspaces/{quote(workspace_id, safe='')}/{kind}",
+            params={k: v for k, v in params.items() if v},
+        )
+    return handle_response(r)
+
+
 @app.command("create")
 def create_cmd(
     config_path: Path | None = typer.Argument(
@@ -586,6 +664,57 @@ def list_asks_cmd(
             params=params,
         )
     emit(handle_response(r), human=_format_asks)
+
+
+@app.command("list-lines")
+def list_lines_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    session: str = typer.Option(
+        "", "--session", help="Only this session's lines."
+    ),
+    state: str = typer.Option(
+        "", "--state", help="Only the lines in this state."
+    ),
+) -> None:
+    """List the lines the workspace keeps: running and newest ended."""
+    params = {"session_id": session, "state": state}
+    emit(_list_records(workspace_id, "lines", params), human=_format_lines)
+
+
+@app.command("list-jobs")
+def list_jobs_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    session: str = typer.Option(
+        "", "--session", help="Only this session's jobs."
+    ),
+    state: str = typer.Option(
+        "", "--state", help="Only the jobs in this state."
+    ),
+) -> None:
+    """List the workspace's jobs, as each session's jobs shows them."""
+    params = {"session_id": session, "state": state}
+    emit(_list_records(workspace_id, "jobs", params), human=_format_jobs)
+
+
+@app.command("list-processes")
+def list_processes_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    session: str = typer.Option(
+        "", "--session", help="Only this session's processes."
+    ),
+    state: str = typer.Option(
+        "", "--state", help="Only the processes in this state."
+    ),
+    line: str = typer.Option(
+        "", "--line", help="Only the processes this line ran."
+    ),
+) -> None:
+    """List the processes the workspace keeps: live and newest ended."""
+    params = {"session_id": session, "state": state, "line_id": line}
+    emit(
+        _list_records(workspace_id, "processes", params),
+        human=_format_processes,
+    )
 
 
 @app.command("allow")

@@ -87,6 +87,7 @@ export class JobHandle {
   line: LineId | null
   group: number | null
   private readonly now: () => number
+  private readonly ended: ((record: Job) => void) | null
 
   state: JobState = 'running'
   exitCode = 0
@@ -113,6 +114,7 @@ export class JobHandle {
     line?: LineId | null
     group?: number | null
     now?: () => number
+    ended?: ((record: Job) => void) | null
   }) {
     this.id = init.id
     this.command = init.command
@@ -129,6 +131,7 @@ export class JobHandle {
     this.group = init.group ?? null
     const clock = new SystemClock()
     this.now = init.now ?? (() => clock.now())
+    this.ended = init.ended ?? null
     if (init.state !== undefined) this.state = init.state
     if (init.exitCode !== undefined) this.exitCode = init.exitCode
     if (init.signal !== undefined) this.signal = init.signal
@@ -176,11 +179,12 @@ export class JobHandle {
     this.markEnded()
   }
 
-  /** Mark the job ended, now, unless it already was. */
+  /** Mark the job ended, now, unless it already was, and tell `ended`. */
   private markEnded(): void {
     if (this.state === 'exited') return
     this.state = 'exited'
     this.endedAt = this.now()
+    this.ended?.(this.record)
   }
 
   /** Ask the job's runner to stop with `signal`, without waiting for it. */

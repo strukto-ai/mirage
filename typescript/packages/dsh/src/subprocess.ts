@@ -205,7 +205,7 @@ export class MirageSubprocess extends SubprocessRuntime {
       if (workspace !== undefined && child !== undefined) {
         const pid = child.pid
         for (;;) {
-          const active = workspace.processes
+          const active = workspace.processTable
             .live()
             .filter((process) => process.record.group === pid)
           if (active.length === 0) break

@@ -176,8 +176,8 @@ describe('Runtime.execute', () => {
       const line = ws.shell('true; hold')
       await until(() => runtime.seen.length > 0)
       const ran = runtime.seen[0]
-      const shell = ws.processes.live().find((p) => p.record.id.pid === ran?.parent)
-      const program = ws.processes.live().find((p) => p.record.id.pid === ran?.id.pid)
+      const shell = ws.processTable.live().find((p) => p.record.id.pid === ran?.parent)
+      const program = ws.processTable.live().find((p) => p.record.id.pid === ran?.id.pid)
       expect(shell?.terminate(15)).toBe(true)
       const ended = await program?.join()
       expect([ended?.exit, ended?.signal]).toEqual([143, 15])
@@ -197,7 +197,7 @@ describe('Runtime.execute', () => {
       const line = ws.shell('true; hold; echo after $?')
       await until(() => runtime.seen.length > 0)
       const ran = runtime.seen[0]
-      const program = ws.processes.live().find((p) => p.record.id.pid === ran?.id.pid)
+      const program = ws.processTable.live().find((p) => p.record.id.pid === ran?.id.pid)
       expect(program?.terminate(15)).toBe(true)
       const done = await line
       expect([done.exitCode, DEC.decode(done.stdout)]).toEqual([0, 'after 143\n'])

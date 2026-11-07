@@ -703,3 +703,30 @@ describe('a damaged history file', () => {
     ])
   })
 })
+
+// A job and each process a line ran are spans of their own once they end,
+// named by their line, session and workspace.
+it('sends an ended job and process as spans', async () => {
+  const spans = exported()
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.shell('sleep 30 & kill %1; wait')
+    const [line] = ws.lines()
+    const [job] = spans.filter((s) => s.name === 'job')
+    expect([
+      job?.attributes['mirage.job.number'],
+      job?.attributes['mirage.command'],
+      job?.attributes['mirage.line.id'],
+    ]).toEqual([1, 'sleep 30', line?.id.value])
+    const [sleep] = spans.filter(
+      (s) => s.name === 'process' && s.attributes['process.command_line'] === 'sleep 30',
+    )
+    expect(sleep?.attributes['process.exit.code']).toBe(143)
+    expect(sleep?.attributes['mirage.line.id']).toBe(line?.id.value)
+    expect(sleep?.attributes['mirage.session.id']).toBe(line?.sessionId)
+    expect(String(sleep?.attributes['host.id'])).toMatch(/^host:/)
+  } finally {
+    await ws.close()
+    trace.disable()
+  }
+})

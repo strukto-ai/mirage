@@ -111,6 +111,7 @@ class JobHandle:
     now: Callable[[], float] = field(
         default_factory=lambda: SystemClock().now, repr=False
     )
+    ended: Callable[[Job], None] | None = field(default=None, repr=False)
 
     @property
     def record(self) -> Job:
@@ -160,9 +161,12 @@ class JobHandle:
         self._mark_ended()
 
     def _mark_ended(self) -> None:
-        """Mark the job ended, now, unless it already was."""
+        """Mark the job ended, now, unless it already was, and tell
+        ``ended``."""
         if self.state != JobState.EXITED:
             self.state, self.ended_at = JobState.EXITED, self.now()
+            if self.ended is not None:
+                self.ended(self.record)
 
     def cancel(self, signal: int = 9) -> None:
         """Ask the job's runner to stop, from any thread, without

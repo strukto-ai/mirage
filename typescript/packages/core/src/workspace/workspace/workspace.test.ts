@@ -433,7 +433,7 @@ it('reaps the programs its runtimes reach', async () => {
   const box = new ReapedBox([2])
   const ws = new Workspace({}, { runtimes: [box] })
   try {
-    const wid = ws.processes.workspaceId
+    const wid = ws.processTable.workspaceId
     const reap = (
       ws as unknown as {
         reapProcess: (record: Record<string, unknown>, signum: number) => Promise<boolean>
@@ -471,7 +471,37 @@ it('reaps a lapsed instance as it starts', async () => {
     await vi.waitFor(async () => {
       expect('dead' in (await store.processes())).toBe(false)
     })
-    expect(box.reaped).toEqual([[`${ws.processes.workspaceId}:2`, 15]])
+    expect(box.reaped).toEqual([[`${ws.processTable.workspaceId}:2`, 15]])
+  } finally {
+    await ws.close()
+  }
+})
+
+// Each line, job and process a workspace runs has a record it lists, by
+// session, state or line, and finds by id.
+it('lists its lines, jobs and processes', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() })
+  try {
+    const pid = Number(stdoutStr(await ws.shell('sleep 30 & echo $!')))
+    const [line] = ws.lines()
+    expect([line?.command, line?.state, line?.exit]).toEqual(['sleep 30 & echo $!', 'exited', 0])
+    if (line === undefined) throw new Error('no line')
+    expect(ws.line(line.id)).toEqual(line)
+    expect(ws.lines({ sessionId: 'other' })).toEqual([])
+    expect(ws.lines({ state: 'running' })).toEqual([])
+    const [job] = ws.jobs({ state: 'running' })
+    expect([job?.command, job?.line?.value]).toEqual(['sleep 30', line.id.value])
+    if (job === undefined) throw new Error('no job')
+    expect(ws.job(job.id)).toEqual(job)
+    const running = ws.processes({ state: 'running' })
+    expect(running.map((p) => p.id.pid)).toEqual([pid])
+    const [held] = running
+    if (held === undefined) throw new Error('no process')
+    expect(ws.process(held.id)).toEqual(held)
+    expect(ws.processes({ lineId: line.id }).map((p) => p.id.pid)).toContain(pid)
+    await ws.shell('kill %1; wait')
+    const ended = ws.process(held.id)
+    expect([ended?.state, ended?.signal]).toEqual(['exited', 15])
   } finally {
     await ws.close()
   }

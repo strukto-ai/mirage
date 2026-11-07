@@ -171,7 +171,7 @@ describe('a job inside a job', () => {
       await ws.shell('kill %1')
       await vi.waitFor(
         () => {
-          expect(ws.processes.live()).toEqual([])
+          expect(ws.processTable.live()).toEqual([])
         },
         { timeout: 5000, interval: 20 },
       )
@@ -315,7 +315,7 @@ describe('job builtins honor the process profile', () => {
         expect(await run(line)).toEqual(['', refusal, 254])
       expect(await run('echo $?')).toEqual(['254\n', '', 0])
       expect(await run('kill %1')).toEqual(['', '', 0])
-      await ws.processes.drain()
+      await ws.processTable.drain()
       expect(await run('(echo sub)')).toEqual(['sub\n', '', 0])
     } finally {
       await ws.close()

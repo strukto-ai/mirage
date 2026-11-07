@@ -412,7 +412,7 @@ async def test_the_host_ceilings_hold_what_a_tenant_lifts():
         ws = app.state.registry.get(wid).runner.ws
         assert ws.registry.memory is not None
         assert ws.registry.memory.limit == 1 << 20
-        assert ws.processes.ceiling == 8
+        assert ws.process_table.ceiling == 8
         r = await client.post(
             f"/v1/workspaces/{wid}/shell",
             params={"session_id": "lifted"},

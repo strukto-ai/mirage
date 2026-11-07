@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { context, trace, type Attributes, type Tracer } from '@opentelemetry/api'
+import type { Job } from '../execution/job/types.ts'
+import type { Process } from '../execution/process/types.ts'
 import { CHUNK_SIZE } from '../io/cooperative.ts'
 import type { IOResult } from '../io/types.ts'
 import { YieldBudget } from '../io/yield_budget.ts'
@@ -111,6 +113,51 @@ function tracedOutput(raw: Uint8Array, limit: number): string {
  */
 function tracer(): Tracer {
   return trace.getTracer(TRACER_NAME)
+}
+
+/**
+ * Send an ended record to OpenTelemetry as one span over its run, from
+ * `startedAt` to `endedAt`, epoch seconds. Mirrors Python's `_trace_ended`.
+ */
+function traceEnded(
+  name: string,
+  attributes: Attributes,
+  startedAt: number,
+  endedAt: number | null,
+): void {
+  const start = startedAt * 1000
+  tracer()
+    .startSpan(name, { startTime: start, attributes })
+    .end(endedAt === null ? start : endedAt * 1000)
+}
+
+/** Send an ended process to OpenTelemetry as a `process` span. */
+export function traceProcess(record: Process): void {
+  const attributes: Attributes = {
+    'process.pid': record.id.pid,
+    'process.command_line': record.command,
+    'host.id': record.machine.toString(),
+    'mirage.workspace.id': record.id.workspaceId,
+    'mirage.session.id': record.sessionId,
+  }
+  if (record.parent !== null) attributes['process.parent_pid'] = record.parent
+  if (record.exit !== null) attributes['process.exit.code'] = record.exit
+  if (record.line !== null) attributes['mirage.line.id'] = record.line.value
+  traceEnded('process', attributes, record.startedAt, record.endedAt)
+}
+
+/** Send an ended job to OpenTelemetry as a `job` span. */
+export function traceJob(record: Job): void {
+  const attributes: Attributes = {
+    'mirage.job.id': record.id.console,
+    'mirage.job.number': record.number,
+    'mirage.command': record.command,
+    'mirage.workspace.id': record.id.workspaceId,
+    'mirage.session.id': record.sessionId,
+  }
+  if (record.exit !== null) attributes['mirage.exit_code'] = record.exit
+  if (record.line !== null) attributes['mirage.line.id'] = record.line.value
+  traceEnded('job', attributes, record.startedAt, record.endedAt)
 }
 
 /**

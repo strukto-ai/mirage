@@ -3,7 +3,11 @@ import errno
 from collections.abc import Callable
 from threading import RLock
 
-from mirage.execution.constants import LOCAL_MACHINE
+from mirage.execution.constants import (
+    HISTORY_MAX_RECORDS,
+    HISTORY_SECONDS,
+    LOCAL_MACHINE,
+)
 from mirage.execution.process.config import ProcessPermissions, ProcessScope
 from mirage.execution.process.handle import ExecutionBind, ProcessHandle
 from mirage.execution.process.types import Process, ProcessRunner, ProcessState
@@ -47,6 +51,8 @@ class ProcessTable:
         now (Callable[[], float]): the epoch seconds a process starts
             at, which ``ps`` shows; the running workspace's system time
             by default.
+        ended (Callable[[Process], None] | None): told each process's
+            record as it ends.
     """
 
     def __init__(
@@ -56,14 +62,17 @@ class ProcessTable:
         bind: ExecutionBind | None = None,
         changed: Callable[[], None] | None = None,
         now: Callable[[], float] = system_now,
+        ended: Callable[[Process], None] | None = None,
     ) -> None:
         self.workspace_id = workspace_id
         self.machine = machine
         self._now = now
         self._bind = bind
         self._changed = changed
+        self._ended_hook = ended
         self._next_pid = 1
         self._live: dict[int, tuple[int, ProcessHandle]] = {}
+        self._ended: dict[int, Process] = {}
         self._ancestors: dict[int, tuple[int, ...]] = {}
         self._generations: dict[str, int] = {}
         self._lock = RLock()
@@ -277,6 +286,11 @@ class ProcessTable:
                 return
             del self._live[pid]
             self._ancestors.pop(pid, None)
+            self._ended.pop(pid, None)
+            self._ended[pid] = handle.record
+            self._prune()
+        if self._ended_hook is not None:
+            self._ended_hook(handle.record)
 
     def view(
         self,
@@ -399,6 +413,32 @@ class ProcessTable:
         """Host-only inventory, including disowned and stopping runners."""
         with self._lock:
             return tuple(handle for _, handle in self._live.values())
+
+    def records(self) -> list[Process]:
+        """The records the table keeps, by pid: every live process's,
+        and the newest ended ones, ``HISTORY_MAX_RECORDS`` of them for
+        ``HISTORY_SECONDS`` at most. A pid a session's lines run under
+        in turn keeps its latest."""
+        with self._lock:
+            self._prune()
+            kept = dict(self._ended)
+            kept.update(
+                (pid, handle.record) for pid, (_, handle) in self._live.items()
+            )
+        return [kept[pid] for pid in sorted(kept)]
+
+    def _prune(self) -> None:
+        """Drop the oldest ended records past the history's bounds; they
+        are kept in the order they ended."""
+        cutoff = self._now() - HISTORY_SECONDS
+        while self._ended:
+            pid, record = next(iter(self._ended.items()))
+            if (
+                len(self._ended) <= HISTORY_MAX_RECORDS
+                and (record.ended_at or 0) > cutoff
+            ):
+                break
+            del self._ended[pid]
 
     def queued(self) -> bool:
         """Whether a runner that was started has yet to begin."""

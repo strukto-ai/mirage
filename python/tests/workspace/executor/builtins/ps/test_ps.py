@@ -115,7 +115,7 @@ async def test_ps_columns_and_signal_probes_share_managed_processes(selector):
         assert result.stdout.decode().splitlines()[0].split() == ["PID", "CMD"]
         assert f"{pid}" in result.stdout.decode()
         assert (await ws.shell(f"kill {selector} {pid}")).exit_code == 0
-        await ws.processes.drain()
+        await ws.process_table.drain()
         result = await ws.shell(f"ps -p {pid} -o pid=; echo absent=$?")
         assert result.stdout == b"absent=1\n"
     finally:

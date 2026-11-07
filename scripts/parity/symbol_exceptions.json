@@ -551,10 +551,16 @@
     "skill_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "vfs_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "logs_cmd": "Typer commands are module functions; commander registers the same action inline in registerWorkspaceCommands.",
-    "use_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
+    "use_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "list_lines_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
+    "list_jobs_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
+    "list_processes_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands."
    },
    "typescript_only": {
-    "LogPage": "TypeScript types the HTTP page passed to its formatter; Python uses a dictionary from the HTTP response."
+    "LogPage": "TypeScript types the HTTP page passed to its formatter; Python uses a dictionary from the HTTP response.",
+    "LineRecord": "TypeScript types the JSON records a verb prints; Python formats them as the decoded dicts.",
+    "JobRecord": "TypeScript types the JSON records a verb prints; Python formats them as the decoded dicts.",
+    "ProcessRecord": "TypeScript types the JSON records a verb prints; Python formats them as the decoded dicts."
    }
   },
   "server/auth/middleware": {
@@ -1519,6 +1525,48 @@
     "resultRecord": "Zod schema for persisted recorder events or pagination cursors; Python reads typed response models and validates cursor fields directly.",
     "mountRecord": "Zod schema for persisted recorder events or pagination cursors; Python reads typed response models and validates cursor fields directly.",
     "cursorValue": "Zod schema for persisted recorder events or pagination cursors; Python reads typed response models and validates cursor fields directly."
+   }
+  },
+  "server/routers/lines": {
+   "python_only": {
+    "get_line": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes.",
+    "list_lines": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes.",
+    "router": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes."
+   },
+   "typescript_only": {
+    "ListLinesQuery": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
+    "STATES": "Fastify checks the state filter against the record's states by hand; FastAPI validates it against the state enum.",
+    "WsIdParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
+    "WsLineParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
+    "registerLinesRoutes": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes."
+   }
+  },
+  "server/routers/jobs": {
+   "python_only": {
+    "get_job": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerJobsRoutes.",
+    "list_jobs": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerJobsRoutes.",
+    "router": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerJobsRoutes."
+   },
+   "typescript_only": {
+    "ListJobsQuery": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
+    "STATES": "Fastify checks the state filter against the record's states by hand; FastAPI validates it against the state enum.",
+    "WsIdParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
+    "WsJobParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
+    "registerJobsRoutes": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerJobsRoutes."
+   }
+  },
+  "server/routers/processes": {
+   "python_only": {
+    "get_process": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerProcessesRoutes.",
+    "list_processes": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerProcessesRoutes.",
+    "router": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerProcessesRoutes."
+   },
+   "typescript_only": {
+    "ListProcessesQuery": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
+    "STATES": "Fastify checks the state filter against the record's states by hand; FastAPI validates it against the state enum.",
+    "WsIdParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
+    "WsProcessParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
+    "registerProcessesRoutes": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerProcessesRoutes."
    }
   }
  }

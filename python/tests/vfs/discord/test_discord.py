@@ -122,7 +122,7 @@ async def test_cancel_cat_releases_stalled_attachment(
         cancel.set()
         with pytest.raises(MirageAbortError):
             await asyncio.wait_for(running, 1)
-        await ws.processes.drain()
+        await ws.process_table.drain()
         response.__aexit__.assert_awaited_once()
         session.close.assert_not_awaited()
         assert await ws.cache.get(path) is None

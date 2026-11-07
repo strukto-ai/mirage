@@ -67,16 +67,27 @@ from mirage.core.history.constants import HISTFILESIZE
 from mirage.errors.fs import enoent
 from mirage.events.base import EventRuntime
 from mirage.execution.context import new_line_id
-from mirage.execution.job import JobTable
+from mirage.execution.job import Job, JobState, JobTable
 from mirage.execution.line.handle import LineHandle
 from mirage.execution.line.table import LineTable
+from mirage.execution.line.types import Line, LineState
 from mirage.execution.process.child import ChildProcess
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.stdio import ProcessInput, ProcessOutput
 from mirage.execution.process.table import ProcessTable
-from mirage.execution.process.types import SpawnRequest
+from mirage.execution.process.types import (
+    Process,
+    ProcessState,
+    SpawnRequest,
+)
 from mirage.execution.process.view import ProcessView
-from mirage.execution.types import MachineId, MachinePid, ProcessId
+from mirage.execution.types import (
+    JobId,
+    LineId,
+    MachineId,
+    MachinePid,
+    ProcessId,
+)
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget
@@ -84,7 +95,7 @@ from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.log_entry import EVENT_COMMAND, EVENT_RESULT, EVENT_VFS
-from mirage.observe.observer import Observer
+from mirage.observe.observer import Observer, trace_job, trace_process
 from mirage.observe.store import ObserverStore
 from mirage.policy import (
     AskHandler,
@@ -412,7 +423,7 @@ class Workspace:
         self._shared_mounts: set[int] = set()
         self._drift = DriftQueue()
         # A line binds the system clock only once its process has started.
-        self.processes = ProcessTable(
+        self.process_table = ProcessTable(
             self._workspace_id,
             MachineId("host", socket.gethostname()),
             bind=run_as_process,
@@ -422,18 +433,20 @@ class Workspace:
                 if self._registry.system_clock is None
                 else self._registry.system_clock.now()
             ),
+            ended=trace_process,
         )
-        self.processes.ceiling = self._registry.ceilings.max_processes
+        self.process_table.ceiling = self._registry.ceilings.max_processes
         # One daemon runs a workspace's lines at a time, the one holding
         # its lease in the store; a server passes the id it keeps on disk,
         # so a restarted one holds its workspaces again.
         self.job_table = JobTable(
             stores.execution,
-            self.processes,
+            self.process_table,
             clock=self._clock,
             daemon=daemon_id,
         )
         self.job_table.reaper = self._reap_process
+        self.job_table.ended = trace_job
         self.line_table = LineTable(self._clock)
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: dict[ShellExecution, None] = {}
@@ -727,7 +740,7 @@ class Workspace:
             self._files,
             self.get_session,
             self._sandbox_mounts,
-            self.processes,
+            self.process_table,
         )
         self._runtimes = Runtimes(self._registry, self._runtime_binding)
         self._runtimes.resolve(runtimes)
@@ -1392,7 +1405,7 @@ class Workspace:
 
     def _process_view(self, session: SessionState) -> ProcessView:
         parent_pid = session.process_id
-        view = self.processes.view(
+        view = self.process_table.view(
             session.session_id, lambda: session.processes
         )
 
@@ -1446,7 +1459,7 @@ class Workspace:
         )
         env = dict(request.env) if request.env is not None else None
         owner = self._session_mgr.get(session.session_id)
-        admission = self.processes.view(
+        admission = self.process_table.view(
             session.session_id, lambda: owner.processes
         )
 
@@ -1493,7 +1506,7 @@ class Workspace:
                 input_stream.stop()
                 output.end()
 
-        process = self.processes.start(
+        process = self.process_table.start(
             session_id=child.session_id,
             command=shell_join(argv),
             cwd=cwd,
@@ -1534,7 +1547,9 @@ class Workspace:
         found, seen = record.get("machine_pid"), record.get("seen_at")
         if not isinstance(pid, int):
             return False
-        if machine == str(self.processes.machine) and isinstance(found, dict):
+        if machine == str(self.process_table.machine) and isinstance(
+            found, dict
+        ):
             return await reap_host_run(
                 MachinePid(found["pid"], found["started"], found["exited"]),
                 seen,
@@ -1546,7 +1561,10 @@ class Workspace:
             if not isinstance(runtime, RemoteSandbox):
                 continue
             try:
-                if str(runtime.machine or self.processes.machine) != machine:
+                if (
+                    str(runtime.machine or self.process_table.machine)
+                    != machine
+                ):
                     continue
                 reached = await runtime.reap(tag, signum) or reached
             except Exception as exc:
@@ -1899,7 +1917,7 @@ class Workspace:
                 self._registry.clis.close,
             ],
             job_table=self.job_table,
-            processes=self.processes,
+            processes=self.process_table,
             registry=self._registry,
             shared_mounts=self._shared_mounts,
             kernel_mounts=self._kernel_mounts,
@@ -2552,11 +2570,105 @@ class Workspace:
         if was_default:
             session_id = self.default_session_id
         session = await self._session_mgr.set_profile(session_id, compiled)
-        self.processes.revoke_session(session_id)
+        self.process_table.revoke_session(session_id)
         return session
 
     def list_sessions(self) -> list[SessionState]:
         return self._session_mgr.list()
+
+    def lines(
+        self,
+        session_id: str | None = None,
+        state: LineState | None = None,
+    ) -> list[Line]:
+        """The lines the workspace keeps, oldest first: every one not
+        ended yet, and the newest ended ones.
+
+        Args:
+            session_id (str | None): only this session's lines.
+            state (LineState | None): only the lines in this state.
+        """
+        return [
+            line
+            for line in self.line_table.lines(session_id)
+            if state is None or line.state == state
+        ]
+
+    def line(self, line_id: LineId) -> Line | None:
+        """One line's record, while the workspace keeps it.
+
+        Args:
+            line_id (LineId): the line.
+        """
+        return self.line_table.get(line_id)
+
+    def jobs(
+        self,
+        session_id: str | None = None,
+        state: JobState | None = None,
+    ) -> list[Job]:
+        """The jobs the workspace's sessions list, as ``jobs`` does:
+        each until its ending is reported.
+
+        Args:
+            session_id (str | None): only this session's jobs.
+            state (JobState | None): only the jobs in this state.
+        """
+        handles = (
+            self.job_table.all_jobs()
+            if session_id is None
+            else self.job_table.list_jobs(session_id)
+        )
+        return [
+            job.record
+            for job in handles
+            if state is None or job.record.state == state
+        ]
+
+    def job(self, job_id: JobId) -> Job | None:
+        """One job's record, while a session lists it.
+
+        Args:
+            job_id (JobId): the job.
+        """
+        return next((job for job in self.jobs() if job.id == job_id), None)
+
+    def processes(
+        self,
+        session_id: str | None = None,
+        state: ProcessState | None = None,
+        line_id: LineId | None = None,
+    ) -> list[Process]:
+        """The processes the workspace keeps, by pid: every live one,
+        and the newest ended ones.
+
+        Args:
+            session_id (str | None): only this session's processes.
+            state (ProcessState | None): only the processes in this state.
+            line_id (LineId | None): only the processes this line ran.
+        """
+        return [
+            process
+            for process in self.process_table.records()
+            if (session_id is None or process.session_id == session_id)
+            and (state is None or process.state == state)
+            and (line_id is None or process.line == line_id)
+        ]
+
+    def process(self, process_id: ProcessId) -> Process | None:
+        """One process's record, while the workspace keeps it.
+
+        Args:
+            process_id (ProcessId): the process.
+        """
+        return next(
+            (
+                process
+                for process in self.process_table.records()
+                if process.id == process_id
+            ),
+            None,
+        )
 
     async def ensure_sessions_loaded(self) -> None:
         """Hydrate sessions from the session store (idempotent).
@@ -2764,7 +2876,7 @@ class Workspace:
         for job in jobs:
             if await self.job_table.kill(job.id, job.session_id):
                 killed += 1
-        for process in self.processes.live():
+        for process in self.process_table.live():
             if session_id in (None, process.record.session_id):
                 if process.terminate():
                     killed += 1
@@ -2961,7 +3073,7 @@ class Workspace:
             line_table=self.line_table,
             runtimes=self._runtimes,
             router=self._router,
-            processes=self.processes,
+            processes=self.process_table,
             dispatch=self.dispatch,
             has_managed_env=lambda: self._has_managed_env,
             secret_sources=self._secret_sources,
@@ -3401,7 +3513,7 @@ class Workspace:
         try:
             if stop is not None:
                 await self._admit_line(stop, cancel)
-            if self.processes.queued():
+            if self.process_table.queued():
                 # A job started before this line (an earlier line's, or
                 # the enclosing line's when this one is its substitution)
                 # begins first, as its fork already runs: what its

@@ -654,7 +654,7 @@ async function action(
       return { type: row.type, size: row.size }
     }
     case 'drain_processes':
-      await ws.processes.drain()
+      await ws.processTable.drain()
       break
     case 'spawn': {
       const child = ws.spawn({ argv: step.argv }, step.session)

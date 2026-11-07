@@ -8,6 +8,7 @@ from mirage.context.session_context import (
     current_process_id,
     run_as_process,
 )
+from mirage.execution.constants import HISTORY_SECONDS
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
@@ -689,3 +690,44 @@ async def test_a_started_runner_tells_the_publisher():
         )
         await handle.join()
     assert live == [1, 1]
+
+
+async def _done() -> int:
+    return 3
+
+
+# The table keeps an ended process's record beside the live ones, until
+# it is older than the history keeps.
+@pytest.mark.asyncio
+async def test_an_ended_process_stays_listed_until_its_history_lapses():
+    clock = [100.0]
+    processes = ProcessTable(now=lambda: clock[0])
+    ended = processes.start(
+        session_id="a",
+        command="done",
+        cwd=PathSpec.from_str_path("/"),
+        run=_done,
+    )
+    await ended.join()
+    release = asyncio.Event()
+
+    async def held() -> int:
+        await release.wait()
+        return 0
+
+    live = processes.start(
+        session_id="a",
+        command="held",
+        cwd=PathSpec.from_str_path("/"),
+        run=held,
+    )
+    try:
+        assert [(r.command, r.state, r.exit) for r in processes.records()] == [
+            ("done", ProcessState.EXITED, 3),
+            ("held", ProcessState.RUNNING, None),
+        ]
+        clock[0] += HISTORY_SECONDS + 1
+        assert [r.command for r in processes.records()] == ["held"]
+    finally:
+        release.set()
+        await live.join()

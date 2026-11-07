@@ -87,7 +87,7 @@ async def _invoke_shell(
         except asyncio.CancelledError:
             execution.cancel()
             raise
-    return await io_result_to_dict(result)
+    return {**await io_result_to_dict(result), "line_id": str(scope.id)}
 
 
 @router.post("")

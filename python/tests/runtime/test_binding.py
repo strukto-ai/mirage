@@ -320,7 +320,7 @@ async def test_process_views_do_not_share_by_profile_or_follow_reused_sessions()
             await release.wait()
             return 0
 
-        process = ws.processes.start(
+        process = ws.process_table.start(
             session_id="one",
             command="private work",
             cwd=PathSpec.from_str_path("/"),

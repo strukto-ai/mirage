@@ -53,9 +53,9 @@ it('revokes captured process entry points on profile replacement', async () => {
     ws.createSession('b')
     const child = ws.spawn({ argv: ['sleep', '30'] }, 'a')
     child.stdin.close()
-    const view = ws.processes.view('a')
+    const view = ws.processTable.view('a')
     expect(view.list().map((info) => info.id.pid)).toEqual([child.pid])
-    expect(ws.processes.view('b').list()).toEqual([])
+    expect(ws.processTable.view('b').list()).toEqual([])
     await ws.setSessionProfile('a', { processes: { max: 1 } })
     expect(view.list()).toEqual([])
     await child.wait()
@@ -192,7 +192,7 @@ print('ok')`
     expect(result.exitCode, new TextDecoder().decode(result.stderr)).toBe(0)
     expect(new TextDecoder().decode(result.stdout)).toBe('ok\n')
     expect(ticks).toBeGreaterThan(10)
-    expect(ws.processes.live()).toHaveLength(0)
+    expect(ws.processTable.live()).toHaveLength(0)
   } finally {
     clearInterval(timer)
     await ws.close()
@@ -266,7 +266,7 @@ print('done')`
       .communicate(new TextEncoder().encode('abcdef'))
     expect(result.exitCode, new TextDecoder().decode(result.stderr)).toBe(0)
     expect(new TextDecoder().decode(result.stdout)).toBe('done\n')
-    expect(ws.processes.live()).toHaveLength(0)
+    expect(ws.processTable.live()).toHaveLength(0)
   } finally {
     await ws.close()
   }
@@ -300,7 +300,7 @@ it('top-level lines cannot bypass the spawn process cap', async () => {
     expect(result.exitCode).toBe(254)
     expect(result.stderrText).toBe('bash: fork: Resource temporarily unavailable\n')
     expect(session.processId).toBeNull()
-    expect(ws.processes.live()).toHaveLength(1)
+    expect(ws.processTable.live()).toHaveLength(1)
     expect((await ws.shell('test ! -e /data/file')).exitCode).toBe(0)
     child.terminate()
     await child.wait()
@@ -355,7 +355,7 @@ it('a fork bomb meets the default cap', async () => {
     const result = await ws.shell('b() { b | b; }; b')
     expect(result.exitCode).toBe(254)
     expect(result.stderrText).toContain('bash: fork: Resource temporarily unavailable')
-    expect(ws.processes.live()).toHaveLength(0)
+    expect(ws.processTable.live()).toHaveLength(0)
   } finally {
     await ws.close()
   }

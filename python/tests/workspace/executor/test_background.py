@@ -690,7 +690,7 @@ async def test_a_session_at_its_process_cap_cannot_fork():
             assert await run(line) == ("", refusal, 254)
         assert await run("echo $?") == ("254\n", "", 0)
         assert await run("kill %1") == ("", "", 0)
-        await ws.processes.drain()
+        await ws.process_table.drain()
         assert await run("(echo sub)") == ("sub\n", "", 0)
     finally:
         await ws.close()

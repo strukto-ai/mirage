@@ -1,9 +1,9 @@
 import { DEFAULT_PROCESS_PERMISSIONS, type ProcessPermissions } from './config.ts'
 import { underCeiling, type PathSpec, type ProcessScope } from '../../types.ts'
 import { ProcessHandle, type ExecutionBind } from './handle.ts'
-import type { ProcessRunner } from './types.ts'
+import type { Process, ProcessRunner } from './types.ts'
 import type { ProcessView } from './view.ts'
-import { LOCAL_MACHINE } from '../constants.ts'
+import { HISTORY_MAX_RECORDS, HISTORY_SECONDS, LOCAL_MACHINE } from '../constants.ts'
 import { type LineId, type MachineId, ProcessId } from '../types.ts'
 import { systemNow } from '../../utils/clock.ts'
 
@@ -27,6 +27,7 @@ export function deliver(handle: ProcessHandle, signal: number): void {
 export class ProcessTable {
   private nextPid = 1
   private readonly runners = new Map<number, { generation: number; handle: ProcessHandle }>()
+  private readonly history = new Map<number, Process>()
   private readonly ancestors = new Map<number, readonly number[]>()
   private readonly generations = new Map<string, number>()
   private stopped = false
@@ -47,6 +48,7 @@ export class ProcessTable {
    *   live runners knows to.
    * @param now the epoch seconds a process starts at, which `ps` shows;
    *   omitted means the running workspace's system time.
+   * @param ended told each process's record as it ends.
    */
   constructor(
     readonly workspaceId = '',
@@ -54,6 +56,7 @@ export class ProcessTable {
     private readonly bind: ExecutionBind = (run) => run(),
     private readonly changed?: () => void,
     private readonly now: () => number = systemNow,
+    private readonly ended?: (record: Process) => void,
   ) {}
 
   /** Whether a runner that was started has yet to begin. */
@@ -142,6 +145,10 @@ export class ProcessTable {
         if (this.runners.get(id)?.handle !== handle) return
         this.runners.delete(id)
         this.ancestors.delete(id)
+        this.history.delete(id)
+        this.history.set(id, handle.record)
+        this.prune()
+        this.ended?.(handle.record)
       },
       (signal) => {
         this.terminateChildren(pid, signal)
@@ -298,6 +305,27 @@ export class ProcessTable {
   /** Host-only inventory, including disowned and stopping runners. */
   live(): readonly ProcessHandle[] {
     return [...this.runners.values()].map((entry) => entry.handle)
+  }
+
+  /**
+   * The records the table keeps, by pid: every live process's, and the
+   * newest ended ones, `HISTORY_MAX_RECORDS` of them for `HISTORY_SECONDS`
+   * at most. A pid a session's lines run under in turn keeps its latest.
+   */
+  records(): Process[] {
+    this.prune()
+    const kept = new Map(this.history)
+    for (const [pid, { handle }] of this.runners) kept.set(pid, handle.record)
+    return [...kept.entries()].sort(([a], [b]) => a - b).map(([, record]) => record)
+  }
+
+  /** Drop the oldest ended records past the history's bounds; they are kept in the order they ended. */
+  private prune(): void {
+    const cutoff = this.now() - HISTORY_SECONDS
+    for (const [pid, record] of this.history) {
+      if (this.history.size <= HISTORY_MAX_RECORDS && (record.endedAt ?? 0) > cutoff) break
+      this.history.delete(pid)
+    }
   }
 
   /** Join managed runners before releasing their workspace resources. */

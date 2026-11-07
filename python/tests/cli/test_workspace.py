@@ -25,6 +25,7 @@ from typer.testing import CliRunner
 from mirage.cli import workspace as workspace_cli
 from mirage.cli.workspace import (
     _format_logs,
+    _format_processes,
     _format_workspace_explanation,
     _load_config_argument,
 )
@@ -309,3 +310,64 @@ def test_stop_and_start_post_to_the_workspace(fake, verb):
 def test_close_cancel_and_kill_are_not_workspace_commands(fake, gone):
     assert _invoke(gone, "w").exit_code == 2
     assert fake.calls == []
+
+
+# Each record list asks its route for the filters its options name, and
+# leaves out the ones not given.
+@pytest.mark.parametrize(
+    ("args", "path", "params"),
+    [
+        (
+            ("list-lines", "w", "--state", "running"),
+            "/v1/workspaces/w/lines",
+            {"state": "running"},
+        ),
+        (
+            ("list-jobs", "w", "--session", "s1"),
+            "/v1/workspaces/w/jobs",
+            {"session_id": "s1"},
+        ),
+        (
+            ("list-processes", "w", "--line", "line_1", "--state", "exited"),
+            "/v1/workspaces/w/processes",
+            {"state": "exited", "line_id": "line_1"},
+        ),
+    ],
+)
+def test_a_record_list_asks_for_what_its_options_name(
+    fake, args, path, params
+):
+    fake.answer = _FakeResponse(200, b"[]")
+    result = _invoke(*args)
+    assert result.exit_code == 0, result.output
+    method, called, kwargs = fake.calls[0]
+    assert (method, called, kwargs["params"]) == ("GET", path, params)
+
+
+def test_processes_read_as_one_row_per_process():
+    lines = _format_processes(
+        [
+            {
+                "pid": 2,
+                "parent": None,
+                "session_id": "s1",
+                "state": "running",
+                "exit": None,
+                "command": "sleep 30",
+            },
+            {
+                "pid": 3,
+                "parent": 2,
+                "session_id": "s1",
+                "state": "exited",
+                "exit": 143,
+                "command": "cat",
+            },
+        ]
+    ).splitlines()
+    assert [line.split() for line in lines] == [
+        ["PID", "PPID", "SESSION", "STATE", "EXIT", "COMMAND"],
+        ["2", "0", "s1", "running", "-", "sleep", "30"],
+        ["3", "2", "s1", "exited", "143", "cat"],
+    ]
+    assert _format_processes([]) == "No processes."

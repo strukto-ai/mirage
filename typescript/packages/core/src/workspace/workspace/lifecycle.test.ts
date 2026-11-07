@@ -671,7 +671,7 @@ describe('closeWorkspace surfaces closer failures', () => {
     const vfs = new RAMVFS()
     const ws = new Workspace({ '/m': [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE })
     await ws.dispatch('stat', '/m')
-    vi.spyOn(ws.processes, 'stop').mockImplementation(() => {
+    vi.spyOn(ws.processTable, 'stop').mockImplementation(() => {
       throw new Error('process cancellation failed')
     })
     vi.spyOn(vfs, 'close').mockRejectedValue(new Error('VFS close failed'))
@@ -733,7 +733,7 @@ describe('Workspace.delete', () => {
 
 describe('cancel and kill', () => {
   async function linesRunning(ws: Workspace, count: number): Promise<void> {
-    const lines = (ws as unknown as { lines: Map<unknown, unknown> }).lines
+    const lines = (ws as unknown as { lineStops: Map<unknown, unknown> }).lineStops
     for (let i = 0; i < 500; i += 1) {
       if (lines.size === count) return
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -807,7 +807,7 @@ describe('cancel and kill', () => {
 
 describe('capture barrier', () => {
   async function linesRunning(ws: Workspace, count: number): Promise<void> {
-    const lines = (ws as unknown as { lines: Map<unknown, unknown> }).lines
+    const lines = (ws as unknown as { lineStops: Map<unknown, unknown> }).lineStops
     for (let i = 0; i < 500; i += 1) {
       if (lines.size === count) return
       await new Promise((resolve) => setTimeout(resolve, 10))

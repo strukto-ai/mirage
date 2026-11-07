@@ -113,7 +113,7 @@ it.each(['-TERM', '-15', '-s TERM', '-n 15', '-SIGTERM', '-9'])(
       expect(all.split('\n')[0]?.trim().split(/\s+/)).toEqual(['PID', 'CMD'])
       expect(all).toContain(String(pid))
       expect((await ws.shell(`kill ${selector} ${String(pid)}`)).exitCode).toBe(0)
-      await ws.processes.drain()
+      await ws.processTable.drain()
       expect(stdoutStr(await ws.shell(`ps -p ${String(pid)} -o pid=; echo absent=$?`))).toBe(
         'absent=1\n',
       )
