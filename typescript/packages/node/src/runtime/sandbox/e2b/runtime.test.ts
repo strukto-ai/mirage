@@ -65,6 +65,20 @@ class FakeExitError extends Error {
 class FakeSandboxError extends Error {}
 class FakeNotFoundError extends FakeSandboxError {}
 
+/** The runtime's transport called directly: a run with no tag but the caller's. */
+function execArgv(
+  rt: E2BRuntime,
+  argv: string[],
+  stdin: Uint8Array | null,
+  env: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<RunResult> {
+  const direct = rt as unknown as {
+    execArgv: (...args: unknown[]) => Promise<RunResult>
+  }
+  return direct.execArgv(argv, stdin, env, '/', null, null, signal)
+}
+
 /** The line `wrapLine` dressed, or the one word of its argv, unquoted. */
 function lineOf(command: string): string {
   const at = command.lastIndexOf("'-c' ")
@@ -360,6 +374,8 @@ describe('E2BRuntime', () => {
       disconnected: true,
     })
   })
+  // An untagged run (the reap's own line) that fails is killed and starts
+  // nothing more.
   it.each([
     new Error('stdin transport failed'),
     new FakeSandboxError('13: [internal] stdin transport failed'),
@@ -367,11 +383,31 @@ describe('E2BRuntime', () => {
     const runtime = makeRuntime()
     await runtime.connect()
     FakeSandbox.last.commands.inputError = inputError
-    await expect(runtime.execLine('cat', new Uint8Array([1]), {}, '/workspace')).rejects.toThrow(
-      'stdin transport failed',
-    )
+    await expect(
+      execArgv(runtime, ['/bin/sh', '-c', 'cat'], new Uint8Array([1]), {}),
+    ).rejects.toThrow('stdin transport failed')
     expect(FakeSandbox.last.commands.handles[0]).toMatchObject({ killed: true, disconnected: true })
     expect(FakeSandbox.last.commands.calls).toHaveLength(1)
+  })
+  // A kill reaches only the encoding shell, so a line run with no tag of its
+  // caller's gets its own and an aborted one is reaped by it.
+  it('reaps an aborted line by its own tag', async () => {
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('l-i-n-e-')
+    const runtime = makeRuntime()
+    await runtime.connect()
+    const commands = FakeSandbox.last.commands
+    const abort = new AbortController()
+    const run = runtime.execLine('sleep', null, {}, '/', abort.signal)
+    await vi.waitFor(() => {
+      expect(commands.handles).toHaveLength(1)
+    })
+    abort.abort()
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    expect(commands.handles[0]).toMatchObject({ killed: true, disconnected: true })
+    expect(commands.calls.map(([command]) => lineOf(command))).toEqual([
+      'sleep',
+      reapLine('line', 15),
+    ])
   })
   // A kill reaches only the shell that encodes the output, so a tagged run
   // that fails for a reason other than a cancel is also stopped by its tag.
@@ -456,7 +492,8 @@ describe('E2B cancellation and validation', () => {
       cancel: () => {
         abort.abort()
       },
-      run: async () => (await runtime.execLine('sleep', null, env, '/', abort.signal)).exitCode,
+      run: async () =>
+        (await execArgv(runtime, ['/bin/sh', '-c', 'sleep'], null, env, abort.signal)).exitCode,
     })
     await vi.waitFor(() => {
       expect(FakeSandbox.last.commands.handles).toHaveLength(1)

@@ -302,6 +302,8 @@ async def test_parallel_calls_connect_once_and_keep_input_separate():
     assert all(h.disconnected for h in FakeSandbox.last.commands.handles)
 
 
+# An untagged run (the reap's own line) that fails is killed and starts
+# nothing more.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "input_error",
@@ -317,7 +319,9 @@ async def test_input_transport_failure_kills_only_its_command_and_disconnects(
     await runtime.connect()
     FakeSandbox.last.commands.input_error = input_error
     with pytest.raises(type(input_error), match="stdin transport failed"):
-        await runtime.exec_line("cat", b"input", {}, "/workspace")
+        await runtime._exec_argv(
+            ("/bin/sh", "-c", "cat"), b"input", {}, "/workspace", None, None
+        )
     handle = FakeSandbox.last.commands.handles[0]
     assert handle.killed and handle.disconnected
     assert len(FakeSandbox.last.commands.calls) == 1
@@ -356,20 +360,33 @@ async def test_streamed_stderr_goes_to_the_errors_callback():
     assert (said, result.stderr) == ([b"warn"], b"")
 
 
+# A kill reaches only the encoding shell, so a line run with no tag of its
+# caller's gets its own and a cancelled one is reaped by it.
 @pytest.mark.asyncio
-async def test_cancellation_kills_command_and_disconnects():
+async def test_a_cancelled_line_is_killed_and_reaped_by_its_own_tag(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.e2b.runtime.uuid.uuid4",
+        lambda: SimpleNamespace(hex="line"),
+    )
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     await runtime.connect()
+    commands = FakeSandbox.last.commands
     task = asyncio.create_task(
         runtime.exec_line("sleep", None, {}, "/workspace")
     )
     await asyncio.sleep(0)
-    handle = FakeSandbox.last.commands.handles[0]
+    handle = commands.handles[0]
     await handle.waiting.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
     assert handle.killed and handle.disconnected
+    assert [shlex.split(command)[-1] for command, _ in commands.calls] == [
+        "sleep",
+        reap_line("line", 15),
+    ]
 
 
 # A kill that names a gentler signal leaves a run's tagged command to the

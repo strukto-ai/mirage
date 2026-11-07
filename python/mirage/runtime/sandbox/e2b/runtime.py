@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -265,6 +266,34 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
             else b"",
             exit_code=int(result.exit_code),
         )
+
+    async def exec_line(
+        self,
+        line: str,
+        stdin: ByteSource | None,
+        env: dict[str, str],
+        cwd: str,
+    ) -> RunResult:
+        """Execute one shell line, under an ``EXEC_ID`` of its own when
+        the caller gave none: a cancel kills only the encoding shell, so a
+        cancelled line is reaped by that tag.
+
+        Args:
+            line (str): the raw shell line.
+            stdin (ByteSource | None): bytes piped into the line.
+            env (dict[str, str]): the merged environment.
+            cwd (str): the working directory, passed through verbatim.
+        """
+        if EXEC_ID in env:
+            return await super().exec_line(line, stdin, env, cwd)
+        exec_id = uuid.uuid4().hex
+        try:
+            return await super().exec_line(
+                line, stdin, {**env, EXEC_ID: exec_id}, cwd
+            )
+        except asyncio.CancelledError:
+            await asyncio.shield(self._reap(exec_id, 15))
+            raise
 
     async def open_pipe(self, command: str) -> SandboxPipe:
         reader = asyncio.StreamReader()

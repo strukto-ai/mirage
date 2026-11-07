@@ -251,6 +251,34 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
     }
   }
 
+  /**
+   * Execute one shell line, under an `EXEC_ID` of its own when the caller
+   * gave none: an abort kills only the encoding shell, so an aborted line
+   * is reaped by that tag.
+   *
+   * @param line the raw shell line.
+   * @param stdin bytes piped into the line.
+   * @param env the merged environment.
+   * @param cwd the working directory, passed through verbatim.
+   * @param signal stops the line.
+   */
+  override async execLine(
+    line: string,
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    if (env[EXEC_ID] !== undefined) return super.execLine(line, stdin, env, cwd, signal)
+    const tag = crypto.randomUUID().replaceAll('-', '')
+    try {
+      return await super.execLine(line, stdin, { ...env, [EXEC_ID]: tag }, cwd, signal)
+    } catch (error) {
+      if (signal?.aborted === true) await this.reapRun(tag, 15)
+      throw error
+    }
+  }
+
   async openPipe(command: string): Promise<SandboxPipe> {
     if (this.sandbox === null) throw new Error('e2b sandbox not connected')
     const pty = this.sandbox.pty
