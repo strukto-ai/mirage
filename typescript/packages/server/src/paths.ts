@@ -72,6 +72,7 @@ export async function loadDaemonId(stateRoot: string): Promise<string> {
     await link(draft, path)
   } catch (err) {
     if ((err as { code?: unknown }).code !== 'EEXIST') throw err
+    console.debug(`daemon id already written at ${path}`)
   } finally {
     await unlink(draft)
   }

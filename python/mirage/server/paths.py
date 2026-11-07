@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import os
 import uuid
 from pathlib import Path
 
 from mirage.server.env import ENV_HOME
+
+logger = logging.getLogger(__name__)
 
 
 def _absolute(value: str | Path) -> Path:
@@ -114,7 +117,7 @@ def load_daemon_id(state_root: Path) -> str:
         try:
             os.link(draft, path)
         except FileExistsError:
-            pass
+            logger.debug("daemon id already written at %s", path)
         finally:
             draft.unlink()
     return path.read_text(encoding="utf-8").strip()

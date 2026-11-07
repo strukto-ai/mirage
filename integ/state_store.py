@@ -18,6 +18,7 @@ _INTEG_DIR = str(Path(__file__).parent)
 sys.path[:] = [p for p in sys.path if p not in (_INTEG_DIR, "")]
 
 import asyncio  # noqa: E402
+import logging  # noqa: E402
 import os  # noqa: E402
 import uuid  # noqa: E402
 
@@ -39,6 +40,8 @@ WORKSPACE_ID = "xstore"
 MARKER = "xstore-history-marker"
 JOBS_WORKSPACE_ID = "xjobs"
 JOBS_SESSION = "s"
+
+logger = logging.getLogger(__name__)
 
 
 def make_state_store(prefix: str) -> RedisWorkspaceStateStore:
@@ -320,7 +323,7 @@ async def lease_own(prefix: str) -> None:
             async with asyncio.timeout(20):
                 await job.process.join()
         except TimeoutError:
-            pass
+            logger.debug("py own: the job outlived 20 s", exc_info=True)
     check(
         "py own: the peer's stop ended the job by TERM",
         job is not None and (job.exit_code, job.signal) == (143, 15),
