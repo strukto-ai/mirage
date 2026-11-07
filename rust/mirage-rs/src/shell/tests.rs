@@ -613,6 +613,12 @@ fn deep_nesting_is_refused_not_overflowed() {
     );
     let wide = format!("a{}", " && a".repeat(100_000));
     assert_eq!(parse(wide.as_bytes()).error, None);
+    // A refused arithmetic body is named without reading it as a line.
+    let named = format!("{}a{}", "${x:-".repeat(100_000), "}".repeat(100_000));
+    let said = words(&refused(&format!("{{ :; }} (({named}))")));
+    assert!(said.starts_with(&format!(
+        "bash: -c: line 1: syntax error near unexpected token `{named}'\n"
+    )));
 }
 
 #[test]
