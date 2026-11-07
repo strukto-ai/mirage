@@ -15,10 +15,11 @@
 import {
   trace,
   type Attributes,
+  type Context,
   type Span,
+  type SpanContext,
   type SpanOptions,
   type Tracer,
-  type TracerProvider,
 } from '@opentelemetry/api'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../io/types.ts'
@@ -35,18 +36,55 @@ import {
 import { Observer, logger } from './observer.ts'
 import { OpRecord } from './record.ts'
 import { RAMObserverStore } from './store.ts'
+import { RouteError } from '../runtime/routing/index.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 
 const NEW_YEAR = 1_609_459_200
 
 /** Take every span the observer starts, its name and attributes. Mirrors Python's `_exported`. */
-function exported(): { name: string; attributes: Attributes }[] {
-  const spans: { name: string; attributes: Attributes }[] = []
+interface Seen {
+  name: string
+  attributes: Attributes
+  startTime: unknown
+  end?: unknown
+  parent: SpanContext | undefined
+  context: SpanContext
+}
+
+/**
+ * Record each span the observer starts: its attributes, those it sets
+ * later included, its start and end, its own context and the span it is
+ * under.
+ */
+function exported(): Seen[] {
+  const spans: Seen[] = []
   const fake = {
-    startSpan(name: string, options: SpanOptions = {}) {
-      spans.push({ name, attributes: options.attributes ?? {} })
-      return { isRecording: () => true, end: () => undefined } as unknown as Span
+    startSpan(name: string, options: SpanOptions = {}, ctx?: Context) {
+      const seen: Seen = {
+        name,
+        attributes: { ...(options.attributes ?? {}) },
+        startTime: options.startTime,
+        parent: ctx === undefined ? undefined : trace.getSpanContext(ctx),
+        context: {
+          traceId: '1'.repeat(32),
+          spanId: String(spans.length + 1).padStart(16, '0'),
+          traceFlags: 1,
+        },
+      }
+      spans.push(seen)
+      const span = {
+        isRecording: () => true,
+        setAttribute: (key: string, value: Attributes[string]) => {
+          seen.attributes[key] = value
+          return span
+        },
+        end: (time?: unknown) => {
+          seen.end = time
+        },
+        spanContext: () => seen.context,
+      }
+      return span as unknown as Span
     },
   } as unknown as Tracer
   trace.setGlobalTracerProvider({ getTracer: () => fake })
@@ -469,34 +507,7 @@ describe('a damaged history file', () => {
   })
 
   it('sends a finished line as a span over its vfs calls', async () => {
-    const spans: { name: string; options: SpanOptions; parent: Span | undefined; end?: unknown }[] =
-      []
-    const fake: Tracer = {
-      startSpan(name, options = {}, ctx) {
-        const seen: (typeof spans)[number] = {
-          name,
-          options,
-          parent: ctx === undefined ? undefined : trace.getSpan(ctx),
-        }
-        spans.push(seen)
-        return {
-          isRecording: () => true,
-          end: (time?: unknown) => {
-            seen.end = time
-          },
-          spanContext: () => ({
-            traceId: '1'.repeat(32),
-            spanId: String(spans.length).repeat(16),
-            traceFlags: 1,
-          }),
-        } as unknown as Span
-      },
-      startActiveSpan: () => {
-        throw new Error('unused')
-      },
-    }
-    const provider: TracerProvider = { getTracer: () => fake }
-    trace.setGlobalTracerProvider(provider)
+    const spans = exported()
     const clock = new ManualClock(NEW_YEAR)
     const o = new Observer(new RAMObserverStore(), clock, 'w')
     const start = NEW_YEAR * 1000
@@ -518,9 +529,10 @@ describe('a damaged history file', () => {
     // The line ends in another cwd; the span keeps the one it started in.
     await o.logResult(io, [rec], 's1', '/', 'L')
     const [line, call] = spans
-    expect([line?.name, line?.options.attributes, line?.options.startTime, line?.end]).toEqual([
+    expect([line?.name, line?.attributes, line?.startTime, line?.end]).toEqual([
       'command',
       {
+        'mirage.line.id': 'L',
         'mirage.session.id': 's1',
         'mirage.command': 'cat /d/a',
         'mirage.exit_code': 1,
@@ -534,7 +546,7 @@ describe('a damaged history file', () => {
       start,
       start + 1000,
     ])
-    expect([call?.name, call?.options.attributes, call?.options.startTime, call?.end]).toEqual([
+    expect([call?.name, call?.attributes, call?.startTime, call?.end]).toEqual([
       'vfs.read',
       {
         'mirage.vfs.path': '/d/a',
@@ -554,21 +566,14 @@ describe('a damaged history file', () => {
 
   it('cuts span output at the bytes it is told to', async () => {
     vi.stubEnv(TRACE_CONTENT_MAX_BYTES_ENV, '5')
-    const spans: SpanOptions[] = []
-    const fake = {
-      startSpan(_name: string, options: SpanOptions = {}) {
-        spans.push(options)
-        return { isRecording: () => true, end: () => undefined } as unknown as Span
-      },
-    } as unknown as Tracer
-    trace.setGlobalTracerProvider({ getTracer: () => fake })
+    const spans = exported()
     const o = new Observer(new RAMObserverStore(), new ManualClock(NEW_YEAR))
     await o.logCommand('echo', 's1', '/', 'L')
     // Two bytes a character: five bytes end inside the third, which is
     // left out rather than shown as U+FFFD.
     const io = new IOResult({ stdout: new TextEncoder().encode('ééé') })
     await o.logResult(io, [], 's1', '/', 'L')
-    expect(spans[0]?.attributes?.['mirage.stdout']).toBe('éé')
+    expect(spans[0]?.attributes['mirage.stdout']).toBe('éé')
   })
 
   it('sends at most its span cap a line and counts the rest', async () => {
@@ -645,14 +650,7 @@ describe('a damaged history file', () => {
 
   it('keeps output and vfs calls out of spans when told to', async () => {
     vi.stubEnv(TRACE_CONTENT_ENV, 'false')
-    const spans: { name: string; options: SpanOptions }[] = []
-    const fake = {
-      startSpan(name: string, options: SpanOptions = {}) {
-        spans.push({ name, options })
-        return { isRecording: () => true, end: () => undefined } as unknown as Span
-      },
-    } as unknown as Tracer
-    trace.setGlobalTracerProvider({ getTracer: () => fake })
+    const spans = exported()
     const o = new Observer(new RAMObserverStore(), new ManualClock(NEW_YEAR), 'w')
     const rec = new OpRecord({
       op: 'read',
@@ -665,10 +663,11 @@ describe('a damaged history file', () => {
     await o.logCommand('cat /d/a', 's1', '/d', 'L')
     const io = new IOResult({ stdout: new TextEncoder().encode('secret\n') })
     await o.logResult(io, [rec], 's1', '/d', 'L')
-    expect(spans.map((s) => [s.name, s.options.attributes])).toEqual([
+    expect(spans.map((s) => [s.name, s.attributes])).toEqual([
       [
         'command',
         {
+          'mirage.line.id': 'L',
           'mirage.session.id': 's1',
           'mirage.command': 'cat /d/a',
           'mirage.exit_code': 0,
@@ -704,14 +703,31 @@ describe('a damaged history file', () => {
   })
 })
 
+// A line whose route is refused still ends its span, as its history ends
+// its entry.
+it('ends the span of a line whose route is refused', async () => {
+  const spans = exported()
+  const ws = new Workspace({ '/data': new RAMVFS() })
+  try {
+    await expect(ws.shell('echo hi', { runtime: 'nope' })).rejects.toBeInstanceOf(RouteError)
+    const [command] = spans.filter((s) => s.name === 'command')
+    expect(command?.end).toBeDefined()
+    expect(command?.attributes['mirage.exit_code']).not.toBe(0)
+  } finally {
+    await ws.close()
+    trace.disable()
+  }
+})
+
 // A job and each process a line ran are spans of their own once they end,
-// named by their line, session and workspace.
+// under the line's span, named by their line, session, workspace, machine
+// and cwd.
 it('sends an ended job and process as spans', async () => {
   const spans = exported()
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     await ws.shell('sleep 30 & kill %1; wait')
-    const [line] = ws.lines()
+    const [line] = await ws.lines()
     const [job] = spans.filter((s) => s.name === 'job')
     expect([
       job?.attributes['mirage.job.number'],
@@ -722,9 +738,18 @@ it('sends an ended job and process as spans', async () => {
       (s) => s.name === 'process' && s.attributes['process.command_line'] === 'sleep 30',
     )
     expect(sleep?.attributes['process.exit.code']).toBe(143)
+    expect(sleep?.attributes['mirage.signal']).toBe(15)
     expect(sleep?.attributes['mirage.line.id']).toBe(line?.id.value)
     expect(sleep?.attributes['mirage.session.id']).toBe(line?.sessionId)
+    expect(sleep?.attributes['mirage.cwd']).toBe('/')
     expect(String(sleep?.attributes['host.id'])).toMatch(/^host:/)
+    const [command] = spans.filter((s) => s.name === 'command')
+    expect(command?.attributes['mirage.line.id']).toBe(line?.id.value)
+    expect(command?.attributes['host.id']).toBe(sleep?.attributes['host.id'])
+    for (const span of [job, sleep]) expect(span?.parent).toEqual(command?.context)
+    expect(job?.attributes['process.pid']).toBe(sleep?.attributes['process.pid'])
+    expect(job?.attributes['host.id']).toBe(sleep?.attributes['host.id'])
+    expect(job?.attributes['mirage.cwd']).toBe('/')
   } finally {
     await ws.close()
     trace.disable()

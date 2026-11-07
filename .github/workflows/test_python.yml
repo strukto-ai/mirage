@@ -100,6 +100,19 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mirage
+          POSTGRES_PASSWORD: mirage
+          POSTGRES_DB: mirage_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
       mongodb:
         # MongoDB 8 refuses to start on the runners' kernel 6.19+ (SERVER-121912).
         image: mongo:7.0
@@ -159,6 +172,9 @@ jobs:
         env:
           REDIS_URL: redis://localhost:6379/0
           MONGODB_URI: mongodb://localhost:27017
+          # The SQL stores' and the sql mount's Postgres legs; each test makes
+          # a database of its own (tests/fixtures/postgres.py).
+          POSTGRES_DSN: postgres://mirage:mirage@localhost:5432/mirage_test
         run: |
           # worksteal, not loadscope. Measured as sibling jobs at one commit,
           # n=4 each: worksteal 398s median with a 13s spread, loadscope 420s

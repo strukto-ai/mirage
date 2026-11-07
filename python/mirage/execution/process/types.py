@@ -22,7 +22,9 @@ class Process:
 
     ``ended_at`` is set exactly when ``state`` is final, with ``exit``
     the status, ``signal`` the signal that ended it, if one did, and
-    ``error`` why its runner failed, if it did.
+    ``error`` why its runner failed, if it did. ``ancestors`` are the
+    pids above it, its parent last, so a process stays under an ancestor
+    whose own record has gone.
     """
 
     id: ProcessId
@@ -41,6 +43,7 @@ class Process:
     exit: int | None = None
     signal: int | None = None
     error: str | None = None
+    ancestors: tuple[int, ...] = ()
 
     @property
     def pid(self) -> int:

@@ -1280,7 +1280,7 @@ class InAppSteps:
         }
         found = [
             r
-            for r in listed[kind]()
+            for r in await listed[kind]()
             if state is None or r.state.value == state
         ]
         return [

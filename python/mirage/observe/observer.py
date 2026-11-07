@@ -22,8 +22,10 @@ from urllib.parse import quote
 
 from opentelemetry import trace
 
+from mirage.execution.constants import HISTORY_MAX_RECORDS
 from mirage.execution.job.types import Job
 from mirage.execution.process.types import Process
+from mirage.execution.types import LineId, MachineId
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
@@ -135,60 +137,80 @@ def _tracer() -> trace.Tracer:
     return trace.get_tracer(TRACER_NAME)
 
 
-def _trace_line(
+def _start_line(
     workspace_id: str | None,
+    machine: str | None,
+    line: str,
     session: str,
     command: str,
     cwd: str | None,
+    start: int,
+) -> trace.Span:
+    """Open a typed line's ``command`` span as it starts, naming the
+    line, its session, its workspace, the machine it runs on and the cwd
+    it starts in; the spans of its jobs and processes go under it.
+
+    Args:
+        workspace_id (str | None): the workspace the line runs in.
+        machine (str | None): the workspace's machine, ``host.id``.
+        line (str): the line's id.
+        session (str): the session it runs in.
+        command (str): the typed line.
+        cwd (str | None): the session cwd it starts in.
+        start (int): its start, epoch milliseconds.
+    """
+    attributes: dict[str, str | int] = {
+        "mirage.line.id": line,
+        "mirage.session.id": session,
+        "mirage.command": command,
+        "mirage.timestamp": start,
+    }
+    if workspace_id is not None:
+        attributes["mirage.workspace.id"] = workspace_id
+    if machine is not None:
+        attributes["host.id"] = machine
+    if cwd is not None:
+        attributes["mirage.cwd"] = cwd
+    return _tracer().start_span(
+        "command", start_time=start * _NS_PER_MS, attributes=attributes
+    )
+
+
+def _end_line(
+    line: trace.Span,
     span: tuple[int, int],
     exit_code: int,
     output: tuple[bytes, bytes],
     records: list[OpRecord],
 ) -> None:
-    """Send a finished line to OpenTelemetry: a ``command`` span over its
-    run, with the cwd it started in and the start of its stdout and
-    stderr, and under it a ``vfs.<call>`` span for each call it made to a
-    mount. Each span also carries its start or end and its length in
-    milliseconds, as the history's entries have them, for a tracer that
-    can't be given a span's times. ``TRACE_CONTENT_ENV`` leaves out the
-    output and the calls, and past ``TRACE_MAX_SPANS_ENV`` calls the
-    rest are only counted.
+    """Close a typed line's ``command`` span: how it ended, the start of
+    its stdout and stderr, and under it a ``vfs.<call>`` span for each
+    call it made to a mount. Each span also carries its start or end and
+    its length in milliseconds, as the history's entries have them, for
+    a tracer that can't be given a span's times. ``TRACE_CONTENT_ENV``
+    leaves out the output and the calls, and past ``TRACE_MAX_SPANS_ENV``
+    calls the rest are only counted.
 
     Args:
-        workspace_id (str | None): the workspace the line ran in.
-        session (str): the session it ran in.
-        command (str): the typed line.
-        cwd (str | None): the session cwd it started in.
+        line (trace.Span): the line's span.
         span (tuple[int, int]): its start and end, epoch milliseconds.
         exit_code (int): how it ended.
         output (tuple[bytes, bytes]): its stdout and stderr as it wrote
             them.
         records (list[OpRecord]): the calls it made.
     """
-    tracer = _tracer()
     content = _trace_content()
-    attributes: dict[str, str | int] = {
-        "mirage.session.id": session,
-        "mirage.command": command,
-        "mirage.exit_code": exit_code,
-        "mirage.timestamp": span[0],
-        "mirage.duration_ms": span[1] - span[0],
-    }
+    line.set_attribute("mirage.exit_code", exit_code)
+    line.set_attribute("mirage.duration_ms", span[1] - span[0])
     calls = records[: _positive_env(TRACE_MAX_SPANS_ENV, TRACE_MAX_SPANS)]
     if content:
         limit = _trace_content_max_bytes()
-        attributes["mirage.stdout"] = _traced_output(output[0], limit)
-        attributes["mirage.stderr"] = _traced_output(output[1], limit)
+        line.set_attribute("mirage.stdout", _traced_output(output[0], limit))
+        line.set_attribute("mirage.stderr", _traced_output(output[1], limit))
         if len(calls) < len(records):
-            attributes["mirage.vfs.dropped"] = len(records) - len(calls)
-    if workspace_id is not None:
-        attributes["mirage.workspace.id"] = workspace_id
-    if cwd is not None:
-        attributes["mirage.cwd"] = cwd
-    line = tracer.start_span(
-        "command", start_time=span[0] * _NS_PER_MS, attributes=attributes
-    )
+            line.set_attribute("mirage.vfs.dropped", len(records) - len(calls))
     if content and line.is_recording():
+        tracer = _tracer()
         parent = trace.set_span_in_context(line)
         for rec in calls:
             call = tracer.start_span(
@@ -205,71 +227,6 @@ def _trace_line(
             )
             call.end(end_time=rec.timestamp * _NS_PER_MS)
     line.end(end_time=span[1] * _NS_PER_MS)
-
-
-def _trace_ended(
-    name: str,
-    attributes: dict[str, str | int],
-    started_at: float,
-    ended_at: float | None,
-) -> None:
-    """Send an ended record to OpenTelemetry as one span over its run.
-
-    Args:
-        name (str): the span's name.
-        attributes (dict[str, str | int]): what it carries.
-        started_at (float): when the record started, epoch seconds.
-        ended_at (float | None): when it ended, epoch seconds.
-    """
-    start = int(started_at * 1_000_000_000)
-    span = _tracer().start_span(name, start_time=start, attributes=attributes)
-    span.end(
-        end_time=int(ended_at * 1_000_000_000)
-        if ended_at is not None
-        else start
-    )
-
-
-def trace_process(record: Process) -> None:
-    """Send an ended process to OpenTelemetry as a ``process`` span.
-
-    Args:
-        record (Process): the process's record.
-    """
-    attributes: dict[str, str | int] = {
-        "process.pid": record.pid,
-        "process.command_line": record.command,
-        "host.id": str(record.machine),
-        "mirage.workspace.id": record.id.workspace_id,
-        "mirage.session.id": record.session_id,
-    }
-    if record.parent is not None:
-        attributes["process.parent_pid"] = record.parent
-    if record.exit is not None:
-        attributes["process.exit.code"] = record.exit
-    if record.line is not None:
-        attributes["mirage.line.id"] = str(record.line)
-    _trace_ended("process", attributes, record.started_at, record.ended_at)
-
-
-def trace_job(record: Job) -> None:
-    """Send an ended job to OpenTelemetry as a ``job`` span.
-
-    Args:
-        record (Job): the job's record.
-    """
-    attributes: dict[str, str | int] = {
-        "mirage.job.id": record.id.console,
-        "mirage.job.number": record.number,
-        "mirage.command": record.command,
-        "mirage.workspace.id": record.id.workspace_id,
-        "mirage.session.id": record.session_id,
-    }
-    if record.exit is not None:
-        attributes["mirage.exit_code"] = record.exit
-    if record.line is not None:
-        attributes["mirage.line.id"] = str(record.line)
-    _trace_ended("job", attributes, record.started_at, record.ended_at)
 
 
 def _parse_files(files: dict[str, bytes]) -> list[dict[str, Any]]:
@@ -334,9 +291,13 @@ class Observer:
     ahead of the commands it acts on. A session with no history sets no
     floor.
 
-    Each line that ends also goes to OpenTelemetry as a span, its vfs
-    calls as spans under it; nothing leaves the process until an SDK is
-    set up.
+    Each typed line also goes to OpenTelemetry as a span, its vfs calls
+    as spans under it, and so does each job and process once it ends,
+    under the span of the line that started it while the newest
+    ``HISTORY_MAX_RECORDS`` lines' spans are known; nothing leaves the
+    process until an SDK is set up. Tracing stops at the workspace's own
+    machine and runtimes: a program a runtime runs elsewhere starts no
+    trace of its own there.
 
     Args:
         store (ObserverStore | None): Storage backend for log files;
@@ -344,6 +305,8 @@ class Observer:
         clock (Clock | None): the workspace clock; None is the system
             clock.
         workspace_id (str | None): the workspace, named on its spans.
+        machine (str | None): the workspace's machine, named on its
+            lines' spans.
     """
 
     def __init__(
@@ -351,13 +314,18 @@ class Observer:
         store: ObserverStore | None = None,
         clock: Clock | None = None,
         workspace_id: str | None = None,
+        machine: str | None = None,
     ) -> None:
         self._store = store if store is not None else RAMObserverStore()
         self._clock: Clock = clock if clock is not None else SystemClock()
         self._workspace_id = workspace_id
+        self._machine = machine
         self._newest: dict[str, int | None] = {}
-        # Each open line's start (epoch ms, then monotonic), text and cwd.
-        self._started: dict[str, tuple[int, float, str, str | None]] = {}
+        # Each open line's start (epoch ms, then monotonic) and span.
+        self._started: dict[str, tuple[int, float, trace.Span]] = {}
+        # The span of each recent line, which its jobs and processes go
+        # under, oldest first.
+        self._line_spans: dict[str, trace.SpanContext] = {}
 
     def _now_ms(self) -> int:
         """The clock's wall time in epoch milliseconds, an entry's stamp."""
@@ -440,7 +408,19 @@ class Observer:
         began = self._clock.monotonic()
         await self._log(entry)
         if line is not None:
-            self._started[line] = (entry.timestamp, began, command, cwd)
+            span = _start_line(
+                self._workspace_id,
+                self._machine,
+                line,
+                session,
+                command,
+                cwd,
+                entry.timestamp,
+            )
+            self._started[line] = (entry.timestamp, began, span)
+            self._line_spans[line] = span.get_span_context()
+            while len(self._line_spans) > HISTORY_MAX_RECORDS:
+                del self._line_spans[next(iter(self._line_spans))]
 
     async def log_result(
         self,
@@ -483,11 +463,8 @@ class Observer:
             else round((self._clock.monotonic() - started[1]) * 1000)
         )
         if started is not None and took is not None:
-            _trace_line(
-                self._workspace_id,
-                session,
+            _end_line(
                 started[2],
-                started[3],
                 (started[0], started[0] + took),
                 io.exit_code,
                 (stdout, stderr),
@@ -505,6 +482,106 @@ class Observer:
                 stderr=err,
                 duration_ms=took,
             )
+        )
+
+    def trace_process(self, record: Process) -> None:
+        """Send an ended process to OpenTelemetry as a ``process`` span,
+        under its line's: what it ran, where and as whom, and how it
+        ended.
+
+        Args:
+            record (Process): the process's record.
+        """
+        attributes: dict[str, str | int] = {
+            "process.pid": record.pid,
+            "process.command_line": record.command,
+            "process.group_leader.pid": record.group,
+            "host.id": str(record.machine),
+            "mirage.workspace.id": record.id.workspace_id,
+            "mirage.session.id": record.session_id,
+            "mirage.cwd": record.cwd.virtual,
+        }
+        if record.parent is not None:
+            attributes["process.parent_pid"] = record.parent
+        if record.exit is not None:
+            attributes["process.exit.code"] = record.exit
+        if record.signal is not None:
+            attributes["mirage.signal"] = record.signal
+        if record.error is not None:
+            attributes["mirage.error"] = record.error
+        if record.runtime is not None:
+            attributes["mirage.runtime"] = record.runtime
+        if record.machine_pid is not None:
+            attributes["mirage.machine.pid"] = record.machine_pid.pid
+        self._trace_ended(
+            "process",
+            attributes,
+            record.line,
+            record.started_at,
+            record.ended_at,
+        )
+
+    def trace_job(self, record: Job, machine: MachineId) -> None:
+        """Send an ended job to OpenTelemetry as a ``job`` span, under its
+        line's: what it ran, where and as whom, and how it ended.
+
+        Args:
+            record (Job): the job's record.
+            machine (MachineId): the machine its process ran on.
+        """
+        attributes: dict[str, str | int] = {
+            "mirage.job.id": record.id.console,
+            "mirage.job.number": record.number,
+            "mirage.command": record.command,
+            "host.id": str(machine),
+            "mirage.workspace.id": record.id.workspace_id,
+            "mirage.session.id": record.session_id,
+            "mirage.cwd": record.cwd,
+        }
+        if record.pid is not None:
+            attributes["process.pid"] = record.pid
+        if record.exit is not None:
+            attributes["mirage.exit_code"] = record.exit
+        if record.signal is not None:
+            attributes["mirage.signal"] = record.signal
+        self._trace_ended(
+            "job", attributes, record.line, record.started_at, record.ended_at
+        )
+
+    def _trace_ended(
+        self,
+        name: str,
+        attributes: dict[str, str | int],
+        line: LineId | None,
+        started_at: float,
+        ended_at: float | None,
+    ) -> None:
+        """Send an ended record to OpenTelemetry as one span over its run,
+        under its line's span while that is known.
+
+        Args:
+            name (str): the span's name.
+            attributes (dict[str, str | int]): what it carries.
+            line (LineId | None): the line that started it.
+            started_at (float): when the record started, epoch seconds.
+            ended_at (float | None): when it ended, epoch seconds.
+        """
+        parent = None
+        if line is not None:
+            attributes["mirage.line.id"] = line.value
+            known = self._line_spans.get(line.value)
+            if known is not None:
+                parent = trace.set_span_in_context(
+                    trace.NonRecordingSpan(known)
+                )
+        start = int(started_at * 1_000_000_000)
+        span = _tracer().start_span(
+            name, context=parent, start_time=start, attributes=attributes
+        )
+        span.end(
+            end_time=int(ended_at * 1_000_000_000)
+            if ended_at is not None
+            else start
         )
 
     async def log_command_text(

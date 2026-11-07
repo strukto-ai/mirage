@@ -48,7 +48,7 @@ import { MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
 import { networkRule, type NetworkSetting, runWithNetwork, sameNetwork } from '../../io/network.ts'
 import { HISTFILESIZE } from '../../core/history/constants.ts'
 import { EVENT_COMMAND, EVENT_RESULT, EVENT_VFS } from '../../observe/log_entry.ts'
-import { Observer, traceJob, traceProcess } from '../../observe/observer.ts'
+import { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
@@ -98,6 +98,8 @@ import { resolveSources } from '../../secrets/sources.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { Terminal } from '../../shell/console/terminal.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import { HANGUP_EXIT_CODE } from '../../execution/job/constants.ts'
 import { type Job, type JobState, JobTable } from '../../execution/job/index.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { literalTree } from '../../shell/literal.ts'
@@ -331,7 +333,12 @@ export class Workspace {
         this.jobTable.processesChanged()
       },
       () => this.registry.systemClock?.now() ?? systemNow(),
-      traceProcess,
+      (record) => {
+        this.observer.traceProcess(record)
+      },
+      (record) => {
+        this.jobTable.store.note(record)
+      },
     )
     this.cache = buildFileCache(options.cache, options.cacheLimit, this.clock, this.wsId)
     const normalized = normalizeMounts(mounts, this.readDefault, index, {
@@ -370,8 +377,51 @@ export class Workspace {
       options.daemonId ?? null,
     )
     this.jobTable.reaper = (record, signum) => this.reapProcess(record, signum)
-    this.jobTable.ended = traceJob
-    this.lineTable = new LineTable(this.clock)
+    this.jobTable.ended = (record) => {
+      const machine =
+        this.processTable.records().find((process) => process.id.pid === record.pid)?.machine ??
+        this.processTable.machine
+      this.observer.traceJob(record, machine)
+    }
+    // What the daemon before this one left running ended with it, as its
+    // jobs did: hung up.
+    this.jobTable.taken = async () => {
+      const now = this.clock.now()
+      const hangup = HANGUP_EXIT_CODE - 128
+      const store = this.jobTable.store
+      // Read the store first: a process or line started, or ended, while it
+      // answers is this workspace's own by the time it is checked, and keeps
+      // the record it wrote.
+      const records = await store.findProcesses()
+      const own = new Set(this.processTable.records().map((record) => record.id.pid))
+      for (const record of records) {
+        if (record.endedAt === null && !own.has(record.id.pid)) {
+          store.note({
+            ...record,
+            state: 'exited',
+            endedAt: now,
+            exit: HANGUP_EXIT_CODE,
+            signal: hangup,
+          })
+        }
+      }
+      const lines = await store.findLines()
+      const read = new Set(this.lineTable.lines().map((line) => line.id.value))
+      for (const line of lines) {
+        if (line.endedAt === null && !read.has(line.id.value)) {
+          store.note({
+            ...line,
+            state: 'exited',
+            endedAt: now,
+            exit: HANGUP_EXIT_CODE,
+            signal: hangup,
+          })
+        }
+      }
+    }
+    this.lineTable = new LineTable(this.clock, (record) => {
+      this.jobTable.store.note(record)
+    })
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
     // The env block, translated once: a literal entry becomes an
@@ -533,7 +583,12 @@ export class Workspace {
       const cliSpec = typeof specOrKey === 'string' ? cliSpecFor(specOrKey) : specOrKey
       this.registry.clis.install(cliName, cliSpec, cliConfig)
     }
-    this.observer = new Observer(stores.observe, this.clock, this.wsId)
+    this.observer = new Observer(
+      stores.observe,
+      this.clock,
+      this.wsId,
+      this.processTable.machine.toString(),
+    )
     this.registry.observer = this.observer
     this.planes = [stores.namespace, stores.observe, stores.sessions]
     // Explicit at the construction site: the history view does not cache
@@ -1336,24 +1391,53 @@ export class Workspace {
 
   /**
    * The lines the workspace keeps, oldest first: every one not ended yet,
-   * and the newest ended ones; a session's or those in a state when named.
+   * and the newest ended ones, as its store keeps them, so a daemon that
+   * does not hold the workspace's lease lists the same ones; the holder
+   * reads its own as they are now. A session's or those in a state when
+   * named.
    */
-  lines(filter: { sessionId?: string; state?: LineState } = {}): Line[] {
-    return this.lineTable
-      .lines(filter.sessionId)
+  async lines(filter: { sessionId?: string; state?: LineState } = {}): Promise<Line[]> {
+    const found = new Map<string, Line>()
+    for (const line of await this.jobTable.store.findLines(filter.sessionId)) {
+      found.set(line.id.value, line)
+    }
+    if (this.jobTable.claimed) {
+      for (const line of this.lineTable.lines(filter.sessionId)) found.set(line.id.value, line)
+    }
+    return [...found.values()]
       .filter((line) => filter.state === undefined || line.state === filter.state)
+      .sort((a, b) => a.startedAt - b.startedAt)
   }
 
   /** One line's record, while the workspace keeps it. */
-  line(id: LineId): Line | null {
-    return this.lineTable.get(id)
+  async line(id: LineId): Promise<Line | null> {
+    const own = this.jobTable.claimed ? this.lineTable.get(id) : null
+    return own ?? (await this.jobTable.store.getLine(id))
   }
 
   /**
    * The jobs the workspace's sessions list, as `jobs` does: each until its
-   * ending is reported; a session's or those in a state when named.
+   * ending is reported; a session's, those in a state or those a line
+   * started when named. A daemon that does not hold the workspace's lease
+   * reads each session's list from the store first.
    */
-  jobs(filter: { sessionId?: string; state?: JobState; lineId?: LineId } = {}): Job[] {
+  async jobs(
+    filter: { sessionId?: string; state?: JobState; lineId?: LineId } = {},
+  ): Promise<Job[]> {
+    if (!this.jobTable.claimed) {
+      // Every session the store keeps a list for, and every one this table
+      // lists jobs of, whose list may have gone with its session.
+      const ids =
+        filter.sessionId !== undefined
+          ? [filter.sessionId]
+          : [
+              ...new Set([
+                ...(await this.jobTable.store.sessions()),
+                ...this.jobTable.allJobs().map((job) => job.sessionId),
+              ]),
+            ].sort(compareCodePoints)
+      for (const id of ids) await this.jobTable.sync(id)
+    }
     const handles =
       filter.sessionId === undefined
         ? this.jobTable.allJobs()
@@ -1369,9 +1453,9 @@ export class Workspace {
   }
 
   /** One job's record, while a session lists it. */
-  job(id: JobId): Job | null {
+  async job(id: JobId): Promise<Job | null> {
     return (
-      this.jobs().find(
+      (await this.jobs()).find(
         (job) => job.id.workspaceId === id.workspaceId && job.id.console === id.console,
       ) ?? null
     )
@@ -1379,11 +1463,13 @@ export class Workspace {
 
   /**
    * The processes the workspace keeps, by pid: every live one, and the
-   * newest ended ones; a session's, those in a state, those a line ran,
+   * newest ended ones, as its store keeps them, so a daemon that does not
+   * hold the workspace's lease lists the same ones; the holder reads its
+   * own as they are now. A session's, those in a state, those a line ran,
    * those a job ran (its own and every one under it, while a session lists
    * it) or those run on a machine when named.
    */
-  processes(
+  async processes(
     filter: {
       sessionId?: string
       state?: ProcessState
@@ -1391,16 +1477,34 @@ export class Workspace {
       jobId?: JobId
       machine?: MachineId
     } = {},
-  ): Process[] {
-    const records = this.processTable.records()
+  ): Promise<Process[]> {
+    const found = new Map<number, Process>()
+    for (const process of await this.jobTable.store.findProcesses(filter.sessionId)) {
+      found.set(process.id.pid, process)
+    }
+    const claimed = this.jobTable.claimed
+    if (claimed) {
+      for (const process of this.processTable.records()) {
+        if (filter.sessionId === undefined || process.sessionId === filter.sessionId)
+          found.set(process.id.pid, process)
+      }
+    }
+    const records = [...found.values()].sort((a, b) => a.id.pid - b.id.pid)
     let tree: Set<number> | null = null
     if (filter.jobId !== undefined) {
-      const pid = this.job(filter.jobId)?.pid ?? null
-      tree = pid === null ? new Set() : this.processTable.tree(pid)
+      const pid = (await this.job(filter.jobId))?.pid ?? null
+      tree = new Set()
+      if (pid !== null && claimed) {
+        tree = this.processTable.tree(pid)
+      } else if (pid !== null) {
+        tree = new Set([
+          pid,
+          ...records.filter((process) => process.ancestors.includes(pid)).map((p) => p.id.pid),
+        ])
+      }
     }
     return records.filter(
       (process) =>
-        (filter.sessionId === undefined || process.sessionId === filter.sessionId) &&
         (filter.state === undefined || process.state === filter.state) &&
         (filter.lineId === undefined || process.line?.value === filter.lineId.value) &&
         (tree === null || tree.has(process.id.pid)) &&
@@ -1408,15 +1512,17 @@ export class Workspace {
     )
   }
 
-  /** One process's record, while the workspace keeps it. */
-  process(id: ProcessId): Process | null {
-    return (
-      this.processTable
-        .records()
-        .find(
-          (process) => process.id.workspaceId === id.workspaceId && process.id.pid === id.pid,
-        ) ?? null
-    )
+  /** One process's record, while the workspace keeps it; none for another workspace's. */
+  async process(id: ProcessId): Promise<Process | null> {
+    if (id.workspaceId !== this.wsId) return null
+    const own = this.jobTable.claimed
+      ? (this.processTable
+          .records()
+          .find(
+            (process) => process.id.workspaceId === id.workspaceId && process.id.pid === id.pid,
+          ) ?? null)
+      : null
+    return own ?? (await this.jobTable.store.getProcess(id))
   }
 
   async closeSession(sessionId: string): Promise<void> {

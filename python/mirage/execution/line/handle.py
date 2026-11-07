@@ -54,6 +54,8 @@ class LineHandle:
         self._budget = YieldBudget()
         self._on_start = on_start
         self._stop_signal: int | None = None
+        # Told the record each time it changes, as its table keeps it.
+        self.noted: Callable[[Line], None] | None = None
 
     @property
     def id(self) -> LineId:
@@ -72,6 +74,7 @@ class LineHandle:
             await on_start()
         if self._record.state == LineState.WAITING:
             self._record = replace(self._record, state=LineState.RUNNING)
+            self._tell()
 
     async def checkpoint(self, cancel: asyncio.Event | None = None) -> None:
         if cancel is not None and cancel.is_set():
@@ -91,6 +94,7 @@ class LineHandle:
             return
         self._stop_signal = signal
         self._record = replace(self._record, state=LineState.STOPPING)
+        self._tell()
 
     def end(self, exit: int | None, error: str | None = None) -> None:
         """End the line, once: a later call changes nothing.
@@ -110,3 +114,9 @@ class LineHandle:
             signal=self._stop_signal,
             error=error,
         )
+        self._tell()
+
+    def _tell(self) -> None:
+        """Tell whoever keeps the record that it changed."""
+        if self.noted is not None:
+            self.noted(self._record)

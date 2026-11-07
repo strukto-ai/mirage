@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import contextlib
 import errno
 import sqlite3
 from collections.abc import AsyncIterator, Sequence
@@ -24,12 +25,14 @@ from mirage.io.stream import materialize
 from mirage.observe.context import RecordingScope
 from mirage.types import CapacityState, FileType, MountMode, PathSpec
 from mirage.vfs.sql.driver import SqliteDriver
+from mirage.vfs.sql.postgres import PostgresSqlDriver
 from mirage.vfs.sql.sql import SqlVFS
-from mirage.vfs.sql.types import SqlStatement
+from mirage.vfs.sql.types import SqlDialect, SqlDriver, SqlStatement
 from mirage.vfs.testing import MutationFixture, check_mutation_contract
 from mirage.workspace import Workspace
 from mirage.workspace.record.sql import SqlRecordClient
 from mirage.workspace.store.sql import SqlWorkspaceStateStore
+from tests.fixtures.postgres import ON_POSTGRES, fresh_database
 
 SCRATCH = MutationFixture(
     PathSpec(virtual="/sql/scratch", directory="/sql", vfs_path="scratch")
@@ -69,17 +72,24 @@ WORKERD_LIMITS = (
 )
 
 
-@pytest_asyncio.fixture(params=["sqlite", "workerd_limits"])
+@pytest_asyncio.fixture(params=["sqlite", "workerd_limits", ON_POSTGRES])
 async def vfs(request: pytest.FixtureRequest) -> AsyncIterator[SqlVFS]:
-    driver = SqliteDriver()
-    if request.param == "workerd_limits":
-        db = driver._open()
-        for limit in WORKERD_LIMITS:
-            db.setlimit(limit, 100)
+    database = contextlib.ExitStack()
+    driver: SqlDriver
+    if request.param == "postgres":
+        driver = PostgresSqlDriver(database.enter_context(fresh_database()))
+    else:
+        sqlite = SqliteDriver()
+        if request.param == "workerd_limits":
+            db = sqlite._open()
+            for limit in WORKERD_LIMITS:
+                db.setlimit(limit, 100)
+        driver = sqlite
     v = SqlVFS(driver=driver)
     yield v
     await v.close()
     driver.close()
+    database.close()
 
 
 @pytest.mark.asyncio
@@ -232,10 +242,15 @@ async def test_an_append_raced_by_another_lands_at_the_end_it_left(
 ):
     await vfs.write(at("/f"), b"a")
     named = "(SELECT ino FROM fs_dentry WHERE parent_ino = 1 AND name = 'f')"
+    ab = (
+        "'\\x6162'::bytea"
+        if vfs.accessor.driver.dialect == SqlDialect.POSTGRES
+        else "X'6162'"
+    )
     racing(
         vfs,
         [
-            f"UPDATE fs_data SET data = X'6162' WHERE ino = {named}",
+            f"UPDATE fs_data SET data = {ab} WHERE ino = {named}",
             f"UPDATE fs_inode SET size = 2, mtime = mtime + 1 WHERE ino = {named}",
         ],
     )
@@ -447,7 +462,7 @@ async def test_a_snapshot_carries_the_files_into_a_fresh_mount():
 @pytest.mark.asyncio
 async def test_an_uncapped_database_grows(vfs: SqlVFS):
     assert (await vfs.capacity()).state == CapacityState.ELASTIC
-    assert vfs.storage_location().startswith("sql::memory:#")
+    assert vfs.storage_location() == f"sql:{vfs.accessor.driver.location}"
 
 
 def test_two_memory_databases_differ_and_two_names_of_one_file_agree(

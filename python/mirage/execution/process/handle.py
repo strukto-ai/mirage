@@ -80,6 +80,8 @@ class ProcessHandle:
         # The host stopped it (its table stopped, its session closed),
         # which ends whoever waits for it as well.
         self.revoked = False
+        # Told the record each time it changes, as its table keeps it.
+        self.noted: Callable[[Process], None] | None = None
 
     def start(self, eager: bool = False) -> None:
         """Start the runner.
@@ -108,6 +110,11 @@ class ProcessHandle:
     def record(self) -> Process:
         with self._lock:
             return self._record
+
+    def _tell(self) -> None:
+        """Tell whoever keeps the record that it changed."""
+        if self.noted is not None:
+            self.noted(self._record)
 
     @property
     def signal(self) -> int | None:
@@ -171,6 +178,7 @@ class ProcessHandle:
                 machine=machine or self._record.machine,
                 runtime=runtime,
             )
+            self._tell()
             return True
 
     def set_machine_pid(self, machine_pid: MachinePid) -> None:
@@ -183,6 +191,7 @@ class ProcessHandle:
         """
         with self._lock:
             self._record = replace(self._record, machine_pid=machine_pid)
+            self._tell()
 
     def program_exited(self, code: int) -> None:
         """Record that a program the runner started handled the stop
@@ -306,6 +315,7 @@ class ProcessHandle:
                 self._record = replace(
                     self._record, state=ProcessState.STOPPING
                 )
+                self._tell()
             elif escalated:
                 self._signal = signal
         if children and (stopped or exited or escalated):
@@ -340,6 +350,7 @@ class ProcessHandle:
                 signal=signal,
                 error=str(error) if error is not None else None,
             )
+            self._tell()
             record = self._record
         self._finished(record.pid)
         self._completion.set_result(record)

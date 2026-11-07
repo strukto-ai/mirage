@@ -700,8 +700,25 @@ async function runPreparedLine(
           } catch (err) {
             await sweep()
             // Invalid routing stays the caller's error; anything else a
-            // policy raised fails the line, as Python folds it.
-            if (err instanceof RouteError || isControlFlowError(err)) throw err
+            // policy raised fails the line, as Python folds it. A refused
+            // route still ends the line's entry, as Python's does.
+            if (err instanceof RouteError) {
+              if (recorded) {
+                const failed = failureResult(err)
+                const io = new IOResult({ exitCode: failed.exitCode, stderr: failed.stderr })
+                await (history !== null
+                  ? history.end(io, [])
+                  : env.observer.logResult(
+                      io,
+                      [],
+                      targetSession.sessionId,
+                      effectiveSession.cwd,
+                      options.lineHandle?.id.value,
+                    ))
+              }
+              throw err
+            }
+            if (isControlFlowError(err)) throw err
             const failed = failureResult(err)
             return await answerLine(
               env,

@@ -492,6 +492,7 @@ def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
     assert (line.name, dict(line.attributes or {})) == (
         "command",
         {
+            "mirage.line.id": "L",
             "mirage.workspace.id": "w",
             "mirage.session.id": "s1",
             "mirage.command": "cat /d/a",
@@ -653,6 +654,7 @@ def test_spans_leave_out_output_and_vfs_calls_when_told_to(monkeypatch):
         (
             "command",
             {
+                "mirage.line.id": "L",
                 "mirage.workspace.id": "w",
                 "mirage.session.id": "s1",
                 "mirage.command": "cat /d/a",
@@ -691,14 +693,15 @@ def test_bash_history_lists_lines_in_the_order_they_ended():
 
 
 # A job and each process a line ran are spans of their own once they end,
-# named by their line, session and workspace.
+# under the line's span, named by their line, session, workspace, machine
+# and cwd.
 @pytest.mark.asyncio
 async def test_an_ended_job_and_process_are_spans(monkeypatch):
     exporter = _exported(monkeypatch)
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.shell("sleep 30 & kill %1; wait")
-        [line] = ws.lines()
+        [line] = await ws.lines()
     finally:
         await ws.close()
     spans = exporter.get_finished_spans()
@@ -720,6 +723,22 @@ async def test_an_ended_job_and_process_are_spans(monkeypatch):
     ]
     attributes = sleep.attributes or {}
     assert attributes["process.exit.code"] == 143
+    assert attributes["mirage.signal"] == 15
     assert attributes["mirage.line.id"] == str(line.id)
     assert attributes["mirage.session.id"] == line.session_id
+    assert attributes["mirage.cwd"] == "/"
     assert str(attributes["host.id"]).startswith("host:")
+    [command] = [s for s in spans if s.name == "command"]
+    assert (command.attributes or {})["mirage.line.id"] == str(line.id)
+    assert (command.attributes or {})["host.id"] == attributes["host.id"]
+    context = command.get_span_context()
+    assert context is not None
+    for span in (job, sleep):
+        assert span.parent is not None
+        assert (span.parent.trace_id, span.parent.span_id) == (
+            context.trace_id,
+            context.span_id,
+        )
+    assert (job.attributes or {})["process.pid"] == attributes["process.pid"]
+    assert (job.attributes or {})["host.id"] == attributes["host.id"]
+    assert (job.attributes or {})["mirage.cwd"] == "/"

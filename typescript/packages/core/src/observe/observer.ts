@@ -12,9 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { context, trace, type Attributes, type Tracer } from '@opentelemetry/api'
+import {
+  context,
+  trace,
+  type Attributes,
+  type Span,
+  type SpanContext,
+  type Tracer,
+} from '@opentelemetry/api'
+import { HISTORY_MAX_RECORDS } from '../execution/constants.ts'
 import type { Job } from '../execution/job/types.ts'
 import type { Process } from '../execution/process/types.ts'
+import type { LineId, MachineId } from '../execution/types.ts'
 import { CHUNK_SIZE } from '../io/cooperative.ts'
 import type { IOResult } from '../io/types.ts'
 import { YieldBudget } from '../io/yield_budget.ts'
@@ -116,90 +125,60 @@ function tracer(): Tracer {
 }
 
 /**
- * Send an ended record to OpenTelemetry as one span over its run, from
- * `startedAt` to `endedAt`, epoch seconds. Mirrors Python's `_trace_ended`.
+ * Open a typed line's `command` span as it starts (`start`, epoch
+ * milliseconds), naming the line, its session, its workspace, the machine
+ * it runs on (`host.id`) and the cwd it starts in; the spans of its jobs and
+ * processes go under it. Mirrors Python's `_start_line`.
  */
-function traceEnded(
-  name: string,
-  attributes: Attributes,
-  startedAt: number,
-  endedAt: number | null,
-): void {
-  const start = startedAt * 1000
-  tracer()
-    .startSpan(name, { startTime: start, attributes })
-    .end(endedAt === null ? start : endedAt * 1000)
-}
-
-/** Send an ended process to OpenTelemetry as a `process` span. */
-export function traceProcess(record: Process): void {
-  const attributes: Attributes = {
-    'process.pid': record.id.pid,
-    'process.command_line': record.command,
-    'host.id': record.machine.toString(),
-    'mirage.workspace.id': record.id.workspaceId,
-    'mirage.session.id': record.sessionId,
-  }
-  if (record.parent !== null) attributes['process.parent_pid'] = record.parent
-  if (record.exit !== null) attributes['process.exit.code'] = record.exit
-  if (record.line !== null) attributes['mirage.line.id'] = record.line.value
-  traceEnded('process', attributes, record.startedAt, record.endedAt)
-}
-
-/** Send an ended job to OpenTelemetry as a `job` span. */
-export function traceJob(record: Job): void {
-  const attributes: Attributes = {
-    'mirage.job.id': record.id.console,
-    'mirage.job.number': record.number,
-    'mirage.command': record.command,
-    'mirage.workspace.id': record.id.workspaceId,
-    'mirage.session.id': record.sessionId,
-  }
-  if (record.exit !== null) attributes['mirage.exit_code'] = record.exit
-  if (record.line !== null) attributes['mirage.line.id'] = record.line.value
-  traceEnded('job', attributes, record.startedAt, record.endedAt)
-}
-
-/**
- * Send a finished line to OpenTelemetry: a `command` span over its run
- * (`span`, its start and end in epoch milliseconds), with the cwd it
- * started in and the start of its stdout and stderr (`output`, as it wrote
- * them), and under it a `vfs.<call>` span for each call it made to a
- * mount. Each span also carries its start or end and its length in
- * milliseconds, as the history's entries have them, for a tracer that
- * can't be given a span's times. TRACE_CONTENT_ENV leaves out the output
- * and the calls, and past TRACE_MAX_SPANS_ENV calls the rest are only
- * counted. Mirrors Python's `_trace_line`.
- */
-function traceLine(
+function startLine(
   workspaceId: string | undefined,
+  machine: string | undefined,
+  line: string,
   session: string,
   command: string,
   cwd: string | undefined,
+  start: number,
+): Span {
+  const attributes: Attributes = {
+    'mirage.line.id': line,
+    'mirage.session.id': session,
+    'mirage.command': command,
+    'mirage.timestamp': start,
+  }
+  if (workspaceId !== undefined) attributes['mirage.workspace.id'] = workspaceId
+  if (machine !== undefined) attributes['host.id'] = machine
+  if (cwd !== undefined) attributes['mirage.cwd'] = cwd
+  return tracer().startSpan('command', { startTime: start, attributes })
+}
+
+/**
+ * Close a typed line's `command` span (`span`, its start and end in epoch
+ * milliseconds): how it ended, the start of its stdout and stderr
+ * (`output`, as it wrote them), and under it a `vfs.<call>` span for each
+ * call it made to a mount. Each span also carries its start or end and its
+ * length in milliseconds, as the history's entries have them, for a tracer
+ * that can't be given a span's times. TRACE_CONTENT_ENV leaves out the
+ * output and the calls, and past TRACE_MAX_SPANS_ENV calls the rest are
+ * only counted. Mirrors Python's `_end_line`.
+ */
+function endLine(
+  line: Span,
   span: [number, number],
   exitCode: number,
   output: [Uint8Array, Uint8Array],
   records: readonly OpRecord[],
 ): void {
   const content = traceContent()
-  const attributes: Attributes = {
-    'mirage.session.id': session,
-    'mirage.command': command,
-    'mirage.exit_code': exitCode,
-    'mirage.timestamp': span[0],
-    'mirage.duration_ms': span[1] - span[0],
-  }
+  line.setAttribute('mirage.exit_code', exitCode)
+  line.setAttribute('mirage.duration_ms', span[1] - span[0])
   const calls = records.slice(0, positiveEnv(TRACE_MAX_SPANS_ENV, TRACE_MAX_SPANS))
   if (content) {
     const limit = traceContentMaxBytes()
-    attributes['mirage.stdout'] = tracedOutput(output[0], limit)
-    attributes['mirage.stderr'] = tracedOutput(output[1], limit)
+    line.setAttribute('mirage.stdout', tracedOutput(output[0], limit))
+    line.setAttribute('mirage.stderr', tracedOutput(output[1], limit))
     if (calls.length < records.length)
-      attributes['mirage.vfs.dropped'] = records.length - calls.length
+      line.setAttribute('mirage.vfs.dropped', records.length - calls.length)
   }
-  if (workspaceId !== undefined) attributes['mirage.workspace.id'] = workspaceId
-  if (cwd !== undefined) attributes['mirage.cwd'] = cwd
-  const line = tracer().startSpan('command', { startTime: span[0], attributes })
   if (content && line.isRecording()) {
     const parent = trace.setSpan(context.active(), line)
     for (const rec of calls) {
@@ -298,20 +277,29 @@ function later(a: number | null, b: number | null): number | null {
  * persisted log) would otherwise file a clear or delete ahead of the
  * commands it acts on. A session with no history sets no floor.
  *
- * Each line that ends also goes to OpenTelemetry as a span, its vfs calls
- * as spans under it; nothing leaves the process until an SDK is set up.
+ * Each typed line also goes to OpenTelemetry as a span, its vfs calls as
+ * spans under it, and so does each job and process once it ends, under the
+ * span of the line that started it while the newest `HISTORY_MAX_RECORDS`
+ * lines' spans are known; nothing leaves the process until an SDK is set
+ * up. Tracing stops at the workspace's own machine and runtimes: a program
+ * a runtime runs elsewhere starts no trace of its own there. `machine` is
+ * the workspace's, named on its lines' spans.
  */
 export class Observer {
   private readonly _store: ObserverStore
   private readonly clock: Clock
   private readonly newest = new Map<string, number | null>()
-  // Each open line's start (epoch ms, then monotonic), text and cwd.
-  private readonly started = new Map<string, [number, number, string, string | undefined]>()
+  // Each open line's start (epoch ms, then monotonic) and span.
+  private readonly started = new Map<string, [number, number, Span]>()
+  // The span of each recent line, which its jobs and processes go under,
+  // oldest first.
+  private readonly lineSpans = new Map<string, SpanContext>()
 
   constructor(
     store?: ObserverStore,
     clock: Clock = new SystemClock(),
     private readonly workspaceId?: string,
+    private readonly machine?: string,
   ) {
     this._store = store ?? new RAMObserverStore()
     this.clock = clock
@@ -370,7 +358,87 @@ export class Observer {
     if (line !== undefined) init.id = line
     const began = this.clock.monotonic()
     await this.log(new LogEntry(init))
-    if (line !== undefined) this.started.set(line, [init.timestamp, began, command, cwd])
+    if (line !== undefined) {
+      const span = startLine(
+        this.workspaceId,
+        this.machine,
+        line,
+        session,
+        command,
+        cwd,
+        init.timestamp,
+      )
+      this.started.set(line, [init.timestamp, began, span])
+      this.lineSpans.set(line, span.spanContext())
+      for (const oldest of this.lineSpans.keys()) {
+        if (this.lineSpans.size <= HISTORY_MAX_RECORDS) break
+        this.lineSpans.delete(oldest)
+      }
+    }
+  }
+
+  /** Send an ended process to OpenTelemetry as a `process` span, under its line's. */
+  traceProcess(record: Process): void {
+    const attributes: Attributes = {
+      'process.pid': record.id.pid,
+      'process.command_line': record.command,
+      'process.group_leader.pid': record.group,
+      'host.id': record.machine.toString(),
+      'mirage.workspace.id': record.id.workspaceId,
+      'mirage.session.id': record.sessionId,
+      'mirage.cwd': record.cwd.virtual,
+    }
+    if (record.parent !== null) attributes['process.parent_pid'] = record.parent
+    if (record.exit !== null) attributes['process.exit.code'] = record.exit
+    if (record.signal !== null) attributes['mirage.signal'] = record.signal
+    if (record.error !== null) attributes['mirage.error'] = record.error
+    if (record.runtime !== null) attributes['mirage.runtime'] = record.runtime
+    if (record.machinePid !== null) attributes['mirage.machine.pid'] = record.machinePid.pid
+    this.traceEnded('process', attributes, record.line, record.startedAt, record.endedAt)
+  }
+
+  /**
+   * Send an ended job to OpenTelemetry as a `job` span, under its line's;
+   * `machine` is where its process ran.
+   */
+  traceJob(record: Job, machine: MachineId): void {
+    const attributes: Attributes = {
+      'mirage.job.id': record.id.console,
+      'mirage.job.number': record.number,
+      'mirage.command': record.command,
+      'host.id': machine.toString(),
+      'mirage.workspace.id': record.id.workspaceId,
+      'mirage.session.id': record.sessionId,
+      'mirage.cwd': record.cwd,
+    }
+    if (record.pid !== null) attributes['process.pid'] = record.pid
+    if (record.exit !== null) attributes['mirage.exit_code'] = record.exit
+    if (record.signal !== null) attributes['mirage.signal'] = record.signal
+    this.traceEnded('job', attributes, record.line, record.startedAt, record.endedAt)
+  }
+
+  /**
+   * Send an ended record to OpenTelemetry as one span over its run, from
+   * `startedAt` to `endedAt`, epoch seconds, under the span of its line
+   * while that is known. Mirrors Python's `_trace_ended`.
+   */
+  private traceEnded(
+    name: string,
+    attributes: Attributes,
+    line: LineId | null,
+    startedAt: number,
+    endedAt: number | null,
+  ): void {
+    let parent = context.active()
+    if (line !== null) {
+      attributes['mirage.line.id'] = line.value
+      const known = this.lineSpans.get(line.value)
+      if (known !== undefined) parent = trace.setSpanContext(parent, known)
+    }
+    const start = startedAt * 1000
+    tracer()
+      .startSpan(name, { startTime: start, attributes }, parent)
+      .end(endedAt === null ? start : endedAt * 1000)
   }
 
   /**
@@ -409,16 +477,7 @@ export class Observer {
     const took =
       started === undefined ? undefined : Math.round((this.clock.monotonic() - started[1]) * 1000)
     if (started !== undefined && took !== undefined) {
-      traceLine(
-        this.workspaceId,
-        session,
-        started[2],
-        started[3],
-        [started[0], started[0] + took],
-        io.exitCode,
-        [out, err],
-        opRecords,
-      )
+      endLine(started[2], [started[0], started[0] + took], io.exitCode, [out, err], opRecords)
     }
     const init: LogEntryInit = {
       type: EVENT_RESULT,

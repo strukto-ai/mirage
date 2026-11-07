@@ -17,11 +17,30 @@ import { createClient } from 'redis'
 import { Channel } from '@struktoai/mirage-core/shell/console/index'
 import { JobTable } from '@struktoai/mirage-core/execution/job/table'
 import type { JobHandle, JobRunner } from '@struktoai/mirage-core/execution/job/handle'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { HISTORY_MAX_RECORDS } from '@struktoai/mirage-core/execution/constants'
+import type { Line } from '@struktoai/mirage-core/execution/line/types'
+import type { Process } from '@struktoai/mirage-core/execution/process/types'
+import { LineId, MachineId, ProcessId } from '@struktoai/mirage-core/execution/types'
+import { PathSpec } from '@struktoai/mirage-core/types'
 import { RedisExecutionStore } from './redis.ts'
 
 const REDIS_URL = process.env.REDIS_URL ?? ''
 const DEC = new TextDecoder()
+
+function lineOf(n: number, endedAt: number | null = null): Line {
+  return {
+    id: new LineId(`line_${String(n)}`),
+    sessionId: 's',
+    command: `echo ${String(n)}`,
+    startedAt: n,
+    state: endedAt === null ? 'running' : 'exited',
+    endedAt,
+    exit: endedAt === null ? null : 0,
+    signal: null,
+    error: null,
+  }
+}
 
 /** A runner that ends only through its abort. */
 function pending(abort: AbortController): JobRunner {
@@ -58,6 +77,7 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     const store = open()
     expect(await store.load('s')).toBeNull()
     expect(await store.casSet('s', { next: 2, generation: 1 }, 0)).toBe(true)
+    expect(await store.sessions()).toEqual(['s'])
     expect(await store.casSet('s', { next: 3, generation: 1 }, 0)).toBe(false)
     expect(await store.load('s')).toEqual({ next: 2, generation: 1 })
     expect(await store.delete('s', 0)).toBe(false)
@@ -105,10 +125,17 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     const client = createClient({ url: REDIS_URL })
     await client.connect()
     await client.expire(`${prefix}console:c:stream`, 5)
+    store.note(lineOf(1))
+    await vi.waitFor(async () => {
+      expect(await client.exists(`${prefix}records:lines`)).toBe(1)
+    })
+    await client.expire(`${prefix}records:lines`, 5)
     await store.lease('o', ['c'])
     const ttl = await client.ttl(`${prefix}console:c:stream`)
+    const records = await client.ttl(`${prefix}records:lines`)
     await client.quit()
     expect(ttl).toBeGreaterThan(5)
+    expect(records).toBeGreaterThan(5)
   })
 
   it('clear drops lists, consoles and the lease', async () => {
@@ -176,5 +203,55 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     await b.sync('s')
     expect((await b.wait(1, 's')).exitCode).toBe(129)
     await a.killAll()
+  })
+  // A record noted on one store reaches every store on the server once it is
+  // written, the newest of each winning, with every field it was noted with.
+  it('brings a noted record to every store', async () => {
+    const a = open()
+    const b = open()
+    const process: Process = {
+      id: new ProcessId('w', 7),
+      sessionId: 's',
+      line: new LineId('line_1'),
+      parent: 3,
+      group: 3,
+      command: 'sleep 30',
+      cwd: PathSpec.fromStrPath('/m'),
+      machine: new MachineId('docker', 'tools'),
+      startedAt: 1.5,
+      runtime: 'docker',
+      machinePid: { pid: 4242, started: 1.25, exited: null },
+      state: 'stopping',
+      endedAt: null,
+      exit: null,
+      signal: null,
+      error: null,
+      ancestors: [1, 3],
+    }
+    a.note(lineOf(1))
+    a.note(lineOf(1, 2))
+    a.note(process)
+    expect(await a.getLine(new LineId('line_1'))).toEqual(lineOf(1, 2))
+    await vi.waitFor(async () => {
+      expect(await b.findProcesses()).toHaveLength(1)
+    })
+    expect(await b.getProcess(new ProcessId('w', 7))).toEqual(process)
+    expect(await b.findLines()).toEqual([lineOf(1, 2)])
+    expect(await b.findLines('other')).toEqual([])
+  })
+
+  // Ended records are kept to the history, and a running one stays.
+  it('keeps ended records to the history', async () => {
+    const a = open()
+    const b = open()
+    a.note(lineOf(0))
+    for (let n = 1; n < HISTORY_MAX_RECORDS + 3; n++) a.note(lineOf(n, n))
+    const newest = `line_${String(HISTORY_MAX_RECORDS + 2)}`
+    await vi.waitFor(async () => {
+      expect((await b.findLines()).map((r) => r.id.value)).toContain(newest)
+    })
+    const kept = (await b.findLines()).map((r) => r.id.value)
+    expect(kept).toHaveLength(HISTORY_MAX_RECORDS + 1)
+    expect(kept.slice(0, 2)).toEqual(['line_0', 'line_3'])
   })
 })

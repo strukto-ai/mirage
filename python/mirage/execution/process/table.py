@@ -56,6 +56,9 @@ class ProcessTable:
             by default.
         ended (Callable[[Process], None] | None): told each process's
             record as it ends.
+        note (Callable[[Process], None] | None): told each process's
+            record as it starts and each time it changes, as the
+            workspace's store keeps it.
     """
 
     def __init__(
@@ -66,8 +69,10 @@ class ProcessTable:
         changed: Callable[[], None] | None = None,
         now: Callable[[], float] = system_now,
         ended: Callable[[Process], None] | None = None,
+        note: Callable[[Process], None] | None = None,
     ) -> None:
         self.workspace_id = workspace_id
+        self._note = note
         self.machine = machine
         self._now = now
         self._bind = bind
@@ -170,6 +175,11 @@ class ProcessTable:
                 raise RuntimeError(
                     "parent process is no longer accepting children"
                 )
+            ancestry = (
+                ()
+                if parent is None
+                else (*self._ancestors.get(parent, ()), parent)
+            )
             handle = ProcessHandle(
                 Process(
                     ProcessId(self.workspace_id, pid),
@@ -186,6 +196,7 @@ class ProcessTable:
                     machine or self.machine,
                     self._now(),
                     runtime,
+                    ancestors=ancestry,
                 ),
                 run,
                 lambda done: self._retire(done, handle),
@@ -197,11 +208,10 @@ class ProcessTable:
             handle.one_command = one_command
             eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
-            self._ancestors[pid] = (
-                ()
-                if parent is None
-                else (*self._ancestors.get(parent, ()), parent)
-            )
+            self._ancestors[pid] = ancestry
+        if self._note is not None:
+            handle.noted = self._note
+            self._note(handle.record)
         if started is not None:
             started(handle)
         handle.start(eager=eager)

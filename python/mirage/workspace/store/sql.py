@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.execution.base import ExecutionStore
+from mirage.execution.sql import SqlExecutionStore
 from mirage.observe.store import ObserverStore
 from mirage.vfs.sql.types import SqlDriver
 from mirage.workspace.mount.namespace.store import (
@@ -25,19 +26,24 @@ from mirage.workspace.store.ram import RAMWorkspaceStateStore
 
 
 class SqlWorkspaceStateStore(WorkspaceStateStore):
-    """WorkspaceStateStore hosting the sessions, the metadata record and
-    the namespace nodes in a SQLite-dialect database, as
-    ``mirage_records`` rows:
+    """WorkspaceStateStore hosting the sessions, the metadata record, the
+    namespace nodes and the execution plane in a SQL database, SQLite or
+    Postgres, as ``mirage_records`` rows:
 
     - ``{scope}workspaces/`` — metadata, one record per workspace
     - ``{scope}{ws}/sessions/`` — the session table
     - ``{scope}{ws}/nodes/`` — symlinks and the attribute overlay
 
-    So a workspace whose process restarts on the same file keeps its
-    sessions' cwd, variables, functions, aliases, options, umask and
-    traps, and its links. Observer events and the execution plane are
-    per-process and stay in memory. Mirrors TypeScript's
-    ``SqlWorkspaceStateStore``.
+    and the execution plane (job lists, consoles, the lease, the line and
+    process records) as ``mirage_execution`` and ``mirage_console`` rows
+    under ``{scope}{ws}/`` (``SqlExecutionStore``). So a workspace whose
+    process restarts on the same database keeps its sessions' cwd,
+    variables, functions, aliases, options, umask and traps, its links,
+    its jobs and the lines and processes it ran, and every process on the
+    database lists them. A host that forgets its memory without closing
+    the workspace takes its lease back at once only under the same
+    daemon id. Observer events are per-process and stay in memory.
+    Mirrors TypeScript's ``SqlWorkspaceStateStore``.
     """
 
     def __init__(
@@ -78,6 +84,7 @@ class SqlWorkspaceStateStore(WorkspaceStateStore):
         self._meta = SqlRecordClient(driver, f"{scope}workspaces/")
         self._memory = RAMWorkspaceStateStore()
         self._tables: dict[str, RecordNamespaceStore] = {}
+        self._executions: dict[str, SqlExecutionStore] = {}
 
     def _table(self, workspace_id: str, plane: str) -> RecordNamespaceStore:
         scope = f"{self._scope}{workspace_id}/{plane}/"
@@ -97,7 +104,11 @@ class SqlWorkspaceStateStore(WorkspaceStateStore):
         return self._table(workspace_id, "sessions")
 
     def _make_execution(self, workspace_id: str) -> ExecutionStore:
-        return self._memory.execution(workspace_id)
+        if workspace_id not in self._executions:
+            self._executions[workspace_id] = SqlExecutionStore(
+                self._driver, f"{self._scope}{workspace_id}/"
+            )
+        return self._executions[workspace_id]
 
     async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:
         fields, _ = await self._meta.get(workspace_id)
@@ -116,10 +127,13 @@ class SqlWorkspaceStateStore(WorkspaceStateStore):
     async def _forget(self, workspace_id: str) -> None:
         for plane in ("nodes", "sessions"):
             self._tables.pop(f"{self._scope}{workspace_id}/{plane}/", None)
+        self._executions.pop(workspace_id, None)
         await self._meta.delete([workspace_id])
         await self._memory.drop(workspace_id)
 
     async def _close(self) -> None:
+        for execution in self._executions.values():
+            await execution.close()
         await self._memory.close()
         if self._owns_driver:
             self._driver.close()

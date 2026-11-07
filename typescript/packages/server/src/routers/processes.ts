@@ -97,7 +97,7 @@ export function registerProcessesRoutes(
 ): void {
   app.get<{ Params: WsIdParams; Querystring: ListProcessesQuery }>(
     '/v1/workspaces/:wsId/processes',
-    (req, reply) => {
+    async (req, reply) => {
       // The processes the workspace keeps, by pid: every live one and the
       // newest ended ones, a session's, those in a state, those a line
       // ran, those a job ran or those run on a machine (`provider:name`)
@@ -117,30 +117,30 @@ export function registerProcessesRoutes(
         return reply.status(400).send({ detail: (err as Error).message })
       }
       const ws = deps.registry.get(wsId).runner.ws
-      return ws
-        .processes({
-          ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
-          ...(state !== undefined ? { state: state as ProcessState } : {}),
-          ...(lineId !== undefined && lineId !== '' ? { lineId: new LineId(lineId) } : {}),
-          ...(jobId !== undefined && jobId !== ''
-            ? { jobId: new JobId(ws.workspaceId, jobId) }
-            : {}),
-          ...(where !== null ? { machine: where } : {}),
-        })
-        .map(toResponse)
+      const records = await ws.processes({
+        ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
+        ...(state !== undefined ? { state: state as ProcessState } : {}),
+        ...(lineId !== undefined && lineId !== '' ? { lineId: new LineId(lineId) } : {}),
+        ...(jobId !== undefined && jobId !== '' ? { jobId: new JobId(ws.workspaceId, jobId) } : {}),
+        ...(where !== null ? { machine: where } : {}),
+      })
+      return records.map(toResponse)
     },
   )
 
-  app.get<{ Params: WsProcessParams }>('/v1/workspaces/:wsId/processes/:pid', (req, reply) => {
-    // One process, by its pid.
-    const { wsId, pid } = req.params
-    if (deps.registry.visible(wsId, req.account) === null) {
-      return reply.status(404).send({ detail: 'workspace not found' })
-    }
-    if (!/^\d+$/.test(pid)) return reply.status(422).send({ detail: 'pid must be a number' })
-    const ws = deps.registry.get(wsId).runner.ws
-    const record = ws.process(new ProcessId(ws.workspaceId, Number(pid)))
-    if (record === null) return reply.status(404).send({ detail: 'process not found' })
-    return toResponse(record)
-  })
+  app.get<{ Params: WsProcessParams }>(
+    '/v1/workspaces/:wsId/processes/:pid',
+    async (req, reply) => {
+      // One process, by its pid.
+      const { wsId, pid } = req.params
+      if (deps.registry.visible(wsId, req.account) === null) {
+        return reply.status(404).send({ detail: 'workspace not found' })
+      }
+      if (!/^\d+$/.test(pid)) return reply.status(422).send({ detail: 'pid must be a number' })
+      const ws = deps.registry.get(wsId).runner.ws
+      const record = await ws.process(new ProcessId(ws.workspaceId, Number(pid)))
+      if (record === null) return reply.status(404).send({ detail: 'process not found' })
+      return toResponse(record)
+    },
+  )
 }
