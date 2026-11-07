@@ -17,11 +17,22 @@ import type { JsonObject } from '@struktoai/mirage-core/types'
 import { completedLogs, logLines, logPage } from './logs.ts'
 
 describe('command logs', () => {
-  it('pages timestamp ties without returning unfinished commands', () => {
+  it('pages timestamp ties without returning unfinished commands', async () => {
     const records: JsonObject[] = []
     for (const id of ['a', 'c', 'b']) {
       records.push({ type: 'command', id, command: id, session: 's', timestamp: 1000 })
-      if (id !== 'c')
+      if (id !== 'c') {
+        records.push({
+          type: 'vfs',
+          parent: id,
+          session: 's',
+          timestamp: 1007,
+          vfs: 'read',
+          path: '/a',
+          source: 'ram',
+          bytes: 2,
+          duration_ms: 2,
+        })
         records.push({
           type: 'result',
           parent: id,
@@ -32,17 +43,21 @@ describe('command logs', () => {
           stdout: '',
           stderr: '',
         })
+      }
     }
     const logs = completedLogs(records)
     const first = logPage(logs, '1')
     expect(first.items.map((item) => item.id)).toEqual(['b'])
+    expect(first.items[0]?.started_at).toBe(1000)
+    expect(first.items[0]?.mounts[0]?.started_at).toBe(1005)
     expect(first.next).not.toBeNull()
     const second = logPage(logs, '1', first.next ?? '')
     expect(second.items.map((item) => item.id)).toEqual(['a'])
     expect(second.next).toBeNull()
-    const exported = [...logLines(logs)].map(
-      (line) => JSON.parse(line) as { type: string; id?: string },
-    )
+    const exported: { type: string; id?: string }[] = []
+    for await (const line of logLines(logs)) {
+      exported.push(JSON.parse(new TextDecoder().decode(line)) as { type: string; id?: string })
+    }
     expect(exported.filter((event) => event.type === 'command').map((event) => event.id)).toEqual([
       'a',
       'b',

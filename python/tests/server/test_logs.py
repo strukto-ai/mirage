@@ -34,6 +34,19 @@ def test_equal_timestamps_and_unfinished_commands():
         if ident != "c":
             records.append(
                 {
+                    "type": "vfs",
+                    "parent": ident,
+                    "session": "s",
+                    "timestamp": 1007,
+                    "vfs": "read",
+                    "path": "/a",
+                    "source": "ram",
+                    "bytes": 2,
+                    "duration_ms": 2,
+                }
+            )
+            records.append(
+                {
                     "type": "result",
                     "parent": ident,
                     "session": "s",
@@ -47,6 +60,8 @@ def test_equal_timestamps_and_unfinished_commands():
     logs = completed_logs(records)
     first = log_page(logs, "1", None)
     assert [item.id for item in first.items] == ["b"]
+    assert first.items[0].started_at == 1000
+    assert first.items[0].mounts[0].started_at == 1005
     assert first.next is not None
     second = log_page(logs, "1", first.next)
     assert [item.id for item in second.items] == ["a"]

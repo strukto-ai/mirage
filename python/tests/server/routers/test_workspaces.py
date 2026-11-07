@@ -24,6 +24,7 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
+from urllib.parse import quote
 
 import boto3
 import jwt as pyjwt
@@ -1919,7 +1920,7 @@ async def test_logs_page_and_export():
             }
             assert item["exit_code"] == 0
             assert item["user_id"] is None and item["api_key_id"] is None
-            assert 1_000_000_000 < item["started_at"] < 10_000_000_000
+            assert 1_000_000_000_000 < item["started_at"] < 10_000_000_000_000
             assert len(item["mounts"]) == 1
         first = (await client.get(url, params={"limit": 1})).json()
         second = (
@@ -1940,9 +1941,7 @@ async def test_logs_page_and_export():
         assert [line["id"] for line in commands] == [
             item["id"] for item in reversed(page["items"])
         ]
-        assert (
-            commands[0]["timestamp"] / 1000 == page["items"][-1]["started_at"]
-        )
+        assert commands[0]["timestamp"] == page["items"][-1]["started_at"]
         assert (
             await client.get(url, params={"session": commands[0]["session"]})
         ).json() == page
@@ -1950,7 +1949,7 @@ async def test_logs_page_and_export():
             await client.get(url, params={"session": "missing"})
         ).json() == {"items": [], "next": None}
         for params in (
-            {"session": "bad session"},
+            {"session": "bad\nsession"},
             {"limit": "0"},
             {"limit": "201"},
             {"after": "bad"},
@@ -2260,3 +2259,47 @@ async def test_a_create_outside_its_network_never_reaches_the_server(
         assert r.status_code == 400
         assert "cannot list the server's tools" in r.json()["detail"]
         assert fake.requests == []
+
+
+@pytest.mark.asyncio
+async def test_logs_support_existing_session_ids_and_unicode_workspaces():
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    wid = "工作"
+    url = f"/v1/workspaces/{quote(wid, safe='')}"
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        assert (
+            await client.post(
+                "/v1/workspaces", json={**_minimal_config(), "id": wid}
+            )
+        ).status_code == 201
+        empty = await client.get(f"{url}/logs", params={"format": "jsonl"})
+        assert empty.status_code == 200 and empty.content == b""
+        assert (
+            "filename*=UTF-8''%E5%B7%A5%E4%BD%9C-logs.jsonl"
+            in empty.headers["content-disposition"]
+        )
+        for sid in ("user:42", "s" * 65, "会话"):
+            created = await client.post(
+                f"{url}/sessions", json={"session_id": sid}
+            )
+            assert created.status_code == 201, created.text
+            result = await client.post(
+                f"{url}/shell",
+                params={"session_id": sid},
+                json={"command": "echo hi"},
+            )
+            assert result.status_code == 200, result.text
+            page = await client.get(f"{url}/logs", params={"session": sid})
+            assert page.status_code == 200, page.text
+            assert len(page.json()["items"]) == 1
+            exported = await client.get(
+                f"{url}/logs", params={"session": sid, "format": "jsonl"}
+            )
+            assert exported.status_code == 200
+            assert [
+                json.loads(line)["session"]
+                for line in exported.text.splitlines()
+            ] == [sid, sid]
+    await app.state.registry.close_all()

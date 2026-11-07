@@ -237,7 +237,7 @@ def test_logs_terminal_rows_and_cursor():
         {
             "items": [
                 {
-                    "started_at": 1,
+                    "started_at": 1000,
                     "exit_code": 0,
                     "command": "echo hi\necho bye",
                 }

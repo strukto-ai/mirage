@@ -189,7 +189,7 @@ function formatLogs(page: LogPage): string {
   const text = formatTable(
     ['TIME', 'EXIT', 'COMMAND'],
     page.items.map((item) => [
-      new Date(item.started_at * 1000).toISOString().slice(0, 19).replace('T', ' '),
+      new Date(item.started_at).toISOString().slice(0, 19).replace('T', ' '),
       item.exit_code === null ? '' : String(item.exit_code),
       item.command.replaceAll('\n', '\\n'),
     ]),

@@ -53,6 +53,7 @@ from mirage.server.io_serde import explanation_to_dict
 from mirage.server.logs import (
     LogPage,
     completed_logs,
+    log_attachment,
     log_lines,
     log_page,
     session_filter,
@@ -649,11 +650,7 @@ async def workspace_logs(
         return StreamingResponse(
             log_lines(logs),
             media_type="application/x-ndjson",
-            headers={
-                "Content-Disposition": (
-                    f'attachment; filename="{workspace_id}-logs.jsonl"'
-                )
-            },
+            headers={"Content-Disposition": log_attachment(workspace_id)},
         )
     return log_page(logs, limit, after)
 

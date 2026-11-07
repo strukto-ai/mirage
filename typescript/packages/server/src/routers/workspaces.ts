@@ -37,10 +37,15 @@ import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { RouteApp, RouteReply, RouteRequest, ServerHost } from '../routes.ts'
+import {
+  streamOf,
+  type RouteApp,
+  type RouteReply,
+  type RouteRequest,
+  type ServerHost,
+} from '../routes.ts'
 import { Buffer } from 'node:buffer'
-import { Readable } from 'node:stream'
-import { completedLogs, logLines, logPage, sessionFilter } from '../logs.ts'
+import { completedLogs, logAttachment, logLines, logPage, sessionFilter } from '../logs.ts'
 import { createHash } from 'node:crypto'
 import { buildOverrideMounts, cloneWorkspaceWithOverride } from '../clone.ts'
 import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
@@ -695,8 +700,8 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       if (req.query.format === 'jsonl')
         return reply
           .header('content-type', 'application/x-ndjson')
-          .header('content-disposition', `attachment; filename="${req.params.id}-logs.jsonl"`)
-          .send(Readable.from(logLines(logs)))
+          .header('content-disposition', logAttachment(req.params.id))
+          .send(streamOf(logLines(logs)))
       try {
         return logPage(logs, req.query.limit, req.query.after)
       } catch (e) {

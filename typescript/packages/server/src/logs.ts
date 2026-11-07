@@ -13,8 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
+import { yieldBytes } from '@struktoai/mirage-core/io/stream'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { JsonObject } from '@struktoai/mirage-core/types'
+import { checkName } from '@struktoai/mirage-core/utils/ids'
 
 const common = z.object({ session: z.string(), timestamp: z.number(), cwd: z.string().optional() })
 const commandRecord = common.extend({
@@ -43,9 +45,16 @@ const cursorValue = z.tuple([z.number().int().nonnegative(), z.string().min(1)])
 
 export function sessionFilter(session: string | undefined): string | undefined {
   if (session === '' || session === undefined) return undefined
-  if (!/^[A-Za-z0-9._-]{1,64}$/.test(session))
-    throw new Error('session must be 1-64 letters, digits, ., _ or -')
+  checkName('session id', session)
   return session
+}
+
+export function logAttachment(workspaceId: string): string {
+  const filename = encodeURIComponent(`${workspaceId}-logs.jsonl`).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  )
+  return `attachment; filename="logs.jsonl"; filename*=UTF-8''${filename}`
 }
 
 export function completedLogs(records: JsonObject[]) {
@@ -83,7 +92,7 @@ export function completedLogs(records: JsonObject[]) {
             id: command.id,
             command: command.command,
             cwd: command.cwd ?? null,
-            started_at: command.timestamp / 1000,
+            started_at: command.timestamp,
             duration_ms: result.duration_ms,
             exit_code: result.exit_code,
             stdout: result.stdout,
@@ -95,7 +104,7 @@ export function completedLogs(records: JsonObject[]) {
               path: e.path,
               source: e.source,
               bytes: e.bytes,
-              started_at: (e.timestamp - e.duration_ms) / 1000,
+              started_at: e.timestamp - e.duration_ms,
               duration_ms: e.duration_ms,
             })),
           },
@@ -137,8 +146,10 @@ export function logPage(logs: LoggedCommand[], limit = '50', after?: string) {
   }
 }
 
-export function* logLines(logs: LoggedCommand[]) {
+export async function* logLines(logs: LoggedCommand[]) {
+  const encoder = new TextEncoder()
   for (const log of [...logs].reverse()) {
-    for (const record of log.records) yield `${JSON.stringify(record)}\n`
+    for (const record of log.records)
+      yield* yieldBytes(encoder.encode(`${JSON.stringify(record)}\n`))
   }
 }

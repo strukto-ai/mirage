@@ -189,8 +189,8 @@ describe('workspaces router', () => {
             'mounts',
           ].sort(),
         )
-        expect(item.started_at).toBeLessThan(10_000_000_000)
-        expect(item.started_at).toBeGreaterThan(1_000_000_000)
+        expect(item.started_at).toBeLessThan(10_000_000_000_000)
+        expect(item.started_at).toBeGreaterThan(1_000_000_000_000)
         expect(item.mounts).toHaveLength(1)
         expect(item.exit_code).toBe(0)
         expect(item.user_id).toBeNull()
@@ -216,14 +216,66 @@ describe('workspaces router', () => {
       expect(commands.map((line) => line.id)).toEqual(
         [...all.items].reverse().map((item) => item.id),
       )
-      expect((commands[0]?.timestamp ?? 0) / 1000).toBe(all.items.at(-1)?.started_at)
+      expect(commands[0]?.timestamp ?? 0).toBe(all.items.at(-1)?.started_at)
       expect((await read(`?session=${commands[0]?.session ?? ''}`)).json()).toEqual(all)
       expect((await read('?session=missing')).json()).toEqual({ items: [], next: null })
-      for (const query of ['?limit=0', '?limit=201', '?session=bad%20session', '?after=bad'])
+      for (const query of ['?limit=0', '?limit=201', '?session=bad%0Asession', '?after=bad'])
         expect((await read(query)).statusCode).toBe(400)
       expect(
         (await app.inject({ method: 'GET', url: '/v1/workspaces/h/history' })).statusCode,
       ).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('exports Unicode workspace names and every valid session ID', async () => {
+    const app = buildApp()
+    const id = '工作'
+    const base = `/v1/workspaces/${encodeURIComponent(id)}`
+    try {
+      expect(
+        (await app.inject({ method: 'POST', url: '/v1/workspaces', payload: { id, config: RAM } }))
+          .statusCode,
+      ).toBe(201)
+      const empty = await app.inject({ method: 'GET', url: `${base}/logs?format=jsonl` })
+      expect(empty.statusCode).toBe(200)
+      expect(empty.body).toBe('')
+      expect(empty.headers['content-disposition']).toContain(
+        "filename*=UTF-8''%E5%B7%A5%E4%BD%9C-logs.jsonl",
+      )
+      for (const session_id of ['user:42', 's'.repeat(65), '会话']) {
+        expect(
+          (await app.inject({ method: 'POST', url: `${base}/sessions`, payload: { session_id } }))
+            .statusCode,
+        ).toBe(201)
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: `${base}/shell?session_id=${encodeURIComponent(session_id)}`,
+              payload: { command: 'echo hi' },
+            })
+          ).statusCode,
+        ).toBe(200)
+        const page = await app.inject({
+          method: 'GET',
+          url: `${base}/logs?session=${encodeURIComponent(session_id)}`,
+        })
+        expect(page.statusCode).toBe(200)
+        expect(page.json<{ items: unknown[] }>().items).toHaveLength(1)
+        const exported = await app.inject({
+          method: 'GET',
+          url: `${base}/logs?format=jsonl&session=${encodeURIComponent(session_id)}`,
+        })
+        expect(exported.statusCode).toBe(200)
+        expect(
+          exported.body
+            .trim()
+            .split('\n')
+            .map((line) => (JSON.parse(line) as { session: string }).session),
+        ).toEqual([session_id, session_id])
+      }
     } finally {
       await app.close()
     }

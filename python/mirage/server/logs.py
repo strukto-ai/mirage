@@ -15,12 +15,14 @@
 import base64
 import json
 import math
-import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from mirage.utils.ids import check_name
 
 
 class LogMount(BaseModel):
@@ -28,7 +30,9 @@ class LogMount(BaseModel):
     path: str
     source: str
     bytes: int | None
-    started_at: float
+    started_at: float = Field(
+        description="Start time as Unix epoch milliseconds."
+    )
     duration_ms: float
 
 
@@ -36,7 +40,9 @@ class CommandLog(BaseModel):
     id: str
     command: str
     cwd: str | None
-    started_at: float
+    started_at: float = Field(
+        description="Start time as Unix epoch milliseconds."
+    )
     duration_ms: float
     exit_code: int | None
     stdout: str
@@ -61,9 +67,13 @@ class LoggedCommand:
 def session_filter(session: str | None) -> str | None:
     if session in (None, ""):
         return None
-    if re.fullmatch(r"[A-Za-z0-9._-]{1,64}", session) is None:
-        raise ValueError("session must be 1-64 letters, digits, ., _ or -")
+    check_name("session id", session)
     return session
+
+
+def log_attachment(workspace_id: str) -> str:
+    filename = quote(f"{workspace_id}-logs.jsonl", safe="")
+    return f"attachment; filename=\"logs.jsonl\"; filename*=UTF-8''{filename}"
 
 
 def completed_logs(records: list[dict[str, Any]]) -> list[LoggedCommand]:
@@ -92,7 +102,7 @@ def completed_logs(records: list[dict[str, Any]]) -> list[LoggedCommand]:
             id=command["id"],
             command=command["command"],
             cwd=command.get("cwd"),
-            started_at=command["timestamp"] / 1000,
+            started_at=command["timestamp"],
             duration_ms=result.get("duration_ms", 0),
             exit_code=result.get("exit_code"),
             stdout=result.get("stdout", ""),
@@ -105,8 +115,7 @@ def completed_logs(records: list[dict[str, Any]]) -> list[LoggedCommand]:
                     path=e["path"],
                     source=e.get("source", ""),
                     bytes=e.get("bytes"),
-                    started_at=(e["timestamp"] - e.get("duration_ms", 0))
-                    / 1000,
+                    started_at=e["timestamp"] - e.get("duration_ms", 0),
                     duration_ms=e.get("duration_ms", 0),
                 )
                 for e in mounts

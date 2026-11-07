@@ -89,6 +89,47 @@ describe('the server API in workerd', () => {
     expect(stat.status).toBe(200)
   })
 
+  it('exports logs as JSONL through the edge route adapter', async () => {
+    const id = '日志'
+    const base = `/v1/workspaces/${encodeURIComponent(id)}`
+    expect(
+      (await call('POST', '/v1/workspaces', { id, config: { mounts: { '/': { vfs: 'ram' } } } }))
+        .status,
+    ).toBe(201)
+    const empty = await call('GET', `${base}/logs?format=jsonl`)
+    expect(empty.status).toBe(200)
+    expect(empty.text).toBe('')
+    for (const session_id of ['user:42', 's'.repeat(65)]) {
+      expect((await call('POST', `${base}/sessions`, { session_id })).status).toBe(201)
+      expect(
+        (
+          await call('POST', `${base}/shell?session_id=${encodeURIComponent(session_id)}`, {
+            command: 'echo hi',
+          })
+        ).status,
+      ).toBe(200)
+      const page = await call('GET', `${base}/logs?session=${encodeURIComponent(session_id)}`)
+      expect(page.status).toBe(200)
+      const items = (page.json as { items: { started_at: number }[] }).items
+      expect(items).toHaveLength(1)
+      expect(items[0]?.started_at).toBeGreaterThan(1_000_000_000_000)
+      const response = await worker.fetch(
+        `http://edge.test${base}/logs?format=jsonl&session=${encodeURIComponent(session_id)}`,
+        { headers: { authorization: `Bearer ${TOKEN}` } },
+      )
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-disposition')).toContain(
+        "filename*=UTF-8''%E6%97%A5%E5%BF%97-logs.jsonl",
+      )
+      expect(
+        (await response.text())
+          .trim()
+          .split('\n')
+          .map((line) => (JSON.parse(line) as { type: string }).type),
+      ).toEqual(['command', 'result'])
+    }
+  })
+
   it('streams a line as ndjson', async () => {
     await call('POST', '/v1/workspaces', {
       id: 'stream',

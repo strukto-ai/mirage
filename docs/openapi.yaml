@@ -243,7 +243,6 @@ paths:
           description: Only this session; absent or empty selects all sessions.
           schema:
             type: string
-            pattern: ^[A-Za-z0-9._-]{0,64}$
         - name: limit
           in: query
           description: Commands per JSON page. Ignored for JSONL export.
@@ -276,7 +275,7 @@ paths:
                   - id: c1
                     command: echo hi
                     cwd: /
-                    started_at: 1700000000
+                    started_at: 1700000000000
                     duration_ms: 8
                     exit_code: 0
                     stdout: |
@@ -309,7 +308,7 @@ paths:
         '403':
           $ref: '#/components/responses/403'
       description: 'Return completed commands newest first by start time and ID, with their
-        mount calls. JSON started_at values are Unix seconds; durations are milliseconds. JSONL
+        mount calls. JSON started_at values and durations are milliseconds. JSONL
         exports all retained matching commands oldest first as command, vfs and result records,
         linked by parent, with timestamp in Unix milliseconds. JSONL ignores limit and after.
         Empty JSON is {items: [], next: null}; empty JSONL has an empty body. Retention is server-specific.
@@ -4746,6 +4745,7 @@ components:
             - type: 'null'
           title: Cwd
         started_at:
+          description: Start time as Unix epoch milliseconds.
           title: Started At
           type: number
         duration_ms:
@@ -4808,6 +4808,7 @@ components:
             - type: 'null'
           title: Bytes
         started_at:
+          description: Start time as Unix epoch milliseconds.
           title: Started At
           type: number
         duration_ms:

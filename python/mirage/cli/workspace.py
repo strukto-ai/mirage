@@ -190,7 +190,7 @@ def _format_logs(page: dict[str, Any]) -> str:
         return "No logs."
     rows = [
         [
-            datetime.fromtimestamp(item["started_at"], UTC).strftime(
+            datetime.fromtimestamp(item["started_at"] / 1000, UTC).strftime(
                 "%Y-%m-%d %H:%M:%S"
             ),
             str(item["exit_code"]) if item["exit_code"] is not None else "",
