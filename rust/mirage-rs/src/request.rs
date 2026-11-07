@@ -103,6 +103,27 @@ pub(crate) enum Request {
     Mkdir {
         path: Vec<u8>,
     },
+    /// What a link holds, or that the name is no link; the name itself is
+    /// never followed.
+    Readlink {
+        path: Vec<u8>,
+    },
+    /// Make `to` a copy of file `from`, its bytes and permission bits,
+    /// in place of whatever stood there.
+    Copy {
+        from: Vec<u8>,
+        to: Vec<u8>,
+    },
+    /// Move a name, a link moving as itself.
+    Rename {
+        from: Vec<u8>,
+        to: Vec<u8>,
+    },
+    /// Hand standard input back what was read of it and not used, for the
+    /// next command to read, where the host's input can take it back.
+    Unread {
+        data: Vec<u8>,
+    },
     /// Remove one directory, which must be empty.
     Rmdir {
         path: Vec<u8>,
@@ -243,6 +264,24 @@ impl Request {
                 put("op", "mkdir".into());
                 put("path", latin1(path));
             }
+            Request::Readlink { path } => {
+                put("op", "readlink".into());
+                put("path", latin1(path));
+            }
+            Request::Copy { from, to } => {
+                put("op", "copy".into());
+                put("path", latin1(from));
+                put("to", latin1(to));
+            }
+            Request::Rename { from, to } => {
+                put("op", "rename".into());
+                put("path", latin1(from));
+                put("to", latin1(to));
+            }
+            Request::Unread { data: payload } => {
+                put("op", "unread".into());
+                take_payload(data, payload);
+            }
             Request::Rmdir { path } => {
                 put("op", "rmdir".into());
                 put("path", latin1(path));
@@ -358,6 +397,9 @@ pub(crate) struct Reply {
     pub(crate) kind: Option<String>,
     /// The permission bits a stat found, where the host keeps them.
     pub(crate) mode: Option<u32>,
+    /// What a link a readlink found holds; none for a name that is no
+    /// link.
+    pub(crate) target: Option<String>,
 }
 
 impl Reply {

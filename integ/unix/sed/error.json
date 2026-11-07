@@ -801,11 +801,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo x | sed -e b -e L; echo rc=$?; printf 'x\\ny\\n' | sed 'p;L'; echo rc=$?; echo x | sed -e b -e Lx; echo rc=$?",
+      "command": "echo x | sed -e b -e L; echo rc=$?; printf 'x\\ny\\n' | sed 'p;L'; echo rc=$?; echo x | sed -e b -e Lx; echo rc=$?; echo x | sed --posix -e b -e L; echo rc=$?; echo x | sed --posix 1~2p; echo rc=$?; echo x | sed --posix 's/x/y/I'; echo rc=$?; echo x | sed --posix 'a y'; echo rc=$?; echo x | sed --posix 1q5; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "x\nrc=0\nx\nrc=4\nrc=1\n",
-        "stderr": "sed: INTERNAL ERROR: Bad cmd L\nsed: -e expression #2, char 2: extra characters after command\n"
+        "stdout": "x\nrc=0\nx\nrc=4\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "sed: INTERNAL ERROR: Bad cmd L\nsed: -e expression #2, char 2: extra characters after command\nsed: -e expression #2, char 1: unknown command: `L'\nsed: -e expression #1, char 2: unknown command: `~'\nsed: -e expression #1, char 7: unknown option to `s'\nsed: -e expression #1, char 3: expected \\ after `a', `c' or `i'\nsed: -e expression #1, char 3: extra characters after command\n"
       }
     },
     {

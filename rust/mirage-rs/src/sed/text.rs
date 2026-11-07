@@ -72,9 +72,9 @@ pub(super) fn convert(
 
 /// `l`'s rendering: escapes for the C controls and the backslash, octal
 /// for every other byte outside printable ASCII, lines folded at `width`
-/// without splitting an escape, and `$` at the end; None once it would
-/// pass `limit` bytes.
-pub(super) fn list(ps: &[u8], width: i64, limit: usize) -> Option<Vec<u8>> {
+/// without splitting an escape, and `$` at the end, each output line
+/// ending at `end`; None once it would pass `limit` bytes.
+pub(super) fn list(ps: &[u8], width: i64, limit: usize, end: u8) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(ps.len() + 2);
     let mut used: i64 = 0;
     let mut piece = Vec::with_capacity(4);
@@ -97,29 +97,33 @@ pub(super) fn list(ps: &[u8], width: i64, limit: usize) -> Option<Vec<u8>> {
         }
         let len = piece.len() as i64;
         if width > 0 && used + len > width - 1 {
-            out.extend_from_slice(b"\\\n");
+            out.extend_from_slice(&[b'\\', end]);
             used = 0;
         }
         out.extend_from_slice(&piece);
         used += len;
     }
-    out.extend_from_slice(b"$\n");
+    out.extend_from_slice(&[b'$', end]);
     Some(out)
+}
+
+/// A name made absolute against `cwd` and nothing more, so the host walks
+/// a `..` in it past the links in front of it, as the kernel does.
+pub(super) fn absolute(name: &[u8], cwd: &[u8]) -> Vec<u8> {
+    if name.starts_with(b"/") {
+        return name.to_vec();
+    }
+    let mut base = cwd;
+    while base.last() == Some(&b'/') {
+        base = &base[..base.len() - 1];
+    }
+    [base, b"/", name].concat()
 }
 
 /// What a name resolves to against `cwd`, as the host resolves a path:
 /// `.` and `..` walked, slashes collapsed.
 pub(super) fn resolve(name: &[u8], cwd: &[u8]) -> Vec<u8> {
-    let mut joined = Vec::new();
-    if !name.starts_with(b"/") {
-        let mut base = cwd;
-        while base.last() == Some(&b'/') {
-            base = &base[..base.len() - 1];
-        }
-        joined.extend_from_slice(base);
-        joined.push(b'/');
-    }
-    joined.extend_from_slice(name);
+    let joined = absolute(name, cwd);
     let mut parts: Vec<&[u8]> = Vec::new();
     for part in joined.split(|&c| c == b'/') {
         match part {

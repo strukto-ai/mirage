@@ -30,11 +30,15 @@ import {
   RG_FLAG_NAMES,
   USAGE_EXIT,
   USAGE_HINT_PREFIX,
+  USAGE_PAGE,
   ZGREP_UNSUPPORTED_LONG,
   ZGREP_UNSUPPORTED_SHORT,
 } from './constants.ts'
+import { specOf } from './builtins.ts'
+import { helpPage } from './standard.ts'
 import { CommandName } from './types.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
+import { rstripNewlines } from '../../utils/text.ts'
 
 /**
  * GNU usage-error exit code for a command.
@@ -148,9 +152,9 @@ export function readFailExitCodeFromLine(cmdName: string, rendered: string): num
  * Shapes pinned against real GNU: long options report the full token
  * (`cat: unrecognized option '--bogus=x'`), short options report the
  * offending character (`cat: invalid option -- 'Y'`), and find uses its
- * predicate wording with backquote quoting. GNU's per-tool usage dumps
- * are deliberately omitted; the `--help` hint line is kept because every
- * registered command serves `--help`.
+ * predicate wording with backquote quoting. The `--help` hint line
+ * follows, because every registered command serves `--help`; the commands
+ * in `USAGE_PAGE` print their own usage page instead.
  */
 function pythonOptionError(cmdName: string, line: string): [Uint8Array, number] {
   return [encodeText(line + PYTHON_USAGE.replace('{name}', cmdName)), usageExitCode(cmdName)]
@@ -263,9 +267,9 @@ function trigrams(name: string): Set<string> {
  * `grep --line-buffered=2`, `nl --help=2`, `cut --complement=2`,
  * `sed --debug=2`), all exit 2 for grep and sort and 1 for the coreutils.
  *
- * GNU's per-tool usage dump is deliberately omitted, exactly as
- * unknownOptionError omits it; grep and sed print theirs between the message
- * and the hint, coreutils print none at all.
+ * The hint follows as it does for unknownOptionError; grep prints its usage
+ * line between the message and the hint, which mirage omits, and coreutils
+ * print none at all.
  *
  * `token` is the option's canonical long spelling and the value that was typed
  * on it ('--byte-offset=2'). It is carried whole because the programs in
@@ -288,9 +292,8 @@ export function unexpectedValueError(
  * getopt_long refusal for an abbreviated long matching several options.
  *
  * Shape pinned against real GNU (`grep --c`): the typed spelling, then
- * every possibility quoted in declaration order on one line. The
- * per-tool usage dump GNU appends is deliberately omitted, like
- * unknownOptionError.
+ * every possibility quoted in declaration order on one line, then the hint,
+ * like unknownOptionError.
  */
 export function ambiguousOptionError(
   cmdName: string,
@@ -500,9 +503,14 @@ export function missingRequiredError(
  * The `Try '<cmd> --help'` line as that command prints it.
  *
  * coreutils writes the hint bare; diffutils routes it through `error()`,
- * so cmp and diff carry the command prefix on the hint line too.
+ * so cmp and diff carry the command prefix on the hint line too. A command
+ * in `USAGE_PAGE` prints its help page from the usage line on in its place.
  */
 export function usageHint(cmdName: string, builtin = true): string {
+  if (builtin && USAGE_PAGE.has(cmdName)) {
+    const page = helpPage(cmdName, specOf(cmdName))
+    return rstripNewlines(page.slice(page.indexOf('Usage: ')))
+  }
   const prefix = builtin && USAGE_HINT_PREFIX.has(cmdName) ? `${cmdName}: ` : ''
   return `${prefix}Try '${cmdName} --help' for more information.`
 }

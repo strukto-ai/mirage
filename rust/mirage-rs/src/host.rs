@@ -28,7 +28,11 @@ pub(crate) struct Host {
     pub(crate) directories: Vec<String>,
     /// The permission bits a `chmod` request set.
     pub(crate) modes: HashMap<String, u32>,
+    /// Links by name and what each holds, which reads and writes follow.
+    pub(crate) links: HashMap<String, String>,
+    /// Standard input, and once a run ends what it left unread.
     pub(crate) stdin: Vec<u8>,
+    stdin_fd: Option<u64>,
     inputs: HashMap<u64, (Vec<u8>, Option<Fault>)>,
     spools: HashMap<u64, Vec<u8>>,
     writers: HashMap<String, Writer>,
@@ -46,6 +50,26 @@ fn failure(errno: &str, text: &str) -> Json {
     json!({"error": text, "errno": errno})
 }
 
+/// A name with `.` and `..` walked, as a namespace walks one.
+fn normal(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            _ => parts.push(part),
+        }
+    }
+    let joined = parts.join("/");
+    if path.starts_with('/') {
+        format!("/{joined}")
+    } else {
+        joined
+    }
+}
+
 impl Host {
     pub(crate) fn with(files: &[(&str, &str)], stdin: &str) -> Host {
         Host {
@@ -56,6 +80,21 @@ impl Host {
                 .collect(),
             ..Host::default()
         }
+    }
+
+    /// What a name leads to through its links.
+    fn follow(&self, path: &str) -> String {
+        let mut name = normal(path);
+        for _ in 0..40 {
+            let Some(target) = self.links.get(&name) else {
+                break;
+            };
+            name = match (target.starts_with('/'), name.rfind('/')) {
+                (false, Some(slash)) => normal(&format!("{}{target}", &name[..=slash])),
+                _ => normal(target),
+            };
+        }
+        name
     }
 
     pub(crate) fn commit(&mut self, path: Option<&str>) {
@@ -108,8 +147,11 @@ impl Host {
                 return (failure("EISDIR", "Is a directory"), Vec::new());
             }
             let source = match path {
-                "-" | "/dev/stdin" if !file => Some(std::mem::take(&mut self.stdin)),
-                _ => self.files.get(path).cloned(),
+                "-" | "/dev/stdin" if !file => {
+                    self.stdin_fd = Some(fd);
+                    Some(std::mem::take(&mut self.stdin))
+                }
+                _ => self.files.get(&self.follow(path)).cloned(),
             };
             let fault = self.faults.get(path).cloned();
             match (source, &fault) {
@@ -153,7 +195,7 @@ impl Host {
     }
 
     fn write(&mut self, request: &Json, data: Vec<u8>) -> Json {
-        let path = text(&request["path"]);
+        let path = self.follow(&text(&request["path"]));
         if path.starts_with("/missing/") {
             return failure("ENOENT", "No such file or directory");
         }
@@ -249,10 +291,57 @@ impl Host {
                 self.modes.insert(path, mode);
                 (json!({}), Vec::new())
             }
-            "unlink" => match self.files.remove(&text(&request["path"])) {
-                Some(_) => (json!({}), Vec::new()),
-                None => (failure("ENOENT", "No such file or directory"), Vec::new()),
-            },
+            "unlink" => {
+                let path = text(&request["path"]);
+                if self.links.remove(&path).is_some() || self.files.remove(&path).is_some() {
+                    return (json!({}), Vec::new());
+                }
+                (failure("ENOENT", "No such file or directory"), Vec::new())
+            }
+            "readlink" => {
+                let path = normal(&text(&request["path"]));
+                if let Some(target) = self.links.get(&path) {
+                    return (json!({"target": target}), Vec::new());
+                }
+                if self.files.contains_key(&path) || self.directories.contains(&path) {
+                    return (json!({}), Vec::new());
+                }
+                (failure("ENOENT", "No such file or directory"), Vec::new())
+            }
+            "copy" | "rename" => {
+                let (from, to) = (text(&request["path"]), text(&request["to"]));
+                if to.starts_with("/missing/") {
+                    return (failure("ENOENT", "No such file or directory"), Vec::new());
+                }
+                if self.directories.contains(&to) {
+                    return (failure("EISDIR", "Is a directory"), Vec::new());
+                }
+                if request["op"] == json!("rename") {
+                    if let Some(target) = self.links.remove(&from) {
+                        self.links.insert(to, target);
+                        return (json!({}), Vec::new());
+                    }
+                }
+                let source = self.follow(&from);
+                let Some(body) = self.files.get(&source).cloned() else {
+                    return (failure("ENOENT", "No such file or directory"), Vec::new());
+                };
+                if request["op"] == json!("rename") {
+                    self.files.remove(&source);
+                }
+                if let Some(mode) = self.modes.get(&source).copied() {
+                    self.modes.insert(to.clone(), mode);
+                }
+                self.files.insert(to, body);
+                (json!({}), Vec::new())
+            }
+            "unread" => {
+                match self.stdin_fd.and_then(|fd| self.inputs.get_mut(&fd)) {
+                    Some((held, _)) => held.splice(0..0, data),
+                    None => self.stdin.splice(0..0, data),
+                };
+                (json!({}), Vec::new())
+            }
             "rmdir" => {
                 let path = text(&request["path"]);
                 let inside = format!("{path}/");
@@ -352,6 +441,9 @@ impl Host {
         }
         stream.finish(&mut self.out).expect("finishes");
         stream.take_stderr(&mut self.err);
+        if let Some((held, _)) = self.stdin_fd.take().and_then(|fd| self.inputs.remove(&fd)) {
+            self.stdin = held;
+        }
         self.spools.clear();
         self.inputs.clear();
         stream.status()

@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo a | sed -e 's/a/b/' -e 's/b/c/'",
+      "command": "echo a | sed -e 's/a/b/' -e 's/b/c/'; echo a | sed --expression=s/a/b/ --expr s/b/c/ --quiet --regexp-ext -e 's/(c)/[\\1]/p'; echo a | sed --silent --binary --separate --unbuffered p",
       "expect": {
         "exit": 0,
-        "stdout": "c\n",
+        "stdout": "c\n[c]\na\n",
         "stderr": ""
       },
       "flags": [

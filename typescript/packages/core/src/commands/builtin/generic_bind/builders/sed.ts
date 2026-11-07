@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import { facts, sedGeneric, positionalAsPaths } from '../../generic/sed.ts'
+import { editsInPlace, facts, sedGeneric, positionalAsPaths } from '../../generic/sed.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { type GenericCommand } from '../adapter.ts'
@@ -31,7 +31,7 @@ export const BUILDER: GenericCommand = {
     // The default stream-to-stdout path is read-only and works on every
     // backend; only in-place editing needs a write op (#382).
     const fl = new FlagView(ctx.flags, specOf('sed'))
-    if (fl.asBool('i') && !files.answers('write')) {
+    if (editsInPlace(fl) && !files.answers('write')) {
       return [
         null,
         new IOResult({
@@ -41,8 +41,8 @@ export const BUILDER: GenericCommand = {
       ]
     }
     // With -e/-f the positional operand is a file, not the script.
-    const usingE = fl.asList('e').length > 0
-    const usingF = fl.asPaths('f').length > 0
+    const usingE = fl.asList('expression').length > 0
+    const usingF = fl.asPaths('file').length > 0
     const operands = usingE || usingF ? [...positionalAsPaths(texts, ctx), ...paths] : paths
     const resolved = operands.length > 0 ? await files.resolveGlob(operands) : operands
     return sedGeneric(resolved, texts, ctx, files.read)

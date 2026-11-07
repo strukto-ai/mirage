@@ -6,8 +6,11 @@ import pytest
 
 from mirage.commands.builtin.utils.stream_host import StreamHost
 from mirage.commands.constants import ROOT_CWD
+from mirage.errors.fs import enotsup
+from mirage.io.async_line_iterator import SharedInput
+from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult, OpReport, materialize
-from mirage.types import JsonValue, PathSpec
+from mirage.types import FileStat, FileType, JsonValue, PathSpec
 
 
 def _spec(path: str) -> PathSpec:
@@ -210,3 +213,91 @@ async def test_an_error_reply_carries_its_words_as_bytes() -> None:
     assert (await host.serve(write, b"")).reply == {
         "error": "refusé".encode().decode("latin-1")
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("unbuffered", "seekable", "left", "rest"),
+    [
+        (True, False, b"left", b"left|tail"),
+        (False, True, b"left", b"left|tail"),
+        (False, False, b"left", b""),
+        (True, False, b"", b"|tail"),
+    ],
+)
+async def test_standard_input_gets_back_what_the_stream_left(
+    unbuffered: bool, seekable: bool, left: bytes, rest: bytes
+) -> None:
+    async def stream(path: PathSpec) -> AsyncIterator[bytes]:
+        yield b""
+
+    # A buffer an earlier reader left comes whole, longer than a piece: the
+    # piece goes to the stream, and what it hands back comes before the
+    # rest of that buffer, even when the stream itself left nothing.
+    shared = SharedInput(_chunks(), seekable=seekable)
+    shared.lines.unread(b"x" * CHUNK_SIZE + b"|tail")
+    host = StreamHost(
+        [], stream, shared, None, ROOT_CWD, unbuffered=unbuffered
+    )
+    first = await host.serve({"op": "read", "fd": 1, "path": "-"}, b"")
+    assert first.data == b"x" * CHUNK_SIZE
+    assert (await host.serve({"op": "unread"}, left)).reply == {}
+    assert await materialize(shared) == rest
+
+
+@pytest.mark.asyncio
+async def test_a_kept_copy_lands_as_a_rename_would_put_it() -> None:
+    files: dict[str, bytes] = {"/f": b"body", "/f.bak": b"old"}
+    modes: dict[str, int] = {"/f": 0o640}
+    calls: list[str] = []
+
+    async def dispatch(
+        name: str,
+        path: PathSpec,
+        /,
+        *,
+        report: OpReport | None = None,
+        **kwargs: Any,
+    ) -> tuple[FileStat | bytes | None, IOResult]:
+        calls.append(f"{name} {path.virtual}")
+        if name == "stat" and path.virtual == "/d":
+            return FileStat(name="d", type=FileType.DIRECTORY), IOResult()
+        if name == "stat" and path.virtual in files:
+            mode = modes.get(path.virtual)
+            return FileStat(
+                name="f", type=FileType.FILE, mode=mode
+            ), IOResult()
+        if name == "stat":
+            raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+        if name == "copy":
+            raise enotsup("ram", name, path)
+        if name == "read":
+            return files[path.virtual], IOResult()
+        if name == "write":
+            files[path.virtual] = await materialize(kwargs["data"])
+        if name == "unlink":
+            del files[path.virtual]
+        if name == "setattr":
+            modes[path.virtual] = kwargs["mode"]
+        return None, IOResult()
+
+    async def stream(path: PathSpec) -> AsyncIterator[bytes]:
+        yield b""
+
+    host = StreamHost([], stream, None, dispatch, ROOT_CWD)
+    kept = await host.serve({"op": "copy", "path": "/f", "to": "/f.bak"}, b"")
+    assert kept.reply == {}
+    # The store cannot copy, so the bytes stream through in place of the
+    # file standing there, its mode kept.
+    assert (files["/f.bak"], modes["/f.bak"]) == (b"body", 0o640)
+    assert "unlink /f.bak" in calls
+    onto = await host.serve({"op": "copy", "path": "/f", "to": "/d"}, b"")
+    assert onto.reply == {"error": "Is a directory", "errno": "EISDIR"}
+    missing = await host.serve({"op": "readlink", "path": "/none"}, b"")
+    assert missing.reply == {
+        "error": "No such file or directory",
+        "errno": "ENOENT",
+    }
+    assert (
+        await host.serve({"op": "readlink", "path": "/f"}, b"")
+    ).reply == {}

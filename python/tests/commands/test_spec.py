@@ -419,9 +419,19 @@ def test_wget_spec():
 def test_sed_spec():
     spec = SPECS["sed"]
     parsed = parse_command(spec, ["-i", "s/foo/bar/", "file.txt"], cwd="/data")
-    assert parsed.flags["-i"] is True
+    assert parsed.flags["--in-place"] is True
     assert parsed.args[0] == ("s/foo/bar/", "str")
     assert parsed.args[1] == ("/data/file.txt", "path")
+    assert (
+        parse_command(spec, ["-i.bak", "p"], cwd="/").flags["--in-place"]
+        == ".bak"
+    )
+    assert (
+        parse_command(spec, ["-iE", "p"], cwd="/").flags["--in-place"] == "E"
+    )
+    clustered = parse_command(spec, ["-Ei", "p"], cwd="/").flags
+    assert clustered["--in-place"] is True
+    assert clustered["--regexp-extended"] is True
 
 
 def test_sort_spec():

@@ -34,6 +34,8 @@ import {
   readFailExitCodeFromLine,
   usageExitCode,
 } from './usage.ts'
+import { specOf } from './builtins.ts'
+import { helpPage } from './standard.ts'
 import { matchWord } from './word_choice.ts'
 
 const td = new TextDecoder()
@@ -55,6 +57,18 @@ describe('unknownOptionError', () => {
       "cat: unrecognized option '--bogus=x'\nTry 'cat --help' for more information.\n",
     )
     expect(code).toBe(1)
+  })
+
+  // Twin of test_sed_follows_a_refusal_with_its_usage_page.
+  it('sed follows a refusal with its usage page', () => {
+    const [msg, code] = unknownOptionError('sed', '--bogus')
+    const page = helpPage('sed', specOf('sed'))
+    expect(td.decode(msg)).toBe(
+      "sed: unrecognized option '--bogus'\n" + page.slice(page.indexOf('Usage: ')),
+    )
+    expect(code).toBe(1)
+    const [custom] = unknownOptionError('sed', '--bogus', false)
+    expect(td.decode(custom)).toMatch(/\nTry 'sed --help' for more information\.\n$/)
   })
 
   it('short options report the char', () => {

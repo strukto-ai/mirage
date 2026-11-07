@@ -56,9 +56,9 @@ def test_script_origins_name_the_script_files() -> None:
         ({}, ["p"], False),
         ({}, ["w /o"], True),
         ({}, ["s/a/b/w /dev/stdout"], True),
-        ({"e": ["w /o", "k"]}, [], True),
-        ({"e": ["k", "w /o"]}, [], False),
-        ({"i": True}, ["p"], True),
+        ({"expression": ["w /o", "k"]}, [], True),
+        ({"expression": ["k", "w /o"]}, [], False),
+        ({"in_place": True}, ["p"], True),
         ({}, [], False),
     ],
 )
@@ -88,7 +88,7 @@ async def test_sed_reads_nothing_after_a_directory(
             raise IsADirectoryError(errno.EISDIR, "Is a directory", "/d")
         yield files[path.virtual]
 
-    ctx = Context(flags={"n": True, "separate": separate})
+    ctx = Context(flags={"quiet": True, "separate": separate})
     output, io = await sed_generic(
         [_spec("/f"), _spec("/d"), _spec("/g")],
         [script],
@@ -145,8 +145,8 @@ async def test_reached_writes_and_status_survive_early_output_close(
 
 def test_many_empty_scripts_are_not_retained_in_the_write_cache():
     sed_module._write_checks.clear()
-    assert not _writes({"e": [""] * 5000}, [])
+    assert not _writes({"expression": [""] * 5000}, [])
     assert not sed_module._write_checks
-    assert not _writes({"e": ["# small"]}, [])
+    assert not _writes({"expression": ["# small"]}, [])
     assert len(sed_module._write_checks) == 1
     sed_module._write_checks.clear()

@@ -308,10 +308,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a\\nb\\nc\\n' | sed N; printf 'a\\nb\\nc\\n' | sed -n 'N;p'",
+      "command": "printf 'a\\nb\\nc\\n' | sed N; printf 'a\\nb\\nc\\n' | sed -n 'N;p'; printf 'a\\nb\\nc\\n' | sed --posix N",
       "expect": {
         "exit": 0,
-        "stdout": "a\nb\nc\na\nb\n",
+        "stdout": "a\nb\nc\na\nb\na\nb\n",
         "stderr": ""
       }
     },
@@ -588,10 +588,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a\\nb\\nc\\n' | sed 2Q; echo rc=$?; printf 'a\\nb\\nc\\n' | sed -n '2{p;Q7}'; echo rc=$?",
+      "command": "printf 'a\\nb\\nc\\n' | sed 2Q; echo rc=$?; printf 'a\\nb\\nc\\n' | sed -n '2{p;Q7}'; echo rc=$?; printf 'a\\nb\\nc\\n' | (sed -u 1q; cat); printf 'a\\nb\\nc\\n' | (sed 1q; cat); printf 'a\\nb\\nc\\n' | (sed -u -n 2q; cat); printf 'a\\nb\\nc\\n' > /data/fcC_sq; (sed 1Q; cat) < /data/fcC_sq; rm /data/fcC_sq",
       "expect": {
         "exit": 0,
-        "stdout": "a\nrc=0\nb\nrc=7\n",
+        "stdout": "a\nrc=0\nb\nrc=7\na\nb\nc\na\nc\nb\nc\n",
         "stderr": ""
       }
     },
@@ -1231,6 +1231,45 @@
         "stdout": " 004  \\n\nrc=1\n",
         "stderr": "sed: -e expression #1, char 9: extra characters after command\n"
       }
+    },
+    {
+      "id": "sed_debug_lists_the_program_and_each_step",
+      "seq": 15300012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'one\\ntwo\\n' | sed --debug -n '1{s/o/0/p;h};$G;$p'; printf 'a\\n' | sed --debug 'y/ab/xy/;/a/I,+1!d;1q 5'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "SED PROGRAM:\n  1 {\n    s/o/0/p\n    h\n  }\n  $ G\n  $ p\nINPUT:   'STDIN' line 1\nPATTERN: one\nCOMMAND: 1 {\nCOMMAND:   s/o/0/p\nMATCHED REGEX REGISTERS\n  regex[0] = 0-1 'o'\n0ne\nPATTERN: 0ne\nCOMMAND:   h\nHOLD:    0ne\nCOMMAND: }\nCOMMAND: $ G\nCOMMAND: $ p\nEND-OF-CYCLE:\nINPUT:   'STDIN' line 2\nPATTERN: two\nCOMMAND: 1 {\nCOMMAND: }\nCOMMAND: $ G\nPATTERN: two\\n0ne\nCOMMAND: $ p\ntwo\n0ne\nEND-OF-CYCLE:\nSED PROGRAM:\n  y/ab/xy/\n  /a/I,+1! d\n  1 q 5\nINPUT:   'STDIN' line 1\nPATTERN: a\nCOMMAND: y/ab/xy/\nPATTERN: x\nCOMMAND: /a/I,+1! d\nEND-OF-CYCLE:\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "debug",
+        "n"
+      ]
     }
   ]
 }

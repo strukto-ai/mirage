@@ -318,6 +318,7 @@ impl Engine {
             utf8: options.utf8,
             terminator: Some(options.terminator),
             multiline: false,
+            nul_lines: false,
             dot_skips_nul: false,
         };
         // Under UTF-8 a word is made of the locale's letters and digits, which
@@ -327,6 +328,7 @@ impl Engine {
             ignore_case: options.ignore_case,
             utf8: options.utf8,
             multiline: false,
+            nul_lines: false,
             unicode_words: options.utf8,
             consumed_newlines: false,
             dot_skips_nul: false,

@@ -34,7 +34,11 @@ function noRead(p: PathSpec): AsyncIterable<Uint8Array> {
 
 describe('sed usage reporting', () => {
   it('reports no input files for -i with no operands', async () => {
-    const ctx = { stdin: null, flags: { i: true }, cwd: PathSpec.fromStrPath('/') } as Context
+    const ctx = {
+      stdin: null,
+      flags: { in_place: true },
+      cwd: PathSpec.fromStrPath('/'),
+    } as Context
     const result = await sedGeneric([], ['s/a/b/'], ctx, noRead)
     if (result === null) throw new Error('sed returned nothing')
     if (result[0] !== null) await materialize(result[0])
@@ -53,9 +57,9 @@ describe('sed line writes', () => {
     [{}, ['p'], false],
     [{}, ['w /o'], true],
     [{}, ['s/a/b/w /dev/stdout'], true],
-    [{ e: ['w /o', 'k'] }, [], true],
-    [{ e: ['k', 'w /o'] }, [], false],
-    [{ i: true }, ['p'], true],
+    [{ expression: ['w /o', 'k'] }, [], true],
+    [{ expression: ['k', 'w /o'] }, [], false],
+    [{ in_place: true }, ['p'], true],
     [{}, [], false],
   ])('%j %j writes: %s', (flags, texts, expected) => {
     expect(writes(flags, texts)).toBe(expected)
@@ -75,7 +79,7 @@ describe('sed operands after a directory (GNU sed 4.9)', () => {
     const paths = ['/f', '/d', '/g'].map((p) => PathSpec.fromStrPath(p))
     const ctx = {
       stdin: null,
-      flags: { n: true, ...flags },
+      flags: { quiet: true, ...flags },
       cwd: PathSpec.fromStrPath('/'),
     } as Context
     const result = await sedGeneric(paths, [script], ctx, async function* (p) {
@@ -151,11 +155,11 @@ it('does not retain many empty scripts in the write cache', () => {
   const open = vi.spyOn(stream, 'openStreamSync')
   try {
     const scripts = Array<string>(5000).fill('')
-    expect(writes({ e: scripts }, [])).toBe(false)
-    expect(writes({ e: scripts }, [])).toBe(false)
+    expect(writes({ expression: scripts }, [])).toBe(false)
+    expect(writes({ expression: scripts }, [])).toBe(false)
     expect(open).toHaveBeenCalledTimes(2)
-    expect(writes({ e: ['# small cache test'] }, [])).toBe(false)
-    expect(writes({ e: ['# small cache test'] }, [])).toBe(false)
+    expect(writes({ expression: ['# small cache test'] }, [])).toBe(false)
+    expect(writes({ expression: ['# small cache test'] }, [])).toBe(false)
     expect(open).toHaveBeenCalledTimes(3)
   } finally {
     open.mockRestore()

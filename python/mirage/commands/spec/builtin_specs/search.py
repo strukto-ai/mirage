@@ -281,20 +281,108 @@ SPECS: dict[str, CommandSpec] = {
         ),
     ),
     "sed": CommandSpec(
+        # The long options stand in sed 4.9's table order, which is the
+        # order an ambiguous prefix lists them in (`--s`: --silent,
+        # --sandbox, --separate).
         arguments=(
-            Argument("-i", action="store_true"),
+            # -i takes its suffix attached alone (`-i.bak`, `--in-place=.bak`),
+            # so `-iE` keeps a backup ending in E and `-Ei` is -E and -i.
+            Argument(
+                "-i",
+                "--in-place",
+                nargs="?",
+                attached_only=True,
+                metavar="SUFFIX",
+                help="rewrite each file; -iSUFFIX keeps a backup",
+            ),
             # -e takes a script and may repeat; the pieces compile in order.
-            Argument("-e", action="append"),
+            Argument(
+                "-e",
+                "--expression",
+                action="append",
+                metavar="SCRIPT",
+                help="one piece of the script, joined in order",
+            ),
             # -f reads the script from a file and may repeat (like grep -f);
             # its value is a PATH so it routes and is read from the mount.
-            Argument("-f", type="path", action="append"),
-            Argument("-n", action="store_true"),
-            Argument("-E", action="store_true"),
-            Argument("-r", action="store_true"),
+            Argument(
+                "-f",
+                "--file",
+                type="path",
+                action="append",
+                metavar="FILE",
+                help="read a piece of the script from FILE",
+            ),
+            Argument(
+                "--follow-symlinks",
+                action="store_true",
+                help="with -i, rewrite what a link points to",
+            ),
+            Argument(
+                "-n",
+                "--quiet",
+                "--silent",
+                action="store_true",
+                help="print only what the script prints",
+            ),
+            Argument(
+                "--debug",
+                action="store_true",
+                help="show the program and trace each command",
+            ),
+            Argument(
+                "-E",
+                "-r",
+                "--regexp-extended",
+                action="store_true",
+                help="read regular expressions as ERE",
+            ),
             # -l N sets the `l` command's line length (GNU atoi: 0 never
             # folds).
-            Argument("-l", "--line-length"),
-            Argument("-s", "--separate", action="store_true"),
+            Argument(
+                "-l",
+                "--line-length",
+                metavar="N",
+                help="wrap l output at N chars; 0 never wraps",
+            ),
+            Argument(
+                "--posix",
+                action="store_true",
+                help="refuse what POSIX sed does not have",
+            ),
+            Argument(
+                "--sandbox",
+                action="store_true",
+                help="refuse running programs and opening files",
+            ),
+            Argument(
+                "-s",
+                "--separate",
+                action="store_true",
+                help="number lines and match $ per file",
+            ),
+            # -u reads no further than it uses; output already flows as it
+            # is made, so this is all it changes.
+            Argument(
+                "-u",
+                "--unbuffered",
+                action="store_true",
+                help="read only as far as each line needs",
+            ),
+            Argument(
+                "-z",
+                "--null-data",
+                "--zero-terminated",
+                action="store_true",
+                help="lines end at NUL, not newline",
+            ),
+            # -b names binary mode, which POSIX systems do not have.
+            Argument(
+                "-b",
+                "--binary",
+                action="store_true",
+                help="accepted; input is always raw bytes",
+            ),
             # provided_by lists the flags that can supply this positional slot's
             # value; when any is present the parser skips the slot so the next
             # word is not mis-grabbed. For sed the first operand is the script

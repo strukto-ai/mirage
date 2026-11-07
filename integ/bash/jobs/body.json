@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(for i in 1 2; do { sleep 0.$i; echo $i; } & done; echo launched; wait) 2>/dev/null",
+      "command": "(for i in 1 2; do { sleep 0.3; echo $i; } & done; echo launched; wait) 2>/dev/null | { read l; echo \"$l\"; sort; }",
       "expect": {
         "exit": 0,
         "stdout": "launched\n1\n2\n",

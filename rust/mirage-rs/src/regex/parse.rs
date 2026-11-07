@@ -292,6 +292,10 @@ pub(crate) enum Dialect {
     /// extended expression, and in a basic one a `*` or an interval may
     /// not follow another repetition.
     Sed,
+    /// sed 4.9 under --posix: Sed's rules without its extensions, so
+    /// `\+`, `\?`, `\|` and the letter escapes (`\w`, `\<`, `\b`, ...)
+    /// each stand for their character.
+    SedPosix,
     /// What expr, nl, bash's `=~` and git read: a basic expression refuses
     /// nothing grep reads as text and takes an inverted range as empty.
     Posix,
@@ -468,11 +472,16 @@ impl<'a> Parser<'a> {
         self.is(at, b'\\') && self.is(at + 1, c)
     }
 
+    /// Whether the extensions to the standard operators and escapes hold.
+    fn extensions(&self) -> bool {
+        self.dialect != Dialect::SedPosix
+    }
+
     fn at_alternation(&self) -> bool {
         if self.extended {
             self.is(self.pos, b'|')
         } else {
-            self.escaped(self.pos, b'|')
+            self.extensions() && self.escaped(self.pos, b'|')
         }
     }
 
@@ -480,7 +489,10 @@ impl<'a> Parser<'a> {
         if self.depth == 0 {
             // sed alone refuses an extended `)` that closes nothing.
             return self.extended
-                && matches!(self.dialect, Dialect::Sed | Dialect::Awk)
+                && matches!(
+                    self.dialect,
+                    Dialect::Sed | Dialect::SedPosix | Dialect::Awk
+                )
                 && self.is(self.pos, b')');
         }
         if self.extended {
@@ -590,7 +602,9 @@ impl<'a> Parser<'a> {
         };
         if !self.extended {
             // sed refuses a basic interval with nothing to repeat.
-            if self.dialect == Dialect::Sed && self.escaped(self.pos, b'{') {
+            if matches!(self.dialect, Dialect::Sed | Dialect::SedPosix)
+                && self.escaped(self.pos, b'{')
+            {
                 return Err(INVALID_PRECEDING);
             }
             return Ok(false);
@@ -651,7 +665,9 @@ impl<'a> Parser<'a> {
 
     // A basic `$` anchors only at the end of its branch.
     fn basic_end(&self) -> bool {
-        self.pos == self.units.len() || self.escaped(self.pos, b')') || self.escaped(self.pos, b'|')
+        self.pos == self.units.len()
+            || self.escaped(self.pos, b')')
+            || (self.extensions() && self.escaped(self.pos, b'|'))
     }
 
     fn group(&mut self) -> Result<(Ast, usize), &'static str> {
@@ -739,6 +755,9 @@ impl<'a> Parser<'a> {
     }
 
     fn gnu_escape(&mut self, unit: Unit, c: u8, bare: bool) -> Result<(Ast, usize), &'static str> {
+        if !self.extensions() && b"wWsSbB<>`'".contains(&c) {
+            return Ok((Ast::Unit(unit), 1));
+        }
         Ok((
             match c {
                 // Basic operators with nothing to repeat are their literals.
@@ -777,7 +796,7 @@ impl<'a> Parser<'a> {
             // another repetition (`a**`, `a\{2\}*`); `\+` and `\?` may.
             if repeated
                 && !self.extended
-                && self.dialect == Dialect::Sed
+                && matches!(self.dialect, Dialect::Sed | Dialect::SedPosix)
                 && (self.is(self.pos, b'*') || self.escaped(self.pos, b'{'))
             {
                 return Err(INVALID_PRECEDING);
@@ -800,9 +819,9 @@ impl<'a> Parser<'a> {
                     },
                     _ => return Ok((atom, depth)),
                 }
-            } else if self.escaped(self.pos, b'+') {
+            } else if self.extensions() && self.escaped(self.pos, b'+') {
                 (1, None, 2)
-            } else if self.escaped(self.pos, b'?') {
+            } else if self.extensions() && self.escaped(self.pos, b'?') {
                 (0, Some(1), 2)
             } else if self.escaped(self.pos, b'{') {
                 let (min, max, end) = self.basic_interval(self.pos + 2)?;

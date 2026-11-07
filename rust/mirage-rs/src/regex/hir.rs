@@ -16,6 +16,9 @@ pub(crate) struct Lower {
     /// Multi-line matching: `^` and `$` match at the edges of each line,
     /// and neither `.` nor a negated set matches a newline.
     pub(crate) multiline: bool,
+    /// sed -z: multi-line matching takes a NUL for the line's end, and
+    /// `.` and a negated set leave out the NUL as well as the newline.
+    pub(crate) nul_lines: bool,
     /// `.` leaves out the NUL byte, as regcomp's syntax has it.
     pub(crate) dot_skips_nul: bool,
 }
@@ -79,6 +82,9 @@ impl Lower {
         }
         if self.multiline && excludes_newline {
             members.without(b'\n');
+            if self.nul_lines {
+                members.without(0);
+            }
         }
         members.hir()
     }

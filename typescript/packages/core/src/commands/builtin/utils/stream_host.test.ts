@@ -13,8 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { enotsup } from '../../../errors/fs.ts'
+import { SharedInput } from '../../../io/async_line_iterator.ts'
+import { CHUNK_SIZE } from '../../../io/cooperative.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import type { Context } from '../../config.ts'
 import { Files } from '../../../workspace/files.ts'
@@ -143,6 +146,85 @@ describe('StreamHost', () => {
     controller.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
     await h.close()
+  })
+
+  it.each([
+    [true, false, 'left', 'left|tail'],
+    [false, true, 'left', 'left|tail'],
+    [false, false, 'left', ''],
+    [true, false, '', '|tail'],
+  ])(
+    'gives stdin back what the stream left (unbuffered %s, seekable %s, left %j)',
+    async (unbuffered, seekable, left, rest) => {
+      // A buffer an earlier reader left comes whole, longer than a piece:
+      // the piece goes to the stream, and what it hands back comes before
+      // the rest of that buffer, even when the stream itself left nothing.
+      const shared = new SharedInput(parts(), null, seekable)
+      shared.lines.unread(ENC.encode('x'.repeat(CHUNK_SIZE) + '|tail'))
+      const ctx = { stdin: shared, flags: {}, cwd: PathSpec.fromStrPath('/') } as unknown as Context
+      const h = new StreamHost(
+        [],
+        () => parts(),
+        ctx,
+        true,
+        '',
+        () => true,
+        unbuffered,
+      )
+      const first = await h.serve({ op: 'read', fd: 1, path: '-' }, new Uint8Array())
+      expect(first.data).toEqual(ENC.encode('x'.repeat(CHUNK_SIZE)))
+      expect((await h.serve({ op: 'unread' }, ENC.encode(left))).reply).toEqual({})
+      expect(new TextDecoder().decode(await materialize(shared))).toBe(rest)
+    },
+  )
+
+  it('lands a kept copy as a rename would put it', async () => {
+    const files = new Map<string, Uint8Array>([
+      ['/f', ENC.encode('body')],
+      ['/f.bak', ENC.encode('old')],
+    ])
+    const modes = new Map<string, number>([['/f', 0o640]])
+    const calls: string[] = []
+    const dispatch = async (
+      op: string,
+      p: PathSpec,
+      args: readonly unknown[] = [],
+      kwargs: Record<string, unknown> = {},
+    ): Promise<[unknown, IOResult]> => {
+      calls.push(`${op} ${p.virtual}`)
+      if (op === 'stat' && p.virtual === '/d') {
+        return [new FileStat({ name: 'd', type: FileType.DIRECTORY }), new IOResult()]
+      }
+      if (op === 'stat' && files.has(p.virtual)) {
+        const mode = modes.get(p.virtual) ?? null
+        return [new FileStat({ name: 'f', type: FileType.FILE, mode }), new IOResult()]
+      }
+      if (op === 'stat') throw Object.assign(new Error(p.virtual), { code: 'ENOENT' })
+      if (op === 'copy') throw enotsup('ram', op, p)
+      if (op === 'read') return [files.get(p.virtual), new IOResult()]
+      if (op === 'write') files.set(p.virtual, await materialize(args[0] as ByteSource))
+      if (op === 'unlink') files.delete(p.virtual)
+      if (op === 'setattr') modes.set(p.virtual, kwargs.mode as number)
+      return [null, new IOResult()]
+    }
+    const ctx = {
+      stdin: null,
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+      vfs: new Files(dispatch, null, null, { ledger: false }),
+    } as unknown as Context
+    const h = new StreamHost([], () => parts(), ctx)
+    const kept = await h.serve({ op: 'copy', path: '/f', to: '/f.bak' }, new Uint8Array())
+    expect(kept.reply).toEqual({})
+    // The store cannot copy, so the bytes stream through in place of the
+    // file standing there, its mode kept.
+    expect([files.get('/f.bak'), modes.get('/f.bak')]).toEqual([ENC.encode('body'), 0o640])
+    expect(calls).toContain('unlink /f.bak')
+    const onto = await h.serve({ op: 'copy', path: '/f', to: '/d' }, new Uint8Array())
+    expect(onto.reply).toEqual({ error: 'Is a directory', errno: 'EISDIR' })
+    const missing = await h.serve({ op: 'readlink', path: '/none' }, new Uint8Array())
+    expect(missing.reply).toEqual({ error: 'No such file or directory', errno: 'ENOENT' })
+    expect((await h.serve({ op: 'readlink', path: '/f' }, new Uint8Array())).reply).toEqual({})
   })
 
   it('refuses what needs a workspace outside one', async () => {

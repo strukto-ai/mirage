@@ -17,15 +17,16 @@ import { type util } from 'zod'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { StreamHost, hostedStream } from '../utils/stream_host.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { compileSpec, expandLong } from '../../spec/compile.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
+import { usageHint } from '../../spec/usage.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { LineFacts, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { SED_MISSING_SCRIPT } from '../constants.ts'
 import { byteView, encodeText, utf8Locale } from '../../../shell/bytes.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { openStreamSync } from '../../../rs/stream.ts'
@@ -53,12 +54,23 @@ function scriptOrigins(
     const word = argv[i] ?? ''
     if (word === '--') break
     if (word.startsWith('--')) {
-      if (word === '--line-length') i += 1
+      const eq = word.indexOf('=')
+      const name = eq < 0 ? word : word.slice(0, eq)
+      const spelled = expandLong(compileSpec(specOf('sed')), name)
+      const option = spelled.length === 1 ? (spelled[0] ?? name) : name
+      let value = eq < 0 ? '' : word.slice(eq + 1)
+      if (VALUED.has(option) && eq < 0) {
+        i += 1
+        value = argv[i] ?? ''
+      }
+      out.push(...origin(option, value))
       continue
     }
     if (!word.startsWith('-') || word === '-') continue
     for (let j = 1; j < word.length; j++) {
       const c = word.charAt(j)
+      // -i takes the rest of the word as its suffix.
+      if (c === 'i') break
       if (c !== 'e' && c !== 'f' && c !== 'l') continue
       let value = word.slice(j + 1)
       if (value === '') {
@@ -72,25 +84,63 @@ function scriptOrigins(
   return out.length === count ? out : null
 }
 
+// The long options that take their value as the next word.
+const VALUED: ReadonlySet<string> = new Set(['--expression', '--file', '--line-length'])
+
+/**
+ * What one long option adds to `scriptOrigins`: a script file's name, null
+ * for an expression, nothing for any other option; `option` has its prefix
+ * expanded.
+ */
+function origin(option: string, value: string): (string | null)[] {
+  if (option === '--file') return [value]
+  if (option === '--expression') return [null]
+  return []
+}
+
 interface SedFlags {
   readonly inPlace: boolean
+  // -i's SUFFIX, null when it keeps no backup.
+  readonly suffix: string | null
   readonly suppress: boolean
   readonly extended: boolean
   readonly separate: boolean
   readonly lineLength: string | null
   // -e and -f in the order typed, each with its text.
   readonly scripts: readonly (readonly [string, string])[]
+  readonly nullData: boolean
+  readonly unbuffered: boolean
+  readonly posix: boolean
+  readonly sandbox: boolean
+  readonly debug: boolean
+  readonly followSymlinks: boolean
+}
+
+/** Whether the line edits in place: -i given, with a suffix or none (`--in-place=`). */
+export function editsInPlace(fl: FlagView): boolean {
+  const inPlace = fl.raw('in_place')
+  return inPlace !== undefined && inPlace !== false
 }
 
 function parseFlags(bag: Record<string, FlagValue>): SedFlags {
   const fl = new FlagView(bag, specOf('sed'))
+  const inPlace = fl.raw('in_place')
   return {
-    inPlace: fl.asBool('i'),
-    suppress: fl.asBool('n'),
-    extended: fl.asBool('E') || fl.asBool('r'),
+    inPlace: editsInPlace(fl),
+    suffix: typeof inPlace === 'string' && inPlace !== '' ? inPlace : null,
+    suppress: fl.asBool('quiet'),
+    extended: fl.asBool('regexp_extended'),
     separate: fl.asBool('separate'),
     lineLength: fl.asText('line_length') ?? null,
-    scripts: fl.occurrences('e', 'f').map(([name, value]) => [name, String(value)] as const),
+    scripts: fl
+      .occurrences('expression', 'file')
+      .map(([name, value]) => [name, String(value)] as const),
+    nullData: fl.asBool('null_data'),
+    unbuffered: fl.asBool('unbuffered'),
+    posix: fl.asBool('posix'),
+    sandbox: fl.asBool('sandbox'),
+    debug: fl.asBool('debug'),
+    followSymlinks: fl.asBool('follow_symlinks'),
   }
 }
 
@@ -101,20 +151,24 @@ function parseFlags(bag: Record<string, FlagValue>): SedFlags {
  * the script when no `-e` or `-f` gave one. Mirrors Python's `facts`.
  */
 export function facts(fl: FlagView, operands: readonly (string | PathSpec)[]): LineFacts {
-  if (fl.asBool('i') || fl.raw('f') !== undefined) return new LineFacts()
-  const expressions = fl.asList('e')
+  if (editsInPlace(fl) || fl.raw('file') !== undefined) return new LineFacts()
+  const expressions = fl.asList('expression')
   const scripts =
     expressions.length > 0
       ? expressions
       : operands.slice(0, 1).map((w) => (typeof w === 'string' ? w : w.rawPath))
   if (scripts.length === 0) return new LineFacts({ writes: false })
-  return new LineFacts({ writes: scriptWrites(scripts, fl.asBool('E') || fl.asBool('r')) })
+  const syntax = [fl.asBool('regexp_extended'), fl.asBool('posix'), fl.asBool('sandbox')] as const
+  return new LineFacts({ writes: scriptWrites(scripts, syntax) })
 }
 
 const writeChecks = new Map<string, boolean>()
-function scriptWrites(scripts: readonly string[], extended: boolean): boolean {
+function scriptWrites(
+  scripts: readonly string[],
+  syntax: readonly [boolean, boolean, boolean],
+): boolean {
   const cacheable = scripts.reduce((size, script) => size + script.length + 1, 0) <= 4096
-  const key = cacheable ? JSON.stringify([scripts, extended]) : null
+  const key = cacheable ? JSON.stringify([scripts, syntax]) : null
   if (key !== null) {
     const known = writeChecks.get(key)
     if (known !== undefined) {
@@ -123,9 +177,12 @@ function scriptWrites(scripts: readonly string[], extended: boolean): boolean {
       return known
     }
   }
+  const [extended, posix, sandbox] = syntax
   const engine = openStreamSync('sed', {
     pieces: scripts.map((text) => ({ text: byteView(text) })),
     extended,
+    posix,
+    sandbox,
   })
   try {
     const writes = (JSON.parse(new TextDecoder().decode(engine.metadata())) as { writes: boolean })
@@ -162,7 +219,7 @@ export async function sedGeneric(
   const origins = scriptOrigins(ctx.argv, parsed.scripts.length)
   for (const [index, [name, text]] of parsed.scripts.entries()) {
     const shown = origins?.[index] ?? null
-    if (name === 'e') {
+    if (name === 'expression') {
       pieces.push(
         shown === null ? { text: byteView(text) } : { text: byteView(text), file: byteView(shown) },
       )
@@ -179,7 +236,7 @@ export async function sedGeneric(
     pieces.push({ text: byteView(body), file: byteView(shown ?? text) })
   }
   if (pieces.length === 0 && texts[0] !== undefined) pieces.push({ text: byteView(texts[0]) })
-  if (pieces.length === 0) return failed(`${SED_MISSING_SCRIPT}\n`, 1)
+  if (pieces.length === 0) return failed(`${usageHint('sed')}\n`, 1)
   // -i edits `-` as a file; otherwise an operand naming stdin is `-` to F
   // and to sed's messages.
   const names = paths.map((p) => (!parsed.inPlace && isStdin(p) ? '-' : p.rawPath))
@@ -190,12 +247,26 @@ export async function sedGeneric(
     quiet: parsed.suppress,
     separate: parsed.separate,
     in_place: parsed.inPlace,
+    suffix: parsed.suffix === null ? null : byteView(parsed.suffix),
+    posix: parsed.posix,
+    sandbox: parsed.sandbox,
+    null_data: parsed.nullData,
+    follow_symlinks: parsed.followSymlinks,
+    debug: parsed.debug,
     line_length: parsed.lineLength === null ? null : byteView(parsed.lineLength),
     inputs: names.map((name) => byteView(name)),
     paths: paths.map((p) => byteView(p.virtual)),
     cwd: byteView(ctx.cwd.virtual),
   }
-  const host = new StreamHost(paths, stream, ctx, !parsed.inPlace)
+  const host = new StreamHost(
+    paths,
+    stream,
+    ctx,
+    !parsed.inPlace,
+    undefined,
+    undefined,
+    parsed.unbuffered,
+  )
   const io = new IOResult()
   return [hostedStream('sed', config, host, io, ctx.signal), io]
 }

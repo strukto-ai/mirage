@@ -373,16 +373,76 @@ export const SPECS: Record<string, CommandSpec> = {
     ],
     allowAbbrev: false,
   }),
+  // The long options stand in sed 4.9's table order, which is the order an
+  // ambiguous prefix lists them in (`--s`: --silent, --sandbox, --separate).
   sed: new CommandSpec({
     arguments: [
-      new Argument('-i', { action: 'store_true' }),
-      new Argument('-e', { action: 'append' }),
-      new Argument('-f', { action: 'append', type: 'path' }),
-      new Argument('-n', { action: 'store_true' }),
-      new Argument('-E', { action: 'store_true' }),
-      new Argument('-r', { action: 'store_true' }),
-      new Argument(['-l', '--line-length']),
-      new Argument(['-s', '--separate'], { action: 'store_true' }),
+      // -i takes its suffix attached alone (`-i.bak`, `--in-place=.bak`), so
+      // `-iE` keeps a backup ending in E and `-Ei` is -E and -i.
+      new Argument(['-i', '--in-place'], {
+        nargs: '?',
+        attachedOnly: true,
+        metavar: 'SUFFIX',
+        help: 'rewrite each file; -iSUFFIX keeps a backup',
+      }),
+      new Argument(['-e', '--expression'], {
+        action: 'append',
+        metavar: 'SCRIPT',
+        help: 'one piece of the script, joined in order',
+      }),
+      new Argument(['-f', '--file'], {
+        action: 'append',
+        type: 'path',
+        metavar: 'FILE',
+        help: 'read a piece of the script from FILE',
+      }),
+      new Argument('--follow-symlinks', {
+        action: 'store_true',
+        help: 'with -i, rewrite what a link points to',
+      }),
+      new Argument(['-n', '--quiet', '--silent'], {
+        action: 'store_true',
+        help: 'print only what the script prints',
+      }),
+      new Argument('--debug', {
+        action: 'store_true',
+        help: 'show the program and trace each command',
+      }),
+      new Argument(['-E', '-r', '--regexp-extended'], {
+        action: 'store_true',
+        help: 'read regular expressions as ERE',
+      }),
+      new Argument(['-l', '--line-length'], {
+        metavar: 'N',
+        help: 'wrap l output at N chars; 0 never wraps',
+      }),
+      new Argument('--posix', {
+        action: 'store_true',
+        help: 'refuse what POSIX sed does not have',
+      }),
+      new Argument('--sandbox', {
+        action: 'store_true',
+        help: 'refuse running programs and opening files',
+      }),
+      new Argument(['-s', '--separate'], {
+        action: 'store_true',
+        help: 'number lines and match $ per file',
+      }),
+      // -u reads no further than it uses; output already flows as it is
+      // made, so this is all it changes.
+      new Argument(['-u', '--unbuffered'], {
+        action: 'store_true',
+        help: 'read only as far as each line needs',
+      }),
+      new Argument(['-z', '--null-data', '--zero-terminated'], {
+        action: 'store_true',
+        help: 'lines end at NUL, not newline',
+      }),
+      // -b names binary mode, which POSIX systems do not have.
+      new Argument(['-b', '--binary'], {
+        action: 'store_true',
+        help: 'accepted; input is always raw bytes',
+      }),
       new Argument('text', { metavar: '', nargs: '?', providedBy: ['-e', '-f'] }),
       PATHS_OPERAND,
     ],

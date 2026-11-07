@@ -16,6 +16,7 @@ from collections.abc import Sequence
 
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
+from mirage.commands.spec.builtin_specs import SPECS
 from mirage.commands.spec.constants import (
     IN_ORDER_OPERANDS,
     NOT_GETOPT_LONG,
@@ -28,9 +29,11 @@ from mirage.commands.spec.constants import (
     RG_FLAG_NAMES,
     USAGE_EXIT,
     USAGE_HINT_PREFIX,
+    USAGE_PAGE,
     ZGREP_UNSUPPORTED_LONG,
     ZGREP_UNSUPPORTED_SHORT,
 )
+from mirage.commands.spec.standard import help_page
 from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.word_choice import WordChoices, WordRefusalKind
 from mirage.errors.fs import fs_strerror
@@ -196,9 +199,9 @@ def unknown_option_error(
     Shapes pinned against real GNU: long options report the full token
     (`cat: unrecognized option '--bogus=x'`), short options report the
     offending character (`cat: invalid option -- 'Y'`), and find uses its
-    predicate wording with backquote quoting. GNU's per-tool usage dumps
-    are deliberately omitted; the `--help` hint line is kept because every
-    registered command serves `--help`.
+    predicate wording with backquote quoting. The `--help` hint line
+    follows, because every registered command serves `--help`; the
+    commands in ``USAGE_PAGE`` print their own usage page instead.
 
     Args:
         cmd_name (str): command name for the message and exit code.
@@ -313,9 +316,9 @@ def unexpected_value_error(
     --help=2`, `cut --complement=2`, `sed --debug=2`), all exit 2 for
     grep and sort and 1 for the coreutils.
 
-    GNU's per-tool usage dump is deliberately omitted, exactly as
-    unknown_option_error omits it; grep and sed print theirs between the
-    message and the hint, coreutils print none at all.
+    The hint follows as it does for unknown_option_error; grep prints
+    its usage line between the message and the hint, which mirage
+    omits, and coreutils print none at all.
 
     Args:
         cmd_name (str): command name for the message and exit code.
@@ -342,9 +345,8 @@ def ambiguous_option_error(
     """getopt_long refusal for an abbreviated long matching several options.
 
     Shape pinned against real GNU (``grep --c``): the typed spelling,
-    then every possibility quoted in declaration order on one line. The
-    per-tool usage dump GNU appends is deliberately omitted, like
-    unknown_option_error.
+    then every possibility quoted in declaration order on one line,
+    then the hint, like unknown_option_error.
 
     Args:
         cmd_name (str): command name for the message and exit code.
@@ -612,12 +614,16 @@ def usage_hint(cmd_name: str, builtin: bool = True) -> str:
 
     coreutils writes the hint bare; diffutils routes it through
     ``error()``, so ``cmp`` and ``diff`` carry the command prefix on the
-    hint line too.
+    hint line too. A command in ``USAGE_PAGE`` prints its help page
+    from the usage line on in its place.
 
     Args:
         cmd_name (str): the command whose hint line is wanted.
         builtin (bool): as in :func:`usage_exit_code`.
     """
+    if builtin and cmd_name in USAGE_PAGE:
+        page = help_page(cmd_name, SPECS[cmd_name]).decode()
+        return page[page.index("Usage: ") :].rstrip("\n")
     prefix = (
         f"{cmd_name}: " if builtin and cmd_name in USAGE_HINT_PREFIX else ""
     )

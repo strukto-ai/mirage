@@ -17,6 +17,9 @@ pub(super) const MAX_LEN: usize = 1 << 18;
 /// The failures of opening an input, which sed reports and reads on past;
 /// any other is a read error that stops it.
 const OPEN_FAILURES: [&str; 6] = ["ENOENT", "EACCES", "EPERM", "EROFS", "ENOTDIR", "ELOOP"];
+/// The links --follow-symlinks crosses from one name, as the kernel
+/// crosses them; one more is a loop.
+const MAX_LINKS: usize = 40;
 
 /// A read the host could not serve, as its reply words it.
 pub(super) struct Failure {
@@ -66,6 +69,8 @@ type Taken = Result<Option<(Line, usize)>, Vec<u8>>;
 pub(super) struct LineReader {
     pub(super) fd: u32,
     open: Option<(Vec<u8>, Opening)>,
+    /// The byte lines end at: -z's NUL, or the newline.
+    delimiter: u8,
     buf: Vec<u8>,
     spare: Vec<u8>,
     start: usize,
@@ -78,10 +83,11 @@ pub(super) struct LineReader {
 }
 
 impl LineReader {
-    pub(super) fn new(io: &mut Io, name: Vec<u8>, opening: Opening) -> LineReader {
+    pub(super) fn new(io: &mut Io, name: Vec<u8>, opening: Opening, delimiter: u8) -> LineReader {
         LineReader {
             fd: io.fd(),
             open: Some((name, opening)),
+            delimiter,
             buf: Vec::new(),
             spare: Vec::new(),
             start: 0,
@@ -129,7 +135,7 @@ impl LineReader {
             crate::release_capacity(&mut self.buf);
         }
         let from = self.scanned.max(self.start);
-        let cut = memchr::memchr(b'\n', &self.buf[from..]).map(|at| from + at);
+        let cut = memchr::memchr(self.delimiter, &self.buf[from..]).map(|at| from + at);
         // A line longer than sed holds is a read it cannot make.
         if cut.unwrap_or(self.buf.len()) - self.start > MAX_LEN {
             return Poll::Ready(Err(Failure::from(Reply {
@@ -178,6 +184,14 @@ impl LineReader {
         line
     }
 
+    /// What arrived and no line has taken yet.
+    pub(super) fn rest(&mut self) -> Vec<u8> {
+        let rest = self.buf.split_off(self.start.min(self.buf.len()));
+        self.start = self.buf.len();
+        self.scanned = self.start;
+        rest
+    }
+
     pub(super) fn recycle(&mut self, mut bytes: Vec<u8>) {
         bytes.clear();
         if bytes.capacity() <= 64 * 1024 && bytes.capacity() > self.spare.capacity() {
@@ -215,6 +229,84 @@ pub(super) struct Input {
     pub(super) opening: Opening,
 }
 
+/// A name looked up link by link: under --follow-symlinks to what it
+/// names, each link's target read against the link's own directory as
+/// sed joins them, otherwise once, to tell a link -i replaces.
+pub(super) struct Follow {
+    operand: Vec<u8>,
+    name: Vec<u8>,
+    follow: bool,
+    links: usize,
+    waiting: bool,
+    reply: Option<Reply>,
+}
+
+/// A followed name, and whether a link stood on the way.
+pub(super) type Followed = Result<(Vec<u8>, bool), Vec<u8>>;
+
+impl Follow {
+    pub(super) fn new(name: Vec<u8>, follow: bool) -> Follow {
+        Follow {
+            operand: name.clone(),
+            name,
+            follow,
+            links: 0,
+            waiting: false,
+            reply: None,
+        }
+    }
+
+    pub(super) fn answer(&mut self, reply: Reply) {
+        self.waiting = false;
+        self.reply = Some(reply);
+    }
+
+    pub(super) fn poll(&mut self, io: &mut Io) -> Poll<Followed> {
+        loop {
+            let Some(reply) = self.reply.take() else {
+                if !std::mem::replace(&mut self.waiting, true) {
+                    io.push(Request::Readlink {
+                        path: self.name.clone(),
+                    });
+                }
+                return Poll::Pending;
+            };
+            let target = match (reply.error, reply.target) {
+                (Some(_), _) if !self.follow => return Poll::Ready(Ok((self.name.clone(), false))),
+                (Some(text), _) => {
+                    let message = [
+                        b"sed: couldn't readlink ".as_slice(),
+                        &self.name,
+                        b": ",
+                        &bytes(&text),
+                        b"\n",
+                    ];
+                    return Poll::Ready(Err(message.concat()));
+                }
+                (None, None) => return Poll::Ready(Ok((self.name.clone(), self.links > 0))),
+                (None, Some(target)) => bytes(&target),
+            };
+            self.links += 1;
+            if !self.follow {
+                return Poll::Ready(Ok((self.name.clone(), true)));
+            }
+            if self.links > MAX_LINKS {
+                let message = [
+                    b"sed: couldn't follow symlink ".as_slice(),
+                    &self.operand,
+                    b": Too many levels of symbolic links\n",
+                ];
+                return Poll::Ready(Err(message.concat()));
+            }
+            let dir = match self.name.iter().rposition(|&c| c == b'/') {
+                Some(slash) if !target.starts_with(b"/") => &self.name[..=slash],
+                _ => b"".as_slice(),
+            };
+            self.name = [dir, &target].concat();
+        }
+    }
+}
+
 /// What reading an input reported along the way: the inputs that never
 /// opened, which sed names and reads past.
 #[derive(Default)]
@@ -246,17 +338,81 @@ pub(super) struct Feed {
     pub(super) reader: Option<LineReader>,
     /// The look-ahead's answer, until the next line is taken.
     more: Option<bool>,
+    delimiter: u8,
+    /// --follow-symlinks: each input is followed to what it names before
+    /// it opens.
+    follow: bool,
+    pub(super) resolving: Option<Follow>,
+    /// Whether the input `advance` moved to waits to open.
+    opening: bool,
 }
 
 impl Feed {
-    pub(super) fn new(inputs: Vec<Input>) -> Feed {
+    pub(super) fn new(inputs: Vec<Input>, delimiter: u8, follow: bool) -> Feed {
         Feed {
             range: 0..inputs.len(),
             inputs,
             index: None,
             reader: None,
             more: None,
+            delimiter,
+            follow,
+            resolving: None,
+            opening: false,
         }
+    }
+
+    /// Look input `index` up, followed to what it names under
+    /// --follow-symlinks, which then names it: whether a link stood there.
+    /// Standard input is no name to look up.
+    pub(super) fn resolve(&mut self, index: usize, io: &mut Io) -> Poll<Result<bool, Vec<u8>>> {
+        let input = &self.inputs[index];
+        let follow = self.follow;
+        let resolving = self
+            .resolving
+            .get_or_insert_with(|| Follow::new(input.name.clone(), follow));
+        let followed = match resolving.poll(io) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(followed) => followed,
+        };
+        self.resolving = None;
+        Poll::Ready(followed.map(|(name, linked)| {
+            if follow {
+                self.inputs[index].name = name;
+            }
+            linked
+        }))
+    }
+
+    /// Open the input `advance` moved to, followed first under
+    /// --follow-symlinks, standard input as it is; a name that cannot be
+    /// followed ends the run. Only an input waiting to open comes here, so
+    /// a line read costs no call.
+    #[cold]
+    fn open(&mut self, io: &mut Io) -> Poll<Result<(), Vec<u8>>> {
+        let Some(index) = self.index else {
+            self.opening = false;
+            return Poll::Ready(Ok(()));
+        };
+        if self.follow && self.inputs[index].name != b"-" {
+            match self.resolve(index, io) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(message)) => {
+                    self.opening = false;
+                    return Poll::Ready(Err(message));
+                }
+                Poll::Ready(Ok(_)) => {}
+            }
+        }
+        self.opening = false;
+        let input = &self.inputs[index];
+        self.reader = Some(LineReader::new(
+            io,
+            input.name.clone(),
+            input.opening,
+            self.delimiter,
+        ));
+        Poll::Ready(Ok(()))
     }
 
     /// Read input `index` alone, from `reader`, which opened it.
@@ -264,6 +420,7 @@ impl Feed {
         self.range = index..index + 1;
         self.index = Some(index);
         self.reader = Some(reader);
+        self.opening = false;
         self.more = None;
     }
 
@@ -272,14 +429,21 @@ impl Feed {
             .map_or(b"-".as_slice(), |index| &self.inputs[index].name)
     }
 
-    fn advance(&mut self, io: &mut Io) -> bool {
+    /// Whether the input read now is standard input.
+    pub(super) fn on_stdin(&self) -> bool {
+        self.index
+            .is_some_and(|index| self.inputs[index].name == b"-")
+    }
+
+    /// Move to the next input, which `open` opens.
+    fn advance(&mut self) -> bool {
         let next = self.index.map_or(self.range.start, |index| index + 1);
         if next >= self.range.end {
             return false;
         }
         self.index = Some(next);
-        let input = &self.inputs[next];
-        self.reader = Some(LineReader::new(io, input.name.clone(), input.opening));
+        self.reader = None;
+        self.opening = true;
         true
     }
 
@@ -288,6 +452,13 @@ impl Feed {
     pub(super) fn read(&mut self, io: &mut Io, notes: &mut Notes) -> Poll<Taken> {
         self.more = None;
         loop {
+            if self.opening {
+                match self.open(io) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(Err(message)) => return Poll::Ready(Err(message)),
+                    Poll::Ready(Ok(())) => {}
+                }
+            }
             if let Some(reader) = &mut self.reader {
                 let index = self.index.unwrap_or_default();
                 match reader.line(io) {
@@ -311,25 +482,37 @@ impl Feed {
                     }
                 }
             }
-            if !self.advance(io) {
+            if !self.advance() {
                 return Poll::Ready(Ok(None));
             }
         }
     }
 
     /// Whether another line follows, in the current input only when
-    /// `within`.
-    pub(super) fn more(&mut self, within: bool, io: &mut Io, notes: &mut Notes) -> Poll<bool> {
+    /// `within`; a name the look-ahead cannot follow ends the run.
+    pub(super) fn more(
+        &mut self,
+        within: bool,
+        io: &mut Io,
+        notes: &mut Notes,
+    ) -> Poll<Result<bool, Vec<u8>>> {
         if let Some(more) = self.more {
-            return Poll::Ready(more);
+            return Poll::Ready(Ok(more));
         }
         loop {
+            if self.opening {
+                match self.open(io) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(Err(message)) => return Poll::Ready(Err(message)),
+                    Poll::Ready(Ok(())) => {}
+                }
+            }
             if let Some(reader) = &mut self.reader {
                 match reader.peek(io) {
                     Poll::Pending => return Poll::Pending,
                     Poll::Ready(Ok(true)) => {
                         self.more = Some(true);
-                        return Poll::Ready(true);
+                        return Poll::Ready(Ok(true));
                     }
                     Poll::Ready(Ok(false)) => {}
                     Poll::Ready(Err(failure)) => {
@@ -341,9 +524,9 @@ impl Feed {
                 }
                 self.reader = None;
             }
-            if within || !self.advance(io) {
+            if within || !self.advance() {
                 self.more = Some(false);
-                return Poll::Ready(false);
+                return Poll::Ready(Ok(false));
             }
         }
     }

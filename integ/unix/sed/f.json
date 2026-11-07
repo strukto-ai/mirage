@@ -142,11 +142,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 's/hello/HI/\\ns/world/EARTH/\\n' > /data/fcC_prog.sed; printf 'hello world\\n' | sed -f /data/fcC_prog.sed; rm /data/fcC_prog.sed",
+      "command": "printf 's/hello/HI/\\ns/world/EARTH/\\n' > /data/fcC_prog.sed; printf 'hello world\\n' | sed -f /data/fcC_prog.sed; rm /data/fcC_prog.sed; printf 'p\\nk\\n' > /data/fcC_prog.sed; echo a | sed -n --fi /data/fcC_prog.sed; echo rc=$?; echo a | sed --file=/data/fcC_prog.sed; echo rc=$?; rm /data/fcC_prog.sed",
       "expect": {
         "exit": 0,
-        "stdout": "HI EARTH\n",
-        "stderr": ""
+        "stdout": "HI EARTH\nrc=1\nrc=1\n",
+        "stderr": "sed: file /data/fcC_prog.sed line 2: unknown command: `k'\nsed: file /data/fcC_prog.sed line 2: unknown command: `k'\n"
       },
       "flags": [
         "f"
