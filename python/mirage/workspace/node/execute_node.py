@@ -39,8 +39,9 @@ from mirage.context.session_context import (
     RedirectRun,
     redirect_syntax_for,
 )
-from mirage.execution.context import new_execution_id
+from mirage.execution.context import new_line_id
 from mirage.execution.job import JobTable
+from mirage.execution.line.handle import LineHandle
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.io import IOResult
@@ -89,7 +90,6 @@ from mirage.shell.types import (
 from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
-from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins import handle_test, handle_unset
 from mirage.workspace.executor.builtins.alias import alias_mark, alias_view
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
@@ -923,7 +923,7 @@ async def execute_node(
     cancel: asyncio.Event | None = None,
     sink: JobConsole | None = None,
     handed: HandOff | None = None,
-    execution_scope: ExecutionScope | None = None,
+    line_handle: LineHandle | None = None,
     ends_shell: bool = False,
     own_diagnostics: bool = True,
     jobs: JobTable | None = None,
@@ -936,8 +936,8 @@ async def execute_node(
     if jobs is not None:
         job_table = jobs
         execute_fn = partial(execute_fn, job_table=jobs)
-    execution_scope = execution_scope or ExecutionScope(
-        execution_id=new_execution_id(registry.ids)
+    line_handle = line_handle or LineHandle(
+        new_line_id(registry.ids), session.session_id, get_text(node)
     )
     # The node is the whole of a child shell (a background job), which
     # runs its EXIT action when the node ends, its evaluator bound the
@@ -948,7 +948,7 @@ async def execute_node(
                 execute_fn,
                 handed=handed,
                 cancel=cancel,
-                execution_scope=execution_scope,
+                line_handle=line_handle,
             ),
             session,
             stdin,
@@ -966,10 +966,10 @@ async def execute_node(
                 cancel,
                 sink,
                 handed,
-                execution_scope,
+                line_handle,
             ),
         )
-    await execution_scope.checkpoint(cancel)
+    await line_handle.checkpoint(cancel)
     run = partial(
         _execute_node,
         dispatch,
@@ -984,7 +984,7 @@ async def execute_node(
         cancel,
         sink,
         handed,
-        execution_scope,
+        line_handle,
     )
     # The node's own `<(...)` files go when it ends, so a command still
     # reading one is read out first.
@@ -1066,7 +1066,7 @@ async def _execute_node(
     cancel: asyncio.Event | None = None,
     sink: JobConsole | None = None,
     handed: HandOff | None = None,
-    execution_scope: ExecutionScope | None = None,
+    line_handle: LineHandle | None = None,
     own_diagnostics: bool = True,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Walk the parsed tree and dispatch each node.
@@ -1119,7 +1119,7 @@ async def _execute_node(
         execute_fn,
         handed=handed,
         cancel=cancel,
-        execution_scope=execution_scope,
+        line_handle=line_handle,
     )
 
     recurse = partial(
@@ -1131,7 +1131,7 @@ async def _execute_node(
         execute_fn,
         cancel=cancel,
         handed=handed,
-        execution_scope=execution_scope,
+        line_handle=line_handle,
     )
 
     kind = node_kind(node)

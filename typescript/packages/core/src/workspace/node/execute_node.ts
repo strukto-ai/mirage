@@ -26,7 +26,7 @@ import {
   runWithEvaluation,
   runWithRedirectPaths,
 } from '../../context/session_context.ts'
-import { newExecutionId } from '../../execution/context.ts'
+import { newLineId } from '../../execution/context.ts'
 import { share } from '../../io/async_line_iterator.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
@@ -68,7 +68,7 @@ import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../
 import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
 import { childContext, type EvaluationContext } from '../evaluation.ts'
-import { ExecutionScope } from '../execution.ts'
+import { LineHandle } from '../../execution/line/handle.ts'
 import { aliasMark, aliasView } from '../executor/builtins/alias/index.ts'
 import { installExecRedirects } from '../executor/builtins/exec/index.ts'
 import { handleTest, handleUnset } from '../executor/builtins/index.ts'
@@ -179,7 +179,7 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
   let next: ExecuteNodeDeps = { ...base }
   if (opts.sink !== undefined) next.sink = opts.sink
   if (opts.signal !== undefined) next.signal = opts.signal
-  if (opts.executionScope !== undefined) next.executionScope = opts.executionScope
+  if (opts.lineHandle !== undefined) next.lineHandle = opts.lineHandle
   if (opts.jobTable !== undefined) {
     // The lines the subtree runs (`eval`, `source`, an EXIT action) see
     // its job list too.
@@ -777,7 +777,7 @@ async function recursePipeStderr(
 
 export interface ExecuteNodeDeps {
   /** @internal Scheduling scope; background jobs create their own. */
-  executionScope?: ExecutionScope
+  lineHandle?: LineHandle
   dispatch: DispatchFn
   registry: MountRegistry
   namespace: Namespace
@@ -850,12 +850,12 @@ export async function executeNode(
 ): Promise<RedirectResult> {
   const session = context.session
   if (endsShell) {
-    const { signal, executionScope } = deps
+    const { signal, lineHandle } = deps
     const executeFn: ExecuteFn = (cmd, opts) =>
       deps.executeFn(cmd, {
         context,
         ...(signal !== undefined ? { signal } : {}),
-        ...(executionScope !== undefined ? { executionScope } : {}),
+        ...(lineHandle !== undefined ? { lineHandle } : {}),
         ...opts,
       })
     return endShell(
@@ -866,9 +866,10 @@ export async function executeNode(
       executeNode(deps, node, context, stdin, callStack, ownDiagnostics),
     )
   }
-  const executionScope =
-    deps.executionScope ?? new ExecutionScope(undefined, newExecutionId(deps.registry.ids))
-  await executionScope.checkpoint(deps.signal ?? context.frame.abortSignal ?? undefined)
+  const lineHandle =
+    deps.lineHandle ??
+    new LineHandle(newLineId(deps.registry.ids), context.session.sessionId, getText(node))
+  await lineHandle.checkpoint(deps.signal ?? context.frame.abortSignal ?? undefined)
   // The node's own `<(...)` files go when it ends, so a command still
   // reading one is read out first.
   const processSubs = new ProcessSubScope(context, deps.registry, deps.sink, deps.signal)
@@ -882,7 +883,7 @@ export async function executeNode(
         context,
         stdin,
         callStack,
-        executionScope,
+        lineHandle,
         false,
       )
       if (deps.signal?.aborted === true || context.frame.abortSignal?.aborted === true) {
@@ -903,7 +904,7 @@ export async function executeNode(
         context,
         stdin,
         callStack,
-        executionScope,
+        lineHandle,
       )
       // A statement that settles after the caller aborted is an orphan: its
       // status must not reach the shell the caller was already released from.
@@ -970,7 +971,7 @@ async function executeNodeBody(
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
-  executionScope: ExecutionScope,
+  lineHandle: LineHandle,
   ownDiagnostics = true,
 ): Promise<RedirectResult> {
   const session = context.session
@@ -978,13 +979,13 @@ async function executeNodeBody(
   const signal = deps.signal
   deps = {
     ...deps,
-    executionScope,
+    lineHandle,
     executeFn: (cmd, opts) => {
-      if (opts.executionScope !== undefined) return inner(cmd, opts)
+      if (opts.lineHandle !== undefined) return inner(cmd, opts)
       const merged = mergeSignals(signal, opts.signal)
       return inner(cmd, {
         ...opts,
-        executionScope,
+        lineHandle,
         ...(merged !== undefined ? { signal: merged } : {}),
       })
     },

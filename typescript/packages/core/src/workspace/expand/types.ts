@@ -15,7 +15,7 @@
 import type { ShellVars } from '../../rs/session.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { SessionState } from '../session/session.ts'
-import type { ExecutionScope } from '../execution.ts'
+import type { LineHandle } from '../../execution/line/handle.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { HandOff } from '../../policy/types.ts'
@@ -38,7 +38,7 @@ export type ExecuteFn = (
   command: string,
   opts: {
     sessionId: string
-    executionScope?: ExecutionScope
+    lineHandle?: LineHandle
     context?: EvaluationContext
     session?: SessionState
     stdin?: ByteSource | null

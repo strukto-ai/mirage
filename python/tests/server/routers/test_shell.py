@@ -24,6 +24,8 @@ import uvicorn
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from mirage.execution.line.types import Line, LineState
+from mirage.execution.types import LineId
 from mirage.server import build_app
 
 
@@ -33,6 +35,20 @@ def _minimal_config() -> dict:
             "mounts": {"/": {"vfs": "ram", "mode": "WRITE"}},
         },
     }
+
+
+def _lines(app: FastAPI, wid: str) -> list[Line]:
+    return app.state.registry.get(wid).runner.ws.line_table.lines()
+
+
+async def _ended(app: FastAPI, wid: str, line_id: LineId) -> Line:
+    table = app.state.registry.get(wid).runner.ws.line_table
+    for _ in range(100):
+        line = table.get(line_id)
+        if line is not None and line.ended_at is not None:
+            return line
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"line {line_id} never ended")
 
 
 async def _create_workspace(client: AsyncClient) -> str:
@@ -182,9 +198,13 @@ async def test_shell_sync_records_a_job_in_done_state():
             json={"command": "echo done-marker"},
         )
         assert r.status_code == 200, r.text
-        [job] = app.state.jobs.list(wid)
-        assert job.status == "done"
-        assert job.result["stdout"].startswith("done-marker")
+        assert r.json()["stdout"].startswith("done-marker")
+        [line] = _lines(app, wid)
+        assert (line.command, line.state) == (
+            "echo done-marker",
+            LineState.EXITED,
+        )
+        assert (line.exit, line.signal, line.error) == (0, None, None)
 
 
 @pytest.mark.asyncio
@@ -319,13 +339,9 @@ async def test_a_caller_that_drops_cancels_its_foreground_job(tmp_path):
                     json={"command": "sleep 20"},
                     timeout=0.5,
                 )
-            status = ""
-            for _ in range(100):
-                status = app.state.jobs.list(wid)[0].status
-                if status == "canceled":
-                    break
-                await asyncio.sleep(0.05)
-        assert status == "canceled"
+            [line] = _lines(app, wid)
+            line = await _ended(app, wid, line.id)
+        assert line.signal == 2
     finally:
         server.should_exit = True
         await task
@@ -393,8 +409,10 @@ async def test_stdin_streams_into_a_running_line():
 
         async def watch() -> None:
             while True:
-                jobs = app.state.jobs.list(wid)
-                if any(j.status == "running" for j in jobs):
+                if any(
+                    line.state == LineState.RUNNING
+                    for line in _lines(app, wid)
+                ):
                     running.set()
                     return
                 await asyncio.sleep(0.02)
@@ -443,8 +461,10 @@ async def test_a_line_starts_before_its_stdin_sends_a_byte():
 
         async def watch() -> None:
             while True:
-                jobs = app.state.jobs.list(wid)
-                if any(j.status == "running" for j in jobs):
+                if any(
+                    line.state == LineState.RUNNING
+                    for line in _lines(app, wid)
+                ):
                     running.set()
                     return
                 await asyncio.sleep(0.02)
@@ -625,7 +645,8 @@ async def test_shell_stream_preserves_bytes_channels_and_final_status(padding):
             assert events[-1]["result"]["exit_code"] == 1
             assert events[-1]["result"]["stdout"] == ""
             assert events[-1]["result"]["stderr"] == ""
-            assert app.state.jobs.list(wid)[-1].status == "done"
+            last = _lines(app, wid)[-1]
+            assert (last.exit, last.signal) == (1, None)
 
 
 @pytest.mark.asyncio
@@ -642,7 +663,7 @@ async def test_shell_stream_refuses_incompatible_mode(other):
                 json={"command": "echo no"},
             )
             assert response.status_code == 400
-            assert app.state.jobs.list() == []
+            assert app.state.jobs.requests() == []
 
 
 @pytest.mark.asyncio
@@ -658,11 +679,10 @@ async def test_shell_stream_sends_prefix_before_completion_and_cancels_on_discon
             lines = response.aiter_lines()
             first = json.loads(await asyncio.wait_for(anext(lines), 3))
             assert base64.b64decode(first["data"]) == b"ready\n"
-            [job] = app.state.jobs.list(wid)
-            assert job.status == "running"
-        waited = await app.state.jobs.wait(job.id, 3)
-        assert waited.status == "canceled"
-        assert waited.finished_at is not None
+            [line] = _lines(app, wid)
+            assert line.state == LineState.RUNNING
+        line = await _ended(app, wid, line.id)
+        assert line.signal == 2
 
 
 @pytest.mark.asyncio

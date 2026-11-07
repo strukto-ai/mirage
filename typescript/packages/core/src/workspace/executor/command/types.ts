@@ -22,7 +22,7 @@ import type { JobTable } from '../../../execution/job/index.ts'
 import type { TSNodeLike } from '../../../shell/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
-import type { ExecutionScope } from '../../execution.ts'
+import type { LineHandle } from '../../../execution/line/handle.ts'
 import type { ExecutionNode } from '../../types.ts'
 
 export type Flags = Record<string, FlagValue>
@@ -66,7 +66,7 @@ export interface ParsedCommand {
 /** Per-call overrides a caller can layer onto the walker's deps. */
 export interface ExecuteNodeOpts {
   /** @internal Scheduling scope; background jobs create their own. */
-  executionScope?: ExecutionScope
+  lineHandle?: LineHandle
   sink?: JobConsole
   signal?: AbortSignal
   /** The hand-off the subtree runs on: a background job's own. */

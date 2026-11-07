@@ -17,6 +17,7 @@ import asyncio
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from mirage.execution.line.types import LineState
 from mirage.server import build_app
 from mirage.types import MountMode
 
@@ -232,15 +233,21 @@ async def test_session_isolated_per_workspace():
 
 
 async def _wait_status(app, wid: str, session_id: str, status: str) -> None:
-    """Wait for the session's job to reach ``status``."""
+    """Wait for the session's line to be running, or canceled."""
+    table = app.state.registry.get(wid).runner.ws.line_table
     for _ in range(500):
-        jobs = app.state.jobs.list(wid)
         if any(
-            j.session_id == session_id and j.status == status for j in jobs
+            line.session_id == session_id
+            and (
+                line.signal is not None
+                if status == "canceled"
+                else line.state == LineState.RUNNING
+            )
+            for line in table.lines()
         ):
             return
         await asyncio.sleep(0.01)
-    raise AssertionError(f"session {session_id}'s job never reached {status}")
+    raise AssertionError(f"session {session_id}'s line never reached {status}")
 
 
 @pytest.mark.asyncio

@@ -32,11 +32,13 @@ from mirage.context import (
     session_voice,
 )
 from mirage.errors.types import CommandTimeoutError
+from mirage.execution.context import new_line_id
 from mirage.execution.job import JobHandle, JobState, JobTable
 from mirage.execution.job.constants import (
     ENDING_SIGNALS,
     STOP_WAIT_SECONDS,
 )
+from mirage.execution.line.handle import LineHandle
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import (
@@ -96,7 +98,6 @@ from mirage.utils.clock import system_now
 from mirage.utils.timezone import zone_from_env
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
-from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.shared import builtin_usage
 from mirage.workspace.executor.statement import (
@@ -646,8 +647,8 @@ async def handle_background(
                     sink=console,
                     handed=job_handed,
                     cancel=None,
-                    execution_scope=ExecutionScope(
-                        execution_id=job.process_id
+                    line_handle=LineHandle(
+                        new_line_id(), bg_session.session_id, cmd_str_inner
                     ),
                     ends_shell=True,
                     jobs=job_table.child(),

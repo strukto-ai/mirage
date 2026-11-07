@@ -50,8 +50,8 @@ from mirage.server.env import (
     ENV_MAX_WORKSPACES,
     ENV_POLICY_FILE,
 )
-from mirage.server.jobs import ExecutionTable
 from mirage.server.paths import mirage_home
+from mirage.server.requests import RequestTable
 from mirage.types import Ceilings, JsonValue
 from mirage.utils.ids import new_workspace_id
 from mirage.utils.size import parse_limit
@@ -382,7 +382,7 @@ class WorkspaceRegistry:
             _Programs(dict(programs or {}))
         )
         self._admission = Policies([*self.policies, self._admission_programs])
-        self.jobs = ExecutionTable()
+        self.jobs = RequestTable()
         self.accounts_required = accounts_required
         self._owners = owners
         self._configs = configs

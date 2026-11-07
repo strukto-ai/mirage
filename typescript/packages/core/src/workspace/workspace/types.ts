@@ -43,7 +43,7 @@ import type { Clock } from '../../utils/clock.ts'
 import type { IdSource } from '../../utils/ids.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { EvaluationContext } from '../evaluation.ts'
-import type { ExecutionScope } from '../execution.ts'
+import type { LineHandle } from '../../execution/line/handle.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
 import type { Mount } from '../mount/spec.ts'
 import type { SessionState } from '../session/session.ts'
@@ -281,7 +281,7 @@ export interface ExecuteOptions {
   /** Return a running execution with bounded output events. */
   stream?: boolean
   /** @internal Scheduling scope; background jobs create their own. */
-  executionScope?: ExecutionScope
+  lineHandle?: LineHandle
   stdin?: ByteSource | null
   sessionId?: string
   /** @internal The calling evaluator for a nested line. */

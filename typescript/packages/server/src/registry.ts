@@ -46,7 +46,7 @@ import {
   ENV_MAX_WORKSPACES,
   ENV_POLICY_FILE,
 } from './env.ts'
-import { ExecutionTable } from './jobs.ts'
+import { RequestTable } from './requests.ts'
 import { mirageHome } from './paths.ts'
 
 // Under the daemon's state root: one record per workspace id naming the
@@ -267,7 +267,7 @@ class Programs {
 }
 
 export class WorkspaceRegistry {
-  readonly jobs = new ExecutionTable()
+  readonly jobs = new RequestTable()
   private entries = new Map<string, WorkspaceEntry>()
   private readonly removals = new Map<string, Promise<WorkspaceEntry>>()
   private readonly creates = new Map<string, { digest: string; done: Promise<unknown> }>()

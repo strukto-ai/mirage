@@ -1,6 +1,7 @@
+import { LineId } from './types.ts'
 import { type IdSource, SystemIdSource } from '../utils/ids.ts'
 
-/** Mint the id an execution's records name, from `ids` or the system source. */
-export function newExecutionId(ids: IdSource = new SystemIdSource()): string {
-  return `exec_${ids.uuid7()}`
+/** Mint a line's id, from `ids` or the system source. */
+export function newLineId(ids: IdSource = new SystemIdSource()): LineId {
+  return new LineId(`line_${ids.uuid7()}`)
 }

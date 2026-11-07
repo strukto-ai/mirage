@@ -2,8 +2,7 @@ import { Buffer } from 'node:buffer'
 import { CHUNK_SIZE } from '@struktoai/mirage-core/io/cooperative'
 import type { StreamName } from '@struktoai/mirage-core/io/types'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
-import type { ExecutionTable } from './jobs.ts'
-import type { ExecutionRecord } from '@struktoai/mirage-core/execution/types'
+import type { LineRequest, RequestTable } from './requests.ts'
 import { streamOf, type RouteReply } from './routes.ts'
 import { UploadStdin } from './stdin.ts'
 
@@ -35,15 +34,14 @@ export function record(stream: StreamName, data: Uint8Array): Uint8Array {
  */
 export function shellResponse(
   execution: Promise<ShellExecution | null>,
-  jobs: ExecutionTable,
-  job: ExecutionRecord,
+  jobs: RequestTable,
+  job: LineRequest,
   reply: RouteReply,
   closed: AbortSignal,
   failed: Promise<unknown>,
   stdin: UploadStdin | Uint8Array | undefined,
 ): RouteReply {
-  const finished = jobs.wait(job.id)
-  const completed = jobs.drain(job.id).then(() => finished)
+  const completed = jobs.drain(job.id).then(() => jobs.wait(job.id))
   void completed.catch((error: unknown) => {
     console.error('streamed shell completion failed', error)
   })
@@ -86,7 +84,14 @@ export function shellResponse(
       if (stdin instanceof UploadStdin && stdin.error !== undefined) uploadError = stdin.error
       yield Buffer.from(
         JSON.stringify({
-          status: uploadError === undefined ? result.status : 'failed',
+          status:
+            uploadError !== undefined
+              ? 'failed'
+              : result.line.record.signal !== null
+                ? 'canceled'
+                : result.error !== null
+                  ? 'failed'
+                  : 'done',
           result: uploadError === undefined ? result.result : null,
           error:
             uploadError === undefined

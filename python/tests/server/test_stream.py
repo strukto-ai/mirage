@@ -5,9 +5,8 @@ import json
 import pytest
 from starlette.requests import ClientDisconnect, Request
 
-from mirage.execution.types import ExecutionStatus
 from mirage.io import IOResult
-from mirage.server.jobs import ExecutionTable
+from mirage.server.requests import RequestTable
 from mirage.server.stdin import UploadStdin
 from mirage.server.stream import PAYLOAD_SIZE, ShellResponse, record
 from mirage.shell.console import Channel
@@ -71,7 +70,7 @@ async def test_the_response_sends_each_event_then_the_final_record():
         await execution.wait()
         return {"exit_code": 0}
 
-    table = ExecutionTable()
+    table = RequestTable()
     job = table.submit("workspace", "line", run, session_id="session")
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
     response = ShellResponse(
@@ -119,7 +118,7 @@ async def test_a_line_that_fails_while_streaming_still_sends_the_final_record():
         await execution.wait()
         return {"exit_code": 0}
 
-    table = ExecutionTable()
+    table = RequestTable()
     job = table.submit("workspace", "line", run, session_id="session")
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
     response = ShellResponse(
@@ -169,7 +168,7 @@ async def test_disconnect_cancels_the_job_and_joins_its_cleanup():
             cleanup.set()
             await release.wait()
 
-    table = ExecutionTable()
+    table = RequestTable()
     job = table.submit("workspace", "held", run, session_id="session")
     await entered.wait()
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
@@ -182,7 +181,7 @@ async def test_disconnect_cancels_the_job_and_joins_its_cleanup():
     assert not sending.done()
     release.set()
     await asyncio.wait_for(sending, 1)
-    assert table.get(job.id).status == ExecutionStatus.CANCELED
+    assert job.line.record.signal == 2
     await table.close()
 
 
@@ -220,7 +219,7 @@ async def test_a_disconnect_before_the_handover_still_closes_the_line():
         finally:
             loop.call_soon(give, execution)
 
-    table = ExecutionTable()
+    table = RequestTable()
     job = table.submit("workspace", "held", run, session_id="session")
     await started.wait()
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
@@ -247,9 +246,9 @@ async def test_the_final_record_does_not_wait_for_stdin_to_end():
     async def send(message):
         sent.append(message)
 
-    table = ExecutionTable()
+    table = RequestTable()
     job = table.submit("workspace", "true", finished, session_id="session")
-    await table.wait(job.id)
+    await table.drain(job.id)
     upload = asyncio.create_task(uploaded.wait())
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
     request = Request(scope, receive)
@@ -296,9 +295,9 @@ async def test_a_hang_up_after_the_final_record_ends_with_an_empty_body():
         await hang_up.wait()
         raise ClientDisconnect()
 
-    table = ExecutionTable()
+    table = RequestTable()
     job = table.submit("workspace", "true", finished, session_id="session")
-    await table.wait(job.id)
+    await table.drain(job.id)
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
     response = ShellResponse(
         none(),
@@ -326,7 +325,7 @@ async def test_a_hang_up_after_the_final_record_ends_with_an_empty_body():
         "body": b"",
         "more_body": False,
     }
-    assert table.get(job.id).status == ExecutionStatus.DONE
+    assert (job.line.record.signal, job.error) == (None, None)
     await table.close()
 
 
@@ -341,9 +340,9 @@ async def test_an_upload_that_failed_first_fails_the_final_record():
     async def send(message):
         sent.append(message)
 
-    table = ExecutionTable()
+    table = RequestTable()
     job = table.submit("workspace", "true", finished, session_id="session")
-    await table.wait(job.id)
+    await table.drain(job.id)
     upload = asyncio.create_task(bad_body())
     await asyncio.gather(upload, return_exceptions=True)
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
@@ -381,7 +380,7 @@ async def test_a_job_cancelled_before_it_starts_still_sends_the_final_record():
     async def send(message):
         sent.append(message)
 
-    table = ExecutionTable()
+    table = RequestTable()
     job = table.submit("workspace", "true", finished, session_id="session")
     upload = asyncio.create_task(bad_body())
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
@@ -399,7 +398,7 @@ async def test_a_job_cancelled_before_it_starts_still_sends_the_final_record():
     terminal = json.loads(b"".join(bodies))
     assert terminal["status"] == "failed"
     assert terminal["error"] == "bad multipart body"
-    assert (await table.wait(job.id)).status.value == "canceled"
+    assert job.line.record.signal == 2
     await table.close()
 
 
@@ -426,9 +425,9 @@ async def test_an_upload_failing_while_its_cleanup_runs_fails_the_record():
         await part.fail(error)
         raise error
 
-    table = ExecutionTable()
+    table = RequestTable()
     job = table.submit("workspace", "true", finished, session_id="session")
-    await table.wait(job.id)
+    await table.drain(job.id)
     uploading = asyncio.create_task(upload())
     await asyncio.sleep(0)
     assert not uploading.done()
@@ -459,8 +458,7 @@ async def test_an_upload_failing_while_its_cleanup_runs_fails_the_record():
 
 
 @pytest.mark.asyncio
-async def test_the_final_record_survives_its_eviction(monkeypatch):
-    monkeypatch.setattr("mirage.server.jobs.MAX_FINISHED_JOBS", 1)
+async def test_the_final_record_outlives_its_request_in_the_table():
     finish, headers = asyncio.Event(), asyncio.Event()
     incoming = asyncio.Queue()
     sent = []
@@ -478,7 +476,7 @@ async def test_the_final_record_survives_its_eviction(monkeypatch):
         await finish.wait()
         return {"exit_code": 0}
 
-    table = ExecutionTable()
+    table = RequestTable()
     job = table.submit("workspace", "held", run, session_id="session")
     table.submit("workspace", "other", run, session_id="session")
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
@@ -495,8 +493,7 @@ async def test_the_final_record_survives_its_eviction(monkeypatch):
     await headers.wait()
     finish.set()
     await asyncio.wait_for(sending, 1)
-    with pytest.raises(KeyError):
-        table.get(job.id)
+    assert job not in table.requests()
     assert json.loads(sent[-2]["body"])["status"] == "done"
     assert sent[-1]["more_body"] is False
     await table.close()

@@ -6,7 +6,7 @@ import type { OutputEvent } from '../io/types.ts'
 import { JobConsole } from '../shell/console/job_console.ts'
 import { Channel } from '../shell/console/types.ts'
 import { PipeClosed } from '../io/errors.ts'
-import type { ExecutionScope } from './execution.ts'
+import type { LineHandle } from '../execution/line/handle.ts'
 import { ExecuteResult } from './workspace/types.ts'
 
 class ShellOutput extends JobConsole {
@@ -80,8 +80,8 @@ export class ShellExecution {
   private settled = false
 
   constructor(
-    run: (sink: JobConsole, signal: AbortSignal, scope: ExecutionScope) => Promise<ExecuteResult>,
-    scope: ExecutionScope,
+    run: (sink: JobConsole, signal: AbortSignal, scope: LineHandle) => Promise<ExecuteResult>,
+    scope: LineHandle,
     signal?: AbortSignal,
     bufferBytes = CAPACITY,
   ) {
@@ -97,8 +97,8 @@ export class ShellExecution {
   }
 
   private async run(
-    run: (sink: JobConsole, signal: AbortSignal, scope: ExecutionScope) => Promise<ExecuteResult>,
-    scope: ExecutionScope,
+    run: (sink: JobConsole, signal: AbortSignal, scope: LineHandle) => Promise<ExecuteResult>,
+    scope: LineHandle,
     signal: AbortSignal,
   ): Promise<ExecuteResult> {
     try {

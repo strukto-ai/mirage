@@ -90,8 +90,10 @@ describe('the RPC endpoint', () => {
     await post(url, request(1, 'shell', { command: 'mkdir /d && cd /d' }), '?session_id=agent')
     const pwd = await post(url, request(2, 'shell', { command: 'pwd' }), '?session_id=agent')
     expect(((await pwd.json()) as { result: { stdout: string } }).result.stdout).toBe('/d\n')
-    const jobs = apps.flatMap((app) => app.jobs.list(id))
-    expect(new Set(jobs.map((job) => job.sessionId))).toEqual(new Set(['agent']))
+    const lines = apps.flatMap((app) =>
+      app.registry.has(id) ? app.registry.get(id).runner.ws.lineTable.lines() : [],
+    )
+    expect(new Set(lines.map((line) => line.sessionId))).toEqual(new Set(['agent']))
   })
 
   it('lets $/cancelRequest reach a running shell', async () => {
@@ -108,13 +110,16 @@ describe('the RPC endpoint', () => {
     expect(cancelled.status).toBe(204)
     const answer = (await (await running).json()) as { error: { code: number } }
     expect(answer.error.code).toBe(-32800)
-    let status = ''
+    let signal: number | null = null
     for (let i = 0; i < 100; i++) {
-      status = apps.flatMap((app) => app.jobs.list(id))[0]?.status ?? ''
-      if (status === 'canceled') break
+      signal =
+        apps.flatMap((app) =>
+          app.registry.has(id) ? app.registry.get(id).runner.ws.lineTable.lines() : [],
+        )[0]?.signal ?? null
+      if (signal !== null) break
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
-    expect(status).toBe('canceled')
+    expect(signal).toBe(2)
   })
 
   it('shares the session tool table with the tool routes', async () => {

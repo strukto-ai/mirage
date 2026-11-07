@@ -63,7 +63,7 @@ INTERNAL = (
     "handed",
     "sink",
     "call_stack",
-    "execution_scope",
+    "line_handle",
     "job_table",
     "session",
 )

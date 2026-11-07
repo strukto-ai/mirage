@@ -39,9 +39,11 @@ app.get<{ Params: { key: string } }>('/__integ/entered/:key', async (request) =>
 // The lines a workspace's sessions have queued, which have not started.
 app.get<{ Params: { wid: string } }>('/__integ/pending/:wid', async (request) => ({
   pending: app.jobs
-    .list(request.params.wid)
-    .filter((job) => job.status === 'pending')
-    .map((job) => job.command),
+    .requests()
+    .filter(
+      (held) => held.workspaceId === request.params.wid && held.line.record.state === 'waiting',
+    )
+    .map((held) => held.line.record.command),
 }))
 app.post<{ Params: { key: string } }>('/__integ/release/:key', async (request) => {
   gate(request.params.key).release()

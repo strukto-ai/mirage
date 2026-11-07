@@ -66,8 +66,10 @@ from mirage.context.session_context import run_as_process
 from mirage.core.history.constants import HISTFILESIZE
 from mirage.errors.fs import enoent
 from mirage.events.base import EventRuntime
-from mirage.execution.context import new_execution_id
+from mirage.execution.context import new_line_id
 from mirage.execution.job import JobTable
+from mirage.execution.line.handle import LineHandle
+from mirage.execution.line.table import LineTable
 from mirage.execution.process.child import ChildProcess
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.stdio import ProcessInput, ProcessOutput
@@ -164,7 +166,6 @@ from mirage.view.types import SessionView
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.documentation.documents import Documents
-from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.statement import (
     record_status,
@@ -432,6 +433,7 @@ class Workspace:
             daemon=daemon_id,
         )
         self.job_table.reaper = self._reap_runs
+        self.line_table = LineTable(self._clock)
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: dict[ShellExecution, None] = {}
         self._admitting = asyncio.Event()
@@ -2955,6 +2957,7 @@ class Workspace:
             observer=self.observer,
             records=self._files.records,
             job_table=self.job_table,
+            line_table=self.line_table,
             runtimes=self._runtimes,
             router=self._router,
             processes=self.processes,
@@ -3090,7 +3093,7 @@ class Workspace:
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
-        execution_scope: ExecutionScope | None = None,
+        line_handle: LineHandle | None = None,
         job_table: JobTable | None = None,
         *,
         stream: Literal[True],
@@ -3112,7 +3115,7 @@ class Workspace:
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
-        execution_scope: ExecutionScope | None = None,
+        line_handle: LineHandle | None = None,
         job_table: JobTable | None = None,
         *,
         stream: Literal[False] = False,
@@ -3134,7 +3137,7 @@ class Workspace:
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
-        execution_scope: ExecutionScope | None = None,
+        line_handle: LineHandle | None = None,
         job_table: JobTable | None = None,
         *,
         stream: bool,
@@ -3155,7 +3158,7 @@ class Workspace:
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
-        execution_scope: ExecutionScope | None = None,
+        line_handle: LineHandle | None = None,
         job_table: JobTable | None = None,
         *,
         stream: bool = False,
@@ -3217,7 +3220,7 @@ class Workspace:
                 caller's positional parameters and locals, and an
                 ``exit``, ``return``, ``break`` or ``continue`` in it
                 unwinds into the caller instead of ending the line.
-            execution_scope: Internal. Scheduling and admission shared by
+            line_handle: Internal. Scheduling and admission shared by
                 nested foreground evaluations. Background jobs start a
                 separate scope.
             job_table: Internal. The jobs of a child shell (``$( )``,
@@ -3236,7 +3239,7 @@ class Workspace:
         if not stream and (
             sink is not None
             or handed is not None
-            or execution_scope is not None
+            or line_handle is not None
             or call_stack is not None
             or job_table is not None
             or get_current_session_for(self._session_mgr) is not None
@@ -3254,7 +3257,7 @@ class Workspace:
                 handed,
                 sink,
                 call_stack,
-                execution_scope,
+                line_handle,
                 job_table,
                 session=session,
             )
@@ -3262,7 +3265,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
 
         async def run(
-            output: JobConsole, stop: asyncio.Event, scope: ExecutionScope
+            output: JobConsole, stop: asyncio.Event, scope: LineHandle
         ) -> IOResult:
             return await self._shell(
                 command,
@@ -3284,8 +3287,15 @@ class Workspace:
 
         execution = ShellExecution(
             run,
-            execution_scope
-            or ExecutionScope(execution_id=new_execution_id(self._ids)),
+            line_handle
+            or LineHandle(
+                new_line_id(self._ids),
+                session.session_id
+                if session is not None
+                else session_id or self.default_session_id,
+                command,
+                now=self._clock.now,
+            ),
             cancel,
             buffer_bytes=self.io.buffer_bytes,
         )
@@ -3316,7 +3326,7 @@ class Workspace:
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
-        execution_scope: ExecutionScope | None = None,
+        line_handle: LineHandle | None = None,
         job_table: JobTable | None = None,
         *,
         session: SessionState | None = None,
@@ -3364,7 +3374,7 @@ class Workspace:
                     frame,
                     sink=sink,
                     call_stack=call_stack,
-                    execution_scope=execution_scope,
+                    line_handle=line_handle,
                     job_table=job_table,
                 )
                 source = None

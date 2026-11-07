@@ -242,7 +242,8 @@ async def test_shell_runs_as_a_daemon_job(tmp_path):
         workspace_id = await create_workspace(base)
         url = f"{base}/v1/workspaces/{workspace_id}/mcp"
         await call(url, "shell", {"command": "echo from-mcp"})
-        commands = [job.command for job in app.state.jobs.list(workspace_id)]
+        lines = app.state.registry.get(workspace_id).runner.ws.line_table
+        commands = [line.command for line in lines.lines()]
     assert "echo from-mcp" in commands
 
 
@@ -253,12 +254,13 @@ MCP_HEADERS = {
 
 
 async def job_status(app: FastAPI, workspace_id: str, command: str) -> str:
+    table = app.state.registry.get(workspace_id).runner.ws.line_table
     statuses: list[str] = []
     for _ in range(100):
         statuses = [
-            job.status
-            for job in app.state.jobs.list(workspace_id)
-            if job.command == command
+            "canceled" if line.signal is not None else line.state.value
+            for line in table.lines()
+            if line.command == command
         ]
         if statuses and statuses[0] == "canceled":
             return statuses[0]

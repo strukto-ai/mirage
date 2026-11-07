@@ -25,8 +25,7 @@ import type { SessionState } from '@struktoai/mirage-core/workspace/session/sess
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { InFlight, rpcMessages } from '../inflight.ts'
 import { ioResultToDict } from '../io_serde.ts'
-import type { ExecutionTable } from '../jobs.ts'
-import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
+import type { RequestTable } from '../requests.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
 import { McpToolOperations, collectExecution, type OutputProgress } from './progress.ts'
@@ -37,7 +36,7 @@ const CALLS: Readonly<Record<string, boolean>> = { tools: false, all: true }
 /**
  * The tool table as the daemon serves it: through its own API.
  *
- * `shell` is a job, submitted to the daemon's execution table the way
+ * `shell` is a job, submitted to the daemon's request table the way
  * `POST /shell` submits one, so an MCP command drains at shutdown and is
  * recorded like any other. The caller's `signal` (an MCP client's cancel)
  * cancels the job too. The other tools run through the session's own
@@ -47,7 +46,7 @@ const CALLS: Readonly<Record<string, boolean>> = { tools: false, all: true }
 export class DaemonToolOperations extends McpToolOperations {
   constructor(
     private readonly entry: WorkspaceEntry,
-    private readonly jobs: ExecutionTable,
+    private readonly jobs: RequestTable,
     private readonly sessionId: string,
   ) {
     super(entry.runner.ws, sessionId)
@@ -79,10 +78,10 @@ export class DaemonToolOperations extends McpToolOperations {
     const submitted = this.jobs.submit(
       this.entry.id,
       command,
-      async (signal, executionScope) => {
+      async (signal, lineHandle) => {
         const execution = await ws.shell(command, {
           sessionId: this.sessionId,
-          executionScope,
+          lineHandle,
           signal,
           stream: true,
         })
@@ -95,10 +94,10 @@ export class DaemonToolOperations extends McpToolOperations {
       this.sessionId,
     )
     const job = await this.jobs.join(submitted.id, signal)
-    if (job.status === ExecutionStatus.CANCELED) {
+    if (job.line.record.signal !== null) {
       return { content: [{ type: 'text', text: 'job canceled' }], isError: true }
     }
-    if (job.status === ExecutionStatus.FAILED || answer === undefined) {
+    if (job.error !== null || answer === undefined) {
       return { content: [{ type: 'text', text: job.error ?? 'shell failed' }], isError: true }
     }
     return answer
@@ -132,7 +131,7 @@ export class McpEndpoint {
 
   constructor(
     private readonly registry: WorkspaceRegistry,
-    private readonly jobs: ExecutionTable,
+    private readonly jobs: RequestTable,
   ) {}
 
   private async fetch(
@@ -329,7 +328,7 @@ export class McpEndpoint {
 export function registerMcpRoutes(
   app: RouteApp,
   registry: WorkspaceRegistry,
-  jobs: ExecutionTable,
+  jobs: RequestTable,
 ): McpEndpoint {
   const endpoint = new McpEndpoint(registry, jobs)
   app.route({

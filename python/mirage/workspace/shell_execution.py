@@ -6,13 +6,13 @@ from types import TracebackType
 from typing import cast
 
 from mirage.concurrency.limiter import owned_task, settle
+from mirage.execution.line.handle import LineHandle
 from mirage.io.output import OutputPipe
 from mirage.io.pipe import CAPACITY
 from mirage.io.types import IOResult, OutputEvent
 from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.types import Channel
 from mirage.utils.abort import MirageAbortError
-from mirage.workspace.execution import ExecutionScope
 
 logger = logging.getLogger(__name__)
 
@@ -87,9 +87,9 @@ class ShellExecution:
     def __init__(
         self,
         run: Callable[
-            [JobConsole, asyncio.Event, ExecutionScope], Awaitable[IOResult]
+            [JobConsole, asyncio.Event, LineHandle], Awaitable[IOResult]
         ],
-        scope: ExecutionScope,
+        scope: LineHandle,
         cancel: asyncio.Event | None = None,
         *,
         buffer_bytes: int = CAPACITY,
@@ -117,9 +117,9 @@ class ShellExecution:
     async def _run(
         self,
         run: Callable[
-            [JobConsole, asyncio.Event, ExecutionScope], Awaitable[IOResult]
+            [JobConsole, asyncio.Event, LineHandle], Awaitable[IOResult]
         ],
-        scope: ExecutionScope,
+        scope: LineHandle,
         external: asyncio.Event | None,
     ) -> IOResult:
         self._task = cast("asyncio.Task[IOResult]", asyncio.current_task())

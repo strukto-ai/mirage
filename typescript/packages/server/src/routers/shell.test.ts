@@ -18,7 +18,25 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
+import type { Line } from '@struktoai/mirage-core/execution/line/types'
+import type { LineId } from '@struktoai/mirage-core/execution/types'
 import { buildApp } from '../app.ts'
+
+function lines(app: ReturnType<typeof buildApp>, id: string): Line[] {
+  return app.registry.get(id).runner.ws.lineTable.lines()
+}
+
+async function ended(app: ReturnType<typeof buildApp>, id: string, lineId: LineId): Promise<Line> {
+  const table = app.registry.get(id).runner.ws.lineTable
+  return vi.waitFor(
+    () => {
+      const line = table.get(lineId)
+      if (line?.endedAt == null) throw new Error(`line ${lineId.value} never ended`)
+      return line
+    },
+    { timeout: 5000, interval: 50 },
+  )
+}
 
 async function createWs(app: ReturnType<typeof buildApp>, id: string): Promise<void> {
   await app.inject({
@@ -103,7 +121,7 @@ describe('execute router', () => {
           expect(result.json<{ stdout: string }>().stdout.trim()).toBe('0')
         }
       }
-      expect(app.jobs.list('multipart-empty')).toHaveLength(1)
+      expect(lines(app, 'multipart-empty')).toHaveLength(1)
     } finally {
       await app.close()
     }
@@ -258,7 +276,7 @@ describe('execute router', () => {
       })
       .then((reply) => reply)
     const job = await vi.waitFor(() => {
-      const [entry] = app.jobs.list('ecancel')
+      const entry = app.jobs.requests().find((request) => request.workspaceId === 'ecancel')
       if (entry === undefined) throw new Error('execute did not register a job')
       return entry
     })
@@ -291,13 +309,9 @@ describe('a foreground shell request', () => {
         stop.abort()
       }, 500)
       await expect(running).rejects.toThrow()
-      let status = ''
-      for (let i = 0; i < 100; i++) {
-        status = app.jobs.list('drop')[0]?.status ?? ''
-        if (status === 'canceled') break
-        await new Promise((resolve) => setTimeout(resolve, 50))
-      }
-      expect(status).toBe('canceled')
+      const [line] = lines(app, 'drop')
+      if (line === undefined) throw new Error('the line was not recorded')
+      expect((await ended(app, 'drop', line.id)).signal).toBe(2)
     } finally {
       await app.close()
       await rm(dir, { recursive: true, force: true })
@@ -341,7 +355,7 @@ describe('a foreground shell request', () => {
           )
           controller.enqueue(text.encode('first\n'))
           for (let i = 0; i < 250 && !running; i++) {
-            running = app.jobs.list('streamed').some((j) => j.status === 'running')
+            running = lines(app, 'streamed').some((line) => line.state === 'running')
             await new Promise((resolve) => setTimeout(resolve, 20))
           }
           controller.enqueue(text.encode(`second\n${END}`))
@@ -406,7 +420,7 @@ describe('a foreground shell request', () => {
             text.encode(requestPart('cat > /out.txt') + part('stdin', 'stdin.bin')),
           )
           for (let i = 0; i < 250 && !running; i++) {
-            running = app.jobs.list('early').some((j) => j.status === 'running')
+            running = lines(app, 'early').some((line) => line.state === 'running')
             await new Promise((resolve) => setTimeout(resolve, 20))
           }
           controller.enqueue(text.encode(`late\n${END}`))
@@ -592,7 +606,8 @@ it.each(['', 'x'.repeat(128 * 1024 + 1)])(
         status: 'done',
         result: { exit_code: 1, stdout: '', stderr: '' },
       })
-      expect(app.jobs.list().at(-1)?.status).toBe('done')
+      const last = lines(app, 'byte-stream').at(-1)
+      expect([last?.exit, last?.signal]).toEqual([1, null])
     } finally {
       await app.close()
     }
@@ -609,7 +624,7 @@ it.each(['explain'])('refuses streaming with %s before submitting work', async (
       payload: { command: 'echo no' },
     })
     expect(result.statusCode).toBe(400)
-    expect(app.jobs.list()).toEqual([])
+    expect(app.jobs.requests()).toEqual([])
   } finally {
     await app.close()
   }
@@ -633,14 +648,13 @@ it('streams a prefix before completion and joins cancellation after disconnect',
     expect(new TextDecoder().decode(first.value)).toContain(
       Buffer.from('ready\n').toString('base64'),
     )
-    const [job] = app.jobs.list('early-stream')
-    if (job === undefined) throw new Error('the line made no job')
-    expect(job.status).toBe('running')
+    const [line] = lines(app, 'early-stream')
+    if (line === undefined) throw new Error('the line was not recorded')
+    expect(line.state).toBe('running')
     stop.abort()
     await reader.cancel().catch(() => undefined)
-    const final = await app.jobs.wait(job.id, 3)
-    expect(final.status).toBe('canceled')
-    expect(typeof final.finishedAt).toBe('number')
+    const final = await ended(app, 'early-stream', line.id)
+    expect([final.signal, typeof final.endedAt]).toEqual([2, 'number'])
   } finally {
     await app.close()
   }

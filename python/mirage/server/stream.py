@@ -8,10 +8,9 @@ from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
 from mirage.concurrency.limiter import on_loop, settle
-from mirage.execution.types import ExecutionRecord
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import StreamName
-from mirage.server.jobs import ExecutionTable
+from mirage.server.requests import LineRequest, RequestTable
 from mirage.server.stdin import UploadStdin
 from mirage.workspace.shell_execution import ShellExecution
 
@@ -63,8 +62,8 @@ class ShellResponse(Response):
         self,
         execution: "asyncio.Future[ShellExecution | None]",
         loop: asyncio.AbstractEventLoop,
-        jobs: ExecutionTable,
-        job: ExecutionRecord,
+        jobs: RequestTable,
+        job: LineRequest,
         request: Request,
         upload: asyncio.Task[None] | None,
         part: UploadStdin | None,
@@ -82,9 +81,9 @@ class ShellResponse(Response):
         self._upload = upload
         self._part = part
 
-    async def _completed(self) -> ExecutionRecord:
-        finished = await self._jobs.wait(self._job.id)
+    async def _completed(self) -> LineRequest:
         await self._jobs.drain(self._job.id)
+        finished = await self._jobs.wait(self._job.id)
         # A job cancelled before its work started never opened the line.
         if not self._execution.done():
             self._execution.set_result(None)
@@ -101,7 +100,7 @@ class ShellResponse(Response):
             pass
 
     async def _send(
-        self, send: Send, completed: asyncio.Task[ExecutionRecord]
+        self, send: Send, completed: asyncio.Task[LineRequest]
     ) -> None:
         await send(
             {
@@ -146,9 +145,13 @@ class ShellResponse(Response):
         terminal = (
             json.dumps(
                 {
-                    "status": job.status.value
-                    if upload_error is None
-                    else "failed",
+                    "status": "failed"
+                    if upload_error is not None
+                    else "canceled"
+                    if job.line.record.signal is not None
+                    else "failed"
+                    if job.error is not None
+                    else "done",
                     "result": job.result if upload_error is None else None,
                     "error": job.error
                     if upload_error is None
@@ -197,7 +200,7 @@ class ShellResponse(Response):
 
     async def _close(
         self,
-        completed: asyncio.Task[ExecutionRecord],
+        completed: asyncio.Task[LineRequest],
         sender: asyncio.Task[None],
         disconnected: asyncio.Task[None],
     ) -> None:

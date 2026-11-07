@@ -235,15 +235,21 @@ describe('the MCP endpoint over HTTP', () => {
     const { base, app } = await daemon()
     const id = await createWorkspace(base)
     await call(`${base}/v1/workspaces/${id}/mcp`, 'shell', { command: 'echo from-mcp' })
-    expect(app.jobs.list(id).map((job) => job.command)).toContain('echo from-mcp')
+    const lines = app.registry.get(id).runner.ws.lineTable.lines()
+    expect(lines.map((line) => line.command)).toContain('echo from-mcp')
   })
 })
 
 async function jobStatus(workspaceId: string, command: string): Promise<string> {
   let status = 'missing'
   for (let i = 0; i < 100; i++) {
-    const jobs = apps.flatMap((app) => app.jobs.list(workspaceId))
-    status = jobs.find((job) => job.command === command)?.status ?? 'missing'
+    const lines = apps.flatMap((app) =>
+      app.registry.has(workspaceId)
+        ? app.registry.get(workspaceId).runner.ws.lineTable.lines()
+        : [],
+    )
+    const line = lines.find((held) => held.command === command)
+    status = line === undefined ? 'missing' : line.signal !== null ? 'canceled' : line.state
     if (status === 'canceled') break
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
@@ -313,8 +319,8 @@ describe('cancelling an MCP shell call', () => {
     const operations = await app.mcp.tools(id, null, null)
     if (typeof operations === 'string') throw new Error(operations)
     const result = await operations.shell('sleep 20', AbortSignal.abort())
-    expect(result.isError).toBe(true)
-    expect(await jobStatus(id, 'sleep 20')).toBe('canceled')
+    expect(result).toEqual({ content: [{ type: 'text', text: 'job canceled' }], isError: true })
+    expect(app.registry.get(id).runner.ws.lineTable.lines()).toEqual([])
   })
 
   it('lets go of a call once its answer is read', async () => {

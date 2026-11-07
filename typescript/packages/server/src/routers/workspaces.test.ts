@@ -1376,8 +1376,13 @@ describe('workspace cancel, kill, stop and start', () => {
         payload: { command: 'sleep 30' },
       })
       for (let i = 0; i < 500; i += 1) {
-        const job = app.jobs.list(wid).find((record) => record.command === 'sleep 30')
-        if (job?.status === 'running') break
+        const running = app.jobs
+          .requests()
+          .some(
+            (request) =>
+              request.line.record.command === 'sleep 30' && request.line.record.state === 'running',
+          )
+        if (running) break
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
       expect(

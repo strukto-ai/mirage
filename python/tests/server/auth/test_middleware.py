@@ -405,7 +405,7 @@ async def test_reused_workspace_name_drops_the_deleted_jobs(
             )
             answer = await tools.shell("echo MCP-SECRET")
             assert answer.text == "MCP-SECRET\n"
-            assert len(app.state.jobs.list("w")) == 2
+            assert len(entry.runner.ws.line_table.lines()) == 2
             assert (await alice.delete("/v1/workspaces/w")).status_code == 200
             r = await successor.post(
                 "/v1/workspaces", json={**_RAM, "id": "w"}
@@ -415,7 +415,8 @@ async def test_reused_workspace_name_drops_the_deleted_jobs(
                 "/v1/workspaces/w/shell", json={"command": "echo fresh"}
             )
             assert r.status_code == 200, r.text
-            commands = [job.command for job in app.state.jobs.list("w")]
+            successor_lines = app.state.registry.get("w").runner.ws.line_table
+            commands = [line.command for line in successor_lines.lines()]
             assert commands == ["echo fresh"]
     finally:
         await app.state.jobs.close()
@@ -489,7 +490,11 @@ async def test_unfinished_upload_cannot_submit_after_deletion(
             r = await pending
             assert r.status_code == 404, r.text
             assert discarded
-            assert app.state.jobs.list("w") == []
+            assert [
+                held
+                for held in app.state.jobs.requests()
+                if held.workspace_id == "w"
+            ] == []
     finally:
         release.set()
         if pending is not None and not pending.done():
@@ -577,7 +582,11 @@ async def test_retained_adapter_cannot_submit_after_deletion(
                     assert r.json() == {"detail": "workspace not found"}
                 else:
                     assert "error" in r.json(), r.text
-            assert app.state.jobs.list("w") == []
+            assert [
+                held
+                for held in app.state.jobs.requests()
+                if held.workspace_id == "w"
+            ] == []
     finally:
         release.set()
         if pending is not None and not pending.done():

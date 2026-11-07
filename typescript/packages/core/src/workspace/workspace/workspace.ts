@@ -40,7 +40,8 @@ import {
 } from '../../context/session_context.ts'
 import { eacces, enoent } from '../../errors/fs.ts'
 import type { EventRuntime } from '../../events/base.ts'
-import { newExecutionId } from '../../execution/context.ts'
+import { newLineId } from '../../execution/context.ts'
+import { LineTable } from '../../execution/line/table.ts'
 import { IOConfig } from '../../io/config.ts'
 import { MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
 import { networkRule, type NetworkSetting, runWithNetwork, sameNetwork } from '../../io/network.ts'
@@ -129,7 +130,7 @@ import { newStatusWriter, runWithLineAbort } from '../abort.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Documents } from '../documentation/documents.ts'
-import { ExecutionScope } from '../execution.ts'
+import { LineHandle } from '../../execution/line/handle.ts'
 import { expandingAliases } from '../executor/builtins/alias/alias.ts'
 import { recordStatus } from '../executor/statement.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
@@ -218,6 +219,7 @@ export class Workspace {
   readonly writeDefault: WritePolicy
   readonly processes: ProcessTable
   readonly jobTable: JobTable
+  readonly lineTable: LineTable
   readonly cache: FileCacheMixin & BaseVFS
   /** The clock this workspace reads time and waits on; a rebuild that shares its mounts runs on it too. */
   readonly clock: Clock
@@ -359,6 +361,7 @@ export class Workspace {
       options.daemonId ?? null,
     )
     this.jobTable.reaper = (runs, signum) => this.reapRuns(runs, signum)
+    this.lineTable = new LineTable(this.clock)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
     // The env block, translated once: a literal entry becomes an
@@ -1902,6 +1905,7 @@ export class Workspace {
       observer: this.observer,
       records: this.records,
       jobTable: this.jobTable,
+      lineTable: this.lineTable,
       workspaceId: this.wsId,
       runtimes: this.runtimeWorld,
       router: this.router,
@@ -1926,20 +1930,27 @@ export class Workspace {
       !options.stream &&
       (options.sink !== undefined ||
         options.evaluation !== undefined ||
-        options.executionScope !== undefined)
+        options.lineHandle !== undefined)
     )
       return this.runShell(command, options)
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const execution = new ShellExecution(
-      (sink, signal, executionScope) =>
+      (sink, signal, lineHandle) =>
         this.runShell(command, {
           ...options,
           stream: false,
           sink,
           signal,
-          executionScope,
+          lineHandle,
         }),
-      options.executionScope ?? new ExecutionScope(undefined, newExecutionId(this.ids)),
+      options.lineHandle ??
+        new LineHandle(
+          newLineId(this.ids),
+          options.session?.sessionId ?? options.sessionId ?? this.defaultSessionId,
+          command,
+          undefined,
+          () => this.clock.now(),
+        ),
       options.signal,
       this.io.bufferBytes,
     )

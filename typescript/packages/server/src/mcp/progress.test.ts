@@ -1,30 +1,34 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
-import { ExecutionScope } from '@struktoai/mirage-core/workspace/execution'
+import { LineHandle } from '@struktoai/mirage-core/execution/line/handle'
+import { LineId } from '@struktoai/mirage-core/execution/types'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import { INTERVAL, LIMIT, OutputProgress, collectExecution } from './progress.ts'
 
 describe('output progress', () => {
   it('joins the producer after a trailing preview delivery fails', async () => {
     let closed = false
-    const execution = new ShellExecution(async (output, signal) => {
-      try {
-        await output.emit('stdout', new TextEncoder().encode('first'))
-        await output.emit('stdout', new TextEncoder().encode('second'))
-        await new Promise<void>((_, reject) => {
-          signal.addEventListener(
-            'abort',
-            () => {
-              reject(new DOMException('aborted', 'AbortError'))
-            },
-            { once: true },
-          )
-        })
-        return new ExecuteResult(new Uint8Array(), new Uint8Array(), 0)
-      } finally {
-        closed = true
-      }
-    }, new ExecutionScope())
+    const execution = new ShellExecution(
+      async (output, signal) => {
+        try {
+          await output.emit('stdout', new TextEncoder().encode('first'))
+          await output.emit('stdout', new TextEncoder().encode('second'))
+          await new Promise<void>((_, reject) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                reject(new DOMException('aborted', 'AbortError'))
+              },
+              { once: true },
+            )
+          })
+          return new ExecuteResult(new Uint8Array(), new Uint8Array(), 0)
+        } finally {
+          closed = true
+        }
+      },
+      new LineHandle(new LineId('line'), 's', 'c'),
+    )
     const progress = new OutputProgress((value, message) => {
       if (value === 2) return Promise.reject(new Error('closed transport'))
       expect(message).toBe('[stdout] first')

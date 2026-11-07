@@ -77,7 +77,8 @@ import { LOCAL_ZONE, type Zone, zoneFromEnv } from '../../utils/timezone.ts'
 import type { SessionView } from '../../view/types.ts'
 import { childContext, EvaluationContext } from '../evaluation.ts'
 import type { ExecutionFrame } from '../frame.ts'
-import { ExecutionScope } from '../execution.ts'
+import { LineHandle } from '../../execution/line/handle.ts'
+import { newLineId } from '../../execution/context.ts'
 import { CAPTURABLE_BUILTINS, SHELL_NAMES } from '../lookup/constants.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
 import type { SessionState } from '../session/session.ts'
@@ -536,7 +537,7 @@ export async function handleBackground(
         const opts: ExecuteNodeOpts = {
           sink: console_,
           signal: AbortSignal.any([abort.signal, expiry.signal, ...(stop === null ? [] : [stop])]),
-          executionScope: new ExecutionScope(undefined, job.processId ?? undefined),
+          lineHandle: new LineHandle(newLineId(), bgSession.sessionId, cmdStrInner),
           endsShell: true,
           jobTable: jobTable.child(),
         }

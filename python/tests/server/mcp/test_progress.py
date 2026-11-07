@@ -2,6 +2,8 @@ import asyncio
 
 import pytest
 
+from mirage.execution.line.handle import LineHandle
+from mirage.execution.types import LineId
 from mirage.server.mcp.progress import (
     INTERVAL,
     LIMIT,
@@ -10,7 +12,6 @@ from mirage.server.mcp.progress import (
 )
 from mirage.shell.console.types import Channel
 from mirage.utils.abort import MirageAbortError
-from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.shell_execution import ShellExecution
 
 
@@ -105,7 +106,7 @@ async def test_collection_joins_producer_after_trailing_preview_failure():
             raise RuntimeError("closed transport")
         assert message == "[stdout] first"
 
-    execution = ShellExecution(run, ExecutionScope())
+    execution = ShellExecution(run, LineHandle(LineId("line"), "s", "c"))
     with pytest.raises(RuntimeError, match="closed transport"):
         await asyncio.wait_for(
             collect_execution(execution, OutputProgress(send)), 2

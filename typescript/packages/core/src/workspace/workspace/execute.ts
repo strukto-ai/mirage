@@ -22,8 +22,10 @@ import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
 
-import { ExecutionScope } from '../execution.ts'
-import { newExecutionId } from '../../execution/context.ts'
+import { LineHandle } from '../../execution/line/handle.ts'
+import { newLineId } from '../../execution/context.ts'
+import { LINE_STOP_SIGNAL } from '../../execution/constants.ts'
+import type { LineTable } from '../../execution/line/table.ts'
 import { PathSpec, underCeiling } from '../../types.ts'
 import { literalTree } from '../../shell/literal.ts'
 import {
@@ -33,7 +35,6 @@ import {
   SHELL_IGNORED_SIGNALS,
 } from '../../shell/constants.ts'
 import type { ProcessHandle } from '../../execution/process/handle.ts'
-import { LineId } from '../../execution/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../utils/bytes.ts'
@@ -147,6 +148,7 @@ export interface ExecuteEnv {
   observer: Observer
   records: OpRecord[]
   jobTable: JobTable
+  lineTable: LineTable
   workspaceId: string
   runtimes: Runtimes
   router: Router
@@ -220,7 +222,7 @@ async function answerLine(
             [],
             session.sessionId,
             options.cwd ?? session.cwd,
-            options.executionScope?.id,
+            options.lineHandle?.id.value,
           ),
       options.signal,
     )
@@ -337,26 +339,51 @@ async function runLine(
     options = { ...options }
     delete options.sink
   }
-  const executionScope =
-    options.executionScope ?? new ExecutionScope(undefined, newExecutionId(env.registry.ids))
-  await executionScope.start()
+  const lineHandle =
+    options.lineHandle ??
+    new LineHandle(newLineId(env.registry.ids), targetSession.sessionId, command, undefined, () =>
+      env.lineTable.clock.now(),
+    )
+  await lineHandle.start()
   // A typed line writes to its session's terminal, and so do the jobs it
   // starts, as they write; the line answers with whatever reached the
   // terminal while it ran, a job's output from before it first.
   const tty = options.tty ?? (options.session === undefined && !inPlace ? targetSession.tty : null)
   const lineOptions: ExecuteOptions = {
     ...options,
-    executionScope,
+    lineHandle,
     ...(tty !== null ? { sink: tty } : {}),
   }
   // The workspace's lease is taken first, so the line's pid comes after
   // every one the workspace gave out; another daemon holding it refuses the
   // line with WorkspaceHeldError.
+  // A line that starts the session's process is one of the workspace's lines
+  // (lineTable), recorded until it ends: with its status, as stopped once a
+  // cancel or an abort ended it, or with the error that kept Mirage from
+  // running it. One the session runs inside another is part of that one.
   const run = async (): Promise<ExecuteResult> => {
     await env.jobTable.claim()
     if (targetSession.processId !== null) {
       return runPreparedLine(env, command, targetSession, lineOptions, frame, argv)
     }
+    env.lineTable.start(lineHandle)
+    let ended: ExecuteResult
+    try {
+      ended = await runAsShell()
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        lineHandle.stop(LINE_STOP_SIGNAL)
+        lineHandle.end(128 + LINE_STOP_SIGNAL)
+      } else {
+        lineHandle.end(null, err instanceof Error ? `${err.name}: ${err.message}` : String(err))
+      }
+      throw err
+    }
+    lineHandle.end(ended.exitCode)
+    return ended
+  }
+  // The line as a process the session starts for it, its `$$`.
+  const runAsShell = async (): Promise<ExecuteResult> => {
     const abort = new AbortController()
     const combined =
       lineOptions.signal === undefined
@@ -366,7 +393,7 @@ async function runLine(
     let process: ProcessHandle
     try {
       process = env.jobTable.processes.start({
-        line: new LineId(executionScope.id),
+        line: lineHandle.id,
         sessionId: targetSession.sessionId,
         limit: targetSession.processes.max,
         command,
@@ -531,7 +558,7 @@ async function runPreparedLine(
                   root as unknown as TSNodeLike,
                   targetSession.sessionId,
                   effectiveSession,
-                  options.executionScope?.id,
+                  options.lineHandle?.id.value,
                   options.sink,
                 )
               : null
@@ -541,7 +568,7 @@ async function runPreparedLine(
                 command,
                 targetSession.sessionId,
                 effectiveSession.cwd,
-                options.executionScope?.id,
+                options.lineHandle?.id.value,
               ),
               lineSignal,
             )
@@ -702,7 +729,7 @@ async function runPreparedLine(
             // so a `timeout` bound and a background job's own abort both reach it.
             const innerSignal = opts.signal
             if (innerSignal !== undefined) innerOpts.signal = innerSignal
-            if (opts.executionScope !== undefined) innerOpts.executionScope = opts.executionScope
+            if (opts.lineHandle !== undefined) innerOpts.lineHandle = opts.lineHandle
             // The agent rides with the execution: an approval a nested line
             // raises is the typed line's agent's, not the workspace default's.
             // Nested lines never re-route: the evaluator's inner lines keep
@@ -754,9 +781,7 @@ async function runPreparedLine(
                         ...lineDeps,
                         parser: substitutionParser,
                         ...(innerSignal !== undefined ? { signal: innerSignal } : {}),
-                        ...(opts.executionScope !== undefined
-                          ? { executionScope: opts.executionScope }
-                          : {}),
+                        ...(opts.lineHandle !== undefined ? { lineHandle: opts.lineHandle } : {}),
                       },
                       innerOpts.handed ?? handed,
                     ),
@@ -844,7 +869,7 @@ async function runPreparedLine(
               }
               if (!substitution) return io
               // Its EXIT action runs as the substitution, which a stop ends.
-              const { node, handed: outer, executionScope } = opts
+              const { node, handed: outer, lineHandle } = opts
               const signal = innerOpts.signal
               const shellJobs = innerOpts.jobTable
               io = await finishShell(
@@ -855,7 +880,7 @@ async function runPreparedLine(
                     ...(node !== undefined ? { node } : {}),
                     ...(outer !== undefined ? { handed: outer } : {}),
                     ...(signal !== undefined ? { signal } : {}),
-                    ...(executionScope !== undefined ? { executionScope } : {}),
+                    ...(lineHandle !== undefined ? { lineHandle } : {}),
                     ...(shellJobs !== undefined ? { jobTable: shellJobs } : {}),
                   }),
                 session,
@@ -915,9 +940,9 @@ async function runPreparedLine(
             jobTable: options.jobTable ?? env.jobTable,
             executeFn,
             workspaceId: env.workspaceId,
-            executionScope:
-              options.executionScope ??
-              new ExecutionScope(undefined, newExecutionId(env.registry.ids)),
+            lineHandle:
+              options.lineHandle ??
+              new LineHandle(newLineId(env.registry.ids), targetSession.sessionId, command),
             registerCloser: (fn: () => Promise<void>) => {
               env.registerCloser(fn)
             },
@@ -974,7 +999,7 @@ async function runPreparedLine(
                     [],
                     targetSession.sessionId,
                     effectiveSession.cwd,
-                    options.executionScope?.id,
+                    options.lineHandle?.id.value,
                   ),
               lineSignal,
             )
@@ -1187,7 +1212,7 @@ async function runParsedLine(
                   [],
                   targetSession.sessionId,
                   effectiveSession.cwd,
-                  options.executionScope?.id,
+                  options.lineHandle?.id.value,
                 ),
             killed,
           )
@@ -1262,7 +1287,7 @@ async function runParsedLine(
                 lineRecords,
                 targetSession.sessionId,
                 effectiveSession.cwd,
-                options.executionScope?.id,
+                options.lineHandle?.id.value,
               ),
           killed,
         )
@@ -1556,7 +1581,7 @@ async function runParsedLine(
             opRecords,
             targetSession.sessionId,
             effectiveSession.cwd,
-            options.executionScope?.id,
+            options.lineHandle?.id.value,
           ),
       killed,
     )
