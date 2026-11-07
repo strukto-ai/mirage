@@ -165,7 +165,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("--exclude", action="append"),
             Argument("-X", "--exclude-from", type="path", action="append"),
             # Two entries for one option, so a refused value is worded
-            # with the spelling typed, as GNU words it.
+            # with the spelling typed.
             Argument("-t"),
             Argument("--threshold"),
             Argument("--time", nargs="?", attached_only=True),

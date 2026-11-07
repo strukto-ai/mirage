@@ -2,8 +2,8 @@
 //! counting from the start; `--follow`'s word; `-s`, a whole C `strtod`
 //! word of at least 0, `null` when it is infinite; `--pid`, a process id;
 //! and `--max-unchanged-stats`, a count that is only checked. Each typed
-//! occurrence is checked in the order it was typed, as GNU reads its
-//! options, and the last of each is the value; `--follow`'s word, which
+//! occurrence is checked in the order it was typed, and the last of each
+//! is the value; `--follow`'s word, which
 //! the host hands over apart, is checked after them.
 
 use serde_json::{Value as Json, json};

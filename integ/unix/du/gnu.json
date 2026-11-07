@@ -66,10 +66,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "du -a /data/sub; du -ab --exclude=deep /data/sub; printf 'deep\\n' | du -ab -X - /data/sub; du -ab -t 10 /data/sub; du -ab --threshold=-5 /data/sub; du -sb -t 100 /data/sub; du -t -0 /data/sub; echo code=$?; du -s --inodes /data/sub; du -sb -0 /data/sub | od -c | head -1; du -sbD --si /data/sub; du --time=bogus /data/sub; echo code=$?",
+      "command": "du -a /data/sub; du -ab --exclude=deep /data/sub; printf 'deep\\n' | du -ab -X - /data/sub; du -ab -t 10 /data/sub; du -ab --threshold=-5 /data/sub; du -sb -t 100 /data/sub; du -t -0 /data/sub; echo code=$?; du -s --inodes /data/sub; du -sb -0 /data/sub | od -c | head -1; du -sbD --si /data/sub; du --time=bogus /data/sub; echo code=$?; printf x > /data/duT && touch -d '2026-03-04 05:06:07' /data/duT && du -b --time /data/duT; du -b --time=access --time-style=full-iso /data/duT; du -b --time --time-style=+%Y/%j /data/duT; TIME_STYLE=iso du -b --time /data/duT; TIME_STYLE=+%s du -b --time --time-style=long-iso /data/duT; rm -f /data/duT",
       "expect": {
         "exit": 0,
-        "stdout": "5\t/data/sub/deep/deeper.txt\n5\t/data/sub/deep\n15\t/data/sub/nested.txt\n20\t/data/sub\n15\t/data/sub/nested.txt\n15\t/data/sub\n15\t/data/sub/nested.txt\n15\t/data/sub\n15\t/data/sub/nested.txt\n20\t/data/sub\n5\t/data/sub/deep/deeper.txt\n5\t/data/sub/deep\ncode=1\n4\t/data/sub\n0000000   2   0  \\t   /   d   a   t   a   /   s   u   b  \\0\n20\t/data/sub\ncode=1\n",
+        "stdout": "5\t/data/sub/deep/deeper.txt\n5\t/data/sub/deep\n15\t/data/sub/nested.txt\n20\t/data/sub\n15\t/data/sub/nested.txt\n15\t/data/sub\n15\t/data/sub/nested.txt\n15\t/data/sub\n15\t/data/sub/nested.txt\n20\t/data/sub\n5\t/data/sub/deep/deeper.txt\n5\t/data/sub/deep\ncode=1\n4\t/data/sub\n0000000   2   0  \\t   /   d   a   t   a   /   s   u   b  \\0\n20\t/data/sub\ncode=1\n1\t2026-03-04 05:06\t/data/duT\n1\t2026-03-04 05:06:07.000000000 +0000\t/data/duT\n1\t2026/063\t/data/duT\n1\t2026-03-04\t/data/duT\n1\t2026-03-04 05:06\t/data/duT\n",
         "stderr": "du: invalid --threshold argument '-0'\ndu: invalid argument 'bogus' for '--time'\nValid arguments are:\n  - 'atime', 'access', 'use'\n  - 'ctime', 'status'\nTry 'du --help' for more information.\n"
       }
     },

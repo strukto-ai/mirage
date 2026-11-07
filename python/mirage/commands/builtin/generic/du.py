@@ -126,7 +126,7 @@ def parse_flags(ctx: Context) -> DuFlags | IOResult:
     """du's options, ``--max-depth`` and its conflicts with ``-s`` and
     ``-a`` read by mirage-rs before any operand is resolved.
 
-    The time style is read only under ``--time``, as GNU reads it, from
+    The time style is read only under ``--time``, from
     ``--time-style`` or else the ``TIME_STYLE`` variable.
 
     Args:
@@ -202,7 +202,7 @@ async def read_flags(
     ctx: Context, stream: Callable[[PathSpec], AsyncIterator[bytes]]
 ) -> DuFlags | IOResult:
     """du's options with every ``-X`` file read into its patterns, one a
-    line; a file that cannot be read is GNU's refusal, exit 1.
+    line; a file that cannot be read is refused, exit 1.
 
     Args:
         ctx (Context): the flags as the dispatcher parsed them.
@@ -335,8 +335,8 @@ async def du_operands(
         stat_path (StatPath | None): dispatcher-backed stat, None when du
             runs outside a workspace and there is no namespace to ask.
         excludes (Sequence[str]): the ``--exclude`` patterns; an operand
-            one matches is dropped before it is stat'ed, as GNU drops
-            it, so a missing one is not reported either.
+            one matches is dropped before it is stat'ed, so a missing
+            one is not reported either.
 
     Returns:
         tuple[list[PathSpec], list[tuple[str, str]]]: readable operands,

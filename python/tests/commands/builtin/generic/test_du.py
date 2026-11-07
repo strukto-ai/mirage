@@ -158,7 +158,7 @@ def test_rollup_handles_a_root_mount():
     assert rollup(entries, "/", a=False, max_depth=None) == [("/sub", 3)]
 
 
-# GNU matches an --exclude pattern against the path as du prints it, or
+# An --exclude pattern matches the path as du prints it, or
 # the part after any slash, with `*` crossing slashes and case kept
 # (pinned on debian:stable-slim). Mirrored in du.test.ts.
 def test_an_exclude_matches_the_path_or_a_part_after_a_slash():

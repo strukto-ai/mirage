@@ -230,7 +230,7 @@ export function excludedStart(
 /**
  * du's options, `--max-depth` and its conflicts with `-s` and `-a` read by
  * mirage-rs before any operand is resolved: the flags, or du's refusal. The
- * time style is read only under --time, as GNU reads it, from --time-style or
+ * time style is read only under --time, from --time-style or
  * else the TIME_STYLE variable. Mirrors Python's `parse_flags`.
  */
 export function parseFlags(ctx: Context): DuFlags | IOResult {
@@ -292,7 +292,7 @@ export function parseFlags(ctx: Context): DuFlags | IOResult {
 
 /**
  * du's options with every -X file read into its patterns, one a line; a file
- * that cannot be read is GNU's refusal, exit 1. `stream` reads a pattern file,
+ * that cannot be read is refused, exit 1. `stream` reads a pattern file,
  * `-` from stdin. Mirrors Python's `read_flags`.
  */
 export async function readFlags(
@@ -403,7 +403,7 @@ async function duOperands(
   hasContent?: (p: PathSpec) => Promise<boolean>,
   statPath: StatPath | null = null,
   // An operand an --exclude pattern matches is dropped before it is stat'ed,
-  // as GNU drops it, so a missing one is not reported either.
+  // so a missing one is not reported either.
   excludes: readonly string[] = [],
 ): Promise<{ present: PathSpec[]; missing: [string, string][] }> {
   const targets = paths.length > 0 ? paths : [cwdSpec(cwd)]

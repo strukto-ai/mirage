@@ -803,8 +803,8 @@ export async function tailGeneric(
   ) {
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(STDIN_BY_NAME) })]
   }
-  // GNU warns first, then tails as if --retry and --pid were not there; a
-  // descriptor it follows only after the initial open says so too.
+  // The warnings come first, then tail runs as if --retry and --pid were not
+  // there; a descriptor it follows only after the initial open says so too.
   const warnings =
     (following.retry && !following.follow
       ? RETRY_IGNORED

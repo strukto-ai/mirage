@@ -1009,8 +1009,9 @@ async def tail_generic(
         and (not paths or any(is_stdin(p) for p in paths))
     ):
         return None, IOResult(exit_code=1, stderr=STDIN_BY_NAME)
-    # GNU warns first, then tails as if --retry and --pid were not there;
-    # a descriptor it follows only after the initial open says so too.
+    # The warnings come first, then tail runs as if --retry and --pid were
+    # not there; a descriptor it follows only after the initial open says
+    # so too.
     warnings = (
         RETRY_IGNORED
         if parsed.retry and not parsed.follow

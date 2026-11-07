@@ -147,7 +147,7 @@ describe('du', () => {
     expect(toVirtual([['/dir/a.txt', 1]], spec('/dir', 'dir'))).toEqual([['/dir/a.txt', 1]])
   })
 
-  // GNU matches an --exclude pattern against the path as du prints it, or the
+  // An --exclude pattern matches the path as du prints it, or the
   // part after any slash, with `*` crossing slashes and case kept (pinned on
   // debian:stable-slim). Mirrors test_du.py.
   it('excludes a path a pattern matches whole or after a slash', () => {

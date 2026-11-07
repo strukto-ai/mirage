@@ -53,7 +53,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('--exclude', { action: 'append' }),
       new Argument(['-X', '--exclude-from'], { type: 'path', action: 'append' }),
       // Two entries for one option, so a refused value is worded with the
-      // spelling typed, as GNU words it.
+      // spelling typed.
       new Argument('-t'),
       new Argument('--threshold'),
       new Argument('--time', { nargs: '?', attachedOnly: true }),

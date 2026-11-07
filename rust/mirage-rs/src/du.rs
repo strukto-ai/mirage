@@ -16,7 +16,7 @@ use crate::{StreamError, byte_text, quoted};
 const HINT: &str = "Try 'du --help' for more information.";
 /// The size letters `-t` takes, each with an optional `B` or `iB`.
 const THRESHOLD_LETTERS: &[u8] = b"kKmMGTPEZYRQ";
-/// `--time`'s words, in the order GNU lists them back.
+/// `--time`'s words, in the order du lists them back.
 const TIMES: &[Choice] = &[&["atime", "access", "use"], &["ctime", "status"]];
 /// The named time styles; a `+FORMAT` is any word with a leading `+`.
 const STYLES: &[Choice] = &[&["full-iso"], &["long-iso"], &["iso"]];
