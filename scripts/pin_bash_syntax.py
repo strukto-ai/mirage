@@ -11,7 +11,7 @@ from typing import Any
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "python"))
 
-from mirage.shell.bytes import decode_text  # noqa: E402
+from mirage.shell.bytes import decode_text, encode_text  # noqa: E402
 from mirage.shell.parse import parse, syntax_refusal  # noqa: E402
 
 FIXTURES = REPO / "integ" / "fixtures" / "shell" / "bash_syntax"
@@ -82,6 +82,7 @@ FRAGMENTS = (
     "$",
 )
 TOKEN = re.compile(r"\s+|[;&|<>()]+|[^\s;&|<>()]+")
+LONE = re.compile("[\udc80-\udcff]")
 PREFIX = re.compile(r"^bash: (-c: )?line \d+: ")
 
 
@@ -98,7 +99,7 @@ def pin(lines: list[str]) -> list[tuple[int, str]]:
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         (work / "lines.bin").write_bytes(
-            b"".join(line.encode() + b"\0" for line in lines)
+            b"".join(encode_text(line) + b"\0" for line in lines)
         )
         (work / "loop.sh").write_text(LOOP)
         subprocess.run(
@@ -118,7 +119,7 @@ def pin(lines: list[str]) -> list[tuple[int, str]]:
     results = []
     for i in range(len(lines)):
         status = int(fields[2 * i])
-        err = fields[2 * i + 1].decode(errors="replace")
+        err = decode_text(fields[2 * i + 1])
         results.append((status, refusal_stderr(err) if status else ""))
     return results
 
@@ -181,6 +182,16 @@ def corpus_rows() -> list[dict[str, Any]]:
     ]
 
 
+def escaped(match: re.Match[str]) -> str:
+    """A byte that is no UTF-8 as the JSON escape of its surrogate, so the
+    fixture stays UTF-8 and reads back to the same bytes.
+
+    Args:
+        match (re.Match[str]): one lone surrogate.
+    """
+    return f"\\u{ord(match.group()):04x}"
+
+
 def dumped(rows: list[dict[str, Any]]) -> str:
     """A fixture's text, one line per row so a re-pin diffs by line.
 
@@ -188,7 +199,8 @@ def dumped(rows: list[dict[str, Any]]) -> str:
         rows (list[dict[str, Any]]): the rows.
     """
     lines = ",\n".join(
-        "  " + json.dumps(row, ensure_ascii=False) for row in rows
+        "  " + LONE.sub(escaped, json.dumps(row, ensure_ascii=False))
+        for row in rows
     )
     pinned = json.dumps(PINNED)
     return f'{{\n "pinned": {pinned},\n "lines": [\n{lines}\n ]\n}}\n'

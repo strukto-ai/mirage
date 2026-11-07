@@ -391,7 +391,7 @@ impl Cond<'_, '_> {
     }
 
     fn test_term(&mut self) -> S<()> {
-        let mut tok = self.test_peek()?;
+        let mut tok = term(self.test_peek())?;
         let mut bangs = 0;
         while tok.kind == Kind::Word && tok.plain && self.text(tok) == b"!" {
             bangs += 1;
@@ -399,7 +399,7 @@ impl Cond<'_, '_> {
                 return Err(Stop::Refused(self.parser.too_deep()));
             }
             self.take(tok);
-            tok = self.test_peek()?;
+            tok = term(self.test_peek())?;
         }
         if tok.kind == Kind::Eof {
             return test("unexpected token `EOF' in conditional command".into(), tok);
@@ -615,6 +615,18 @@ fn operand(line: &str, read: R<Tok>) -> S<Tok> {
     read.map_err(|mut fail| {
         if fail.eof {
             fail.lines.push(line.into());
+        }
+        Stop::Refused(fail)
+    })
+}
+
+/// A term's first token; ending inside a quote or substitution there,
+/// bash names the byte its reader ends the input with.
+fn term(read: R<Tok>) -> S<Tok> {
+    read.map_err(|mut fail| {
+        if fail.eof {
+            fail.lines
+                .push(b"unexpected token `\xff' in conditional command".to_vec());
         }
         Stop::Refused(fail)
     })

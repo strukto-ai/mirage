@@ -271,7 +271,7 @@ impl Parser<'_> {
             children.push(Syn::hidden(at, at + 1));
         }
         self.skip_space();
-        let body = if self.peek() == b'{' {
+        let body = if self.at_word(b"{") {
             self.primary()?
         } else {
             self.do_group()?

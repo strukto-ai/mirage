@@ -813,11 +813,10 @@ impl Parser<'_> {
             }
             return self.refusal(at, at, vec![self.eof_line().into()], true);
         }
-        let token = match self.token_text(at) {
+        let (token, end) = match self.token_text(at) {
             Ok(token) => token,
             Err(fail) => return fail,
         };
-        let end = at + token.len().max(1);
         let newline = token == b"\n";
         let token = if newline { b"newline".to_vec() } else { token };
         let fail = self.refusal(
@@ -838,7 +837,7 @@ impl Parser<'_> {
 
     /// The token at `at` as bash names it; bash's lexer reads a word
     /// whole first, refusing one that the input ends inside.
-    fn token_text(&self, at: usize) -> R<Vec<u8>> {
+    fn token_text(&self, at: usize) -> R<(Vec<u8>, usize)> {
         let rest = &self.s[at..];
         let ops: &[&[u8]] = &[
             b";;&", b";;", b";&", b"&&", b"||", b"|&", b">>", b"<<", b"&>", b">&", b"<&", b">|",
@@ -847,10 +846,21 @@ impl Parser<'_> {
         let procsub = rest.starts_with(b"<(") || rest.starts_with(b">(");
         for op in ops.iter().filter(|_| !procsub) {
             if rest.starts_with(op) {
-                return Ok(op.to_vec());
+                return Ok((op.to_vec(), at + op.len()));
             }
         }
-        let end = self.scan_word(at)?.max(at + 1);
+        if let Some(token) = self.array_token(at) {
+            return Ok(token);
+        }
+        let mut end = self.scan_word(at)?.max(at + 1);
+        // A word that starts `name[` holds its subscript to the `]`, blanks
+        // and all, as bash reads an assignment's.
+        let name = super::lex::name_end(self.s, at);
+        if name > at && self.s.get(name) == Some(&b'[') {
+            if let Ok(close) = self.scan_bracket(name + 1, name) {
+                end = end.max(self.scan_word(close)?);
+            }
+        }
         let mut word = Vec::with_capacity(end - at);
         let mut from = at;
         while from < end {
@@ -861,7 +871,34 @@ impl Parser<'_> {
             word.push(self.s[from]);
             from += 1;
         }
-        Ok(word)
+        Ok((word, end))
+    }
+
+    /// An array assignment at `at` as the one token bash reads it as, and
+    /// where it ends: named with its elements a blank apart, comments and
+    /// newlines dropped, and the word glued after its `)`.
+    fn array_token(&self, at: usize) -> Option<(Vec<u8>, usize)> {
+        let mut probe = self.probe(at);
+        if !probe.at_assignment() {
+            return None;
+        }
+        let node = probe.assignment(false).ok()?;
+        let array = node.children.iter().find(|child| child.kind == "array")?;
+        let elements: Vec<&[u8]> = array
+            .children
+            .iter()
+            .filter(|child| child.named && !child.hidden && child.kind != "comment")
+            .map(|child| &self.s[child.start..child.end])
+            .collect();
+        let end = probe.scan_word(probe.i).ok()?;
+        let token = [
+            &self.s[at..=array.start],
+            &elements.join(&b' '),
+            b")",
+            &self.s[probe.i..end],
+        ]
+        .concat();
+        Some((token, end))
     }
 
     /// Where the next token after `at` starts, blanks and newlines skipped.
@@ -1309,7 +1346,13 @@ impl Parser<'_> {
                 return self.fail(at);
             }
         }
-        if let Some((word, kind)) = self.at_declaration() {
+        // A declaration builtin's name and `(` start a function definition,
+        // as any name's do.
+        if let Some((word, kind)) = self.at_declaration().filter(|(word, _)| {
+            self.s
+                .get(super::lex::blank_end(self.s, self.i + word.len()))
+                != Some(&b'(')
+        }) {
             return self.declaration(Vec::new(), word, kind);
         }
         if !self.at_assignment() {

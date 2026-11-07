@@ -67,15 +67,15 @@ impl Parser<'_> {
         if prefix.is_empty() && self.at_command_end() {
             return self.fail(self.i);
         }
-        // `name[` opens a subscript bash reads to its `]` at the start of a
-        // command.
-        if !assigned && is_name_start(self.peek()) {
+        // `name[` opens a subscript bash reads to its `]` where a command's
+        // name or another assignment may start.
+        if is_name_start(self.peek()) {
             let end = name_end(self.s, self.i);
             if self.s.get(end) == Some(&b'[') {
                 self.scan_bracket(end + 1, end)?;
             }
         }
-        if self.at_command_end() || self.at_word(b"}") && !prefix.is_empty() {
+        if self.at_command_end() {
             return self.statement_without_name(prefix, &marks);
         }
         let Some(name) = self.literal_opt(super::word::Ctx::default())? else {
@@ -101,15 +101,38 @@ impl Parser<'_> {
         let mut children = prefix;
         children.push(Syn::node("command_name", vec![name]).with_field("name"));
         self.skip_blank();
-        // A name and `(` begin a function definition, which needs its `)`.
+        // A name and `(` begin a function definition, which needs its `)`;
+        // a `((...))` there is one arithmetic token, named by its text.
         if unprefixed && !coproc && self.peek() == b'(' && !self.at_process_substitution() {
             let open = self.i;
             self.i += 1;
             self.skip_blank();
+            if let Some(end) = self
+                .starts(b"((")
+                .then(|| self.double_paren_end(self.i))
+                .flatten()
+            {
+                let text = &self.s[self.i + 2..end - 2];
+                let line =
+                    super::parser::line(&[b"syntax error near unexpected token `", text, b"'"]);
+                return Err(self.refusal(self.i, end, vec![line], false));
+            }
             if self.peek() != b')' {
                 return self.fail(self.i);
             }
             self.i = open;
+        }
+        // `coproc` starts a command of its own: a `name[` there opens a
+        // subscript, and redirects alone are one.
+        if coproc && is_name_start(self.peek()) {
+            let end = name_end(self.s, self.i);
+            if self.s.get(end) == Some(&b'[') {
+                self.scan_bracket(end + 1, end)?;
+            }
+        }
+        if coproc && self.at_redirect() && !self.words_after_redirects()? {
+            children.push(self.command()?);
+            return Ok(Syn::node("command", children));
         }
         if coproc && !self.at_command_end() && !self.starts(b"(") {
             let at = self.i;
@@ -290,7 +313,7 @@ impl Parser<'_> {
 
     /// `name=value`, `name+=value` or `name[index]=value`; `names` checks
     /// an array value's elements as after a redirect.
-    fn assignment(&mut self, names: bool) -> R<Syn> {
+    pub(super) fn assignment(&mut self, names: bool) -> R<Syn> {
         let at = self.i;
         let end = name_end(self.s, at);
         let name = if self.s.get(end) == Some(&b'[') {
@@ -309,7 +332,16 @@ impl Parser<'_> {
         let mut children = vec![name.with_field("name"), Syn::token(op, op_at, self.i)];
         let byte = self.peek();
         if byte == b'(' {
-            children.push(self.array(names)?.with_field("value"));
+            let open = self.i;
+            let array = self.array(names)?;
+            // A word glued after the `)` makes the whole one word, which
+            // bash assigns as a string.
+            if self.eof() || is_space(self.peek()) || is_operator(self.peek()) {
+                children.push(array.with_field("value"));
+            } else {
+                self.i = self.scan_word(self.i)?;
+                children.push(Syn::leaf("word", open, self.i).with_field("value"));
+            }
         } else if byte == b'#' {
             // The grammar ends a `#` value at an expansion or a quote; bash
             // reads the rest of the word into it.
