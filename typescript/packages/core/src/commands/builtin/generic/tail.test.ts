@@ -766,8 +766,14 @@ describe('tail -s reads exactly what strtod reads', () => {
 // test_tail.py.
 describe('tail parseFlags', () => {
   it.each([
-    [{ lines: '+3' }, { lines: null, fromLine: 3, byteCount: null, fromByte: null, terminator: 10 }],
-    [{ lines: '-3' }, { lines: 3, fromLine: null, byteCount: null, fromByte: null, terminator: 10 }],
+    [
+      { lines: '+3' },
+      { lines: null, fromLine: 3, byteCount: null, fromByte: null, terminator: 10 },
+    ],
+    [
+      { lines: '-3' },
+      { lines: 3, fromLine: null, byteCount: null, fromByte: null, terminator: 10 },
+    ],
     [
       { lines: '2', bytes: '1k' },
       { lines: null, fromLine: null, byteCount: 1024, fromByte: null, terminator: 10 },

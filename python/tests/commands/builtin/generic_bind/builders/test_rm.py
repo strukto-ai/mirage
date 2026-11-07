@@ -104,7 +104,9 @@ async def test_rm_f_reports_an_existing_file_it_cannot_remove():
 async def test_rm_reports_a_refused_stat_and_removes_the_rest():
     removed: list[str] = []
     refusal = "rm: cannot remove '/m/locked/f.txt': Permission denied\n"
-    result = await _rm(_mount(removed), "/m/locked/f.txt", "/m/a.txt", force=True)
+    result = await _rm(
+        _mount(removed), "/m/locked/f.txt", "/m/a.txt", force=True
+    )
     assert result == (1, "", refusal)
     assert removed == ["/m/a.txt"]
 
