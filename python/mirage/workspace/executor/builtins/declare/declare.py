@@ -774,6 +774,7 @@ async def handle_declare_print(
     names: list[str],
     session: SessionState,
     flags: set[str] | None = None,
+    cmd: str = "declare",
 ) -> Result:
     """Run ``declare -p``: render declarations for names, or for all.
 
@@ -787,6 +788,7 @@ async def handle_declare_print(
         names (list[str]): the names to render, empty for all.
         session (SessionState): shell session state.
         flags (set[str] | None): the declaration's option letters.
+        cmd (str): ``declare`` or ``typeset``, which a refusal names.
     """
     targets = names or sorted(
         name
@@ -798,11 +800,11 @@ async def handle_declare_print(
     for name in targets:
         line = declare_line(session, name)
         if line is None:
-            errors.append(f"{shell_voice()}declare: {name}: not found")
+            errors.append(f"{shell_voice()}{cmd}: {name}: not found")
         else:
             lines.append(line)
     return result(
-        "declare",
+        cmd,
         encode_text("".join(f"{line}\n" for line in lines)),
         1 if errors else 0,
         "".join(f"{error}\n" for error in errors),

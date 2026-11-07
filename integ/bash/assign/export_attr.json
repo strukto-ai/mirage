@@ -378,11 +378,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "QEO=good; declare -p QEO QENOPE",
+      "command": "QEO=good; declare -p QEO QENOPE; typeset -p QENOPE QEO",
       "expect": {
         "exit": 1,
-        "stdout": "declare -- QEO=\"good\"\n",
-        "stderr": "bash: line 1: declare: QENOPE: not found\n"
+        "stdout": "declare -- QEO=\"good\"\ndeclare -- QEO=\"good\"\n",
+        "stderr": "bash: line 1: declare: QENOPE: not found\nbash: line 1: typeset: QENOPE: not found\n"
       }
     },
     {

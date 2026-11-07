@@ -29,7 +29,7 @@ import { Terminal, type JobOutput } from '../../shell/console/index.ts'
 import { BIN_PREFIX, IFS_DEFAULT, SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 import type { JobTable, JobWaits } from '../../execution/job/index.ts'
-import { sourceRow } from '../../shell/helpers.ts'
+import { lineRow } from '../../shell/helpers.ts'
 import type { AliasExpansion, TSNodeLike } from '../../shell/types.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { attrsFromLetters, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
@@ -888,7 +888,7 @@ export class SessionState {
    * spelled it, numbered on from where that text's parse starts (`lineRow`).
    */
   get lineNumber(): number {
-    return this.lineRow + (this.lineNode === null ? 0 : sourceRow(this.lineNode)) + 1
+    return this.lineRow + (this.lineNode === null ? 0 : lineRow(this.lineNode)) + 1
   }
 
   /**

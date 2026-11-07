@@ -14,7 +14,7 @@ use mirage_rs::interp::job::{Job, Output, Running, Step};
 use mirage_rs::interp::shell::Shell as Inner;
 use mirage_rs::interp::task::{self, Answer, Ask, Expanded, Mode, Write};
 use mirage_rs::interp::write::{Denied, Fault, Verb};
-use mirage_rs::interp::{Diagnostic, Signal};
+use mirage_rs::interp::{Diagnostic, Signal, quote};
 use mirage_rs::vars::{self, Assigned, Indexed, Kind, Managed, Store, Value, Var};
 
 use crate::codec::{Args, Item, one};
@@ -601,6 +601,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "hidden" => Item::Bool(shell.store()?.hidden(&args.string()?)),
         "nameref_target" => Item::opt(shell.store()?.nameref_target(&args.string()?), Item::text),
         "deref" => Item::text(shell.store()?.deref(&args.string()?)),
+        "shown" => Item::text(quote::shown(&args.bytes()?, shell.shell()?.utf8())),
         "target" => Item::text(shell.store()?.target(&args.string()?)),
         "is_readonly" => {
             let name = args.string()?;
@@ -635,6 +636,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         }
         "in_function" => Item::Bool(shell.store()?.in_function()),
         "is_local" => Item::Bool(shell.store()?.is_local(&args.string()?)),
+        "locals" => Item::list(shell.store()?.locals().into_iter().map(Item::text)),
         "shadow" => {
             let name = args.string()?;
             shell.store_mut()?.shadow(&name, args.flag()?);

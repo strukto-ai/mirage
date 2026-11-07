@@ -168,11 +168,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "readonly -a UC=(x y); unset 'UC[1]'; echo rc=$?; echo [${UC[@]}]",
+      "command": "readonly -a UC=(x y); unset 'UC[1]'; echo rc=$?; echo [${UC[@]}]; declare -n UR=UC; x=1; unset UR x 'UC[0]'; echo rc=$? ${x-gone}; g() { :; }; readonly -f g; h() { :; }; unset -f g h; echo rc=$?; type -t h || echo none",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\n[x y]\n",
-        "stderr": "bash: line 1: unset: UC: cannot unset: readonly variable\n"
+        "stdout": "rc=1\n[x y]\nrc=1 gone\nrc=1\nnone\n",
+        "stderr": "bash: line 1: unset: UC: cannot unset: readonly variable\nbash: line 1: unset: UC: cannot unset: readonly variable\nbash: line 1: unset: UC: cannot unset: readonly variable\nbash: line 1: unset: g: cannot unset: readonly function\n"
       }
     },
     {

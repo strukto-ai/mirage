@@ -16,6 +16,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { YieldBudget } from '../../../../io/yield_budget.ts'
 import { closeStream, openStream } from '../../../../rs/stream.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { shellVoice } from '../../../../shell/voice.ts'
 import { concat } from '../../../../utils/bytes.ts'
 
 /**
@@ -25,7 +26,8 @@ import { concat } from '../../../../utils/bytes.ts'
  * stops early stops the engine. The status and stderr settle on `io` as the
  * output ends, or as its reader stops: the status the format reached, unless
  * an output limit set one first, and the stderr ahead of that limit's notice.
- * Mirrors Python's printf_output.
+ * `voice` leads a builtin diagnostic, read when the builtin ran rather than
+ * when its output drains. Mirrors Python's printf_output.
  */
 export async function* printfOutput(
   fmt: string,
@@ -34,6 +36,7 @@ export async function* printfOutput(
   program = false,
   posix = false,
   utf8 = false,
+  voice = 'bash: ',
   signal?: AbortSignal,
 ): AsyncGenerator<Uint8Array> {
   const stream = await openStream('printf', {
@@ -41,6 +44,7 @@ export async function* printfOutput(
     posix,
     argument_count: args.length,
     utf8,
+    voice,
   })
   const budget = new YieldBudget(signal)
   const errors: Uint8Array[] = []
@@ -91,7 +95,16 @@ export async function runPrintf(
 ): Promise<[Uint8Array, Uint8Array, number]> {
   const io = new IOResult()
   const output: Uint8Array[] = []
-  for await (const part of printfOutput(fmt, args, io, program, posix, utf8, signal)) {
+  for await (const part of printfOutput(
+    fmt,
+    args,
+    io,
+    program,
+    posix,
+    utf8,
+    shellVoice(),
+    signal,
+  )) {
     output.push(part)
   }
   return [

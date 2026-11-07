@@ -791,6 +791,14 @@ export class Shell {
     return this.call('deref', name) as string
   }
 
+  /**
+   * A name as a diagnostic names it, under the shell's locale: as it is, or
+   * `$'...'` when it does not show as it is.
+   */
+  shown(value: string): string {
+    return this.call('shown', value) as string
+  }
+
   /** Where a write to a name lands, references followed. */
   target(name: string): string {
     return this.call('target', name) as string
@@ -835,6 +843,11 @@ export class Shell {
 
   isLocal(name: string): boolean {
     return this.call('is_local', name) as boolean
+  }
+
+  /** The names the running function made local, sorted. */
+  locals(): string[] {
+    return this.call('locals') as string[]
   }
 
   /**

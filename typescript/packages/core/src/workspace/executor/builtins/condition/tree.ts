@@ -76,7 +76,10 @@ async function evalLeaf(
   return node.value !== '' ? 0 : 1
 }
 
-/** Match [[ left =~ right ]], filling BASH_REMATCH on a match. */
+/**
+ * Match [[ left =~ right ]], filling BASH_REMATCH on a match and emptying
+ * it on a miss; a pattern that does not compile leaves it.
+ */
 async function regexStatus(
   ctx: CondContext,
   node: Extract<CondNode, { kind: 'binary' }>,
@@ -97,15 +100,16 @@ async function regexStatus(
     if (!(err instanceof RegexError)) throw err
     return 2
   }
-  if (found === null) return 1
   seedVar(
     ctx.session,
     'BASH_REMATCH',
     makeArray(
-      found.map((span) => (span === null ? '' : textView(left.slice(span[0], span[1]), utf8))),
+      (found ?? []).map((span) =>
+        span === null ? '' : textView(left.slice(span[0], span[1]), utf8),
+      ),
     ),
   )
-  return 0
+  return found === null ? 1 : 0
 }
 
 async function evalCondBinary(

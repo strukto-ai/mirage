@@ -188,11 +188,12 @@ def _printed(
     """
     io = IOResult()
     node = ExecutionNode(command="printf")
+    voice = shell_voice()
 
     async def output() -> AsyncIterator[bytes]:
         try:
             async with aclosing(
-                printf_output(fmt, args, io, program, posix, utf8)
+                printf_output(fmt, args, io, program, posix, utf8, voice)
             ) as parts:
                 async for part in parts:
                     yield part

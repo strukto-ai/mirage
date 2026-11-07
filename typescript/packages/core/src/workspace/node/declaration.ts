@@ -313,7 +313,7 @@ export async function executeDeclaration(
     (flagChars.has('p') || plusChars.has('p') || listing) &&
     (keyword === 'declare' || keyword === 'typeset')
   ) {
-    return handleDeclarePrint(words, session, flagChars)
+    return handleDeclarePrint(words, session, flagChars, keyword)
   }
   const conversionErrors: string[] = []
   const kind = declaredKind(flagChars)

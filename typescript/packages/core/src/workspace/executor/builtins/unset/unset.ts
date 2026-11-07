@@ -31,7 +31,7 @@ import {
 } from '../../../session/state.ts'
 import { TARGET_RE } from '../constants.ts'
 import { flagHelp } from '../help/help.ts'
-import { builtinUsage, fail, ok, refusal, requireView } from '../shared.ts'
+import { builtinUsage, fail, finish, requireView } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 
 /**
@@ -123,6 +123,11 @@ async function unsetElement(
   return 'ok'
 }
 
+/** bash's refusal to unset a readonly variable or function. */
+function readonly(name: string, kind: 'variable' | 'function'): string {
+  return `${shellVoice()}unset: ${name}: cannot unset: readonly ${kind}\n`
+}
+
 /**
  * Unset shell variables, arrays, or functions, with bash's flags.
  *
@@ -130,7 +135,8 @@ async function unsetElement(
  * variable if one exists or else a function. A `name[idx]` operand clears
  * one element; the readonly guard resolves it to the base name first,
  * since that is what `readonly` records. `-n` unsets a name reference
- * itself, where a bare name unsets what the reference points at.
+ * itself, where a bare name unsets what the reference points at. A name
+ * it cannot unset is reported and the rest still go, for status 1.
  */
 export async function handleUnset(
   args: string[],
@@ -163,26 +169,29 @@ export async function handleUnset(
       2,
     )
   }
+  const errors: string[] = []
   for (const name of args.slice(i)) {
+    const view = requireView(state)
     if (mode === 'n') {
       // `unset -n` drops the reference itself rather than its target;
       // on a plain variable bash unsets it. Ungated-by-target unset. A
       // frozen reference refuses, writable target or not.
-      const view = requireView(state)
       if (view.isReadonly(name, false)) {
-        return fail('unset', `${shellVoice()}unset: ${name}: cannot unset: readonly variable\n`)
+        errors.push(readonly(name, 'variable'))
+        continue
       }
       try {
         await view.unset(name, false)
       } catch (err) {
-        if (err instanceof PolicyDenied) return refusal('unset', err)
-        throw err
+        if (!(err instanceof PolicyDenied)) throw err
+        errors.push(`${err.message}\n`)
       }
       continue
     }
     if (mode === 'f') {
       if (session.readonlyFunctions.has(name)) {
-        return fail('unset', `${shellVoice()}unset: ${name}: cannot unset: readonly function\n`)
+        errors.push(readonly(name, 'function'))
+        continue
       }
       session.removeFunction(name)
       continue
@@ -191,11 +200,13 @@ export async function handleUnset(
     const subscript = match?.[2]
     const isElement = subscript !== undefined
     // `readonly arr` records the base name, so an `arr[i]` operand has to
-    // be resolved before the guard, as bash does (which also names the
-    // base, not the element, in the error).
+    // be resolved before the guard, as bash does, and a reference to the
+    // variable it reaches: bash names that variable, not the element or
+    // the reference, in the error.
     const base = match?.[1] ?? name
-    if (session.readonlyVars.has(base)) {
-      return fail('unset', `${shellVoice()}unset: ${base}: cannot unset: readonly variable\n`)
+    if (view.isReadonly(base)) {
+      errors.push(readonly(deref(session, base), 'variable'))
+      continue
     }
     const existed =
       isElement || name in session.env || name in session.arrays || name in session.assocs
@@ -206,15 +217,16 @@ export async function handleUnset(
     let status: 'ok' | 'notarray' | 'subscript'
     try {
       if (subscript !== undefined) {
-        status = await unsetElement(session, requireView(state), base, subscript, policies)
+        status = await unsetElement(session, view, base, subscript, policies)
       } else {
-        await requireView(state).unset(name)
+        await view.unset(name)
         unsetVariable(session, deref(session, name) || name)
         status = 'ok'
       }
     } catch (err) {
-      if (err instanceof PolicyDenied) return refusal('unset', err)
-      throw err
+      if (!(err instanceof PolicyDenied)) throw err
+      errors.push(`${err.message}\n`)
+      continue
     }
     if (status !== 'ok') {
       // bash names the base for "not an array variable" but prints only
@@ -223,16 +235,18 @@ export async function handleUnset(
         status === 'notarray'
           ? `unset: ${base}: not an array variable`
           : `unset: ${name.slice(base.length)}: bad array subscript`
-      return fail('unset', `${shellVoice()}${detail}\n`)
+      errors.push(`${shellVoice()}${detail}\n`)
+      continue
     }
     if (mode === 'auto' && !existed && name in session.functions) {
       if (session.readonlyFunctions.has(name)) {
-        return fail('unset', `${shellVoice()}unset: ${name}: cannot unset: readonly function\n`)
+        errors.push(readonly(name, 'function'))
+        continue
       }
       session.removeFunction(name)
     }
   }
-  return ok('unset')
+  return finish('unset', errors)
 }
 
 /** The `unset` arm. */

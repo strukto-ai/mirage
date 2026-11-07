@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "zbf1() { local lx=5; echo in:$lx; }; zbf1; echo out:${lx:-unset}",
+      "command": "zbf1() { local lx=5; echo in:$lx; }; zbf1; echo out:${lx:-unset}; zbf5() { local zb=2 za=1; local -i zn=4; local -a zr=(x); local zu; local; local -p | wc -l; }; zbf5; zbf6() { local zc=3; zbf7; }; zbf7() { local zd=4; local; }; zbf6",
       "expect": {
         "exit": 0,
-        "stdout": "in:5\nout:unset\n",
+        "stdout": "in:5\nout:unset\ndeclare -- za=\"1\"\ndeclare -- zb=\"2\"\ndeclare -i zn=\"4\"\ndeclare -a zr=([0]=\"x\")\ndeclare -- zu\n5\ndeclare -- zd=\"4\"\n",
         "stderr": ""
       }
     },

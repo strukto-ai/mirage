@@ -14,6 +14,7 @@
 
 from mirage.policy import PolicyDenied
 from mirage.policy.policies import Policies
+from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import VarAttr
 from mirage.shell.voice import shell_voice
@@ -21,6 +22,7 @@ from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.constants import SUBSCRIPT_RE
 from mirage.workspace.executor.builtins.declare.declare import (
     declaration_result,
+    declare_line,
     drop_reference,
     held_value,
     identifier_refusal,
@@ -45,6 +47,7 @@ from mirage.workspace.executor.builtins.declare.types import (
 from mirage.workspace.executor.builtins.shared import (
     fail,
     is_valid_name,
+    ok,
     readonly_line,
     refusal,
     require_view,
@@ -99,6 +102,16 @@ async def handle_local(
         # whole tier exists to remove.
         return fail(
             "local", f"{shell_voice()}local: can only be used in a function\n"
+        )
+    if decl.cmd == "local" and not assignments:
+        # A bare `local`, whatever its letters, lists the running
+        # function's locals as `declare -p` prints them.
+        listed = (
+            declare_line(session, name) for name in session.vars.shell.locals()
+        )
+        return ok(
+            "local",
+            encode_text("".join(f"{line}\n" for line in listed if line)),
         )
     view = require_view(state)
     restore = (

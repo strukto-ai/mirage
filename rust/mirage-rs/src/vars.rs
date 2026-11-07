@@ -553,6 +553,20 @@ impl Store {
         (!self.hidden(&name)).then_some(array)
     }
 
+    /// The names set now whose value the shell computes at each read, which
+    /// `${!prefix@}` lists beside the stored ones: `PIPESTATUS` once a
+    /// command has run, `FUNCNAME` inside a function, and `RANDOM`,
+    /// `LINENO` and `BASHPID` until each is no longer special.
+    pub fn computed(&self) -> impl Iterator<Item = &'static str> + '_ {
+        [RANDOM, LINENO, BASHPID, "PIPESTATUS", "FUNCNAME"]
+            .into_iter()
+            .filter(|&name| {
+                self.random_special(name)
+                    || self.dynamic(name).is_some()
+                    || self.special(name).is_some_and(|array| !array.is_empty())
+            })
+    }
+
     /// Whether this store saves as `other` does, record for record. A
     /// fork that has written nothing shares the records outright, and a
     /// write undone (`TMP=x true`) puts back the record it replaced, so a
@@ -956,6 +970,17 @@ impl Store {
     /// Whether a function is running.
     pub fn in_function(&self) -> bool {
         self.local.is_some()
+    }
+
+    /// The names the running function made local, sorted; none at top
+    /// level.
+    pub fn locals(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .local
+            .map(|index| self.frames[index].saved.keys().cloned().collect())
+            .unwrap_or_default();
+        names.sort();
+        names
     }
 
     /// Whether the running function made `name` local already.

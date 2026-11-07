@@ -612,6 +612,7 @@ export function handleDeclarePrint(
   names: string[],
   session: SessionState,
   flags: ReadonlySet<string> = new Set(),
+  cmd = 'declare',
 ): RedirectResult {
   const targets =
     names.length > 0
@@ -624,10 +625,10 @@ export function handleDeclarePrint(
   const errors: string[] = []
   for (const name of targets) {
     const line = declareLine(session, name)
-    if (line === null) errors.push(`${shellVoice()}declare: ${name}: not found`)
+    if (line === null) errors.push(`${shellVoice()}${cmd}: ${name}: not found`)
     else lines.push(line)
   }
-  return result('declare', {
+  return result(cmd, {
     out: encodeText(lines.map((line) => `${line}\n`).join('')),
     exitCode: errors.length > 0 ? 1 : 0,
     stderr: errors.map((error) => `${error}\n`).join(''),

@@ -273,10 +273,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "[[ abc =~ b. ]] && echo m:${BASH_REMATCH[0]}",
+      "command": "[[ abc =~ b. ]] && echo m:${BASH_REMATCH[0]}; [[ x =~ (a) ]]; echo \"n=${#BASH_REMATCH[@]}\"; re='('; [[ ab =~ (a) ]]; [[ x =~ $re ]]; echo \"rc=$? ${BASH_REMATCH[1]}\"",
       "expect": {
         "exit": 0,
-        "stdout": "m:bc\n",
+        "stdout": "m:bc\nn=0\nrc=2 a\n",
         "stderr": ""
       }
     },

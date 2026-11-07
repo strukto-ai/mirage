@@ -1323,10 +1323,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "pref2=zz_missing_pn; echo \"[${!pref2}]\"; pzqa=1 pzqb=2; echo ${!pzq@} \"${!pzq*}\"; (: ${!pzun1}); echo rc=$?; (set -u; pzr2=pzun2; : ${!pzr2}); echo rc=$?; (pzib=1a; : ${!pzib}); echo rc=$?; (pzia=(x y); pzi1='pzia[1]' pzi2='pzia[@]' pzid=zz_missing; echo ${!pzi1} ${!pzi2} ${!pzid:-d} ${!pzi1:-e} ${!pzi1:+f})",
+      "command": "pref2=zz_missing_pn; echo \"[${!pref2}]\"; pzqa=1 pzqb=2; echo ${!pzq@} \"${!pzq*}\"; (: ${!pzun1}); echo rc=$?; (set -u; pzr2=pzun2; : ${!pzr2}); echo rc=$?; (pzib=1a; : ${!pzib}); echo rc=$?; (pzia=(x y); pzi1='pzia[1]' pzi2='pzia[@]' pzid=zz_missing; echo ${!pzi1} ${!pzi2} ${!pzid:-d} ${!pzi1:-e} ${!pzi1:+f}); echo ${!RAND@} ${!BASHP@} ${!LINEN@} ${!PIPES@}; (unset LINENO; echo ${!LINEN@}.); pzf() { echo ${!FUNCN@}; }; pzf; echo ${!FUNCN@}.",
       "expect": {
         "exit": 0,
-        "stdout": "[]\npzqa pzqb pzqa pzqb\nrc=1\nrc=1\nrc=1\ny x y d y f\n",
+        "stdout": "[]\npzqa pzqb pzqa pzqb\nrc=1\nrc=1\nrc=1\ny x y d y f\nRANDOM BASHPID LINENO PIPESTATUS\n.\nFUNCNAME\n.\n",
         "stderr": "bash: line 1: pzun1: invalid indirect expansion\nbash: line 1: !pzr2: unbound variable\nbash: line 1: 1a: invalid variable name\n"
       }
     },

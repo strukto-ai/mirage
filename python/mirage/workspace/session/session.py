@@ -40,7 +40,7 @@ from mirage.shell.constants import (
     SHELL_ARGV0,
 )
 from mirage.shell.descriptors import Descriptor, StreamOwner
-from mirage.shell.helpers import source_row
+from mirage.shell.helpers import line_row
 from mirage.shell.types import AliasExpansion, TSNodeLike
 from mirage.shell.variable import (
     ManagedRef,
@@ -947,10 +947,10 @@ class SessionState:
     @property
     def line_number(self) -> int:
         """The line of the command running, ``$LINENO``: its row in the
-        text that spelled it, numbered on from where that text's parse
-        starts (``_line_row``)."""
+        text that spelled it (``line_row``), numbered on from where that
+        text's parse starts (``_line_row``)."""
         node = self._line_node
-        return self._line_row + (0 if node is None else source_row(node)) + 1
+        return self._line_row + (0 if node is None else line_row(node)) + 1
 
     @property
     def bash_pid(self) -> int:

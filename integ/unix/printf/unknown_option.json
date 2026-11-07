@@ -297,7 +297,7 @@
       "expect": {
         "exit": 0,
         "stdout": "   \\   x   |\n",
-        "stderr": "bash: printf: missing hex digit for \\x\n"
+        "stderr": "bash: line 1: printf: missing hex digit for \\x\n"
       }
     },
     {
@@ -312,7 +312,7 @@
       "expect": {
         "exit": 0,
         "stdout": "   \\   x   |\n",
-        "stderr": "bash: printf: missing hex digit for \\x\n"
+        "stderr": "bash: line 1: printf: missing hex digit for \\x\n"
       }
     },
     {
@@ -327,7 +327,7 @@
       "expect": {
         "exit": 0,
         "stdout": "   \\   u   |   \\   U   |\n",
-        "stderr": "bash: printf: missing unicode digit for \\u\nbash: printf: missing unicode digit for \\U\n"
+        "stderr": "bash: line 1: printf: missing unicode digit for \\u\nbash: line 1: printf: missing unicode digit for \\U\n"
       }
     },
     {
@@ -342,7 +342,7 @@
       "expect": {
         "exit": 0,
         "stdout": "\\x\\u\\U\n",
-        "stderr": "bash: printf: missing hex digit for \\x\nbash: printf: missing unicode digit for \\u\nbash: printf: missing unicode digit for \\U\n"
+        "stderr": "bash: line 1: printf: missing hex digit for \\x\nbash: line 1: printf: missing unicode digit for \\u\nbash: line 1: printf: missing unicode digit for \\U\n"
       }
     },
     {
@@ -357,7 +357,7 @@
       "expect": {
         "exit": 1,
         "stdout": "\\x0\n",
-        "stderr": "bash: printf: missing hex digit for \\x\nbash: printf: abc: invalid number\n"
+        "stderr": "bash: line 1: printf: missing hex digit for \\x\nbash: line 1: printf: abc: invalid number\n"
       }
     },
     {
@@ -372,7 +372,7 @@
       "expect": {
         "exit": 1,
         "stdout": "0\\x\n",
-        "stderr": "bash: printf: abc: invalid number\nbash: printf: missing hex digit for \\x\n"
+        "stderr": "bash: line 1: printf: abc: invalid number\nbash: line 1: printf: missing hex digit for \\x\n"
       }
     },
     {
@@ -387,7 +387,7 @@
       "expect": {
         "exit": 1,
         "stdout": "0\\x\n",
-        "stderr": "bash: printf: abc: invalid number\nbash: printf: missing hex digit for \\x\n"
+        "stderr": "bash: line 1: printf: abc: invalid number\nbash: line 1: printf: missing hex digit for \\x\n"
       }
     },
     {
@@ -402,7 +402,7 @@
       "expect": {
         "exit": 0,
         "stdout": "\\xa\n\\xb\n",
-        "stderr": "bash: printf: missing hex digit for \\x\nbash: printf: missing hex digit for \\x\n"
+        "stderr": "bash: line 1: printf: missing hex digit for \\x\nbash: line 1: printf: missing hex digit for \\x\n"
       }
     },
     {
@@ -417,7 +417,7 @@
       "expect": {
         "exit": 0,
         "stdout": "\\x\n",
-        "stderr": "bash: printf: missing hex digit for \\x\n"
+        "stderr": "bash: line 1: printf: missing hex digit for \\x\n"
       }
     },
     {
@@ -447,7 +447,7 @@
       "expect": {
         "exit": 0,
         "stdout": "\\\n",
-        "stderr": "bash: printf: missing hex digit for \\x\n"
+        "stderr": "bash: line 1: printf: missing hex digit for \\x\n"
       }
     },
     {
@@ -462,7 +462,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=0\n\\x|\n",
-        "stderr": "bash: printf: missing hex digit for \\x\n"
+        "stderr": "bash: line 1: printf: missing hex digit for \\x\n"
       }
     },
     {
@@ -477,7 +477,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n\\x0\n",
-        "stderr": "bash: printf: missing hex digit for \\x\nbash: printf: abc: invalid number\n"
+        "stderr": "bash: line 1: printf: missing hex digit for \\x\nbash: line 1: printf: abc: invalid number\n"
       }
     },
     {
@@ -492,7 +492,7 @@
       "expect": {
         "exit": 0,
         "stdout": "0 rc=0\n",
-        "stderr": "bash: printf: abc: invalid number\n"
+        "stderr": "bash: line 1: printf: abc: invalid number\n"
       }
     },
     {
@@ -507,7 +507,7 @@
       "expect": {
         "exit": 0,
         "stdout": "0x rc=0\n",
-        "stderr": "bash: printf: abc: invalid number\n"
+        "stderr": "bash: line 1: printf: abc: invalid number\n"
       }
     },
     {
@@ -522,7 +522,7 @@
       "expect": {
         "exit": 0,
         "stdout": "0x0 rc=0\n",
-        "stderr": "bash: printf: abc: invalid number\nbash: printf: def: invalid number\n"
+        "stderr": "bash: line 1: printf: abc: invalid number\nbash: line 1: printf: def: invalid number\n"
       }
     },
     {
@@ -552,7 +552,7 @@
       "expect": {
         "exit": 0,
         "stdout": "0x rc=1\n",
-        "stderr": "bash: printf: abc: invalid number\n"
+        "stderr": "bash: line 1: printf: abc: invalid number\n"
       }
     },
     {
@@ -567,7 +567,7 @@
       "expect": {
         "exit": 0,
         "stdout": "\\x0 rc=0\n",
-        "stderr": "bash: printf: missing hex digit for \\x\nbash: printf: abc: invalid number\n"
+        "stderr": "bash: line 1: printf: missing hex digit for \\x\nbash: line 1: printf: abc: invalid number\n"
       }
     },
     {
@@ -582,7 +582,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=0\n0\n",
-        "stderr": "bash: printf: abc: invalid number\n"
+        "stderr": "bash: line 1: printf: abc: invalid number\n"
       }
     },
     {
@@ -597,7 +597,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=0\n0x0\n",
-        "stderr": "bash: printf: abc: invalid number\nbash: printf: def: invalid number\n"
+        "stderr": "bash: line 1: printf: abc: invalid number\nbash: line 1: printf: def: invalid number\n"
       }
     }
   ]

@@ -335,7 +335,7 @@ async def execute_declaration(
         or "p" in plus_chars
         or (listing and flag_chars & (LISTED_ATTRIBUTES | {"a", "A"}))
     ) and keyword in ("declare", "typeset"):
-        return await handle_declare_print(words, session, flag_chars)
+        return await handle_declare_print(words, session, flag_chars, keyword)
     conversion_errors: list[str] = []
     kind = declared_kind(flag_chars)
     if kind is not None:

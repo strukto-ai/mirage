@@ -122,7 +122,7 @@ describe('printf in a pipeline', () => {
     const io = await ws.shell(`printf '%d' bad | head -c 1; echo " \${PIPESTATUS[*]}"`)
     expect([io.stdoutText, io.stderrText]).toEqual([
       '0 1 0\n',
-      'bash: printf: bad: invalid number\n',
+      'bash: line 1: printf: bad: invalid number\n',
     ])
     await ws.close()
   })

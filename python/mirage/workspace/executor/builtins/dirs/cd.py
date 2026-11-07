@@ -164,7 +164,8 @@ async def handle_cd(
     physical: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     raw = _scope_path(path)
-    named = typed_path(path)
+    # bash's refusals quote an operand that does not show as it is.
+    named = session.vars.shell.shown(typed_path(path))
     # `-L` joins a relative operand to the name the shell is *spelling*,
     # `-P` to the one it resolves to: from a logical /data/lk whose target
     # is /data/deep/real, bash sends `cd -L ..` to /data and `cd -P ..` to

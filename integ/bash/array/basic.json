@@ -1078,11 +1078,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "(ar28=(1); ar28[-5]=x); echo rc=$?",
+      "command": "(ar28=(1); ar28[-5]=x); echo rc=$?; (ar28[k=-5]=x); echo rc=$?; (ar28[k=-3]+=z); ar29[ ]=1; ar29[j=2]=y; declare -p ar29 j; (ar29[]=1); echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\n",
-        "stderr": "bash: line 1: ar28[-5]: bad array subscript\n"
+        "stdout": "rc=1\nrc=1\ndeclare -a ar29=([0]=\"1\" [2]=\"y\")\ndeclare -- j=\"2\"\nrc=1\n",
+        "stderr": "bash: line 1: ar28[-5]: bad array subscript\nbash: line 1: ar28[k=-5]: bad array subscript\nbash: line 1: ar28[k=-3]: bad array subscript\nbash: line 1: ar29[]: bad array subscript\n"
       }
     },
     {

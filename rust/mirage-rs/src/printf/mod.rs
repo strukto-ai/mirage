@@ -65,6 +65,9 @@ struct Config {
     argument_count: usize,
     #[serde(default)]
     utf8: bool,
+    /// How the builtin leads a diagnostic (`bash: line 3: `).
+    #[serde(default)]
+    voice: String,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -108,12 +111,15 @@ enum ParseField {
     Width,
     Dot,
     Precision,
+    Length,
     Kind,
 }
 struct Parse {
     start: usize,
     spec: Spec,
     field: ParseField,
+    /// A length modifier (`%ld`) came before the conversion.
+    modified: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -312,13 +318,49 @@ impl Printf {
         if self.config.mode == Mode::Builtin {
             self.pending.push_back(Event {
                 stderr: true,
-                segment: Segment::bytes(b"bash: ".to_vec()),
+                segment: Segment::bytes(self.config.voice.clone().into_bytes()),
             });
         }
         self.pending.extend(parts.into_iter().map(|segment| Event {
             stderr: true,
             segment,
         }));
+    }
+
+    /// Refuse the directive at `start` whose conversion is `byte`, None at
+    /// the format's end, and stop: the builtin names the byte, or the
+    /// directive when the format ends inside it, and the program the
+    /// directive through the byte.
+    fn bad_conversion(&mut self, start: usize, byte: Option<u8>) -> Work {
+        let format = self.inputs[&0].clone();
+        let end = if byte.is_some() {
+            self.format_at + 1
+        } else {
+            format.len
+        };
+        let directive = Segment::Raw {
+            input: format,
+            at: start,
+            end,
+        };
+        let parts = match (self.config.mode, byte) {
+            (Mode::Program, _) => vec![
+                Segment::bytes(b"printf: ".to_vec()),
+                directive,
+                Segment::bytes(b": invalid conversion specification\n".to_vec()),
+            ],
+            (Mode::Builtin, Some(b)) => vec![Segment::bytes(
+                [&b"printf: `"[..], &[b], b"': invalid format character\n"].concat(),
+            )],
+            (Mode::Builtin, None) => vec![
+                Segment::bytes(b"printf: `".to_vec()),
+                directive,
+                Segment::bytes(b"': missing format character\n".to_vec()),
+            ],
+        };
+        self.diagnostic(parts);
+        self.failed = true;
+        Work::End(End::Refusal)
     }
 
     fn warning(&mut self, text: impl Into<Vec<u8>>) {
@@ -669,6 +711,7 @@ impl Printf {
                         start,
                         spec: Spec::default(),
                         field: ParseField::Flags,
+                        modified: false,
                     })
                 } else if byte == b'\\' {
                     let (bytes, next, stop, warning) = escape(&format, self.format_at, false);
@@ -726,11 +769,11 @@ impl Printf {
                         parse.spec.precision = Field::Count(0);
                         parse.field = ParseField::Precision;
                     }
-                    ParseField::Dot => parse.field = ParseField::Kind,
+                    ParseField::Dot => parse.field = ParseField::Length,
                     ParseField::Precision if byte == Some(b'*') => {
                         parse.spec.precision = Field::Argument;
                         self.format_at += 1;
-                        parse.field = ParseField::Kind;
+                        parse.field = ParseField::Length;
                     }
                     ParseField::Precision if byte.is_some_and(|b| b.is_ascii_digit()) => {
                         let n = parse.spec.precision().unwrap_or(0);
@@ -740,9 +783,23 @@ impl Printf {
                         );
                         self.format_at += 1;
                     }
-                    ParseField::Precision => parse.field = ParseField::Kind,
+                    ParseField::Precision => parse.field = ParseField::Length,
+                    ParseField::Length if byte.is_some_and(|b| b"hlLjtz".contains(&b)) => {
+                        parse.modified = true;
+                        self.format_at += 1;
+                    }
+                    ParseField::Length => parse.field = ParseField::Kind,
                     ParseField::Kind => {
-                        if let Some(b) = byte.filter(|b| b"sdiouxXeEfFgGaAcbq%".contains(b)) {
+                        // Only a `%` right after the one it closes is a
+                        // literal; the program takes no length on `%b` or
+                        // `%q`, where the builtin ignores one anywhere.
+                        let literal = byte == Some(b'%') && self.format_at == parse.start + 1;
+                        let sized = self.config.mode == Mode::Program && parse.modified;
+                        if let Some(b) = byte.filter(|b| {
+                            literal
+                                || (b"sdiouxXeEfFgGaAcbq".contains(b)
+                                    && !(sized && b"bq".contains(b)))
+                        }) {
                             self.format_at += 1;
                             parse.spec.kind = b;
                             if b == b'%' {
@@ -751,9 +808,7 @@ impl Printf {
                             }
                             return Work::Evaluate(parse.spec);
                         }
-                        self.format_at = parse.start + 1;
-                        self.output(Segment::bytes(b"%".to_vec()));
-                        return Work::Format;
+                        return self.bad_conversion(parse.start, byte);
                     }
                 }
                 Work::Parse(parse)

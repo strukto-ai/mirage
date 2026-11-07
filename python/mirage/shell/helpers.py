@@ -92,6 +92,28 @@ def source_row(node: TSNodeLike, end: bool = False) -> int:
     return program.row(program.offsets[byte])
 
 
+def line_row(node: TSNodeLike) -> int:
+    """The row bash numbers ``node`` by, ``$LINENO`` and a diagnostic's
+    ``line N``: a simple command's is where the token after its first
+    element ends, which bash has read by the time it makes the command
+    (a redirect's operator, the element itself when none follows); any
+    other node's is the row it starts on.
+
+    Args:
+        node (TSNodeLike): a node of a parsed program.
+    """
+    if node.type != NT.COMMAND or not node.children:
+        return source_row(node)
+    after = node.children[1] if len(node.children) > 1 else node.children[0]
+    if after.type in (
+        NT.FILE_REDIRECT,
+        NT.HEREDOC_REDIRECT,
+        NT.HERESTRING_REDIRECT,
+    ):
+        after = after.children[0]
+    return source_row(after, end=True)
+
+
 def read_row(node: TSNodeLike) -> int:
     """The row the shell began reading ``node``'s command on.
 

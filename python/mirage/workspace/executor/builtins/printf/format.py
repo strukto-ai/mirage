@@ -19,6 +19,7 @@ from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.stream import close_stream, open_stream
 from mirage.shell.bytes import encode_text
+from mirage.shell.voice import shell_voice
 
 
 async def printf_output(
@@ -28,6 +29,7 @@ async def printf_output(
     program: bool = False,
     posix: bool = False,
     utf8: bool = False,
+    voice: str = "bash: ",
 ) -> AsyncGenerator[bytes, None]:
     """Format raw shell arguments through the shared bounded engine.
 
@@ -45,6 +47,8 @@ async def printf_output(
         program (bool): Use the program's numeric diagnostics.
         posix (bool): Suppress program character-constant warnings.
         utf8 (bool): Read quoted numeric constants as UTF-8 characters.
+        voice (str): How the builtin leads a diagnostic, read when the
+            builtin ran rather than when its output drains.
     """
     stream = open_stream(
         "printf",
@@ -53,6 +57,7 @@ async def printf_output(
             "posix": posix,
             "argument_count": len(args),
             "utf8": utf8,
+            "voice": voice,
         },
     )
     budget = YieldBudget()
@@ -103,7 +108,7 @@ async def run_printf(
     """
     io = IOResult()
     async with aclosing(
-        printf_output(fmt, args, io, program, posix, utf8)
+        printf_output(fmt, args, io, program, posix, utf8, shell_voice())
     ) as parts:
         output = b"".join([part async for part in parts])
     stderr = io.stderr if isinstance(io.stderr, bytes) else b""

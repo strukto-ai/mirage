@@ -163,9 +163,10 @@ function printed(
 ): RedirectResult {
   const io = new IOResult()
   const node = new ExecutionNode({ command: 'printf' })
+  const voice = shellVoice()
   async function* output(): AsyncGenerator<Uint8Array> {
     try {
-      yield* printfOutput(fmt, args, io, program, posix, utf8, signal)
+      yield* printfOutput(fmt, args, io, program, posix, utf8, voice, signal)
     } finally {
       node.exitCode = io.exitCode
       node.stderr = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()

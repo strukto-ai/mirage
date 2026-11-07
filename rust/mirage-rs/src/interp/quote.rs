@@ -87,6 +87,16 @@ pub(crate) fn ansi_c(value: &[u8], utf8: bool) -> Vec<u8> {
     out
 }
 
+/// A name as a diagnostic names it (`cd`, `command not found`): as it is
+/// when it shows as it is, else `$'...'`.
+pub fn shown(value: &[u8], utf8: bool) -> Vec<u8> {
+    if printable(value, utf8) {
+        value.to_vec()
+    } else {
+        ansi_c(value, utf8)
+    }
+}
+
 /// `${v@Q}`: single quotes, `'` as `'\''`, or `$'...'` for a value that
 /// does not show as it is.
 pub fn single(value: &[u8], utf8: bool) -> Vec<u8> {

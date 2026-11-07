@@ -113,7 +113,8 @@ async def _eval_leaf(
 
 
 async def _regex_status(ctx: CondContext, node: CondBinary) -> int:
-    """Match ``[[ left =~ right ]]``, filling BASH_REMATCH on a match.
+    """Match ``[[ left =~ right ]]``, filling BASH_REMATCH on a match and
+    emptying it on a miss; a pattern that does not compile leaves it.
 
     Args:
         ctx (CondContext): evaluation context.
@@ -129,19 +130,17 @@ async def _regex_status(ctx: CondContext, node: CondBinary) -> int:
         found = await regex.search(left)
     except RegexError:
         return 2
-    if found is None:
-        return 1
     seed_var(
         ctx.session,
         "BASH_REMATCH",
         make_array(
             [
                 "" if span is None else text_view(left[slice(*span)], utf8)
-                for span in found
+                for span in found or ()
             ]
         ),
     )
-    return 0
+    return 1 if found is None else 0
 
 
 async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
