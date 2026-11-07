@@ -93,6 +93,7 @@ describe('pullForBranch', () => {
   const node = (number: number, state: string, head = 'dev', fork?: string) => ({
     number,
     state,
+    baseRefName: 'main',
     headRefName: head,
     isCrossRepository: fork !== undefined,
     headRepositoryOwner: { login: fork ?? 'o' },
@@ -100,28 +101,41 @@ describe('pullForBranch', () => {
   const reply = (nodes: unknown[], defaultBranch = 'main') => ({
     data: { repository: { pullRequests: { nodes }, defaultBranchRef: { name: defaultBranch } } },
   })
+  const numberOf = async (found: Promise<Record<string, unknown> | null>) => (await found)?.number
 
   it('asks for the newest 30 of every state whose head ref is the branch', async () => {
     const sent: { query: string; variables: Record<string, unknown> }[] = []
-    expect(
-      await pullForBranch(graphqlTransport([reply([node(3, 'OPEN')])], sent), ref, 'dev'),
-    ).toBe(3)
+    const transport = graphqlTransport([reply([node(3, 'OPEN')])], sent)
+    expect(await numberOf(pullForBranch(transport, ref, 'dev'))).toBe(3)
     expect(sent[0]?.variables).toEqual({ owner: 'o', repo: 'r', headRefName: 'dev', states: null })
     expect(sent[0]?.query).toContain('first: 30')
   })
 
   it('takes an open one before a newer closed one, and a fork only as owner:branch', async () => {
     const rows = [node(9, 'CLOSED'), node(8, 'OPEN', 'dev', 'fork'), node(7, 'OPEN')]
-    expect(await pullForBranch(graphqlTransport([reply(rows)], []), ref, 'dev')).toBe(7)
-    expect(await pullForBranch(graphqlTransport([reply(rows)], []), ref, 'fork:dev')).toBe(8)
+    const transport = graphqlTransport([reply(rows), reply(rows)], [])
+    expect(await numberOf(pullForBranch(transport, ref, 'dev'))).toBe(7)
+    expect(await numberOf(pullForBranch(transport, ref, 'fork:dev'))).toBe(8)
   })
 
   it('passes over a merged one headed by the default branch, as gh does', async () => {
     const rows = [node(4, 'MERGED', 'main')]
-    await expect(pullForBranch(graphqlTransport([reply(rows)], []), ref, 'main')).rejects.toThrow(
-      'no pull requests found for branch "main"',
-    )
-    expect(await pullForBranch(graphqlTransport([reply(rows, 'trunk')], []), ref, 'main')).toBe(4)
+    const transport = graphqlTransport([reply(rows), reply(rows, 'trunk')], [])
+    expect(await pullForBranch(transport, ref, 'main')).toBeNull()
+    expect(await numberOf(pullForBranch(transport, ref, 'main'))).toBe(4)
+  })
+
+  it('narrows by the states asked for and by the base, as pr create does', async () => {
+    const sent: { query: string; variables: Record<string, unknown> }[] = []
+    const rows = [{ ...node(5, 'OPEN'), baseRefName: 'release' }]
+    const transport = graphqlTransport([reply(rows), reply(rows)], sent)
+    expect(
+      await pullForBranch(transport, ref, 'dev', { states: ['OPEN'], base: 'main' }),
+    ).toBeNull()
+    expect(
+      await numberOf(pullForBranch(transport, ref, 'dev', { states: ['OPEN'], base: 'release' })),
+    ).toBe(5)
+    expect(sent[0]?.variables.states).toEqual(['OPEN'])
   })
 
   it('refuses a head with more than one owner before asking anything', async () => {

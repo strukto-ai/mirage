@@ -19,11 +19,13 @@ import pytest
 from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.issue import (
     ISSUE_FIELDS,
+    edit_cmd,
     list_cmd,
     reopen_cmd,
     view_cmd,
 )
 from mirage.commands.config import Context
+from mirage.commands.errors import UsageError
 from mirage.core.github.config import GhConfig
 from mirage.core.github.issue import IssueListFilter, IssueSelections
 from mirage.io.types import materialize
@@ -268,3 +270,113 @@ async def test_reopen_leaves_an_open_issue_alone(monkeypatch):
     assert io.exit_code == 0
     assert io.stderr == b"! Issue o/r#4 (t) is already open\n"
     assert calls == [("get", 4)]
+
+
+def _url(number: int) -> str:
+    return f"https://github.com/o/r/issues/{number}"
+
+
+def _edit_calls(monkeypatch, failing=()) -> list[tuple]:
+    calls: list[tuple] = []
+
+    async def get(config, ref, number):
+        calls.append(("get", number))
+        return {"number": number, "title": "t", "url": _url(number)}
+
+    async def edit(config, ref, number, body):
+        calls.append(("edit", number, body))
+        if number in failing:
+            raise ValueError("Validation Failed (HTTP 422)")
+        return {"url": _url(number)}
+
+    monkeypatch.setitem(edit_cmd.__globals__, "get_issue", get)
+    monkeypatch.setitem(edit_cmd.__globals__, "edit_issue", edit)
+    return calls
+
+
+def _ctx(**flags) -> Context:
+    return Context(argv=(), flags=flags)
+
+
+# cobra's counts: exactly one issue for each verb but edit, which takes at
+# least one.
+@pytest.mark.asyncio
+async def test_issue_verbs_refuse_any_count_but_one(monkeypatch):
+    calls = _edit_calls(monkeypatch)
+    with pytest.raises(ValueError, match=r"accepts 1 arg\(s\), received 0"):
+        await view_cmd(ACCOUNT, [], [], _ctx(repo="o/r"))
+    with pytest.raises(ValueError, match=r"accepts 1 arg\(s\), received 2"):
+        await view_cmd(ACCOUNT, [], ["1", "2"], _ctx(repo="o/r"))
+    with pytest.raises(
+        ValueError, match=r"requires at least 1 arg\(s\), only received 0"
+    ):
+        await edit_cmd(ACCOUNT, [], [], _ctx(repo="o/r", title="t"))
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_issue_edit_with_no_field_is_refused_before_any_read(
+    monkeypatch,
+):
+    calls = _edit_calls(monkeypatch)
+    with pytest.raises(
+        UsageError,
+        match="field to edit flag required when not running interactively",
+    ):
+        await edit_cmd(ACCOUNT, [], ["4"], _ctx(repo="o/r"))
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_issue_edit_edits_every_issue_named_in_order(monkeypatch):
+    calls = _edit_calls(monkeypatch)
+    out, io = await edit_cmd(
+        ACCOUNT, [], ["5", "#4"], _ctx(repo="o/r", add_label=["bug"])
+    )
+    assert await materialize(out) == f"{_url(4)}\n{_url(5)}\n".encode()
+    assert calls == [
+        ("get", 5),
+        ("get", 4),
+        ("edit", 5, {"labels": ["bug"]}),
+        ("edit", 4, {"labels": ["bug"]}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_issue_edit_names_each_issue_it_could_not_edit(monkeypatch):
+    _edit_calls(monkeypatch, failing=(5,))
+    out, io = await edit_cmd(
+        ACCOUNT, [], ["5", "4"], _ctx(repo="o/r", title="x")
+    )
+    assert await materialize(out) == f"{_url(4)}\n".encode()
+    assert io.exit_code == 1
+    assert (
+        await materialize(io.stderr)
+        == (
+            f"failed to update {_url(5)}: Validation Failed (HTTP 422)\n"
+            "gh issue edit: failed to update 1 issue\n"
+        ).encode()
+    )
+
+
+@pytest.mark.asyncio
+async def test_issue_edit_puts_every_issue_in_the_url_repo(monkeypatch):
+    calls = _edit_calls(monkeypatch)
+    await edit_cmd(
+        ACCOUNT, [], ["1", "https://github.com/a/b/issues/2"], _ctx(title="x")
+    )
+    assert calls[:2] == [("get", 1), ("get", 2)]
+    with pytest.raises(
+        ValueError,
+        match='multiple issues must be in same repo: found "c/d", '
+        'expected "a/b"',
+    ):
+        await edit_cmd(
+            ACCOUNT,
+            [],
+            [
+                "https://github.com/a/b/issues/1",
+                "https://github.com/c/d/issues/2",
+            ],
+            _ctx(title="x"),
+        )

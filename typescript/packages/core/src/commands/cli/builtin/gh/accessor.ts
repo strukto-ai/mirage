@@ -149,8 +149,13 @@ export function repoNumber(
   const raw = value ?? ''
   const found = numberedSubject(accessor, fl, raw, urlKind)
   if (found !== null) return found
-  if (raw === '') throw new Error(`a ${label} number is required`)
   throw new Error(`invalid ${label} format: ${JSON.stringify(raw)}`)
+}
+
+/** The number a selector spells out, `#` optional; null for anything else. */
+export function subjectNumber(raw: string): number | null {
+  const digits = raw.startsWith('#') ? raw.slice(1) : raw
+  return /^\d+$/.test(digits) ? Number(digits) : null
 }
 
 /**
@@ -166,8 +171,8 @@ export function numberedSubject(
   raw: string,
   urlKind: 'issues' | 'pull',
 ): [RepoRef, number] | null {
-  const digits = raw.startsWith('#') ? raw.slice(1) : raw
-  if (/^\d+$/.test(digits)) return [repoFor(accessor, fl), Number(digits)]
+  const number = subjectNumber(raw)
+  if (number !== null) return [repoFor(accessor, fl), number]
   if (!URL.canParse(raw)) return null
   const url = new URL(raw)
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null

@@ -22,6 +22,7 @@ import {
   getPull,
   listPullRequestFields,
   listPulls,
+  headBranch,
   mergePull,
   pullChecks,
   pullForBranch,
@@ -352,6 +353,7 @@ async function target(
   texts: string[],
   fl: FlagView,
 ): Promise<[RepoRef, number]> {
+  atMostOne(texts)
   const selector = texts[0] ?? ''
   const named = numberedSubject(accessor, fl, selector, 'pull')
   if (named !== null) return named
@@ -360,7 +362,16 @@ async function target(
   if (head === null) {
     throw new Error('could not determine current branch: no `branch` on the install')
   }
-  return [ref, await pullForBranch(accessor.transport, ref, head)]
+  const found = await pullForBranch(accessor.transport, ref, head)
+  if (found === null) throw new Error(`no pull requests found for branch ${JSON.stringify(head)}`)
+  return [ref, Number(found.number)]
+}
+
+/** Refuse a second selector as cobra's MaximumNArgs(1) refuses it for gh's. */
+function atMostOne(texts: string[]): void {
+  if (texts.length > 1) {
+    throw new Error(`accepts at most 1 arg(s), received ${String(texts.length)}`)
+  }
 }
 
 /**
@@ -459,10 +470,25 @@ export async function createCmd(
   if (head === null) {
     throw new Error('could not determine the current branch: no `branch` on the install')
   }
+  headBranch(head)
   let base = fl.asNonEmpty('base')
   if (base === undefined) {
     const repository = (await viewRepo(accessor.transport, ref)) as { default_branch?: unknown }
     base = typeof repository.default_branch === 'string' ? repository.default_branch : ''
+  }
+  // gh refuses a second open pull request from the same head into the same
+  // base before it asks for one.
+  let existing: Record<string, unknown> | null
+  try {
+    existing = await pullForBranch(accessor.transport, ref, head, { states: ['OPEN'], base })
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    throw new Error(`error checking for existing pull request: ${reason}`, { cause: err })
+  }
+  if (existing !== null) {
+    throw new Error(
+      `a pull request for branch ${JSON.stringify(head)} into branch ${JSON.stringify(base)} already exists:\n${textValue(existing.url)}`,
+    )
   }
   const body = {
     title,
@@ -483,6 +509,7 @@ export async function editCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
+  atMostOne(texts)
   const body: Record<string, unknown> = {}
   const title = fl.asStr('title')
   const base = fl.asStr('base')
@@ -490,7 +517,12 @@ export async function editCmd(
   if (title !== undefined) body.title = title
   if (base !== undefined) body.base = base
   if (text !== undefined) body.body = text
-  if (Object.keys(body).length === 0) throw new Error('no pull request fields to edit')
+  if (Object.keys(body).length === 0) {
+    throw new UsageError(
+      '--title, --body, --reviewer, --assignee, --label, --project, or --milestone required when not running interactively',
+      1,
+    )
+  }
   const [ref, number] = await target(accessor, texts, fl)
   const edited = pull(await editPull(accessor.transport, ref, number, body))
   return textOut(`${textValue(edited.url)}\n`)
@@ -524,6 +556,7 @@ export async function closeCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
+  if (texts.length > 1) throw new UsageError('too many arguments', 1)
   if (texts.length === 0) {
     throw new UsageError('cannot close pull request: number, url, or branch required', 1)
   }
@@ -541,7 +574,9 @@ export async function reopenCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  if (texts.length === 0) throw new Error('accepts 1 arg(s), received 0')
+  if (texts.length !== 1) {
+    throw new Error(`accepts 1 arg(s), received ${String(texts.length)}`)
+  }
   const [ref, number] = await target(accessor, texts, fl)
   const transport = accessor.transport
   const row = pull(await getPull(transport, ref, number))

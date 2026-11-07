@@ -213,11 +213,17 @@ def repo_number(
     found = numbered_subject(accessor, fl, raw, url_kind)
     if found is not None:
         return found
-    if not raw:
-        raise ValueError(f"a {label} number is required")
     raise ValueError(
         f"invalid {label} format: {json.dumps(raw, ensure_ascii=False)}"
     )
+
+
+def subject_number(raw: str) -> int | None:
+    """The number a selector spells out, ``#`` optional; None for anything
+    else.
+    """
+    digits = raw.removeprefix("#")
+    return int(digits) if digits.isascii() and digits.isdigit() else None
 
 
 def numbered_subject(
@@ -229,9 +235,9 @@ def numbered_subject(
     takes a pull request's URL too. None for anything else, which a pull
     request command reads as a branch.
     """
-    digits = raw.removeprefix("#")
-    if digits.isascii() and digits.isdigit():
-        return repo_for(accessor, fl), int(digits)
+    number = subject_number(raw)
+    if number is not None:
+        return repo_for(accessor, fl), number
     try:
         url = urlsplit(raw)
     except ValueError:

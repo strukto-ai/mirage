@@ -283,10 +283,11 @@ async def test_pull_listing_asks_nothing_for_a_zero_limit(monkeypatch):
     assert graphql.sent == []
 
 
-def _branch_node(number, state, head="dev", fork=None):
+def _branch_node(number, state, head="dev", fork=None, base="main"):
     return {
         "number": number,
         "state": state,
+        "baseRefName": base,
         "headRefName": head,
         "isCrossRepository": fork is not None,
         "headRepositoryOwner": {"login": fork or "o"},
@@ -302,6 +303,11 @@ def _branch_reply(nodes, default="main"):
     }
 
 
+async def _number_of(found):
+    node = await found
+    return None if node is None else node["number"]
+
+
 @pytest.mark.asyncio
 async def test_pull_for_branch_asks_for_the_newest_30_of_every_state(
     monkeypatch,
@@ -309,7 +315,10 @@ async def test_pull_for_branch_asks_for_the_newest_30_of_every_state(
     graphql = GraphQL(_branch_reply([_branch_node(3, "OPEN")]))
     monkeypatch.setitem(pull_for_branch.__globals__, "graphql_data", graphql)
 
-    assert await pull_for_branch(ACCOUNT, RepoRef("o", "r"), "dev") == 3
+    assert (
+        await _number_of(pull_for_branch(ACCOUNT, RepoRef("o", "r"), "dev"))
+        == 3
+    )
     query, variables = graphql.sent[0]
     assert variables == {
         "owner": "o",
@@ -335,8 +344,9 @@ async def test_pull_for_branch_takes_open_first_and_a_fork_as_owner_branch(
         GraphQL(_branch_reply(rows), _branch_reply(rows)),
     )
 
-    assert await pull_for_branch(ACCOUNT, RepoRef("o", "r"), "dev") == 7
-    assert await pull_for_branch(ACCOUNT, RepoRef("o", "r"), "fork:dev") == 8
+    ref = RepoRef("o", "r")
+    assert await _number_of(pull_for_branch(ACCOUNT, ref, "dev")) == 7
+    assert await _number_of(pull_for_branch(ACCOUNT, ref, "fork:dev")) == 8
 
 
 @pytest.mark.asyncio
@@ -350,11 +360,29 @@ async def test_pull_for_branch_passes_over_a_merged_default_branch_head(
         GraphQL(_branch_reply(rows), _branch_reply(rows, "trunk")),
     )
 
-    with pytest.raises(
-        ValueError, match='no pull requests found for branch "main"'
-    ):
-        await pull_for_branch(ACCOUNT, RepoRef("o", "r"), "main")
-    assert await pull_for_branch(ACCOUNT, RepoRef("o", "r"), "main") == 4
+    ref = RepoRef("o", "r")
+    assert await pull_for_branch(ACCOUNT, ref, "main") is None
+    assert await _number_of(pull_for_branch(ACCOUNT, ref, "main")) == 4
+
+
+@pytest.mark.asyncio
+async def test_pull_for_branch_narrows_by_states_and_base(monkeypatch):
+    rows = [_branch_node(5, "OPEN", base="release")]
+    graphql = GraphQL(_branch_reply(rows), _branch_reply(rows))
+    monkeypatch.setitem(pull_for_branch.__globals__, "graphql_data", graphql)
+
+    ref = RepoRef("o", "r")
+    assert (
+        await pull_for_branch(
+            ACCOUNT, ref, "dev", states=("OPEN",), base="main"
+        )
+        is None
+    )
+    found = pull_for_branch(
+        ACCOUNT, ref, "dev", states=("OPEN",), base="release"
+    )
+    assert await _number_of(found) == 5
+    assert graphql.sent[0][1]["states"] == ["OPEN"]
 
 
 @pytest.mark.asyncio

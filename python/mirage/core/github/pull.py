@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -133,37 +132,54 @@ _PULL_FOR_BRANCH = (
     "  repository(owner: $owner, name: $repo) {\n"
     "    pullRequests(headRefName: $headRefName, states: $states, "
     "first: 30, orderBy: {field: CREATED_AT, direction: DESC}) {\n"
-    "      nodes {number state headRefName isCrossRepository "
-    "headRepositoryOwner {login}}\n"
+    "      nodes {number url state baseRefName headRefName "
+    "isCrossRepository headRepositoryOwner {login}}\n"
     "    }\n    defaultBranchRef {name}\n  }\n}"
 )
 
 
+def head_branch(head: str) -> str:
+    """The branch name of a head, which is a branch or ``owner:branch``
+    for a fork's, refused the way gh's ParseQualifiedHeadRef refuses any
+    other.
+    """
+    parts = head.split(":")
+    if len(parts) > 2:
+        raise ValueError(f"invalid qualified head ref format '{head}'")
+    return parts[-1]
+
+
 async def pull_for_branch(
-    account: GitHubAccount, ref: RepoRef, head: str
-) -> int:
-    """The number of the pull request a branch heads, picked as gh's
-    finder picks it: of the newest 30 whose head ref is the branch's
-    name, open ones first, the first whose head is exactly ``head``
-    (``owner:branch`` for a fork's), passing over a closed or merged one
-    when ``head`` is the default branch.
+    account: GitHubAccount,
+    ref: RepoRef,
+    head: str,
+    *,
+    states: tuple[str, ...] | None = None,
+    base: str | None = None,
+) -> dict[str, Any] | None:
+    """The pull request a branch heads, picked as gh's finder picks it:
+    of the newest 30 whose head ref is the branch's name, open ones
+    first, the first whose head is exactly ``head`` (``owner:branch`` for
+    a fork's) and whose base is ``base``, passing over a closed or merged
+    one when ``head`` is the default branch. None when none is.
 
     Args:
         account (GitHubAccount): the API client.
         ref (RepoRef): the base repository.
         head (str): the branch, or ``owner:branch``.
+        states (tuple[str, ...] | None): the states asked for; every
+            state when None.
+        base (str | None): the base branch a match must merge into; any
+            when None.
     """
-    parts = head.split(":")
-    if len(parts) > 2:
-        raise ValueError(f"invalid qualified head ref format '{head}'")
     data = await graphql_data(
         account,
         _PULL_FOR_BRANCH,
         {
             "owner": ref.owner,
             "repo": ref.repo,
-            "headRefName": parts[-1],
-            "states": None,
+            "headRefName": head_branch(head),
+            "states": list(states) if states is not None else None,
         },
     )
     repository = data.get("repository")
@@ -187,14 +203,13 @@ async def pull_for_branch(
         )
         if label != head:
             continue
+        if base is not None and node.get("baseRefName") != base:
+            continue
         if node.get("state") != "OPEN" and default_branch == head:
             continue
-        number = node.get("number")
-        if isinstance(number, int):
-            return number
-    raise ValueError(
-        f"no pull requests found for branch {json.dumps(head, ensure_ascii=False)}"
-    )
+        if isinstance(node.get("number"), int):
+            return node
+    return None
 
 
 async def list_pull_request_fields(

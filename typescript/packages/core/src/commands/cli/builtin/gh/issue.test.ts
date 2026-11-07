@@ -22,6 +22,8 @@ import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 const FIELDS = vi.fn<typeof IssueModule.issueFields>()
 const CALLS: unknown[][] = []
 let REOPEN_ROW: Record<string, unknown> = {}
+const FAILING = new Set<number>()
+const url = (number: number) => `https://github.com/o/r/issues/${String(number)}`
 const LIST = vi.fn<typeof IssueModule.listIssueFields>()
 
 vi.mock('../../../../core/github/issue.ts', async (importOriginal) => {
@@ -30,7 +32,7 @@ vi.mock('../../../../core/github/issue.ts', async (importOriginal) => {
     ...actual,
     getIssue: (_t: unknown, _r: unknown, number: number) => {
       CALLS.push(['get', number])
-      return Promise.resolve({ number, title: 't', ...REOPEN_ROW })
+      return Promise.resolve({ number, title: 't', url: url(number), ...REOPEN_ROW })
     },
     commentIssue: (_t: unknown, _r: unknown, number: number, body: string) => {
       CALLS.push(['comment', number, body])
@@ -38,14 +40,15 @@ vi.mock('../../../../core/github/issue.ts', async (importOriginal) => {
     },
     editIssue: (_t: unknown, _r: unknown, number: number, body: unknown) => {
       CALLS.push(['edit', number, body])
-      return Promise.resolve({})
+      if (FAILING.has(number)) return Promise.reject(new Error('Validation Failed (HTTP 422)'))
+      return Promise.resolve({ url: url(number) })
     },
     issueFields: (...args: Parameters<typeof IssueModule.issueFields>) => FIELDS(...args),
     listIssueFields: (...args: Parameters<typeof IssueModule.listIssueFields>) => LIST(...args),
   }
 })
 
-const { ISSUE_FIELDS, listCmd, reopenCmd, viewCmd } = await import('./issue.ts')
+const { ISSUE_FIELDS, editCmd, listCmd, reopenCmd, viewCmd } = await import('./issue.ts')
 
 const ACCOUNT = new GitHubAccount({ token: 't' })
 
@@ -214,5 +217,76 @@ describe('gh issue reopen', () => {
       ['get', 4],
       ['edit', 4, { state: 'open' }],
     ])
+  })
+})
+
+describe('gh issue selectors', () => {
+  const at = (texts: string[], flags: Context['flags'] = {}) =>
+    [ACCOUNT, [], texts, context({ flags })] as [GitHubAccount, PathSpec[], string[], Context]
+
+  beforeEach(() => {
+    CALLS.length = 0
+    REOPEN_ROW = {}
+    FAILING.clear()
+  })
+
+  // cobra's counts: exactly one issue for each verb but edit, which takes
+  // at least one.
+  it('refuses any count but one, and edit none, as gh does', async () => {
+    await expect(viewCmd(...at([], { repo: 'o/r' }))).rejects.toThrow(
+      'accepts 1 arg(s), received 0',
+    )
+    await expect(viewCmd(...at(['1', '2'], { repo: 'o/r' }))).rejects.toThrow(
+      'accepts 1 arg(s), received 2',
+    )
+    await expect(editCmd(...at([], { repo: 'o/r', title: 't' }))).rejects.toThrow(
+      'requires at least 1 arg(s), only received 0',
+    )
+    expect(CALLS).toEqual([])
+  })
+
+  it('refuses an edit with no field before it reads anything', async () => {
+    await expect(editCmd(...at(['4'], { repo: 'o/r' }))).rejects.toThrow(
+      'field to edit flag required when not running interactively',
+    )
+    expect(CALLS).toEqual([])
+  })
+
+  it('edits every issue named, reading each first, and prints their URLs in order', async () => {
+    const result = await editCmd(...at(['5', '#4'], { repo: 'o/r', add_label: ['bug'] }))
+    if (result === null) throw new Error('expected a result tuple')
+    expect(new TextDecoder().decode(result[0] as Uint8Array)).toBe(`${url(4)}\n${url(5)}\n`)
+    expect(CALLS).toEqual([
+      ['get', 5],
+      ['get', 4],
+      ['edit', 5, { labels: ['bug'] }],
+      ['edit', 4, { labels: ['bug'] }],
+    ])
+  })
+
+  it('names each issue it could not edit, and the count, as gh does', async () => {
+    FAILING.add(5)
+    const result = await editCmd(...at(['5', '4'], { repo: 'o/r', title: 'x' }))
+    if (result === null) throw new Error('expected a result tuple')
+    expect(new TextDecoder().decode(result[0] as Uint8Array)).toBe(`${url(4)}\n`)
+    expect(result[1].exitCode).toBe(1)
+    expect(new TextDecoder().decode(result[1].stderr as Uint8Array)).toBe(
+      `failed to update ${url(5)}: Validation Failed (HTTP 422)\ngh issue edit: failed to update 1 issue\n`,
+    )
+  })
+
+  it('puts every issue in the repository a URL names, and refuses two', async () => {
+    await editCmd(...at(['1', 'https://github.com/a/b/issues/2'], { title: 'x' }))
+    expect(CALLS.slice(0, 2)).toEqual([
+      ['get', 1],
+      ['get', 2],
+    ])
+    await expect(
+      editCmd(
+        ...at(['https://github.com/a/b/issues/1', 'https://github.com/c/d/issues/2'], {
+          title: 'x',
+        }),
+      ),
+    ).rejects.toThrow('multiple issues must be in same repo: found "c/d", expected "a/b"')
   })
 })

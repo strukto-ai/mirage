@@ -2794,6 +2794,58 @@
         "stdout": "4\n",
         "stderr": "gh issue view: invalid issue format: \"dev\"\n"
       }
+    },
+    {
+      "id": "gh_pr_create_refuses_a_second_open_pull_request",
+      "seq": 9940115,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr create -t again -b 'from dev'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh pr create: a pull request for branch \"dev\" into branch \"main\" already exists:\nhttps://github.com/integ/repo-cli/pull/14\n"
+      }
+    },
+    {
+      "id": "gh_issue_and_pr_verbs_count_their_selectors",
+      "seq": 9940116,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue view; gh issue view 1 2; gh issue edit --title x; gh pr view 1 2; gh pr close 1 2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh issue view: accepts 1 arg(s), received 0\ngh issue view: accepts 1 arg(s), received 2\ngh issue edit: requires at least 1 arg(s), only received 0\ngh pr view: accepts at most 1 arg(s), received 2\ntoo many arguments\n"
+      }
+    },
+    {
+      "id": "gh_edit_without_a_field_is_refused",
+      "seq": 9940117,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue edit 4; gh pr edit 14",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "field to edit flag required when not running interactively\n--title, --body, --reviewer, --assignee, --label, --project, or --milestone required when not running interactively\n"
+      }
+    },
+    {
+      "id": "gh_issue_edit_takes_several_issues",
+      "seq": 9940118,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue edit 13 4 --add-label bug && gh issue view 13 --json labels --jq '[.labels[].name]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "https://github.com/integ/repo-cli/issues/13\nhttps://github.com/integ/repo-cli/issues/4\n[\"bug\"]\n",
+        "stderr": ""
+      }
     }
   ]
 }

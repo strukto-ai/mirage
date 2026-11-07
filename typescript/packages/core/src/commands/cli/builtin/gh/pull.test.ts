@@ -37,6 +37,7 @@ const NAME_ONLY_DIFF =
 const FIELDS = vi.fn<typeof PullModule.pullRequestFields>()
 const CALLS: unknown[][] = []
 let REOPEN_ROW: Record<string, unknown> = {}
+let FOUND: Record<string, unknown> | null = { number: 7 }
 const LIST = vi.fn<typeof PullModule.listPullRequestFields>()
 
 vi.mock('../../../../core/github/pull.ts', async (importOriginal) => {
@@ -55,9 +56,9 @@ vi.mock('../../../../core/github/pull.ts', async (importOriginal) => {
       CALLS.push(['edit', number, body])
       return Promise.resolve({})
     },
-    pullForBranch: (_t: unknown, _r: unknown, head: string) => {
-      CALLS.push(['branch', head])
-      return Promise.resolve(7)
+    pullForBranch: (_t: unknown, _r: unknown, head: string, filter?: unknown) => {
+      CALLS.push(filter === undefined ? ['branch', head] : ['branch', head, filter])
+      return Promise.resolve(FOUND)
     },
     diffPull: () => Promise.resolve(NAME_ONLY_DIFF),
     pullChecks: () => Promise.resolve(ROWS),
@@ -68,7 +69,7 @@ vi.mock('../../../../core/github/pull.ts', async (importOriginal) => {
   }
 })
 
-const { PR_FIELDS, checksCmd, closeCmd, createCmd, diffCmd, listCmd, reopenCmd, viewCmd } =
+const { PR_FIELDS, checksCmd, closeCmd, createCmd, diffCmd, editCmd, listCmd, reopenCmd, viewCmd } =
   await import('./pull.ts')
 
 function json(result: Awaited<ReturnType<typeof viewCmd>>): Record<string, unknown> {
@@ -463,6 +464,7 @@ describe('gh pr selectors', () => {
   beforeEach(() => {
     CALLS.length = 0
     REOPEN_ROW = {}
+    FOUND = { number: 7 }
   })
 
   // gh's finder: a number (`#` optional) or a URL names one, any other word
@@ -495,6 +497,29 @@ describe('gh pr selectors', () => {
     )
   })
 
+  it("refuses a branch that heads no pull request in gh's words", async () => {
+    FOUND = null
+    await expect(viewCmd(...at(['nope']))).rejects.toThrow(
+      'no pull requests found for branch "nope"',
+    )
+  })
+
+  // cobra's argument counts: at most one selector for most verbs, exactly
+  // one for close and reopen.
+  it('refuses a second selector as gh does', async () => {
+    await expect(viewCmd(...at(['1', '2']))).rejects.toThrow('accepts at most 1 arg(s), received 2')
+    await expect(closeCmd(...at(['1', '2']))).rejects.toThrow('too many arguments')
+    await expect(reopenCmd(...at(['1', '2']))).rejects.toThrow('accepts 1 arg(s), received 2')
+    expect(CALLS).toEqual([])
+  })
+
+  it('refuses an edit with no field before it looks anything up', async () => {
+    await expect(editCmd(...at([]))).rejects.toThrow(
+      '--title, --body, --reviewer, --assignee, --label, --project, or --milestone required when not running interactively',
+    )
+    expect(CALLS).toEqual([])
+  })
+
   it('takes no current branch for close and reopen, as gh does', async () => {
     await expect(closeCmd(...at([]))).rejects.toThrow(
       'cannot close pull request: number, url, or branch required',
@@ -505,6 +530,11 @@ describe('gh pr selectors', () => {
 })
 
 describe('gh pr create', () => {
+  beforeEach(() => {
+    CALLS.length = 0
+    FOUND = null
+  })
+
   function recording(sent: unknown[]): GitHubTransport {
     return {
       get: (path) => {
@@ -528,11 +558,34 @@ describe('gh pr create', () => {
     const account = new GitHubAccount({ token: 't', repo: 'o/r', branch: 'dev' }, recording(sent))
     await createCmd(account, [], [], context({ flags: { title: 't', body: 'b', ...flags } }))
     expect(sent).toHaveLength(requests)
+    expect(CALLS).toEqual([['branch', head, { states: ['OPEN'], base }]])
     expect(sent.at(-1)).toEqual([
       'POST',
       '/repos/o/r/pulls',
       { title: 't', head, base, body: 'b', draft: false, maintainer_can_modify: true },
     ])
+  })
+
+  it('refuses a second open pull request for the head and base, as gh does', async () => {
+    FOUND = { number: 4, url: 'https://github.com/o/r/pull/4' }
+    const sent: unknown[] = []
+    const account = new GitHubAccount({ token: 't', repo: 'o/r', branch: 'dev' }, recording(sent))
+    await expect(
+      createCmd(account, [], [], context({ flags: { title: 't', body: 'b', base: 'main' } })),
+    ).rejects.toThrow(
+      'a pull request for branch "dev" into branch "main" already exists:\nhttps://github.com/o/r/pull/4',
+    )
+    expect(sent).toEqual([])
+  })
+
+  it('refuses a head with two owners before it asks anything', async () => {
+    const sent: unknown[] = []
+    const account = new GitHubAccount({ token: 't', repo: 'o/r' }, recording(sent))
+    await expect(
+      createCmd(account, [], [], context({ flags: { title: 't', body: 'b', head: 'a:b:c' } })),
+    ).rejects.toThrow("invalid qualified head ref format 'a:b:c'")
+    expect(sent).toEqual([])
+    expect(CALLS).toEqual([])
   })
 
   it('needs --head or the install branch', async () => {

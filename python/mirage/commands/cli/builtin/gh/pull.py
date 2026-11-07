@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from dataclasses import replace
 from typing import Any
 
@@ -65,6 +66,7 @@ from mirage.core.github.pull import (
     diff_pull,
     edit_pull,
     get_pull,
+    head_branch,
     list_pull_request_fields,
     list_pulls,
     merge_pull,
@@ -437,6 +439,7 @@ async def _target(
     is a branch whose pull request is looked up. With none, the branch is
     the current one, which the install's ``branch`` stands in for.
     """
+    _at_most_one(texts)
     selector = texts[0] if texts else ""
     named = numbered_subject(accessor, fl, selector, "pull")
     if named is not None:
@@ -447,7 +450,21 @@ async def _target(
         raise ValueError(
             "could not determine current branch: no `branch` on the install"
         )
-    return ref, await pull_for_branch(accessor, ref, head)
+    found = await pull_for_branch(accessor, ref, head)
+    if found is None:
+        raise ValueError(
+            "no pull requests found for branch "
+            f"{json.dumps(head, ensure_ascii=False)}"
+        )
+    return ref, found["number"]
+
+
+def _at_most_one(texts: list[str]) -> None:
+    """Refuse a second selector as cobra's MaximumNArgs(1) refuses it for
+    gh's.
+    """
+    if len(texts) > 1:
+        raise ValueError(f"accepts at most 1 arg(s), received {len(texts)}")
 
 
 async def list_cmd(
@@ -576,6 +593,7 @@ async def create_cmd(
             "could not determine the current branch: no `branch` on the "
             "install"
         )
+    head_branch(head)
     base = fl.as_nonempty("base")
     if base is None:
         repository = await view_repo(accessor, ref)
@@ -585,6 +603,22 @@ async def create_cmd(
             else None
         )
         base = default if isinstance(default, str) else ""
+    # gh refuses a second open pull request from the same head into the
+    # same base before it asks for one.
+    try:
+        existing = await pull_for_branch(
+            accessor, ref, head, states=("OPEN",), base=base
+        )
+    except Exception as exc:
+        raise ValueError(
+            f"error checking for existing pull request: {exc}"
+        ) from exc
+    if existing is not None:
+        raise ValueError(
+            f"a pull request for branch {json.dumps(head, ensure_ascii=False)} "
+            f"into branch {json.dumps(base, ensure_ascii=False)} already "
+            f"exists:\n{existing.get('url', '')}"
+        )
     body: dict[str, JsonValue] = {
         "title": title,
         "head": head,
@@ -604,6 +638,7 @@ async def edit_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
+    _at_most_one(texts)
     body: dict[str, JsonValue] = {}
     for name in ("title", "base"):
         value = fl.as_str(name)
@@ -613,7 +648,11 @@ async def edit_cmd(
     if text is not None:
         body["body"] = text
     if not body:
-        raise ValueError("no pull request fields to edit")
+        raise UsageError(
+            "--title, --body, --reviewer, --assignee, --label, --project, or "
+            "--milestone required when not running interactively",
+            1,
+        )
     ref, number = await _target(accessor, texts, fl)
     edited = _pull(await edit_pull(accessor, ref, number, body))
     return text_out(f"{edited.get('url', '')}\n")
@@ -653,6 +692,8 @@ async def close_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
+    if len(texts) > 1:
+        raise UsageError("too many arguments", 1)
     if not texts:
         raise UsageError(
             "cannot close pull request: number, url, or branch required", 1
@@ -672,8 +713,8 @@ async def reopen_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    if not texts:
-        raise ValueError("accepts 1 arg(s), received 0")
+    if len(texts) != 1:
+        raise ValueError(f"accepts 1 arg(s), received {len(texts)}")
     ref, number = await _target(accessor, texts, fl)
     row = _pull(await get_pull(accessor, ref, number))
     name = f"{ref.owner}/{ref.repo}#{number} ({row.get('title', '')})"

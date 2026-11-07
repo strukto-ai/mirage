@@ -28,6 +28,8 @@ import type { RepoRef } from '../../../../core/github/repo.ts'
 import type { JsonObject, PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
+import { UsageError } from '../../../errors.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import {
   bodyValue,
@@ -38,6 +40,7 @@ import {
   listLimit,
   repoFor,
   repoNumber,
+  subjectNumber,
   textOut,
   textValue,
   typedOut,
@@ -143,7 +146,38 @@ function viewText(row: Record<string, unknown>): string {
   return `title:\t${textValue(row.title)}\nstate:\t${textValue(row.state).toUpperCase()}\nauthor:\t${textValue(author?.login)}\nlabels:\t${labels(row)}\n--\n${textValue(row.body)}\n`
 }
 
+/**
+ * The issues `gh issue edit` names, read as gh's ParseIssuesFromArgs reads
+ * them: at least one, each parsed before anything is asked, and the
+ * repository a URL names the one every issue is in.
+ */
+function targets(accessor: GitHubAccount, texts: string[], fl: FlagView): [RepoRef, number[]] {
+  if (texts.length === 0) throw new Error('requires at least 1 arg(s), only received 0')
+  let named: RepoRef | null = null
+  const numbers: number[] = []
+  for (const text of texts) {
+    const number = subjectNumber(text)
+    if (number !== null) {
+      numbers.push(number)
+      continue
+    }
+    const [ref, found] = repoNumber(accessor, fl, text, 'issue', 'issues')
+    const name = `${ref.owner}/${ref.repo}`
+    if (named !== null && name.toLowerCase() !== `${named.owner}/${named.repo}`.toLowerCase()) {
+      const expected = `${named.owner}/${named.repo}`
+      throw new Error(
+        `multiple issues must be in same repo: found ${JSON.stringify(name)}, expected ${JSON.stringify(expected)}`,
+      )
+    }
+    named ??= ref
+    numbers.push(found)
+  }
+  return [named ?? repoFor(accessor, fl), numbers]
+}
+
+/** The issue a line names: one, as cobra's ExactArgs(1) holds gh's verbs to. */
 function target(accessor: GitHubAccount, texts: string[], fl: FlagView) {
+  if (texts.length !== 1) throw new Error(`accepts 1 arg(s), received ${String(texts.length)}`)
   return repoNumber(accessor, fl, texts[0], 'issue', 'issues')
 }
 
@@ -242,6 +276,12 @@ export async function createCmd(
   return textOut(`${textValue(created.url)}\n`)
 }
 
+/**
+ * `gh issue edit`: every issue named, as gh edits them. Each is read first,
+ * which ends the line at the first one missing; each is then edited, the
+ * URLs of those edited printed in order, and any that failed named on
+ * standard error with the count.
+ */
 export async function editCmd(
   accessor: GitHubAccount,
   _paths: PathSpec[],
@@ -250,24 +290,27 @@ export async function editCmd(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const transport = accessor.transport
-  const [ref, number] = target(accessor, texts, fl)
-  const body: Record<string, unknown> = {}
+  const [ref, numbers] = targets(accessor, texts, fl)
   const title = fl.asStr('title')
   const text = await bodyValue(ctx, fl)
-  if (title !== undefined) body.title = title
-  if (text !== undefined) body.body = text
   const additions = csvValues(fl.asList('add_label'))
   const removals = new Set(csvValues(fl.asList('remove_label')))
   const addAssignees = csvValues(fl.asList('add_assignee'))
   const removeAssignees = new Set(csvValues(fl.asList('remove_assignee')))
-  if (
-    additions.length > 0 ||
-    removals.size > 0 ||
-    addAssignees.length > 0 ||
-    removeAssignees.size > 0
-  ) {
-    const current = issue(await getIssue(transport, ref, number))
-    if (additions.length > 0 || removals.size > 0) {
+  const relabel = additions.length > 0 || removals.size > 0
+  const reassign = addAssignees.length > 0 || removeAssignees.size > 0
+  if (title === undefined && text === undefined && !relabel && !reassign) {
+    throw new UsageError('field to edit flag required when not running interactively', 1)
+  }
+  const rows: Record<string, unknown>[] = []
+  for (const number of numbers) rows.push(issue(await getIssue(transport, ref, number)))
+  const edited: string[] = []
+  const failed: string[] = []
+  for (const [at, current] of rows.entries()) {
+    const body: Record<string, unknown> = {}
+    if (title !== undefined) body.title = title
+    if (text !== undefined) body.body = text
+    if (relabel) {
       body.labels = [
         ...new Set([
           ...names(current.labels, 'name').filter((name) => !removals.has(name)),
@@ -275,7 +318,7 @@ export async function editCmd(
         ]),
       ]
     }
-    if (addAssignees.length > 0 || removeAssignees.size > 0) {
+    if (reassign) {
       body.assignees = [
         ...new Set([
           ...names(current.assignees, 'login').filter((name) => !removeAssignees.has(name)),
@@ -283,10 +326,25 @@ export async function editCmd(
         ]),
       ]
     }
+    try {
+      edited.push(textValue(issue(await editIssue(transport, ref, numbers[at] ?? 0, body)).url))
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      failed.push(`failed to update ${textValue(current.url)}: ${reason}`)
+    }
   }
-  if (Object.keys(body).length === 0) throw new Error('no issue fields to edit')
-  const edited = issue(await editIssue(transport, ref, number, body))
-  return textOut(`${textValue(edited.url)}\n`)
+  const out = textOut(
+    edited
+      .sort(compareCodePoints)
+      .map((url) => `${url}\n`)
+      .join(''),
+  )
+  if (failed.length === 0 || out === null) return out
+  const count = failed.length === 1 ? '1 issue' : `${String(failed.length)} issues`
+  const lines = [...failed.sort(compareCodePoints), `gh issue edit: failed to update ${count}`]
+  out[1].exitCode = 1
+  out[1].stderr = new TextEncoder().encode(lines.map((line) => `${line}\n`).join(''))
+  return out
 }
 
 export async function closeCmd(

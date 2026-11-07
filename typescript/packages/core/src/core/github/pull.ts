@@ -83,32 +83,52 @@ const PULL_FOR_BRANCH =
   '$states: [PullRequestState!]) {\n  repository(owner: $owner, name: $repo) {\n' +
   '    pullRequests(headRefName: $headRefName, states: $states, first: 30, ' +
   'orderBy: {field: CREATED_AT, direction: DESC}) {\n' +
-  '      nodes {number state headRefName isCrossRepository headRepositoryOwner {login}}\n' +
+  '      nodes {number url state baseRefName headRefName isCrossRepository ' +
+  'headRepositoryOwner {login}}\n' +
   '    }\n    defaultBranchRef {name}\n  }\n}'
 
 /**
- * The number of the pull request a branch heads, picked as gh's finder picks
- * it: of the newest 30 whose head ref is the branch's name, open ones first,
- * the first whose head is exactly `head` (`owner:branch` for a fork's),
- * passing over a closed or merged one when `head` is the default branch.
+ * The branch name of a head, which is a branch or `owner:branch` for a
+ * fork's, refused the way gh's ParseQualifiedHeadRef refuses any other.
+ */
+export function headBranch(head: string): string {
+  const parts = head.split(':')
+  if (parts.length > 2) throw new Error(`invalid qualified head ref format '${head}'`)
+  return parts.at(-1) ?? ''
+}
+
+/** What gh's finder narrows a branch's pull requests by. */
+export interface BranchFilter {
+  /** The states asked for; every state when unset. */
+  readonly states?: readonly string[]
+  /** The base branch a match must merge into; any when unset. */
+  readonly base?: string
+}
+
+/**
+ * The pull request a branch heads, picked as gh's finder picks it: of the
+ * newest 30 whose head ref is the branch's name, open ones first, the first
+ * whose head is exactly `head` (`owner:branch` for a fork's) and whose base
+ * is the filter's, passing over a closed or merged one when `head` is the
+ * default branch. Null when none is.
  *
  * Args:
  *   transport (GitHubTransport): the API client.
  *   ref (RepoRef): the base repository.
  *   head (string): the branch, or `owner:branch`.
+ *   filter (BranchFilter): the states and the base to narrow by.
  */
 export async function pullForBranch(
   transport: GitHubTransport,
   ref: RepoRef,
   head: string,
-): Promise<number> {
-  const parts = head.split(':')
-  if (parts.length > 2) throw new Error(`invalid qualified head ref format '${head}'`)
+  filter: BranchFilter = {},
+): Promise<Record<string, unknown> | null> {
   const data = await graphqlData(transport, PULL_FOR_BRANCH, {
     owner: ref.owner,
     repo: ref.repo,
-    headRefName: parts.at(-1) ?? '',
-    states: null,
+    headRefName: headBranch(head),
+    states: filter.states ?? null,
   })
   const repository = data.repository as {
     pullRequests?: { nodes?: Record<string, unknown>[] }
@@ -123,10 +143,11 @@ export async function pullForBranch(
     const name = typeof node.headRefName === 'string' ? node.headRefName : ''
     const label = node.isCrossRepository === true ? `${login}:${name}` : name
     if (label !== head) continue
+    if (filter.base !== undefined && node.baseRefName !== filter.base) continue
     if (node.state !== 'OPEN' && defaultBranch === head) continue
-    if (typeof node.number === 'number') return node.number
+    if (typeof node.number === 'number') return node
   }
-  throw new Error(`no pull requests found for branch ${JSON.stringify(head)}`)
+  return null
 }
 
 /** The narrowing `gh pr list` applies before it lists. */
