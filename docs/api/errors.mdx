@@ -1,94 +1,57 @@
 ---
 title: Errors
-description: HTTP errors, command exit codes and retry behavior.
+description: Handle hosted API errors, command exit codes, and retry behavior.
 icon: triangle-exclamation
 ---
 
-A `200` from `POST /v1/workspaces/{workspace_id}/shell` means the server ran
-the line, not that the line succeeded: check `exit_code`. Most API errors return
-JSON with a `detail` message, but an auth or `Host` refusal can be plain text,
-so check `Content-Type` before parsing. The full status table is in
-[Errors](/home/access/http#errors); requests past a limit answer `429` with
-`Retry-After` ([rate limits](/home/access/http#rate-limits)).
+An HTTP `200` from a shell request means that the request completed.
+Check `exit_code` to determine whether the command succeeded.
+
+API errors return JSON with `detail` and `request_id`. Preserve the request ID
+when reporting a failed request.
 
 ## HTTP status codes
 
 | Status | Meaning | Recovery |
 | --- | --- | --- |
-| `400` | Malformed request, disallowed host or disallowed browser origin. | Check the body, API host and browser origin. |
-| `401` | Missing or incorrect token. | Send a valid bearer token; sign in again if it expired. |
-| `403` | A policy or mount mode refused the call. | Check workspace policies and mount permissions. |
-| `404` | The workspace, session, job or file does not exist. | Verify the identifier or file path. |
-| `409` | An identifier is taken, the workspace is busy or a file changed since it was read. | Resolve the conflict before retrying; see the workspace example below. |
-| `422` | Request fields failed validation. | Correct the fields named in `detail`. |
-| `429` | A rate limit or session limit was reached. | Respect `Retry-After` when present; reduce the request rate or close unused sessions. |
-| `501` | A saved-config operation requires a server configured for one account. | Check the deployment's saved-configuration support. |
-| `503` | The server reached its workspace limit or is shutting down. | Retry after capacity or availability recovers. |
+| `400` | A request field, filter, or cursor is invalid. | Correct the field named in `detail`. |
+| `401` | The bearer token is missing, invalid, or expired. | Supply a valid token or sign in again. |
+| `403` | The account or API key cannot perform the operation. | Check the account and key permissions. |
+| `404` | The requested resource was not found. | Verify the resource name or UID and account. |
+| `409` | The operation conflicts with an existing resource or its current state. | Resolve the conflict before retrying. |
+| `413` | The request exceeds the body-size limit. | Reduce the request size. |
+| `429` | A request or resource limit was reached. | Honor `Retry-After` when present and reduce the request rate. |
+| `502` | An upstream service is unavailable. | Retry later; preserve the request ID if the failure continues. |
+| `503` | A required service is unavailable or not configured. | Retry later or contact support with the request ID. |
 
-Each endpoint's **Errors** section lists its documented failures. The complete
-[OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml)
-retains every response schema. JSON errors can
-include `errno` and `refusal` alongside `detail`. Those fields describe filesystem
-errors and policy refusals when available.
-
-The readiness endpoint uses a different body: HTTP `503` returns
-`{"status": "full"}` or `{"status": "shutting_down"}` when the server cannot
-accept new workspaces.
+Each endpoint's collapsed **Errors** section lists its documented failures.
+Only successful response examples appear in the right pane.
 
 ## Examples
 
 ### Missing or invalid credentials
 
-The TypeScript daemon returns HTTP `401` with JSON:
-
 ```json
-{"detail": "Unauthorized"}
+{"detail":"missing bearer token","request_id":"req_example"}
 ```
 
-The Python daemon returns the same status with `Content-Type: text/plain`:
-
-```text
-Unauthorized
-```
-
-Check `Content-Type` before decoding the body. Supply a valid token before retrying.
+Send the token as `Authorization: Bearer <token>`.
 See [Authentication](/api/authentication).
 
-### Workspace identifier conflict
-
-Creating `demo` again with a different configuration returns HTTP `409`:
+### Workspace name already exists
 
 ```json
-{"detail": "workspace id already exists: 'demo'"}
+{"detail":"workspace demo already exists","request_id":"req_example"}
 ```
 
-Choose another identifier for a different workspace. Retrying the original
-configuration with the same identifier returns HTTP `200` and the existing
-workspace, with the same response shape as a successful `201` creation.
+Choose another name for a new workspace or retrieve the existing workspace.
 
-### Invalid request field
-
-Sending a numeric workspace `id` returns HTTP `422`:
+### Invalid log page size
 
 ```json
-{
-  "detail": [
-    {
-      "type": "string_type",
-      "loc": ["body", "id"],
-      "msg": "Input should be a valid string",
-      "input": 4
-    }
-  ]
-}
+{"detail":"limit must be 1-200","request_id":"req_example"}
 ```
 
-`loc` identifies the invalid field. Change `id` to a string before retrying.
-Validation messages can differ between server implementations.
+Use `limit` from `1` to `200` on [List workspace logs](/api/operations/workspaces/list-workspace-logs).
 
-## Shell exit codes
-
-A completed shell request can return HTTP `200` with a nonzero `exit_code`.
-Inspect `exit_code`, `stdout`, `stderr` and `refusal` before treating the command
-as successful. The response's HTTP status describes the request, while
-`exit_code` describes the shell command.
+For errors from a server you operate, see the [HTTP guide](/home/access/http).

@@ -1,0 +1,56 @@
+---
+title: Quickstart
+description: Create a workspace and run your first shell command with the OSS Server API.
+icon: bolt
+---
+
+Set your access token in the terminal that sends requests:
+
+```bash
+export MIRAGE_AUTH_TOKEN='replace-with-your-token'
+```
+
+Create a workspace with an in-memory mount:
+
+```bash
+curl --request POST \
+  --url 'http://127.0.0.1:8765/v1/workspaces' \
+  --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"id":"demo","config":{"mounts":{"/data":{"vfs":"ram","mode":"write"}}}}'
+```
+
+A successful response has status `201` and includes the workspace ID `demo`. Supply either `config` or a saved
+`template`. An identical retry can return `200`; an existing ID with a different
+configuration returns `409`.
+
+Run a shell command:
+
+```bash
+curl --request POST \
+  --url 'http://127.0.0.1:8765/v1/workspaces/demo/shell' \
+  --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"command":"echo hello"}'
+```
+
+The response contains the output and command exit status:
+
+```json
+{"kind":"io","exit_code":0,"stdout":"hello\n","stderr":"","refusal":null}
+```
+
+Read the workspace's command logs:
+
+```bash
+curl --request GET \
+  --url 'http://127.0.0.1:8765/v1/workspaces/demo/logs?limit=50' \
+  --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
+```
+
+Logs return an object with `items` and `next`. Follow `next` using the `after`
+query parameter for another page. See [List workspace logs](/api/server/operations/workspaces/list-workspace-logs)
+for the fields and a complete response example.
+
+Browse the resource groups on the left or use [endpoint search](/api/server/reference).
+For local daemon setup, see the [HTTP guide](/home/access/http).

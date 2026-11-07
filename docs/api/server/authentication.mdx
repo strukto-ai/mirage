@@ -1,0 +1,16 @@
+---
+title: Authentication
+description: Authenticate requests to your OSS Server.
+icon: key
+---
+
+Use the bearer token configured on your server, or a JWT accepted by its issuer and audience settings.
+Default local mode without a configured token allows requests without authentication.
+
+```bash
+curl http://127.0.0.1:8765/v1/workspaces \
+  --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
+```
+
+Omit the authorization header in local mode with no token configured.
+See [HTTP](/home/access/http#configure-authentication) for token, JWT, and OAuth settings.

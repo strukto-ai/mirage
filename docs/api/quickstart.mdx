@@ -1,50 +1,57 @@
 ---
 title: Quickstart
-description: Create a workspace and run your first shell command over HTTP.
+description: Create a workspace and run your first shell command with the hosted API.
 icon: bolt
 ---
 
-Set the hosted API URL and your access token in the terminal that sends requests:
+Set your access token in the terminal that sends requests:
 
 ```bash
-export MIRAGE_BASE_URL='https://api.strukto.ai'
 export MIRAGE_AUTH_TOKEN='replace-with-your-token'
 ```
 
-For another deployment, set `MIRAGE_BASE_URL` to its API URL and use its token.
-
-Create a workspace with an in-memory filesystem:
+Create a workspace with an in-memory mount:
 
 ```bash
-curl "$MIRAGE_BASE_URL/v1/workspaces" \
-  -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"id":"demo","config":{"mounts":{"/":{"vfs":"ram","mode":"write"}}}}'
+curl --request POST \
+  --url 'https://api.strukto.ai/v1/workspaces' \
+  --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"id":"demo","config":{"mounts":{"/data":{"vfs":"ram","mode":"write"}}}}'
 ```
 
-The response has status `201` and the workspace identifier `demo`. An identical
-retry returns the existing workspace with status `200`. Supply either `config`
-or a saved `template`, never both.
+A successful response has status `201` and includes the workspace name `demo`
+and its `uid`. Use either the name or UID in workspace URLs. Supply either
+`config` or a saved `template`. Creating another workspace with the same name
+returns `409`.
 
-Run a shell command in that workspace:
+Run a shell command:
 
 ```bash
-curl "$MIRAGE_BASE_URL/v1/workspaces/demo/shell" \
-  -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"command":"echo hello"}'
+curl --request POST \
+  --url 'https://api.strukto.ai/v1/workspaces/demo/shell' \
+  --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"command":"echo hello"}'
 ```
 
-The response contains the command's output and exit status:
+The response contains the output and command exit status:
 
 ```json
 {"kind":"io","exit_code":0,"stdout":"hello\n","stderr":"","refusal":null}
 ```
 
-Use [Create a workspace](/api/operations/workspaces/create-a-workspace) and
-[Run a shell line](/api/operations/shell/run-a-shell-line) for the complete
-request fields and responses. Browse the resource groups on the left, or use
-the [endpoint search](/api/reference) to find an operation by path, parameter
-or response field.
+Read the workspace's command logs:
 
-For local daemon setup, see the [HTTP server guide](/home/access/http).
+```bash
+curl --request GET \
+  --url 'https://api.strukto.ai/v1/workspaces/demo/logs?limit=50' \
+  --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
+```
+
+Logs return an object with `items` and `next`. Follow `next` using the `after`
+query parameter for another page. See [List workspace logs](/api/operations/workspaces/list-workspace-logs)
+for the fields and a complete response example.
+
+Browse the resource groups on the left or use [endpoint search](/api/reference).
+For local daemon setup, see the [HTTP guide](/home/access/http).

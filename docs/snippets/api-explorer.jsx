@@ -70,7 +70,7 @@ export const ApiExplorer = ({ children }) => {
   )
 }
 
-export const Operation = ({ resource, method, path, summary, hosts, href, anchor, search }) => {
+export const Operation = ({ resource, method, path, summary, href, anchor, search }) => {
   const methodStyles = {
     GET: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
     POST: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
@@ -86,7 +86,7 @@ export const Operation = ({ resource, method, path, summary, hosts, href, anchor
       <span className="min-w-0 flex-1">
         <span className="block font-medium group-hover:underline">{summary}</span>
         <span className="mt-1 block break-all font-mono text-xs leading-5 text-zinc-600 dark:text-zinc-400">{path}</span>
-        <span className="mt-1 block text-xs text-zinc-500">{resource} · {hosts.includes("hosted") ? "Daemon and hosted" : "Daemon only"}</span>
+        <span className="mt-1 block text-xs text-zinc-500">{resource}</span>
       </span>
       <span aria-hidden="true" className="shrink-0 text-zinc-400">→</span>
     </a>
