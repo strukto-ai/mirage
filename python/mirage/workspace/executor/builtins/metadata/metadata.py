@@ -915,8 +915,6 @@ async def change_owner(
             await own_link(target, typed)
         for path, path_stat, unread in walked:
             name = walked_name(typed, resolved, path)
-            if path.virtual == skip:
-                continue
             if path_stat.type == FileType.SYMLINK:
                 if unread is None:
                     top = PathSpec.from_str_path("/")
@@ -926,15 +924,19 @@ async def change_owner(
                 else:
                     errors.append(unfollowed_error(cmd, name, unread))
                 continue
-            if itself and links.is_link(path.virtual):
+            if path.virtual == skip:
+                pass
+            elif itself and links.is_link(path.virtual):
                 await own_link(path, name)
-                continue
-            before = len(errors)
-            if matches(path_stat):
-                await apply_attrs(
-                    dispatch, cmd, path, name, errors, uid=uid, gid=gid
-                )
-            describe(name, path_stat, len(errors) > before)
+            else:
+                before = len(errors)
+                if matches(path_stat):
+                    await apply_attrs(
+                        dispatch, cmd, path, name, errors, uid=uid, gid=gid
+                    )
+                describe(name, path_stat, len(errors) > before)
+            # A directory whose listing was refused is reported however
+            # its own change went, link or not.
             if isinstance(unread, PermissionError):
                 errors.append(unread_error(cmd, name, unread))
         for link in owned:

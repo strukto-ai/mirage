@@ -195,6 +195,29 @@ async def test_a_denied_listing_is_reported_and_not_descended(cmd, mounted):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["chown", "chgrp"])
+@pytest.mark.parametrize(
+    "setup, operand, shown",
+    [
+        ("ln -s t/sealed sl", "sl", "sl"),
+        ("mkdir -p w && printf x > w/f && ln -s ../t/sealed w/l", "w", "w/l"),
+    ],
+)
+async def test_h_reports_a_denied_listing_behind_a_link(
+    name, setup, operand, shown
+):
+    # -h changes the link itself, and the directory it leads to is still
+    # walked under -L, so a listing refused there is reported.
+    ws = await _sealed_ws()
+    line = f"cd /data && {setup} && {name} -R -L -h 7 {operand}; echo rc=$?"
+    assert await _guarded(ws, line) == (
+        0,
+        "rc=1\n",
+        f"{name}: cannot read directory '{shown}': Permission denied\n",
+    )
+
+
+@pytest.mark.asyncio
 async def test_write_clears_overlay_times_but_keeps_mode():
     ws, _ = _make_overlay_ws({"/f.txt": b"hello"})
     await _run(ws, "chmod 601 /data/f.txt")

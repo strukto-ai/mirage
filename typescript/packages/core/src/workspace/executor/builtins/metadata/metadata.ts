@@ -662,7 +662,6 @@ export async function changeOwner(
     if (skip !== null) await ownLink(target, typed)
     for (const [path, pathStat, unread] of walked) {
       const name = walkedName(typed, resolved, path)
-      if (path.virtual === skip) continue
       if (pathStat.type === FileType.SYMLINK) {
         if (unread === null) {
           errors.push(rootRefusal(cmd, fl, name, PathSpec.fromStrPath('/')) ?? '')
@@ -670,11 +669,12 @@ export async function changeOwner(
         else errors.push(unfollowedError(cmd, name, unread))
         continue
       }
-      if (itself && links.isLink(path.virtual)) {
-        await ownLink(path, name)
-        continue
-      }
-      describe(name, pathStat, matches(pathStat) && !(await own(path, name, false)))
+      if (path.virtual === skip) {
+        // The operand link itself changed above.
+      } else if (itself && links.isLink(path.virtual)) await ownLink(path, name)
+      else describe(name, pathStat, matches(pathStat) && !(await own(path, name, false)))
+      // A directory whose listing was refused is reported however its own
+      // change went, link or not.
       if (unread !== null) errors.push(unreadError(cmd, name, unread))
     }
     for (const link of owned) {

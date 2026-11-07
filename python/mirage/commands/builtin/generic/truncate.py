@@ -19,7 +19,7 @@ from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused, scan
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, PathSpec
-from mirage.utils.path import CycleError, ends_at_dot
+from mirage.utils.path import ends_at_dot
 from mirage.utils.quote import shell_quote_always
 from mirage.utils.stat_view import is_dir
 
@@ -152,7 +152,7 @@ async def truncate_generic(
     if flags.reference is not None:
         try:
             base = (await (reference_stat or stat)(flags.reference)).size or 0
-        except FS_ERRORS + (CycleError,) as exc:
+        except FS_ERRORS as exc:
             label = shell_quote_always(flags.reference.raw_path)
             line = f"truncate: cannot stat {label}: {fs_strerror(exc)}\n"
             return None, IOResult(exit_code=1, stderr=encode_text(line))

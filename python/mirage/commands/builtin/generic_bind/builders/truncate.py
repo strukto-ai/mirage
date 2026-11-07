@@ -5,7 +5,6 @@ from mirage.commands.builtin.generic.truncate import (
 )
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
-from mirage.commands.builtin.utils.links import links_of
 from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, PathSpec
@@ -23,12 +22,10 @@ async def truncate(
     files = command_files(ctx, paths)
     truncate_fn = files.truncate
     paths = await files.resolve_glob(paths)
-    links = links_of(ctx)
+    vfs = ctx.vfs
 
     async def followed(path: PathSpec) -> FileStat:
-        if links is not None:
-            path = PathSpec.from_str_path(links.resolve(path.virtual))
-        return await files.stat(path)
+        return await (files.stat(path) if vfs is None else vfs.stat(path))
 
     return await generic_truncate(
         paths,

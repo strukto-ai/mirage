@@ -3,16 +3,15 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles } from '../files.ts'
-import { type FileStat, PathSpec } from '../../../../types.ts'
-import { linksOf } from '../../utils/links.ts'
+import type { FileStat, PathSpec } from '../../../../types.ts'
 
 const truncate: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const flags = parseFlags(ctx.flags)
   if (flags instanceof IOResult) return [null, flags]
   const files = commandFiles(ctx, paths)
-  const links = linksOf(ctx)
+  const vfs = ctx.vfs
   const followed = (path: PathSpec): Promise<FileStat> =>
-    files.stat(links === undefined ? path : PathSpec.fromStrPath(links.resolve(path.virtual)))
+    vfs === undefined ? files.stat(path) : vfs.stat(path)
   return truncateGeneric(
     await files.resolveGlob(paths),
     flags,
