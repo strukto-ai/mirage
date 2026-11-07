@@ -19,9 +19,12 @@ import uuid
 import pytest
 
 from mirage.runtime.sandbox.constants import (
+    ENCODE_OUTPUT,
     EXEC_ID,
     MOUNT_GUARD,
     REAP_ABSENT,
+    REAP_PATH,
+    decode_output,
     mount_field,
     reap_line,
     wrap_line,
@@ -251,4 +254,29 @@ def test_the_mount_guard_refuses_without_a_mount_table(tmp_path):
         126,
         b"",
         b"lost /data\n",
+    )
+
+
+# A line the sandbox's own shell writes (no encoder there) is not base64
+# and comes back as it is, between the decoded lines; a blank line adds
+# nothing.
+def test_decode_output_keeps_a_plain_line_as_it_is():
+    text = "YQ==\r\nmirage: no base64\n\nAP8=\n"
+    assert decode_output(text) == b"amirage: no base64\n\x00\xff"
+
+
+# A sandbox without dd or base64 runs nothing: the script says so in
+# plain text and exits 127.
+def test_a_sandbox_without_the_encoder_runs_nothing(tmp_path):
+    script = ENCODE_OUTPUT.replace(REAP_PATH, str(tmp_path))
+    done = subprocess.run(
+        ["/bin/sh", "-c", script, "sh", "/bin/sh", "-c", "echo ran"],
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    assert (done.returncode, done.stdout, done.stderr) == (
+        127,
+        b"",
+        b"mirage: the sandbox needs dd and base64 to return output\n",
     )

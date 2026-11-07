@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -24,6 +25,8 @@ from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import (
     EXEC_ID,
+    decode_output,
+    encode_output,
     stop_signal,
     wrap_line,
 )
@@ -48,6 +51,22 @@ def past_mark(data: bytes) -> int:
     """
     at = data.find(PTY_MARK)
     return -1 if at < 0 else at + len(PTY_MARK)
+
+
+class LineDecoder:
+    """The bytes in output an ``encode_output`` command streams, decoded
+    a whole line at a time as its text arrives."""
+
+    def __init__(self) -> None:
+        self._held = ""
+
+    def feed(self, text: str) -> bytes:
+        lines, _, self._held = (self._held + text).rpartition("\n")
+        return decode_output(lines)
+
+    def flush(self) -> bytes:
+        held, self._held = self._held, ""
+        return decode_output(held)
 
 
 class PtyWriter:
@@ -108,7 +127,9 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
     You create the sandbox yourself (`e2b sandbox spawn` or the SDK);
     mirage only connects by ``sandbox_id`` and execs lines.
     ``api_key`` falls back to E2B_API_KEY. E2B's exec reports stdout
-    and stderr separately, stdout as it arrives when streamed. Piped
+    and stderr separately, stdout as it arrives when streamed, each
+    base64-encoded in the sandbox since the exec decodes output as text
+    (``encode_output``: the sandbox needs dd and base64). Piped
     bytes use native stdin, chunk by chunk, followed by an explicit EOF;
     no input closes stdin when the command starts. The SDK's own
     command timeout is off: a command runs until mirage's limits stop
@@ -145,16 +166,20 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
+        out, err = LineDecoder(), LineDecoder()
+
         async def emit(text: str) -> None:
             assert output is not None
-            await output(text.encode())
+            if data := out.feed(text):
+                await output(data)
 
         async def emit_errors(text: str) -> None:
             assert errors is not None
-            await errors(text.encode())
+            if data := err.feed(text):
+                await errors(data)
 
         handle = await self._sandbox.commands.run(
-            wrap_line(argv, env, cwd),
+            encode_output(wrap_line(argv, env, cwd)),
             background=True,
             stdin=stdin is not None,
             on_stdout=emit if output is not None else None,
@@ -207,9 +232,9 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
         try:
             await asyncio.gather(feeding, reaping)
             result = reaping.result()
-        except BaseException:
+        except BaseException as exc:
             # A tagged command a kill stopped with a gentler signal is left
-            # to the reap, which sends it that signal first.
+            # to the caller's reap, which sends it that signal first.
             try:
                 if (
                     EXEC_ID not in env
@@ -218,6 +243,9 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
                     await handle.kill()
             except Exception:
                 logger.warning("Failed to stop the E2B command", exc_info=True)
+            # The kill stops only the encoding shell; the caller reaps a cancel.
+            if EXEC_ID in env and not isinstance(exc, asyncio.CancelledError):
+                await self._reap(env[EXEC_ID], 15)
             raise
         finally:
             for task in (feeding, reaping):
@@ -225,11 +253,47 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
                     task.cancel()
             await asyncio.gather(feeding, reaping, return_exceptions=True)
             await handle.disconnect()
+        if output is not None and (data := out.flush()):
+            await output(data)
+        if errors is not None and (data := err.flush()):
+            await errors(data)
         return RunResult(
-            stdout=str(result.stdout).encode() if output is None else b"",
-            stderr=str(result.stderr).encode() if errors is None else b"",
+            stdout=decode_output(str(result.stdout))
+            if output is None
+            else b"",
+            stderr=decode_output(str(result.stderr))
+            if errors is None
+            else b"",
             exit_code=int(result.exit_code),
         )
+
+    async def exec_line(
+        self,
+        line: str,
+        stdin: ByteSource | None,
+        env: dict[str, str],
+        cwd: str,
+    ) -> RunResult:
+        """Execute one shell line, under an ``EXEC_ID`` of its own when
+        the caller gave none: a cancel kills only the encoding shell, so a
+        cancelled line is reaped by that tag.
+
+        Args:
+            line (str): the raw shell line.
+            stdin (ByteSource | None): bytes piped into the line.
+            env (dict[str, str]): the merged environment.
+            cwd (str): the working directory, passed through verbatim.
+        """
+        if EXEC_ID in env:
+            return await super().exec_line(line, stdin, env, cwd)
+        exec_id = uuid.uuid4().hex
+        try:
+            return await super().exec_line(
+                line, stdin, {**env, EXEC_ID: exec_id}, cwd
+            )
+        except asyncio.CancelledError:
+            await asyncio.shield(self._reap(exec_id, 15))
+            raise
 
     async def open_pipe(self, command: str) -> SandboxPipe:
         reader = asyncio.StreamReader()

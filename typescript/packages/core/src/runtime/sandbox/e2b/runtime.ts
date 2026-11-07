@@ -23,7 +23,7 @@ import type { OutputFn, PipeWriter, RunResult, SandboxPipe } from '../../types.t
 import type { ConfigFields, RuntimeOptions } from '../../config.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { requireId } from '../config.ts'
-import { EXEC_ID, stopSignal, wrapLine } from '../constants.ts'
+import { decodeOutput, encodeOutput, EXEC_ID, stopSignal, wrapLine } from '../constants.ts'
 import { CLOSED_INPUT, PTY_MARK, PTY_RAW } from './constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_FIELDS, type E2BConfig } from './config.ts'
@@ -40,6 +40,27 @@ function pastMark(bytes: Uint8Array): number {
     return at + PTY_MARK.length
   }
   return -1
+}
+
+/**
+ * The bytes in output an `encodeOutput` command streams, decoded a whole
+ * line at a time as its text arrives.
+ */
+class LineDecoder {
+  private held = ''
+
+  feed(text: string): Uint8Array {
+    const all = this.held + text
+    const cut = all.lastIndexOf('\n')
+    this.held = all.slice(cut + 1)
+    return decodeOutput(all.slice(0, Math.max(cut, 0)))
+  }
+
+  flush(): Uint8Array {
+    const held = this.held
+    this.held = ''
+    return decodeOutput(held)
+  }
 }
 
 /**
@@ -98,7 +119,9 @@ class PtyWriter implements PipeWriter {
  * You create the sandbox yourself (`e2b sandbox spawn` or the SDK);
  * mirage only connects by `sandboxId` and execs lines. `apiKey` falls
  * back to E2B_API_KEY. E2B's exec reports stdout and stderr
- * separately, stdout as it arrives when streamed. Piped bytes use native
+ * separately, stdout as it arrives when streamed, each base64-encoded in
+ * the sandbox since the exec decodes output as text (`encodeOutput`: the
+ * sandbox needs dd and base64). Piped bytes use native
  * stdin, chunk by chunk, followed by an explicit EOF; no input closes
  * stdin when the command starts. The SDK's own command timeout is off: a
  * command runs until mirage's limits stop it. A `mountType` serves the
@@ -150,12 +173,20 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
     const sdk = await this.ensureSdk()
     signal?.throwIfAborted()
     // Keep the startup result even if aborted in flight, so its process can be killed.
-    const handle = await this.sandbox.commands.run(wrapLine(argv, env, cwd), {
+    const out = new LineDecoder()
+    const err = new LineDecoder()
+    const decoding =
+      (sink: OutputFn, decoder: LineDecoder) =>
+      async (text: string): Promise<void> => {
+        const data = decoder.feed(text)
+        if (data.byteLength > 0) await sink(data)
+      }
+    const handle = await this.sandbox.commands.run(encodeOutput(wrapLine(argv, env, cwd)), {
       background: true,
       stdin: stdin !== null,
       timeoutMs: 0,
-      ...(output !== null ? { onStdout: (text: string) => output(ENC.encode(text)) } : {}),
-      ...(errors !== null ? { onStderr: (text: string) => errors(ENC.encode(text)) } : {}),
+      ...(output !== null ? { onStdout: decoding(output, out) } : {}),
+      ...(errors !== null ? { onStderr: decoding(errors, err) } : {}),
     })
     let result: Pick<CommandResult, 'stdout' | 'stderr' | 'exitCode'>
     const state = { exited: false }
@@ -196,21 +227,55 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
       } else {
         try {
           // A tagged command a kill stopped with a gentler signal is left
-          // to the reap, which sends it that signal first.
+          // to the caller's reap, which sends it that signal first.
           if (env[EXEC_ID] === undefined || stopSignal(runner) === null) await handle.kill()
         } catch (cleanupError) {
           console.warn('Failed to stop the E2B command', cleanupError)
         }
         if (signal?.aborted) throw new DOMException('execute aborted', 'AbortError')
+        // The kill stops only the encoding shell; the caller reaps an abort.
+        const tag = env[EXEC_ID]
+        if (tag !== undefined) await this.reapRun(tag, 15)
         throw error
       }
     } finally {
       await handle.disconnect()
     }
+    const [outTail, errTail] = [out.flush(), err.flush()]
+    if (output !== null && outTail.byteLength > 0) await output(outTail)
+    if (errors !== null && errTail.byteLength > 0) await errors(errTail)
     return {
-      stdout: output === null ? ENC.encode(result.stdout) : new Uint8Array(),
-      stderr: errors === null ? ENC.encode(result.stderr) : new Uint8Array(),
+      stdout: output === null ? decodeOutput(result.stdout) : new Uint8Array(),
+      stderr: errors === null ? decodeOutput(result.stderr) : new Uint8Array(),
       exitCode: result.exitCode,
+    }
+  }
+
+  /**
+   * Execute one shell line, under an `EXEC_ID` of its own when the caller
+   * gave none: an abort kills only the encoding shell, so an aborted line
+   * is reaped by that tag.
+   *
+   * @param line the raw shell line.
+   * @param stdin bytes piped into the line.
+   * @param env the merged environment.
+   * @param cwd the working directory, passed through verbatim.
+   * @param signal stops the line.
+   */
+  override async execLine(
+    line: string,
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    if (env[EXEC_ID] !== undefined) return super.execLine(line, stdin, env, cwd, signal)
+    const tag = crypto.randomUUID().replaceAll('-', '')
+    try {
+      return await super.execLine(line, stdin, { ...env, [EXEC_ID]: tag }, cwd, signal)
+    } catch (error) {
+      if (signal?.aborted === true) await this.reapRun(tag, 15)
+      throw error
     }
   }
 

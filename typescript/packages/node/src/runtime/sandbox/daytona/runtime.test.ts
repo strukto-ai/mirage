@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { spawn } from 'node:child_process'
+import { writeFile } from 'node:fs/promises'
 import { stdinRedirect } from './constants.ts'
-import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { encodeOutput, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { MountMode } from '@struktoai/mirage-core/types'
@@ -135,7 +137,10 @@ describe('DaytonaRuntime', () => {
     expect(DEC.decode(sandbox.fs.files.get(path ?? ''))).toBe('a\nb\n')
     const [command, cwd, env] = sandbox.process.calls[0] ?? ['', undefined, undefined]
     expect(command).toBe(
-      stdinRedirect(wrapLine(['/bin/sh', '-c', 'wc -l'], { E: '1' }, '/workspace'), path ?? ''),
+      stdinRedirect(
+        encodeOutput(wrapLine(['/bin/sh', '-c', 'wc -l'], { E: '1' }, '/workspace'), true),
+        path ?? '',
+      ),
     )
     expect(command).toContain(`rm -f ${path ?? ''}`)
     expect([cwd, env]).toEqual([undefined, undefined])
@@ -182,4 +187,53 @@ it.each(RESTRICTIONS)('refuses every line under a session restriction', async (p
   } finally {
     await ws.close()
   }
+})
+
+/**
+ * Daytona's exec over a local sh: stdout and stderr combined, decoded as
+ * its JSON result carries them (UTF-8, errors replaced).
+ */
+class ShellProcess {
+  executeCommand(command: string): Promise<{ exitCode: number; result: string }> {
+    const child = spawn('/bin/sh', ['-c', `exec 2>&1\n${command}`], {
+      stdio: ['ignore', 'pipe', 'inherit'],
+    })
+    const chunks: Buffer[] = []
+    child.stdout.on('data', (data: Buffer) => chunks.push(data))
+    return new Promise((resolve) =>
+      child.on('close', (code) => {
+        resolve({ exitCode: code ?? -1, result: new TextDecoder().decode(Buffer.concat(chunks)) })
+      }),
+    )
+  }
+}
+
+class LocalFs extends FakeFs {
+  override async uploadFile(data: Buffer, path: string): Promise<void> {
+    await super.uploadFile(data, path)
+    await writeFile(path, data)
+  }
+}
+
+// Program output is bytes: invalid UTF-8, NUL and CRLF reach the host
+// unchanged, stderr in the one combined stream, with the program's status,
+// with or without piped input.
+describe('DaytonaRuntime output bytes', () => {
+  it.each([{ stdin: null }, { stdin: new Uint8Array([0x69, 0x6e, 0xff, 0x00]) }])(
+    'returns arbitrary bytes and the exit code exactly (stdin: $stdin)',
+    async ({ stdin }) => {
+      const runtime = makeRuntime()
+      await runtime.connect()
+      Object.assign(FakeClient.last ?? {}, { process: new ShellProcess(), fs: new LocalFs() })
+      const line =
+        "printf 'a\\377\\000b\\r\\n\\303'; printf 'e\\376\\000\\r\\n' >&2; " +
+        (stdin === null ? 'exit 5' : 'cat; exit 5')
+      const result = await runtime.execLine(line, stdin, {}, '/')
+      expect([result.exitCode, [...result.stdout], result.stderr]).toEqual([
+        5,
+        [0x61, 0xff, 0x00, 0x62, 0x0d, 0x0a, 0xc3, 0x65, 0xfe, 0x00, 0x0d, 0x0a, ...(stdin ?? [])],
+        null,
+      ])
+    },
+  )
 })

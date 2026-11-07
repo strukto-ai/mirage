@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import base64
+import re
 from collections.abc import Mapping, Sequence
 
 from mirage.process.handle import ProcessHandle
@@ -181,6 +183,61 @@ STOP_POLL_SECONDS = 0.02
 # Where the stop line finds grep and sleep: the config's PATH is for the
 # programs it runs and may name none of the system's directories.
 REAP_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Output as base64 lines per read, status on fd 3, for an exec that returns text.
+ENCODE_PRELUDE = (
+    f"e() {{ PATH={REAP_PATH}; "
+    'while c=$(dd bs=65536 count=1 2>/dev/null | base64) && [ -n "$c" ]; '
+    "do printf '%s\\n' \"$c\"; done; }; "
+    f"(PATH={REAP_PATH}; command -v dd && command -v base64) >/dev/null || "
+    "{ echo 'mirage: the sandbox needs dd and base64 to return output' >&2; "
+    "exit 127; }; "
+)
+ENCODE_OUTPUT = ENCODE_PRELUDE + (
+    'exec 4>&1 5>&2; s=$( { { { "$@" 3>&- 4>&- 5>&-; echo $? >&3; } '
+    '| e >&4; } 2>&1 | e >&5; } 3>&1 ); exit "$s"'
+)
+# For an exec that returns one combined stream: stderr joins stdout first.
+ENCODE_COMBINED = ENCODE_PRELUDE + (
+    'exec 4>&1; s=$( { { "$@" 2>&1 3>&- 4>&-; echo $? >&3; } '
+    '| e >&4; } 3>&1 ); exit "$s"'
+)
+
+BASE64_LINE = re.compile(
+    r"(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?"
+)
+
+
+def encode_output(line: str, combined: bool = False) -> str:
+    """``line`` run so its output comes back as base64 lines, which an
+    exec that decodes output as text leaves intact (``ENCODE_OUTPUT``).
+
+    Args:
+        line (str): the command, as ``wrap_line`` builds it.
+        combined (bool): encode stderr with stdout as one stream, for an
+            exec that returns them combined.
+    """
+    script = ENCODE_COMBINED if combined else ENCODE_OUTPUT
+    return f"/bin/sh -c {single_quote(script)} sh {line}"
+
+
+def decode_output(text: str) -> bytes:
+    """The bytes an ``encode_output`` command wrote, from whole lines of
+    its output. A blank line adds nothing; a line that is not base64,
+    which only the sandbox's own shell writes (the encoder missing), comes
+    back as it is, with its newline.
+
+    Args:
+        text (str): whole lines of the command's output.
+    """
+    out = bytearray()
+    for line in text.split("\n"):
+        word = line.strip()
+        if BASE64_LINE.fullmatch(word):
+            out += base64.b64decode(word)
+        else:
+            out += f"{line}\n".encode()
+    return bytes(out)
 
 
 def wrap_line(argv: Sequence[str], env: Mapping[str, str], cwd: str) -> str:

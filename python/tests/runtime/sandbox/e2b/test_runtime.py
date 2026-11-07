@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import base64
+import codecs
 import io
 import shlex
 from dataclasses import dataclass
@@ -26,7 +28,13 @@ from mirage.commands.config import Context
 from mirage.context.session_context import run_with_execution
 from mirage.io.types import materialize
 from mirage.process.table import ProcessTable
-from mirage.runtime.sandbox.constants import EXEC_ID, MOUNT_GUARD, wrap_line
+from mirage.runtime.sandbox.constants import (
+    EXEC_ID,
+    MOUNT_GUARD,
+    encode_output,
+    reap_line,
+    wrap_line,
+)
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
 from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
 from mirage.runtime.types import RunResult, SandboxPipe
@@ -37,6 +45,11 @@ def _line(box: E2BRuntime, line: str, stdin: bytes | None, env=None):
     cwd = PathSpec.from_str_path("/workspace")
     ctx = Context(flags={"c": line}, stdin=stdin, env=env, cwd=cwd)
     return box.run_line(None, [], [], ctx)
+
+
+def b64(text: str) -> str:
+    """``text`` as the sandbox's encoder sends it."""
+    return base64.b64encode(text.encode()).decode() + "\n"
 
 
 @dataclass
@@ -74,19 +87,22 @@ class FakeHandle:
         if self.command == "sleep":
             await asyncio.Event().wait()
         if self.command == "exit 0":
-            return FakeResult("partial", "boom-err", 0)
+            return FakeResult(b64("partial"), b64("boom-err"), 0)
         if self.command == "exit 3":
             raise CommandExitException(
-                stderr="boom-err", stdout="partial", exit_code=3, error=None
+                stderr=b64("boom-err"),
+                stdout=b64("partial"),
+                exit_code=3,
+                error=None,
             )
         if self.command == "head":
             await self.received.wait()
-            return FakeResult(self.input.hex(), "", 0)
+            return FakeResult(b64(self.input.hex()), "", 0)
         if not self.eof:
             await self.closed.wait()
         if self.on_stderr is not None:
-            await self.on_stderr("warn")
-        return FakeResult(self.input.hex(), "warn", 0)
+            await self.on_stderr(b64("warn"))
+        return FakeResult(b64(self.input.hex()), b64("warn"), 0)
 
     async def kill(self):
         self.killed = True
@@ -205,10 +221,12 @@ async def test_native_stdin_eof_and_command_are_preserved(data, monkeypatch):
     sandbox = FakeSandbox.last
     assert sandbox.commands.calls == [
         (
-            wrap_line(
-                ("/bin/sh", "-c", "wc -l | cat"),
-                {"E": "1", EXEC_ID: "run"},
-                "/workspace",
+            encode_output(
+                wrap_line(
+                    ("/bin/sh", "-c", "wc -l | cat"),
+                    {"E": "1", EXEC_ID: "run"},
+                    "/workspace",
+                )
             ),
             data is not None,
         )
@@ -284,6 +302,8 @@ async def test_parallel_calls_connect_once_and_keep_input_separate():
     assert all(h.disconnected for h in FakeSandbox.last.commands.handles)
 
 
+# An untagged run (the reap's own line) that fails is killed and starts
+# nothing more.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "input_error",
@@ -299,9 +319,28 @@ async def test_input_transport_failure_kills_only_its_command_and_disconnects(
     await runtime.connect()
     FakeSandbox.last.commands.input_error = input_error
     with pytest.raises(type(input_error), match="stdin transport failed"):
-        await runtime.exec_line("cat", b"input", {}, "/workspace")
+        await runtime._exec_argv(
+            ("/bin/sh", "-c", "cat"), b"input", {}, "/workspace", None, None
+        )
     handle = FakeSandbox.last.commands.handles[0]
     assert handle.killed and handle.disconnected
+    assert len(FakeSandbox.last.commands.calls) == 1
+
+
+# A kill reaches only the shell that encodes the output, so a tagged run
+# that fails for a reason other than a cancel is also stopped by its tag.
+@pytest.mark.asyncio
+async def test_a_tagged_run_that_fails_is_reaped_by_its_tag():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    commands = FakeSandbox.last.commands
+    commands.input_error = RuntimeError("stdin transport failed")
+    with pytest.raises(RuntimeError, match="stdin transport failed"):
+        await runtime.exec_line("cat", b"input", {EXEC_ID: "run"}, "/")
+    assert [shlex.split(command)[-1] for command, _ in commands.calls] == [
+        "cat",
+        reap_line("run", 15),
+    ]
 
 
 # A streamed command's stderr goes to its errors callback as it arrives,
@@ -321,25 +360,39 @@ async def test_streamed_stderr_goes_to_the_errors_callback():
     assert (said, result.stderr) == ([b"warn"], b"")
 
 
+# A kill reaches only the encoding shell, so a line run with no tag of its
+# caller's gets its own and a cancelled one is reaped by it.
 @pytest.mark.asyncio
-async def test_cancellation_kills_command_and_disconnects():
+async def test_a_cancelled_line_is_killed_and_reaped_by_its_own_tag(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.e2b.runtime.uuid.uuid4",
+        lambda: SimpleNamespace(hex="line"),
+    )
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     await runtime.connect()
+    commands = FakeSandbox.last.commands
     task = asyncio.create_task(
         runtime.exec_line("sleep", None, {}, "/workspace")
     )
     await asyncio.sleep(0)
-    handle = FakeSandbox.last.commands.handles[0]
+    handle = commands.handles[0]
     await handle.waiting.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
     assert handle.killed and handle.disconnected
+    assert [shlex.split(command)[-1] for command, _ in commands.calls] == [
+        "sleep",
+        reap_line("line", 15),
+    ]
 
 
 # A kill that names a gentler signal leaves a run's tagged command to the
 # reap, which sends it that signal first; an untagged one (mount setup, a
-# direct exec) has no reap behind it and is killed.
+# direct exec) has no reap behind it and is killed. Either way the runtime
+# runs nothing more: a cancelled run is the caller's to reap.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("env,killed", [({EXEC_ID: "run"}, False), ({}, True)])
 async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
@@ -366,6 +419,7 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
     assert runner.terminate(15)
     await runner.join()
     assert (handle.killed, handle.disconnected) == (killed, True)
+    assert len(FakeSandbox.last.commands.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -536,3 +590,185 @@ async def test_ssh_mounts_serve_a_restricted_session_its_files(profile):
     assert list(runtime.table) == ["/data"]
     assert "tool run" in runtime.lines
     await ws.close()
+
+
+class ShellHandle:
+    """E2B's command handle over a local sh, its output decoded as the
+    SDK decodes it (UTF-8, errors replaced) and read in small slices."""
+
+    def __init__(self, process, on_stdout, on_stderr):
+        self.process = process
+        self.chunks = {"out": [], "err": []}
+        self.pumps = asyncio.gather(
+            self._pump(process.stdout, on_stdout, self.chunks["out"]),
+            self._pump(process.stderr, on_stderr, self.chunks["err"]),
+        )
+
+    async def _pump(self, stream, callback, chunks):
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        while True:
+            data = await stream.read(7)
+            text = decoder.decode(data, final=not data)
+            if text:
+                chunks.append(text)
+                if callback is not None:
+                    await callback(text)
+            if not data:
+                return
+
+    async def send_stdin(self, data):
+        self.process.stdin.write(data)
+        await self.process.stdin.drain()
+
+    async def close_stdin(self):
+        self.process.stdin.close()
+
+    async def wait(self):
+        await self.pumps
+        code = await self.process.wait()
+        stdout = "".join(self.chunks["out"])
+        stderr = "".join(self.chunks["err"])
+        if code:
+            raise CommandExitException(
+                stdout=stdout, stderr=stderr, exit_code=code, error=None
+            )
+        return FakeResult(stdout, stderr, code)
+
+    async def kill(self):
+        self.process.kill()
+
+    async def disconnect(self):
+        pass
+
+
+class ShellCommands:
+    async def run(
+        self, command, *, background, stdin, on_stdout, on_stderr, timeout
+    ):
+        process = await asyncio.create_subprocess_exec(
+            "/bin/sh",
+            "-c",
+            command,
+            stdin=asyncio.subprocess.PIPE
+            if stdin
+            else asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        return ShellHandle(process, on_stdout, on_stderr)
+
+
+BYTES_LINE = (
+    "printf 'a\\377\\000b\\r\\n\\303'; printf 'e\\376\\000\\r\\n' >&2; exit 5"
+)
+
+
+# Program output is bytes: invalid UTF-8, NUL and CRLF reach the host
+# unchanged on stdout and stderr, whole or streamed, with the program's
+# status.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_arbitrary_output_bytes_and_the_exit_code_come_back_exactly(
+    streamed,
+):
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    FakeSandbox.last.commands = ShellCommands()
+    said = {"out": bytearray(), "err": bytearray()}
+
+    async def output(chunk: bytes) -> None:
+        said["out"] += chunk
+
+    async def errors(chunk: bytes) -> None:
+        said["err"] += chunk
+
+    result = await runtime._exec_argv(
+        ("/bin/sh", "-c", BYTES_LINE),
+        None,
+        {},
+        "/",
+        output if streamed else None,
+        errors if streamed else None,
+    )
+    if streamed:
+        stdout, stderr = bytes(said["out"]), bytes(said["err"])
+        assert (result.stdout, result.stderr) == (b"", b"")
+    else:
+        stdout, stderr = result.stdout, result.stderr
+    assert (result.exit_code, stdout, stderr) == (
+        5,
+        b"a\xff\x00b\r\n\xc3",
+        b"e\xfe\x00\r\n",
+    )
+
+
+# A program's output reaches the host while it still runs: here it waits
+# for input that is only sent once its first line has arrived.
+@pytest.mark.asyncio
+async def test_output_streams_while_the_program_runs():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    FakeSandbox.last.commands = ShellCommands()
+    said = bytearray()
+    first = asyncio.Event()
+
+    async def output(chunk: bytes) -> None:
+        said.extend(chunk)
+        if b"one\n" in said:
+            first.set()
+
+    async def reply():
+        await first.wait()
+        yield b"two\n"
+
+    result = await asyncio.wait_for(
+        runtime._exec_argv(
+            ("/bin/sh", "-c", "echo one; head -n 1"),
+            reply(),
+            {},
+            "/",
+            output,
+            None,
+        ),
+        10,
+    )
+    assert (result.exit_code, bytes(said)) == (0, b"one\ntwo\n")
+
+
+class TailCommands:
+    """A command that streams a line, then a tail with no newline, on
+    stdout and on stderr."""
+
+    async def run(
+        self, command, *, background, stdin, on_stdout, on_stderr, timeout
+    ):
+        handle = FakeHandle(command, stdin)
+        await on_stdout(b64("a")[:3])
+        await on_stdout(b64("a")[3:] + "mirage: tail")
+        await on_stderr(b64("b")[:3])
+        await on_stderr(b64("b")[3:] + "mirage: etail")
+        return handle
+
+
+# Streamed text decodes a whole line at a time; what is left when the
+# stream ends without a newline still comes out, once.
+@pytest.mark.asyncio
+async def test_a_streamed_tail_without_a_newline_still_comes_out():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    FakeSandbox.last.commands = TailCommands()
+    said: dict[str, list[bytes]] = {"out": [], "err": []}
+
+    async def output(chunk: bytes) -> None:
+        said["out"].append(chunk)
+
+    async def errors(chunk: bytes) -> None:
+        said["err"].append(chunk)
+
+    result = await runtime._exec_argv(
+        ("/bin/sh", "-c", "x"), None, {}, "/", output, errors
+    )
+    assert (result.exit_code, said) == (
+        0,
+        {"out": [b"a", b"mirage: tail\n"], "err": [b"b", b"mirage: etail\n"]},
+    )
