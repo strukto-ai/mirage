@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.builtin.generic.du import du_generic
+from mirage.commands.builtin.generic.du import du_generic, parse_flags
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eacces
@@ -44,8 +44,10 @@ async def _size(path):
 
 @command("du", vfs="ram", spec=SPECS["du"])
 async def _measured(accessor, paths, texts, opts):
+    flags = parse_flags(opts)
+    assert not isinstance(flags, IOResult)
     return await du_generic(
-        paths, texts, opts, _resolve, _stat, _size, _entries
+        flags, paths, texts, opts, _resolve, _stat, _size, _entries
     )
 
 

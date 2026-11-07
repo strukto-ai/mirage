@@ -1,19 +1,29 @@
 import logging
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from functools import partial
 
 from mirage.commands.builtin.utils.formatting import (
     BlockSize,
     block_size_of,
+    full_iso_time,
     scaled_size,
 )
 from mirage.commands.builtin.utils.links import mounts_of
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import vfs_stat_path
+from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import ZERO_LENGTH_NAME
@@ -21,7 +31,10 @@ from mirage.errors.types import DotWalkError, FsCondition
 from mirage.io.types import IOResult, PathRecord
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused, scan
-from mirage.types import FileStat, Follow, LineFacts, PathSpec
+from mirage.shell.bytes import decode_text, encode_text
+from mirage.types import FileStat, Follow, LineFacts, LsTimeKind, PathSpec
+from mirage.utils.dates import iso_timestamp
+from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
 from mirage.view.namespace_view import paths_scoped
@@ -32,6 +45,11 @@ logger = logging.getLogger(__name__)
 DuEntries = tuple[list[tuple[str, int]], int]
 ComputeSize = Callable[[PathSpec], Awaitable[int]]
 ComputeEntries = Callable[[PathSpec], Awaitable[DuEntries]]
+# A time as an ordering key and the stamp it was read from.
+Newest = tuple[float, str]
+
+_HINT = "Try 'du --help' for more information.\n"
+_TIMES = {"atime": LsTimeKind.ATIME, "ctime": LsTimeKind.CTIME}
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +66,20 @@ class DuFlags:
         max_depth (int | None): --max-depth/-d, deepest level to print.
         warning (str | None): a non-fatal diagnostic GNU prints before the
             output, without failing the command.
+        inodes (bool): --inodes, count entries rather than bytes: a file
+            is one, a directory one plus what it holds; only ``-h`` and
+            ``--si`` scale the count.
+        threshold (int | None): -t/--threshold, print a row only at or
+            above this size, or at or below its magnitude when negative;
+            the ``total`` row always prints.
+        time (LsTimeKind | None): --time, the clock of the time column:
+            each row shows the newest time in its tree; None prints none.
+        time_style (str): --time-style or ``TIME_STYLE``: ``full-iso``,
+            ``long-iso``, ``iso`` or ``+FORMAT``.
+        null (bool): -0/--null, end each row with NUL.
+        excludes (tuple[str, ...]): --exclude and -X patterns; an entry
+            whose path, as du prints it, or the part after any slash in
+            it matches one is neither walked nor counted.
     """
 
     s: bool = False
@@ -58,6 +90,12 @@ class DuFlags:
     S: bool = False
     max_depth: int | None = None
     warning: str | None = None
+    inodes: bool = False
+    threshold: int | None = None
+    time: LsTimeKind | None = None
+    time_style: str = "long-iso"
+    null: bool = False
+    excludes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +124,9 @@ def parse_flags(ctx: Context) -> DuFlags | IOResult:
     """du's options, ``--max-depth`` and its conflicts with ``-s`` and
     ``-a`` read by mirage-rs before any operand is resolved.
 
+    The time style is read only under ``--time``, as GNU reads it, from
+    ``--time-style`` or else the ``TIME_STYLE`` variable.
+
     Args:
         ctx (Context): the flags as the dispatcher parsed them.
 
@@ -93,26 +134,44 @@ def parse_flags(ctx: Context) -> DuFlags | IOResult:
         DuFlags | IOResult: the flags, or du's refusal.
     """
     fl = FlagView(ctx.flags, spec=SPECS["du"])
+    typed = fl.texts(
+        "max_depth",
+        "summarize",
+        "all",
+        "human_readable",
+        "si",
+        "bytes",
+        "apparent_size",
+        "k",
+        "m",
+        "block_size",
+        "inodes",
+        "t",
+        "threshold",
+    )
+    when = fl.raw("time")
+    timed = when is not None and when is not False
+    if isinstance(when, str):
+        typed.append(("time", when))
+    style = fl.as_str("time_style")
+    if style is None and ctx.env is not None:
+        style = ctx.env.get("TIME_STYLE")
+    if timed and style is not None:
+        typed.append(("time_style", style))
     try:
-        values = scan(
-            "du",
-            fl.texts(
-                "max_depth",
-                "summarize",
-                "all",
-                "human_readable",
-                "bytes",
-                "k",
-                "m",
-                "block_size",
-            ),
-        )
+        values = scan("du", typed)
     except StreamRefusal as refusal:
         return refused(refusal)
     depth = values["max_depth"]
     warning = values["warning"]
+    limit = values["threshold"]
+    word = values["time"]
+    shape = values["time_style"]
     assert depth is None or isinstance(depth, int)
     assert warning is None or isinstance(warning, str)
+    assert limit is None or isinstance(limit, str)
+    assert word is None or isinstance(word, str)
+    assert shape is None or isinstance(shape, str)
     return DuFlags(
         s=fl.as_bool("summarize"),
         a=fl.as_bool("all"),
@@ -122,6 +181,70 @@ def parse_flags(ctx: Context) -> DuFlags | IOResult:
         S=fl.as_bool("separate_dirs"),
         max_depth=depth,
         warning=warning,
+        inodes=fl.as_bool("inodes"),
+        threshold=None if limit is None else int(limit),
+        time=(
+            None
+            if not timed
+            else _TIMES[word]
+            if word is not None
+            else LsTimeKind.MTIME
+        ),
+        time_style=shape or "long-iso",
+        null=fl.as_bool("null"),
+        excludes=tuple(fl.as_list("exclude")),
+    )
+
+
+async def read_flags(
+    ctx: Context, stream: Callable[[PathSpec], AsyncIterator[bytes]]
+) -> DuFlags | IOResult:
+    """du's options with every ``-X`` file read into its patterns, one a
+    line; a file that cannot be read is GNU's refusal, exit 1.
+
+    Args:
+        ctx (Context): the flags as the dispatcher parsed them.
+        stream (Callable[[PathSpec], AsyncIterator[bytes]]): reads a
+            pattern file, ``-`` from stdin.
+
+    Returns:
+        DuFlags | IOResult: the flags, or du's refusal.
+    """
+    flags = parse_flags(ctx)
+    if isinstance(flags, IOResult):
+        return flags
+    patterns = list(flags.excludes)
+    for source in FlagView(ctx.flags, spec=SPECS["du"]).as_paths(
+        "exclude_from"
+    ):
+        held = bytearray()
+        try:
+            async for chunk in stream(source):
+                held += chunk
+        except FS_ERRORS as exc:
+            line = f"du: {source.raw_path}: {fs_strerror(exc)}\n{_HINT}"
+            return IOResult(exit_code=1, stderr=line.encode())
+        patterns.extend(
+            line for line in decode_text(bytes(held)).split("\n") if line
+        )
+    return replace(flags, excludes=tuple(patterns))
+
+
+def excluded(patterns: Sequence[str], shown: str) -> bool:
+    """Whether ``--exclude`` or ``-X`` leaves a path out: a pattern that
+    matches it whole, or the part after any slash in it.
+
+    Args:
+        patterns (Sequence[str]): the patterns.
+        shown (str): the path as du prints it.
+    """
+    if not patterns:
+        return False
+    tails = [shown] + [
+        shown[at + 1 :] for at, char in enumerate(shown) if char == "/"
+    ]
+    return any(
+        fnmatch(tail, pattern) for pattern in patterns for tail in tails
     )
 
 
@@ -145,6 +268,7 @@ async def du_operands(
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     has_content: Callable[[PathSpec], Awaitable[bool]] | None = None,
     stat_path: StatPath | None = None,
+    excludes: Sequence[str] = (),
 ) -> tuple[list[PathSpec], list[tuple[str, str]]]:
     """Split the operands into the ones du can read and the ones it cannot.
 
@@ -178,6 +302,9 @@ async def du_operands(
             tell an implicit directory from an absent path.
         stat_path (StatPath | None): dispatcher-backed stat, None when du
             runs outside a workspace and there is no namespace to ask.
+        excludes (Sequence[str]): the ``--exclude`` patterns; an operand
+            one matches is dropped before it is stat'ed, as GNU drops
+            it, so a missing one is not reported either.
 
     Returns:
         tuple[list[PathSpec], list[tuple[str, str]]]: readable operands,
@@ -192,9 +319,13 @@ async def du_operands(
         # An unmatched glob reaches GNU as the literal pattern, which it
         # then reports as unreadable.
         missing = [
-            (p.raw_path, posix_phrase(FsCondition.ENOENT)) for p in targets
+            (p.raw_path, posix_phrase(FsCondition.ENOENT))
+            for p in targets
+            if not excluded(excludes, p.raw_path)
         ]
     for path in resolved:
+        if excluded(excludes, path.raw_path):
+            continue
         try:
             await stat(path)
             stattable = True
@@ -296,8 +427,101 @@ async def du_has_content(
         return False
 
 
-def _line(size: int, flags: DuFlags, label: str) -> str:
-    return scaled_size(size, flags.block_size, flags.h) + "\t" + label
+def _line(
+    size: int, flags: DuFlags, label: str, newest: Newest | None = None
+) -> str:
+    block = flags.block_size
+    if flags.inodes and block is not None and block.human_base is None:
+        block = None
+    shown = scaled_size(size, block, flags.h)
+    if flags.time is not None:
+        shown += "\t" + _stamp(newest[1] if newest else None, flags.time_style)
+    return shown + "\t" + label
+
+
+def _stamp(modified: str | None, style: str) -> str:
+    """A row's time under du's ``--time-style``: ``full-iso`` as ``ls``
+    spells it, ``long-iso``, ``iso`` (a date alone, whatever its age) or
+    a ``+FORMAT``; an unknown time is the epoch.
+
+    Args:
+        modified (str | None): the ISO timestamp.
+        style (str): the style.
+    """
+    if style == "full-iso":
+        return full_iso_time(modified)
+    seconds = iso_timestamp(modified) or 0.0
+    when = datetime.fromtimestamp(seconds, timezone.utc)
+    fmt = {"long-iso": "%Y-%m-%d %H:%M", "iso": "%Y-%m-%d"}.get(
+        style, style[1:]
+    )
+    return gnu_strftime(when, fmt)
+
+
+def _kept(size: int, flags: DuFlags) -> bool:
+    """Whether ``-t`` lets a row print.
+
+    Args:
+        size (int): the row's bytes, or its count under ``--inodes``.
+        flags (DuFlags): the parsed command line.
+    """
+    limit = flags.threshold
+    if limit is None:
+        return True
+    return size >= limit if limit >= 0 else size <= -limit
+
+
+def newest_under(times: Mapping[str, str], root: str) -> dict[str, Newest]:
+    """The newest time in each directory's tree under ``root``, for
+    ``--time``: each entry's time is carried up to the root, stopping at
+    an ancestor that already holds a newer one, since every ancestor of
+    that one does too.
+
+    Args:
+        times (Mapping[str, str]): each entry's time by virtual path.
+        root (str): the operand's virtual path.
+    """
+    root_key = _norm(root)
+    prefix = root_key if root_key.endswith("/") else root_key + "/"
+    best: dict[str, Newest] = {}
+    for virtual, stamp in times.items():
+        node = _norm(virtual)
+        key = iso_timestamp(stamp)
+        if key is None or (node != root_key and not node.startswith(prefix)):
+            continue
+        while True:
+            held = best.get(node)
+            if held is not None and held[0] >= key:
+                break
+            best[node] = (key, stamp)
+            if node == root_key:
+                break
+            node = _parent_of(node)
+    return best
+
+
+def inode_count(
+    entries: Sequence[tuple[str, int]], root: str, dirs: Sequence[str] = ()
+) -> int:
+    """The entries ``--inodes`` counts in an operand: every file and
+    directory under it, and the operand itself.
+
+    Args:
+        entries (Sequence[tuple[str, int]]): leaf (virtual path, size).
+        root (str): the operand's virtual path.
+        dirs (Sequence[str]): the directories the walk met.
+    """
+    root_key = _norm(root)
+    prefix = root_key if root_key.endswith("/") else root_key + "/"
+    nodes: set[str] = set()
+    for path in [leaf for leaf, _ in entries] + list(dirs):
+        node = _norm(path)
+        while (
+            node != root_key and node.startswith(prefix) and node not in nodes
+        ):
+            nodes.add(node)
+            node = _parent_of(node)
+    return len(nodes) + 1
 
 
 def _norm(path: str) -> str:
@@ -367,6 +591,7 @@ def rollup(
     max_depth: int | None,
     dirs: Sequence[str] = (),
     separate_dirs: bool = False,
+    inodes: bool = False,
 ) -> list[tuple[str, int]]:
     """Derive GNU's per-directory lines from a flat list of leaf files.
 
@@ -394,6 +619,9 @@ def rollup(
             one, or one it could not open) and the roots of descendant
             mounts, which still get GNU's ``0`` row.
         separate_dirs (bool): -S, exclude subdirectory sizes.
+        inodes (bool): --inodes, each directory counts itself too, and
+            under ``-S`` itself alone of the directories in it; the
+            leaves come in as one each.
 
     Returns:
         list[tuple[str, int]]: (virtual path, size) in GNU's print order.
@@ -427,6 +655,16 @@ def rollup(
         while node != root_key and node.startswith(prefix):
             sizes.setdefault(node, 0)
             node = _parent_of(node)
+    if inodes:
+        # Deepest first, so each directory's count of the directories
+        # in its tree is complete before it is added to its parent's.
+        own = dict.fromkeys(sizes, 1)
+        for node in sorted(sizes, key=lambda n: n.count("/"), reverse=True):
+            parent = _parent_of(node)
+            if not separate_dirs and parent in own:
+                own[parent] += own[node]
+        for node, count in own.items():
+            sizes[node] += count
 
     # Keyed backends (S3, GridFS) carry a zero-byte marker object for a
     # directory, which arrives here as a leaf. Under -a it must not
@@ -493,6 +731,20 @@ def leaves_of(records: Sequence[PathRecord]) -> list[tuple[str, int]]:
     return [(r.path.virtual, r.size) for r in records if r.size is not None]
 
 
+def _row(
+    size: int, flags: DuFlags, label: str, newest: Newest | None
+) -> list[str]:
+    """One row as ``-t`` lets it print: the line, or none.
+
+    Args:
+        size (int): the row's bytes, or its count under ``--inodes``.
+        flags (DuFlags): the parsed command line.
+        label (str): the name it prints under.
+        newest (Newest | None): the newest time in its tree.
+    """
+    return [_line(size, flags, label, newest)] if _kept(size, flags) else []
+
+
 async def _du_one(
     path: PathSpec,
     run: int,
@@ -501,11 +753,20 @@ async def _du_one(
     flags: DuFlags,
     mounts: MountView | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
-) -> tuple[list[str], int, list[PathRecord] | None]:
+    times: Callable[[], Mapping[str, str]] | None = None,
+) -> tuple[list[str], int, list[PathRecord] | None, Newest | None]:
     label = path.raw_path
+    root_key = _norm(path.virtual)
     roots = mounts.descendants(path.virtual) if mounts is not None else []
+    timed = times is not None and flags.time is not None
 
-    if flags.s and not flags.S and not roots and not paths_scoped([path]):
+    if (
+        flags.s
+        and not flags.S
+        and not flags.inodes
+        and not roots
+        and not paths_scoped([path])
+    ):
         # The one-total fast path trusts the backend's own sum, which a
         # session hiding paths under this operand cannot: hidden leaves
         # would be counted into a total their names never justify, so
@@ -513,14 +774,21 @@ async def _du_one(
         # rule likewise, since the walk is where a refused directory is
         # reported. Per operand: a hide elsewhere keeps this total.
         total = await compute_size(path)
-        return [_line(total, flags, label)], total, None
+        newest = (
+            newest_under(times(), path.virtual).get(root_key)
+            if times is not None and timed
+            else None
+        )
+        return _row(total, flags, label, newest), total, None, newest
 
     entries, total = await compute_entries(path)
-    root_key = _norm(path.virtual)
+    raw = times() if times is not None and timed else {}
+    stamps = newest_under(raw, path.virtual) if raw else {}
+    newest = stamps.get(root_key)
     under = root_key.rstrip("/") + "/"
     met = drop_shadowed(
         [
-            PathRecord(PathSpec.from_str_path(d), run)
+            PathRecord(PathSpec.from_str_path(d), run, modified=raw.get(d))
             for d in (directories() if directories is not None else ())
             if _norm(d).startswith(under)
         ],
@@ -529,6 +797,7 @@ async def _du_one(
     walked = directories is not None and any(
         _norm(d) == root_key for d in directories()
     )
+    own_record = PathRecord(path, run, modified=raw.get(path.virtual))
     if not entries and not met and not walked:
         # A backend that can only produce a size degrades to one total;
         # it cannot enumerate, so shadowed keys cannot be excluded either.
@@ -536,14 +805,18 @@ async def _du_one(
         # empty directory, or one a rule refused, which a second walk
         # would report twice.
         total = await compute_size(path)
+        count = 1 if flags.inodes else total
         return (
-            [_line(total, flags, label)],
-            total,
-            [PathRecord(path, run)] if total == 0 else None,
+            _row(count, flags, label, newest),
+            count,
+            [own_record] if total == 0 else None,
+            newest,
         )
 
     counted = [
-        PathRecord(PathSpec.from_str_path(leaf), run, size)
+        PathRecord(
+            PathSpec.from_str_path(leaf), run, size, modified=raw.get(leaf)
+        )
         for leaf, size in to_virtual(entries, path)
     ]
     # Shadowed leaves drop: the total is the sum of what survived, never
@@ -553,32 +826,45 @@ async def _du_one(
     if len(kept) != len(counted) or roots:
         total = sum(size for _, size in virtual)
     dirs = [r.path.virtual for r in met]
-    records = [PathRecord(path, run), *kept, *met]
+    records = [own_record, *kept, *met]
+    if flags.inodes:
+        total = inode_count(virtual, path.virtual, dirs)
     # A file operand walks to itself. GNU prints it once, with or
     # without -a, never as a leaf line plus a roll-up line. GNU scopes
     # -S to directories, so a file operand keeps its own size in both
     # its row and the grand total.
     if len(virtual) == 1 and _norm(virtual[0][0]) == root_key:
-        return [_line(virtual[0][1], flags, label)], total, records
+        size = total if flags.inodes else virtual[0][1]
+        return _row(size, flags, label, newest), total, records, newest
+    counts = [(leaf, 1) for leaf, _ in virtual] if flags.inodes else virtual
     # -S changes what the operand's own row counts, not what the operand
     # contributes to -c: GNU's grand total stays recursive (coreutils
     # 9.7, `du -bSc dir` prints `3 dir` then `6 total`).
-    own = separate_total(virtual, path.virtual) if flags.S else total
+    own = (
+        separate_total(counts, path.virtual) + int(flags.inodes)
+        if flags.S
+        else total
+    )
     if flags.s:
-        return [_line(own, flags, label)], total, records
+        return _row(own, flags, label, newest), total, records, newest
 
     rows = rollup(
-        virtual,
+        counts,
         path.virtual,
         a=flags.a,
         max_depth=flags.max_depth,
         dirs=dirs,
         separate_dirs=flags.S,
+        inodes=flags.inodes,
     )
     shown = respell_raw([node for node, _ in rows], path.virtual, label)
-    lines = [_line(size, flags, name) for name, (_, size) in zip(shown, rows)]
-    lines.append(_line(own, flags, label))
-    return lines, total, records
+    lines = [
+        line
+        for name, (node, size) in zip(shown, rows)
+        for line in _row(size, flags, name, stamps.get(node))
+    ]
+    lines.extend(_row(own, flags, label, newest))
+    return lines, total, records, newest
 
 
 async def du(
@@ -594,6 +880,7 @@ async def du(
     directories: Callable[[], Sequence[str]] | None = None,
     inaccessible: Callable[[], Sequence[tuple[str, str | None]]] | None = None,
     repeated: Callable[[PathSpec], bool] | None = None,
+    times: Callable[[], Mapping[str, str]] | None = None,
 ) -> DuOutput:
     """Render ``du`` output for a list of operands.
 
@@ -630,14 +917,18 @@ async def du(
         repeated (Callable[[PathSpec], bool] | None): asked before each
             operand's walk whether an earlier one already counted it,
             which GNU then skips without a row.
+        times (Callable[[], Mapping[str, str]] | None): read after each
+            operand's walk for the time of every entry it met, by virtual
+            path, under ``--time``.
     """
     lines: list[str] = []
     totals: list[int] = []
     records: list[PathRecord] | None = []
+    latest: Newest | None = None
     for run, path in enumerate(paths):
         if repeated is not None and repeated(path):
             continue
-        block, total, measured = await _du_one(
+        block, total, measured, newest = await _du_one(
             path,
             run,
             compute_size,
@@ -645,9 +936,12 @@ async def du(
             flags,
             mounts,
             directories,
+            times,
         )
         lines.extend(block)
         totals.append(total)
+        if newest is not None and (latest is None or newest[0] > latest[0]):
+            latest = newest
         if measured is None:
             records = None
         elif records is not None:
@@ -655,7 +949,7 @@ async def du(
     # GNU still prints the grand total when every operand failed ("0
     # total"), so this stays outside the loop guard.
     if flags.c:
-        lines.append(_line(sum(totals), flags, "total"))
+        lines.append(_line(sum(totals), flags, "total", latest))
 
     notes = [flags.warning] if flags.warning else []
     notes.extend(
@@ -683,7 +977,12 @@ async def du(
         notes.append(f"du: {line}")
         exit_code = 1
     stderr = ("\n".join(notes) + "\n").encode() if notes else b""
-    return DuOutput(format_records(lines), stderr, exit_code, records)
+    stdout = (
+        b"".join(encode_text(line) + b"\0" for line in lines)
+        if flags.null
+        else format_records(lines)
+    )
+    return DuOutput(stdout, stderr, exit_code, records)
 
 
 def _respell_under(virtual: str, paths: Sequence[PathSpec]) -> str:
@@ -701,6 +1000,7 @@ def _respell_under(virtual: str, paths: Sequence[PathSpec]) -> str:
 
 
 async def du_generic(
+    flags: DuFlags,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -713,13 +1013,16 @@ async def du_generic(
     directories: Callable[[], Sequence[str]] | None = None,
     inaccessible: Callable[[], Sequence[tuple[str, str | None]]] | None = None,
     repeated: Callable[[PathSpec], bool] | None = None,
+    times: Callable[[], Mapping[str, str]] | None = None,
 ) -> tuple[bytes, IOResult]:
-    """Run one whole ``du`` invocation, from raw flags to rendered bytes.
+    """Run one whole ``du`` invocation over flags already read
+    (``read_flags``), to rendered bytes.
 
-    Every caller needs the same three steps in the same order: validate
-    the flags before touching I/O, split the operands into readable and
-    unreadable, then render. Keeping them here means a backend wrapper is
-    wiring only, and the three steps cannot drift apart per backend.
+    Every caller needs the same steps in the same order: split the
+    operands into readable and unreadable, then render. Keeping them here
+    means a backend wrapper is wiring only, and the steps cannot drift
+    apart per backend. The wrapper reads the flags first, since its walk
+    leaves out what ``--exclude`` and ``-X`` match.
 
     The walks meet links as entries of their own; under -L they follow
     them instead, which the operand's own was already, at dispatch.
@@ -728,14 +1031,13 @@ async def du_generic(
     (0 for a target short enough to live in the inode); mirage counts
     bytes throughout.
 
-    Deliberate divergence: --exclude remains refused. GNU 9.7 prunes matched
-    operands before stat and matched directories before traversal. Backend
-    size shortcuts and separately scheduled descendant mounts do not share a
-    pruning contract, so filtering measured rows would still read excluded
-    paths and report their failures. --apparent-size preserves the existing
-    apparent-byte measurement; only explicit unit options change its scale.
+    ``--apparent-size`` preserves the existing apparent-byte measurement;
+    only explicit unit options change its scale. ``-l`` counts a file
+    once per hard link to it, and no backend here has hard links, so it
+    changes nothing.
 
     Args:
+        flags (DuFlags): The options, read before the operands were.
         paths (list[PathSpec]): The operands as parsed, possibly empty.
         texts (list[str]): Non-path words, unused by du.
         ctx (Context): Flags and cwd from the dispatcher.
@@ -755,11 +1057,10 @@ async def du_generic(
             None): The links -L could not follow, read after the walks.
         repeated (Callable[[PathSpec], bool] | None): Whether an earlier
             operand's walk already counted an operand.
+        times (Callable[[], Mapping[str, str]] | None): Each entry's time
+            the walks met, under ``--time``.
 
     """
-    flags = parse_flags(ctx)
-    if isinstance(flags, IOResult):
-        return b"", flags
     present, missing = await du_operands(
         paths,
         ctx.cwd,
@@ -767,6 +1068,7 @@ async def du_generic(
         stat,
         partial(du_has_content, compute_entries),
         stat_path=vfs_stat_path(ctx.vfs),
+        excludes=flags.excludes,
     )
     out = await du(
         present,
@@ -780,6 +1082,7 @@ async def du_generic(
         mounts=mounts_of(ctx),
         inaccessible=inaccessible,
         repeated=repeated,
+        times=times,
     )
     return out.stdout, IOResult(
         stderr=out.stderr, exit_code=out.exit_code, records=out.records
@@ -789,7 +1092,7 @@ async def du_generic(
 def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     """A du line reads below every path it names, walks into the mounts
     below unless ``-x``, and follows a link operand when the last of
-    ``-L`` and ``-P`` is ``-L``.
+    ``-L``, ``-P``, ``-D`` and ``-H`` is not ``-P``.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
@@ -798,8 +1101,10 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     return LineFacts(
         follows=(
             Follow.LAST
-            if fl.typed_order("dereference", "no_dereference")[-1:]
-            == ["dereference"]
+            if fl.typed_order(
+                "dereference", "no_dereference", "dereference_args", "H"
+            )[-1:]
+            not in ([], ["no_dereference"])
             else Follow.NONE
         ),
         walks=not fl.as_bool("one_file_system"),

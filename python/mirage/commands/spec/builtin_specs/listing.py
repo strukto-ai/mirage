@@ -156,6 +156,20 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-k", action="store_true"),
             Argument("-m", action="store_true"),
             Argument("-B", "--block-size"),
+            Argument("--si", action="store_true"),
+            Argument("--inodes", action="store_true"),
+            Argument("-l", "--count-links", action="store_true"),
+            Argument("-D", "--dereference-args", action="store_true"),
+            Argument("-H", action="store_true"),
+            Argument("-0", "--null", action="store_true"),
+            Argument("--exclude", action="append"),
+            Argument("-X", "--exclude-from", type="path", action="append"),
+            # Two entries for one option, so a refused value is worded
+            # with the spelling typed, as GNU words it.
+            Argument("-t"),
+            Argument("--threshold"),
+            Argument("--time", nargs="?", attached_only=True),
+            Argument("--time-style"),
             PATHS_OPERAND,
         )
     ),

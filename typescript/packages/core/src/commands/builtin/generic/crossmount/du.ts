@@ -148,6 +148,11 @@ export async function runDu(
     const counted = leavesOf(measured.get(path) ?? [])
     return Promise.resolve([counted, counted.reduce((acc, [, size]) => acc + size, 0)])
   }
+  const stamped = new Map<string, string>()
+  for (const { io } of done) {
+    for (const r of io.records ?? [])
+      if (r.modified !== undefined) stamped.set(r.path.virtual, r.modified)
+  }
   const out = await du(
     [...measured.keys()],
     rendering,
@@ -161,6 +166,9 @@ export async function runDu(
       [...measured.values()].flatMap((rows) =>
         rows.flatMap((r) => (r.size === undefined ? [r.path.virtual] : [])),
       ),
+    undefined,
+    undefined,
+    () => stamped,
   )
   merged.stderr = new Uint8Array([...out.stderr, ...(await materialize(merged.stderr))])
   merged.exitCode = Math.max(out.exitCode, ...done.map(({ io }) => io.exitCode))

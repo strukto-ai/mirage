@@ -15,7 +15,7 @@
 import { expect, it } from 'vitest'
 import { command, type CommandFn } from '../../../config.ts'
 import { SPECS } from '../../../spec/index.ts'
-import { duGeneric } from '../du.ts'
+import { duGeneric, parseFlags } from '../du.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces } from '../../../../errors/fs.ts'
@@ -25,8 +25,11 @@ import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
 
-const measured: CommandFn = (_accessor, paths, _texts, ctx) =>
-  duGeneric(
+const measured: CommandFn = (_accessor, paths, _texts, ctx) => {
+  const parsed = parseFlags(ctx)
+  if (parsed instanceof IOResult) throw new Error('refused')
+  return duGeneric(
+    parsed,
     paths,
     ctx,
     (targets) => Promise.resolve(targets),
@@ -34,6 +37,7 @@ const measured: CommandFn = (_accessor, paths, _texts, ctx) =>
     () => Promise.resolve(1000),
     () => Promise.resolve([[['/big', 1000]], 1000]),
   )
+}
 
 const unmeasured: CommandFn = (_accessor, paths) => [
   ENC.encode(`777\t${paths[0]?.rawPath ?? ''}\n`),

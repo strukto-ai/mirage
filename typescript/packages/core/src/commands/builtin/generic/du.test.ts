@@ -19,6 +19,9 @@ import {
   type DuFlags,
   du,
   duGeneric,
+  excluded,
+  inodeCount,
+  newestUnder,
   parseFlags,
   rollup,
   toVirtual,
@@ -86,7 +89,10 @@ describe('du', () => {
     const boom = () => {
       throw new Error('Graph API error 404 (itemNotFound)')
     }
+    const parsed = parseFlags(ctx({ total: true }))
+    if (parsed instanceof IOResult) throw new Error('refused')
     const [out, io] = await duGeneric(
+      parsed,
       [spec('/data/nosuch', 'nosuch')],
       ctx({ total: true }),
       (targets) => Promise.resolve(targets),
@@ -138,6 +144,53 @@ describe('du', () => {
     ]
     expect(rollup(entries, '/', { all: false, maxDepth: null })).toEqual([['/sub', 3]])
     expect(toVirtual([['/dir/a.txt', 1]], spec('/dir', 'dir'))).toEqual([['/dir/a.txt', 1]])
+  })
+
+  // GNU matches an --exclude pattern against the path as du prints it, or the
+  // part after any slash, with `*` crossing slashes and case kept (pinned on
+  // debian:stable-slim). Mirrors test_du.py.
+  it('excludes a path a pattern matches whole or after a slash', () => {
+    expect(excluded(['b'], 'd/x/b')).toBe(true)
+    expect(excluded(['x/b'], 'd/x/b')).toBe(true)
+    expect(excluded(['d*b'], 'd/x/b')).toBe(true)
+    expect(excluded(['x'], 'd/x/b')).toBe(false)
+    expect(excluded(['B'], 'd/x/b')).toBe(false)
+    expect(excluded([], 'd')).toBe(false)
+  })
+
+  it('counts each directory under --inodes, and under -S its own files', () => {
+    const leaves: [string, number][] = [
+      ['/d/a', 1],
+      ['/d/x/b', 1],
+      ['/d/x/bb', 1],
+    ]
+    const dirs = ['/d/x/z']
+    expect(rollup(leaves, '/d', { all: false, maxDepth: null, dirs, inodes: true })).toEqual([
+      ['/d/x/z', 1],
+      ['/d/x', 4],
+    ])
+    expect(
+      rollup(leaves, '/d', { all: false, maxDepth: null, dirs, separateDirs: true, inodes: true }),
+    ).toEqual([
+      ['/d/x/z', 1],
+      ['/d/x', 3],
+    ])
+    expect(inodeCount(leaves, '/d', dirs)).toBe(6)
+  })
+
+  it('shows a directory the newest time in its tree', () => {
+    const late = '2024-03-04T05:06:07.5'
+    const newest = newestUnder(
+      new Map([
+        ['/d', '2023-01-01T00:00:00'],
+        ['/d/x/b', late],
+        ['/d/a', '2024-01-02T03:04:05'],
+        ['/e/f', '2030-01-01T00:00:00'],
+      ]),
+      '/d',
+    )
+    expect([newest.get('/d')?.[1], newest.get('/d/x')?.[1]]).toEqual([late, late])
+    expect(newest.has('/e/f')).toBe(false)
   })
 })
 

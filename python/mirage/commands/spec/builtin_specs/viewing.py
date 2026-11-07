@@ -66,6 +66,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-F", action="store_true"),
             Argument("--retry", action="store_true"),
             Argument("-s", "--sleep-interval"),
+            Argument("--pid"),
+            Argument("--max-unchanged-stats"),
             PATHS_OPERAND,
         )
     ),

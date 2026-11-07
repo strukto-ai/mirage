@@ -27,6 +27,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import enoent, fs_strerror
+from mirage.execution.process.view import ProcessView
 from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.io.memory import check_memory
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
@@ -91,6 +92,8 @@ class TailFlags:
         retry (bool): ``--retry``/``-F``; keep trying a file that is
             missing or vanishes.
         interval (float): ``-s``; seconds between polls.
+        pid (int | None): ``--pid``; a follow ends once this process is
+            gone, and 0 names none.
     """
 
     counts: TailCounts
@@ -100,12 +103,16 @@ class TailFlags:
     follow_name: bool = False
     retry: bool = False
     interval: float = DEFAULT_SLEEP_INTERVAL
+    pid: int | None = None
 
 
 RETRY_IGNORED = (
     b"tail: warning: --retry ignored; --retry is useful only when following\n"
 )
 RETRY_INITIAL = b"tail: warning: --retry only effective for the initial open\n"
+PID_IGNORED = (
+    b"tail: warning: PID ignored; --pid=PID is useful only when following\n"
+)
 # A name is what -F follows, and standard input has none.
 STDIN_BY_NAME = b"tail: cannot follow '-' by name\n"
 # What a waited-for name is announced as when it turns up: a missing file
@@ -163,7 +170,9 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TailFlags | IOResult:
     """
     fl = FlagView(flags, spec=SPECS["tail"])
     raw = fl.raw("follow")
-    typed = fl.texts("lines", "bytes", "sleep_interval")
+    typed = fl.texts(
+        "lines", "bytes", "sleep_interval", "pid", "max_unchanged_stats"
+    )
     if isinstance(raw, str):
         typed.append(("follow", raw))
     try:
@@ -186,6 +195,8 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TailFlags | IOResult:
     )
     interval = values["sleep_interval"]
     assert interval is None or isinstance(interval, (int, float))
+    pid = values["pid"]
+    assert pid is None or isinstance(pid, int)
     return TailFlags(
         counts=TailCounts(
             lines,
@@ -200,6 +211,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TailFlags | IOResult:
         follow_name=by_name,
         retry=retry,
         interval=math.inf if interval is None else float(interval),
+        pid=pid,
     )
 
 
@@ -624,6 +636,7 @@ async def _follow(
         [PathSpec, int, float], Awaitable[AsyncIterator[bytes] | None]
     ]
     | None = None,
+    processes: ProcessView | None = None,
 ) -> AsyncIterator[bytes]:
     """Print each operand's tail, then keep printing what it gains.
 
@@ -639,9 +652,10 @@ async def _follow(
     for it (and for one that was never there) and announces ``has
     appeared`` when it turns up, reading it from the start as GNU does
     after a rotation. The loop ends only when nothing is left to follow
-    (``no files remaining``, exit 1) or the caller stops draining, which
-    is how
-    ``timeout`` and a killed job end it. A followed file that a
+    (``no files remaining``, exit 1), when ``--pid``'s process is gone
+    (a poll that finds nothing new looks, and once it is gone one more
+    poll reads what it wrote last), or when the caller stops draining,
+    which is how ``timeout`` and a killed job end it. A followed file that a
     directory replaces is ``has been replaced with an untailable
     file``: name-following gives the name up, or under ``--retry``
     keeps polling it and announces ``has become accessible`` when a
@@ -698,8 +712,12 @@ async def _follow(
             the file is polled.
         follow (Callable[[PathSpec, int, float],
             Awaitable[AsyncIterator[bytes] | None]] | None): the mount's
-            ``follow``; None, or an answer of None, polls.
+            ``follow``; None, or an answer of None, polls. A line with a
+            ``--pid`` polls, since only a poll can look for the process.
+        processes (ProcessView | None): the session's processes, which
+            ``--pid`` is looked up in.
     """
+    writer = flags.pid or None
     positions: dict[int, int] = {}
     added: AsyncIterator[bytes] | None = None
     active = list(enumerate(paths))
@@ -723,6 +741,7 @@ async def _follow(
                     and len(paths) == 1
                     and not pending
                     and not flags.follow_name
+                    and writer is None
                     and not is_stdin(p)
                 ):
                     added = await follow(p, follow_lines, flags.interval)
@@ -775,8 +794,16 @@ async def _follow(
     active = [(slot, p) for slot, p in active if not is_stdin(p)]
     if only_stdin:
         return
+    gone = False
+    idle = True
     while active or waiting:
-        await asyncio.sleep(flags.interval)
+        if writer is not None and idle:
+            if gone:
+                return
+            gone = not _writer_runs(processes, writer)
+        if not gone:
+            await asyncio.sleep(flags.interval)
+        idle = True
         for slot, p, how in list(waiting):
             try:
                 found = await stat(p)
@@ -850,9 +877,27 @@ async def _follow(
                 if show_headers and last != slot:
                     yield operand_header(p, True)
                 last = slot
+                idle = False
                 yield data
     _note(io, "tail: no files remaining\n")
     io.exit_code = 1
+
+
+def _writer_runs(processes: ProcessView | None, pid: int) -> bool:
+    """Whether ``--pid``'s process still runs, as ``kill(pid, 0)``
+    answers: one the session cannot see is gone, and one it sees but may
+    not signal still runs.
+
+    Args:
+        processes (ProcessView | None): the session's processes.
+        pid (int): the process.
+    """
+    if processes is None:
+        return False
+    try:
+        return processes.probe(pid)
+    except PermissionError:
+        return True
 
 
 async def _unfollowable(
@@ -964,15 +1009,15 @@ async def tail_generic(
         and (not paths or any(is_stdin(p) for p in paths))
     ):
         return None, IOResult(exit_code=1, stderr=STDIN_BY_NAME)
-    # GNU warns first, then tails as if --retry were not there; a
-    # descriptor it follows only after the initial open says so too.
-    retry_warning = (
+    # GNU warns first, then tails as if --retry and --pid were not there;
+    # a descriptor it follows only after the initial open says so too.
+    warnings = (
         RETRY_IGNORED
         if parsed.retry and not parsed.follow
         else RETRY_INITIAL
         if parsed.retry and not parsed.follow_name
         else b""
-    )
+    ) + (PID_IGNORED if parsed.pid is not None and not parsed.follow else b"")
     # GNU opens nothing when a tail from the end keeps no line or byte.
     if (
         not parsed.follow
@@ -980,13 +1025,13 @@ async def tail_generic(
         and counts.from_byte is None
         and (n if counts.byte_count is None else counts.byte_count) == 0
     ):
-        return None, IOResult(stderr=retry_warning or None)
+        return None, IOResult(stderr=warnings or None)
     if paths:
         show_headers = shows_headers(parsed.verbose, parsed.quiet, len(paths))
         opened, unread, err = await split_opened(paths, stat, "tail")
         io = operands_io(err)
-        if retry_warning:
-            io.stderr = retry_warning + (
+        if warnings:
+            io.stderr = warnings + (
                 io.stderr if isinstance(io.stderr, bytes) else b""
             )
         if parsed.follow:
@@ -1020,6 +1065,7 @@ async def tail_generic(
                 only_stdin=all(is_stdin(p) for p in paths),
                 follow_lines=n if from_end else None,
                 follow=follow,
+                processes=ctx.processes,
             ), io
         if not opened:
             return None, io
@@ -1055,4 +1101,4 @@ async def tail_generic(
     if parsed.verbose and not parsed.quiet:
         # -v heads a stdin nobody named with the name it gives `-`.
         body = async_chain([operand_header(None), body])
-    return body, IOResult(stderr=retry_warning or None)
+    return body, IOResult(stderr=warnings or None)

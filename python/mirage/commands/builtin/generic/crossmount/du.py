@@ -171,6 +171,12 @@ async def run_du(
     async def size(path: PathSpec) -> int:
         return (await entries(path))[1]
 
+    stamped = {
+        r.path.virtual: r.modified
+        for _, io in done
+        for r in io.records or []
+        if r.modified is not None
+    }
     out = await du(
         targets,
         compute_size=size,
@@ -182,6 +188,7 @@ async def run_du(
             for r in rows
             if r.size is None
         ],
+        times=lambda: stamped,
     )
     merged.stderr = out.stderr + await materialize(merged.stderr)
     merged.exit_code = max([out.exit_code, *(io.exit_code for _, io in done)])

@@ -5,11 +5,15 @@ from mirage.commands.builtin.generic.du import (
     DuFlags,
     du,
     du_generic,
+    excluded,
+    inode_count,
+    newest_under,
     parse_flags,
     rollup,
     to_virtual,
 )
 from mirage.commands.config import Context
+from mirage.io.types import IOResult
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.view.types import MountView
@@ -73,10 +77,14 @@ async def test_backend_error_on_the_content_probe_reads_as_missing():
     async def compute_entries(path):
         raise RuntimeError("Graph API error 404 (itemNotFound)")
 
+    ctx = Context(flags={"total": True})
+    flags = parse_flags(ctx)
+    assert not isinstance(flags, IOResult)
     out, io = await du_generic(
+        flags,
         [_spec("/data/nosuch", "nosuch")],
         [],
-        Context(flags={"total": True}),
+        ctx,
         lambda targets: _ok(list(targets)),
         stat,
         compute_size,
@@ -147,6 +155,51 @@ async def test_du_reports_what_it_measured_unless_it_only_summed():
 def test_rollup_handles_a_root_mount():
     entries = [("/a.txt", 2), ("/sub/b.txt", 3)]
     assert rollup(entries, "/", a=False, max_depth=None) == [("/sub", 3)]
+
+
+# GNU matches an --exclude pattern against the path as du prints it, or
+# the part after any slash, with `*` crossing slashes and case kept
+# (pinned on debian:stable-slim). Mirrored in du.test.ts.
+def test_an_exclude_matches_the_path_or_a_part_after_a_slash():
+    assert excluded(["b"], "d/x/b")
+    assert excluded(["x/b"], "d/x/b")
+    assert excluded(["d*b"], "d/x/b")
+    assert not excluded(["x"], "d/x/b")
+    assert not excluded(["B"], "d/x/b")
+    assert not excluded([], "d")
+
+
+def test_inodes_count_each_directory_and_under_s_its_own_files():
+    leaves = [("/d/a", 1), ("/d/x/b", 1), ("/d/x/bb", 1)]
+    dirs = ["/d/x/z"]
+    assert rollup(
+        leaves, "/d", a=False, max_depth=None, dirs=dirs, inodes=True
+    ) == [("/d/x/z", 1), ("/d/x", 4)]
+    assert rollup(
+        leaves,
+        "/d",
+        a=False,
+        max_depth=None,
+        dirs=dirs,
+        separate_dirs=True,
+        inodes=True,
+    ) == [("/d/x/z", 1), ("/d/x", 3)]
+    assert inode_count(leaves, "/d", dirs) == 6
+
+
+def test_a_directory_shows_the_newest_time_in_its_tree():
+    late = "2024-03-04T05:06:07.5"
+    newest = newest_under(
+        {
+            "/d": "2023-01-01T00:00:00",
+            "/d/x/b": late,
+            "/d/a": "2024-01-02T03:04:05",
+            "/e/f": "2030-01-01T00:00:00",
+        },
+        "/d",
+    )
+    assert newest["/d"][1] == newest["/d/x"][1] == late
+    assert "/e/f" not in newest
 
 
 def test_to_virtual_is_a_no_op_at_the_root_mount():

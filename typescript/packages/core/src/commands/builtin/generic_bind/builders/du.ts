@@ -14,14 +14,20 @@
 
 import { fsStrerror, isEacces, isEnotdir, isFsError, isMissingPath } from '../../../../errors/fs.ts'
 import { underPath } from '../../../../utils/key_prefix.ts'
-import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
+import { type FileStat, FileType, type LsTimeKind, PathSpec } from '../../../../types.ts'
+import { IOResult } from '../../../../io/types.ts'
+import { respellOne } from '../../../../utils/path.ts'
+import { timeOf } from '../../utils/formatting.ts'
+import { stdinStream } from '../../utils/stream.ts'
 import { WalkBudget, treeWalk, type WalkCall } from '../../utils/tree.ts'
 import {
   type ComputeEntries,
   type ComputeSize,
   type DuEntries,
   duGeneric,
+  excluded,
   facts,
+  readFlags,
 } from '../../generic/du.ts'
 import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
 import type { LinkView, MountView } from '../../../../view/types.ts'
@@ -58,9 +64,17 @@ export class DuTally {
   // Under -L, each link that leads nowhere, with the strerror GNU adds for
   // a chain that loops.
   readonly inaccessible: [string, string | null][] = []
+  // Under --time, each entry's time by virtual path.
+  readonly times = new Map<string, string>()
 
-  // The mount table the limits come from.
-  constructor(readonly mounts: MountView | null = null) {}
+  // The mount table the limits come from; the --exclude and -X patterns, an
+  // entry one matches neither stat'ed nor walked; and under --time the clock
+  // each entry's time is read from.
+  constructor(
+    readonly mounts: MountView | null = null,
+    readonly excludes: readonly string[] = [],
+    readonly clock: LsTimeKind | null = null,
+  ) {}
 }
 
 /**
@@ -209,6 +223,7 @@ async function duWalk(
   scan: WalkBudget,
   entries: [string, number][] | null,
   follow: Dereference | null,
+  skip: ((virtual: string) => boolean) | null = null,
 ): Promise<number> {
   let info
   try {
@@ -221,6 +236,10 @@ async function duWalk(
     const row = await counted(follow, path, info, tally)
     if (row === null) return 0
     info = row
+  }
+  if (tally.clock !== null) {
+    const stamp = timeOf(info, tally.clock)
+    if (stamp !== null) tally.times.set(path.virtual, stamp)
   }
   if (info.type !== FileType.DIRECTORY) {
     const size = info.size ?? 0
@@ -240,9 +259,18 @@ async function duWalk(
   let total = 0
   for (const child of children) {
     if (!scan.spend(path.virtual)) break
-    total += await duWalk(walk, PathSpec.fromStrPath(child), tally, scan, entries, follow)
+    if (skip?.(child) === true) continue
+    total += await duWalk(walk, PathSpec.fromStrPath(child), tally, scan, entries, follow, skip)
   }
   return total
+}
+
+/**
+ * Whether a walked path is one --exclude or -X leaves out, matched as du
+ * prints it, under the operand as typed. Mirrors Python's `_skipped`.
+ */
+function skipped(patterns: readonly string[], operand: PathSpec, virtual: string): boolean {
+  return excluded(patterns, respellOne(virtual, operand.virtual, operand.rawPath))
 }
 
 /**
@@ -261,11 +289,15 @@ async function walkOperand(
   tally.directories.length = 0
   const scan = new WalkBudget(path, tally.mounts)
   const state = follow === null ? null : follow.operand(path)
-  let total = await duWalk(walk, path, tally, scan, entries, state)
+  const skip =
+    tally.excludes.length === 0
+      ? null
+      : (virtual: string): boolean => skipped(tally.excludes, path, virtual)
+  let total = await duWalk(walk, path, tally, scan, entries, state, skip)
   if (state !== null) {
     for (const [link, real] of state.waiting) {
       if (!state.counted.has(real)) {
-        total += await duWalk(walk, link, tally, scan, entries, state.under(link))
+        total += await duWalk(walk, link, tally, scan, entries, state.under(link), skip)
       }
     }
   }
@@ -298,8 +330,10 @@ export async function walkEntries(
 
 const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
+  const parsed = await readFlags(ctx, stdinStream(files.read, ctx.stdin))
+  if (parsed instanceof IOResult) return [new Uint8Array(), parsed]
   const flags = new FlagView(ctx.flags, specOf('du'))
-  const tally = new DuTally(mountsOf(ctx) ?? null)
+  const tally = new DuTally(mountsOf(ctx) ?? null, parsed.excludes ?? [], parsed.time ?? null)
   // Kept on one filesystem, a listing leaves out the roots of the mounts
   // below it, which the walk must neither list nor stat. Those names would
   // count toward a cut listing the walk then finds short, so such a listing
@@ -317,7 +351,8 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const links = linksOf(ctx)
   const follow =
     links !== undefined &&
-    flags.typedOrder('dereference', 'no_dereference').at(-1) === 'dereference'
+    flags.typedOrder('dereference', 'no_dereference', 'dereference_args', 'H').at(-1) ===
+      'dereference'
       ? new Dereference(links, flags.asBool('one_file_system') ? (mountsOf(ctx) ?? null) : null)
       : null
   const computeSize: ComputeSize = (p) => walkSize(treeOf(files, listing), tally, follow, p)
@@ -325,6 +360,7 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
     walkEntries(treeOf(files, listing), tally, follow, p)
 
   return duGeneric(
+    parsed,
     paths,
     ctx,
     files.resolveGlob,
@@ -336,6 +372,7 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
     () => tally.directories,
     () => tally.inaccessible,
     follow === null ? undefined : (p) => follow.repeated(p),
+    () => tally.times,
   )
 }
 
