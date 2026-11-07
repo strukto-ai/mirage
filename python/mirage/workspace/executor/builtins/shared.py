@@ -217,6 +217,17 @@ def readonly_line(cmd: str, name: str) -> str:
     return f"{shell_voice()}{voice}{name}: readonly variable"
 
 
+def identifier_line(cmd: str, name: str) -> str:
+    """A builtin's refusal of a word that names no variable
+    (``bash: read: `1x': not a valid identifier``).
+
+    Args:
+        cmd (str): the builtin's name.
+        name (str): the word as given.
+    """
+    return f"{shell_voice()}{cmd}: `{name}': not a valid identifier"
+
+
 def readonly_refusal(cmd: str, name: str) -> Result:
     """Render the readonly refusal (``readonly_line``) as the result.
 

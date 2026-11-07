@@ -42,7 +42,7 @@ async def test_env_prints_environment_sorted_by_name():
     seed_exported(session, "AAA", "2")
     out, io, _ = await handle_env(_unused_execute_fn, [], session)
     assert io.exit_code == 0
-    assert await materialize(out) == b"AAA=2\nPWD=/\nZZZ=1\n"
+    assert await materialize(out) == b"AAA=2\nPWD=/\nZZZ=1\n_=/usr/bin/env\n"
 
 
 @pytest.mark.asyncio

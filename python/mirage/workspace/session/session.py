@@ -288,7 +288,7 @@ class _Records(Mapping[str, T]):
         return sum(1 for _ in self)
 
 
-class _Readonly(AbstractSet[str]):
+class _ReadonlyNames(AbstractSet[str]):
     """A live view of the names ``readonly`` has marked.
 
     Args:
@@ -547,6 +547,11 @@ class SessionState:
     # numbers it on from the running command's line, as `eval` and
     # `$( )` do, or from 0 for a shell's own input.
     _parse_from: int | None = field(default=None, repr=False)
+    # Whether the next nested parse is a `$( )` or `<( )` body, which
+    # bash reads again as it prints it; and that running parse's line per
+    # row (`reread_rows`), None when its rows count as typed.
+    _reread: bool = field(default=False, repr=False)
+    _line_rows: tuple[int, ...] | None = field(default=None, repr=False)
     # The owner of this session's terminal streams, which an `exec` copy
     # of one names (`exec 3>&1`), and whether a line of the session is
     # running, whose outermost program routes what was written to them.
@@ -951,10 +956,23 @@ class SessionState:
     @property
     def line_number(self) -> int:
         """The line of the command running, ``$LINENO``: its row in the
-        text that spelled it (``line_row``), numbered on from where that
-        text's parse starts (``_line_row``)."""
+        text that spelled it (``line_row``), as a body read again counts
+        it (``_line_rows``), numbered on from where that text's parse
+        starts (``_line_row``)."""
         node = self._line_node
-        return self._line_row + (0 if node is None else line_row(node)) + 1
+        row = 0 if node is None else self.counted_row(line_row(node))
+        return self._line_row + row + 1
+
+    def counted_row(self, row: int) -> int:
+        """A row of the running parse's text as its lines count it.
+
+        Args:
+            row (int): the row in the text.
+        """
+        rows = self._line_rows
+        if not rows:
+            return row
+        return rows[min(row, len(rows) - 1)]
 
     @property
     def bash_pid(self) -> int:
@@ -986,7 +1004,7 @@ class SessionState:
     @property
     def readonly_vars(self) -> AbstractSet[str]:
         """The names `readonly` has marked. Read-only, like `env`."""
-        return _Readonly(self.vars)
+        return _ReadonlyNames(self.vars)
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "vars" and not isinstance(value, ShellVars):
@@ -1117,6 +1135,7 @@ class SessionState:
         child._parse_current = self._parse_current
         child._parse_row = self._parse_row
         child._line_row = self._line_row
+        child._line_rows = self._line_rows
         child._parse_name = self._parse_name
         child._parse_head = self._parse_head
         child._line_node = self._line_node

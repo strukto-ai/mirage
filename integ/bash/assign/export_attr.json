@@ -238,11 +238,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "export QEK; declare -p QEK",
+      "command": "export QEK; declare -p QEK; ( declare -a QUY; declare -A QUM; declare -ai QUQ; readonly QUR; declare -a QUR; f() { local -a QUL; declare -p QUL; }; f; declare -p QUY QUM QUQ QUR; echo \"${QUY[@]@A}|${#QUY[@]}|${QUY+set}\"; set | grep -E '^QU(Y|M|W)='; declare -a QUW; QUW[0]=x; unset 'QUW[0]'; declare -p QUW; QUY+=(a); declare -p QUY; QUX=1 export -p | grep QUX; QUX=1 declare -x | grep QUX; declare -i QUI; QUI=1+2 declare -p QUI; g() { export -p | grep QUX; }; QUX=1 g ); ( declare -a zgn_u; zgn_u=tmp true; declare -p zgn_u; declare -n zgn_r=ZGN_T; ZGN_T=old; readonly ZGN_T; zgn_r=new true; echo rc=$? T=$ZGN_T )",
       "expect": {
         "exit": 0,
-        "stdout": "declare -x QEK\n",
-        "stderr": ""
+        "stdout": "declare -x QEK\ndeclare -a QUL\ndeclare -a QUY\ndeclare -A QUM\ndeclare -ai QUQ\ndeclare -ar QUR\ndeclare -a QUY|0|\ndeclare -a QUW=()\ndeclare -a QUY=([0]=\"a\")\ndeclare -x QUI=\"1+2\"\ndeclare -x QUX=\"1\"\ndeclare -a zgn_u\nrc=0 T=old\n",
+        "stderr": "bash: line 1: zgn_r: readonly variable\n"
       }
     },
     {

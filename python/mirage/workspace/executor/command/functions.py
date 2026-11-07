@@ -164,6 +164,7 @@ async def run_shell_function(
         session._parse_current,
         session._parse_row,
         session._line_row,
+        session._line_rows,
         session._parse_name,
         session._line_node,
     )
@@ -180,6 +181,7 @@ async def run_shell_function(
         mark = site.mark
     session._parse_current, session._parse_row = mark
     session._line_row = 0 if site is None else site.row
+    session._line_rows = None
     session._parse_name = "environment" if site is None else site.name
     session._alias_view = (
         dict(site.aliases)
@@ -234,6 +236,7 @@ async def run_shell_function(
             session._parse_current,
             session._parse_row,
             session._line_row,
+            session._line_rows,
             session._parse_name,
             session._line_node,
         ) = outer_parse

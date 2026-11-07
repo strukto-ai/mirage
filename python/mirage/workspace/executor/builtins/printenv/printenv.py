@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.context import program_invocation
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
+from mirage.shell.constants import BIN_PREFIX
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import env_snapshot
@@ -22,26 +24,53 @@ from mirage.workspace.types import ExecutionNode
 
 
 async def handle_printenv(
-    name: str | None,
+    args: list[str],
     session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Print each named variable's exported value in order, or every
+    exported ``NAME=value`` sorted when none is named; ``-0`` /
+    ``--null`` ends each with a NUL instead of a newline. A name with no
+    exported value prints nothing and fails the command with 1 once the
+    others printed. Run by the shell, its environment holds ``_`` as the
+    program's path, last, as bash hands every program it runs; run by
+    ``env``, the ``_`` env handed on.
+
+    Args:
+        args (list[str]): the words after ``printenv``.
+        session (SessionState): the session whose environment it reads.
+    """
     # The process view, not the shell view: GNU printenv is a separate
     # binary, so the only names it can possibly see are the exported
     # ones. A plain `X=hello` is invisible to it and exits 1.
     env = env_snapshot(session)
-    if name:
-        val = env.get(name)
-        if val is None:
-            return (
-                None,
-                IOResult(exit_code=1),
-                ExecutionNode(command="printenv", exit_code=1),
-            )
-        out = encode_text(f"{val}\n")
-    else:
-        lines = [f"{k}={v}" for k, v in env.items()]
-        out = encode_text("\n".join(sorted(lines)) + "\n")
-    return out, IOResult(), ExecutionNode(command="printenv", exit_code=0)
+    if not program_invocation(session):
+        env.pop("_", None)
+        env["_"] = f"{BIN_PREFIX}/printenv"
+    end = "\n"
+    names: list[str] = []
+    for i, arg in enumerate(args):
+        if arg == "--":
+            names += args[i + 1 :]
+            break
+        if arg in ("-0", "--null"):
+            end = "\0"
+        else:
+            names.append(arg)
+    if not names:
+        last = env.pop("_", None)
+        lines = sorted(f"{k}={v}" for k, v in env.items())
+        if last is not None:
+            lines.append(f"_={last}")
+        out = encode_text("".join(line + end for line in lines))
+        return out, IOResult(), ExecutionNode(command="printenv", exit_code=0)
+    values = [env[name] for name in names if name in env]
+    code = 0 if len(values) == len(names) else 1
+    out = encode_text("".join(value + end for value in values))
+    return (
+        out or None,
+        IOResult(exit_code=code),
+        ExecutionNode(command="printenv", exit_code=code),
+    )
 
 
 async def printenv_builtin(call: BuiltinCall) -> Result:
@@ -50,6 +79,4 @@ async def printenv_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    args = list(call.argv.args)
-    var_name = args[0] if args else None
-    return await handle_printenv(var_name, call.context.session)
+    return await handle_printenv(list(call.argv.args), call.context.session)

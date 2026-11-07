@@ -60,6 +60,18 @@ import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
 
+// The compound commands, whose rows a `$( )` body read again keeps apart.
+const COMPOUND_TYPES: ReadonlySet<string> = new Set([
+  NT.IF_STATEMENT,
+  NT.FOR_STATEMENT,
+  NT.C_STYLE_FOR_STATEMENT,
+  NT.WHILE_STATEMENT,
+  NT.CASE_STATEMENT,
+  NT.COMPOUND_STATEMENT,
+  NT.SUBSHELL,
+  NT.FUNCTION_DEFINITION,
+])
+
 /** Forward ordinary output while retaining chunks needing descriptor routing. */
 class StatementRecorder extends Recorder {
   constructor(
@@ -160,10 +172,11 @@ export async function executeProgram(
   // a use on the same parse and row. Restored on the way out so a nested
   // parse (`eval`, `source`, `bash -c`) does not leave its id behind.
   session.parseSeq += 1
-  const outerParse: [number, number, number, TSNodeLike | null] = [
+  const outerParse: [number, number, number, readonly number[] | null, TSNodeLike | null] = [
     session.parseCurrent,
     session.parseRow,
     session.lineRow,
+    session.lineRows,
     session.lineNode,
   ]
   session.parseCurrent = session.parseSeq
@@ -171,6 +184,8 @@ export async function executeProgram(
   session.parseFrom = null
   session.parseRow = start
   session.lineRow = lineStart
+  session.lineRows = session.reread ? rereadRows(node) : null
+  session.reread = false
   const root = !session.lineOpen
   session.lineOpen = true
   try {
@@ -190,7 +205,8 @@ export async function executeProgram(
       executeFn,
     )
   } finally {
-    ;[session.parseCurrent, session.parseRow, session.lineRow, session.lineNode] = outerParse
+    ;[session.parseCurrent, session.parseRow, session.lineRow, session.lineRows, session.lineNode] =
+      outerParse
     if (root) {
       session.lineOpen = false
       session.errexitExiting = false
@@ -548,8 +564,9 @@ async function exitShell(
  * Where the parse about to run starts: its row in the text that spelled it
  * (`parseRow`) and the same row as `$LINENO` counts it (`lineRow`). A sourced
  * file and the rest of an input read again start where `parseFrom` says; a
- * nested parse (`eval`, `$( )`) numbers on from the row the running command
- * ends on, as bash's reader stands there; any other at 0. Mirrors Python's
+ * nested parse (`eval`, a backtick) numbers on from the row the running
+ * command ends on, as bash's reader stands there, and a `$( )` or `<( )` body
+ * from the running command's own line; any other at 0. Mirrors Python's
  * parse_rows.
  */
 export function parseRows(session: SessionState, inline: boolean): [number, number] {
@@ -557,7 +574,44 @@ export function parseRows(session: SessionState, inline: boolean): [number, numb
   const running = session.lineNode
   if (!inline || running === null) return [0, 0]
   const ends = sourceRow(running, true)
-  return [session.parseRow + ends, session.lineRow + ends]
+  if (session.reread) return [session.parseRow + ends, session.lineNumber - 1]
+  return [session.parseRow + ends, session.lineRow + session.countedRow(ends)]
+}
+
+/**
+ * The line a `$( )` or `<( )` body numbers each of its rows by, on from the
+ * command running it. bash reads the body again as it prints it, a statement
+ * to a line only where a newline ended the one before, so a blank line, a
+ * newline after `;` and the rows a simple statement or pipeline spans add
+ * none; a compound command keeps its rows apart, one line each. Mirrors
+ * Python's reread_rows.
+ */
+export function rereadRows(node: TSNodeLike): number[] {
+  const rows: number[] = []
+  let line = 0
+  let newline = false
+  for (const child of node.children) {
+    if (child.isNamed !== true) {
+      newline = false
+      continue
+    }
+    if (child.type === NT.COMMENT) continue
+    if (rows.length > 0 && newline) line++
+    const first = sourceRow(child)
+    const last = sourceRow(child, true)
+    while (rows.length <= first) rows.push(line)
+    const nested = compound(child)
+    for (let row = rows.length; row <= last; row++) rows.push(line + (nested ? row - first : 0))
+    if (nested) line += last - first
+    newline = true
+  }
+  return rows
+}
+
+/** Whether a statement is a compound command, under its redirects. Mirrors Python's _compound. */
+function compound(node: TSNodeLike): boolean {
+  const inner = node.type === NT.REDIRECTED_STATEMENT ? (node.namedChildren[0] ?? node) : node
+  return COMPOUND_TYPES.has(inner.type)
 }
 
 /**

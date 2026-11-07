@@ -82,7 +82,7 @@ import { RouteError } from '../../runtime/routing/errors.ts'
 import type { Deny, HandOff, Pending } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { inputSubstitutionRedirect } from '../../shell/helpers.ts'
+import { getText, inputSubstitutionRedirect } from '../../shell/helpers.ts'
 import { LineHistory } from '../history/line.ts'
 import {
   recordStatus,
@@ -863,6 +863,12 @@ async function runPreparedLine(
               // the substitution, as bash's does; a `$( )` was read with its
               // line.
               session.parseHead = `${voiceName(session)}: command substitution: `
+              // A `$( )` or `<( )` body is read again as bash prints it, a
+              // backtick's as typed (`rereadRows`).
+              session.reread =
+                opts.node !== undefined &&
+                opts.span === undefined &&
+                !getText(opts.node).startsWith('`')
               innerOpts.session = session
               innerOpts.evaluation = innerContext
             }

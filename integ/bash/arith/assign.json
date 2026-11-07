@@ -238,11 +238,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "zx=1; RANDOM=\"zx=5\"; echo $zx $RANDOM; declare -i zn; zn=\"zx=7\"; echo $zn $zx; RANDOM=1; [[ RANDOM=42 -eq RANDOM ]]; echo $? $RANDOM; zx=1; [[ zx=5 -eq 5 ]]; echo $? $zx; unset zx zn",
+      "command": "zx=1; RANDOM=\"zx=5\"; echo $zx $RANDOM; declare -i zn; zn=\"zx=7\"; echo $zn $zx; RANDOM=1; [[ RANDOM=42 -eq RANDOM ]]; echo $? $RANDOM; zx=1; [[ zx=5 -eq 5 ]]; echo $? $zx; unset zx zn; printf -v RANDOM '1/0'; echo prc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "5 18498\n7 7\n1 26794\n0 5\n",
-        "stderr": ""
+        "stdout": "5 18498\n7 7\n1 26794\n0 5\nprc=0\n",
+        "stderr": "bash: line 1: printf: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -273,10 +273,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "unset zx zy; [[ zx=5 -eq zx ]]; echo $? $zx; zx=1; [[ zx+=4 -eq zx ]]; echo $? $zx; zx=\"zy=5\"; echo $((zx)) $zy; zx=\"RANDOM=42\"; RANDOM=1; echo $((zx,RANDOM)) $RANDOM; zx=\"zy=1, zy+=1\"; echo $((zx + zy)) $zy; unset zx zy",
+      "command": "unset zx zy; [[ zx=5 -eq zx ]]; echo $? $zx; zx=1; [[ zx+=4 -eq zx ]]; echo $? $zx; zx=\"zy=5\"; echo $((zx)) $zy; zx=\"RANDOM=42\"; RANDOM=1; echo $((zx,RANDOM)) $RANDOM; zx=\"zy=1, zy+=1\"; echo $((zx + zy)) $zy; unset zx zy; zns_e=(5 6 7); zns_i=2; zns_s='zns_e[$zns_i]'; echo $((zns_s)) $(( (zns_i=0) + zns_s )); zns_i=2; let 'zns_r=zns_e[$zns_i]'; declare -i zns_n; zns_n='zns_e[$zns_i]+1'; echo $zns_r $zns_n; declare -A zns_m=([x]=5); zns_k=x; zns_y='zns_m[$zns_k]'; zns_w='zns_e[ \"${zns_i}\" - $((zns_i-1)) ]'; echo $((zns_y)) $((zns_w))",
       "expect": {
         "exit": 0,
-        "stdout": "0 5\n0 5\n5 5\n17772 26794\n4 2\n",
+        "stdout": "0 5\n0 5\n5 5\n17772 26794\n4 2\n7 5\n7 8\n5 6\n",
         "stderr": ""
       }
     },

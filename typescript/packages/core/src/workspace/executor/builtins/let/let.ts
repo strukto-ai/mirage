@@ -39,7 +39,7 @@ export async function handleLet(
   let value = 0n
   for (const expr of args) {
     try {
-      value = await sessionArith(session, expr, policies)
+      value = await sessionArith(session, expr, policies, null, true)
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal('let', err)
       if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err

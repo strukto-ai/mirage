@@ -47,6 +47,7 @@ import {
   deref,
   inCallEnv,
   outliveCall,
+  prefixTemporaries,
   setAttr,
   shadowLocal,
   subscriptIndex,
@@ -64,11 +65,9 @@ import {
   result,
 } from '../shared.ts'
 import {
-  ANSI_C_ESCAPES,
-  BARE_KEY_RE,
-  CONTROL_RE,
   EXPORT_FLAGS,
   LISTED_ATTRIBUTES,
+  NAME_BRACKET_RE,
   READONLY_FLAGS,
   SUBSCRIPT_RE,
   VISIBLE_SCOPE_BUILTINS,
@@ -419,39 +418,6 @@ export async function storeStagedArrays(
   return null
 }
 
-function isControl(ch: string): boolean {
-  const code = ch.codePointAt(0) ?? 0
-  return code < 0x20 || code === 0x7f
-}
-
-/**
- * Quote a value the way bash `declare -p` / `export -p` does.
- *
- * A value holding any control character takes the `$'...'` form, with the
- * named escapes bash uses (`\a \b \t \n \v \f \r`, and `\E` for escape) and
- * three-digit octal for the rest; `"`, `$` and backtick need no escaping
- * there because `$'...'` does not expand. Everything else is double-quoted
- * with escapes for `\`, `"`, `$` and backtick. Non-ASCII printable text
- * stays literal, which is what bash emits in a UTF-8 locale.
- */
-export function bashDeclareQuote(value: string): string {
-  let out = ''
-  if (CONTROL_RE.test(value)) {
-    for (const ch of value) {
-      const escape = ANSI_C_ESCAPES[ch]
-      if (escape !== undefined) out += escape
-      else if (isControl(ch)) out += `\\${(ch.codePointAt(0) ?? 0).toString(8).padStart(3, '0')}`
-      else out += ch
-    }
-    return `$'${out}'`
-  }
-  for (const ch of value) {
-    if (ch === '\\' || ch === '"' || ch === '$' || ch === '`') out += `\\${ch}`
-    else out += ch
-  }
-  return `"${out}"`
-}
-
 export function splitDeclFlags(
   args: readonly DeclarationOperand[],
   allowed: Set<string>,
@@ -480,43 +446,61 @@ export function splitDeclFlags(
 }
 
 /**
- * One associative key as `declare -p` spells it.
- *
- * Bare when every character is one GNU leaves unquoted (pinned by a
- * character sweep on 5.2.37: alphanumerics and `_ % + , - . / : = @ ~`),
- * quoted like a value otherwise. A key that *is* `@` or `*` quotes even
- * though the character is bare mid-key, since the bare spelling would
- * read back as a splat.
- */
-function assocKeyText(key: string): string {
-  if (key !== '@' && key !== '*' && BARE_KEY_RE.test(key)) return key
-  return bashDeclareQuote(key)
-}
-
-/**
- * The `=(...)` tail of an associative `declare` line.
- *
- * Sorted keys (mirage's pinned order, where GNU prints hash order) and
- * GNU's trailing space before the closing paren, which an empty map
- * does not carry: `m=([a]="1" )` but `m=()`.
- */
-export function assocBody(amap: Readonly<Record<string, string>>): string {
-  const keys = Object.keys(amap).sort(compareCodePoints)
-  if (keys.length === 0) return '=()'
-  const parts = keys.map((k) => `[${assocKeyText(k)}]=${bashDeclareQuote(amap[k] ?? '')}`)
-  return `=(${parts.join(' ')} )`
-}
-
-/**
  * A declaration operand as its name, whether it appends, and its value, null
- * for a bare name: `X+=y` appends `y` to `X`.
+ * for a bare name: `X+=y` appends `y` to `X`. An element's subscript runs to
+ * its matching `]`, so an `=` inside it is the subscript's (`a[x=5]=1`,
+ * `a[b[0]=1]=v`). Mirrors Python's operand_parts.
  */
 export function operandParts(word: string): [string, boolean, string | null] {
+  const end = subscriptEnd(word)
+  if (end !== null) {
+    const rest = word.slice(end)
+    if (rest === '') return [word, false, null]
+    if (rest.startsWith('+=')) return [word.slice(0, end), true, rest.slice(2)]
+    if (rest.startsWith('=')) return [word.slice(0, end), false, rest.slice(1)]
+  }
   const eq = word.indexOf('=')
   if (eq < 0) return [word, false, null]
   const name = word.slice(0, eq)
   const append = name.endsWith('+')
   return [append ? name.slice(0, -1) : name, append, word.slice(eq + 1)]
+}
+
+/**
+ * The name a bare element operand declares (`a[1]`, `a[x=2]`), null for any
+ * other word. Mirrors Python's element_name.
+ */
+export function elementName(word: string): string | null {
+  if (subscriptEnd(word) !== word.length) return null
+  return word.slice(0, word.indexOf('['))
+}
+
+/**
+ * The index just past the `]` closing the subscript `word` opens with, as
+ * `NAME[`; null when it opens with none or never closes it. A quoted or
+ * escaped bracket does not count, as bash skips it. Mirrors Python's
+ * _subscript_end.
+ */
+function subscriptEnd(word: string): number | null {
+  const head = NAME_BRACKET_RE.exec(word)
+  if (head === null) return null
+  let depth = 0
+  for (let i = head[0].length - 1; i < word.length; i++) {
+    const ch = word[i]
+    if (ch === '\\') i++
+    else if (ch === "'") {
+      i = word.indexOf("'", i + 1)
+      if (i < 0) return null
+    } else if (ch === '"') {
+      i++
+      while (i < word.length && word[i] !== '"') i += word[i] === '\\' ? 2 : 1
+    } else if (ch === '[') depth++
+    else if (ch === ']') {
+      depth--
+      if (depth === 0) return i + 1
+    }
+  }
+  return null
 }
 
 /**
@@ -563,43 +547,10 @@ export function declarationResult(
 }
 
 /**
- * The `=(...)` an indexed array's `declare -p` line ends with:
- * `a=([0]="x" [2]="z")`. Mirrors Python's array_body.
- */
-export function arrayBody(arr: ShellArray): string {
-  const parts: string[] = []
-  for (const [i, el] of arr.elements) parts.push(`[${String(i)}]=${bashDeclareQuote(el)}`)
-  return `=(${parts.join(' ')})`
-}
-
-/**
- * The `declare -p` line for one name, or null when it has none.
- *
- * The attribute cluster is `attrLetters`, which is why this renders
- * `declare -rx` and `declare -ar` without a table of its own: the record
- * already knows its own letters and their print order. bash spells an
- * empty cluster `--`, and that spelling is the caller's because only a
- * `declare` line needs it.
- *
- * A hidden name answers null, the same way `isReadonly` answers false for
- * one: reporting it as declared would leak it.
- */
-export function declareLine(session: SessionState, name: string): string | null {
-  if (varHidden(session.visibility, name)) return null
-  const v = session.vars.get(name)
-  if (v === undefined) return null
-  const letters = attrLetters(v)
-  const head = letters ? `declare -${letters}` : 'declare --'
-  if (v.value === null) return `${head} ${name}`
-  if (v.value instanceof ShellArray) return `${head} ${name}${arrayBody(v.value)}`
-  if (typeof v.value !== 'string') return `${head} ${name}${assocBody(v.value)}`
-  return `${head} ${name}=${bashDeclareQuote(v.value)}`
-}
-
-/**
  * Whether a no-name `declare` listing's letters keep `name`: `-a` / `-A`
  * narrow it to that array kind (`kindListed`), and any of `-i -l -n -r -t
- * -u -x` keeps a name carrying one of them.
+ * -u -x` keeps a name carrying one of them. A running command's temporary
+ * is never listed.
  */
 export function declarationListed(
   session: SessionState,
@@ -607,7 +558,12 @@ export function declarationListed(
   flags: ReadonlySet<string>,
 ): boolean {
   const v = session.vars.get(name)
-  if (v === undefined || !kindListed(session, name, flags)) return false
+  if (
+    v === undefined ||
+    !kindListed(session, name, flags) ||
+    prefixTemporaries(session).includes(name)
+  )
+    return false
   const letters = new Set(attrLetters(v))
   const wanted = [...flags].filter((c) => LISTED_ATTRIBUTES.has(c))
   return wanted.length === 0 || wanted.some((c) => letters.has(c))
@@ -633,7 +589,7 @@ export function handleDeclarePrint(
   const lines: string[] = []
   const errors: string[] = []
   for (const name of targets) {
-    const line = declareLine(session, name)
+    const line = session.vars.shell.declaration(name)
     if (line === null) errors.push(`${shellVoice()}${cmd}: ${name}: not found`)
     else lines.push(line)
   }
@@ -788,12 +744,16 @@ export async function markNames(
     return markFunctions(cmd, session, marked, names, on, state, parser, kind, policies)
   }
   if (names.length === 0) {
+    const temporaries = prefixTemporaries(session)
     const lines = session.vars
       .records()
-      .filter(([name, v]) => v.attrs.has(attr) && kindListed(session, name, flags))
+      .filter(
+        ([name, v]) =>
+          v.attrs.has(attr) && kindListed(session, name, flags) && !temporaries.includes(name),
+      )
       .map(([name]) => name)
       .sort(compareCodePoints)
-      .map((name) => declareLine(session, name))
+      .map((name) => session.vars.shell.declaration(name))
       .filter((line) => line !== null)
     return ok(cmd, encodeText(lines.map((line) => `${line}\n`).join('')))
   }

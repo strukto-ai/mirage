@@ -157,10 +157,10 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.session.budget import check_env, entry_bytes
 from mirage.workspace.session.state import (
     bind_last_word,
+    deref,
     ensure_var_visible,
     env_is_readonly,
     seed_var,
-    set_attr,
     visible_env,
 )
 from mirage.workspace.types import ExecutionNode
@@ -373,7 +373,7 @@ async def execute_command(
         if "=" not in atext:
             continue
         key, _, raw_val = atext.partition("=")
-        if name and env_is_readonly(session, key, False):
+        if name and env_is_readonly(session, key, True):
             refused += encode_text(
                 f"{shell_voice()}{key}: readonly variable\n"
             )
@@ -394,7 +394,10 @@ async def execute_command(
             v = raw_val
         prefix_assignments.append((key, v))
 
-    for k, v in prefix_assignments:
+    for given, v in prefix_assignments:
+        # Each check is of the name the write lands on, a reference's
+        # target (`r=new cmd` over `declare -n r=T` writes T).
+        k = deref(session, given)
         # The hidden gate runs first, as in set_var: calling a hidden
         # name "readonly" would leak that it exists. Both branches
         # below write session.env raw (an `export` inside a function
@@ -423,12 +426,13 @@ async def execute_command(
             return _write_refused(exc, name or k)
         if k in session.readonly_vars:
             raise DiscardSignal(
-                encode_text(f"{shell_voice()}{k}: readonly variable\n")
+                encode_text(f"{shell_voice()}{given}: readonly variable\n")
             )
 
     async def judge_landed(renderings: Mapping[str, str | None]) -> None:
         # `post_session` asks about each prefix write once it landed.
-        for k, v in prefix_assignments:
+        for given, v in prefix_assignments:
+            k = deref(session, given)
             await post_session_gate(
                 registry.policies,
                 SessionContext(
@@ -437,8 +441,12 @@ async def execute_command(
                     value=v,
                     session_id=session.session_id,
                 ),
-                renderings.get(k),
+                renderings.get(k, renderings.get(given)),
             )
+
+    # The saved records of arrays declared and never assigned, which a
+    # record put back as a table entry no longer says.
+    unassigned: dict[str, ShellVar] = {}
 
     def restore(saved: Mapping[str, Any]) -> None:
         for k, prev in saved.items():
@@ -446,6 +454,8 @@ async def execute_command(
                 session.vars.pop(k, None)
             else:
                 session.vars[k] = prev
+                if unassigned.get(k) is prev:
+                    session.vars.shell.unassigned(k)
         saves = session._prefix_saves
         saves[:] = [s for s in saves if s is not saved]
 
@@ -505,7 +515,10 @@ async def execute_command(
         # expands them with the values from before the assignment:
         # `x=new echo $x` prints the old x and `IFS=, cmd $v` splits on
         # the old IFS.
-        for k, v in prefix_assignments:
+        for given, v in prefix_assignments:
+            # A reference's temporary is its target's (`N=5 cmd` over
+            # `declare -n N=T` sets T).
+            k = deref(session, given)
             # A first write's old record stays held; a repeat drops the earlier value.
             old = session.vars.get(k) if k in saved_env_overrides else None
             check_env(
@@ -514,8 +527,10 @@ async def execute_command(
                 entry_bytes(k, v),
             )
             if k not in saved_env_overrides:
-                saved_env_overrides[k] = session.vars.get(k)
+                held = saved_env_overrides[k] = session.vars.get(k)
                 saved_renderings[k] = shell.rendered(k)
+                if held is not None and shell.is_unassigned(k):
+                    unassigned[k] = held
             if temp is not None:
                 shell.save_temp(temp, k)
             # Exported for the duration, which is the whole point of the
@@ -524,10 +539,11 @@ async def execute_command(
             # merely in the shell. Seeding it plain left it invisible to
             # every reader of `env_snapshot` -- the command's own env, an
             # installed CLI, a guest runtime -- once that view narrowed
-            # to the exported set. The saved record is put back below, so
-            # neither the value nor the attribute outlives the command.
-            seed_var(session, k, v)
-            set_attr(session, k, VarAttr.EXPORT)
+            # to the exported set. The temporary carries that mark alone,
+            # as bash's does: `declare -i n; n=1+2 cmd` hands cmd `1+2`
+            # and `declare -p n` there prints `declare -x`. The saved
+            # record is put back below, so neither outlives the command.
+            session.vars[k] = ShellVar(v, frozenset({VarAttr.EXPORT}))
         # Judged before the command reads them; on a refusal the
         # restore below puts the old values back.
         await judge_landed(saved_renderings)

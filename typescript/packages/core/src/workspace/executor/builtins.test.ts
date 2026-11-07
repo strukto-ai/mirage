@@ -303,17 +303,24 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
 
   it('printenv VAR emits value + newline; exit 1 if missing', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ X: 'yes' }) })
-    const [out, io] = handlePrintenv('X', s)
+    const [out, io] = handlePrintenv(['X'], s)
     expect(decode(out as Uint8Array)).toBe('yes\n')
     expect(io.exitCode).toBe(0)
-    const [, io2] = handlePrintenv('MISSING', s)
+    const [, io2] = handlePrintenv(['MISSING'], s)
     expect(io2.exitCode).toBe(1)
+  })
+
+  it('printenv prints each found name and fails on a missing one', () => {
+    const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ X: 'yes' }) })
+    const [out, io] = handlePrintenv(['-0', 'MISSING', 'X', '--', 'X'], s)
+    expect(decode(out as Uint8Array)).toBe('yes\0yes\0')
+    expect(io.exitCode).toBe(1)
   })
 
   it('printenv with no name lists sorted KEY=VAL', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ B: '2', A: '1' }) })
-    const [out] = handlePrintenv(null, s)
-    expect(decode(out as Uint8Array)).toBe('A=1\nB=2\nPWD=/\n')
+    const [out] = handlePrintenv([], s)
+    expect(decode(out as Uint8Array)).toBe('A=1\nB=2\nPWD=/\n_=/usr/bin/printenv\n')
   })
 })
 
