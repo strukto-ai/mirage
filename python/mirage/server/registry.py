@@ -650,6 +650,17 @@ class WorkspaceRegistry:
         if self._configs is not None:
             await self._configs.put(workspace_id, {"config": config})
 
+    async def drop_config(self, workspace_id: str) -> None:
+        """Forget the config kept for ``workspace_id``, as a clone or load
+        under the id does: it was built from no config, so ``start`` must
+        not build an earlier one's.
+
+        Args:
+            workspace_id (str): the workspace.
+        """
+        if self._configs is not None:
+            await self._configs.delete([workspace_id])
+
     async def saved_config(
         self, workspace_id: str, account: str | None
     ) -> dict[str, JsonValue] | None:

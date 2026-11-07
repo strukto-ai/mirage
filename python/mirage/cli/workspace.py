@@ -368,9 +368,12 @@ def stop_cmd(
 def start_cmd(
     workspace_id: str = typer.Argument(..., help="Workspace id."),
 ) -> None:
-    """Start a stopped workspace from the config it was created with."""
+    """Start a stopped workspace from the config it was created with.
+
+    The daemon is started if it has exited, as it does once idle.
+    """
     with make_client() as client:
-        client.ensure_running(allow_spawn=False)
+        client.ensure_running()
         r = client.request(
             "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/start"
         )

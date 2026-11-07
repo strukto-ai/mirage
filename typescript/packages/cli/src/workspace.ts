@@ -388,7 +388,7 @@ export function registerWorkspaceCommands(program: Command): Command {
     .argument('<id>', 'Workspace id.')
     .action(async (id: string) => {
       const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
+      await c.ensureRunning({ allowSpawn: true })
       const started = (await handleResponse(
         await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/start`),
       )) as { id: string }

@@ -205,7 +205,7 @@ describe('WorkerProxy', () => {
     )
     expect((await call(`${d.url}/v1/workspaces/n/stop`, 'POST')).status).toBe(200)
     expect((await call(`${d.url}/v1/health`, 'GET')).json).toMatchObject({ workspaces: 0 })
-    expect((await call(`${d.url}/v1/workspaces/n/start`, 'POST')).status).toBe(200)
+    expect((await call(`${d.url}/v1/workspaces/n/start`, 'POST', {})).status).toBe(200)
     expect(ids(d)).toEqual([[], ['n']])
     expect((await call(`${d.url}/v1/health`, 'GET')).json).toMatchObject({ workspaces: 1 })
   })

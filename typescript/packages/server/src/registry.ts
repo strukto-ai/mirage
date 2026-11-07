@@ -537,6 +537,14 @@ export class WorkspaceRegistry {
   }
 
   /**
+   * Forget the config kept for `id`, as a clone or load under the id does:
+   * it was built from no config, so `start` must not build an earlier one's.
+   */
+  async dropConfig(id: string): Promise<void> {
+    if (this.configs !== null) await this.configs.delete([id])
+  }
+
+  /**
    * The config a stopped `id` starts from, as written, when `account` may
    * start it; null otherwise.
    */

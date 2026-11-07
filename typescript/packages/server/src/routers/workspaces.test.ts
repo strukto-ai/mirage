@@ -22,7 +22,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '@struktoai/mirage-node'
 import { readSnapshotTar, writeSnapshotTar } from '@struktoai/mirage-core/workspace/snapshot/tar_io'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { MountMode, type JsonValue } from '@struktoai/mirage-core/types'
 import { buildApp } from '../app.ts'
 import * as metrics from '../metrics.ts'
 import type * as multipart from '../multipart.ts'
@@ -1396,7 +1396,7 @@ describe('workspace cancel, kill, stop and start', () => {
     }
   })
 
-  const post = (app: App, url: string, payload: object = {}) =>
+  const post = (app: App, url: string, payload: Record<string, JsonValue> = {}) =>
     app.inject({ method: 'POST', url, payload })
 
   it('starts a stopped workspace with its files and cwd', async () => {
@@ -1466,6 +1466,23 @@ describe('workspace cancel, kill, stop and start', () => {
       const createdAt = (r: typeof first) => r.json<{ created_at: number }>().created_at
       expect(createdAt(second)).toBe(createdAt(first))
       expect(app.registry.size()).toBe(1)
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('drops the saved config when a clone takes a stopped id', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-start-clone-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      for (const id of ['w', 'src']) {
+        expect((await post(app, '/v1/workspaces', { ...RAM, id })).statusCode).toBe(201)
+      }
+      await post(app, '/v1/workspaces/w/stop')
+      expect((await post(app, '/v1/workspaces/src/clone', { id: 'w' })).statusCode).toBe(201)
+      await post(app, '/v1/workspaces/w/stop')
+      expect((await post(app, '/v1/workspaces/w/start')).statusCode).toBe(404)
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })

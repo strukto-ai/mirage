@@ -196,7 +196,7 @@ export class WorkerProxy {
   /**
    * A create, load, clone or start: to the worker holding or creating the id
    * it names, else to `source`'s for a clone, else to a worker at random. A
-   * start names its id in the path, `started`, and sends no body.
+   * start names its id in the path, `started`, and its body goes on as sent.
    */
   private async create(
     req: IncomingMessage,
@@ -216,10 +216,9 @@ export class WorkerProxy {
         sendAnswer(res, refused)
         return
       }
+      const read = await peek(req)
       const peeked: Peeked =
-        started === undefined
-          ? await peek(req)
-          : { head: Buffer.alloc(0), more: false, id: started, lost: false, twice: false }
+        started === undefined ? read : { ...read, id: started, lost: false, twice: false }
       if (peeked.lost) {
         sendJson(res, 413, {
           detail: `the workspace id must come in the body's first ${String(MAX_REQUEST_PART)} bytes`,
