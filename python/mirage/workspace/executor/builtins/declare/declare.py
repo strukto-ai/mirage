@@ -601,6 +601,7 @@ def element_name(word: str) -> str | None:
 def _subscript_end(word: str) -> int | None:
     """The index just past the ``]`` closing the subscript ``word`` opens
     with, as ``NAME[``; None when it opens with none or never closes it.
+    A quoted or escaped bracket does not count, as bash skips it.
 
     Args:
         word (str): the operand as typed.
@@ -609,13 +610,26 @@ def _subscript_end(word: str) -> int | None:
     if head is None:
         return None
     depth = 0
-    for i in range(head.end() - 1, len(word)):
-        if word[i] == "[":
+    i = head.end() - 1
+    while i < len(word):
+        ch = word[i]
+        if ch == "\\":
+            i += 1
+        elif ch == "'":
+            i = word.find("'", i + 1)
+            if i < 0:
+                return None
+        elif ch == '"':
+            i += 1
+            while i < len(word) and word[i] != '"':
+                i += 2 if word[i] == "\\" else 1
+        elif ch == "[":
             depth += 1
-        elif word[i] == "]":
+        elif ch == "]":
             depth -= 1
             if depth == 0:
                 return i + 1
+        i += 1
     return None
 
 

@@ -477,16 +477,25 @@ export function elementName(word: string): string | null {
 
 /**
  * The index just past the `]` closing the subscript `word` opens with, as
- * `NAME[`; null when it opens with none or never closes it. Mirrors
- * Python's _subscript_end.
+ * `NAME[`; null when it opens with none or never closes it. A quoted or
+ * escaped bracket does not count, as bash skips it. Mirrors Python's
+ * _subscript_end.
  */
 function subscriptEnd(word: string): number | null {
   const head = NAME_BRACKET_RE.exec(word)
   if (head === null) return null
   let depth = 0
   for (let i = head[0].length - 1; i < word.length; i++) {
-    if (word[i] === '[') depth++
-    else if (word[i] === ']') {
+    const ch = word[i]
+    if (ch === '\\') i++
+    else if (ch === "'") {
+      i = word.indexOf("'", i + 1)
+      if (i < 0) return null
+    } else if (ch === '"') {
+      i++
+      while (i < word.length && word[i] !== '"') i += word[i] === '\\' ? 2 : 1
+    } else if (ch === '[') depth++
+    else if (ch === ']') {
       depth--
       if (depth === 0) return i + 1
     }
