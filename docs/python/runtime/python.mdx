@@ -74,7 +74,7 @@ A host application starts a program through the same admitted entry point
 as the shell.
 
 ```python
-from mirage.process.types import SpawnRequest
+from mirage.execution.process.types import SpawnRequest
 
 child = ws.spawn(SpawnRequest(("cat",)))
 result = await child.communicate(b"hello\n")

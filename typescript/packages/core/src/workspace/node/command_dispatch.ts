@@ -61,7 +61,7 @@ import {
   readRow,
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
-import type { JobTable } from '../../shell/job_table/index.ts'
+import type { JobTable } from '../../execution/job/index.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { WORD_BREAKS } from '../../shell/parse/constants.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'

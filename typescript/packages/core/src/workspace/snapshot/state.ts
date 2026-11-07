@@ -30,7 +30,7 @@ import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { profileFromDict, profileToDict, type SessionProfile } from '../../policy/profile.ts'
-import { statedProcesses, type ProcessPermissions } from '../../process/config.ts'
+import { statedProcesses, type ProcessPermissions } from '../../execution/process/config.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 import {
   Channel,
@@ -41,7 +41,7 @@ import {
   RAMConsoleStore,
 } from '../../shell/console/index.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
-import { Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
+import { Job, JobStatus, type JobTable } from '../../execution/job/index.ts'
 import type { ShellVar } from '../../shell/variable.ts'
 import type { JsonObject } from '../../types.ts'
 import {

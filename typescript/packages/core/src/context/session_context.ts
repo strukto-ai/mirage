@@ -23,7 +23,7 @@ import type {
   HandOff,
   VfsExplanation,
 } from '../policy/types.ts'
-import type { ProcessHandle } from '../process/handle.ts'
+import type { ProcessHandle } from '../execution/process/handle.ts'
 import { fromUnits, units } from '../rs/document.ts'
 import { visibilityMatcher } from '../rs/policy.ts'
 import { useVoice } from '../shell/voice.ts'

@@ -20,7 +20,7 @@ import { MountMode, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
-import { RAMJobStore } from '@struktoai/mirage-core/shell/job_table/ram'
+import { RAMJobStore } from '@struktoai/mirage-core/execution/job/ram'
 import { normalizeCacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import {
   normalizeIndexConfig,
@@ -35,7 +35,7 @@ import { RedisNamespaceStore } from './workspace/mount/namespace/redis.ts'
 import { DiskWorkspaceStateStore } from './workspace/store/disk.ts'
 import { RedisWorkspaceStateStore } from './workspace/store/redis.ts'
 import { RedisConsoleStore } from './shell/console/redis/index.ts'
-import { RedisJobStore } from './shell/job_table/redis.ts'
+import { RedisJobStore } from './execution/job/redis.ts'
 import { RedisFileCacheStore } from './cache/file/redis.ts'
 import { Workspace } from './workspace.ts'
 import { DiskVFS } from './vfs/disk/disk.ts'

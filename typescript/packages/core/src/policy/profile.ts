@@ -13,7 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { networkLayer, networkRoutes, NetworkRule, type NetworkSetting } from '../io/network.ts'
-import { statedProcesses, type ProcessesBlock, type ProcessPermissions } from '../process/config.ts'
+import {
+  statedProcesses,
+  type ProcessesBlock,
+  type ProcessPermissions,
+} from '../execution/process/config.ts'
 import { validateDocument } from '../rs/document.ts'
 import { type Language, ScriptSource } from '../runtime/types.ts'
 import { type EnvEntries, EnvVar, SecretRef } from '../secrets/config.ts'

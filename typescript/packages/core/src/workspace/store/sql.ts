@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ObserverStore } from '../../observe/store.ts'
-import type { JobStore } from '../../shell/job_table/store.ts'
+import type { JobStore } from '../../execution/job/store.ts'
 import type { SqlDriver } from '../../vfs/sql/types.ts'
 import { RecordNamespaceStore, type NamespaceStore } from '../mount/namespace/store.ts'
 import { SqlRecordClient } from '../record/sql.ts'

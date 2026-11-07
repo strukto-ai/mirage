@@ -19,7 +19,10 @@ import { PolicyError } from '../../policy/errors.ts'
 import { opRuling } from '../../policy/match/rule.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import { Outcome, Scope, type CommandRule, type VfsContext } from '../../policy/types.ts'
-import { DEFAULT_PROCESS_PERMISSIONS, parseProcessPermissions } from '../../process/config.ts'
+import {
+  DEFAULT_PROCESS_PERMISSIONS,
+  parseProcessPermissions,
+} from '../../execution/process/config.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import { DEFAULT_VISIBILITY, MountMode, PathSpec } from '../../types.ts'
 import { pathVisible } from '../../utils/hidden.ts'

@@ -17,10 +17,10 @@ import os
 import shutil
 from urllib.parse import quote
 
+from mirage.execution.job.ram import RAMJobStore
+from mirage.execution.job.store import JobStore
 from mirage.observe.disk_store import DiskObserverStore
 from mirage.observe.store import ObserverStore
-from mirage.shell.job_table.ram import RAMJobStore
-from mirage.shell.job_table.store import JobStore
 from mirage.workspace.mount.namespace.disk import DiskNamespaceStore
 from mirage.workspace.mount.namespace.store import (
     NamespaceStore,

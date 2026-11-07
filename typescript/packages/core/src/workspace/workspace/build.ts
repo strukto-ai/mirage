@@ -16,7 +16,7 @@ import type { ObserverStore } from '../../observe/store.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import type { JobStore } from '../../shell/job_table/store.ts'
+import type { JobStore } from '../../execution/job/store.ts'
 import type { WorkspaceOptions } from './types.ts'
 
 /**

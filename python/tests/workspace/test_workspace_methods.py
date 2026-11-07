@@ -20,13 +20,13 @@ import uuid
 
 import pytest
 
+from mirage.execution.job import Job, JobStatus
 from mirage.shell.console import (
     Channel,
     ConsoleChunk,
     JobConsole,
     RAMConsoleStore,
 )
-from mirage.shell.job_table import Job, JobStatus
 from mirage.types import MountMode
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS

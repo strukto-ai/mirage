@@ -30,7 +30,7 @@ import {
 } from './io/network.ts'
 import { parseCommandLimits } from './policy/builtin/output_cap.ts'
 import { parseProgram, SessionProfile, type ProfilePolicySpec } from './policy/profile.ts'
-import { statedProcesses } from './process/config.ts'
+import { statedProcesses } from './execution/process/config.ts'
 import { validateDocument } from './rs/document.ts'
 import { Runtime, type RuntimeEntry } from './runtime/base.ts'
 import type { RuntimeOptions } from './runtime/config.ts'

@@ -1,0 +1,342 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Callable, Coroutine
+from concurrent.futures import Future
+from dataclasses import replace
+from threading import RLock
+from typing import Any, Protocol, TypeVar, cast
+
+from mirage.concurrency.limiter import owned_task
+from mirage.execution.process.types import ProcessInfo, ProcessRunner, ProcessState
+from mirage.types import JsonValue
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+class ExecutionBind(Protocol):
+    """Run a process under the execution context its host provides."""
+
+    async def __call__(
+        self,
+        execution_id: str,
+        run: ProcessRunner,
+        process: ProcessHandle,
+    ) -> int: ...
+
+
+class ProcessHandle:
+    """Host-side lifecycle of one asynchronous runner.
+
+    Termination requests cancellation once, standing for a signal: a
+    native program the runner started receives it, and a cancelled
+    runner's status is 128 plus it, as a shell reports a child the
+    signal ended. Joining waits for the runner, including its finally
+    blocks; it does not assert that a provider has stopped native
+    descendants. A cancelled waiter never cancels the runner.
+
+    The runner starts once ``start`` is called, so whoever tracks the
+    handle registers it before even a synchronous prelude of the runner
+    runs.
+    """
+
+    task: asyncio.Task[int]
+
+    def __init__(
+        self,
+        info: ProcessInfo,
+        run: ProcessRunner,
+        finished: Callable[[int], None],
+        cancel_children: Callable[[int], None] = lambda signal: None,
+        bind: ExecutionBind | None = None,
+        ignores: frozenset[int] = frozenset(),
+    ) -> None:
+        self._info = info
+        self.ignores = ignores
+        self._run = run
+        self._bind = bind
+        self._lock = RLock()
+        self._finished = finished
+        self._cancel_children = cancel_children
+        self._programs: dict[asyncio.Task[Any], int | None] = {}
+        self._takes: dict[asyncio.Task[Any], frozenset[int] | None] = {}
+        self._signal: int | None = None
+        self._program_code: int | None = None
+        self._program_signal: int | None = None
+        self._runs: dict[str, dict[str, JsonValue]] = {}
+        self._completion: Future[ProcessInfo] = Future()
+        self.begun = False
+        # The host stopped it (its table stopped, its session closed),
+        # which ends whoever waits for it as well.
+        self.revoked = False
+
+    def start(self, eager: bool = False) -> None:
+        """Start the runner.
+
+        Args:
+            eager (bool): run it at once, up to its first wait, so a
+                runner that never waits is done, and settled, before
+                this returns and costs the loop no turn; otherwise it
+                starts on the loop's next turn.
+        """
+        work = self._work()
+        self.task = owned_task(work) if eager else asyncio.create_task(work)
+        if self.task.done():
+            self._settle(self.task)
+        else:
+            self.task.add_done_callback(self._settle)
+
+    async def _work(self) -> int:
+        self.task = cast("asyncio.Task[int]", asyncio.current_task())
+        self.begun = True
+        if self._bind is None:
+            return await self._run()
+        return await self._bind(self._info.execution_id, self._run, self)
+
+    @property
+    def info(self) -> ProcessInfo:
+        with self._lock:
+            return self._info
+
+    @property
+    def signal(self) -> int | None:
+        """The signal the runner was stopped with, None while it runs."""
+        with self._lock:
+            return self._signal
+
+    @property
+    def ended_by(self) -> int | None:
+        """The signal that ended the runner, None while it runs or once
+        it exited on its own (a trap that handled the signal): the one
+        it was stopped with, or the one that ended the native program
+        its status is (``program_signaled``)."""
+        if not self.task.done():
+            return None
+        if self.task.cancelled():
+            return self.signal or 9
+        with self._lock:
+            ended = self._program_signal
+            code = self._info.exit_code
+        return ended if ended is not None and code == 128 + ended else None
+
+    @property
+    def interrupted(self) -> int | None:
+        """The signal ``interrupt`` stops the program the runner runs
+        right now with, None while none is stopping."""
+        with self._lock:
+            return next(
+                (sent for sent in self._programs.values() if sent is not None),
+                None,
+            )
+
+    @property
+    def program_code(self) -> int | None:
+        """The status a program the runner started exited with on its
+        own after the stop signal, None unless one did."""
+        with self._lock:
+            return self._program_code
+
+    @property
+    def runs(self) -> dict[str, dict[str, JsonValue]]:
+        """The native runs this runner has going, each under a key of
+        its own: a host program it started, a sandbox's run."""
+        with self._lock:
+            return dict(self._runs)
+
+    def add_run(self, key: str, run: dict[str, JsonValue]) -> None:
+        """Record a native run this runner started, which the process
+        plane publishes and a workspace that outlives this one stops.
+
+        Args:
+            key (str): the run's key, unique among the runner's.
+            run (dict[str, JsonValue]): how another workspace reaches it.
+        """
+        with self._lock:
+            self._runs[key] = run
+
+    def drop_run(self, key: str) -> None:
+        """Forget a native run once it ended.
+
+        Args:
+            key (str): the key it was recorded under.
+        """
+        with self._lock:
+            self._runs.pop(key, None)
+
+    def program_exited(self, code: int) -> None:
+        """Record that a program the runner started handled the stop
+        signal and exited: a job that is that one program reports its
+        status, as bash reports a child that handled the signal.
+
+        Args:
+            code (int): the program's exit status.
+        """
+        with self._lock:
+            self._program_code = code
+
+    def program_signaled(self, signal: int | None) -> None:
+        """Record that a native program the runner started ended on a
+        signal, which names the runner's end when its status is that
+        program's (``true | python3 -c 'os.kill(os.getpid(), 9)'``).
+        Every statement the runner starts clears it, so only the last
+        one's end counts.
+
+        Args:
+            signal (int | None): the signal that ended the program; None
+                as a statement starts.
+        """
+        with self._lock:
+            self._program_signal = signal
+
+    async def program(
+        self,
+        run: Callable[[], Coroutine[Any, Any, T]],
+        takes: frozenset[int] | None = None,
+    ) -> tuple[T, None] | tuple[None, int]:
+        """Run one program of the runner's shell where ``interrupt``
+        reaches it, as bash's background job runs each program as a
+        child that takes the INT the job itself ignores.
+
+        Args:
+            run (Callable[[], Coroutine[Any, Any, T]]): the program, to
+                its end.
+            takes (frozenset[int] | None): the signals that stop it,
+                every one when None.
+
+        Returns:
+            tuple[T, None] | tuple[None, int]: what it returned, or the
+            signal ``interrupt`` stopped it with.
+        """
+        # Eager, so the program begins where the statement stands, before
+        # what the shell runs next (a job's redirect lands first).
+        task: asyncio.Task[T] = asyncio.Task(
+            run(), loop=asyncio.get_running_loop(), eager_start=True
+        )
+        with self._lock:
+            self._programs[task] = None
+            self._takes[task] = takes
+        try:
+            return await task, None
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            signal = self._programs.get(task)
+            if signal is None or (
+                current is not None and current.cancelling()
+            ):
+                raise
+            return None, signal
+        finally:
+            with self._lock:
+                self._programs.pop(task, None)
+                self._takes.pop(task, None)
+
+    def interrupt(self, signal: int) -> None:
+        """Deliver a signal the runner's shell ignores, as bash's
+        background job ignores INT: the program it runs right now
+        (``program``) gets it, and the shell goes on.
+
+        Args:
+            signal (int): the signal.
+        """
+        with self._lock:
+            running = [
+                task
+                for task, sent in self._programs.items()
+                if sent is None
+                and (
+                    (takes := self._takes.get(task)) is None or signal in takes
+                )
+            ]
+            for task in running:
+                self._programs[task] = signal
+        for task in running:
+            task.get_loop().call_soon_threadsafe(task.cancel)
+
+    def terminate(self, signal: int = 9, children: bool = True) -> bool:
+        """Request cancellation without waiting for the runner to exit.
+
+        A runner that already exited has nothing to cancel, but what it
+        started may still run (``sh -c 'sleep 100 &'``), so its children
+        are stopped all the same. A KILL while the runner still stops
+        under another signal cuts the grace that signal gave its program
+        short, as a second ``kill -KILL`` does. A signal the runner
+        ignores (``ignores``) does nothing.
+
+        Args:
+            signal (int): what the stop stands for, KILL (9) unless a
+                ``kill`` named another.
+            children (bool): stop what the runner started too; False
+                leaves its jobs running, for a signal they ignore.
+        """
+        if signal in self.ignores:
+            return False
+        with self._lock:
+            exited = self._info.state == ProcessState.EXITED
+            stopped = not exited and not self._info.cancellation_requested
+            escalated = (
+                not exited
+                and not stopped
+                and signal == 9
+                and self._signal != 9
+            )
+            if stopped:
+                self._signal = signal
+                self.task.get_loop().call_soon_threadsafe(self.task.cancel)
+                self._info = replace(
+                    self._info,
+                    state=ProcessState.STOPPING,
+                    cancellation_requested=True,
+                )
+            elif escalated:
+                self._signal = signal
+        if children and (stopped or exited or escalated):
+            self._cancel_children(signal)
+        return stopped or escalated
+
+    def _settle(self, task: asyncio.Task[int]) -> None:
+        cancelled = task.cancelled()
+        error = None if cancelled else task.exception()
+        if error is not None:
+            logger.debug("process %d failed: %s", self._info.pid, error)
+        with self._lock:
+            # Read with the exit published, so a KILL another thread sends
+            # meanwhile is either refused or the status it reports.
+            if cancelled:
+                code = 128 + (self._signal or 9)
+            else:
+                code = 1 if error is not None else task.result()
+            self._info = replace(
+                self._info,
+                state=ProcessState.EXITED,
+                exit_code=code,
+                cancellation_requested=self._info.cancellation_requested
+                or cancelled,
+                failure=str(error) if error is not None else None,
+            )
+            info = self._info
+        self._finished(info.pid)
+        self._completion.set_result(info)
+
+    async def join(self) -> ProcessInfo:
+        """Wait asynchronously, including from a different event loop."""
+        return await asyncio.shield(asyncio.wrap_future(self._completion))
+
+    async def reap(self) -> int:
+        """Wait for the runner from the shell that forked it, as wait(2)
+        does: its exit status, 128 plus the signal that stopped it. A
+        stop of the waiting shell itself stops the runner with it, and a
+        runner the host stopped (``revoked``) ends the wait cancelled.
+
+        Returns:
+            int: the status.
+        """
+        try:
+            return await self.task
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if self.revoked or (current is not None and current.cancelling()):
+                raise
+            return 128 + (self.signal or 9)

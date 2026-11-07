@@ -20,6 +20,7 @@ from typing import Any, Callable
 from mirage.commands.builtin.utils.limit import guard_output
 from mirage.context import reset_admission, set_admission
 from mirage.execution.context import new_execution_id
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.policy import (
@@ -35,7 +36,6 @@ from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole, Terminal
 from mirage.shell.helpers import input_substitution_redirect
-from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.execution import ExecutionScope

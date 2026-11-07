@@ -14,9 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Context } from '../../../../commands/config.ts'
-import { ChildProcess } from '../../../../process/child.ts'
-import { ProcessInput, ProcessOutput } from '../../../../process/stdio.ts'
-import { ProcessTable } from '../../../../process/table.ts'
+import { ChildProcess } from '../../../../execution/process/child.ts'
+import { ProcessInput, ProcessOutput } from '../../../../execution/process/stdio.ts'
+import { ProcessTable } from '../../../../execution/process/table.ts'
 import { PathSpec } from '../../../../types.ts'
 import type { RuntimeFiles } from '../../../files.ts'
 import { GuestProcessTable } from './process.ts'

@@ -22,7 +22,7 @@ import {
 import { missCondition, pathStat } from '../../mount/namespace/probe.ts'
 import { FileType, wordText, PathSpec, type Limit } from '../../../types.ts'
 import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
-import type { ProcessView } from '../../../process/view.ts'
+import type { ProcessView } from '../../../execution/process/view.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
 import type { CLI, CLIHandler } from '../../../commands/cli/types.ts'
 import type { CommandFnResult, Context } from '../../../commands/config.ts'

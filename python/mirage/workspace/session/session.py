@@ -18,6 +18,9 @@ from dataclasses import dataclass, field, replace
 from typing import Any, TypeVar
 
 from mirage.cache.versions import VersionHistory
+from mirage.execution.job.table import JobTable
+from mirage.execution.job.waits import JobWaits
+from mirage.execution.process.config import ProcessPermissions
 from mirage.io.async_line_iterator import SharedInput, release_inputs
 from mirage.io.network import NetworkSetting
 from mirage.policy.builtin.output_cap import command_limits_to_json
@@ -27,7 +30,6 @@ from mirage.policy.types import (
     HideReason,
     ProfileScripts,
 )
-from mirage.process.config import ProcessPermissions
 from mirage.rs.session import ShellVars
 from mirage.secrets.config import EnvVar
 from mirage.shell.array import ShellArray
@@ -39,8 +41,6 @@ from mirage.shell.constants import (
 )
 from mirage.shell.descriptors import Descriptor, StreamOwner
 from mirage.shell.helpers import source_row
-from mirage.shell.job_table.table import JobTable
-from mirage.shell.job_table.waits import JobWaits
 from mirage.shell.types import AliasExpansion, TSNodeLike
 from mirage.shell.variable import (
     ManagedRef,

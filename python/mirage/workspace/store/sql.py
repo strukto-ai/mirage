@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.execution.job.store import JobStore
 from mirage.observe.store import ObserverStore
-from mirage.shell.job_table.store import JobStore
 from mirage.vfs.sql.types import SqlDriver
 from mirage.workspace.mount.namespace.store import (
     NamespaceStore,

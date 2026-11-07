@@ -43,7 +43,7 @@ const SEED_7_IDS = [
 const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 // The packages whose ids and draws come from the workspace IdSource.
-const SEAMED_PACKAGES = ['cache', 'commands', 'core', 'execution', 'process', 'workspace']
+const SEAMED_PACKAGES = ['cache', 'commands', 'core', 'execution', 'workspace']
 
 const GLOBAL_DRAWS: Record<string, Set<string>> = {
   crypto: new Set(['randomUUID', 'getRandomValues']),
@@ -73,7 +73,12 @@ interface DrawOwner {
   report: (name: string) => string
 }
 
-const KEPT_ON_PROCESS_RANDOMNESS: Record<string, string> = {}
+const KEPT_ON_PROCESS_RANDOMNESS: Record<string, string> = {
+  'execution/job/table.ts crypto.randomUUID':
+    "a job table's lease and its jobs' consoles are named in a store other processes share, so a seeded name would collide with theirs",
+  'execution/job/table.ts Math.random':
+    'a job list written again starts at a random generation so a reader of the deleted one never matches it, which a seed shared with another process would repeat',
+}
 
 function stampOf(value: string): number {
   return parseInt(value.slice(0, 8) + value.slice(9, 13), 16)

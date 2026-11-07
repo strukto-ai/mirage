@@ -31,7 +31,7 @@ import {
   exitOutcome,
   killedOutcome,
 } from '@struktoai/mirage-core/shell/console/index'
-import { KILLED_EXIT_CODE } from '@struktoai/mirage-core/shell/job_table/constants'
+import { KILLED_EXIT_CODE } from '@struktoai/mirage-core/execution/job/constants'
 import type {
   ConsoleChunk,
   ConsoleStore,

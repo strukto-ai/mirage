@@ -14,9 +14,9 @@
 
 import asyncio
 
+from mirage.execution.job import JobStatus, JobTable
 from mirage.io.types import IOResult
 from mirage.shell.console import Channel
-from mirage.shell.job_table import JobStatus, JobTable
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace

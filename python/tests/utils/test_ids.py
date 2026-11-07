@@ -55,7 +55,6 @@ SEAMED_PACKAGES = (
     "commands",
     "core",
     "execution",
-    "process",
     "workspace",
 )
 
@@ -102,6 +101,15 @@ KEPT_ON_PROCESS_RANDOMNESS = {
     ("core/disk/write.py", "tempfile.mkstemp"): (
         "the atomic write stages beside its target on the host disk, so a "
         "seeded name would collide with an earlier run's leftover"
+    ),
+    ("execution/job/table.py", "uuid.uuid4"): (
+        "a job table's lease and its jobs' consoles are named in a store "
+        "other processes share, so a seeded name would collide with theirs"
+    ),
+    ("execution/job/table.py", "secrets.randbits"): (
+        "a job list written again starts at a random generation so a reader "
+        "of the deleted one never matches it, which a seed shared with "
+        "another process would repeat"
     ),
     ("workspace/fuse.py", "uuid.uuid4"): (
         "the FSKit mountpoint is a host directory under /Volumes, shared "

@@ -15,7 +15,7 @@
 import type { ObserverStore } from '../../observe/store.ts'
 import { normalizeKeyPrefix, type S3Config } from '../../vfs/s3/config.ts'
 import { RecordNamespaceStore, type NamespaceStore } from '../mount/namespace/store.ts'
-import type { JobStore } from '../../shell/job_table/store.ts'
+import type { JobStore } from '../../execution/job/store.ts'
 import { S3RecordClient } from '../record/s3.ts'
 import {
   WorkspaceStateStore,

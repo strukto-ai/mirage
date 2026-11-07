@@ -15,7 +15,7 @@
 import { singleQuote } from '../../utils/quote.ts'
 import { decodeBase64 } from '../../utils/base64.ts'
 import { boundSystemClock, systemNow } from '../../utils/clock.ts'
-import type { ProcessHandle } from '../../process/handle.ts'
+import type { ProcessHandle } from '../../execution/process/handle.ts'
 import type { MountType } from '../types.ts'
 
 const ENC = new TextEncoder()

@@ -21,8 +21,8 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.context.session_context import run_with_execution
+from mirage.execution.process.table import ProcessTable
 from mirage.io.types import materialize
-from mirage.process.table import ProcessTable
 from mirage.runtime.sandbox.constants import wrap_line
 from mirage.runtime.sandbox.ssh import SSHRuntime, sdk
 from mirage.runtime.types import RunResult

@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.commands.builtin.utils.strtol import atoi
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, line_buffer
 from mirage.io.stream import async_chain
@@ -34,7 +35,6 @@ from mirage.shell.errors import (
     ReadonlyVariableError,
     ReturnSignal,
 )
-from mirage.shell.job_table import JobTable
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.shell.voice import shell_voice

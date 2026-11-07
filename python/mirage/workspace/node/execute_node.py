@@ -40,14 +40,15 @@ from mirage.context.session_context import (
     redirect_syntax_for,
 )
 from mirage.execution.context import new_execution_id
+from mirage.execution.job import JobTable
+from mirage.execution.process.handle import ProcessHandle
+from mirage.execution.process.table import ProcessTable
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
 from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
 from mirage.policy.policies import Policies
-from mirage.process.handle import ProcessHandle
-from mirage.process.table import ProcessTable
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import decode_text, encode_text
@@ -77,7 +78,6 @@ from mirage.shell.helpers import (
     read_row,
     with_own_redirects,
 )
-from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import (

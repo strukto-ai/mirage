@@ -21,6 +21,7 @@ from mirage.context.session_context import (
     current_caller,
     reset_caller,
 )
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
@@ -34,7 +35,6 @@ from mirage.shell.console import Channel, JobConsole
 from mirage.shell.descriptors import Recorder, StreamOwner
 from mirage.shell.errors import DiscardSignal, ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_text, same_line, source_row
-from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.parse.constants import PARSED_WORDS
 from mirage.shell.types import NodeType as NT

@@ -23,8 +23,8 @@ import type {
 } from '@struktoai/mirage-core/workspace/store/base'
 import { RedisConnection } from '../../optional_peer.ts'
 import { CAS_SCRIPT, RedisNamespaceStore } from '../mount/namespace/redis.ts'
-import type { JobStore } from '@struktoai/mirage-core/shell/job_table/store'
-import { RedisJobStore } from '../../shell/job_table/redis.ts'
+import type { JobStore } from '@struktoai/mirage-core/execution/job/store'
+import { RedisJobStore } from '../../execution/job/redis.ts'
 import { DEFAULT_STATE_ROOT, DiskWorkspaceStateStore } from './disk.ts'
 
 export interface RedisWorkspaceStateStoreOptions extends WorkspaceStateStoreOverrides {

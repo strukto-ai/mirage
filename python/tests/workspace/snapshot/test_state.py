@@ -38,6 +38,7 @@ from mirage import (
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.cache.index import IndexConfig, RedisIndexConfig
 from mirage.errors.types import QuotaExceededError
+from mirage.execution.job.types import Job
 from mirage.io import IOResult
 from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
@@ -45,7 +46,6 @@ from mirage.policy.types import SessionContext
 from mirage.secrets import registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
-from mirage.shell.job_table.types import Job
 from mirage.types import (
     ContentType,
     FileType,

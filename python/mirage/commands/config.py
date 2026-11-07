@@ -25,9 +25,9 @@ from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.constants import OWN_OPTION_LOOP
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
+from mirage.execution.process.view import ProcessView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, CommandOutput, IOResult
-from mirage.process.view import ProcessView
 from mirage.rs.diff_types import DiffComputer
 from mirage.rs.find import FindExpr
 from mirage.runtime.types import CommandRuntime, ShellFn

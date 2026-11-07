@@ -35,6 +35,8 @@ from mirage.config import (
     load_config,
     resolve_secrets,
 )
+from mirage.execution.job import RAMJobStore
+from mirage.execution.job.redis import RedisJobStore
 from mirage.io.memory import MAX_MEMORY
 from mirage.policy import DEFAULT_DENY_REASON, CommandRule
 from mirage.policy.profile import (
@@ -49,8 +51,6 @@ from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import EnvVar, SecretRef
 from mirage.secrets.errors import SecretsError
 from mirage.shell.console.redis import RedisConsoleStore
-from mirage.shell.job_table import RAMJobStore
-from mirage.shell.job_table.redis import RedisJobStore
 from mirage.types import ReadPolicy, ReadSpec, WritePolicy
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS

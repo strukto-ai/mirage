@@ -22,8 +22,8 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.config import Context
 from mirage.context.session_context import run_with_execution
+from mirage.execution.process.table import ProcessTable
 from mirage.io.types import materialize
-from mirage.process.table import ProcessTable
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin

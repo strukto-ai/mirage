@@ -32,6 +32,19 @@ from mirage.context import (
     session_voice,
 )
 from mirage.errors.types import CommandTimeoutError
+from mirage.execution.job import Job, JobStatus, JobTable
+from mirage.execution.job.constants import (
+    ENDING_SIGNALS,
+    STOP_WAIT_SECONDS,
+)
+from mirage.execution.process.handle import ProcessHandle
+from mirage.execution.process.table import ProcessTable
+from mirage.execution.process.types import (
+    ProcessInfo,
+    ProcessRunner,
+    ProcessState,
+)
+from mirage.execution.process.view import ProcessView
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, hold_inputs
 from mirage.io.errors import PipeClosed
@@ -40,10 +53,6 @@ from mirage.io.types import ByteSource
 from mirage.policy.builtin.output_cap import LINE_NAME
 from mirage.policy.decisions import Decisions, is_pending
 from mirage.policy.types import HandOff
-from mirage.process.handle import ProcessHandle
-from mirage.process.table import ProcessTable
-from mirage.process.types import ProcessInfo, ProcessRunner, ProcessState
-from mirage.process.view import ProcessView
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import (
@@ -69,11 +78,6 @@ from mirage.shell.constants import (
 )
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
-from mirage.shell.job_table import Job, JobStatus, JobTable
-from mirage.shell.job_table.constants import (
-    ENDING_SIGNALS,
-    STOP_WAIT_SECONDS,
-)
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.names import command_invocations
 from mirage.shell.parse.program import retain_programs

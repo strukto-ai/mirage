@@ -40,6 +40,8 @@ from mirage.context import (
     set_current_evaluation,
     set_program_invocation,
 )
+from mirage.execution.process.handle import ProcessHandle
+from mirage.execution.process.table import ProcessTable, deliver
 from mirage.io import IOResult
 from mirage.io.stream import (
     OutputStream,
@@ -48,8 +50,6 @@ from mirage.io.stream import (
     yield_bytes,
 )
 from mirage.io.types import ByteSource, OutputState
-from mirage.process.handle import ProcessHandle
-from mirage.process.table import ProcessTable, deliver
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.console.pipe import PipeConsole

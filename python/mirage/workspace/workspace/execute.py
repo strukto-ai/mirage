@@ -31,6 +31,9 @@ from mirage.context import (
 )
 from mirage.errors.types import CommandTimeoutError
 from mirage.execution.context import new_execution_id
+from mirage.execution.job import JobTable, JobWaits
+from mirage.execution.process.handle import ProcessHandle
+from mirage.execution.process.table import ProcessTable
 from mirage.io import IOResult
 from mirage.io.errors import MemoryExhausted
 from mirage.io.gateway import run_with_egress
@@ -43,8 +46,6 @@ from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
 from mirage.policy.builtin.output_cap import LINE_NAME, line_timeout
 from mirage.policy.decisions import is_pending
-from mirage.process.handle import ProcessHandle
-from mirage.process.table import ProcessTable
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import whole_line_runtime
 from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
@@ -60,7 +61,6 @@ from mirage.shell.constants import (
 )
 from mirage.shell.errors import DiscardSignal, ExitSignal
 from mirage.shell.helpers import input_substitution_redirect
-from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.literal import literal_tree
 from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope

@@ -32,7 +32,7 @@ import {
   INTERRUPTED_STATUS,
   SHELL_IGNORED_SIGNALS,
 } from '../../shell/constants.ts'
-import type { ProcessHandle } from '../../process/handle.ts'
+import type { ProcessHandle } from '../../execution/process/handle.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../utils/bytes.ts'
@@ -54,8 +54,8 @@ import {
   syntaxHead,
   voiceName,
 } from '../../context/session_context.ts'
-import { STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
-import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
+import { STOP_WAIT_SECONDS } from '../../execution/job/constants.ts'
+import { type JobTable, JobWaits } from '../../execution/job/index.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { formatFsError } from '../../errors/render.ts'

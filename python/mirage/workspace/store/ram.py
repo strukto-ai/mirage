@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.execution.job.ram import RAMJobStore
+from mirage.execution.job.store import JobStore
 from mirage.observe.store import ObserverStore, RAMObserverStore
-from mirage.shell.job_table.ram import RAMJobStore
-from mirage.shell.job_table.store import JobStore
 from mirage.workspace.mount.namespace import NamespaceStore, RAMNamespaceStore
 from mirage.workspace.record.types import generation_of
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore

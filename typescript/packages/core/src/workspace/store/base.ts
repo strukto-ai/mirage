@@ -14,7 +14,7 @@
 
 import type { ObserverStore } from '../../observe/store.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import type { JobStore } from '../../shell/job_table/store.ts'
+import type { JobStore } from '../../execution/job/store.ts'
 import { CAS_MAX_RETRIES, generationOf } from '../record/types.ts'
 
 // One workspace's metadata record: the JSON-able discovery payload

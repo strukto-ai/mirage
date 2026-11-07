@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountMode, RAMVFS, type NamespaceStore } from '@struktoai/mirage-core'
-import { JobStatus } from '@struktoai/mirage-core/shell/job_table/types'
+import { JobStatus } from '@struktoai/mirage-core/execution/job/types'
 import { seedVar } from '@struktoai/mirage-core/workspace/session/state'
 import { RedisWorkspaceStateStore, S3WorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 

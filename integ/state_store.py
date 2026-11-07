@@ -23,7 +23,7 @@ import re  # noqa: E402
 import uuid  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
-from mirage.shell.job_table import JobStatus  # noqa: E402
+from mirage.execution.job import JobStatus  # noqa: E402
 from mirage.vfs.ram import RAMVFS  # noqa: E402
 from mirage.vfs.s3.config import S3Config  # noqa: E402
 from mirage.workspace.mount.namespace.store import NamespaceStore  # noqa: E402

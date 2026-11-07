@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from mirage import Workspace
-from mirage.process.types import SpawnRequest
+from mirage.execution.process.types import SpawnRequest
 from mirage.runtime.python.monty.runtime import MontyRuntime
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS

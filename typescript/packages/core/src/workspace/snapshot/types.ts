@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NetworkSetting } from '../../io/network.ts'
-import type { ProcessPermissions } from '../../process/config.ts'
+import type { ProcessPermissions } from '../../execution/process/config.ts'
 import type { JsonObject, JsonValue, MountMode } from '../../types.ts'
 import type { RAMVFSState } from '../../vfs/ram/ram.ts'
 import type { VFSStateBase } from '../../vfs/types.ts'

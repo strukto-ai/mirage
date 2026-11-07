@@ -19,6 +19,8 @@ from typing import Any
 import pytest
 
 from mirage.bridge.sync import handed
+from mirage.execution.job import Job, JobStatus, JobTable
+from mirage.execution.job import table as job_table_module
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import (
     AsyncLineIterator,
@@ -27,8 +29,6 @@ from mirage.io.async_line_iterator import (
 )
 from mirage.policy.profile import SessionProfile
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.job_table import Job, JobStatus, JobTable
-from mirage.shell.job_table import table as job_table_module
 from mirage.types import Limit, MountMode, PathSpec
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS

@@ -1,5 +1,6 @@
 import pytest
 
+from mirage.execution.process.config import ProcessPermissions
 from mirage.policy.errors import PolicyError
 from mirage.policy.match.rule import op_ruling
 from mirage.policy.profile import (
@@ -16,7 +17,6 @@ from mirage.policy.types import (
     HideReason,
     VfsContext,
 )
-from mirage.process.config import ProcessPermissions
 from mirage.shell.variable import VarAttr
 from mirage.types import (
     HiddenPaths,

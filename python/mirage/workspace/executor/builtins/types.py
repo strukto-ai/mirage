@@ -17,12 +17,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
-from mirage.shell.job_table import JobTable
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.argv import Argv
 from mirage.workspace.mount import MountRegistry

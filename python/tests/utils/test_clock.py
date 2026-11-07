@@ -44,7 +44,7 @@ SEAMED = (
     "core/box/client.py",
     "core/dropbox/client.py",
     "core/google/client.py",
-    "shell/job_table",
+    "execution/job",
     "workspace/files.py",
     "workspace/mount/mount.py",
     "workspace/mount/registry.py",
@@ -85,29 +85,29 @@ KEPT_ON_SYSTEM_CLOCK = {
         "different clocks, so they stay on the process monotonic clock; "
         "listing expiry already reads the store clock"
     ),
-    ("shell/job_table/table.py", "asyncio.timeout"): (
+    ("execution/job/table.py", "asyncio.timeout"): (
         "bounds a killed job's stop with a loop timer, which a simulated "
         "loop already keeps on virtual time; on a manual clock a clock "
         "sleep would end the bound before the job stops. It also paces "
         "the checks of another owner's lease, which expires on real time "
         "in the store"
     ),
-    ("shell/job_table/table.py", "asyncio.sleep"): (
+    ("execution/job/table.py", "asyncio.sleep"): (
         "paces the renewal of the owner's lease, which expires on real "
         "time in the store, and the retry of a failed watch; a manual "
         "clock's sleep returns at once and would spin both"
     ),
-    ("shell/job_table/table.py", "time.time"): (
+    ("execution/job/table.py", "time.time"): (
         "stamps seen_at on the process records, which a host reap compares "
         "with the start times ps prints, on the host's wall clock; a manual "
         "clock's time would prove nothing about the host's processes"
     ),
-    ("shell/job_table/table.py", "time.monotonic"): (
+    ("execution/job/table.py", "time.monotonic"): (
         "waits out another owner's lease on the same process clock the "
         "shared store uses; a table's injected clock may differ from "
         "other tables sharing the store"
     ),
-    ("shell/job_table/ram.py", "time.monotonic"): (
+    ("execution/job/ram.py", "time.monotonic"): (
         "an owner's lease is compared by every table sharing the store, "
         "and those tables may hold different clocks, so it stays on the "
         "process monotonic clock, as a Redis lease expires on the server's"

@@ -29,7 +29,7 @@ import { SSHVFS } from '../../../vfs/ssh/ssh.ts'
 import { Workspace } from '../../../workspace.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { SSHRuntime } from './runtime.ts'
-import { ProcessTable } from '@struktoai/mirage-core/process/table'
+import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
 import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
 import type { Ssh2Sdk } from './sdk.ts'
 

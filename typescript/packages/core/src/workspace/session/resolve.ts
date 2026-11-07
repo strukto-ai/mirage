@@ -28,7 +28,11 @@ import type {
   ProfileScripts,
   ScriptMethod,
 } from '../../policy/types.ts'
-import { layerProcesses, restrictProcesses, type ProcessesBlock } from '../../process/config.ts'
+import {
+  layerProcesses,
+  restrictProcesses,
+  type ProcessesBlock,
+} from '../../execution/process/config.ts'
 import { fromUnits, units } from '../../rs/document.ts'
 import { StreamRefusal } from '../../rs/errors.ts'
 import { admissionMatcher, rulesWire, visibilityFrom, type Wire } from '../../rs/policy.ts'

@@ -27,8 +27,8 @@ from mirage.cache.index import IndexConfig
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.cli.builtin.gws import GWS
 from mirage.context import reset_current_session, set_current_session
+from mirage.execution.job.ram import RAMJobStore
 from mirage.runtime.sandbox import RemoteSandbox
-from mirage.shell.job_table.ram import RAMJobStore
 from mirage.types import MountBackend, MountMode
 from mirage.utils.clock import ManualClock
 from mirage.utils.ids import SeededIdSource, SystemIdSource

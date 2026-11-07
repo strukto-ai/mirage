@@ -34,6 +34,7 @@ from mirage.commands.cli import mcp
 from mirage.commands.cli.mcp.constants import NAME as MCP_CLI
 from mirage.commands.cli.types import CLI
 from mirage.commands.spec.types import CommandSpec
+from mirage.execution.process.config import ProcessPermissions
 from mirage.io.config import IOConfig
 from mirage.io.network import (
     NetworkRule,
@@ -51,7 +52,6 @@ from mirage.policy.profile import (
     compile_program,
 )
 from mirage.policy.types import ProfileScript, ProfileScripts
-from mirage.process.config import ProcessPermissions
 from mirage.rs.document import validate_document
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime

@@ -16,8 +16,8 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any
 
+from mirage.execution.job.store import JobStore
 from mirage.observe.store import ObserverStore
-from mirage.shell.job_table.store import JobStore
 from mirage.workspace.mount.namespace import NamespaceStore
 from mirage.workspace.record.types import CAS_MAX_RETRIES, generation_of
 

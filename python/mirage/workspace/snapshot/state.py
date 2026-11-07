@@ -30,6 +30,8 @@ from mirage.commands.cli.types import CLI
 from mirage.commands.spec.types import CommandSpec
 from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.utils import open_regular
+from mirage.execution.job import Job, JobStatus, JobTable
+from mirage.execution.process.config import ProcessPermissions
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY
 from mirage.io.network import NetworkSetting
@@ -47,7 +49,6 @@ from mirage.policy.profile import (
     profile_from_dict,
     profile_to_dict,
 )
-from mirage.process.config import ProcessPermissions
 from mirage.rs.session import ShellVars
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
@@ -59,7 +60,6 @@ from mirage.shell.console import (
     killed_outcome,
 )
 from mirage.shell.constants import BIN_PREFIX
-from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.variable import ShellVar
 from mirage.types import (
     JsonValue,

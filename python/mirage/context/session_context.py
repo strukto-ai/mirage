@@ -49,6 +49,7 @@ from mirage.view.types import SessionAccess
 
 if TYPE_CHECKING:
     from mirage.cache.types import CacheInvalidator, WriteContext
+    from mirage.execution.process.handle import ProcessHandle
     from mirage.io.types import ByteSource, IOResult
     from mirage.observe.record import OpRecord, Recorder
     from mirage.policy.types import (
@@ -59,7 +60,6 @@ if TYPE_CHECKING:
         HandOff,
         VfsExplanation,
     )
-    from mirage.process.handle import ProcessHandle
     from mirage.shell.console import JobConsole
     from mirage.shell.descriptors import FileDescription
     from mirage.shell.types import Redirect

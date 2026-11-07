@@ -18,7 +18,7 @@ import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { CapacityState } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { type JobRunner, JobStatus, RAMJobStore } from '../../shell/job_table/index.ts'
+import { type JobRunner, JobStatus, RAMJobStore } from '../../execution/job/index.ts'
 import {
   type Channel,
   type ConsoleChunk,

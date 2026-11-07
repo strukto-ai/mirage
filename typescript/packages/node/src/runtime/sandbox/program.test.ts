@@ -40,12 +40,12 @@ import {
 } from './program.ts'
 import { runWithSystemClock, ShiftedClock, SystemClock } from '@struktoai/mirage-core/utils/clock'
 import { FAKETIME_LIBRARIES } from '@struktoai/mirage-core/runtime/sandbox/constants'
-import { ProcessTable } from '@struktoai/mirage-core/process/table'
-import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
+import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
+import type { ProcessHandle } from '@struktoai/mirage-core/execution/process/handle'
 import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { PIPE_DIAGNOSTIC_BYTES } from '@struktoai/mirage-core/runtime/sandbox/constants'
-import { ProcessInput } from '@struktoai/mirage-core/process/stdio'
+import { ProcessInput } from '@struktoai/mirage-core/execution/process/stdio'
 import { PipeClosed } from '@struktoai/mirage-core/io/errors'
 
 const DEC = new TextDecoder()

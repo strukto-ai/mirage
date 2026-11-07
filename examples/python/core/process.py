@@ -3,7 +3,7 @@ import shlex
 import time
 
 from mirage import MountMode, Workspace
-from mirage.process.types import SpawnRequest
+from mirage.execution.process.types import SpawnRequest
 from mirage.vfs.ram import RAMVFS
 
 LOG = (

@@ -1,5 +1,5 @@
 import type { ByteSource, IOResult } from '../io/types.ts'
-import type { ProcessHandle } from '../process/handle.ts'
+import type { ProcessHandle } from '../execution/process/handle.ts'
 import type { JobConsole } from '../shell/console/index.ts'
 import type { TSNodeLike } from '../shell/types.ts'
 

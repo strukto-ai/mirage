@@ -28,9 +28,9 @@ from contextvars import Context
 import aiofiles.os
 
 from mirage.context.session_context import current_caller
+from mirage.execution.process.handle import ProcessHandle
 from mirage.io.stream import close_quietly, feed
 from mirage.io.types import ByteSource
-from mirage.process.handle import ProcessHandle
 from mirage.runtime.sandbox.constants import (
     EXEC_PRELUDE,
     FAKETIME_LIBRARIES,

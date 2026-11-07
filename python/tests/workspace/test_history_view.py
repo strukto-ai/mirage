@@ -19,9 +19,9 @@ import pytest
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
+from mirage.execution.job import JobStatus
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.console import Channel
-from mirage.shell.job_table import JobStatus
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.snapshot import apply_state_dict, read_tar

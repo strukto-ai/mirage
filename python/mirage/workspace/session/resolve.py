@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from mirage.execution.process.config import ProcessPermissions
 from mirage.policy.errors import PolicyError
 from mirage.policy.profile import (
     CommandsBlock,
@@ -37,7 +38,6 @@ from mirage.policy.types import (
     ProfileScript,
     ProfileScripts,
 )
-from mirage.process.config import ProcessPermissions
 from mirage.rs.document import from_units, units
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.policy import (

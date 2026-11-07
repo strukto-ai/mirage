@@ -26,8 +26,8 @@ from e2b import CommandExitException, NotFoundException, SandboxException
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.context.session_context import run_with_execution
+from mirage.execution.process.table import ProcessTable
 from mirage.io.types import materialize
-from mirage.process.table import ProcessTable
 from mirage.runtime.sandbox.constants import (
     EXEC_ID,
     MOUNT_GUARD,

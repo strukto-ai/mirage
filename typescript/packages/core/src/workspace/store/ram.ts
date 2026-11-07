@@ -15,8 +15,8 @@
 import { RAMObserverStore, type ObserverStore } from '../../observe/store.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import { RAMJobStore } from '../../shell/job_table/ram.ts'
-import type { JobStore } from '../../shell/job_table/store.ts'
+import { RAMJobStore } from '../../execution/job/ram.ts'
+import type { JobStore } from '../../execution/job/store.ts'
 import { generationOf } from '../record/types.ts'
 import {
   WorkspaceStateStore,

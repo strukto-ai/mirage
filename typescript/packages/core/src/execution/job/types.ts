@@ -1,0 +1,105 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import type { ProcessHandle } from '../process/handle.ts'
+import type { IOResult } from '../../io/types.ts'
+import type { ExecutionNode } from '../../workspace/types.ts'
+import { JobConsole } from '../../shell/console/index.ts'
+
+export const JobStatus = Object.freeze({
+  RUNNING: 'running',
+  COMPLETED: 'completed',
+  KILLED: 'killed',
+} as const)
+
+export type JobStatus = (typeof JobStatus)[keyof typeof JobStatus]
+
+export type JobResult = [IOResult, ExecutionNode]
+
+/** Produces a job's output and its result. */
+export type JobRunner = (job: Job) => Promise<JobResult>
+
+/**
+ * One background command, and everything it has printed.
+ *
+ * Output lives in `console` rather than in byte fields, so a reader can
+ * watch a job while it runs instead of waiting for it to end. A `simple`
+ * job is one simple command, which the job is, so a program it ran that
+ * handled a `kill` leaves the job its own status. Its `owner` is the job
+ * table that runs it; a job another workspace runs has no `process` here.
+ * Its `consoleName` is the name its job store keeps the console under,
+ * which tells apart two jobs a reused number gave the same id. A `reported`
+ * job's shell printed the report of the signal that ended it, so `jobs` and
+ * a `%N` no longer name it, and its pid still answers `wait`.
+ */
+export class Job {
+  id: number
+  readonly command: string
+  // null for jobs restored from a snapshot (already finished, no runner)
+  // and for jobs another workspace runs.
+  process: ProcessHandle | null = null
+  readonly abort: AbortController | null
+  readonly cwd: string
+  readonly sessionId: string
+  readonly createdAt: number
+  console: JobConsole
+  readonly simple: boolean
+  owner: string
+  consoleName: string
+
+  status: JobStatus = JobStatus.RUNNING
+  exitCode = 0
+  reported = false
+
+  constructor(init: {
+    id: number
+    command: string
+    abort?: AbortController | null
+    cwd: string
+    sessionId?: string
+    createdAt: number
+    status?: JobStatus
+    exitCode?: number
+    console?: JobConsole
+    simple?: boolean
+    owner?: string
+    consoleName?: string
+  }) {
+    this.id = init.id
+    this.command = init.command
+    this.abort = init.abort ?? null
+    this.cwd = init.cwd
+    this.sessionId = init.sessionId ?? ''
+    this.createdAt = init.createdAt
+    this.console = init.console ?? new JobConsole()
+    this.simple = init.simple ?? false
+    this.owner = init.owner ?? ''
+    this.consoleName = init.consoleName ?? ''
+    if (init.status !== undefined) this.status = init.status
+    if (init.exitCode !== undefined) this.exitCode = init.exitCode
+  }
+
+  /**
+   * The managed PID `$!`, `jobs -p` and `wait -p` report. A job restored
+   * from a snapshot or run by another workspace has no runner here, so its
+   * job number stands in.
+   */
+  get pid(): number {
+    return this.process?.info.pid ?? this.id
+  }
+
+  get executionId(): string | null {
+    return this.process?.info.executionId ?? this.console.executionId
+  }
+}

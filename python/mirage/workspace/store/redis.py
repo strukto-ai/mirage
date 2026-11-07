@@ -19,9 +19,9 @@ from typing import Any, Awaitable, cast
 
 import redis.asyncio as aioredis
 
+from mirage.execution.job.redis import RedisJobStore
+from mirage.execution.job.store import JobStore
 from mirage.observe.store import ObserverStore
-from mirage.shell.job_table.redis import RedisJobStore
-from mirage.shell.job_table.store import JobStore
 from mirage.workspace.mount.namespace.redis import (
     CAS_SCRIPT,
     RedisNamespaceStore,

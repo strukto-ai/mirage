@@ -32,6 +32,7 @@ from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Command
 from mirage.commands.spec import Argument, CommandSpec
 from mirage.core.api.client import SessionPool
+from mirage.execution.job import JobStatus, RAMJobStore
 from mirage.io import IOResult
 from mirage.runtime.base import Runtime
 from mirage.runtime.python.host.fs import HostFs
@@ -42,7 +43,6 @@ from mirage.shell.console import (
     ConsoleStore,
     RAMConsoleStore,
 )
-from mirage.shell.job_table import JobStatus, RAMJobStore
 from mirage.types import (
     CapacityResult,
     CapacityState,

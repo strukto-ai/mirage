@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
-import { JobStatus } from '../../shell/job_table/index.ts'
+import { JobStatus } from '../../execution/job/index.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { eacces } from '../../errors/fs.ts'
 import { Workspace } from '../workspace/workspace.ts'

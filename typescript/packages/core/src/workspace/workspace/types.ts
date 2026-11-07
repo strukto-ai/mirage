@@ -21,7 +21,7 @@ import type { ByteSource } from '../../io/types.ts'
 import type { ObserverStore } from '../../observe/store.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
 import type { SessionProfile } from '../../policy/profile.ts'
-import type { ProcessesBlock } from '../../process/config.ts'
+import type { ProcessesBlock } from '../../execution/process/config.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import type { RouteRule } from '../../runtime/routing/index.ts'
@@ -29,7 +29,7 @@ import type { RouteDecision } from '../../runtime/types.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { JobConsole, Terminal } from '../../shell/console/index.ts'
-import type { JobTable } from '../../shell/job_table/index.ts'
+import type { JobTable } from '../../execution/job/index.ts'
 import type {
   Ceilings,
   DriftPolicy,

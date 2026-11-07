@@ -27,6 +27,7 @@ from mirage.context.session_context import (
     set_explaining,
     set_refusal_sink,
 )
+from mirage.execution.job import RAMJobStore
 from mirage.policy import (
     Action,
     Ask,
@@ -46,7 +47,6 @@ from mirage.secrets import registry as secrets_registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
 from mirage.shell.console import ConsoleStore
-from mirage.shell.job_table import RAMJobStore
 from mirage.shell.parse import parse
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS

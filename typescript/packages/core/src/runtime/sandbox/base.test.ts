@@ -32,8 +32,8 @@ import { LanguageRuntime } from '../language.ts'
 import { isLineExecutor } from '../mixin.ts'
 import type { RunResult } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
-import { ProcessTable } from '../../process/table.ts'
-import type { ProcessHandle } from '../../process/handle.ts'
+import { ProcessTable } from '../../execution/process/table.ts'
+import type { ProcessHandle } from '../../execution/process/handle.ts'
 import { runWithExecution } from '../../context/session_context.ts'
 
 const ENC = new TextEncoder()

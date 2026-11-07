@@ -27,7 +27,7 @@ from collections.abc import AsyncIterator
 import pytest
 
 from mirage.context.session_context import run_with_execution
-from mirage.process.table import ProcessTable
+from mirage.execution.process.table import ProcessTable
 from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
 from mirage.runtime.sandbox.program import (
     FAKETIME_LIBRARIES,

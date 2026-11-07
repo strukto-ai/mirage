@@ -26,17 +26,17 @@ from mirage.context import (
     reset_program_invocation,
     set_current_evaluation,
 )
+from mirage.execution.job import JobTable
+from mirage.execution.process.handle import ProcessHandle
 from mirage.io import IOResult
 from mirage.io.stream import materialize, yield_bytes
 from mirage.io.types import ByteSource
-from mirage.process.handle import ProcessHandle
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.constants import SET_OPTION_NAMES
 from mirage.shell.errors import ExitSignal
-from mirage.shell.job_table import JobTable
 from mirage.shell.options import parse_option_word
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.script.constants import (

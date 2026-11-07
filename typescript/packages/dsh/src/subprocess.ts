@@ -11,7 +11,7 @@ import {
 import { PassThrough } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import type { ChildProcess } from '@struktoai/mirage-core/process/child'
+import type { ChildProcess } from '@struktoai/mirage-core/execution/process/child'
 import type { Workspace } from '@struktoai/mirage-node'
 import './service.ts'
 import { StreamTail } from './text.ts'

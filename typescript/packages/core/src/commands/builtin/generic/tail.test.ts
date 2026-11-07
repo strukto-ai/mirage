@@ -32,7 +32,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import type { Handed } from '../../../vfs/types.ts'
 import { record, startOp } from '../../../observe/context.ts'
 import { Channel } from '../../../shell/console/index.ts'
-import type { Job } from '../../../shell/job_table/types.ts'
+import type { Job } from '../../../execution/job/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 

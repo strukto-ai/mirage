@@ -18,11 +18,11 @@ from urllib.parse import urlsplit
 
 from mirage.cache.index.config import IndexConfig, IndexType, RedisIndexConfig
 from mirage.commands.cli.types import CLI
+from mirage.execution.process.config import ProcessPermissions
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY
 from mirage.io.network import NetworkSetting
 from mirage.policy.profile import SessionProfile
-from mirage.process.config import ProcessPermissions
 from mirage.types import Limit, WritePolicy
 from mirage.vfs.secrets import REDACTED_SECRET, has_redacted_secret
 from mirage.workspace.session.constants import MAX_ENV

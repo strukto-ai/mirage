@@ -16,7 +16,7 @@ import base64
 import re
 from collections.abc import Mapping, Sequence
 
-from mirage.process.handle import ProcessHandle
+from mirage.execution.process.handle import ProcessHandle
 from mirage.runtime.types import MountType
 from mirage.utils.clock import bound_system_clock, system_now
 from mirage.utils.quote import single_quote

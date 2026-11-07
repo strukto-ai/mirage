@@ -66,6 +66,13 @@ from mirage.core.history.constants import HISTFILESIZE
 from mirage.errors.fs import enoent
 from mirage.events.base import EventRuntime
 from mirage.execution.context import new_execution_id
+from mirage.execution.job import JobTable
+from mirage.execution.process.child import ChildProcess
+from mirage.execution.process.config import ProcessPermissions
+from mirage.execution.process.stdio import ProcessInput, ProcessOutput
+from mirage.execution.process.table import ProcessTable
+from mirage.execution.process.types import SpawnRequest
+from mirage.execution.process.view import ProcessView
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget
@@ -94,12 +101,6 @@ from mirage.policy import (
 from mirage.policy.builtin import RoutePolicy
 from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.policy.types import DryRun, PolicyCaller, policy_caller
-from mirage.process.child import ChildProcess
-from mirage.process.config import ProcessPermissions
-from mirage.process.stdio import ProcessInput, ProcessOutput
-from mirage.process.table import ProcessTable
-from mirage.process.types import SpawnRequest
-from mirage.process.view import ProcessView
 from mirage.rs.diff_pool import DiffPool
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import (
@@ -123,7 +124,6 @@ from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import BIN_PREFIX
-from mirage.shell.job_table import JobTable
 from mirage.shell.literal import literal_tree
 from mirage.shell.parse import parse
 from mirage.shell.variable import VarAttr

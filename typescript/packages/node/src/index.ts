@@ -40,7 +40,7 @@ export {
 export { classifyErrno, classifyError } from './mount/errors.ts'
 export { DiskObserverStore } from './observe/disk_store.ts'
 export { patchNodeFs } from './runtime/js/host/fs.ts'
-export { RedisJobStore, type RedisJobStoreOptions } from './shell/job_table/redis.ts'
+export { RedisJobStore, type RedisJobStoreOptions } from './execution/job/redis.ts'
 export { DatabricksVolumeVFS } from '@struktoai/mirage-core/vfs/direct/databricks_volume'
 export { DiskVFS, type DiskVFSOptions, type DiskVFSState } from './vfs/disk/disk.ts'
 export { normalizeGridFSConfig, type GridFSConfig } from './vfs/gridfs/config.ts'

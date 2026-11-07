@@ -25,8 +25,8 @@ import type {
   WorkspaceFields,
   WorkspaceStateStoreOverrides,
 } from '@struktoai/mirage-core/workspace/store/base'
-import { RAMJobStore } from '@struktoai/mirage-core/shell/job_table/ram'
-import type { JobStore } from '@struktoai/mirage-core/shell/job_table/store'
+import { RAMJobStore } from '@struktoai/mirage-core/execution/job/ram'
+import type { JobStore } from '@struktoai/mirage-core/execution/job/store'
 import { DiskObserverStore } from '../../observe/disk_store.ts'
 import { DiskNamespaceStore } from '../mount/namespace/disk.ts'
 import { DiskRecordClient, quoteName } from '../record/disk.ts'
