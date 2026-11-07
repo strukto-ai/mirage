@@ -153,6 +153,50 @@
           }
         }
       ]
+    },
+    {
+      "id": "line_output_bytes",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "perl -e 'print \"a\\xff\\x00b\\r\\n\\xc3\"; print STDERR \"e\\xfe\\x00\\r\\n\"; exit 5' > /ram/out.bin 2> /ram/err.bin",
+          "expect": {
+            "exit": 5
+          }
+        },
+        {
+          "command": "base64 /ram/out.bin",
+          "expect": {
+            "exit": 0,
+            "stdout": "Yf8AYg0Kww==\n"
+          }
+        },
+        {
+          "command": "base64 /ram/err.bin",
+          "expect": {
+            "exit": 0,
+            "stdout": "Zf4ADQo=\n"
+          }
+        }
+      ]
     }
   ]
 }
