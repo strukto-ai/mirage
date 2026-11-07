@@ -15,10 +15,13 @@
 import { specOf } from '../../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../../commands/spec/flag_view.ts'
 import { parseCommand, parseToKwargs } from '../../../../commands/spec/parser.ts'
+import { readStdinAsync } from '../../../../commands/builtin/utils/stream.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
+import { isEisdir } from '../../../../errors/fs.ts'
+import { type ByteSource, materialize } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
-import { type PathSpec, wordText } from '../../../../types.ts'
+import { PathSpec, wordText } from '../../../../types.ts'
 import { decodeBase64 } from '../../../../utils/base64.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { finish, result } from '../shared.ts'
@@ -73,6 +76,96 @@ export function decodeValue(text: string): Uint8Array | null {
 }
 
 /**
+ * A `# file:` name as getfattr escaped it: `\ooo` is that byte and `\\` a
+ * backslash. Mirrors Python's `_unescaped`.
+ */
+function unescaped(name: string): string {
+  const raw = encodeText(name)
+  const out: number[] = []
+  for (let i = 0; i < raw.length;) {
+    const digits = raw.subarray(i + 1, i + 4)
+    if (raw[i] === 0x5c && digits.length === 3 && digits.every((b) => b >= 0x30 && b <= 0x37)) {
+      out.push(parseInt(decodeText(digits), 8) & 0xff)
+      i += 4
+    } else if (raw[i] === 0x5c && raw[i + 1] === 0x5c) {
+      out.push(0x5c)
+      i += 2
+    } else {
+      out.push(raw[i] ?? 0)
+      i += 1
+    }
+  }
+  return decodeText(Uint8Array.from(out))
+}
+
+/**
+ * `--restore`: set what a `getfattr --dump` listing names. Each `# file:`
+ * line names the file the attribute lines after it are set on, `NAME=VALUE`
+ * decoded as `-v` decodes it (`--raw` leaves it) and a bare `NAME` the empty
+ * value; blank lines and other comments are skipped. A listing that cannot be
+ * opened is reported with exit 0, as attr 2.5.2 does. Divergence: a failed
+ * attribute is reported once and the rest of the listing still restores,
+ * where attr repeats the failure and stops. Mirrors Python's `_restore`.
+ */
+async function restore(
+  dispatch: DispatchFn,
+  session: SessionState,
+  typed: string,
+  stdin: ByteSource | null,
+  raw: boolean,
+  nofollow: boolean,
+): Promise<RedirectResult> {
+  let data: Uint8Array
+  try {
+    if (typed === '-') {
+      data = (await readStdinAsync(stdin)) ?? new Uint8Array()
+    } else {
+      const [found] = await dispatch('read', PathSpec.fromStrPath(typed, undefined, session.cwd))
+      data =
+        found === null || found === undefined
+          ? new Uint8Array()
+          : await materialize(found as ByteSource)
+    }
+  } catch (err) {
+    return result('setfattr', {
+      exitCode: isEisdir(err) ? 1 : 0,
+      stderr: `setfattr: ${typed}: ${attrError(err)}\n`,
+    })
+  }
+  const errors: string[] = []
+  let target: PathSpec | null = null
+  for (const line of decodeText(data).split('\n')) {
+    if (line.startsWith('# file: ')) {
+      target = PathSpec.fromStrPath(
+        unescaped(line.slice('# file: '.length)),
+        undefined,
+        session.cwd,
+      )
+      continue
+    }
+    if (line === '' || line.startsWith('#')) continue
+    if (target === null) {
+      errors.push(`setfattr: ${typed}: No filename found in line 0, aborting\n`)
+      break
+    }
+    const at = line.indexOf('=')
+    const name = at < 0 ? line : line.slice(0, at)
+    const text = at < 0 ? '' : line.slice(at + 1)
+    const value = raw ? encodeText(text) : decodeValue(text)
+    if (value === null) {
+      errors.push('bad input encoding\n')
+      continue
+    }
+    try {
+      await dispatch('setxattr', target, [], { name, value, nofollow })
+    } catch (err) {
+      errors.push(`setfattr: ${target.rawPath}: ${attrError(err)}\n`)
+    }
+  }
+  return finish('setfattr', errors)
+}
+
+/**
  * setfattr: set or remove one extended attribute on each path.
  *
  * Debian's attr 2.5.2, pinned in docker: `-n NAME [-v VALUE]` sets it (no
@@ -89,6 +182,7 @@ export async function handleSetfattr(
   dispatch: DispatchFn,
   session: SessionState,
   args: (string | PathSpec)[],
+  stdin: ByteSource | null = null,
 ): Promise<RedirectResult> {
   const spec = specOf('setfattr')
   const parsed = parseCommand(
@@ -100,6 +194,12 @@ export async function handleSetfattr(
   const refused = attrUsageRefusal('setfattr', parsed, SETFATTR_USAGE)
   if (refused !== null) return refused
   const fl = new FlagView(parseToKwargs(parsed), spec)
+  const raw = fl.asBool('raw')
+  const nofollow = fl.asBool('no_dereference')
+  const typedRestore = parsed.rawPathFlags.restore
+  if (typeof typedRestore === 'string') {
+    return restore(dispatch, session, typedRestore, stdin, raw, nofollow)
+  }
   const name = fl.asStr('name') ?? null
   const remove = fl.asStr('remove') ?? null
   const typed = fl.asStr('value') ?? null
@@ -111,9 +211,8 @@ export async function handleSetfattr(
   ) {
     return result('setfattr', { exitCode: 2, stderr: SETFATTR_USAGE })
   }
-  const value = typed !== null ? decodeValue(typed) : new Uint8Array()
+  const value = typed === null ? new Uint8Array() : raw ? encodeText(typed) : decodeValue(typed)
   if (value === null) return result('setfattr', { exitCode: 1, stderr: 'bad input encoding\n' })
-  const nofollow = fl.asBool('no_dereference')
   const errors: string[] = []
   for (const target of targets) {
     try {

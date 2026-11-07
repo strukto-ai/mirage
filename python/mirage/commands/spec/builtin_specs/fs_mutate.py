@@ -282,6 +282,11 @@ SPECS: dict[str, CommandSpec] = {
                 action="store_true",
                 help="physical walk, do not follow symbolic links",
             ),
+            Argument(
+                "--one-file-system",
+                action="store_true",
+                help="stay on the mount each path starts on",
+            ),
             PATHS_OPERAND,
         )
     ),
@@ -307,6 +312,16 @@ SPECS: dict[str, CommandSpec] = {
                 "--no-dereference",
                 action="store_true",
                 help="do not dereference symbolic links",
+            ),
+            Argument(
+                "--raw",
+                action="store_true",
+                help="store each value exactly as typed, undecoded",
+            ),
+            Argument(
+                "--restore",
+                type="path",
+                help="set the attributes a getfattr --dump listing names",
             ),
             PATHS_OPERAND,
         )

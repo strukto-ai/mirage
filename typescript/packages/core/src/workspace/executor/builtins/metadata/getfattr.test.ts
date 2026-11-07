@@ -129,6 +129,25 @@ describe('getfattr', () => {
     )
   })
 
+  it('stays off a nested mount under --one-file-system', async () => {
+    const ws = new Workspace(
+      { '/r': new RAMVFS(), '/r/in': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    await ws.shell('echo a > /r/f && echo b > /r/in/g')
+    for (const path of ['/r/f', '/r/in', '/r/in/g']) {
+      await ws.vfs.setxattr(path, 'user.a', ENC.encode('1'))
+    }
+    const block = 'user.a="1"\n\n'
+    expect((await run(ws, 'getfattr -R -d .'))[1]).toBe(
+      `# file: ./f\n${block}# file: ./in\n${block}# file: ./in/g\n${block}`,
+    )
+    expect((await run(ws, 'getfattr -R --one-file-system -d .'))[1]).toBe(`# file: ./f\n${block}`)
+    expect((await run(ws, 'getfattr -R --one-file-system -d in'))[1]).toBe(
+      `# file: in\n${block}# file: in/g\n${block}`,
+    )
+  })
+
   it.each([
     ['getfattr', ''],
     ['getfattr -Z d/f', "getfattr: invalid option -- 'Z'\n"],

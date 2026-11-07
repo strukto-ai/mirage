@@ -87,12 +87,15 @@ async def _walk(
     logical: bool,
     deref: bool,
     budget: WalkBudget,
+    home: str | None = None,
 ) -> list[tuple[PathSpec, str]]:
     """A subtree in pre-order, the way nftw hands it to getfattr -R.
 
     Every entry is reported, links included. A link to a directory is
     descended only when ``deref`` says so: for every entry under ``-L``,
-    and for an operand itself unless ``-P``.
+    and for an operand itself unless ``-P``. Under ``--one-file-system``
+    a mount nested below is neither reported nor descended, as nftw
+    skips another device.
 
     Args:
         dispatch (DispatchFn): op dispatcher, which follows a link.
@@ -105,6 +108,8 @@ async def _walk(
         logical (bool): ``-L``, which descends every link below.
         deref (bool): whether this entry, if a link, is descended.
         budget (WalkBudget): the entries the operand's walk may still list.
+        home (str | None): the operand's mount root, which every entry
+            stays on, or None to cross into any mount.
     """
     readdir, lstat = walk
     entries = [(path, shown)]
@@ -127,6 +132,12 @@ async def _walk(
         if not budget.spend(here):
             break
         name = child.rstrip("/").rsplit("/", 1)[-1]
+        if (
+            home is not None
+            and budget.mounts is not None
+            and budget.mounts.root_of(f"{here.rstrip('/')}/{name}") != home
+        ):
+            continue
         entries.extend(
             await _walk(
                 dispatch,
@@ -137,6 +148,7 @@ async def _walk(
                 logical,
                 logical,
                 budget,
+                home,
             )
         )
     return entries
@@ -220,6 +232,11 @@ async def handle_getfattr(
                 fl.as_bool("logical"),
                 not fl.as_bool("physical"),
                 budget,
+                (
+                    mounts.root_of(links.follow(target.virtual))
+                    if fl.as_bool("one_file_system")
+                    else None
+                ),
             )
         for path, label in entries:
             header = label

@@ -114,6 +114,10 @@ export const SPECS: Record<string, CommandSpec> = {
         action: 'store_true',
         help: 'physical walk, do not follow symbolic links',
       }),
+      new Argument('--one-file-system', {
+        action: 'store_true',
+        help: 'stay on the mount each path starts on',
+      }),
       PATHS_OPERAND,
     ],
   }),
@@ -215,6 +219,14 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-h', '--no-dereference'], {
         action: 'store_true',
         help: 'do not dereference symbolic links',
+      }),
+      new Argument('--raw', {
+        action: 'store_true',
+        help: 'store each value exactly as typed, undecoded',
+      }),
+      new Argument('--restore', {
+        type: 'path',
+        help: 'set the attributes a getfattr --dump listing names',
       }),
       PATHS_OPERAND,
     ],

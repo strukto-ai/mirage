@@ -70,9 +70,11 @@ export function encodeValue(value: Uint8Array, encoding: string | null): Uint8Ar
  * A subtree in pre-order, the way nftw hands it to getfattr -R. Every
  * entry is reported, links included. A link to a directory is descended
  * only when `deref` says so: for every entry under `-L`, and for an
- * operand itself unless `-P`. `calls` are the walk's readdir and lstat,
- * answered from a mount's `readTree` where one answers; `dispatch` follows a
- * link. Mirrors Python's `_walk`.
+ * operand itself unless `-P`. Under `--one-file-system` a mount nested below
+ * is neither reported nor descended, as nftw skips another device: `home` is
+ * the operand's mount root, or null to cross into any mount. `calls` are the
+ * walk's readdir and lstat, answered from a mount's `readTree` where one
+ * answers; `dispatch` follows a link. Mirrors Python's `_walk`.
  */
 async function walk(
   dispatch: DispatchFn,
@@ -83,6 +85,7 @@ async function walk(
   logical: boolean,
   deref: boolean,
   budget: WalkBudget,
+  home: string | null = null,
 ): Promise<[PathSpec, string][]> {
   const [readdir, lstat] = calls
   const entries: [PathSpec, string][] = [[path, shown]]
@@ -106,6 +109,7 @@ async function walk(
     if (!budget.spend(here)) break
     const bare = rstripSlash(child)
     const name = bare.slice(bare.lastIndexOf('/') + 1)
+    if (home !== null && budget.mounts?.rootOf(`${rstripSlash(here)}/${name}`) !== home) continue
     const below = `${rstripSlash(shown)}/${name}`
     entries.push(
       ...(await walk(
@@ -117,6 +121,7 @@ async function walk(
         logical,
         logical,
         budget,
+        home,
       )),
     )
   }
@@ -268,6 +273,7 @@ export async function handleGetfattr(
           fl.asBool('logical'),
           !fl.asBool('physical'),
           budget,
+          fl.asBool('one_file_system') ? mounts.rootOf(links.follow(target.virtual)) : null,
         )
       : ([[target, typed]] as [PathSpec, string][])
     for (const [path, label] of entries) {

@@ -1184,7 +1184,7 @@ async function routeArgv(
     return await handleGetfattr(namespace, made, session, operands)
   }
   if (name === 'setfattr') {
-    return await handleSetfattr(made, session, operands)
+    return await handleSetfattr(made, session, operands, stdin)
   }
 
   // Metadata commands (namespace-routed: resolve-then-setattr with

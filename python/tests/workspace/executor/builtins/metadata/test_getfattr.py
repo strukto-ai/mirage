@@ -150,6 +150,23 @@ async def test_recursive_walk_reports_links_without_descending():
 
 
 @pytest.mark.asyncio
+async def test_one_file_system_stays_off_a_nested_mount():
+    ws = Workspace({"/r/": RAMVFS(), "/r/in/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo a > /r/f && echo b > /r/in/g")
+    for path in ("/r/f", "/r/in", "/r/in/g"):
+        await ws.vfs.setxattr(path, "user.a", b"1")
+    _, crossed, _ = await _run(ws, "getfattr -R -d .")
+    _, stayed, _ = await _run(ws, "getfattr -R --one-file-system -d .")
+    _, inside, _ = await _run(ws, "getfattr -R --one-file-system -d in")
+    block = b'user.a="1"\n\n'
+    assert crossed == (
+        b"# file: ./f\n" + block + b"# file: ./in\n" + block
+    ) + (b"# file: ./in/g\n" + block)
+    assert stayed == b"# file: ./f\n" + block
+    assert inside == b"# file: in\n" + block + b"# file: in/g\n" + block
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line, first",
     [
