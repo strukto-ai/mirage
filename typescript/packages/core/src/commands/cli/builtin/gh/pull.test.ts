@@ -14,6 +14,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { GitHubAccount } from '../../../../accessor/github.ts'
+import type { GitHubTransport } from '../../../../core/github/client.ts'
 import type * as PullModule from '../../../../core/github/pull.ts'
 import type { Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -54,6 +55,10 @@ vi.mock('../../../../core/github/pull.ts', async (importOriginal) => {
       CALLS.push(['edit', number, body])
       return Promise.resolve({})
     },
+    pullForBranch: (_t: unknown, _r: unknown, head: string) => {
+      CALLS.push(['branch', head])
+      return Promise.resolve(7)
+    },
     diffPull: () => Promise.resolve(NAME_ONLY_DIFF),
     pullChecks: () => Promise.resolve(ROWS),
     pullRequestFields: (...args: Parameters<typeof PullModule.pullRequestFields>) =>
@@ -63,7 +68,8 @@ vi.mock('../../../../core/github/pull.ts', async (importOriginal) => {
   }
 })
 
-const { PR_FIELDS, checksCmd, diffCmd, listCmd, reopenCmd, viewCmd } = await import('./pull.ts')
+const { PR_FIELDS, checksCmd, closeCmd, createCmd, diffCmd, listCmd, reopenCmd, viewCmd } =
+  await import('./pull.ts')
 
 function json(result: Awaited<ReturnType<typeof viewCmd>>): Record<string, unknown> {
   if (result === null) throw new Error('expected a result tuple')
@@ -442,5 +448,99 @@ describe('gh pr reopen', () => {
       "X Pull request o/r#5 (t) can't be reopened because it was already merged\n",
     )
     expect(CALLS).toEqual([['get', 5]])
+  })
+})
+
+describe('gh pr selectors', () => {
+  const BRANCHED = new GitHubAccount({ token: 't', branch: 'dev' })
+  const at = (texts: string[]): [GitHubAccount, PathSpec[], string[], Context] => [
+    BRANCHED,
+    [],
+    texts,
+    context({ flags: { repo: 'o/r' } }),
+  ]
+
+  beforeEach(() => {
+    CALLS.length = 0
+    REOPEN_ROW = {}
+  })
+
+  // gh's finder: a number (`#` optional) or a URL names one, any other word
+  // is a branch, and none is the current branch, which the install's
+  // `branch` stands in for.
+  it.each([
+    [
+      [],
+      [
+        ['branch', 'dev'],
+        ['get', 7],
+      ],
+    ],
+    [
+      ['feature'],
+      [
+        ['branch', 'feature'],
+        ['get', 7],
+      ],
+    ],
+    [['#5'], [['get', 5]]],
+  ])('resolves %j as gh does', async (texts, calls) => {
+    await viewCmd(...at(texts))
+    expect(CALLS).toEqual(calls)
+  })
+
+  it('needs the install branch when no selector is given', async () => {
+    await expect(viewCmd(ACCOUNT, [], [], context({ flags: { repo: 'o/r' } }))).rejects.toThrow(
+      'could not determine current branch: no `branch` on the install',
+    )
+  })
+
+  it('takes no current branch for close and reopen, as gh does', async () => {
+    await expect(closeCmd(...at([]))).rejects.toThrow(
+      'cannot close pull request: number, url, or branch required',
+    )
+    await expect(reopenCmd(...at([]))).rejects.toThrow('accepts 1 arg(s), received 0')
+    expect(CALLS).toEqual([])
+  })
+})
+
+describe('gh pr create', () => {
+  function recording(sent: unknown[]): GitHubTransport {
+    return {
+      get: (path) => {
+        sent.push(['GET', path])
+        return Promise.resolve({ default_branch: 'trunk' })
+      },
+      request: (method, path, body) => {
+        sent.push([method, path, body])
+        return Promise.resolve({ html_url: 'https://github.com/o/r/pull/9' })
+      },
+    }
+  }
+
+  // gh opens it from the current branch unless --head names one, into the
+  // repository's default branch unless --base names one.
+  it.each([
+    [{}, 'dev', 'trunk', 2],
+    [{ head: 'feature', base: 'release' }, 'feature', 'release', 1],
+  ])('takes %o as head %s into %s', async (flags, head, base, requests) => {
+    const sent: unknown[] = []
+    const account = new GitHubAccount({ token: 't', repo: 'o/r', branch: 'dev' }, recording(sent))
+    await createCmd(account, [], [], context({ flags: { title: 't', body: 'b', ...flags } }))
+    expect(sent).toHaveLength(requests)
+    expect(sent.at(-1)).toEqual([
+      'POST',
+      '/repos/o/r/pulls',
+      { title: 't', head, base, body: 'b', draft: false, maintainer_can_modify: true },
+    ])
+  })
+
+  it('needs --head or the install branch', async () => {
+    const sent: unknown[] = []
+    const account = new GitHubAccount({ token: 't', repo: 'o/r' }, recording(sent))
+    await expect(
+      createCmd(account, [], [], context({ flags: { title: 't', body: 'b' } })),
+    ).rejects.toThrow('could not determine the current branch: no `branch` on the install')
+    expect(sent).toEqual([])
   })
 })

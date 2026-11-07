@@ -250,7 +250,9 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
                   token: 'ghp-integ',
                   base_url: base,
                   repo: 'integ/repo-cli',
-                  branch: 'main',
+                  // Not the default branch, so a line that falls back on
+                  // it shows which of the two gh read.
+                  branch: 'dev',
                 },
               },
             },

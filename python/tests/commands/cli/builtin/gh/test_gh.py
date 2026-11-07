@@ -23,6 +23,7 @@ from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh import GH
 from mirage.commands.cli.builtin.gh.accessor import (
     body_value,
+    numbered_subject,
     read_cli_file,
     repo_number,
 )
@@ -264,15 +265,36 @@ def test_full_subject_url_overrides_the_configured_repository():
     assert (ref.owner, ref.repo, number) == ("acme", "tools", 42)
 
 
-def test_subject_url_kind_must_match_the_verb():
-    with pytest.raises(ValueError, match="pull request number"):
-        repo_number(
-            ACCOUNT,
-            FlagView({}),
-            "https://github.com/acme/tools/issues/42",
-            "pull request",
+# gh reads the URL's path alone, and an issue verb takes a pull request's
+# URL; a pull request verb reads an issue's URL as a branch.
+@pytest.mark.parametrize(
+    "raw,kind,want",
+    [
+        ("#42", "issues", ("o", "r", 42)),
+        (
+            "https://github.com/acme/tools/pull/42",
+            "issues",
+            ("acme", "tools", 42),
+        ),
+        (
+            "https://github.com/acme/tools/pull/42/files#diff",
             "pull",
-        )
+            ("acme", "tools", 42),
+        ),
+        ("https://github.com/acme/tools/issues/42", "pull", None),
+        ("dev", "pull", None),
+    ],
+)
+def test_subject_selectors_read_as_gh_reads_them(raw, kind, want):
+    account = GitHubAccount(GhConfig(token="t", repo="o/r"))
+    found = numbered_subject(account, FlagView({}), raw, kind)
+    got = None if found is None else (found[0].owner, found[0].repo, found[1])
+    assert got == want
+
+
+def test_issue_selector_that_is_no_number_or_url_is_refused_as_gh_does():
+    with pytest.raises(ValueError, match='invalid issue format: "dev"'):
+        repo_number(ACCOUNT, FlagView({}), "dev", "issue", "issues")
 
 
 @pytest.mark.asyncio

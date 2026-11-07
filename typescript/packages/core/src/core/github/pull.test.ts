@@ -21,6 +21,7 @@ import {
   listPullRequestFields,
   listPulls,
   pullChecks,
+  pullForBranch,
   pullRequestFields,
 } from './pull.ts'
 
@@ -84,6 +85,51 @@ describe('pullRequestFields', () => {
     ).rejects.toThrow(
       'GraphQL: Could not resolve to a PullRequest with the number of 9. (repository.pullRequest)',
     )
+  })
+})
+
+describe('pullForBranch', () => {
+  const ref = { owner: 'o', repo: 'r' }
+  const node = (number: number, state: string, head = 'dev', fork?: string) => ({
+    number,
+    state,
+    headRefName: head,
+    isCrossRepository: fork !== undefined,
+    headRepositoryOwner: { login: fork ?? 'o' },
+  })
+  const reply = (nodes: unknown[], defaultBranch = 'main') => ({
+    data: { repository: { pullRequests: { nodes }, defaultBranchRef: { name: defaultBranch } } },
+  })
+
+  it('asks for the newest 30 of every state whose head ref is the branch', async () => {
+    const sent: { query: string; variables: Record<string, unknown> }[] = []
+    expect(
+      await pullForBranch(graphqlTransport([reply([node(3, 'OPEN')])], sent), ref, 'dev'),
+    ).toBe(3)
+    expect(sent[0]?.variables).toEqual({ owner: 'o', repo: 'r', headRefName: 'dev', states: null })
+    expect(sent[0]?.query).toContain('first: 30')
+  })
+
+  it('takes an open one before a newer closed one, and a fork only as owner:branch', async () => {
+    const rows = [node(9, 'CLOSED'), node(8, 'OPEN', 'dev', 'fork'), node(7, 'OPEN')]
+    expect(await pullForBranch(graphqlTransport([reply(rows)], []), ref, 'dev')).toBe(7)
+    expect(await pullForBranch(graphqlTransport([reply(rows)], []), ref, 'fork:dev')).toBe(8)
+  })
+
+  it('passes over a merged one headed by the default branch, as gh does', async () => {
+    const rows = [node(4, 'MERGED', 'main')]
+    await expect(pullForBranch(graphqlTransport([reply(rows)], []), ref, 'main')).rejects.toThrow(
+      'no pull requests found for branch "main"',
+    )
+    expect(await pullForBranch(graphqlTransport([reply(rows, 'trunk')], []), ref, 'main')).toBe(4)
+  })
+
+  it('refuses a head with more than one owner before asking anything', async () => {
+    const sent: { query: string; variables: Record<string, unknown> }[] = []
+    await expect(pullForBranch(graphqlTransport([], sent), ref, 'a:b:c')).rejects.toThrow(
+      "invalid qualified head ref format 'a:b:c'",
+    )
+    expect(sent).toEqual([])
   })
 })
 

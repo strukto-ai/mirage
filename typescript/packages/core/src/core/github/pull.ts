@@ -78,6 +78,57 @@ export async function pullRequestFields(
   return pull !== null && typeof pull === 'object' ? (pull as Record<string, unknown>) : {}
 }
 
+const PULL_FOR_BRANCH =
+  'query PullRequestForBranch($owner: String!, $repo: String!, $headRefName: String!, ' +
+  '$states: [PullRequestState!]) {\n  repository(owner: $owner, name: $repo) {\n' +
+  '    pullRequests(headRefName: $headRefName, states: $states, first: 30, ' +
+  'orderBy: {field: CREATED_AT, direction: DESC}) {\n' +
+  '      nodes {number state headRefName isCrossRepository headRepositoryOwner {login}}\n' +
+  '    }\n    defaultBranchRef {name}\n  }\n}'
+
+/**
+ * The number of the pull request a branch heads, picked as gh's finder picks
+ * it: of the newest 30 whose head ref is the branch's name, open ones first,
+ * the first whose head is exactly `head` (`owner:branch` for a fork's),
+ * passing over a closed or merged one when `head` is the default branch.
+ *
+ * Args:
+ *   transport (GitHubTransport): the API client.
+ *   ref (RepoRef): the base repository.
+ *   head (string): the branch, or `owner:branch`.
+ */
+export async function pullForBranch(
+  transport: GitHubTransport,
+  ref: RepoRef,
+  head: string,
+): Promise<number> {
+  const parts = head.split(':')
+  if (parts.length > 2) throw new Error(`invalid qualified head ref format '${head}'`)
+  const data = await graphqlData(transport, PULL_FOR_BRANCH, {
+    owner: ref.owner,
+    repo: ref.repo,
+    headRefName: parts.at(-1) ?? '',
+    states: null,
+  })
+  const repository = data.repository as {
+    pullRequests?: { nodes?: Record<string, unknown>[] }
+    defaultBranchRef?: { name?: unknown } | null
+  } | null
+  const nodes = [...(repository?.pullRequests?.nodes ?? [])]
+  nodes.sort((a, b) => Number(b.state === 'OPEN') - Number(a.state === 'OPEN'))
+  const defaultBranch = repository?.defaultBranchRef?.name
+  for (const node of nodes) {
+    const owner = node.headRepositoryOwner as { login?: unknown } | null | undefined
+    const login = typeof owner?.login === 'string' ? owner.login : ''
+    const name = typeof node.headRefName === 'string' ? node.headRefName : ''
+    const label = node.isCrossRepository === true ? `${login}:${name}` : name
+    if (label !== head) continue
+    if (node.state !== 'OPEN' && defaultBranch === head) continue
+    if (typeof node.number === 'number') return node.number
+  }
+  throw new Error(`no pull requests found for branch ${JSON.stringify(head)}`)
+}
+
 /** The narrowing `gh pr list` applies before it lists. */
 export interface PullListFilter {
   readonly states: readonly string[]

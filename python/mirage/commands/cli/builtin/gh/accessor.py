@@ -210,17 +210,49 @@ def repo_number(
 ) -> tuple[RepoRef, int]:
     """Resolve a numeric subject or a full GitHub subject URL atomically."""
     raw = value or ""
-    if raw.isdigit():
-        return repo_for(accessor, fl), int(raw)
-    match = re.fullmatch(
-        r"https?://[^/]+/([^/]+)/([^/]+)/(issues|pull)/(\d+)/?", raw
-    )
-    if match is None or match.group(3) != url_kind:
+    found = numbered_subject(accessor, fl, raw, url_kind)
+    if found is not None:
+        return found
+    if not raw:
         raise ValueError(f"a {label} number is required")
-    check_host(accessor, urlsplit(raw).hostname)
+    raise ValueError(
+        f"invalid {label} format: {json.dumps(raw, ensure_ascii=False)}"
+    )
+
+
+def numbered_subject(
+    accessor: GitHubAccount, fl: FlagView, raw: str, url_kind: str
+) -> tuple[RepoRef, int] | None:
+    """The subject a selector names outright, as gh reads one: its
+    number, ``#`` optional, or its URL, of which gh reads the path alone,
+    so a tab or a fragment after the number is fine. An issue command
+    takes a pull request's URL too. None for anything else, which a pull
+    request command reads as a branch.
+    """
+    digits = raw.removeprefix("#")
+    if digits.isascii() and digits.isdigit():
+        return repo_for(accessor, fl), int(digits)
+    try:
+        url = urlsplit(raw)
+    except ValueError:
+        return None
+    if url.scheme not in ("http", "https"):
+        return None
+    match = re.match(r"/([^/]+)/([^/]+)/(issues|pull)/(\d+)", url.path)
+    if match is None or (url_kind == "pull" and match.group(3) != "pull"):
+        return None
+    check_host(accessor, url.hostname)
     return parse_repo(f"{match.group(1)}/{match.group(2)}"), int(
         match.group(4)
     )
+
+
+def current_branch(accessor: GitHubAccount) -> str | None:
+    """The branch gh reads from the checkout, which a workspace has no
+    equivalent of, so the install's ``branch`` stands in for it; None
+    when the install names none.
+    """
+    return accessor.config.branch or None
 
 
 def csv_values(values: Iterable[str]) -> list[str]:

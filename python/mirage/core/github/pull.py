@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -124,6 +125,76 @@ _PULL_LIST = (
     "            hasNextPage\n            endCursor\n          }\n"
     "        }\n      }\n    }"
 )
+
+
+_PULL_FOR_BRANCH = (
+    "query PullRequestForBranch($owner: String!, $repo: String!, "
+    "$headRefName: String!, $states: [PullRequestState!]) {\n"
+    "  repository(owner: $owner, name: $repo) {\n"
+    "    pullRequests(headRefName: $headRefName, states: $states, "
+    "first: 30, orderBy: {field: CREATED_AT, direction: DESC}) {\n"
+    "      nodes {number state headRefName isCrossRepository "
+    "headRepositoryOwner {login}}\n"
+    "    }\n    defaultBranchRef {name}\n  }\n}"
+)
+
+
+async def pull_for_branch(
+    account: GitHubAccount, ref: RepoRef, head: str
+) -> int:
+    """The number of the pull request a branch heads, picked as gh's
+    finder picks it: of the newest 30 whose head ref is the branch's
+    name, open ones first, the first whose head is exactly ``head``
+    (``owner:branch`` for a fork's), passing over a closed or merged one
+    when ``head`` is the default branch.
+
+    Args:
+        account (GitHubAccount): the API client.
+        ref (RepoRef): the base repository.
+        head (str): the branch, or ``owner:branch``.
+    """
+    parts = head.split(":")
+    if len(parts) > 2:
+        raise ValueError(f"invalid qualified head ref format '{head}'")
+    data = await graphql_data(
+        account,
+        _PULL_FOR_BRANCH,
+        {
+            "owner": ref.owner,
+            "repo": ref.repo,
+            "headRefName": parts[-1],
+            "states": None,
+        },
+    )
+    repository = data.get("repository")
+    repository = repository if isinstance(repository, dict) else {}
+    connection = repository.get("pullRequests")
+    nodes = connection.get("nodes") if isinstance(connection, dict) else None
+    rows = [node for node in nodes or [] if isinstance(node, dict)]
+    rows.sort(key=lambda node: node.get("state") != "OPEN")
+    default = repository.get("defaultBranchRef")
+    default_branch = default.get("name") if isinstance(default, dict) else None
+    for node in rows:
+        owner = node.get("headRepositoryOwner")
+        login = owner.get("login") if isinstance(owner, dict) else None
+        login = login if isinstance(login, str) else ""
+        name = node.get("headRefName")
+        name = name if isinstance(name, str) else ""
+        label = (
+            f"{login}:{name}"
+            if node.get("isCrossRepository") is True
+            else name
+        )
+        if label != head:
+            continue
+        if node.get("state") != "OPEN" and default_branch == head:
+            continue
+        number = node.get("number")
+        if isinstance(number, int):
+            return number
+    raise ValueError(
+        f"no pull requests found for branch {json.dumps(head, ensure_ascii=False)}"
+    )
 
 
 async def list_pull_request_fields(
