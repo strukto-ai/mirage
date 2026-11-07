@@ -299,7 +299,7 @@ describe('rest of the read family keeps partial output past missing', () => {
   it('strings keeps partial output', async () => {
     const [out, err, code] = await runNumbered(['strings /a/h.txt /a/missing.txt'])
     expect(out).toBe('hello\n')
-    expect(err).toBe('strings: /a/missing.txt: No such file or directory\n')
+    expect(err).toBe("strings: '/a/missing.txt': No such file\n")
     expect(code).toBe(1)
   })
 

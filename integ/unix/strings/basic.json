@@ -98,10 +98,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'hi\\0longer_string\\0abcd\\0' | strings -n 5; printf 'hi\\0longer_string\\0abcd\\0' | strings -n 4",
+      "command": "printf 'hi\\0longer_string\\0abcd\\0' | strings -n 5; printf 'hi\\0longer_string\\0abcd\\0' | strings -n 4; printf 'ab\\0hello\\tworld\\0x\\0abcd\\0' | strings -t x -s '|' -n 4; echo; printf 'h\\0e\\0l\\0l\\0o\\0\\0\\0' | strings -e l; printf 'one\\ntwo\\0' | strings -w -t d; strings -f -o /data/binary.bin; strings --print-file-name --bytes=3 --radix=o --all /data/binary.bin; strings -d -e b /data/binary.bin; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "longer_string\nlonger_string\nabcd\n",
+        "stdout": "longer_string\nlonger_string\nabcd\n      3 hello\tworld|     11 abcd|\nhello\n      0 one\ntwo\n/data/binary.bin:       3 hello\n/data/binary.bin:       3 hello\nrc=0\n",
         "stderr": ""
       }
     },

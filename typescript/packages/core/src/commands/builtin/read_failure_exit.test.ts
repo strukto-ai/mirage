@@ -114,14 +114,16 @@ describe('a read that fails answers like GNU', () => {
       // still names the operand (head/tail/uniq `error reading 'dir'`,
       // tac/tsort `dir: read error`, sed `read error on dir`); the rest say
       // the house `<cmd>: <path>: Is a directory`, awk mawk's `cannot open
-      // "dir" (Is a directory)` and the gzip family gzip's own `dir is a
-      // directory -- ignored` (see the python twin).
+      // "dir" (Is a directory)`, strings binutils' `Warning: 'dir' is a
+      // directory` and the gzip family gzip's own `dir is a directory --
+      // ignored` (see the python twin).
       expect(
         stderr.includes('/ram/dir: Is a directory') ||
           stderr.includes('/ram/dir: read error: Is a directory') ||
           stderr.includes("error reading '/ram/dir': Is a directory") ||
           stderr.includes('cannot open "/ram/dir" (Is a directory)') ||
-          stderr.includes('gzip: /ram/dir is a directory -- ignored'),
+          stderr.includes('gzip: /ram/dir is a directory -- ignored') ||
+          stderr.includes("strings: Warning: '/ram/dir' is a directory"),
       ).toBe(true)
       expect(stderr).not.toContain('No such file')
     })
