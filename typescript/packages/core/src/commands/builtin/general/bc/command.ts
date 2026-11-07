@@ -102,7 +102,7 @@ export function bc(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, specOf('bc'))
   const config: { math_mode: boolean; line_length: string | null; files: string[] } = {
-    math_mode: fl.asBool('args_l'),
+    math_mode: fl.asBool('mathlib'),
     line_length: ctx.env?.BC_LINE_LENGTH ?? null,
     files: [],
   }

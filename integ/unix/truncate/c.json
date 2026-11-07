@@ -27,13 +27,15 @@
       ],
       "flags": [
         "c",
-        "s"
+        "s",
+        "r",
+        "reference"
       ],
-      "command": "truncate -c -s 3 /data/t2tc/new; echo rc=$?; test -e /data/t2tc/new; echo new=$?",
+      "command": "truncate -c -s 3 /data/t2tc/new; echo rc=$?; test -e /data/t2tc/new; echo new=$?; printf abcdefgh > /data/t2tc/fl1r; printf ab > /data/t2tc/fl1; truncate -r /data/t2tc/fl1r /data/t2tc/fl1; wc -c < /data/t2tc/fl1; truncate -r /data/t2tc/fl1r -s +2 /data/t2tc/fl1; wc -c < /data/t2tc/fl1; truncate --reference=/data/t2tc/nope /data/t2tc/fl1; echo rc=$?; ln -s fl1r /data/t2tc/fl1l; ln -s nope /data/t2tc/fl1d; truncate -r /data/t2tc/fl1l /data/t2tc/fl1; wc -c < /data/t2tc/fl1; truncate -r /data/t2tc/fl1d /data/t2tc/fl1; echo rc=$?; truncate --reference= /data/t2tc/fl1; echo rc=$?; truncate -r /data/t2tc/nope/../fl1r /data/t2tc/fl1; echo rc=$?; wc -c < /data/t2tc/fl1; rm /data/t2tc/fl1 /data/t2tc/fl1r /data/t2tc/fl1l /data/t2tc/fl1d",
       "expect": {
         "exit": 0,
-        "stdout": "rc=0\nnew=1\n",
-        "stderr": ""
+        "stdout": "rc=0\nnew=1\n8\n10\nrc=1\n8\nrc=1\nrc=1\nrc=1\n8\n",
+        "stderr": "truncate: cannot stat '/data/t2tc/nope': No such file or directory\ntruncate: cannot stat '/data/t2tc/fl1d': No such file or directory\ntruncate: cannot stat '': No such file or directory\ntruncate: cannot stat '/data/t2tc/nope/../fl1r': No such file or directory\n"
       }
     },
     {

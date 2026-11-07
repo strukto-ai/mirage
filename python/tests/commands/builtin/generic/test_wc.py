@@ -7,9 +7,11 @@ from mirage.commands.builtin.generic.wc import (
     number_width,
     parse_flags,
     wc,
+    wc_generic,
 )
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
-from mirage.io.types import PathRecord
+from mirage.io.types import PathRecord, materialize
 from mirage.types import PathSpec
 
 
@@ -267,3 +269,18 @@ async def test_an_unknown_size_reads_the_file():
         [p], read=_five_bytes, size_of=_unknown_size, bytes_=True
     )
     assert body == b"5 /f\n"
+
+
+@pytest.mark.asyncio
+async def test_a_listed_file_is_read_whatever_the_mount_counts():
+    files = {"/l": b"/a\0", "/a": b"x\ny\n"}
+
+    async def read(path):
+        return files[path.virtual]
+
+    async def line_count(path):
+        raise AssertionError(f"line_count asked for {path.virtual}")
+
+    flags = {"lines": True, "files0_from": PathSpec.from_str_path("/l")}
+    body, io = await wc_generic([], [], Context(flags=flags), read, line_count)
+    assert (await materialize(body), io.exit_code) == (b"2 /a\n", 0)

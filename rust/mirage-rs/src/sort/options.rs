@@ -90,6 +90,7 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
     let mut keydefs = Vec::new();
     let mut output: Option<&[u8]> = None;
     let mut check: Option<Check> = None;
+    let mut source: Option<&[u8]> = None;
     let mut operands = Vec::new();
     for (name, raw) in options {
         match name.as_str() {
@@ -102,6 +103,13 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
             "ignore_case" => globals.fold = true,
             "dictionary_order" => globals.dictionary = true,
             "ignore_nonprinting" => globals.ignore_nonprinting = true,
+            "random_sort" => globals.random = true,
+            "random_source" => match source {
+                Some(first) if first != raw.as_slice() => {
+                    return Err(usage("sort: multiple random sources specified"));
+                }
+                _ => source = Some(raw),
+            },
             "ignore_leading_blanks" => skip = true,
             "unique" => unique = true,
             "stable" => stable = true,
@@ -166,14 +174,17 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
             )));
         }
     }
+    let random = keys.iter().any(|key| key.mods.random);
     let compare = Compare {
         keys,
         field_sep: tab,
         reverse: globals.reverse,
         unique,
         stable,
+        salt: Vec::new(),
     };
     let mut values = Values::new();
+    values.insert("random".to_owned(), Json::from(random));
     values.insert(
         "check".to_owned(),
         check.map_or(Json::Null, |mode| Json::from(mode.letter().to_string())),
@@ -399,7 +410,7 @@ mod tests {
     fn a_line_with_no_options_is_one_key_over_the_record() {
         assert_eq!(
             read(&[]).expect("read"),
-            json!({"check": null, "config": {
+            json!({"check": null, "random": false, "config": {
                 "compare": {
                     "keys": [{
                         "start_field": 1, "start_char": 1, "start_skip": false,
@@ -412,6 +423,7 @@ mod tests {
                         },
                     }],
                     "field_sep": null, "reverse": false, "unique": false, "stable": false,
+                    "salt": [],
                 },
                 "zero_terminated": false,
             }})

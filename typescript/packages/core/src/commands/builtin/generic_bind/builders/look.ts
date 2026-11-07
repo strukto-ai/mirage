@@ -43,9 +43,13 @@ const look: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
   const words = texts.length > 0 ? [...texts, ...resolved.map((path) => path.rawPath)] : []
+  const fl = new FlagView(ctx.flags, specOf('look'))
+  const stop = fl.asStr('terminate')
   const config = {
     operands: words.map((word) => byteView(word)),
-    fold: new FlagView(ctx.flags, specOf('look')).asBool('f'),
+    fold: fl.asBool('ignore_case'),
+    alphanum: fl.asBool('alphanum'),
+    ...(stop === undefined ? {} : { terminate: byteView(stop) }),
   }
   try {
     openStreamSync('look', config).close()

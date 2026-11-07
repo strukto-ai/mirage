@@ -1291,7 +1291,7 @@ async def _route_argv(
     if name == "getfattr":
         return await handle_getfattr(namespace, made, session, operands)
     if name == "setfattr":
-        return await handle_setfattr(made, session, operands)
+        return await handle_setfattr(made, session, operands, stdin)
 
     # ── metadata commands (namespace-routed: resolve-then-setattr with
     #    overlay fallback; they run their own link follow) ──

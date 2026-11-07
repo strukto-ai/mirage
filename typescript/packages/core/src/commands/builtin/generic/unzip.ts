@@ -19,7 +19,7 @@ import type { util } from 'zod'
 import { specOf } from '../../spec/builtins.ts'
 import { OPERAND } from '../../spec/constants.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { versionLine } from '../../spec/standard.ts'
+import { helpPage, versionLine } from '../../spec/standard.ts'
 import { UsageError } from '../../errors.ts'
 import { IOResult } from '../../../io/types.ts'
 import { LineFacts, type PathSpec } from '../../../types.ts'
@@ -111,6 +111,16 @@ function patterns(
 }
 
 /**
+ * mirage's unzip usage, from its `Usage:` line on: Info-ZIP answers a bare
+ * line, and a line whose options it cannot read, with its usage block and no
+ * message of its own. Mirrors Python's _usage_block.
+ */
+function usageBlock(): string {
+  const page = helpPage('unzip', specOf('unzip'))
+  return page.slice(page.indexOf('Usage: ')).replace(/\n+$/, '')
+}
+
+/**
  * List, test, pipe or extract an archive through mirage-rs's unzip, which
  * reads it from a host spool and writes each member where -d or the working
  * directory says, on whichever mount owns it. Mirrors unzip.py.
@@ -129,8 +139,19 @@ export function unzipGeneric(
     // Info-ZIP answers -v without an archive with its version banner, and
     // mirage's version line is that banner here.
     if (letters.v === true) return [ENC.encode(versionLine('unzip')), new IOResult()]
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('unzip: missing operand\n') })]
+    const typed =
+      Object.values(letters).some((on) => on) ||
+      dest !== null ||
+      flags.quiet > 0 ||
+      flags.excludes.length > 0
+    if (!typed) {
+      return [ENC.encode(`${usageBlock()}\n`), new IOResult()]
+    }
+    throw new UsageError(usageBlock(), USAGE_EXIT)
   }
+  // Info-ZIP reads every dash word before the archive as options, so one
+  // that reached here held a letter it does not know.
+  if (archive.rawPath.startsWith('-')) throw new UsageError(usageBlock(), USAGE_EXIT)
   if (letters.Z !== true) {
     for (const letter of ZIPINFO_LETTERS) {
       if (letters[letter] === true)

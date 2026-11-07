@@ -38,7 +38,8 @@ from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused, scan
 from mirage.rs.stream import open_stream, run_stream, stream_output_chunks
-from mirage.types import LineFacts, PathSpec, ReadStreamFn
+from mirage.shell.bytes import byte_view
+from mirage.types import JsonValue, LineFacts, PathSpec, ReadStreamFn
 
 # xxd's exit for an OUTFILE it cannot open, for an INFILE it cannot seek
 # where -s says, and for a dump that seeks backwards on a stream (vim's
@@ -49,37 +50,27 @@ SEEK_BACK_EXIT = 5
 CANNOT_SEEK = b"xxd: Sorry, cannot seek.\n"
 
 
-def _dump_stream(
+def _forward_stream(
     source: AsyncIterator[bytes],
-    cols: int,
-    group: int,
-    uppercase: bool,
+    render: Mapping[str, JsonValue],
     base: int,
+    name: str | None,
 ) -> OutputStream:
-    return stream_output(
-        open_stream(
-            "xxd",
-            {
-                "mode": "dump",
-                "cols": cols,
-                "group": group,
-                "uppercase": uppercase,
-                "base": base,
-            },
-        ),
-        source,
-    )
+    """A dump of ``source`` as the scan's ``render`` describes it, its
+    offsets from ``base`` past ``-o`` and a ``-i`` array named ``name``.
 
-
-def _plain_stream(
-    source: AsyncIterator[bytes], uppercase: bool, cols: int
-) -> OutputStream:
-    return stream_output(
-        open_stream(
-            "xxd", {"mode": "plain", "uppercase": uppercase, "cols": cols}
-        ),
-        source,
-    )
+    Args:
+        source (AsyncIterator[bytes]): the octets.
+        render (Mapping[str, JsonValue]): the dump's configuration.
+        base (int): the offset of the first octet in INFILE.
+        name (str | None): ``-i``'s array name, None for none.
+    """
+    config = dict(render)
+    if config["mode"] == "dump":
+        config["base"] = base
+    if config["mode"] == "include":
+        config["name"] = None if name is None else byte_view(name)
+    return stream_output(open_stream("xxd", config), source)
 
 
 async def _xxd_reverse_stream(
@@ -299,11 +290,10 @@ async def xxd(
     stdin: ByteSource | None = None,
     reverse: bool = False,
     plain: bool = False,
-    uppercase: bool = False,
-    cols: int = 16,
-    group: int = 2,
+    render: Mapping[str, JsonValue] | None = None,
     seek: XxdSeek | None = None,
     limit: int | None = None,
+    name: str | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """xxd over INFILE (or stdin) to OUTFILE (or stdout).
 
@@ -322,14 +312,26 @@ async def xxd(
         write_bytes (Callable | None): writes OUTFILE.
         pwrite_bytes (Callable | None): writes into OUTFILE at an offset.
         stdin (ByteSource | None): standard input.
+        render (Mapping[str, JsonValue] | None): the dump's
+            configuration as the scan read it; None for the default dump.
         seek (XxdSeek | None): -s.
         limit (int | None): -l, None for no limit.
+        name (str | None): -n, the name of -i's array; INFILE's spelling
+            without it.
     """
     if len(paths) > 2:
         raise extra_operand_error(
             CommandName.XXD, paths[2].raw_path or paths[2].virtual
         )
     seek = seek or XxdSeek()
+    render = render or {
+        "mode": "dump",
+        "cols": 16,
+        "group": 2,
+        "uppercase": False,
+    }
+    if name is None and paths and not is_stdin(paths[0]):
+        name = paths[0].raw_path or paths[0].virtual
     read = stdin_stream(stream, stdin, sole=True)
     base = 0
     if reverse:
@@ -362,17 +364,14 @@ async def xxd(
             pwrite_bytes,
             reverse=reverse,
             plain=plain,
-            uppercase=uppercase,
-            cols=cols,
-            group=group,
-            base=base,
+            forward=_forward_stream(source, render, base, name)
+            if not reverse
+            else None,
         )
     io = IOResult()
     if reverse:
         return _xxd_reverse_stream(source, io, plain), io
-    if plain:
-        return _plain_stream(source, uppercase, cols), io
-    return _dump_stream(source, cols, group, uppercase, base), io
+    return _forward_stream(source, render, base, name), io
 
 
 async def _write_output(
@@ -384,10 +383,7 @@ async def _write_output(
     *,
     reverse: bool,
     plain: bool,
-    uppercase: bool,
-    cols: int,
-    group: int,
-    base: int,
+    forward: OutputStream | None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Write the dump (or with ``-r`` the bytes) to OUTFILE.
 
@@ -401,11 +397,9 @@ async def _write_output(
         write_bytes (Callable | None): writes OUTFILE.
         pwrite_bytes (Callable | None): writes into OUTFILE at an offset.
         reverse (bool): revert a dump instead of making one.
-        plain (bool): plain hexdump style.
-        uppercase (bool): uppercase hex digits.
-        cols (int): octets per line.
-        group (int): octets per group.
-        base (int): the offset of INFILE's first byte.
+        plain (bool): the dump to revert is plain hexdump style.
+        forward (OutputStream | None): the dump of INFILE, None for
+            ``-r``.
     """
     target = paths[1]
     segments: ByteSource = b""
@@ -431,13 +425,8 @@ async def _write_output(
             except BaseException:
                 await stored.close()
                 raise
-        else:
-            data = await prime_stream(
-                _plain_stream(source, uppercase, cols)
-                if plain
-                else _dump_stream(source, cols, group, uppercase, base),
-                failed,
-            )
+        elif forward is not None:
+            data = await prime_stream(forward, failed)
     except FS_ERRORS as exc:
         return None, IOResult(
             stderr=fs_error_line("xxd", paths[0], exc).encode(),
@@ -523,11 +512,10 @@ __all__ = ["facts", "xxd"]
 class XxdFlags:
     reverse: bool = False
     plain: bool = False
-    uppercase: bool = False
-    cols: int = 16
-    group: int = 2
+    render: Mapping[str, JsonValue] | None = None
     seek: XxdSeek = XxdSeek()
     limit: int | None = None
+    name: str | None = None
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> XxdFlags | IOResult:
@@ -541,13 +529,31 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> XxdFlags | IOResult:
     """
     fl = FlagView(flags, spec=SPECS["xxd"])
     try:
-        values = scan("xxd", fl.texts("p", "c", "g", "s", "args_l"))
+        values = scan(
+            "xxd",
+            fl.texts(
+                "p",
+                "c",
+                "g",
+                "s",
+                "args_l",
+                "b",
+                "e",
+                "i",
+                "u",
+                "a",
+                "d",
+                "E",
+                "C",
+                "n",
+                "o",
+            ),
+        )
     except StreamRefusal as refusal:
         return refused(refusal)
     match values:
         case {
-            "cols": int(cols),
-            "group": int(group),
+            "render": dict(render),
             "seek": {
                 "offset": int(offset),
                 "relative": bool(relative),
@@ -561,11 +567,10 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> XxdFlags | IOResult:
     return XxdFlags(
         reverse=fl.as_bool("r"),
         plain=fl.as_bool("p"),
-        uppercase=fl.as_bool("u"),
-        cols=cols,
-        group=group,
+        render=render,
         seek=seek,
         limit=limit if isinstance(limit, int) else None,
+        name=fl.as_text("n"),
     )
 
 
@@ -586,9 +591,8 @@ async def xxd_generic(
         stdin=ctx.stdin,
         reverse=parsed.reverse,
         plain=parsed.plain,
-        uppercase=parsed.uppercase,
-        cols=parsed.cols,
-        group=parsed.group,
+        render=parsed.render,
         seek=parsed.seek,
         limit=parsed.limit,
+        name=parsed.name,
     )

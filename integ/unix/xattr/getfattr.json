@@ -63,11 +63,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "getfattr -n user.tag --only-values /data/xattr.txt",
+      "command": "getfattr -n user.tag --only-values /data/xattr.txt; echo; getfattr -d /data/xattr.txt > /data/fl1_dump 2>/dev/null; setfattr -x user.tag /data/xattr.txt; setfattr --restore=/data/fl1_dump; getfattr -n user.tag --only-values /data/xattr.txt; echo; setfattr --raw -n user.raw -v 0x41 /data/xattr.txt; getfattr -n user.raw --only-values /data/xattr.txt; echo; setfattr -x user.raw /data/xattr.txt; getfattr -R --one-file-system -n user.tag /data/xattr.txt 2>/dev/null; rm /data/fl1_dump",
       "expect": {
         "exit": 0,
-        "stdout": "blue",
-        "stderr": ""
+        "stdout": "blue\nblue\n0x41\n# file: data/xattr.txt\nuser.tag=\"blue\"\n\n",
+        "stderr": "getfattr: Removing leading '/' from absolute path names\ngetfattr: Removing leading '/' from absolute path names\ngetfattr: Removing leading '/' from absolute path names\n"
       }
     },
     {

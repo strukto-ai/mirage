@@ -15,15 +15,17 @@
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import type { PathSpec } from '../../../../types.ts'
+import { FileStat, type PathSpec } from '../../../../types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { fail, parseLine } from '../shared.ts'
-import { changeOwner, parseOwner } from './metadata.ts'
+import { changeOwner, parseOwner, referenceOperands, referenceStat } from './metadata.ts'
 
 // chown OWNER[:GROUP] FILE...: set ownership via setattr. Ownership is
 // stored, not enforced (mirage has no user model); names are kept
-// verbatim, numeric ids become numbers.
+// verbatim, numeric ids become numbers. --reference copies a file's owner
+// and group, and --from changes only a file that has the owner and group it
+// names.
 export async function handleChown(
   namespace: Namespace,
   dispatch: DispatchFn,
@@ -32,6 +34,29 @@ export async function handleChown(
 ): Promise<RedirectResult> {
   const [parsed, fl, refused] = parseLine('chown', args, session.cwd)
   if (refused !== null) return refused
+  const fromText = fl.asStr('from')
+  const current = fromText === undefined ? null : parseOwner(fromText)
+  const reference = fl.asPath('reference')
+  if (reference !== undefined) {
+    const operands = referenceOperands(parsed.texts, parsed.paths, session.cwd)
+    if (operands.length === 0) {
+      const error = missingOperandError('chown', null)
+      return fail('chown', `${error.message}\n`, error.exitCode)
+    }
+    const found = await referenceStat(namespace.sessionLinks(session), dispatch, 'chown', reference)
+    if (!(found instanceof FileStat)) return found
+    return changeOwner(
+      namespace,
+      dispatch,
+      session,
+      'chown',
+      fl,
+      operands,
+      found.uid,
+      found.gid,
+      current,
+    )
+  }
   const ownerText = parsed.texts[0]
   if (ownerText === undefined || parsed.paths.length === 0) {
     const error = missingOperandError('chown', ownerText ?? null)
@@ -41,5 +66,5 @@ export async function handleChown(
   if (uid === null && gid === null) {
     return fail('chown', `chown: invalid spec: '${ownerText}'\n`, 1)
   }
-  return changeOwner(namespace, dispatch, session, 'chown', fl, parsed.paths, uid, gid)
+  return changeOwner(namespace, dispatch, session, 'chown', fl, parsed.paths, uid, gid, current)
 }

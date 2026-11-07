@@ -16,6 +16,17 @@ const BACKWARDS: &str = "xxd: Sorry, cannot seek backwards.";
 const WINDOW: usize = 64 * 1024;
 const LOWER: &[u8; 16] = b"0123456789abcdef";
 const UPPER: &[u8; 16] = b"0123456789ABCDEF";
+const CONFLICT: &str = "xxd: only one of -b, -e, -u, -p, -i can be used";
+const GROUP_POWER: &str = "xxd: number of octets per group must be a power of 2 with -e.";
+
+/// The character `-E` shows for each EBCDIC byte, `.` for one with no
+/// printable ASCII match, as xxd 2024-12-07 shows them.
+const EBCDIC: [&[u8; 64]; 4] = [
+    b"................................................................",
+    b" ...........<(+|&.........!$*);~-/.........,%_>?.........`:#@'=\"",
+    b".abcdefghi.......jklmnopqr^.......stuvwxyz...[...............]..",
+    b"{ABCDEFGHI......}JKLMNOPQR......\\.STUVWXYZ......0123456789......",
+];
 
 #[derive(Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
@@ -26,10 +37,37 @@ enum Config {
         uppercase: bool,
         #[serde(deserialize_with = "crate::saturating_u64")]
         base: u64,
+        /// `-b`: each octet in binary.
+        #[serde(default)]
+        bits: bool,
+        /// `-e`: each group's octets in reverse order.
+        #[serde(default)]
+        little: bool,
+        /// `-d`: offsets in decimal.
+        #[serde(default)]
+        decimal: bool,
+        /// `-E`: the text column read as EBCDIC.
+        #[serde(default)]
+        ebcdic: bool,
+        /// `-a`: a run of all-zero lines shown as `*`.
+        #[serde(default)]
+        autoskip: bool,
+        /// `-o`, added to `base`, as decimal text: a host's JSON number
+        /// past 2^53 loses digits.
+        #[serde(default)]
+        displacement: String,
     },
     Plain {
         uppercase: bool,
         cols: usize,
+    },
+    /// `-i`: a C array, named for `name` (no declaration without one).
+    Include {
+        cols: usize,
+        uppercase: bool,
+        capitalize: bool,
+        #[serde(default, deserialize_with = "crate::latin1_opt")]
+        name: Option<Vec<u8>>,
     },
     Reverse {
         plain: bool,
@@ -41,30 +79,67 @@ enum Config {
 const COLS_MAX: i64 = 256;
 
 /// xxd's options as vim's xxd (2024-12-07) reads them, the last of each:
-/// `-c`, `-g`, `-s` and `-l` through `strtol` at base 0, so a word with no
-/// number is 0 and only its leading number counts, and `p` (-p), which
-/// lifts `-c`'s ceiling. `-c` is the one value refused; `-g` under 1 or
-/// past the line is the whole line, and a negative `-l` is no limit.
+/// `-c`, `-g`, `-s`, `-l` and `-o` through `strtol` at base 0, so a word with
+/// no number is 0 and only its leading number counts. `-b`, `-e`, `-p` and
+/// `-i` each pick a dump, of which a line names one. `-c` is the one value
+/// refused, past 256 outside `-p` and `-i`;
+/// `-g` under 1 or past the line is the whole line, and must be a power of 2
+/// under `-e`; a negative `-l` is no limit. What comes back is the dump's
+/// configuration (`render`), `-o` within it, for the host to add the base
+/// offset and `-i`'s name to.
 pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
+    const NAMES: [&str; 15] = [
+        "p", "c", "g", "s", "args_l", "b", "e", "i", "u", "a", "d", "E", "C", "n", "o",
+    ];
     if let Some((name, _)) = options
         .iter()
-        .find(|(name, _)| !["p", "c", "g", "s", "args_l"].contains(&name.as_str()))
+        .find(|(name, _)| !NAMES.contains(&name.as_str()))
     {
         return Err(unknown("xxd", name));
     }
-    let plain = last(options, "p").is_some();
+    let mut kind: Option<&str> = None;
+    let mut uppercase = false;
+    for (name, _) in options {
+        match name.as_str() {
+            name @ ("b" | "e" | "p" | "i") => {
+                if kind.is_some_and(|picked| picked != name) {
+                    return Err(StreamError::refusal(CONFLICT.as_bytes(), 1));
+                }
+                kind = Some(name);
+            }
+            "u" => uppercase = true,
+            _ => {}
+        }
+    }
+    let plain = kind == Some("p");
+    let include = kind == Some("i");
+    let bits = kind == Some("b");
+    let little = kind == Some("e");
     let typed = last(options, "c").map(octets);
-    if typed.is_some_and(|cols| cols < 0 || (!plain && cols > COLS_MAX)) {
+    if typed.is_some_and(|cols| cols < 0 || (!plain && !include && cols > COLS_MAX)) {
         let refused = format!("xxd: invalid number of columns (max. {COLS_MAX}).");
         return Err(StreamError::refusal(refused.as_bytes(), 1));
     }
     let cols = match typed {
         Some(cols) if plain || cols > 0 => cols,
         _ if plain => 30,
+        _ if include => 12,
+        _ if bits => 6,
         _ => 16,
     };
-    let group = last(options, "g").map_or(2, octets);
-    let group = if group < 0 { 2 } else { group };
+    let group = last(options, "g").map_or(-1, octets);
+    if little && group >= 1 && group.count_ones() != 1 {
+        return Err(StreamError::refusal(GROUP_POWER.as_bytes(), 1));
+    }
+    let group = if group >= 0 {
+        group
+    } else if bits {
+        1
+    } else if little {
+        4
+    } else {
+        2
+    };
     let group = if group < 1 || group > cols {
         cols
     } else {
@@ -78,6 +153,30 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
     let limit = last(options, "args_l")
         .map(|raw| number::strtol(raw).0)
         .filter(|&limit| limit >= 0);
+    let displacement = last(options, "o").map_or(0, |raw| number::strtol(raw).0 as u64);
+    let render = if plain {
+        json!({"mode": "plain", "uppercase": uppercase, "cols": cols})
+    } else if include {
+        json!({
+            "mode": "include",
+            "cols": cols,
+            "uppercase": uppercase,
+            "capitalize": last(options, "C").is_some(),
+        })
+    } else {
+        json!({
+            "mode": "dump",
+            "cols": cols,
+            "group": group,
+            "uppercase": uppercase,
+            "bits": bits,
+            "little": little,
+            "decimal": last(options, "d").is_some(),
+            "ebcdic": last(options, "E").is_some(),
+            "autoskip": last(options, "a").is_some(),
+            "displacement": displacement.to_string(),
+        })
+    };
     let mut values = Values::new();
     values.insert("cols".to_owned(), Json::from(cols));
     values.insert("group".to_owned(), Json::from(group));
@@ -86,6 +185,7 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
         json!({"offset": offset, "relative": relative, "back": back}),
     );
     values.insert("limit".to_owned(), limit.map_or(Json::Null, Json::from));
+    values.insert("render".to_owned(), render);
     Ok(values)
 }
 
@@ -101,18 +201,51 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             group,
             uppercase,
             base,
+            bits,
+            little,
+            decimal,
+            ebcdic,
+            autoskip,
+            displacement,
         } => {
             if cols == 0 || group == 0 {
                 return Err(StreamError::new("xxd: a dump needs octets per line"));
             }
+            let displacement = match displacement.as_str() {
+                "" => 0,
+                text => text
+                    .parse::<u64>()
+                    .map_err(|_| StreamError::new("xxd: a displacement is a decimal count"))?,
+            };
             Box::new(Dump {
                 cols,
                 group,
                 uppercase,
-                offset: base,
+                bits,
+                little,
+                decimal,
+                ebcdic,
+                autoskip,
+                offset: base.wrapping_add(displacement),
                 held: Vec::new(),
+                waiting: None,
+                zeros: 0,
+                kept: None,
             })
         }
+        Config::Include {
+            cols,
+            uppercase,
+            capitalize,
+            name,
+        } => Box::new(Include {
+            cols: cols.max(1),
+            uppercase,
+            name: name.map(|name| c_name(&name, capitalize)),
+            capitalize,
+            count: 0,
+            started: false,
+        }),
         Config::Plain { uppercase, cols } => Box::new(Plain {
             digits: if uppercase { UPPER } else { LOWER },
             cols,
@@ -138,45 +271,127 @@ fn hex(out: &mut Vec<u8>, byte: u8, digits: &[u8; 16]) {
 }
 
 /// The default dump: an offset, the octets in hex groups padded to a full
-/// line's width, and their printable ASCII.
+/// line's width, and their printable ASCII. `-b` writes each octet in
+/// binary, `-e` each group's octets in reverse with a short group pushed to
+/// its right, `-d` the offset in decimal, `-E` the text as EBCDIC, and `-a`
+/// a run of three or more all-zero lines as its first line and `*`. Under
+/// `-a` a whole line waits for the next, since the last line is always
+/// written.
 struct Dump {
     cols: usize,
     group: usize,
     uppercase: bool,
+    bits: bool,
+    little: bool,
+    decimal: bool,
+    ebcdic: bool,
+    autoskip: bool,
     offset: u64,
     held: Vec<u8>,
+    /// `-a`'s last whole line, written once the next one shows it is not
+    /// the last.
+    waiting: Option<(u64, Vec<u8>)>,
+    /// How many all-zero lines in a row `-a` has met.
+    zeros: usize,
+    /// The second of them, written only if the run ends there.
+    kept: Option<(u64, Vec<u8>)>,
 }
 
 impl Dump {
-    fn row(&mut self, row: &[u8], out: &mut Vec<u8>) {
+    fn render(&self, offset: u64, row: &[u8], out: &mut Vec<u8>) {
         let start = out.len();
-        let count = (u64::BITS - self.offset.leading_zeros()).div_ceil(4).max(8) as usize;
-        crate::integer::digits(self.offset, 16, count, out);
-        if self.uppercase {
-            out[start..].make_ascii_uppercase();
+        if self.decimal {
+            let text = offset.to_string();
+            out.resize(out.len() + 8usize.saturating_sub(text.len()), b'0');
+            out.extend_from_slice(text.as_bytes());
+        } else {
+            let count = (u64::BITS - offset.leading_zeros()).div_ceil(4).max(8) as usize;
+            crate::integer::digits(offset, 16, count, out);
+            if self.uppercase {
+                out[start..].make_ascii_uppercase();
+            }
         }
         out.extend_from_slice(b": ");
-        let width = self.cols * 2 + self.cols.div_ceil(self.group) - 1;
+        let digits = if self.uppercase { UPPER } else { LOWER };
+        let groups = self.cols.div_ceil(self.group);
+        let width = if self.little {
+            groups * self.group * 2
+        } else if self.bits {
+            self.cols * 8
+        } else {
+            self.cols * 2
+        } + groups
+            - 1;
         let start = out.len();
         for (index, group) in row.chunks(self.group).enumerate() {
             if index > 0 {
                 out.push(b' ');
             }
-            for &byte in group {
-                hex(out, byte, if self.uppercase { UPPER } else { LOWER });
+            if self.little {
+                out.resize(out.len() + (self.group - group.len()) * 2, b' ');
+                for &byte in group.iter().rev() {
+                    hex(out, byte, digits);
+                }
+            } else if self.bits {
+                for &byte in group {
+                    out.extend((0..8).rev().map(|bit| b'0' + (byte >> bit & 1)));
+                }
+            } else {
+                for &byte in group {
+                    hex(out, byte, digits);
+                }
             }
         }
         let used = out.len() - start;
         out.resize(out.len() + width.saturating_sub(used) + 2, b' ');
         out.extend(row.iter().map(|&byte| {
-            if (32..127).contains(&byte) {
+            if self.ebcdic {
+                EBCDIC[usize::from(byte >> 6)][usize::from(byte & 63)]
+            } else if (32..127).contains(&byte) {
                 byte
             } else {
                 b'.'
             }
         }));
         out.push(b'\n');
-        self.offset += row.len() as u64;
+    }
+
+    fn row(&mut self, row: &[u8], out: &mut Vec<u8>) {
+        let offset = self.offset;
+        self.offset = self.offset.wrapping_add(row.len() as u64);
+        if !self.autoskip {
+            self.render(offset, row, out);
+            return;
+        }
+        if let Some((at, line)) = self.waiting.replace((offset, row.to_vec())) {
+            self.settle(at, &line, out);
+        }
+    }
+
+    /// `-a` over a line that is not the last.
+    fn settle(&mut self, at: u64, line: &[u8], out: &mut Vec<u8>) {
+        if line.iter().all(|&byte| byte == 0) {
+            self.zeros += 1;
+            match self.zeros {
+                1 => self.render(at, line, out),
+                2 => self.kept = Some((at, line.to_vec())),
+                3 => {
+                    self.kept = None;
+                    out.extend_from_slice(b"*\n");
+                }
+                _ => {}
+            }
+            return;
+        }
+        self.release(out);
+        self.render(at, line, out);
+    }
+
+    fn release(&mut self, out: &mut Vec<u8>) {
+        if let Some((at, line)) = self.kept.take() {
+            self.render(at, &line, out);
+        }
+        self.zeros = 0;
     }
 }
 
@@ -202,9 +417,98 @@ impl Stream for Dump {
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        if !self.held.is_empty() {
-            let row = std::mem::take(&mut self.held);
-            self.row(&row, out);
+        let tail = std::mem::take(&mut self.held);
+        let last = if tail.is_empty() {
+            self.waiting.take()
+        } else {
+            if let Some((at, line)) = self.waiting.take() {
+                self.settle(at, &line, out);
+            }
+            let at = self.offset;
+            self.offset = self.offset.wrapping_add(tail.len() as u64);
+            Some((at, tail))
+        };
+        if let Some((at, line)) = last {
+            self.release(out);
+            self.render(at, &line, out);
+        }
+        Ok(())
+    }
+}
+
+/// `-i`'s array name: every character but a letter or a digit becomes `_`,
+/// a leading digit takes `__` before it, and `-C` capitalizes it.
+fn c_name(name: &[u8], capitalize: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(name.len() + 2);
+    if name.first().is_some_and(u8::is_ascii_digit) {
+        out.extend_from_slice(b"__");
+    }
+    out.extend(name.iter().map(|&byte| {
+        let byte = if byte.is_ascii_alphanumeric() {
+            byte
+        } else {
+            b'_'
+        };
+        if capitalize {
+            byte.to_ascii_uppercase()
+        } else {
+            byte
+        }
+    }));
+    out
+}
+
+/// `-i`: the octets as C hex literals, `cols` a line, inside an array
+/// declaration and followed by its length when the input has a name.
+struct Include {
+    cols: usize,
+    uppercase: bool,
+    capitalize: bool,
+    name: Option<Vec<u8>>,
+    count: u64,
+    started: bool,
+}
+
+impl Stream for Include {
+    fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        if !self.started {
+            self.started = true;
+            if let Some(name) = &self.name {
+                out.extend_from_slice(b"unsigned char ");
+                out.extend_from_slice(name);
+                out.extend_from_slice(b"[] = {\n");
+            }
+        }
+        let digits = if self.uppercase { UPPER } else { LOWER };
+        for &byte in input {
+            if self.count > 0 {
+                out.push(b',');
+                if self.count % self.cols as u64 == 0 {
+                    out.push(b'\n');
+                } else {
+                    out.push(b' ');
+                }
+            }
+            if self.count % self.cols as u64 == 0 {
+                out.extend_from_slice(b"  ");
+            }
+            out.extend_from_slice(if self.uppercase { b"0X" } else { b"0x" });
+            hex(out, byte, digits);
+            self.count += 1;
+        }
+        Ok(())
+    }
+
+    fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.feed(&[], out)?;
+        if self.count > 0 {
+            out.push(b'\n');
+        }
+        if let Some(name) = &self.name {
+            out.extend_from_slice(b"};\nunsigned int ");
+            out.extend_from_slice(name);
+            out.extend_from_slice(if self.capitalize { b"_LEN" } else { b"_len" });
+            out.extend_from_slice(format!(" = {};\n", self.count).as_bytes());
         }
         Ok(())
     }
@@ -555,6 +859,64 @@ mod tests {
         let expected = "FFFFFFFF: 6869 2E0A 41  hi..A\n100000004: 42            B\n";
         assert_eq!(dump(config, &[b"hi.\nAB"]), expected);
         assert_eq!(dump(config, &[b"h", b"i.\nA", b"", b"B"]), expected);
+        assert_eq!(dump(config, &[]), "");
+        let config = r#"{"mode":"dump","cols":5,"group":2,"uppercase":false,"base":3,"displacement":"18446744073709551611"}"#;
+        assert_eq!(
+            dump(config, &[b"hi.\nAB"]),
+            "fffffffffffffffe: 6869 2e0a 41  hi..A\n00000003: 42            B\n"
+        );
+    }
+
+    #[test]
+    fn bits_little_endian_and_decimal_lay_out_the_line() {
+        let config = r#"{"mode":"dump","cols":5,"group":4,"uppercase":false,"base":4,"little":true,"decimal":true}"#;
+        let expected = "00000004: 64636261       65  abcde\n00000009:       66           f\n";
+        assert_eq!(dump(config, &[b"abcdef"]), expected);
+        assert_eq!(dump(config, &[b"ab", b"cdef"]), expected);
+        let config = r#"{"mode":"dump","cols":3,"group":2,"uppercase":false,"base":0,"bits":true,"ebcdic":true}"#;
+        assert_eq!(
+            dump(config, &[b"\x81\xc1\x00"]),
+            "00000000: 1000000111000001 00000000  aA.\n"
+        );
+    }
+
+    #[test]
+    fn autoskip_stars_a_run_of_three_zero_lines_and_keeps_the_last() {
+        let config =
+            r#"{"mode":"dump","cols":2,"group":2,"uppercase":false,"base":0,"autoskip":true}"#;
+        let zeros = |lines: usize| vec![0u8; lines * 2];
+        let line = |at: u32| format!("{at:08x}: 0000  ..\n");
+        assert_eq!(
+            dump(config, &[&zeros(3)]),
+            [line(0), line(2), line(4)].concat()
+        );
+        assert_eq!(
+            dump(config, &[&zeros(4)]),
+            [line(0), "*\n".into(), line(6)].concat()
+        );
+        let mut data = zeros(4);
+        data.extend_from_slice(b"ab");
+        let pieces: Vec<&[u8]> = data.chunks(1).collect();
+        let expected = [line(0), "*\n".into(), "00000008: 6162  ab\n".into()].concat();
+        assert_eq!(dump(config, &pieces), expected);
+    }
+
+    #[test]
+    fn include_names_the_array_and_counts_its_octets() {
+        let config =
+            r#"{"mode":"include","cols":2,"uppercase":false,"capitalize":false,"name":"9a-b"}"#;
+        assert_eq!(
+            dump(config, &[b"ab", b"c"]),
+            "unsigned char __9a_b[] = {\n  0x61, 0x62,\n  0x63\n};\nunsigned int __9a_b_len = 3;\n"
+        );
+        let config =
+            r#"{"mode":"include","cols":12,"uppercase":true,"capitalize":true,"name":"e"}"#;
+        assert_eq!(
+            dump(config, &[]),
+            "unsigned char E[] = {\n};\nunsigned int E_LEN = 0;\n"
+        );
+        let config = r#"{"mode":"include","cols":12,"uppercase":true,"capitalize":false}"#;
+        assert_eq!(dump(config, &[b"\xab"]), "  0XAB\n");
         assert_eq!(dump(config, &[]), "");
     }
 

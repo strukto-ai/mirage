@@ -19,16 +19,18 @@ const SLEEP_INTERVAL: f64 = 1.0;
 const FOLLOW: &[Choice] = &[&["descriptor"], &["name"]];
 
 pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
-    if let Some((name, _)) = options
-        .iter()
-        .find(|(name, _)| !matches!(name.as_str(), "n" | "c" | "follow" | "sleep_interval"))
-    {
+    if let Some((name, _)) = options.iter().find(|(name, _)| {
+        !matches!(
+            name.as_str(),
+            "lines" | "bytes" | "follow" | "sleep_interval"
+        )
+    }) {
         return Err(unknown("tail", name));
     }
-    let lines = last(options, "n")
+    let lines = last(options, "lines")
         .map(|raw| Ok::<_, StreamError>(count(raw, head::lines("tail", raw)?)))
         .transpose()?;
-    let bytes = last(options, "c")
+    let bytes = last(options, "bytes")
         .map(|raw| Ok::<_, StreamError>(count(raw, head::bytes("tail", raw)?)))
         .transpose()?;
     let follow = last(options, "follow").map(follow).transpose()?;
@@ -77,7 +79,7 @@ mod tests {
 
     #[test]
     fn a_plus_counts_from_the_start_and_a_minus_from_the_end() {
-        let typed: &[(&str, &[u8])] = &[("n", b"+2"), ("c", b"-1K")];
+        let typed: &[(&str, &[u8])] = &[("lines", b"+2"), ("bytes", b"-1K")];
         assert_eq!(
             scan("tail", typed).expect("read"),
             json!({
@@ -92,10 +94,10 @@ mod tests {
     #[test]
     fn counts_refuse_in_head_s_grammar_with_tail_s_name() {
         assert_eq!(
-            refusal("tail", &[("n", b"2K")]),
+            refusal("tail", &[("lines", b"2K")]),
             ("tail: invalid number of lines: '2K'".to_owned(), 1)
         );
-        let typed: &[(&str, &[u8])] = &[("c", b"y"), ("sleep_interval", b"x"), ("n", b"x")];
+        let typed: &[(&str, &[u8])] = &[("bytes", b"y"), ("sleep_interval", b"x"), ("lines", b"x")];
         assert_eq!(
             refusal("tail", typed).0,
             "tail: invalid number of lines: 'x'"

@@ -59,13 +59,13 @@ async def rm(
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
     fl = FlagView(ctx.flags, spec=SPECS["rm"])
-    f = fl.as_bool("f")
-    v = fl.as_bool("v")
-    d = fl.as_bool("d")
+    f = fl.as_bool("force")
+    v = fl.as_bool("verbose")
+    d = fl.as_bool("dir")
     if not paths:
         return rm_without_operands(f)
     paths = await files.resolve_glob(paths)
-    recursive = fl.as_bool("r") or fl.as_bool("R")
+    recursive = fl.as_bool("recursive")
     verbose_parts: list[str] = []
     errors: list[str] = []
     links = links_of(ctx)

@@ -180,9 +180,9 @@ function jqView(...words: string[]): FlagView {
 
 describe('FlagView.texts', () => {
   it('reads a numeric shorthand where it was typed', () => {
-    expect(view('tail', '-n', 'x', '-4').texts('n')).toEqual([
-      ['n', 'x'],
-      ['n', '4'],
+    expect(view('tail', '-n', 'x', '-4').texts('lines')).toEqual([
+      ['lines', 'x'],
+      ['lines', '4'],
     ])
     expect(view('head', '-4', '-n', 'x').texts('lines')).toEqual([
       ['lines', '4'],

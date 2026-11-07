@@ -287,7 +287,9 @@ pub(crate) mod tests {
             ("s", b"+-0x10"),
             ("args_l", b"-1"),
         ];
-        let values = scan("xxd", typed).expect("read");
+        let mut values = scan("xxd", typed).expect("read");
+        let render = values.as_object_mut().expect("an object").remove("render");
+        assert_eq!(render.expect("render")["mode"], json!("dump"));
         assert_eq!(
             values,
             json!({"cols": 8, "group": 2, "seek": {"offset": 16, "relative": true, "back": true}, "limit": null})

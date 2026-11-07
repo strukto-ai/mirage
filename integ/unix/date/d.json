@@ -57,11 +57,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "date -u -d '@1755300000' '+%F %T'",
+      "command": "date -u -d '@1755300000' '+%F %T'; date --resolution; printf '2020-01-01\\n@0\\n' | date -u -f - +%F; printf '2020-01-01\\nbad\\n@86400\\n' > /data/fl1_dates; date -u --file=/data/fl1_dates +%F; echo rc=$?; rm /data/fl1_dates",
       "expect": {
         "exit": 0,
-        "stdout": "2025-08-15 23:20:00\n",
-        "stderr": ""
+        "stdout": "2025-08-15 23:20:00\n0.000000001\n2020-01-01\n1970-01-01\n2020-01-01\n1970-01-02\nrc=1\n",
+        "stderr": "date: invalid date 'bad'\n"
       }
     },
     {

@@ -171,8 +171,14 @@ export const SPECS: Record<string, CommandSpec> = {
   bc: new CommandSpec({
     description: 'Arbitrary precision calculator language.',
     arguments: [
-      new Argument('-l', { action: 'store_true', help: 'Load the standard math library.' }),
-      new Argument('-q', { action: 'store_true', help: 'Suppress the welcome banner.' }),
+      new Argument(['-l', '--mathlib'], {
+        action: 'store_true',
+        help: 'Load the standard math library.',
+      }),
+      new Argument(['-q', '--quiet'], {
+        action: 'store_true',
+        help: 'Suppress the welcome banner.',
+      }),
       PATHS_OPERAND,
     ],
   }),
@@ -203,6 +209,18 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('--universal', {
         action: 'store_true',
         help: 'Use Coordinated Universal Time (UTC).',
+      }),
+      new Argument(['-r', '--reference'], {
+        type: 'path',
+        help: 'Display the time the given file was last modified.',
+      }),
+      new Argument(['-f', '--file'], {
+        type: 'path',
+        help: 'Display the time each line of the given file describes, as -d would.',
+      }),
+      new Argument('--resolution', {
+        action: 'store_true',
+        help: 'Display the resolution of the times shown.',
       }),
       TEXT_OPERAND,
     ],

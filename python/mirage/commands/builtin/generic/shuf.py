@@ -1,5 +1,6 @@
 import logging
 from collections.abc import (
+    AsyncIterator,
     Awaitable,
     Callable,
     Mapping,
@@ -9,6 +10,10 @@ from contextlib import aclosing
 from dataclasses import dataclass
 from functools import partial
 
+from mirage.commands.builtin.utils.random_source import (
+    RandomSource,
+    RandomSourceError,
+)
 from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -19,7 +24,12 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.spool import ByteSpool
-from mirage.io.stream import OutputStream, close_quietly, rechunk
+from mirage.io.stream import (
+    OutputStream,
+    close_quietly,
+    prime_stream,
+    rechunk,
+)
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import StreamRefusal
@@ -66,6 +76,7 @@ class ShufFlags:
     with_replacement: bool = False
     input_range: tuple[int, int] | None = None
     output: PathSpec | None = None
+    random_source: PathSpec | None = None
 
 
 def emit_count(
@@ -116,11 +127,14 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ShufFlags | IOResult:
     """
     fl = FlagView(flags, spec=SPECS["shuf"])
     # GNU compares two -o by the words typed, which the tape holds resolved.
-    words = iter(p.raw_path or p.virtual for p in fl.as_paths("output"))
+    words = {
+        option: iter(p.raw_path or p.virtual for p in fl.as_paths(option))
+        for option in ("output", "random_source")
+    }
     typed = [
-        (name, next(words) if name == "output" else text)
+        (name, next(words[name]) if name in words else text)
         for name, text in fl.texts(
-            "head_count", "input_range", "output", "echo"
+            "head_count", "input_range", "output", "echo", "random_source"
         )
     ]
     try:
@@ -141,6 +155,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ShufFlags | IOResult:
             raise TypeError(f"shuf: mirage-rs read -i as {bounds!r}")
         input_range = (int(str(bounds[0])), int(str(bounds[1])))
     outputs = fl.as_paths("output")
+    sources = fl.as_paths("random_source")
     return ShufFlags(
         count=None if count is None else int(count),
         echo=fl.as_bool("echo"),
@@ -148,6 +163,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ShufFlags | IOResult:
         with_replacement=fl.as_bool("repeat"),
         input_range=input_range,
         output=outputs[-1] if outputs else None,
+        random_source=sources[-1] if sources else None,
     )
 
 
@@ -170,10 +186,16 @@ def _need(available: int, count: int | None, with_replacement: bool) -> int:
 
 
 class ShufHost:
-    """Async storage and injected randomness for the shared shuffle engine."""
+    """Async storage and injected randomness for the shared shuffle engine:
+    the workspace's, or the bytes of a ``--random-source`` file. Each word
+    takes four bytes of that file where GNU takes only the bits a draw
+    needs, so a short file runs out sooner and the order differs."""
 
     def __init__(
-        self, ids: IdSource, stream: OpenStream, spools: dict[int, ByteSpool]
+        self,
+        ids: IdSource | RandomSource,
+        stream: OpenStream,
+        spools: dict[int, ByteSpool],
     ) -> None:
         self.ids = ids
         self.stream = stream
@@ -188,6 +210,8 @@ class ShufHost:
         if op == "words":
             count = request["count"]
             assert isinstance(count, int)
+            if isinstance(self.ids, RandomSource):
+                return Served({}, await self.ids.take(count * 4))
             return Served({}, self.ids.random_words(count))
         spool = request.get(
             "spool", int(op == "swap" or request.get("index") is True)
@@ -226,6 +250,7 @@ class ShufHost:
         closers: tuple[Callable[[], Awaitable[None]], ...] = (
             partial(close_stream, self.stream),
             self.errors.close,
+            *((self.ids.close,) if isinstance(self.ids, RandomSource) else ()),
             *(spool.close for spool in self.spools.values()),
         )
         for close in closers:
@@ -241,7 +266,7 @@ class ShufHost:
 
 
 def _engine(
-    ids: IdSource,
+    ids: IdSource | RandomSource,
     config: Mapping[str, JsonValue],
     spools: dict[int, ByteSpool] | None = None,
 ) -> ByteSource:
@@ -253,7 +278,7 @@ def _engine(
 
 
 async def _sample_records(
-    ids: IdSource,
+    ids: IdSource | RandomSource,
     paths: list[PathSpec],
     read: PolymorphicReadFn,
     stdin: ByteSource | None,
@@ -298,7 +323,7 @@ async def _sample_records(
 
 
 async def _sample_items(
-    ids: IdSource,
+    ids: IdSource | RandomSource,
     items: list[str],
     count: int | None,
     repeat: bool,
@@ -334,6 +359,27 @@ async def _sample_items(
         raise
 
 
+async def _drawn(rendered: ByteSource, io: IOResult) -> AsyncIterator[bytes]:
+    """The output, ending at the first draw a ``--random-source`` file
+    cannot make, whose refusal settles ``io``.
+
+    Args:
+        rendered (ByteSource): the engine's output.
+        io (IOResult): receives the refusal and its status.
+    """
+    if isinstance(rendered, bytes):
+        yield rendered
+        return
+    try:
+        async for chunk in rendered:
+            yield chunk
+    except RandomSourceError as exc:
+        io.exit_code = 1
+        io.stderr = f"{exc}\n".encode()
+    finally:
+        await close_quietly(rendered)
+
+
 async def shuf_generic(
     paths: list[PathSpec],
     texts: list[str],
@@ -350,8 +396,15 @@ async def shuf_generic(
     | None = None,
     root: str = "",
     ids: IdSource | None = None,
+    random_source: PathSpec | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    ids = ids if ids is not None else SystemIdSource()
+    draws: IdSource | RandomSource = (
+        RandomSource("shuf", random_source, stdin_stream(read, stdin))
+        if random_source is not None
+        else ids
+        if ids is not None
+        else SystemIdSource()
+    )
     sep = "\x00" if zero_terminated else "\n"
     rendered: ByteSource
 
@@ -365,7 +418,7 @@ async def shuf_generic(
         low, high = input_range
         need = _need(high - low + 1, count, with_replacement)
         rendered = _engine(
-            ids,
+            draws,
             {
                 "mode": "range",
                 "separator": ord(sep),
@@ -384,12 +437,22 @@ async def shuf_generic(
             else list(texts)
         )
         rendered = await _sample_items(
-            ids, items, count, with_replacement, ord(sep)
+            draws, items, count, with_replacement, ord(sep)
         )
     else:
         rendered = await _sample_records(
-            ids, paths, read, stdin, sep, count, with_replacement
+            draws, paths, read, stdin, sep, count, with_replacement
         )
+    io = IOResult()
+    if random_source is not None:
+        if output is not None and not isinstance(rendered, bytes):
+            # GNU draws before it creates the output, so a source that
+            # cannot answer leaves none behind.
+            try:
+                rendered = await prime_stream(rendered)
+            except RandomSourceError as exc:
+                return None, IOResult(exit_code=1, stderr=f"{exc}\n".encode())
+        rendered = _drawn(rendered, io)
     if output is not None:
         if write_bytes is None:
             await close_quietly(rendered)
@@ -403,8 +466,8 @@ async def shuf_generic(
             )
         finally:
             await close_quietly(rendered)
-        return None, IOResult()
-    return rendered, IOResult()
+        return None, io
+    return rendered, io
 
 
 def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:

@@ -359,8 +359,8 @@ def test_echo_spec_text_args():
 def test_rm_spec_combined_flags():
     spec = SPECS["rm"]
     parsed = parse_command(spec, ["-rf", "a", "b", "c"], cwd="/data")
-    assert parsed.flags["-r"] is True
-    assert parsed.flags["-f"] is True
+    assert parsed.flags["--recursive"] is True
+    assert parsed.flags["--force"] is True
     assert parsed.paths() == ["/data/a", "/data/b", "/data/c"]
 
 
@@ -663,7 +663,7 @@ def test_head_spec_supports_numeric_shorthand():
 
 def test_tail_spec_supports_numeric_shorthand():
     parsed = parse_command(SPECS["tail"], ["-5", "/file.txt"], cwd="/")
-    assert parsed.flags.get("-n") == "5"
+    assert parsed.flags.get("--lines") == "5"
     assert parsed.paths() == ["/file.txt"]
 
 

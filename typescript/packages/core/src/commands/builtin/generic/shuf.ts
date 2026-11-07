@@ -26,10 +26,11 @@ import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
+import { RandomSource, RandomSourceError } from '../utils/random_source.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { ByteSpool } from '../../../io/spool.ts'
 import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
-import { OutputStream, closeQuietly, rechunk } from '../../../io/stream.ts'
+import { OutputStream, closeQuietly, primeStream, rechunk } from '../../../io/stream.ts'
 import {
   closeStream,
   openStream,
@@ -98,6 +99,7 @@ export interface ShufFlags {
   readonly inputRange: readonly [bigint, bigint] | null
   // The last `-o`, a PathSpec as every PATH-typed flag arrives.
   readonly output: PathSpec | null
+  readonly randomSource: PathSpec | null
 }
 
 /**
@@ -108,13 +110,15 @@ export interface ShufFlags {
 export function parseFlags(bag: Record<string, FlagValue>): ShufFlags | IOResult {
   const fl = new FlagView(bag, specOf('shuf'))
   // GNU compares two -o by the words typed, which the tape holds resolved.
-  const words = fl.asPaths('output').map((p) => (p.rawPath !== '' ? p.rawPath : p.virtual))
+  const words = new Map(
+    (['output', 'random_source'] as const).map((option) => [
+      option as string,
+      fl.asPaths(option).map((p) => (p.rawPath !== '' ? p.rawPath : p.virtual)),
+    ]),
+  )
   const typed = fl
-    .texts('head_count', 'input_range', 'output', 'echo')
-    .map(([name, text]): [string, string] => [
-      name,
-      name === 'output' ? (words.shift() ?? text) : text,
-    ])
+    .texts('head_count', 'input_range', 'output', 'echo', 'random_source')
+    .map(([name, text]): [string, string] => [name, words.get(name)?.shift() ?? text])
   let values
   try {
     values = scan('shuf', typed)
@@ -141,21 +145,32 @@ export function parseFlags(bag: Record<string, FlagValue>): ShufFlags | IOResult
     withReplacement: fl.asBool('repeat'),
     inputRange,
     output: fl.asPaths('output').at(-1) ?? null,
+    randomSource: fl.asPaths('random_source').at(-1) ?? null,
   }
 }
 
+// Async storage and injected randomness for the shared shuffle engine: the
+// workspace's, or the bytes of a `--random-source` file. Each word takes four
+// bytes of that file where GNU takes only the bits a draw needs, so a short
+// file runs out sooner and the order differs.
 class ShufHost {
   readonly errors = new ByteSpool()
   private closed = false
   constructor(
-    readonly ids: IdSource,
+    readonly ids: IdSource | RandomSource,
     readonly stream: OpenStream,
     readonly spools: Map<number, ByteSpool>,
   ) {}
 
   async serve(request: Readonly<Record<string, util.JSONType>>, data: Uint8Array): Promise<Served> {
-    if (request.op === 'words')
-      return { reply: {}, data: this.ids.randomWords(Number(request.count)) }
+    if (request.op === 'words') {
+      const count = Number(request.count)
+      const data =
+        this.ids instanceof RandomSource
+          ? await this.ids.take(count * 4)
+          : this.ids.randomWords(count)
+      return { reply: {}, data }
+    }
     const id = Number(request.spool ?? (request.op === 'swap' || request.index === true ? 1 : 0))
     if (request.op === 'close') {
       const store = this.spools.get(id)
@@ -195,6 +210,7 @@ class ShufHost {
     for (const close of [
       () => closeStream(this.stream),
       () => this.errors.close(),
+      ...(this.ids instanceof RandomSource ? [() => (this.ids as RandomSource).close()] : []),
       ...[...this.spools.values()].map((spool) => () => spool.close()),
     ]) {
       try {
@@ -212,7 +228,7 @@ class ShufHost {
 }
 
 async function engine(
-  ids: IdSource,
+  ids: IdSource | RandomSource,
   config: Readonly<Record<string, util.JSONType>>,
   spools = new Map<number, ByteSpool>(),
   signal?: AbortSignal,
@@ -226,7 +242,7 @@ async function engine(
 }
 
 async function sampleRecords(
-  ids: IdSource,
+  ids: IdSource | RandomSource,
   sources: ByteSource[],
   sep: string,
   count: bigint | null,
@@ -265,7 +281,7 @@ async function sampleRecords(
 }
 
 async function sampleItems(
-  ids: IdSource,
+  ids: IdSource | RandomSource,
   items: string[],
   count: bigint | null,
   repeat: boolean,
@@ -311,6 +327,24 @@ async function sampleItems(
   }
 }
 
+// The output, ending at the first draw a `--random-source` file cannot make,
+// whose refusal settles `io`. Mirrors Python's `_drawn`.
+async function* drawn(result: ByteSource, io: IOResult): AsyncGenerator<Uint8Array> {
+  if (result instanceof Uint8Array) {
+    yield result
+    return
+  }
+  try {
+    for await (const chunk of result) yield chunk
+  } catch (error) {
+    if (!(error instanceof RandomSourceError)) throw error
+    io.exitCode = 1
+    io.stderr = ENC.encode(`${error.message}\n`)
+  } finally {
+    await closeQuietly(result)
+  }
+}
+
 export async function shufGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -320,8 +354,11 @@ export async function shufGeneric(
   parsed: ShufFlags | IOResult = parseFlags(ctx.flags),
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, ctx.stdin)
-  const ids = ctx.ids ?? new SystemIdSource()
   if (parsed instanceof IOResult) return [null, parsed]
+  const ids =
+    parsed.randomSource !== null
+      ? new RandomSource('shuf', parsed.randomSource, stream)
+      : (ctx.ids ?? new SystemIdSource())
   const { count: nFlag, inputRange, echo: echoMode, zeroTerminated: zeroSep } = parsed
   const repeat = parsed.withReplacement
   const output =
@@ -397,6 +434,20 @@ export async function shufGeneric(
     }
     result = await sampleItems(ids, items, nFlag, repeat, sep.charCodeAt(0), ctx.signal)
   }
+  const io = new IOResult()
+  if (parsed.randomSource !== null) {
+    if (output !== null && !(result instanceof Uint8Array)) {
+      // GNU draws before it creates the output, so a source that cannot
+      // answer leaves none behind.
+      try {
+        result = await primeStream(result)
+      } catch (error) {
+        if (!(error instanceof RandomSourceError)) throw error
+        return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${error.message}\n`) })]
+      }
+    }
+    result = drawn(result, io)
+  }
   if (output !== null) {
     try {
       await write(output, result)
@@ -412,9 +463,9 @@ export async function shufGeneric(
     } finally {
       await closeQuietly(result)
     }
-    return [null, new IOResult()]
+    return [null, io]
   }
-  return [result, new IOResult()]
+  return [result, io]
 }
 
 /**

@@ -28,7 +28,9 @@ def winning_pad(flags: str) -> str | None:
     return next((ch for ch in reversed(flags) if ch in "-_0+"), None)
 
 
-def gnu_strftime(dt: datetime, fmt: str, years: int = 0) -> str:
+def gnu_strftime(
+    dt: datetime, fmt: str, years: int = 0, nanosecond: int | None = None
+) -> str:
     """Render date's C-locale directives through the shared Rust engine.
 
     The host supplies one timezone reading, including the epoch and offset;
@@ -39,6 +41,8 @@ def gnu_strftime(dt: datetime, fmt: str, years: int = 0) -> str:
         dt (datetime): the moment being rendered.
         fmt (str): the format without a leading plus sign.
         years (int): whole 400-year cycles to add to the displayed year.
+        nanosecond (int | None): the second's nanoseconds, finer than a
+            datetime holds; the moment's own microseconds when None.
     """
     if dt.utcoffset() is None:
         dt = dt.astimezone()
@@ -52,7 +56,9 @@ def gnu_strftime(dt: datetime, fmt: str, years: int = 0) -> str:
             "hour": dt.hour,
             "minute": dt.minute,
             "second": dt.second,
-            "nanosecond": dt.microsecond * 1000,
+            "nanosecond": dt.microsecond * 1000
+            if nanosecond is None
+            else nanosecond,
             "epoch": math.floor(dt.timestamp()),
             "offset": round(offset.total_seconds())
             if offset is not None

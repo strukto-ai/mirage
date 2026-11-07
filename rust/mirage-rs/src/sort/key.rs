@@ -1,5 +1,8 @@
 use std::cmp::Ordering;
 
+use blake2::Blake2b;
+use blake2::digest::Digest;
+use blake2::digest::consts::U16;
 use serde::{Deserialize, Serialize};
 
 use super::number::{general_order, human_order, leading_number};
@@ -18,7 +21,7 @@ pub(crate) struct Mods {
     pub reverse: bool,
     pub dictionary: bool,
     pub ignore_nonprinting: bool,
-    /// `-R`: it counts against the other orderings; nothing shuffles.
+    /// `-R`: the key's salted hash orders it, so equal keys stay together.
     pub random: bool,
 }
 
@@ -51,6 +54,9 @@ pub(crate) struct Compare {
     pub reverse: bool,
     pub unique: bool,
     pub stable: bool,
+    /// The bytes `-R` salts each key's hash with, which the host draws.
+    #[serde(default)]
+    pub salt: Vec<u8>,
 }
 
 /// The bytes GNU sort skips as blanks in the C locale: space, tab and the
@@ -68,7 +74,11 @@ impl Compare {
         for key in &self.keys {
             let ka = self.extract(a, key);
             let kb = self.extract(b, key);
-            let mut order = compare_keys(ka, kb, &key.mods);
+            let mut order = if key.mods.random {
+                self.random(ka, kb, &key.mods)
+            } else {
+                compare_keys(ka, kb, &key.mods)
+            };
             if key.mods.reverse {
                 order = order.reverse();
             }
@@ -81,6 +91,27 @@ impl Compare {
         }
         let order = a.cmp(b);
         if self.reverse { order.reverse() } else { order }
+    }
+
+    /// `-R`: two keys by their hashes salted with `salt`, after `-f`, `-d`
+    /// and `-i` have changed them, then by their bytes when the hashes tie.
+    fn random(&self, a: &[u8], b: &[u8], mods: &Mods) -> Ordering {
+        if mods.fold || mods.dictionary || mods.ignore_nonprinting {
+            let a: Vec<u8> = translated(a, mods).collect();
+            let b: Vec<u8> = translated(b, mods).collect();
+            return self
+                .hashed(&a)
+                .cmp(&self.hashed(&b))
+                .then_with(|| a.cmp(&b));
+        }
+        self.hashed(a).cmp(&self.hashed(b)).then_with(|| a.cmp(b))
+    }
+
+    fn hashed(&self, key: &[u8]) -> [u8; 16] {
+        let mut hasher = Blake2b::<U16>::new();
+        hasher.update(&self.salt);
+        hasher.update(key);
+        hasher.finalize().into()
     }
 
     /// The bytes one key covers, as GNU sort reads a KEYDEF: offsets count

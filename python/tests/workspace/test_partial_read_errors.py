@@ -346,7 +346,7 @@ async def test_strings_good_then_missing():
         _make_numbered_ws(), "strings /a/h.txt /a/missing.txt"
     )
     assert out == "hello\n"
-    assert err == "strings: /a/missing.txt: No such file or directory\n"
+    assert err == "strings: '/a/missing.txt': No such file\n"
     assert code == 1
 
 

@@ -19,18 +19,25 @@ from mirage.commands.spec.constants import (
 )
 from mirage.commands.spec.types import Argument, CommandSpec
 
-OWNERSHIP = CommandSpec(
-    arguments=(
-        Argument("-c", "--changes", action="store_true"),
-        Argument("-f", "--silent", action="store_true"),
-        Argument("--quiet", action="store_true"),
-        Argument("-v", "--verbose", action="store_true"),
-        Argument("--dereference", action="store_true"),
-        Argument("-h", "--no-dereference", action="store_true"),
-        Argument("-R", "--recursive", action="store_true"),
-        TEXT_OPERAND,
-        PATHS_OPERAND,
-    )
+# The walk and failsafe options chmod, chown and chgrp share.
+_TREE_OPTIONS: tuple[Argument, ...] = (
+    Argument("--reference", type="path"),
+    Argument("--preserve-root", action="store_true"),
+    Argument("--no-preserve-root", action="store_true"),
+    Argument("-H", action="store_true"),
+    Argument("-L", action="store_true"),
+    Argument("-P", action="store_true"),
+)
+
+_OWNERSHIP_OPTIONS: tuple[Argument, ...] = (
+    Argument("-c", "--changes", action="store_true"),
+    Argument("-f", "--silent", action="store_true"),
+    Argument("--quiet", action="store_true"),
+    Argument("-v", "--verbose", action="store_true"),
+    Argument("--dereference", action="store_true"),
+    Argument("-h", "--no-dereference", action="store_true"),
+    Argument("-R", "--recursive", action="store_true"),
+    *_TREE_OPTIONS,
 )
 
 _OVERWRITE_OPTIONS: tuple[Argument, ...] = (
@@ -106,12 +113,22 @@ SPECS: dict[str, CommandSpec] = {
             Argument("--quiet", action="store_true"),
             Argument("-v", "--verbose", action="store_true"),
             Argument("-R", "--recursive", action="store_true"),
+            *_TREE_OPTIONS,
             TEXT_OPERAND,
             PATHS_OPERAND,
         )
     ),
-    "chown": OWNERSHIP,
-    "chgrp": OWNERSHIP,
+    "chown": CommandSpec(
+        arguments=(
+            *_OWNERSHIP_OPTIONS,
+            Argument("--from"),
+            TEXT_OPERAND,
+            PATHS_OPERAND,
+        )
+    ),
+    "chgrp": CommandSpec(
+        arguments=(*_OWNERSHIP_OPTIONS, TEXT_OPERAND, PATHS_OPERAND)
+    ),
     "cp": CommandSpec(
         arguments=(
             Argument("-r", action="store_true"),
@@ -143,11 +160,10 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "rm": CommandSpec(
         arguments=(
-            Argument("-r", action="store_true"),
-            Argument("-R", action="store_true"),
-            Argument("-f", action="store_true"),
-            Argument("-v", action="store_true"),
-            Argument("-d", action="store_true"),
+            Argument("-r", "-R", "--recursive", action="store_true"),
+            Argument("-f", "--force", action="store_true"),
+            Argument("-v", "--verbose", action="store_true"),
+            Argument("-d", "--dir", action="store_true"),
             # Non-interactive control plane: -i/-I are accepted no-ops
             # (there is no prompt; removal always proceeds).
             Argument("-i", action="store_true"),
@@ -176,6 +192,7 @@ SPECS: dict[str, CommandSpec] = {
         arguments=(
             Argument("-c", "--no-create", action="store_true"),
             Argument("-s", "--size"),
+            Argument("-r", "--reference", type="path"),
             PATHS_OPERAND,
         )
     ),
@@ -282,6 +299,11 @@ SPECS: dict[str, CommandSpec] = {
                 action="store_true",
                 help="physical walk, do not follow symbolic links",
             ),
+            Argument(
+                "--one-file-system",
+                action="store_true",
+                help="stay on the mount each path starts on",
+            ),
             PATHS_OPERAND,
         )
     ),
@@ -307,6 +329,16 @@ SPECS: dict[str, CommandSpec] = {
                 "--no-dereference",
                 action="store_true",
                 help="do not dereference symbolic links",
+            ),
+            Argument(
+                "--raw",
+                action="store_true",
+                help="store each value exactly as typed, undecoded",
+            ),
+            Argument(
+                "--restore",
+                type="path",
+                help="set the attributes a getfattr --dump listing names",
             ),
             PATHS_OPERAND,
         )
