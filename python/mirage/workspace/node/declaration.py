@@ -16,6 +16,8 @@ from typing import Any, Callable
 
 from mirage.io import IOResult
 from mirage.policy import PolicyDenied
+from mirage.policy.policies import pre_session_gate
+from mirage.policy.types import SessionContext
 from mirage.shell.array import ShellArray, make_array
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -402,7 +404,22 @@ async def execute_declaration(
             )
             if view.is_readonly(bare, False):
                 # bash converts a readonly name all the same, which a
-                # gated write refuses.
+                # gated write refuses, so the rule is asked on its own
+                # before the ungated one lands it.
+                try:
+                    await pre_session_gate(
+                        registry.policies,
+                        SessionContext(
+                            verb="set",
+                            key=bare,
+                            value=scalar or "",
+                            session_id=session.session_id,
+                        ),
+                    )
+                except PolicyDenied as exc:
+                    raise DiscardSignal(
+                        encode_text(f"{exc.strerror}\n")
+                    ) from exc
                 seed_var(session, bare, fill)
                 continue
             try:

@@ -525,13 +525,15 @@ impl<G: Gate> Writer<'_, G> {
     /// `test -v` asks. A bare name over an array asks after element 0 (an
     /// associative one's key `0`), `name[@]` and `name[*]` whether any
     /// element is set. An associative subscript is the key as typed, one
-    /// quote pair removed; an indexed one is arithmetic, whose writes land
-    /// (`[[ -v a[x=2] ]]` leaves x at 2). `array` is the indexed array the
-    /// name reads as, `PIPESTATUS` and `FUNCNAME` included.
+    /// quote pair removed, or verbatim once `expanded`; an indexed one is
+    /// arithmetic, whose writes land (`[[ -v a[x=2] ]]` leaves x at 2).
+    /// `array` is the indexed array the name reads as, `PIPESTATUS` and
+    /// `FUNCNAME` included.
     pub async fn is_set(
         &mut self,
         reference: &[u8],
         array: Option<Indexed>,
+        expanded: bool,
     ) -> Result<bool, Fault> {
         let Some((name, subscript)) = element_reference(reference) else {
             return Ok(false);
@@ -550,7 +552,8 @@ impl<G: Gate> Writer<'_, G> {
                 });
             }
             Some(key) if assoc.is_some() => {
-                return Ok(assoc.is_some_and(|map| map.get(strip_key_quotes(key)).is_some()));
+                let key = if expanded { key } else { strip_key_quotes(key) };
+                return Ok(assoc.is_some_and(|map| map.get(key).is_some()));
             }
             Some(_) => {}
         }
@@ -909,17 +912,19 @@ mod tests {
         let mut gate = Recorder::default();
         let mut writer = writer(&mut store, &mut gate);
         let arr = || Some(Indexed::dense([b"p".to_vec(), b"q".to_vec()]));
-        assert!(run(writer.is_set(b"s", None)).unwrap());
-        assert!(run(writer.is_set(b"s[0]", None)).unwrap());
-        assert!(!run(writer.is_set(b"s[1]", None)).unwrap());
-        assert!(run(writer.is_set(b"m[\"a\"]", None)).unwrap());
-        assert!(!run(writer.is_set(b"m[1+1]", None)).unwrap());
-        assert!(run(writer.is_set(b"m[@]", None)).unwrap());
-        assert!(run(writer.is_set(b"arr[-1]", arr())).unwrap());
-        assert!(!run(writer.is_set(b"arr[x=2]", arr())).unwrap());
+        assert!(run(writer.is_set(b"s", None, false)).unwrap());
+        assert!(run(writer.is_set(b"s[0]", None, false)).unwrap());
+        assert!(!run(writer.is_set(b"s[1]", None, false)).unwrap());
+        assert!(run(writer.is_set(b"m[\"a\"]", None, false)).unwrap());
+        assert!(!run(writer.is_set(b"m[\"a\"]", None, true)).unwrap());
+        assert!(run(writer.is_set(b"m[a]", None, true)).unwrap());
+        assert!(!run(writer.is_set(b"m[1+1]", None, false)).unwrap());
+        assert!(run(writer.is_set(b"m[@]", None, false)).unwrap());
+        assert!(run(writer.is_set(b"arr[-1]", arr(), false)).unwrap());
+        assert!(!run(writer.is_set(b"arr[x=2]", arr(), false)).unwrap());
         assert_eq!(text(writer.store, "x").as_deref(), Some("2"));
-        assert!(!run(writer.is_set(b"1x", None)).unwrap());
-        assert!(!run(writer.is_set(b"m[]", None)).unwrap());
+        assert!(!run(writer.is_set(b"1x", None, false)).unwrap());
+        assert!(!run(writer.is_set(b"m[]", None, false)).unwrap());
     }
 
     #[test]

@@ -448,7 +448,10 @@ _ELEMENT_STATUS = ("ok", "denied", "readonly", "subscript")
 
 
 async def element_is_set(
-    session: SessionState, ref: str, policies: Policies | None = None
+    session: SessionState,
+    ref: str,
+    policies: Policies | None = None,
+    expanded: bool = False,
 ) -> bool:
     """Whether a ``name`` / ``name[sub]`` reference names a set value,
     what ``test -v`` asks: a bare name over an array checks element 0,
@@ -460,6 +463,8 @@ async def element_is_set(
         ref (str): the reference as the operand spelled it.
         policies (Policies | None): the policies the subscript's
             assignments clear; None outside a workspace.
+        expanded (bool): the subscript was expanded already, so an
+            associative key is taken verbatim, its quotes its own.
 
     Raises:
         ArithError: the subscript does not evaluate.
@@ -467,7 +472,9 @@ async def element_is_set(
     shell = session.vars.shell
     return bool(
         await run_write(
-            session, policies, lambda heard: shell.is_set(ref, listens=heard)
+            session,
+            policies,
+            lambda heard: shell.is_set(ref, expanded=expanded, listens=heard),
         )
     )
 

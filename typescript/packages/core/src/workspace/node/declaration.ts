@@ -16,6 +16,7 @@ import { shellVoice } from '../../shell/voice.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import { IOResult } from '../../io/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
+import { preSessionGate } from '../../policy/index.ts'
 import { makeArray, ShellArray } from '../../shell/array.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -368,7 +369,19 @@ export async function executeDeclaration(
         : makeArray(scalar === null ? [] : [scalar])
       if (view.isReadonly(bare, false)) {
         // bash converts a readonly name all the same, which a gated write
-        // refuses.
+        // refuses, so the rule is asked on its own before the ungated one
+        // lands it.
+        try {
+          await preSessionGate(registry.policies, {
+            verb: 'set',
+            key: bare,
+            value: scalar ?? '',
+            sessionId: session.sessionId,
+          })
+        } catch (err) {
+          if (!(err instanceof PolicyDenied)) throw err
+          throw new DiscardSignal(encodeText(`${err.message}\n`))
+        }
         seedVar(session, bare, fill)
         continue
       }

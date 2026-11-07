@@ -988,8 +988,10 @@ export class SessionState {
     // the name (the fetched plaintext must not land in the record)
     // while `var_attrs` keeps its letters, so a payload with the
     // `managed` key stripped still restores the name as
-    // attributed-unset rather than dropping it.
-    const records = this.vars.records()
+    // attributed-unset rather than dropping it. `$_` is the last command's
+    // last word, the shell's own and gone by the next one, so no record
+    // keeps it: `echo $TOKEN` would store the secret.
+    const records = this.vars.records().filter(([name]) => name !== '_')
     const managed = ownRecord<ManagedRef>()
     for (const [name, v] of records) {
       if (v.managed !== undefined) managed[name] = v.managed

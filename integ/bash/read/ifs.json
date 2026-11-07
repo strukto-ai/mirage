@@ -98,10 +98,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "IFS=: read re1 re2 re3 <<< 'a::c'; echo \"[$re1][$re2][$re3]\"; IFS=: read re4 re5 re6 <<< 'x::y:z:'; IFS=': ' read re7 re8 re9 <<< ' x : : y '; IFS=' :' read re10 re11 <<< ': x'; printf '[%s]' \"$re4\" \"$re5\" \"$re6\" \"$re7\" \"$re8\" \"$re9\" \"$re10\" \"$re11\"; echo; IFS=: read -a rea <<< 'x::y::'; IFS=': ' read -a reb <<< ' x : y :: z '; IFS=: read -a rec <<< '\\:a:b\\'; declare -p rea reb rec",
+      "command": "IFS=: read re1 re2 re3 <<< 'a::c'; echo \"[$re1][$re2][$re3]\"; IFS=: read re4 re5 re6 <<< 'x::y:z:'; IFS=': ' read re7 re8 re9 <<< ' x : : y '; IFS=' :' read re10 re11 <<< ': x'; printf '[%s]' \"$re4\" \"$re5\" \"$re6\" \"$re7\" \"$re8\" \"$re9\" \"$re10\" \"$re11\"; echo; IFS=: read -a rea <<< 'x::y::'; IFS=': ' read -a reb <<< ' x : y :: z '; IFS=: read -a rec <<< '\\:a:b\\'; declare -p rea reb rec; ( LC_ALL=C.UTF-8; IFS=😀 read -r ree1 ree2 ree3 <<< 'x😀y'; printf '[%s]' \"$ree1\" \"$ree2\" \"$ree3\"; echo )",
       "expect": {
         "exit": 0,
-        "stdout": "[a][][c]\n[x][][y:z:][x][][y][][x]\ndeclare -a rea=([0]=\"x\" [1]=\"\" [2]=\"y\" [3]=\"\")\ndeclare -a reb=([0]=\"x\" [1]=\"y\" [2]=\"\" [3]=\"z\")\ndeclare -a rec=([0]=\":a\" [1]=\"b\")\n",
+        "stdout": "[a][][c]\n[x][][y:z:][x][][y][][x]\ndeclare -a rea=([0]=\"x\" [1]=\"\" [2]=\"y\" [3]=\"\")\ndeclare -a reb=([0]=\"x\" [1]=\"y\" [2]=\"\" [3]=\"z\")\ndeclare -a rec=([0]=\":a\" [1]=\"b\")\n[x][y][]\n",
         "stderr": ""
       }
     },

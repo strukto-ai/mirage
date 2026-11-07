@@ -1019,8 +1019,8 @@ export class Shell {
   }
 
   /** Whether a `name` / `name[sub]` reference is set, as `test -v` asks; 1 or 0. */
-  isSet(reference: string, options: Heard = {}): ShellTask {
-    return this.task('is_set', null, reference, options.listens ?? false)
+  isSet(reference: string, options: Heard & { expanded?: boolean } = {}): ShellTask {
+    return this.task('is_set', null, reference, options.expanded ?? false, options.listens ?? false)
   }
 
   /** Write one element a builtin names: 0 landed, 1 hidden, 2 readonly, 3 no element. */

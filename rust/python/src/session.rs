@@ -766,14 +766,21 @@ impl Shell {
 
     /// Whether a `name` / `name[sub]` reference is set, as `test -v`
     /// asks; what its subscript assigns landed. The result is 1 or 0.
-    #[pyo3(signature = (reference, *, listens = false))]
+    /// `expanded` for a subscript already expanded, an associative key
+    /// then taken verbatim.
+    #[pyo3(signature = (reference, *, expanded = false, listens = false))]
     fn is_set(
         slf: &Bound<'_, Self>,
         reference: Bound<'_, PyAny>,
+        expanded: bool,
         listens: bool,
     ) -> PyResult<ShellTask> {
         let reference = bytes_of(&reference)?;
-        Self::write_task(slf, Write::IsSet { reference }, listens, true)
+        let write = Write::IsSet {
+            reference,
+            expanded,
+        };
+        Self::write_task(slf, write, listens, true)
     }
 
     /// Write one element a builtin names, or a bare name as element 0;

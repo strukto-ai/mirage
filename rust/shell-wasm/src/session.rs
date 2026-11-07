@@ -502,8 +502,13 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         }
         "is_set" => {
             let reference = args.bytes()?;
+            let expanded = args.flag()?;
             let listens = args.flag()?;
-            return engine.write(handle, Write::IsSet { reference }, listens, true);
+            let write = Write::IsSet {
+                reference,
+                expanded,
+            };
+            return engine.write(handle, write, listens, true);
         }
         "element" => {
             let name = args.string()?;

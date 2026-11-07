@@ -335,9 +335,14 @@ export async function elementIsSet(
   session: SessionState,
   ref: string,
   policies: Policies | null = null,
+  expanded = false,
 ): Promise<boolean> {
   const shell = session.vars.shell
-  return (await runWrite(session, policies, (heard) => shell.isSet(ref, { listens: heard }))) !== 0n
+  return (
+    (await runWrite(session, policies, (heard) =>
+      shell.isSet(ref, { expanded, listens: heard }),
+    )) !== 0n
+  )
 }
 
 /**

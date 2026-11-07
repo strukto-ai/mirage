@@ -390,9 +390,12 @@ pub enum Write {
         added: Option<Vec<u8>>,
     },
     /// Whether a `name` / `name[sub]` reference is set (`test -v`), what
-    /// its subscript assigns landed; the result is 1 or 0.
+    /// its subscript assigns landed; the result is 1 or 0. `expanded` for
+    /// a subscript the host already expanded, an associative key then
+    /// taken verbatim.
     IsSet {
         reference: Vec<u8>,
+        expanded: bool,
     },
     /// One element a builtin writes (`read 'a[k]'`); the result is the
     /// [`Element`] it came to.
@@ -411,7 +414,7 @@ pub fn write(shell: Shell, write: Write, listens: bool, warns: bool) -> Task<End
         let mut shell = shell;
         let mut diagnostics = Vec::new();
         let array = match &write {
-            Write::IsSet { reference } => element_reference(reference)
+            Write::IsSet { reference, .. } => element_reference(reference)
                 .and_then(|(name, _)| shell.indexed(name))
                 .map(Cow::into_owned),
             _ => None,
@@ -454,7 +457,13 @@ pub fn write(shell: Shell, write: Write, listens: bool, warns: bool) -> Task<End
                 } => writer.mark(&name, attr, on, follow_ref).await.map(|()| 0),
                 Write::Index { subscript } => writer.subscript_index(&subscript).await,
                 Write::Arith { text } => writer.arith(&text).await,
-                Write::IsSet { reference } => writer.is_set(&reference, array).await.map(i64::from),
+                Write::IsSet {
+                    reference,
+                    expanded,
+                } => writer
+                    .is_set(&reference, array, expanded)
+                    .await
+                    .map(i64::from),
                 Write::Element {
                     name,
                     subscript,

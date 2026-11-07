@@ -236,7 +236,7 @@ class Shell:
         self, subscript: Text, *, listens: bool = False
     ) -> ShellTask: ...
     def is_set(
-        self, reference: Text, *, listens: bool = False
+        self, reference: Text, *, expanded: bool = False, listens: bool = False
     ) -> ShellTask: ...
     def element(
         self,

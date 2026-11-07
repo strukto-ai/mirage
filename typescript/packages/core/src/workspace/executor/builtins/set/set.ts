@@ -38,14 +38,6 @@ import { builtinError, builtinUsage } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 
 /**
- * A value as bash's bare `set` prints it.
- *
- * `$'...'` when it holds a control character, the form `declare -p`
- * writes; single quotes when the shell would read a character in it
- * specially; bare otherwise. GNU prints `IFS=$' \t\n'`, `x='a b'` and
- * `y=a,b`.
- */
-/**
  * What a bare `set` prints: every visible variable by name, an array's value
  * as `declare -p` writes it, then each function as `declare -f` prints it,
  * which posix mode leaves out. Mirrors Python's _listing.
@@ -63,6 +55,14 @@ function listing(session: SessionState, parser?: ParseScope): string[] {
   return lines
 }
 
+/**
+ * A value as bash's bare `set` prints it.
+ *
+ * `$'...'` when it holds a control character, the form `declare -p`
+ * writes; single quotes when the shell would read a character in it
+ * specially; bare otherwise. GNU prints `IFS=$' \t\n'`, `x='a b'` and
+ * `y=a,b`.
+ */
 function listedValue(value: string): string {
   if (CONTROL_RE.test(value)) return bashDeclareQuote(value)
   let quoted = value.startsWith('#')

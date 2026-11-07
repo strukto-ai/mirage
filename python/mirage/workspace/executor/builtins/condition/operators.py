@@ -146,12 +146,19 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
         return text == ""
     if op == "-v":
         target = TARGET_RE.match(text)
-        if target is not None and ctx.subscripts is not None:
+        if (
+            target is not None
+            and target.group(2) is not None
+            and ctx.subscripts is not None
+        ):
             subscript = await ctx.subscripts(target.group(2))
             text = f"{target.group(1)}[{subscript}]"
+            expanded = True
+        else:
+            expanded = False
         try:
             return await element_is_set(
-                ctx.session, text, ctx.namespace.registry.policies
+                ctx.session, text, ctx.namespace.registry.policies, expanded
             )
         except ArithError as exc:
             # bash aborts the line on `[[ -v a[1/0] ]]` with `1/0:

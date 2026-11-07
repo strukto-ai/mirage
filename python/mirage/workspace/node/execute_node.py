@@ -1399,22 +1399,26 @@ async def _execute_node(
 
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
-        if command is None:
-            bind_last_word(session, ())
-        ran = await _run_redirected(
-            recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
-            command,
-            redirects,
-            job_table.processes if job_table is not None else None,
-            context,
-            stdin,
-            cs,
-            sink=sink,
-        )
+        try:
+            ran = await _run_redirected(
+                recurse,
+                dispatch,
+                execute_fn,
+                registry,
+                namespace,
+                command,
+                redirects,
+                job_table.processes if job_table is not None else None,
+                context,
+                stdin,
+                cs,
+                sink=sink,
+            )
+        finally:
+            # A line of redirects alone clears `$_` once they are
+            # opened, so a target may still name it (`>"$_"`).
+            if command is None:
+                bind_last_word(session, ())
         return ran if sink is None else await drained(sink, *ran)
 
     if kind == NodeKind.SUBSHELL:

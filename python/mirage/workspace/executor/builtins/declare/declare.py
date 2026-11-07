@@ -1322,17 +1322,25 @@ async def declaration_builtin(call: BuiltinCall) -> Result:
     """The ``declare``, ``typeset`` and ``readonly`` arm, for a name the
     parser did not read as a declaration: after an assignment
     (``n=1 declare -p n``) or from an expansion (``$d -p n``). The words
-    run again as the declaration they spell, as ``command`` runs them.
+    run again as the declaration they spell, as ``command`` runs them,
+    the name's alias masked: bash expands none in a word that came from
+    an expansion.
 
     Args:
         call (BuiltinCall): the invocation.
     """
-    io = await call.execute_fn(
-        shell_join([call.argv.name, *call.argv.args]),
-        session_id=call.context.session.session_id,
-        stdin=call.stdin,
-        call_stack=call.call_stack,
-    )
+    session = call.context.session
+    saved_alias = session.aliases.pop(call.argv.name, None)
+    try:
+        io = await call.execute_fn(
+            shell_join([call.argv.name, *call.argv.args]),
+            session_id=session.session_id,
+            stdin=call.stdin,
+            call_stack=call.call_stack,
+        )
+    finally:
+        if saved_alias is not None:
+            session.aliases[call.argv.name] = saved_alias
     return (
         io.stdout,
         io,

@@ -115,11 +115,15 @@ export async function applyUnary(
   if (op === '-z') return text === ''
   if (op === '-v') {
     const target = TARGET_RE.exec(text)
+    const subscript = target?.[2]
     let ref = text
-    if (target !== null && ctx.subscripts !== undefined)
-      ref = `${target[1] ?? ''}[${await ctx.subscripts(target[2] ?? '')}]`
+    let expanded = false
+    if (subscript !== undefined && ctx.subscripts !== undefined) {
+      ref = `${target?.[1] ?? ''}[${await ctx.subscripts(subscript)}]`
+      expanded = true
+    }
     try {
-      return await elementIsSet(ctx.session, ref, ctx.namespace.registry.policies)
+      return await elementIsSet(ctx.session, ref, ctx.namespace.registry.policies, expanded)
     } catch (err) {
       // bash aborts the line on `[[ -v a[1/0] ]]` with `1/0: division by
       // 0`, a test's grammar error being the only other thing that ends it.

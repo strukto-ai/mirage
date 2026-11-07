@@ -224,9 +224,10 @@ async def handle_bash(
     if script is None:
         return None, IOResult(), ExecutionNode(command=name, exit_code=0)
     # bash reads a file's or stdin's final backslash as a line continuation
-    # onto nothing, where -c keeps it.
+    # onto nothing, where -c keeps it; the newline it would have ended
+    # leaves it to the reader, so a quoted heredoc's `END\` still closes.
     if name == "bash" and parsed.script is None and ends_escaped(script):
-        script = script[:-1]
+        script += "\n"
     cs = (
         call_stack
         if call_stack is not None

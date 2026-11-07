@@ -86,18 +86,20 @@ function lastCountFlag(args: string[]): string | null {
 }
 
 /**
- * The characters `read` splits, each with whether a backslash quoted it.
- * Without `-r` a backslash quotes the next character, a backslash-newline
- * pair is a line continuation and a backslash at the end goes. Mirrors
- * Python's _read_chars.
+ * The characters `read` splits, as whole code points, each with whether a
+ * backslash quoted it. Without `-r` a backslash quotes the next character, a
+ * backslash-newline pair is a line continuation and a backslash at the end
+ * goes. Mirrors Python's _read_chars.
  */
 function readChars(text: string, raw: boolean): (readonly [string, boolean])[] {
   const out: (readonly [string, boolean])[] = []
+  const points = Array.from(text)
   let i = 0
-  while (i < text.length) {
-    const ch = text.charAt(i)
+  while (i < points.length) {
+    const ch = points[i] ?? ''
     if (ch === '\\' && !raw) {
-      if (i + 1 < text.length && text.charAt(i + 1) !== '\n') out.push([text.charAt(i + 1), true])
+      const next = points[i + 1]
+      if (next !== undefined && next !== '\n') out.push([next, true])
       i += 2
       continue
     }

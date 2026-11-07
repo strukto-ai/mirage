@@ -168,7 +168,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "readonly -a UC=(x y); unset 'UC[1]'; echo rc=$?; echo [${UC[@]}]; declare -n UR=UC; x=1; unset UR x 'UC[0]'; echo rc=$? ${x-gone}; g() { :; }; readonly -f g; h() { :; }; unset -f g h; echo rc=$?; type -t h || echo none",
+      "command": "readonly -a UC=(x y); unset 'UC[1]'; echo rc=$?; echo [${UC[@]}]; ( declare -n UR=UC; x=1; unset UR x 'UC[0]'; echo rc=$? ${x-gone}; g() { :; }; readonly -f g; h() { :; }; unset -f g h; echo rc=$?; type -t h || echo none )",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n[x y]\nrc=1 gone\nrc=1\nnone\n",

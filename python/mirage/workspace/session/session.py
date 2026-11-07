@@ -613,8 +613,12 @@ class SessionState:
         # the name (the fetched plaintext must not land in the record)
         # while `var_attrs` keeps its letters, so a payload with the
         # `managed` key stripped still restores the name as
-        # attributed-unset rather than dropping it.
-        records = self.vars.records()
+        # attributed-unset rather than dropping it. `$_` is the last
+        # command's last word, the shell's own and gone by the next one,
+        # so no record keeps it: `echo $TOKEN` would store the secret.
+        records = [
+            (name, var) for name, var in self.vars.records() if name != "_"
+        ]
         managed = {
             name: var.managed
             for name, var in records

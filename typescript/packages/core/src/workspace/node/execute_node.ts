@@ -1306,22 +1306,28 @@ async function executeNodeBody(
 
   if (kind === NodeKind.REDIRECT) {
     const [command, redirects] = getRedirects(node)
-    if (command === null) bindLastWord(session, [])
-    const ran = await runRedirected(
-      recurse,
-      dispatch,
-      executeFn,
-      registry,
-      deps.namespace,
-      command,
-      redirects,
-      deps.signal,
-      jobTable.processes,
-      sink,
-      context,
-      stdin,
-      callStack,
-    )
+    let ran: RedirectResult
+    try {
+      ran = await runRedirected(
+        recurse,
+        dispatch,
+        executeFn,
+        registry,
+        deps.namespace,
+        command,
+        redirects,
+        deps.signal,
+        jobTable.processes,
+        sink,
+        context,
+        stdin,
+        callStack,
+      )
+    } finally {
+      // A line of redirects alone clears `$_` once they are opened, so a
+      // target may still name it (`>"$_"`).
+      if (command === null) bindLastWord(session, [])
+    }
     return sink === undefined ? ran : drained(sink, ...ran)
   }
 

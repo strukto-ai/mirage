@@ -202,8 +202,9 @@ export async function handleBash(
     return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
   }
   // bash reads a file's or stdin's final backslash as a line continuation
-  // onto nothing, where -c keeps it.
-  if (name === 'bash' && parsed.script === null && endsEscaped(script)) script = script.slice(0, -1)
+  // onto nothing, where -c keeps it; the newline it would have ended leaves
+  // it to the reader, so a quoted heredoc's `END\` still closes.
+  if (name === 'bash' && parsed.script === null && endsEscaped(script)) script += '\n'
   const cs = callStack ?? new CallStack(session.shellNesting)
   cs.admit(name)
   const parentPid = session.processId

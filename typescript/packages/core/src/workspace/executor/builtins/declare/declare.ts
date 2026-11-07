@@ -563,6 +563,16 @@ export function declarationResult(
 }
 
 /**
+ * The `=(...)` an indexed array's `declare -p` line ends with:
+ * `a=([0]="x" [2]="z")`. Mirrors Python's array_body.
+ */
+export function arrayBody(arr: ShellArray): string {
+  const parts: string[] = []
+  for (const [i, el] of arr.elements) parts.push(`[${String(i)}]=${bashDeclareQuote(el)}`)
+  return `=(${parts.join(' ')})`
+}
+
+/**
  * The `declare -p` line for one name, or null when it has none.
  *
  * The attribute cluster is `attrLetters`, which is why this renders
@@ -574,16 +584,6 @@ export function declarationResult(
  * A hidden name answers null, the same way `isReadonly` answers false for
  * one: reporting it as declared would leak it.
  */
-/**
- * The `=(...)` an indexed array's `declare -p` line ends with:
- * `a=([0]="x" [2]="z")`. Mirrors Python's array_body.
- */
-export function arrayBody(arr: ShellArray): string {
-  const parts: string[] = []
-  for (const [i, el] of arr.elements) parts.push(`[${String(i)}]=${bashDeclareQuote(el)}`)
-  return `=(${parts.join(' ')})`
-}
-
 export function declareLine(session: SessionState, name: string): string | null {
   if (varHidden(session.visibility, name)) return null
   const v = session.vars.get(name)
@@ -1043,13 +1043,23 @@ export function referenceRefusal(
  * The `declare`, `typeset` and `readonly` arm, for a name the parser did not
  * read as a declaration: after an assignment (`n=1 declare -p n`) or from an
  * expansion (`$d -p n`). The words run again as the declaration they spell,
- * as `command` runs them. Mirrors Python's declaration_builtin.
+ * as `command` runs them, the name's alias masked: bash expands none in a
+ * word that came from an expansion. Mirrors Python's declaration_builtin.
  */
 export async function declarationBuiltin(call: BuiltinCall): Promise<RedirectResult> {
-  const io = await call.executeFn(shellJoin([call.argv.name, ...call.argv.args]), {
-    sessionId: call.context.session.sessionId,
-    stdin: call.stdin,
-    ...(call.callStack !== null ? { callStack: call.callStack } : {}),
-  })
-  return [io.stdout, io, new ExecutionNode({ command: call.argv.name, exitCode: io.exitCode })]
+  const session = call.context.session
+  const name = call.argv.name
+  const savedAlias = session.aliases[name]
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete session.aliases[name]
+  try {
+    const io = await call.executeFn(shellJoin([name, ...call.argv.args]), {
+      sessionId: session.sessionId,
+      stdin: call.stdin,
+      ...(call.callStack !== null ? { callStack: call.callStack } : {}),
+    })
+    return [io.stdout, io, new ExecutionNode({ command: name, exitCode: io.exitCode })]
+  } finally {
+    if (savedAlias !== undefined) session.aliases[name] = savedAlias
+  }
 }

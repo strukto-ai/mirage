@@ -2863,10 +2863,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "( set -- a b; value=2tail; echo \"${value#$#}|${value#\"$#\"}|${value#${#}}\"; value=1tail; false; echo \"${value#$?}|${value#\"$?\"}|${value#${?}}\"; value=\"${$}tail\"; echo \"${value#$$}|${value#\"$$\"}|${value#${$}}\" ); echo a b >/dev/null; echo \"[$_]\"; true; echo \"[$_]\"; pq=1; echo \"[$_]\"; declare pqd=2; echo \"[$_]\"; (echo sub >/dev/null); echo \"[$_]\"; echo r | cat >/dev/null; echo \"[$_]\"; pqf() { echo in >/dev/null; }; pqf a b; echo \"[$_]\"; [[ x == y ]]; echo \"[$_]\"; eval 'echo e1 e2' >/dev/null; echo \"[$_]\"; >/dev/null; echo \"[$_]\"; unset pqz; echo \"[$_]\"",
+      "command": "( set -- a b; value=2tail; echo \"${value#$#}|${value#\"$#\"}|${value#${#}}\"; value=1tail; false; echo \"${value#$?}|${value#\"$?\"}|${value#${?}}\"; value=\"${$}tail\"; echo \"${value#$$}|${value#\"$$\"}|${value#${$}}\" ); echo a b >/dev/null; echo \"[$_]\"; true; echo \"[$_]\"; pq=1; echo \"[$_]\"; declare pqd=2; echo \"[$_]\"; (echo sub >/dev/null); echo \"[$_]\"; echo r | cat >/dev/null; echo \"[$_]\"; pqf() { echo in >/dev/null; }; pqf a b; echo \"[$_]\"; [[ x == y ]]; echo \"[$_]\"; eval 'echo e1 e2' >/dev/null; echo \"[$_]\"; >/dev/null; echo \"[$_]\"; unset pqz; echo \"[$_]\"; echo /dev/null >/dev/null; >\"$_\"; echo \"rc=$? [$_]\"",
       "expect": {
         "exit": 0,
-        "stdout": "tail|tail|tail\ntail|tail|tail\ntail|tail|tail\n[b]\n[true]\n[]\n[pqd=2]\n[[pqd=2]]\n[[[pqd=2]]]\n[b]\n[[b]]\n[echo e1 e2]\n[]\n[pqz]\n",
+        "stdout": "tail|tail|tail\ntail|tail|tail\ntail|tail|tail\n[b]\n[true]\n[]\n[pqd=2]\n[[pqd=2]]\n[[[pqd=2]]]\n[b]\n[[b]]\n[echo e1 e2]\n[]\n[pqz]\nrc=0 []\n",
         "stderr": ""
       }
     },
