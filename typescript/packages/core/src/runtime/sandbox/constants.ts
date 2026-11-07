@@ -13,9 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { singleQuote } from '../../utils/quote.ts'
+import { decodeBase64 } from '../../utils/base64.ts'
+import { concat } from '../../utils/bytes.ts'
 import { boundSystemClock, systemNow } from '../../utils/clock.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { MountType } from '../types.ts'
+
+const ENC = new TextEncoder()
 
 /**
  * Why a sandbox cannot take a line, named by the state its status command
@@ -165,6 +169,56 @@ export const STOP_POLL_SECONDS = 0.02
 // Where the stop line finds grep and sleep: the config's PATH is for the
 // programs it runs and may name none of the system's directories.
 export const REAP_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+// Output as base64 lines per read, status on fd 3, for an exec that returns text.
+export const ENCODE_PRELUDE =
+  `e() { PATH=${REAP_PATH}; ` +
+  'while c=$(dd bs=65536 count=1 2>/dev/null | base64) && [ -n "$c" ]; ' +
+  `do printf '%s\\n' "$c"; done; }; ` +
+  `(PATH=${REAP_PATH}; command -v dd && command -v base64) >/dev/null || ` +
+  "{ echo 'mirage: the sandbox needs dd and base64 to return output' >&2; " +
+  'exit 127; }; '
+export const ENCODE_OUTPUT =
+  ENCODE_PRELUDE +
+  'exec 4>&1 5>&2; s=$( { { { "$@" 3>&- 4>&- 5>&-; echo $? >&3; } ' +
+  '| e >&4; } 2>&1 | e >&5; } 3>&1 ); exit "$s"'
+// For an exec that returns one combined stream: stderr joins stdout first.
+export const ENCODE_COMBINED =
+  ENCODE_PRELUDE +
+  'exec 4>&1; s=$( { { "$@" 2>&1 3>&- 4>&-; echo $? >&3; } ' +
+  '| e >&4; } 3>&1 ); exit "$s"'
+
+export const BASE64_LINE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
+
+/**
+ * `line` run so its output comes back as base64 lines, which an exec that
+ * decodes output as text leaves intact (`ENCODE_OUTPUT`).
+ *
+ * @param line the command, as `wrapLine` builds it.
+ * @param combined encode stderr with stdout as one stream, for an exec
+ *   that returns them combined.
+ */
+export function encodeOutput(line: string, combined = false): string {
+  const script = combined ? ENCODE_COMBINED : ENCODE_OUTPUT
+  return `/bin/sh -c ${singleQuote(script)} sh ${line}`
+}
+
+/**
+ * The bytes an `encodeOutput` command wrote, from whole lines of its
+ * output. A blank line adds nothing; a line that is not base64, which only
+ * the sandbox's own shell writes (the encoder missing), comes back as it
+ * is, with its newline.
+ *
+ * @param text whole lines of the command's output.
+ */
+export function decodeOutput(text: string): Uint8Array {
+  const parts: Uint8Array[] = []
+  for (const line of text.split('\n')) {
+    const word = line.trim()
+    parts.push(BASE64_LINE.test(word) ? decodeBase64(word) : ENC.encode(`${line}\n`))
+  }
+  return concat(parts)
+}
 
 /**
  * The command line for a sandbox whose exec takes one (ssh, e2b,

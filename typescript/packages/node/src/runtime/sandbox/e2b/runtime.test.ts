@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import type { Readable } from 'node:stream'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../../workspace.ts'
@@ -25,9 +27,19 @@ import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/runtime/sandbox/e2b/co
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
-import { EXEC_ID, MOUNT_GUARD, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import {
+  EXEC_ID,
+  MOUNT_GUARD,
+  encodeOutput,
+  wrapLine,
+} from '@struktoai/mirage-core/runtime/sandbox/constants'
 
 const DEC = new TextDecoder()
+
+/** `text` as the sandbox's encoder sends it. */
+function b64(text: string): string {
+  return `${Buffer.from(text).toString('base64')}\n`
+}
 
 function runLine(
   rt: E2BRuntime,
@@ -91,16 +103,17 @@ class FakeHandle {
     if (this.command === 'exit 3' || this.command === 'exit 0') {
       if (!this.eof) await Promise.race([this.sent.promise, this.closed.promise])
       await new Promise((resolve) => setTimeout(resolve, 0))
-      if (this.command === 'exit 0') return { stdout: 'partial', stderr: 'boom-err', exitCode: 0 }
-      throw new FakeExitError(3, 'partial', 'boom-err')
+      if (this.command === 'exit 0')
+        return { stdout: b64('partial'), stderr: b64('boom-err'), exitCode: 0 }
+      throw new FakeExitError(3, b64('partial'), b64('boom-err'))
     }
-    const hex = (): string => Buffer.from(this.input).toString('hex')
+    const hex = (): string => b64(Buffer.from(this.input).toString('hex'))
     if (this.command === 'head') {
       await this.received.promise
       return { stdout: hex(), stderr: '', exitCode: 0 }
     }
     if (!this.eof) await this.closed.promise
-    return { stdout: hex(), stderr: 'warn', exitCode: 0 }
+    return { stdout: hex(), stderr: b64('warn'), exitCode: 0 }
   }
   kill(): Promise<boolean> {
     this.killed = true
@@ -274,7 +287,9 @@ describe('E2BRuntime', () => {
     expect(DEC.decode(result.stderr)).toBe('warn')
     expect(FakeSandbox.last.commands.calls).toEqual([
       [
-        wrapLine(['/bin/sh', '-c', 'wc -l | cat'], { E: '1', [EXEC_ID]: 'runid' }, '/workspace'),
+        encodeOutput(
+          wrapLine(['/bin/sh', '-c', 'wc -l | cat'], { E: '1', [EXEC_ID]: 'runid' }, '/workspace'),
+        ),
         data !== null,
       ],
     ])
@@ -644,4 +659,156 @@ describe('E2BRuntime under session restrictions', () => {
       }
     },
   )
+})
+
+/**
+ * E2B's command handle over a local sh, its output decoded as the SDK
+ * decodes it (streaming TextDecoder) and read in small slices.
+ */
+class ShellHandle {
+  private readonly chunks = { out: [] as string[], err: [] as string[] }
+  private readonly pumps: Promise<unknown>
+  private readonly exited: Promise<number>
+  constructor(
+    private readonly child: ChildProcessWithoutNullStreams,
+    onStdout?: (text: string) => unknown,
+    onStderr?: (text: string) => unknown,
+  ) {
+    this.exited = new Promise((resolve) =>
+      child.on('exit', (code) => {
+        resolve(code ?? -1)
+      }),
+    )
+    this.pumps = Promise.all([
+      this.pump(child.stdout, onStdout, this.chunks.out),
+      this.pump(child.stderr, onStderr, this.chunks.err),
+    ])
+  }
+  private async pump(
+    stream: Readable,
+    callback: ((text: string) => unknown) | undefined,
+    chunks: string[],
+  ): Promise<void> {
+    const decoder = new TextDecoder()
+    for await (const data of stream as AsyncIterable<Buffer>) {
+      for (let at = 0; at < data.length; at += 7) {
+        const text = decoder.decode(data.subarray(at, at + 7), { stream: true })
+        if (text === '') continue
+        chunks.push(text)
+        await callback?.(text)
+      }
+    }
+    const tail = decoder.decode()
+    if (tail !== '') {
+      chunks.push(tail)
+      await callback?.(tail)
+    }
+  }
+  sendStdin(data: Uint8Array): Promise<void> {
+    this.child.stdin.write(data)
+    return Promise.resolve()
+  }
+  closeStdin(): Promise<void> {
+    this.child.stdin.end()
+    return Promise.resolve()
+  }
+  async wait(): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    await this.pumps
+    const exitCode = await this.exited
+    const [stdout, stderr] = [this.chunks.out.join(''), this.chunks.err.join('')]
+    if (exitCode !== 0) throw new FakeExitError(exitCode, stdout, stderr)
+    return { stdout, stderr, exitCode }
+  }
+  kill(): Promise<boolean> {
+    return Promise.resolve(this.child.kill('SIGKILL'))
+  }
+  disconnect(): Promise<void> {
+    return Promise.resolve()
+  }
+}
+
+class ShellCommands {
+  run(
+    command: string,
+    opts: {
+      stdin: boolean
+      onStdout?: (text: string) => unknown
+      onStderr?: (text: string) => unknown
+    },
+  ): Promise<ShellHandle> {
+    const child = spawn('/bin/sh', ['-c', command])
+    if (!opts.stdin) child.stdin.end()
+    return Promise.resolve(new ShellHandle(child, opts.onStdout, opts.onStderr))
+  }
+}
+
+class ShellSandbox {
+  readonly commands = new ShellCommands()
+  static connect(): Promise<ShellSandbox> {
+    return Promise.resolve(new ShellSandbox())
+  }
+}
+
+class ShellE2BRuntime extends E2BRuntime {
+  protected override loadSdk(): Promise<E2bSdk> {
+    return Promise.resolve({
+      Sandbox: ShellSandbox,
+      CommandExitError: FakeExitError,
+      NotFoundError: FakeNotFoundError,
+      SandboxError: FakeSandboxError,
+    } as unknown as E2bSdk)
+  }
+}
+
+const BYTES_LINE = "printf 'a\\377\\000b\\r\\n\\303'; printf 'e\\376\\000\\r\\n' >&2; exit 5"
+
+describe('E2BRuntime output bytes', () => {
+  // Program output is bytes: invalid UTF-8, NUL and CRLF reach the host
+  // unchanged on stdout and stderr, whole or streamed, with the program's
+  // status.
+  it.each([false, true])(
+    'returns arbitrary bytes and the exit code exactly (streamed: %s)',
+    async (streamed) => {
+      const runtime = new ShellE2BRuntime({ config: { sandboxId: 'sb-live' } })
+      const said = { out: [] as number[], err: [] as number[] }
+      const result = await runtime.runLine(
+        undefined,
+        [],
+        [],
+        { stdin: null, flags: { c: BYTES_LINE }, env: {}, cwd: PathSpec.fromStrPath('/') },
+        streamed ? (chunk) => Promise.resolve(void said.out.push(...chunk)) : undefined,
+        streamed ? (chunk) => Promise.resolve(void said.err.push(...chunk)) : undefined,
+      )
+      const stdout = streamed ? said.out : [...result.stdout]
+      const stderr = streamed ? said.err : [...(result.stderr ?? [])]
+      expect([result.exitCode, stdout, stderr]).toEqual([
+        5,
+        [0x61, 0xff, 0x00, 0x62, 0x0d, 0x0a, 0xc3],
+        [0x65, 0xfe, 0x00, 0x0d, 0x0a],
+      ])
+    },
+  )
+  // A program's output reaches the host while it still runs: here it
+  // waits for input that is only sent once its first line has arrived.
+  it('streams output while the program runs', async () => {
+    const runtime = new ShellE2BRuntime({ config: { sandboxId: 'sb-live' } })
+    let said = ''
+    const first = deferred<undefined>()
+    async function* reply(): AsyncGenerator<Uint8Array> {
+      await first.promise
+      yield new TextEncoder().encode('two\n')
+    }
+    const ctx = {
+      stdin: reply(),
+      flags: { c: 'echo one; head -n 1' },
+      env: {},
+      cwd: PathSpec.fromStrPath('/'),
+    }
+    const result = await runtime.runLine(undefined, [], [], ctx, (chunk) => {
+      said += DEC.decode(chunk)
+      if (said.includes('one\n')) first.resolve(undefined)
+      return Promise.resolve()
+    })
+    expect([result.exitCode, said]).toEqual([0, 'one\ntwo\n'])
+  }, 10_000)
 })

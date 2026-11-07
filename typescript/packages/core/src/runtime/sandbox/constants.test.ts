@@ -17,7 +17,17 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { EXEC_ID, MOUNT_GUARD, REAP_ABSENT, mountField, reapLine, wrapLine } from './constants.ts'
+import {
+  ENCODE_OUTPUT,
+  EXEC_ID,
+  MOUNT_GUARD,
+  REAP_ABSENT,
+  REAP_PATH,
+  decodeOutput,
+  mountField,
+  reapLine,
+  wrapLine,
+} from './constants.ts'
 
 const PRELUDE = `/bin/sh -c 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"' sh `
 
@@ -226,5 +236,41 @@ describe('MOUNT_GUARD', () => {
     const missing = join(tableDir(), 'missing')
     const done = guarded(missing, ...expected('/data', 'mirage-x:/data', 'fuse.sshfs'))
     expect([done.status, done.stdout, done.stderr]).toEqual([126, '', 'lost /data\n'])
+  })
+})
+
+// A line the sandbox's own shell writes (no encoder there) is not base64
+// and comes back as it is, between the decoded lines; a blank line adds
+// nothing.
+describe('decodeOutput', () => {
+  it('keeps a plain line as it is', () => {
+    const text = 'YQ==\r\nmirage: no base64\n\nAP8=\n'
+    expect([...decodeOutput(text)]).toEqual([
+      ...new TextEncoder().encode('amirage: no base64\n'),
+      0,
+      255,
+    ])
+  })
+})
+
+// A sandbox without dd or base64 runs nothing: the script says so in plain
+// text and exits 127.
+describe('ENCODE_OUTPUT', () => {
+  it('runs nothing in a sandbox without the encoder', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'mirage-noenc-'))
+    try {
+      const script = ENCODE_OUTPUT.replaceAll(REAP_PATH, empty)
+      const done = spawnSync('/bin/sh', ['-c', script, 'sh', '/bin/sh', '-c', 'echo ran'], {
+        encoding: 'utf8',
+        timeout: 10_000,
+      })
+      expect([done.status, done.stdout, done.stderr]).toEqual([
+        127,
+        '',
+        'mirage: the sandbox needs dd and base64 to return output\n',
+      ])
+    } finally {
+      rmSync(empty, { recursive: true, force: true })
+    }
   })
 })

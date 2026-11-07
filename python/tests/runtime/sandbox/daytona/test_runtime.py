@@ -12,10 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.runtime.sandbox.constants import wrap_line
+from mirage.runtime.sandbox.constants import encode_output, wrap_line
 from mirage.runtime.sandbox.daytona import DaytonaRuntime, sdk
 from mirage.runtime.sandbox.daytona.constants import stdin_redirect
 
@@ -126,7 +130,9 @@ async def test_exec_line_redirects_stdin_through_a_file():
     assert sandbox.fs.files[path] == b"a\nb\n"
     command, cwd, env = sandbox.process.calls[0]
     wrapped = wrap_line(("/bin/sh", "-c", "wc -l"), {"E": "1"}, "/workspace")
-    assert command == stdin_redirect(wrapped, path)
+    assert command == stdin_redirect(
+        encode_output(wrapped, combined=True), path
+    )
     assert f"rm -f {path}" in command
     assert (cwd, env) == (None, None)
 
@@ -175,3 +181,50 @@ async def test_a_session_restriction_refuses_every_line(profile):
     assert FakeClient.fetched == []
     assert (await (await ws.session("other")).shell("tool run")).exit_code == 0
     await ws.close()
+
+
+class ShellProcess:
+    """Daytona's exec over a local sh: stdout and stderr combined, decoded
+    as its JSON result carries them (UTF-8, errors replaced)."""
+
+    async def exec(self, command, cwd=None, env=None, timeout=None):
+        process = await asyncio.create_subprocess_exec(
+            "/bin/sh",
+            "-c",
+            command,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await process.communicate()
+        return SimpleNamespace(
+            result=out.decode("utf-8", "replace"), exit_code=process.returncode
+        )
+
+
+class LocalFs(FakeFs):
+    async def upload_file(self, data, path):
+        await super().upload_file(data, path)
+        Path(path).write_bytes(data)
+
+
+# Program output is bytes: invalid UTF-8, NUL and CRLF reach the host
+# unchanged, stderr in the one combined stream, with the program's status,
+# with or without piped input.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stdin", [None, b"in\xff\x00"])
+async def test_arbitrary_output_bytes_and_the_exit_code_come_back_exactly(
+    stdin,
+):
+    runtime = DaytonaRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    FakeClient.last.process = ShellProcess()
+    FakeClient.last.fs = LocalFs()
+    line = "printf 'a\\377\\000b\\r\\n\\303'; printf 'e\\376\\000\\r\\n' >&2; "
+    line += "cat; exit 5" if stdin is not None else "exit 5"
+    result = await runtime.exec_line(line, stdin, {}, "/")
+    assert (result.exit_code, result.stdout, result.stderr) == (
+        5,
+        b"a\xff\x00b\r\n\xc3e\xfe\x00\r\n" + (stdin or b""),
+        None,
+    )

@@ -17,7 +17,11 @@ from typing import Any
 from mirage.io.types import ByteSource, materialize
 from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import wrap_line
+from mirage.runtime.sandbox.constants import (
+    decode_output,
+    encode_output,
+    wrap_line,
+)
 from mirage.runtime.sandbox.daytona import sdk
 from mirage.runtime.sandbox.daytona.config import DaytonaConfig
 from mirage.runtime.sandbox.daytona.constants import stdin_path, stdin_redirect
@@ -32,7 +36,9 @@ class DaytonaRuntime(RemoteSandbox):
     execs lines. ``api_key`` falls back to DAYTONA_API_KEY. Daytona's
     exec has no stdin and reports combined output once the command
     ends, so piped bytes are uploaded and redirected in, stderr comes
-    back None, and a stream gets its output at the end. close()
+    back None, and a stream gets its output at the end. The output is
+    base64-encoded in the sandbox, since the exec returns it as text
+    (``encode_output``: the sandbox needs dd and base64). close()
     releases the SDK client and never touches the sandbox.
 
     Args:
@@ -68,14 +74,14 @@ class DaytonaRuntime(RemoteSandbox):
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        command = wrap_line(argv, env, cwd)
+        command = encode_output(wrap_line(argv, env, cwd), combined=True)
         if stdin is not None:
             path = stdin_path()
             await self._upload(path, await materialize(stdin))
             command = stdin_redirect(command, path)
         response = await self._sandbox.process.exec(command)
         return RunResult(
-            stdout=str(response.result).encode(),
+            stdout=decode_output(str(response.result)),
             stderr=None,
             exit_code=int(response.exit_code),
         )

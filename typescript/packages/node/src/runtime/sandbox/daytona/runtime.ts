@@ -16,15 +16,17 @@ import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { stdinPath, stdinRedirect } from './constants.ts'
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
-import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import {
+  decodeOutput,
+  encodeOutput,
+  wrapLine,
+} from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields, RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type DaytonaSdk } from './sdk.ts'
 import { DAYTONA_CONFIG_FIELDS, type DaytonaConfig } from './config.ts'
 import type { Daytona, Sandbox } from '@daytonaio/sdk'
-
-const ENC = new TextEncoder()
 
 /**
  * A Daytona sandbox the user runs as a whole-line runtime.
@@ -34,8 +36,10 @@ const ENC = new TextEncoder()
  * lines. `apiKey` falls back to DAYTONA_API_KEY. Daytona's exec has
  * no stdin and reports combined output once the command ends, so piped
  * bytes are uploaded and redirected in, stderr comes back null, and a
- * stream gets its output at the end. close() releases the SDK client and
- * never touches the sandbox.
+ * stream gets its output at the end. The output is base64-encoded in the
+ * sandbox, since the exec returns it as text (`encodeOutput`: the sandbox
+ * needs dd and base64). close() releases the SDK client and never
+ * touches the sandbox.
  */
 export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
   static override readonly configFields: ConfigFields = DAYTONA_CONFIG_FIELDS
@@ -70,7 +74,7 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
     cwd: string,
   ): Promise<RunResult> {
     if (this.sandbox === null) throw new Error('daytona sandbox not connected')
-    let command = wrapLine(argv, env, cwd)
+    let command = encodeOutput(wrapLine(argv, env, cwd), true)
     if (stdin !== null) {
       const path = stdinPath()
       await this.upload(path, await materialize(stdin))
@@ -78,7 +82,7 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
     }
     const response = await this.sandbox.process.executeCommand(command)
     return {
-      stdout: ENC.encode(response.result),
+      stdout: decodeOutput(response.result),
       stderr: null,
       exitCode: response.exitCode,
     }

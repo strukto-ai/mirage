@@ -182,6 +182,11 @@ mirage workspace create /tmp/sandbox.yaml
 ## Notes
 
 - Closing the workspace leaves the sandbox running.
+- Output comes back as the program wrote it, binary included: the
+  sandbox base64-encodes it on the way out, so the image needs `dd` and
+  `base64` (Debian, Ubuntu and Alpine images have both), and output
+  takes about a third more to transfer. Without them a line runs
+  nothing, prints why and exits 127.
 - Commands run concurrently, each with its own input and output. Without
   piped input, stdin starts closed.
 - Templates, sizing, networking and lifecycle stay E2B settings.

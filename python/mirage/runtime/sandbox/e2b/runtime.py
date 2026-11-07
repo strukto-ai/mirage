@@ -24,6 +24,8 @@ from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import (
     EXEC_ID,
+    decode_output,
+    encode_output,
     stop_signal,
     wrap_line,
 )
@@ -48,6 +50,22 @@ def past_mark(data: bytes) -> int:
     """
     at = data.find(PTY_MARK)
     return -1 if at < 0 else at + len(PTY_MARK)
+
+
+class LineDecoder:
+    """The bytes in output an ``encode_output`` command streams, decoded
+    a whole line at a time as its text arrives."""
+
+    def __init__(self) -> None:
+        self._held = ""
+
+    def feed(self, text: str) -> bytes:
+        lines, _, self._held = (self._held + text).rpartition("\n")
+        return decode_output(lines)
+
+    def flush(self) -> bytes:
+        held, self._held = self._held, ""
+        return decode_output(held) if held else b""
 
 
 class PtyWriter:
@@ -108,7 +126,9 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
     You create the sandbox yourself (`e2b sandbox spawn` or the SDK);
     mirage only connects by ``sandbox_id`` and execs lines.
     ``api_key`` falls back to E2B_API_KEY. E2B's exec reports stdout
-    and stderr separately, stdout as it arrives when streamed. Piped
+    and stderr separately, stdout as it arrives when streamed, each
+    base64-encoded in the sandbox since the exec decodes output as text
+    (``encode_output``: the sandbox needs dd and base64). Piped
     bytes use native stdin, chunk by chunk, followed by an explicit EOF;
     no input closes stdin when the command starts. The SDK's own
     command timeout is off: a command runs until mirage's limits stop
@@ -145,16 +165,20 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
+        out, err = LineDecoder(), LineDecoder()
+
         async def emit(text: str) -> None:
             assert output is not None
-            await output(text.encode())
+            if data := out.feed(text):
+                await output(data)
 
         async def emit_errors(text: str) -> None:
             assert errors is not None
-            await errors(text.encode())
+            if data := err.feed(text):
+                await errors(data)
 
         handle = await self._sandbox.commands.run(
-            wrap_line(argv, env, cwd),
+            encode_output(wrap_line(argv, env, cwd)),
             background=True,
             stdin=stdin is not None,
             on_stdout=emit if output is not None else None,
@@ -225,9 +249,17 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
                     task.cancel()
             await asyncio.gather(feeding, reaping, return_exceptions=True)
             await handle.disconnect()
+        if output is not None and (data := out.flush()):
+            await output(data)
+        if errors is not None and (data := err.flush()):
+            await errors(data)
         return RunResult(
-            stdout=str(result.stdout).encode() if output is None else b"",
-            stderr=str(result.stderr).encode() if errors is None else b"",
+            stdout=decode_output(str(result.stdout))
+            if output is None
+            else b"",
+            stderr=decode_output(str(result.stderr))
+            if errors is None
+            else b"",
             exit_code=int(result.exit_code),
         )
 
