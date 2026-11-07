@@ -501,7 +501,21 @@ fn refusals(source: &[u8], options: &super::Options, ended: bool, first: Fail) -
 fn said(source: &[u8], newlines: &[usize], fail: &Fail) -> Vec<Said> {
     let rows = |to: usize| newlines.partition_point(|&at| at < to);
     let at = fail.at.min(source.len());
-    let last = fail.end.min(source.len()).saturating_sub(1).max(at);
+    let end = fail.end.min(source.len());
+    let mut last = end.saturating_sub(1).max(at);
+    // bash reads on past the line continuations right after a token (the
+    // first may already lie inside its span), so it reports the token on
+    // the line they lead to.
+    let mut ahead = end;
+    while source
+        .get(ahead..)
+        .is_some_and(|rest| rest.starts_with(b"\\\n"))
+    {
+        ahead += 2;
+    }
+    if ahead > end || end > at && source[..end].ends_with(b"\\\n") {
+        last = ahead;
+    }
     let past = newlines.len() + usize::from(source.last().is_some_and(|&b| b != b'\n'));
     let mut out = Vec::new();
     for (index, text) in fail.lines.iter().enumerate() {

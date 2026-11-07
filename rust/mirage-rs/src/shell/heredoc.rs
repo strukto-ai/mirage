@@ -64,6 +64,12 @@ impl Parser<'_> {
             }
             self.i += 2;
         }
+        // A `#` there starts a comment, which leaves the delimiter out.
+        if self.peek() == b'#' {
+            let line_end =
+                memchr::memchr(b'\n', &self.s[self.i..]).map_or(self.s.len(), |n| self.i + n);
+            return self.fail(line_end);
+        }
         let (start, end, delimiter, raw) = self.heredoc_word()?;
         children.push(Syn::leaf("heredoc_start", start, end));
         self.pending.push(Pending {
@@ -112,6 +118,11 @@ impl Parser<'_> {
         let mut end = at;
         while end < s.len() {
             let byte = s[end];
+            // A process substitution is part of the word.
+            if matches!(byte, b'<' | b'>') && s.get(end + 1) == Some(&b'(') {
+                end = pair_end(s, end + 1, b'(', b')').ok_or_else(|| self.matching(end, ')'))?;
+                continue;
+            }
             if is_space(byte)
                 || matches!(byte, b';' | b'&' | b'|' | b'<' | b'>' | b'(' | b')')
                 || (byte == b'`' && self.in_backtick)
@@ -122,6 +133,12 @@ impl Parser<'_> {
                 b'\\' => end + 2,
                 b'\'' | b'"' | b'`' => {
                     quote_end(s, end, byte).ok_or_else(|| self.matching(end, char::from(byte)))?
+                }
+                // bash parses a substitution in the word as it reads it.
+                b'$' if s.get(end + 1) == Some(&b'(') && s.get(end + 2) != Some(&b'(') => {
+                    let mut probe = self.probe(end);
+                    probe.command_substitution()?;
+                    probe.i
                 }
                 b'$' if matches!(s.get(end + 1), Some(b'(' | b'{')) => {
                     let (open, close) = if s[end + 1] == b'(' {

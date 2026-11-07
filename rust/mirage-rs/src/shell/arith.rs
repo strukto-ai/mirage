@@ -193,7 +193,7 @@ impl Parser<'_> {
     pub(super) fn bracket_arithmetic(&mut self) -> R<Syn> {
         self.enter()?;
         let at = self.i;
-        self.scan_matched(at + 2, at, b'[', b']')?;
+        self.scan_matched(at + 2, at + 1, b'[', b']')?;
         let Some(end) = super::lex::bracket_end(self.s, at + 1) else {
             return self.fail(at);
         };
