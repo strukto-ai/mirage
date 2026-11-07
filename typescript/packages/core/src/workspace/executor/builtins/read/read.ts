@@ -34,6 +34,7 @@ import { TARGET_RE } from '../constants.ts'
 import {
   builtinUsage,
   countOperand,
+  identifierLine,
   isValidName,
   readonlyRefusal,
   recordDelimiter,
@@ -46,7 +47,7 @@ import { READ_VALUE_LETTERS } from './constants.ts'
 
 /** bash's refusal of a name `read` cannot assign. */
 function invalidName(name: string): RedirectResult {
-  return readRefusal(`${shellVoice()}read: \`${name}': not a valid identifier\n`)
+  return readRefusal(`${identifierLine('read', name)}\n`)
 }
 
 function readRefusal(msg: string): RedirectResult {
@@ -337,7 +338,7 @@ export async function handleRead(
   }
   const arrayName = typeof flags.a === 'string' ? flags.a : null
   if (arrayName !== null && !isValidName(arrayName)) {
-    return readRefusal(`${shellVoice()}read: \`${arrayName}': not a valid identifier\n`)
+    return invalidName(arrayName)
   }
   const variables = parse.operands.length > 0 ? parse.operands : ['REPLY']
   // A first name it cannot assign refuses before anything is read.

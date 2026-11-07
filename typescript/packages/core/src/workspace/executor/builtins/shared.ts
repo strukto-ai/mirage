@@ -268,6 +268,14 @@ export function readonlyLine(cmd: string, name: string): string {
   return `${shellVoice()}${voice}${name}: readonly variable`
 }
 
+/**
+ * A builtin's refusal of a word that names no variable (`bash: read: \`1x':
+ * not a valid identifier`). Mirrors Python's identifier_line.
+ */
+export function identifierLine(cmd: string, name: string): string {
+  return `${shellVoice()}${cmd}: \`${name}': not a valid identifier`
+}
+
 /** Render the readonly refusal (`readonlyLine`) as the result. */
 export function readonlyRefusal(cmd: string, name: string): RedirectResult {
   const encoded = encodeText(`${readonlyLine(cmd, name)}\n`)

@@ -33,6 +33,8 @@ from mirage.workspace.executor.builtins.printf.format import (
 from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
     fail,
+    identifier_line,
+    readonly_line,
     result,
     subscript_expansion,
 )
@@ -100,11 +102,7 @@ async def handle_printf(
         if parsed is None:
             # bash validates the name before formatting, so a bad name
             # suppresses the conversion errors the format would report.
-            return fail(
-                "printf",
-                f"{shell_voice()}printf: `{target}': not a valid identifier\n",
-                2,
-            )
+            return fail("printf", identifier_line("printf", target) + "\n", 2)
     if args and not program:
         first = args[0]
         if first == "--":
@@ -170,9 +168,7 @@ async def handle_printf(
         signal.stderr = encode_text(errors) + signal.stderr
         raise signal from exc
     if status == "readonly":
-        return fail(
-            "printf", errors + f"{shell_voice()}{base}: readonly variable\n"
-        )
+        return fail("printf", errors + readonly_line("printf", base) + "\n")
     if status == "denied":
         return fail(
             "printf", errors + f"{shell_voice()}{base}: permission denied\n"

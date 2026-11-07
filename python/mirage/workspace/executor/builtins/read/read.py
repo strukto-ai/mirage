@@ -32,6 +32,7 @@ from mirage.workspace.executor.builtins.read.constants import (
 from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
     count_operand,
+    identifier_line,
     is_valid_name,
     readonly_refusal,
     record_delimiter,
@@ -124,9 +125,7 @@ def _invalid_name(
     Args:
         name (str): the operand as spelled.
     """
-    return _read_refusal(
-        f"{shell_voice()}read: `{name}': not a valid identifier\n"
-    )
+    return _read_refusal(identifier_line("read", name) + "\n")
 
 
 def _read_refusal(
@@ -494,9 +493,7 @@ async def handle_read(
         stdin = descriptor.source
     array_name = str(flags["a"]) if "a" in flags else None
     if array_name is not None and not is_valid_name(array_name):
-        return _read_refusal(
-            f"{shell_voice()}read: `{array_name}': not a valid identifier\n"
-        )
+        return _invalid_name(array_name)
     variables = parse.operands or ["REPLY"]
     if TARGET_RE.match(variables[0]) is None:
         # A first name it cannot assign refuses before anything is read.

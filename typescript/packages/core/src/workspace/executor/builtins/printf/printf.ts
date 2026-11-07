@@ -27,7 +27,14 @@ import { assignElement, envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { TARGET_RE } from '../constants.ts'
 import type { SubscriptFn } from '../../../expand/types.ts'
-import { builtinUsage, fail, result, subscriptExpansion } from '../shared.ts'
+import {
+  builtinUsage,
+  fail,
+  identifierLine,
+  readonlyLine,
+  result,
+  subscriptExpansion,
+} from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 import { printfOutput, runPrintf } from './format.ts'
 
@@ -74,7 +81,7 @@ export async function handlePrintf(
     if (parsed === null) {
       // bash validates the name before formatting, so a bad name
       // suppresses the conversion errors the format would report.
-      return fail('printf', `${shellVoice()}printf: \`${target}': not a valid identifier\n`, 2)
+      return fail('printf', `${identifierLine('printf', target)}\n`, 2)
     }
   }
   const first = args[0]
@@ -145,8 +152,7 @@ export async function handlePrintf(
     if (!(err instanceof PolicyDenied)) throw err
     return fail('printf', errors + `${shellVoice()}${err.message}\n`)
   }
-  if (status === 'readonly')
-    return fail('printf', errors + `${shellVoice()}${base}: readonly variable\n`)
+  if (status === 'readonly') return fail('printf', `${errors}${readonlyLine('printf', base)}\n`)
   if (status === 'denied')
     return fail('printf', errors + `${shellVoice()}${base}: permission denied\n`)
   if (status !== 'ok')

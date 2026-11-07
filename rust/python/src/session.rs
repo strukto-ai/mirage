@@ -7,7 +7,7 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 use streams::arith;
 use streams::interp::expand::{Substitution, marked};
 use streams::interp::job::{Job, Output, Running, Step};
-use streams::interp::shell::Shell as Inner;
+use streams::interp::shell::{Frame, Shell as Inner};
 use streams::interp::task::{self, Answer, Ask, Expanded, Mode, Write};
 use streams::interp::write::{Denied, Fault, Verb};
 use streams::interp::{Diagnostic, Signal, listing, quote};
@@ -595,25 +595,26 @@ impl Shell {
             .iter()
             .map(|call| texts(call))
             .collect::<PyResult<Vec<_>>>()?;
-        let function_names = function_names.as_deref().map(texts).transpose()?;
-        let argv0 = bytes_of(&argv0)?;
-        let voice = bytes_of(&voice)?;
-        let shell = self.shell_mut()?;
-        shell.positional = positional;
-        shell.calls = calls;
-        shell.status = status;
-        shell.pid = pid;
-        shell.last_job = last_job;
-        shell.argv0 = argv0;
-        shell.options = options;
-        shell.shopts = shopts;
-        shell.env_limit = env_limit;
-        shell.outside = outside;
-        shell
-            .vars
-            .set_specials(pipe_status, function_names, line, bash_pid, voice);
-        shell.paren = paren;
-        shell.memory_room = memory_room;
+        let frame = Frame {
+            positional,
+            calls,
+            status,
+            pid,
+            last_job,
+            argv0: bytes_of(&argv0)?,
+            options,
+            shopts,
+            env_limit,
+            outside,
+            pipe_status,
+            function_names: function_names.as_deref().map(texts).transpose()?,
+            paren,
+            memory_room,
+            line,
+            bash_pid,
+            voice: bytes_of(&voice)?,
+        };
+        self.shell_mut()?.apply(frame);
         Ok(())
     }
 
@@ -656,20 +657,7 @@ impl Shell {
         mode: &str,
         listens: bool,
     ) -> PyResult<ShellTask> {
-        let mode = match mode {
-            "fields" => Mode::Fields,
-            "text" => Mode::Text,
-            "assignment" => Mode::Assignment,
-            "pattern" => Mode::Pattern,
-            "regex" => Mode::Regex,
-            "arith" => Mode::Arith,
-            "subscript" => Mode::Subscript,
-            other => {
-                return Err(PyRuntimeError::new_err(format!(
-                    "no expansion mode {other}"
-                )));
-            }
-        };
+        let mode: Mode = mode.parse().map_err(PyRuntimeError::new_err)?;
         let tree = Arc::clone(&node.tree);
         let index = node.index as usize;
         ShellTask::start(slf, Some((Arc::clone(&tree), node.serial)), |inner| {

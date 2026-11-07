@@ -11,7 +11,7 @@ use std::sync::Arc;
 use mirage_rs::arith;
 use mirage_rs::interp::expand::{Substitution, marked};
 use mirage_rs::interp::job::{Job, Output, Running, Step};
-use mirage_rs::interp::shell::Shell as Inner;
+use mirage_rs::interp::shell::{Frame, Shell as Inner};
 use mirage_rs::interp::task::{self, Answer, Ask, Expanded, Mode, Write};
 use mirage_rs::interp::write::{Denied, Fault, Verb};
 use mirage_rs::interp::{Diagnostic, Signal, listing, quote};
@@ -424,16 +424,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "expand" => {
             let tree = args.handle()?;
             let node = size(args.int()?)?;
-            let mode = match args.string()?.as_str() {
-                "fields" => Mode::Fields,
-                "text" => Mode::Text,
-                "assignment" => Mode::Assignment,
-                "pattern" => Mode::Pattern,
-                "regex" => Mode::Regex,
-                "arith" => Mode::Arith,
-                "subscript" => Mode::Subscript,
-                other => return Err(format!("no expansion mode {other}")),
-            };
+            let mode: Mode = args.string()?.parse()?;
             let listens = args.flag()?;
             let tree = shell_tree(tree).ok_or_else(|| format!("no tree {tree}"))?;
             return engine.start(handle, |inner| {
@@ -720,27 +711,26 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .maybe()?
                 .map(|item| texts(one(item, Args::list)?))
                 .transpose()?;
-            let paren = args.flag()?;
-            let memory_room = optional_size(args.maybe()?)?;
-            let line = size(args.int()?)?;
-            let bash_pid = u32::try_from(args.int()?).unwrap_or(0);
-            let voice = args.bytes()?;
-            let inner = shell.shell_mut()?;
-            inner.positional = positional;
-            inner.calls = calls;
-            inner.status = status;
-            inner.pid = pid;
-            inner.last_job = last_job;
-            inner.argv0 = argv0;
-            inner.options = options;
-            inner.shopts = shopts;
-            inner.env_limit = env_limit;
-            inner.outside = outside;
-            inner
-                .vars
-                .set_specials(pipe_status, function_names, line, bash_pid, voice);
-            inner.paren = paren;
-            inner.memory_room = memory_room;
+            let frame = Frame {
+                positional,
+                calls,
+                status,
+                pid,
+                last_job,
+                argv0,
+                options,
+                shopts,
+                env_limit,
+                outside,
+                pipe_status,
+                function_names,
+                paren: args.flag()?,
+                memory_room: optional_size(args.maybe()?)?,
+                line: size(args.int()?)?,
+                bash_pid: u32::try_from(args.int()?).unwrap_or(0),
+                voice: args.bytes()?,
+            };
+            shell.shell_mut()?.apply(frame);
             Item::Nil
         }
         "conversion_scalar" => match shell.store_mut()?.conversion_scalar(&args.string()?) {

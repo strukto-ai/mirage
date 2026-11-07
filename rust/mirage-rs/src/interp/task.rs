@@ -287,6 +287,25 @@ pub enum Mode {
     Subscript,
 }
 
+impl std::str::FromStr for Mode {
+    type Err = String;
+
+    /// A mode as a host names it: `fields`, `text`, `assignment`,
+    /// `pattern`, `regex`, `arith` or `subscript`.
+    fn from_str(name: &str) -> Result<Self, String> {
+        Ok(match name {
+            "fields" => Mode::Fields,
+            "text" => Mode::Text,
+            "assignment" => Mode::Assignment,
+            "pattern" => Mode::Pattern,
+            "regex" => Mode::Regex,
+            "arith" => Mode::Arith,
+            "subscript" => Mode::Subscript,
+            other => return Err(format!("no expansion mode {other}")),
+        })
+    }
+}
+
 /// What an expansion produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expanded {
