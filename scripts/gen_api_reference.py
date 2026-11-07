@@ -58,6 +58,8 @@ Routes are under `/v1` and take and return JSON. Send
 is the contract both servers are checked against.
 
 Rows marked **daemon and hosted** are also served by the hosted API.
+Readiness and shutdown control a server you run yourself, so they are
+documented with [launching a server](/home/access/http#server), not here.
 An error answers `{detail, errno?, refusal?}`; `429` adds `Retry-After`.
 """
 
@@ -308,7 +310,7 @@ def render(doc: dict[str, Any]) -> str:
         (path, method, op)
         for path, methods in doc["paths"].items()
         for method, op in methods.items()
-        if method in METHOD_ORDER
+        if method in METHOD_ORDER and not op.get("x-excluded")
     ]
     lines = [HEADER, "<ApiExplorer>", ""]
     for path, method, op in sorted(ops, key=order):
