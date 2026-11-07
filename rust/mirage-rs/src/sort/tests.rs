@@ -573,3 +573,63 @@ fn a_unique_merge_keeps_the_first_of_a_key_equal_series() {
     let typed = [("ignore_case", ""), ("unique", "")];
     assert_eq!(merged(&typed, &[&["b"], &["B"]]), ["b"]);
 }
+
+/// What `-R` under `salt` makes of `list`, with the other `options`.
+fn shuffled(options: &Options, salt: &[u8], list: &[&str]) -> Vec<String> {
+    let mut typed = options.to_vec();
+    typed.push(("random_sort", ""));
+    let mut config: Json = serde_json::from_str(&engine(
+        &typed,
+        json!({"mode": "sort", "run_bytes": 8 << 20}),
+    ))
+    .expect("json");
+    config["compare"]["salt"] = json!(salt);
+    split(&run("sort", &config.to_string(), &[&records(list)]).0)
+}
+
+#[test]
+fn random_keeps_equal_keys_together_and_follows_its_salt() {
+    let list = ["b", "a", "c", "a", "b", "d", "c", "e"];
+    let first = shuffled(&[], &[1; 16], &list);
+    assert_eq!(first, shuffled(&[], &[1; 16], &list));
+    let mut every = first.clone();
+    every.sort();
+    assert_eq!(every, ["a", "a", "b", "b", "c", "c", "d", "e"]);
+    let runs = first.windows(2).filter(|pair| pair[0] != pair[1]).count();
+    assert_eq!(runs, 4);
+    let salts: std::collections::BTreeSet<_> = (0..8u8)
+        .map(|byte| shuffled(&[], &[byte; 16], &list))
+        .collect();
+    assert!(salts.len() > 1);
+}
+
+#[test]
+fn random_hashes_a_key_after_folding_and_breaks_a_tie_on_the_record() {
+    let folded = shuffled(&[("ignore_case", "")], &[7; 16], &["B", "a", "b", "A"]);
+    let at = |name: &str| folded.iter().position(|record| record == name).unwrap();
+    assert_eq!(at("a"), at("A") + 1);
+    assert_eq!(at("b"), at("B") + 1);
+    let keyed = shuffled(&[("key", "2,2")], &[7; 16], &["x 2", "y 1", "z 2"]);
+    let at = |name: &str| keyed.iter().position(|record| record == name).unwrap();
+    assert_eq!(at("z 2"), at("x 2") + 1);
+}
+
+#[test]
+fn a_second_random_source_must_be_the_same_word() {
+    let typed = |words: &[&str]| -> Vec<(String, Vec<u8>)> {
+        words
+            .iter()
+            .map(|word| ("random_source".to_owned(), word.as_bytes().to_vec()))
+            .collect()
+    };
+    assert!(scan(&typed(&["a", "a"])).is_ok());
+    let refused = scan(&typed(&["a", "b"])).err().expect("refused");
+    assert_eq!(refused.status, 2);
+    assert_eq!(
+        String::from_utf8_lossy(&refused.stderr()),
+        "sort: multiple random sources specified"
+    );
+    assert_eq!(scan(&[]).expect("read")["random"], json!(false));
+    let random = [("random_sort".to_owned(), Vec::new())];
+    assert_eq!(scan(&random).expect("read")["random"], json!(true));
+}

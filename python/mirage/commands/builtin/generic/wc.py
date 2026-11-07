@@ -4,6 +4,7 @@ from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from mirage.commands.builtin.utils.files0 import listed_names
 from mirage.commands.builtin.utils.operands import operands_io
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import (
@@ -16,15 +17,17 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import word_refusal_error
+from mirage.commands.spec.usage import usage_hint, word_refusal_error
 from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.render import fs_error_line
+from mirage.errors.fs import fs_strerror
+from mirage.errors.render import ZERO_LENGTH_NAME, fs_error_line
 from mirage.io.types import ByteSource, IOResult, PathRecord
 from mirage.rs import run_stream
 from mirage.rs.stream import open_stream
 from mirage.shell.bytes import byte_view, decode_text, encode_text
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
+from mirage.utils.quote import shell_quote, shell_quote_always
 
 # The --total words in GNU's order, which is both the accepted set and
 # what `--total=x` lists back. No aliases, so one per line.
@@ -39,6 +42,7 @@ class WCFlags:
     chars: bool = False
     max_line_length: bool = False
     total: str = "auto"
+    files0_from: PathSpec | None = None
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> WCFlags:
@@ -62,6 +66,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> WCFlags:
         chars=fl.as_bool("chars"),
         max_line_length=fl.as_bool("max_line_length"),
         total=total,
+        files0_from=fl.as_path("files0_from"),
     )
 
 
@@ -269,6 +274,7 @@ async def format_multi(
     total: str = "auto",
     line_count: Callable[[PathSpec], Awaitable[int | None]] | None = None,
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
+    listed_from: str | None = None,
 ) -> tuple[bytes, bytes, list[PathRecord]]:
     """Format wc output for multiple already-resolved paths.
 
@@ -295,6 +301,9 @@ async def format_multi(
         size_of (Callable[[PathSpec], Awaitable[int | None]] | None):
             a regular file's size, called as ``size_of(path)``; None, or
             an answer of None, reads the file.
+        listed_from (str | None): the ``--files0-from`` list the paths
+            were read from, as typed (``-`` for stdin), which names an
+            empty entry by its number and pads nothing when it is stdin.
 
     Returns:
         tuple[bytes, bytes, list[PathRecord]]: Encoded wc output (``b""``
@@ -330,6 +339,11 @@ async def format_multi(
     )
     pushed = False
     for run, path in enumerate(paths):
+        if listed_from is not None:
+            refusal = _listed_refusal(listed_from, path, run)
+            if refusal:
+                err += encode_text(refusal)
+                continue
         try:
             found = (
                 await counted(path)
@@ -369,6 +383,8 @@ async def format_multi(
     width = (
         None
         if pushed
+        else 1
+        if listed_from == "-"
         else number_width(sizes, len(paths), shown_counts(flags))
     )
     records = [
@@ -390,6 +406,51 @@ async def format_multi(
     ]
     body = format_count_rows(rows, totals, len(paths), flags, width)
     return body, err, records
+
+
+def _listed_refusal(listed_from: str, path: PathSpec, run: int) -> str:
+    """The line refusing one ``--files0-from`` entry, empty for none.
+
+    Args:
+        listed_from (str): the list as typed, ``-`` for stdin.
+        path (PathSpec): the entry.
+        run (int): the entry's index in the list.
+    """
+    if path.raw_path == "":
+        return (
+            f"wc: {shell_quote(listed_from)}:{run + 1}: {ZERO_LENGTH_NAME}\n"
+        )
+    if listed_from == "-" and path.raw_path == "-":
+        return "wc: when reading file names from stdin, no file name of '-' allowed\n"
+    return ""
+
+
+async def _listed(
+    source: PathSpec,
+    stream: Callable[[PathSpec], AsyncIterator[bytes]],
+    cwd: PathSpec,
+) -> list[PathSpec] | IOResult:
+    """The paths a ``--files0-from`` list names, or wc's refusal of the
+    list itself.
+
+    Args:
+        source (PathSpec): the list, ``-`` for stdin.
+        stream (Callable[[PathSpec], AsyncIterator[bytes]]): the reader.
+        cwd (PathSpec): where a relative name is resolved.
+    """
+    label = source.raw_path if source.raw_path is not None else source.virtual
+    try:
+        names = await listed_names(source, stream)
+    except IsADirectoryError as exc:
+        line = f"wc: {shell_quote(label)}: read error: {fs_strerror(exc)}\n"
+        return IOResult(exit_code=1, stderr=encode_text(line))
+    except FS_ERRORS as exc:
+        line = (
+            f"wc: cannot open {shell_quote_always(label)} for reading: "
+            f"{fs_strerror(exc)}\n"
+        )
+        return IOResult(exit_code=1, stderr=encode_text(line))
+    return [PathSpec.from_str_path(name, cwd=cwd) for name in names]
 
 
 async def wc_generic(
@@ -430,7 +491,25 @@ async def wc_generic(
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=encode_text(str(exc) + "\n"))
     stream = stdin_stream(stream, ctx.stdin)
-    if paths:
+    listed_from = None
+    if parsed.files0_from is not None:
+        if paths:
+            word = paths[0].raw_path or paths[0].virtual
+            line = (
+                f"wc: extra operand {shell_quote_always(word)}\n"
+                "file operands cannot be combined with --files0-from\n"
+                f"{usage_hint('wc')}\n"
+            )
+            return None, IOResult(exit_code=1, stderr=encode_text(line))
+        listed = await _listed(parsed.files0_from, stream, ctx.cwd)
+        if isinstance(listed, IOResult):
+            return None, listed
+        source = parsed.files0_from
+        listed_from = (
+            source.raw_path if source.raw_path is not None else source.virtual
+        )
+        paths = listed
+    if paths or listed_from is not None:
         body, err, records = await format_multi(
             paths,
             read=stream,
@@ -442,6 +521,7 @@ async def wc_generic(
             total=parsed.total,
             line_count=line_count,
             size_of=size_of,
+            listed_from=listed_from,
         )
         io = operands_io(err)
         io.records = records

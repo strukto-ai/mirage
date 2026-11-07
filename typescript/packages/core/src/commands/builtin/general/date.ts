@@ -147,6 +147,17 @@ async function eachLine(
   ]
 }
 
+/**
+ * `-r`: the moment a file was last modified. A backend that reports no time
+ * for it answers the epoch. Mirrors Python's `_modified`.
+ */
+async function modified(ctx: Context, reference: PathSpec): Promise<Date> {
+  if (ctx.vfs === undefined) {
+    throw Object.assign(new Error(reference.rawPath), { code: 'ENOENT' })
+  }
+  return new Date((isoTimestamp((await ctx.vfs.stat(reference)).modified) ?? 0) * 1000)
+}
+
 function lacksPlusError(operand: string): UsageError {
   return new UsageError(
     `date: the argument '${quoteText(operand)}' lacks a leading '+';\n` +
@@ -213,13 +224,8 @@ async function date(
     if (parsed === null) return invalidDate(d)
     dt = parsed
   } else if (reference !== null) {
-    // -r: when the file was last modified; a backend that reports no time
-    // for it answers the epoch.
     try {
-      if (ctx.vfs === undefined) {
-        throw Object.assign(new Error(reference.rawPath), { code: 'ENOENT' })
-      }
-      dt = new Date((isoTimestamp((await ctx.vfs.stat(reference)).modified) ?? 0) * 1000)
+      dt = await modified(ctx, reference)
     } catch (err) {
       if (!isFsError(err)) throw err
       const line = fsErrorLine(CommandName.DATE, reference, err)

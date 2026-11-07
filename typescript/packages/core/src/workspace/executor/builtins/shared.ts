@@ -123,13 +123,6 @@ export function absPath(arg: string | PathSpec, cwd: string): string {
   return resolvePath(arg, cwd)
 }
 
-export interface SplitValueFlags {
-  flags: Set<string>
-  values: Map<string, string>
-  operands: (string | PathSpec)[]
-  bad: string | null
-}
-
 /**
  * Coerce operands to PathSpec and expand glob patterns per mount, through the
  * dispatcher's listings.

@@ -12,19 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isEisdir, isFsError } from '../../../errors/fs.ts'
-import { fsErrorLine } from '../../../errors/render.ts'
+import { fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine, ZERO_LENGTH_NAME } from '../../../errors/render.ts'
 import { IOResult, type ByteSource, type PathRecord } from '../../../io/types.ts'
 import { openStreamSync, runStream } from '../../../rs/stream.ts'
 import { byteView, decodeText, encodeText } from '../../../shell/bytes.ts'
-import type { PathSpec, ReadStreamFn } from '../../../types.ts'
+import { PathSpec, type ReadStreamFn } from '../../../types.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { shellQuote, shellQuoteAlways } from '../../../utils/quote.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
-import { wordRefusalError } from '../../spec/usage.ts'
+import { usageHint, wordRefusalError } from '../../spec/usage.ts'
 import { matchWord } from '../../spec/word_choice.ts'
+import { listedNames } from '../utils/files0.ts'
 import { guardInput } from '../utils/limit.ts'
 import { formatRecords } from '../utils/output.ts'
 import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
@@ -55,6 +57,7 @@ export interface WcFlags {
   chars: boolean
   maxLineLength: boolean
   total: 'auto' | 'always' | 'only' | 'never'
+  files0From: PathSpec | null
 }
 
 export function parseFlags(bag: Record<string, FlagValue>): WcFlags | string {
@@ -79,6 +82,7 @@ export function parseFlags(bag: Record<string, FlagValue>): WcFlags | string {
     chars: fl.asBool('chars'),
     maxLineLength: fl.asBool('max_line_length'),
     total: match.word as WcFlags['total'],
+    files0From: fl.asPath('files0_from') ?? null,
   }
 }
 
@@ -184,6 +188,39 @@ export function formatCountRows(
   return formatRecords(formatWcLines(out, width))
 }
 
+/** The line refusing one `--files0-from` entry, empty for none. */
+function listedRefusal(listedFrom: string, p: PathSpec, run: number): string {
+  if (p.rawPath === '')
+    return `wc: ${shellQuote(listedFrom)}:${String(run + 1)}: ${ZERO_LENGTH_NAME}\n`
+  if (listedFrom === '-' && p.rawPath === '-') {
+    return "wc: when reading file names from stdin, no file name of '-' allowed\n"
+  }
+  return ''
+}
+
+/**
+ * The paths a `--files0-from` list names, or wc's refusal of the list itself.
+ * Mirrors Python's `_listed`.
+ */
+async function listed(
+  source: PathSpec,
+  stream: ReadStreamFn,
+  cwd: PathSpec,
+): Promise<PathSpec[] | IOResult> {
+  const label = source.rawPath
+  let names: string[]
+  try {
+    names = await listedNames(source, stream)
+  } catch (e) {
+    if (!isFsError(e)) throw e
+    const line = isEisdir(e)
+      ? `wc: ${shellQuote(label)}: read error: ${fsStrerror(e) ?? ''}\n`
+      : `wc: cannot open ${shellQuoteAlways(label)} for reading: ${fsStrerror(e) ?? ''}\n`
+    return new IOResult({ exitCode: 1, stderr: encodeText(line) })
+  }
+  return names.map((name) => PathSpec.fromStrPath(name, undefined, cwd))
+}
+
 /** How many columns a row shows under these flags. */
 export function shownCounts(flags: WcFlags): number {
   return selectedValues({ lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }, flags).length
@@ -211,7 +248,22 @@ export async function wcGeneric(
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   }
-  if (paths.length > 0) {
+  let listedFrom: string | null = null
+  if (parsed.files0From !== null) {
+    const extra = paths[0]
+    if (extra !== undefined) {
+      const line =
+        `wc: extra operand ${shellQuoteAlways(extra.rawPath)}\n` +
+        'file operands cannot be combined with --files0-from\n' +
+        `${usageHint('wc')}\n`
+      return [null, new IOResult({ exitCode: 1, stderr: encodeText(line) })]
+    }
+    const found = await listed(parsed.files0From, stream, ctx.cwd)
+    if (found instanceof IOResult) return [null, found]
+    listedFrom = parsed.files0From.rawPath
+    paths = found
+  }
+  if (paths.length > 0 || listedFrom !== null) {
     const rows: WcRow[] = []
     const records: PathRecord[] = []
     const sizes: (number | null)[] = []
@@ -231,6 +283,13 @@ export async function wcGeneric(
         : null
     let pushed = false
     for (const [run, p] of paths.entries()) {
+      if (listedFrom !== null) {
+        const refusal = listedRefusal(listedFrom, p, run)
+        if (refusal !== '') {
+          err += refusal
+          continue
+        }
+      }
       let counts: WcCounts
       try {
         const found = counted === null || isStdin(p) ? null : await counted(p)
@@ -261,7 +320,11 @@ export async function wcGeneric(
       sizes.push(isStdin(p) ? null : counts.bytes)
       addCounts(total, counts)
     }
-    const width = pushed ? null : numberWidth(sizes, paths.length, shownCounts(parsed))
+    const width = pushed
+      ? null
+      : listedFrom === '-'
+        ? 1
+        : numberWidth(sizes, paths.length, shownCounts(parsed))
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
       stderr: err === '' ? null : encodeText(err),

@@ -15,7 +15,9 @@
 import { chunks } from '../../../io/cooperative.ts'
 import { ByteSpool, IO_BUFFER_SIZE } from '../../../io/spool.ts'
 import { drain } from '../../../io/stream.ts'
-import { stdinStream } from '../utils/stream.ts'
+import { listedNames } from '../utils/files0.ts'
+import { RandomSource, RandomSourceError } from '../utils/random_source.ts'
+import { isStdin, stdinStream } from '../utils/stream.ts'
 import { recordSeparator } from '../utils/lines.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
@@ -29,16 +31,19 @@ import {
 } from '../../../rs/stream.ts'
 import { LineFacts, PathSpec, type JsonValue } from '../../../types.ts'
 import { concat } from '../../../utils/bytes.ts'
-import { fsStrerror, isFsError } from '../../../errors/fs.ts'
+import { fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
+import { ZERO_LENGTH_NAME } from '../../../errors/render.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { stripSlash } from '../../../utils/slash.ts'
-import { shellQuote } from '../../../utils/quote.ts'
+import { type IdSource, SystemIdSource } from '../../../utils/ids.ts'
+import { shellQuote, shellQuoteAlways } from '../../../utils/quote.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { refused, scan } from '../../../rs/scan.ts'
 import { OPERAND } from '../../spec/constants.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { usageHint } from '../../spec/usage.ts'
 
 const ENC = new TextEncoder()
 
@@ -50,6 +55,7 @@ export interface SortFlags {
   merge: boolean
   output: PathSpec | null
   zeroTerminated: boolean
+  random: boolean
 }
 
 // The options sort's grammar in mirage-rs reads.
@@ -73,7 +79,12 @@ const GRAMMAR = [
   'c',
   'C',
   'check',
+  'random_sort',
+  'random_source',
 ] as const
+
+// The options naming a file whose word the scan compares as typed.
+const WORDS = ['output', 'random_source'] as const
 
 // The steps GNU sort names when a file fails it. GNU checks that every input
 // is readable before it reads any (`cannot read`), opens the output and the
@@ -139,14 +150,22 @@ function earliest(
 // holds other `-o` words than the paths. Mirrors _typed_options in sort.py.
 function typedOptions(fl: FlagView, paths: readonly PathSpec[]): [string, string][] {
   const tape = fl.occurrences(...GRAMMAR)
-  const outputs = fl.asPaths('output')
-  if (tape.filter(([name]) => name === 'output').length !== outputs.length) {
-    throw new Error(`sort's tape holds other -o words than its ${String(outputs.length)} paths`)
+  const words = new Map<string, string[]>()
+  for (const option of WORDS) {
+    const named = fl.asPaths(option)
+    if (tape.filter(([name]) => name === option).length !== named.length) {
+      throw new Error(
+        `sort's tape holds other ${option} words than its ${String(named.length)} paths`,
+      )
+    }
+    words.set(
+      option,
+      named.map((path) => path.rawPath),
+    )
   }
-  const words = outputs.map((path) => path.rawPath).reverse()
   const typed: [string, string][] = []
   for (const [name, value] of tape) {
-    const word = name === 'output' ? words.pop() : undefined
+    const word = words.get(name)?.shift()
     if (word !== undefined) {
       typed.push([name, word])
     } else if (value === true) {
@@ -207,7 +226,85 @@ export function parseFlags(
     merge: fl.asBool('merge'),
     output: outputs[outputs.length - 1] ?? null,
     zeroTerminated: config.zero_terminated === true,
+    random: values.random === true,
   }
+}
+
+function refusal(line: string): IOResult {
+  return new IOResult({ exitCode: 2, stderr: ENC.encode(`${line}\n`) })
+}
+
+/**
+ * The inputs a `--files0-from` list names, every one vetted before any is
+ * read, or what GNU sort refuses first. Mirrors _listed in sort.py.
+ */
+async function listed(
+  source: PathSpec,
+  paths: readonly PathSpec[],
+  stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
+  cwd: PathSpec,
+): Promise<PathSpec[] | IOResult> {
+  const label = source.rawPath
+  const extra = paths[0]
+  if (extra !== undefined) {
+    return refusal(
+      `sort: extra operand ${shellQuoteAlways(extra.rawPath)}\n` +
+        'file operands cannot be combined with --files0-from\n' +
+        usageHint('sort'),
+    )
+  }
+  let names: string[]
+  try {
+    names = await listedNames(source, stream)
+  } catch (error) {
+    if (!isFsError(error)) throw error
+    if (isEisdir(error)) {
+      return refusal(`sort: cannot read file names from ${shellQuoteAlways(label)}`)
+    }
+    const strerror = fsStrerror(error) ?? String(error)
+    return new IOResult({ exitCode: 2, stderr: stepFailure(OPEN_FAILED, label, strerror) })
+  }
+  if (names.length === 0) return refusal(`sort: no input from ${shellQuoteAlways(label)}`)
+  for (const [run, name] of names.entries()) {
+    if (name === '') {
+      return refusal(`sort: ${shellQuote(label)}:${String(run + 1)}: ${ZERO_LENGTH_NAME}`)
+    }
+    if (name === '-' && isStdin(source)) {
+      return refusal("sort: when reading file names from stdin, no file name of '-' allowed")
+    }
+  }
+  return names.map((name) => PathSpec.fromStrPath(name, undefined, cwd))
+}
+
+/**
+ * The configuration with the salt `-R` hashes keys under: the first 16 bytes
+ * of `--random-source`, or 16 random ones. Mirrors _salted in sort.py.
+ */
+async function salted(
+  config: Record<string, JsonValue>,
+  source: PathSpec | null,
+  stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
+  ids: IdSource,
+): Promise<Record<string, JsonValue> | IOResult> {
+  let salt: Uint8Array
+  if (source === null) {
+    salt = ids.randomWords(4)
+  } else {
+    const random = new RandomSource('sort', source, stream, OPEN_FAILED)
+    try {
+      salt = await random.take(16)
+    } catch (error) {
+      if (!(error instanceof RandomSourceError)) throw error
+      return refusal(error.message)
+    } finally {
+      await random.close()
+    }
+  }
+  const compare = config.compare
+  if (typeof compare !== 'object' || compare === null || Array.isArray(compare)) {
+    throw new Error(`sort's scan read no compare: ${JSON.stringify(config)}`)
+  }
+  return { ...config, compare: { ...compare, salt: [...salt] } }
 }
 
 async function checkStream(
@@ -462,8 +559,27 @@ export async function sortGeneric(
   write?: (path: PathSpec, data: ByteSource) => Promise<void>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, ctx.stdin)
-  const parsed = parseFlags(ctx.flags, paths)
+  let parsed = parseFlags(ctx.flags, paths)
   if (parsed instanceof IOResult) return [new Uint8Array(), parsed]
+  const fl = new FlagView(ctx.flags, specOf('sort'))
+  const list = fl.asPath('files0_from')
+  if (list !== undefined) {
+    const named = await listed(list, paths, stream, ctx.cwd)
+    if (named instanceof IOResult) return [new Uint8Array(), named]
+    paths = named
+    parsed = parseFlags(ctx.flags, paths)
+    if (parsed instanceof IOResult) return [new Uint8Array(), parsed]
+  }
+  if (parsed.random) {
+    const config = await salted(
+      parsed.config,
+      fl.asPaths('random_source').at(-1) ?? null,
+      stream,
+      ctx.ids ?? new SystemIdSource(),
+    )
+    if (config instanceof IOResult) return [new Uint8Array(), config]
+    parsed = { ...parsed, config }
+  }
   if (parsed.check) {
     const path = paths[0] ?? null
     return [

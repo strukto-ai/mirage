@@ -40,6 +40,8 @@ async def sort(
         write_bytes=(files.write if files.answers("write") else None),
         stdin=ctx.stdin,
         flags=ctx.flags,
+        cwd=ctx.cwd,
+        ids=ctx.ids,
     )
 
 

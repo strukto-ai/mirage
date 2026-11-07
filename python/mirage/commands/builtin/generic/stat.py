@@ -100,6 +100,7 @@ _ESCAPES = {
     "\\": 92,
 }
 _HEX = "0123456789abcdefABCDEF"
+_OCTAL = "01234567"
 
 _FS_LAYOUT = (
     '  File: "%n"\n'
@@ -543,9 +544,9 @@ def _escape(fmt: str, start: int, warnings: list[str]) -> tuple[str, int]:
         warnings.append("stat: warning: backslash at end of format\n")
         return "\\", cursor
     char = fmt[cursor]
-    if char in "01234567":
+    if char in _OCTAL:
         end = cursor
-        while end < len(fmt) and end - cursor < 3 and fmt[end] in "01234567":
+        while end < len(fmt) and end - cursor < 3 and fmt[end] in _OCTAL:
             end += 1
         return byte_char(int(fmt[cursor:end], 8)), end
     if char == "x" and cursor + 1 < len(fmt) and fmt[cursor + 1] in _HEX:
