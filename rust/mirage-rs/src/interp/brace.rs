@@ -45,6 +45,13 @@ pub fn spend(room: &mut Option<usize>, bytes: usize) -> Result<(), Exhausted> {
     Ok(())
 }
 
+/// Give back `bytes` taken out of `room` for words since dropped.
+fn refund(room: &mut Option<usize>, bytes: usize) {
+    if let Some(left) = room {
+        *left += bytes;
+    }
+}
+
 fn is(tok: Tok, byte: u8) -> bool {
     tok == Tok::Byte(byte)
 }
@@ -52,7 +59,8 @@ fn is(tok: Tok, byte: u8) -> bool {
 /// The words `template` expands to, group by group from the left, each
 /// word charged to `room` before it is built: a word holding thousands of
 /// groups builds no deeper than its groups nest, and stops at the first
-/// that does not fit.
+/// that does not fit. A group's words replace the partial words and the
+/// alternatives they were built from, whose bytes go back to `room`.
 fn expand(
     template: &[Tok],
     room: &mut Option<usize>,
@@ -62,6 +70,7 @@ fn expand(
         return Err(Exhausted);
     }
     let mut words: Vec<Vec<Tok>> = vec![Vec::new()];
+    let mut held = 0;
     let mut literal = 0;
     let mut i = 0;
     while i < template.len() {
@@ -78,6 +87,7 @@ fn expand(
             continue;
         };
         let body = &template[i + 1..close];
+        let before = *room;
         let alternatives = match sequence(body, room)? {
             Some(words) => words,
             None => match split_alternatives(body) {
@@ -94,14 +104,20 @@ fn expand(
                 }
             },
         };
+        let built = before.zip(*room).map_or(0, |(before, left)| before - left);
         let text = &template[literal..i];
         let mut next = Vec::new();
+        let mut size = 0;
         for word in &words {
             for alternative in &alternatives {
-                spend(room, word.len() + text.len() + alternative.len() + 1)?;
+                let bytes = word.len() + text.len() + alternative.len() + 1;
+                spend(room, bytes)?;
+                size += bytes;
                 next.push([word.as_slice(), text, alternative].concat());
             }
         }
+        refund(room, held + built);
+        held = size;
         words = next;
         i = close + 1;
         literal = i;
@@ -368,6 +384,18 @@ mod tests {
         let deep = format!("{}x{}", "{a,".repeat(5_000), "}".repeat(5_000));
         let deep: Vec<Tok> = deep.bytes().map(Tok::Byte).collect();
         assert_eq!(expand_template(&deep, &mut None), Err(Exhausted));
+        let long = format!("{}{}", "x".repeat(128 << 10), "{1..1}".repeat(NESTING));
+        let long: Vec<Tok> = long.bytes().map(Tok::Byte).collect();
+        let mut room = Some(1 << 20);
+        let words = expand_template(&long, &mut room).unwrap().unwrap();
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].len(), (128 << 10) + NESTING);
+        assert_eq!(room, Some((1 << 20) - words[0].len() - 1));
+        let crossed: Vec<Tok> = "p{a,b}q{1,2}r".bytes().map(Tok::Byte).collect();
+        let mut room = Some(100);
+        let words = expand_template(&crossed, &mut room).unwrap().unwrap();
+        assert_eq!(words.len(), 4);
+        assert_eq!(room, Some(100 - 4 * 6));
         let nested = format!("{}x{}", "{a,".repeat(NESTING), "}".repeat(NESTING));
         let nested: Vec<Tok> = nested.bytes().map(Tok::Byte).collect();
         assert_eq!(
