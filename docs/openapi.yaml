@@ -331,7 +331,8 @@ paths:
         use Unix milliseconds. Set vfs=true to include filesystem operation records.
         An empty JSON response is []. With format=jsonl, the same records are
         returned oldest first as newline-delimited JSON, with an attachment
-        filename of logs.jsonl. See the logs contract for Cloud differences.
+        filename of logs.jsonl. The [HTTP guide](/home/access/http#cloud-workspace-logs)
+        describes the different Cloud response and pagination.
       tags:
         - Workspaces
       x-hosts:

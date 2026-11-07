@@ -346,9 +346,24 @@ line made to a mount is a `vfs` entry between them.
 ```
 
 `stdout` and `stderr` keep their first 4096 characters.
-The Cloud endpoint returns paginated command objects instead of this array of
-records. Its JSON timestamps are in seconds, while its JSONL timestamps are in
-milliseconds.
+### Cloud workspace logs
+
+Cloud also exposes `GET /v1/workspaces/{id}/logs` at `https://api.strukto.ai`,
+but returns paginated command objects instead of the daemon's array of records.
+`session` filters one session. `limit` defaults to 50 and accepts 1–200; pass
+the opaque `next` cursor as `after` to fetch the next page with the same
+session filter. The response is `{"items": [...], "next": null}` on the
+last page, ordered newest first by command start time and ID. Each item has
+`id`, `command`, `cwd`, `started_at`, `duration_ms`, `exit_code`, `stdout`,
+`stderr`, `user_id`, `api_key_id`, and `mounts`. Mounts contain `op`, `path`,
+`source`, `bytes`, `started_at`, and `duration_ms`. JSON `started_at` values
+are Unix seconds. Durations are milliseconds.
+
+`format=jsonl` downloads all retained matching commands oldest first, ignoring
+`limit` and `after`. Each command is followed by its VFS calls and result,
+whose `parent` identifies the command. JSONL `timestamp` values are Unix
+milliseconds. The attachment uses `application/x-ndjson` and a workspace-named
+`-logs.jsonl` filename. Retention limits both response formats.
 
 ### Delete a workspace
 

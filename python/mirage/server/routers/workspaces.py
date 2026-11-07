@@ -598,7 +598,15 @@ async def get_workspace(
     return await make_detail(entry, verbose=verbose)
 
 
-@router.get("/{workspace_id}/logs", response_model=None)
+@router.get(
+    "/{workspace_id}/logs",
+    response_model=list[dict[str, Any]],
+    responses={
+        200: {
+            "content": {"application/x-ndjson": {"schema": {"type": "string"}}}
+        }
+    },
+)
 async def workspace_logs(
     workspace_id: str,
     request: Request,

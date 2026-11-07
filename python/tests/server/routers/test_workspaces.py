@@ -1873,6 +1873,11 @@ async def test_a_server_shutting_down_refuses_new_workspaces():
 @pytest.mark.asyncio
 async def test_history_reads_what_the_workspace_ran():
     app, _ = _make_app_with_short_grace(grace=10.0)
+    content = app.openapi()["paths"]["/v1/workspaces/{workspace_id}/logs"][
+        "get"
+    ]["responses"]["200"]["content"]
+    assert content["application/json"]["schema"]["type"] == "array"
+    assert content["application/x-ndjson"]["schema"]["type"] == "string"
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
