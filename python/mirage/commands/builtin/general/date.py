@@ -31,6 +31,7 @@ from mirage.commands.spec.usage import (
 )
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import PathSpec
@@ -213,7 +214,11 @@ async def _each_line(
         line = fs_error_line(CommandName.DATE, datefile, exc)
         return None, IOResult(exit_code=1, stderr=encode_text(line))
     io = IOResult()
-    return _dated(first, source, zone, fmt, io), io
+    # The output owns the input: closed early, or before its first pull,
+    # it closes the reader too.
+    return OutputStream(
+        _dated(first, source, zone, fmt, io), lambda: close_quietly(source)
+    ), io
 
 
 async def _modified(ctx: Context, reference: PathSpec) -> datetime:

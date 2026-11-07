@@ -224,3 +224,34 @@ describe('date output formats through the shell', () => {
     expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual(['', err, 1])
   })
 })
+
+// Mirrors test_date_f_closed_early_closes_its_input.
+it.each([0, 1])('closes the -f input when its output closes after %i pulls', async (pulls) => {
+  let closed = 0
+  const enc = new TextEncoder()
+  const lines = async function* (): AsyncGenerator<Uint8Array> {
+    try {
+      await Promise.resolve()
+      yield enc.encode('@0\n@1\n')
+      yield enc.encode('@2\n')
+    } finally {
+      closed += 1
+    }
+  }
+  const cmd = GENERAL_DATE[0]
+  if (cmd === undefined) throw new Error('date not registered')
+  const vfs = { read: () => Promise.resolve(lines()) }
+  const result = await cmd.fn(undefined as never, [], ['+%s'], {
+    stdin: null,
+    flags: { u: true, file: PathSpec.fromStrPath('/l') },
+    cwd: PathSpec.fromStrPath('/'),
+    vfs,
+  } as never)
+  const out = (result?.[0] as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+  for (let i = 0; i < pulls; i += 1) {
+    const step = await out.next()
+    expect(step.done === true ? '' : DEC.decode(step.value)).toMatch(/^0\n/)
+  }
+  await out.return?.()
+  expect(closed).toBe(1)
+})

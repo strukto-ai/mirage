@@ -15,6 +15,7 @@
 import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
+import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { isoTimestamp, parseDateExprAsync, parsePosixTimeAsync } from '../../../utils/dates.ts'
@@ -124,7 +125,7 @@ async function* dated(
   fmt: string,
   io: IOResult,
   signal?: AbortSignal,
-): AsyncIterable<Uint8Array> {
+): AsyncGenerator<Uint8Array> {
   const errors: string[] = []
   const one = async (raw: Uint8Array): Promise<Uint8Array | null> => {
     const text = decodeText(raw)
@@ -187,7 +188,10 @@ async function eachLine(
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(line) })]
   }
   const io = new IOResult()
-  return [dated(first, source, zone, fmt, io, ctx.signal), io]
+  // The output owns the input: closed early, or before its first pull, it
+  // closes the reader too.
+  const out = dated(first, source, zone, fmt, io, ctx.signal)
+  return [new OutputStream(out, () => closeQuietly(source)), io]
 }
 
 /**
