@@ -140,7 +140,7 @@ describe('Runtime.execute', () => {
   // the runtime's machine: a pipeline stage's when it is the stage's, a job's
   // when it is the job's, including one `exec` replaces, as bash execs it
   // there; a child of its shell otherwise, the session's shell staying across
-  // its lines, and of `find`, which forks each one.
+  // its lines, and of `find` and `xargs`, which fork each one.
   it('runs a program past the workspace as a process of its own', async () => {
     const box = new MachineId('box', 'b1')
     const [alone, line] = await seen('probe; echo $$')
@@ -158,6 +158,8 @@ describe('Runtime.execute', () => {
     expect([replaced.id.pid, replaced.runtime]).toEqual([Number(execd), 'seen'])
     const [forked, found] = await seen('find /data -maxdepth 0 -exec probe {} \\; & echo $!; wait')
     expect([forked.parent, forked.runtime]).toEqual([Number(found), 'seen'])
+    const [batched, xargs] = await seen('/usr/bin/xargs probe </dev/null & echo $!; wait')
+    expect([batched.parent, batched.runtime]).toEqual([Number(xargs), 'seen'])
   })
 
   // A runtime the workspace reaches runs its program in its shell's process.

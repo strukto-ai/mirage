@@ -27,7 +27,11 @@ import {
 } from '../../../../commands/spec/usage.ts'
 import { boundedMapStream } from '../../../../concurrency/limiter.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { runAsProgram, runWithEvaluation } from '../../../../context/session_context.ts'
+import {
+  currentCaller,
+  runAsProgram,
+  runWithEvaluation,
+} from '../../../../context/session_context.ts'
 import { enoent, fsStrerror } from '../../../../errors/fs.ts'
 import { chunks } from '../../../../io/cooperative.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
@@ -979,6 +983,9 @@ async function* runLines(
     signal: AbortSignal,
   ): Promise<void> => {
     const line = shellJoin(words)
+    // xargs stays its process and forks each program as a child of it.
+    const process = currentCaller().process
+    if (process != null) process.oneCommand = false
     if (!forked) {
       await runAsProgram(session, () =>
         drainChild(

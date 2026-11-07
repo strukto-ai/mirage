@@ -40,6 +40,7 @@ from mirage.commands.spec.usage import (
 )
 from mirage.concurrency.limiter import bounded_map_stream
 from mirage.context import (
+    current_caller,
     reset_current_session,
     reset_program_invocation,
     set_current_evaluation,
@@ -990,6 +991,10 @@ async def _run_lines(
     ) -> None:
         line = shell_join(words)
         extra = {"session_id": session.session_id, "stdin": feed, "sink": pipe}
+        # xargs stays its process and forks each program as a child of it.
+        process = current_caller().process
+        if process is not None:
+            process.one_command = False
         # xargs execs its command, so a builtin that is also a program
         # answers as the program.
         if not forked:
