@@ -24,6 +24,7 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.context import bind_caller, current_caller, reset_caller
+from mirage.errors.fs import strerror_of
 from mirage.mount.sftp import (
     MirageSFTPServer,
     PipeServer,
@@ -280,6 +281,118 @@ async def test_a_sync_lands_what_a_pipe_acknowledged_before_its_close():
     finally:
         requests.feed_eof()
         await asyncio.wait_for(served, 5)
+        await ws.close()
+
+
+async def capped_pipe() -> tuple[
+    Workspace,
+    PipeServer,
+    asyncio.StreamReader,
+    asyncio.StreamReader,
+    asyncio.Task[None],
+]:
+    """A pipe server over a 20-byte ``/notes``, past its init."""
+    ws = Workspace({"/notes": RAMVFS(capacity=20)}, mode=MountMode.WRITE)
+    await ws.session("agent")
+    server = PipeServer(ws.vfs, ws.get_session("agent"))
+    requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
+    served = asyncio.create_task(server.serve(requests, Feed(answers)))
+    requests.feed_data(packet(FXP_INIT, struct.pack(">I", 3)))
+    await answer(answers)
+    return ws, server, requests, answers, served
+
+
+def said(lost: list[tuple[str, Exception]]) -> list[tuple[str, str]]:
+    return [(path, strerror_of(err)) for path, err in lost]
+
+
+@pytest.mark.asyncio
+async def test_a_sync_hands_back_a_landing_that_failed_once():
+    # sshfs answers close(2) before the landing, so the sync's failure is
+    # the program's only report; the close sshfs sends later fails the
+    # same way, and no later sync reports it again.
+    ws, server, requests, answers, served = await capped_pipe()
+    try:
+        handle = await write_new(
+            requests, answers, b"/notes/big.bin", b"x" * 50
+        )
+        assert said(await server.sync()) == [
+            ("/notes/big.bin", "Disk quota exceeded")
+        ]
+        assert await server.sync() == []
+        _, body = await request(
+            requests, answers, FXP_CLOSE, 3, string(handle)
+        )
+        assert body[:8] != struct.pack(">II", 3, FX_OK)
+        assert await server.sync() == []
+    finally:
+        requests.feed_eof()
+        await asyncio.wait_for(served, 5)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_close_that_fails_is_handed_to_the_next_sync():
+    # The close lands the writes after close(2) returned: its failure,
+    # with the error the store raised, waits for the line's sync.
+    ws, server, requests, answers, served = await capped_pipe()
+    try:
+        handle = await write_new(
+            requests, answers, b"/notes/big.bin", b"x" * 50
+        )
+        await request(requests, answers, FXP_CLOSE, 3, string(handle))
+        assert said(await server.sync()) == [
+            ("/notes/big.bin", "Disk quota exceeded")
+        ]
+        assert await server.sync() == []
+    finally:
+        requests.feed_eof()
+        await asyncio.wait_for(served, 5)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_close_racing_a_sync_reports_its_failure_once(monkeypatch):
+    # sshfs may send the close while the line's sync is still landing:
+    # both fail on the one handle, and the line hears of it once.
+    ws, server, requests, answers, served = await capped_pipe()
+    core_sync = server._core.sync
+
+    async def racing():
+        failed = await core_sync()
+        await request(requests, answers, FXP_CLOSE, 3, string(handle))
+        return failed
+
+    try:
+        handle = await write_new(
+            requests, answers, b"/notes/big.bin", b"x" * 50
+        )
+        monkeypatch.setattr(server._core, "sync", racing)
+        assert said(await server.sync()) == [
+            ("/notes/big.bin", "Disk quota exceeded")
+        ]
+    finally:
+        requests.feed_eof()
+        await asyncio.wait_for(served, 5)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_pipe_that_ends_lands_every_handle_past_one_that_fails():
+    # asyncssh closes the handles a client left open and stops at the
+    # first close that raises; the server still releases the rest.
+    ws, server, requests, answers, served = await capped_pipe()
+    try:
+        await write_new(requests, answers, b"/notes/big.bin", b"x" * 50)
+        await write_new(requests, answers, b"/notes/small.txt", b"ok")
+        requests.feed_eof()
+        with pytest.raises(OSError):
+            await asyncio.wait_for(served, 5)
+        assert await ws.vfs.read("/notes/small.txt") == b"ok"
+        assert said(await server.sync()) == [
+            ("/notes/big.bin", "Disk quota exceeded")
+        ]
+    finally:
         await ws.close()
 
 

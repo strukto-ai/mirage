@@ -1683,16 +1683,21 @@ export class MountCore {
   /**
    * Land what every open handle holds, as sync(2) does, for a client whose
    * close(2) returns before it releases the handle (sshfs). A landing that
-   * fails is logged, and its bytes stay on the handle for its own flush to
-   * retry and report.
+   * fails does not stop the rest, and its bytes stay on the handle for its
+   * own flush to retry.
+   *
+   * @returns each handle whose landing failed, with its path and the
+   *   error, for the caller to report.
    */
-  async sync(): Promise<void> {
-    for (const ctx of [...this.handles.values()]) {
+  async sync(): Promise<[number, string, unknown][]> {
+    const failed: [number, string, unknown][] = []
+    for (const [fd, ctx] of [...this.handles.items()]) {
       try {
         await this.settle(ctx)
       } catch (err) {
-        console.warn(`fuse: landing ${ctx.path} failed: ${String(err)}`)
+        failed.push([fd, ctx.path, err])
       }
     }
+    return failed
   }
 }

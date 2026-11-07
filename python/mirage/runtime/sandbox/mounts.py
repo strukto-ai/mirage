@@ -28,6 +28,7 @@ from mirage.context import (
     get_current_session,
     reset_caller,
 )
+from mirage.errors.fs import strerror_of
 from mirage.runtime.binding import (
     WorkspaceBinding,
     refused_run,
@@ -439,26 +440,66 @@ class SandboxMounts:
             await self._unmount()
             self._session = None
 
-    async def sync(self) -> None:
+    async def land(self) -> list[str]:
         """Land every write a served prefix's server has acknowledged.
 
         sshfs answers close(2) once the file's writes are acknowledged and
         sends the SFTP close that lands them afterwards, so a line can end
-        before they land. Its programs have closed their files by then,
-        so this lands every one, outside the line as that close would,
-        and ``file_effects_dispatched`` holds. Each landing keeps the
-        line's write admission alone: a capture waiting for the line lets
-        it through rather than waiting on it. Then the line lends its
-        admission to no more requests, and waits out the ones it lent it
-        to, so a capture never reads past one still running.
+        before they land, and the program never hears of one that fails.
+        This lands every one, outside the line as that close would, and
+        ``file_effects_dispatched`` holds. Each landing keeps the line's
+        write admission alone: a capture waiting for the line lets it
+        through rather than waiting on it. Failures it cannot hand back,
+        the landing stopped part way, are logged.
+
+        Returns:
+            list[str]: one line per write that failed to land, naming
+            its path and why.
         """
         line = current_caller()
         admitted = Caller(stop=line.stop, write_held=line.write_held)
+        failed: list[tuple[str, Exception]] = []
+        syncing: asyncio.Task[list[tuple[str, Exception]]] | None = None
         try:
             for _, _, server in list(self._served.values()):
                 context = Context()
                 context.run(bind_caller, admitted)
-                await asyncio.create_task(server.sync(), context=context)
+                syncing = asyncio.create_task(server.sync(), context=context)
+                failed += await syncing
+                syncing = None
+        except BaseException:
+            # A sync that finished as the landing stopped still counts.
+            if (
+                syncing is not None
+                and syncing.done()
+                and not syncing.cancelled()
+                and syncing.exception() is None
+            ):
+                failed += syncing.result()
+            # The line hears of none of these, and no landing reports them.
+            for path, err in failed:
+                logger.warning(
+                    "%s: %s: %s", self._runtime, path, strerror_of(err)
+                )
+            raise
+        return [
+            f"{self._runtime}: {path}: {strerror_of(err)}"
+            for path, err in failed
+        ]
+
+    async def sync(self) -> list[str]:
+        """Land as ``land`` does as the line ends, however it ended. Then
+        the line lends its admission to no more requests, and waits out
+        the ones it lent it to, so a capture never reads past one still
+        running.
+
+        Returns:
+            list[str]: one line per write that failed to land, naming
+            its path and why.
+        """
+        line = current_caller()
+        try:
+            return await self.land()
         finally:
             for index, (held, lent) in enumerate(self._lines):
                 if held.stop is line.stop:

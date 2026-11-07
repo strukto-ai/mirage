@@ -18,6 +18,7 @@ import {
   runWithCaller,
   type Caller,
 } from '../../context/session_context.ts'
+import { strerrorOf } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { singleQuote } from '../../utils/quote.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -44,8 +45,8 @@ import {
 export interface PipeServer {
   /** Answer the client's requests on its pipe until it closes it. */
   serve(reader: ReadableStream<Uint8Array>, writer: PipeWriter): Promise<void>
-  /** Land every write the client has been told is done. */
-  sync(): Promise<void>
+  /** Land every write the client has been told is done; the path and error of each landing that failed since the last sync. */
+  sync(): Promise<[string, unknown][]>
 }
 
 let pipeServer: Parameters<typeof registerPipeServer>[0] | null = null
@@ -400,22 +401,49 @@ export class SandboxMounts {
    *
    * sshfs answers close(2) once the file's writes are acknowledged and
    * sends the SFTP close that lands them afterwards, so a line can end
-   * before they land. Its programs have closed their files by then, so
-   * this lands every one, outside the line as that close would, and
+   * before they land, and the program never hears of one that fails. This
+   * lands every one, outside the line as that close would, and
    * `fileEffectsDispatched` holds. Each landing keeps the line's write
    * admission alone: a capture waiting for the line lets it through rather
-   * than waiting on it. Then the line lends its admission to no more
-   * requests, and waits out the ones it lent it to, so a capture never
-   * reads past one still running.
+   * than waiting on it. Failures it cannot hand back, the landing stopped
+   * part way or its run gone, are logged.
+   *
+   * @param signal the run's, which stops waiting for the landing.
+   * @returns one line per write that failed to land, naming its path and
+   *   why.
    */
-  async sync(): Promise<void> {
+  async land(signal?: AbortSignal): Promise<string[]> {
     const { stop, writeHeld } = currentCaller()
+    const lost: string[] = []
     try {
       for (const { server } of [...this.served.values()]) {
-        await runDetached(() =>
+        const failed = await runDetached(() =>
           runWithCaller({ ...currentCaller(), stop, writeHeld }, () => server.sync()),
         )
+        for (const [path, err] of failed) lost.push(`${this.runtime}: ${path}: ${strerrorOf(err)}`)
       }
+    } catch (error) {
+      // The line hears of none of these, and no landing reports them again.
+      for (const said of lost) console.warn(said)
+      throw error
+    }
+    // A run its deadline stopped no longer waits for these.
+    if (signal?.aborted === true) for (const said of lost) console.warn(said)
+    return lost
+  }
+
+  /**
+   * Land as `land` does as the line ends, however it ended. Then the line
+   * lends its admission to no more requests, and waits out the ones it lent
+   * it to, so a capture never reads past one still running.
+   *
+   * @returns one line per write that failed to land, naming its path and
+   *   why.
+   */
+  async sync(): Promise<string[]> {
+    const { stop } = currentCaller()
+    try {
+      return await this.land()
     } finally {
       const index = this.lines.findIndex((held) => held.stop === stop)
       const [line] = index >= 0 ? this.lines.splice(index, 1) : []

@@ -8,7 +8,9 @@ checks hides, a read-only mount and a host change through it, that `both`
 refuses a line while a rule covers the box's own mount, and that a line
 over a served mount the box lost since the mounts were last read, its
 sshfs still running as a restart between check and run leaves it, exits
-126 without running and the next line serves it again.
+126 without running and the next line serves it again. A write sshfs
+acknowledged and could not land (a capped mount) fails its line with the
+error, though the program saw it succeed.
 
 | File            | Pins                                                                             | Runs on                                          |
 | --------------- | -------------------------------------------------------------------------------- | ------------------------------------------------ |

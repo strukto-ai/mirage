@@ -19,7 +19,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { ContentType, FileStat, FileType, Limit, MountMode } from '../types.ts'
 import type { PathSpec } from '../types.ts'
 import type { Action, Policy, VfsContext } from '../policy/index.ts'
-import { enotsup, erofs, unnamedFsError } from '../errors/fs.ts'
+import { enotsup, erofs, strerrorOf, unnamedFsError } from '../errors/fs.ts'
 import { DIR_SIZE } from '../utils/stat_view.ts'
 import { ByteSlice, MEMORY_LIMIT, type ByteSpool } from '../io/spool.ts'
 import type { ByteSource } from '../io/types.ts'
@@ -388,6 +388,26 @@ describe('MountCore', () => {
       expect(await stored()).toBe('olnewdworld\n')
     },
   )
+
+  it('hands back each landing a sync could not make', async () => {
+    // Its caller reports them: an sshfs client's close(2) has returned
+    // before they land. The other handles still land, and the failed one
+    // keeps its bytes for its release, which fails the same way.
+    const ws = new Workspace({ '/data/': new RAMVFS({ capacity: 20 }) }, { mode: MountMode.WRITE })
+    const core = new MountCore(ws.vfs)
+    const creating = openMode(fsConstants.O_WRONLY | fsConstants.O_CREAT, fsConstants)
+    const big = await core.open('/data/big.bin', creating)
+    const small = await core.open('/data/small.txt', creating)
+    await core.write('/data/big.bin', big, new Uint8Array(50), 0)
+    await core.write('/data/small.txt', small, new TextEncoder().encode('ok'), 0)
+    const failed = await core.sync()
+    expect(failed.map(([fd, path, err]) => [fd, path, strerrorOf(err)])).toEqual([
+      [big, '/data/big.bin', 'Disk quota exceeded'],
+    ])
+    expect(new TextDecoder().decode(await ws.vfs.read('/data/small.txt'))).toBe('ok')
+    await expect(core.release(big)).rejects.toThrow()
+    expect(await core.sync()).toEqual([])
+  })
 
   it('leaves the file now at a name alone when an unlinked handle writes', async () => {
     // The old handle's file has no name left: the one now at that name is

@@ -1532,18 +1532,24 @@ class MountCore:
         if ctx is not None:
             await self._settle(ctx)
 
-    async def sync(self) -> None:
+    async def sync(self) -> list[tuple[int, str, Exception]]:
         """Land what every open handle holds, as sync(2) does.
 
         For a client whose close(2) returns before it releases the handle
-        (sshfs). A landing that fails is logged, and its bytes stay on the
-        handle for its own flush to retry and report.
+        (sshfs). A landing that fails does not stop the rest, and its
+        bytes stay on the handle for its own flush to retry.
+
+        Returns:
+            list[tuple[int, str, Exception]]: each handle whose landing
+            failed, with its path and the error, for the caller to report.
         """
-        for ctx in list(self._handles.values()):
+        failed: list[tuple[int, str, Exception]] = []
+        for fh, ctx in list(self._handles.items()):
             try:
                 await self._settle(ctx)
             except Exception as err:
-                logger.warning("fuse: landing %s failed: %r", ctx.path, err)
+                failed.append((fh, ctx.path, err))
+        return failed
 
     async def _settle(self, ctx: Handle) -> None:
         """Land a handle's buffered writes in its file's turn.

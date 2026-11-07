@@ -178,8 +178,13 @@ class RemoteSandbox(
         return await self._run_argv(tuple(texts), ctx, output, errors)
 
     async def settle(self) -> None:
+        """Land what a line's program left, however the line ended. Its
+        exit reported the landings that failed then; one that fails only
+        here (the deadline stopped the program or its exit's landing) is
+        logged."""
         if self._mounts is not None:
-            await self._mounts.sync()
+            for lost in await self._mounts.sync():
+                logger.warning("%s", lost)
 
     async def _run_argv(
         self,
@@ -188,7 +193,8 @@ class RemoteSandbox(
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        """Connect once, bring the served mounts in step, then run.
+        """Connect once, bring the served mounts in step, run, then land
+        what sshfs acknowledged, failing the run with a landing that failed.
 
         Args:
             argv (tuple[str, ...]): the program and its arguments.
@@ -247,6 +253,16 @@ class RemoteSandbox(
             and done.exit_code == CANNOT_EXECUTE_STATUS
         ):
             self._mounts.forget()
+        if self._mounts is not None:
+            # sshfs acknowledged the writes before they landed.
+            lost = await self._mounts.land()
+            if lost:
+                said = "".join(f"{line}\n" for line in lost).encode()
+                done = RunResult(
+                    stdout=done.stdout,
+                    stderr=(done.stderr or b"") + said,
+                    exit_code=done.exit_code or 1,
+                )
         return done
 
     async def reap(self, tag: str, signum: int) -> bool:

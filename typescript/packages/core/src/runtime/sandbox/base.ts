@@ -19,6 +19,7 @@ import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
 import { shellJoin } from '../../shell/join.ts'
 import type { PathSpec } from '../../types.ts'
 import { abortable } from '../../utils/abort.ts'
+import { concat } from '../../utils/bytes.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { Runtime } from '../base.ts'
 import type { ConfigFields, RuntimeOptions } from '../config.ts'
@@ -164,12 +165,18 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     return this.runArgv(texts, ctx, output ?? null, errors ?? null)
   }
 
+  /**
+   * Land what a line's program left, however the line ended. Its exit
+   * reported the landings that failed then; one that fails only here (the
+   * deadline stopped the program or its exit's landing) is logged.
+   */
   override async settle(): Promise<void> {
-    await this.mounts?.sync()
+    for (const lost of (await this.mounts?.sync()) ?? []) console.warn(lost)
   }
 
   /**
-   * Connect once, bring the served mounts in step, then run.
+   * Connect once, bring the served mounts in step, run, then land what sshfs
+   * acknowledged, failing the run with a landing that failed.
    *
    * @param argv the program and its arguments.
    * @param ctx the run's stdin, environment, cwd and signal.
@@ -198,8 +205,9 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     const execId = crypto.randomUUID().replaceAll('-', '')
     const runner = currentCaller().process
     runner?.addRun(`box:${execId}`, { runtime: this.name, tag: execId, command: shellJoin(argv) })
+    let done: RunResult
     try {
-      const done = await this.execArgv(
+      done = await this.execArgv(
         run,
         ctx.stdin,
         { ...given, ...clock, [EXEC_ID]: execId },
@@ -208,14 +216,23 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
         errors,
         ctx.signal,
       )
-      if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forget()
-      return done
     } catch (error) {
       if (ctx.signal?.aborted === true)
         await this.reapRun(execId, runner?.signal ?? runner?.interrupted ?? 15)
       throw error
     } finally {
       runner?.dropRun(`box:${execId}`)
+    }
+    if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forget()
+    // sshfs acknowledged the writes before they landed.
+    const lost =
+      this.mounts === null ? [] : await abortable(this.mounts.land(ctx.signal), ctx.signal)
+    if (lost.length === 0) return done
+    const said = new TextEncoder().encode(lost.map((line) => `${line}\n`).join(''))
+    return {
+      stdout: done.stdout,
+      stderr: concat([done.stderr ?? new Uint8Array(), said]),
+      exitCode: done.exitCode || 1,
     }
   }
 

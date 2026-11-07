@@ -141,6 +141,8 @@ export class MirageSFTPServer {
    *   pipe without SSH peer identification.
    * @param run runs one request, with a line's write admission for a
    *   sandbox's pipe; by default it just runs it.
+   * @param onLost told the handle, path and error of a release whose
+   *   writes failed to land, before the client gets the status.
    */
   constructor(
     private readonly sftp: SFTPWrapper,
@@ -148,6 +150,7 @@ export class MirageSFTPServer {
     private readonly onExit?: () => Promise<void>,
     private readonly passiveSshfs = false,
     private readonly run: (op: () => Promise<void>) => Promise<void> = (op) => op(),
+    private readonly onLost?: (fd: number, path: string, err: unknown) => void,
   ) {}
 
   /** Answer the client's requests; settles once it has left and its handles are released. */
@@ -384,8 +387,19 @@ export class MirageSFTPServer {
     const core = await this.mount()
     const handle = this.handle(buf)
     this.handles.delete(buf.toString('hex'))
-    if (handle.kind === 'file') await core.release(handle.fd)
+    if (handle.kind === 'file') await this.release(core, handle)
     this.sftp.status(id, STATUS.OK)
+  }
+
+  /** Release a file handle, telling `onLost` when its writes did not land. */
+  private async release(core: MountCore, handle: OpenFile): Promise<void> {
+    const path = core.handles.get(handle.fd)?.path ?? handle.path
+    try {
+      await core.release(handle.fd)
+    } catch (err) {
+      this.onLost?.(handle.fd, path, err)
+      throw err
+    }
   }
 
   // SFTP v3's rename refuses to replace an existing target.
@@ -405,13 +419,21 @@ export class MirageSFTPServer {
   private async exit(): Promise<void> {
     const core = this.core
     try {
+      // Every handle is released past one that fails; the first failure is rethrown after onExit.
+      let failed: { err: unknown } | null = null
       if (core !== null) {
         for (const handle of this.handles.values()) {
-          if (handle.kind === 'file') await core.release(handle.fd)
+          if (handle.kind !== 'file') continue
+          try {
+            await this.release(core, handle)
+          } catch (err) {
+            failed ??= { err }
+          }
         }
       }
       this.handles.clear()
       await this.onExit?.()
+      if (failed !== null) throw failed.err
     } finally {
       this.sftp.end()
     }
@@ -448,6 +470,10 @@ function loadSftp(): Ssh2Sftp {
  */
 export class PipeServer {
   private readonly core: MountCore
+  // Each released handle whose writes failed to land, until a sync.
+  private lost = new Map<number, [string, unknown]>()
+  // Handles whose failure a sync handed back, never handed back again.
+  private readonly told = new Set<number>()
 
   constructor(
     files: Files,
@@ -481,6 +507,9 @@ export class PipeServer {
       undefined,
       true,
       this.run,
+      (fd, path, err) => {
+        this.lose(fd, path, err)
+      },
     ).attach()
     const chunks = reader.getReader()
     try {
@@ -495,9 +524,33 @@ export class PipeServer {
     }
   }
 
-  /** Land every write the client has been told is done. */
-  sync(): Promise<void> {
-    return this.core.sync()
+  /** Keep a release's failure for the next sync, unless a sync already reported its handle. */
+  private lose(fd: number, path: string, err: unknown): void {
+    if (this.told.delete(fd)) return
+    this.lost.set(fd, [path, err])
+  }
+
+  /**
+   * Land every write the client has been told is done.
+   *
+   * shortcut: a handle reports its first failure only, and lines running at
+   * once in one sandbox share the failures; key them by line if a sandbox
+   * runs concurrent lines that write.
+   *
+   * @returns the path and error of each landing that failed since the last
+   *   sync, at a release or here.
+   */
+  async sync(): Promise<[string, unknown][]> {
+    const failed = await this.core.sync()
+    const lost = this.lost
+    this.lost = new Map()
+    for (const [fd, path, err] of failed) {
+      if (this.told.has(fd)) continue
+      this.told.add(fd)
+      // Keyed by handle: a close that raced this sync counts once.
+      lost.set(fd, [path, err])
+    }
+    return [...lost.values()]
   }
 }
 

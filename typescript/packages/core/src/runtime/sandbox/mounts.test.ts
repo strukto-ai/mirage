@@ -16,13 +16,14 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   currentCaller,
   getAdmission,
   getCurrentSession,
   lineRunning,
 } from '../../context/session_context.ts'
+import { edquot } from '../../errors/fs.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Limit, MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -44,6 +45,7 @@ import {
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+const LOST = 'fake: /data/a.bin: Disk quota exceeded\nfake: /my notes/b.txt: Disk quota exceeded\n'
 
 // sh -c's own reading of a single-quoted word, enough for these commands.
 function words(command: string): string[] {
@@ -178,6 +180,12 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
       this.table.delete(prefix)
       this.running.delete(source)
     }
+    if (line === 'python3 fails.py')
+      return Promise.resolve({
+        stdout: new Uint8Array(),
+        stderr: ENC.encode('boom\n'),
+        exitCode: 3,
+      })
     return Promise.resolve({ stdout: ENC.encode('ran\n'), stderr: null, exitCode: 0 })
   }
 
@@ -288,7 +296,7 @@ const drain = (_files: unknown, session: SessionState): PipeServer => ({
     const chunks = reader.getReader()
     while (!(await chunks.read()).done) continue
   },
-  sync: () => Promise.resolve(),
+  sync: () => Promise.resolve([]),
 })
 
 beforeAll(() => {
@@ -752,9 +760,11 @@ describe('SandboxMounts', () => {
       return {
         ...drain(files, session),
         sync: async () => {
-          await new Promise<void>((resolve) => holds.push(resolve))
+          // It lands at its program's exit (held here), and again as it ends.
+          if (landed.length < 2) await new Promise<void>((resolve) => holds.push(resolve))
           await files.write('/data/landed.txt', 'x')
           landed.push([lineRunning(), await lentALine(run)])
+          return []
         },
       }
     })
@@ -785,10 +795,7 @@ describe('SandboxMounts', () => {
       expect((await line).exitCode).toBe(0)
       await capture
       await borrowed
-      expect(landed).toEqual([
-        [false, true],
-        [false, true],
-      ])
+      expect(landed).toEqual(Array(4).fill([false, true]))
       expect(await Promise.all(runs.map(lentALine))).toEqual([false, false])
       await ws.close()
     } finally {
@@ -796,13 +803,106 @@ describe('SandboxMounts', () => {
     }
   })
 
+  it.each([
+    ['python3 job.py', true, 1, LOST],
+    ['python3 fails.py', true, 3, `boom\n${LOST}`],
+    ['python3 job.py', false, 0, ''],
+  ])(
+    'fails the line with a landing that failed: %s lost=%s',
+    async (line, lost, status, stderr) => {
+      // sshfs lands a file's writes after close(2) told the program they
+      // were done, so the line reports each landing that failed, on every
+      // served prefix, keeping a failing program's own status.
+      const failures: [string, unknown][][] = [
+        [['/my notes/b.txt', edquot('/my notes/b.txt')]],
+        [['/data/a.bin', edquot('/data/a.bin')]],
+      ]
+      registerPipeServer((files, session) => ({
+        ...drain(files, session),
+        sync: () => Promise.resolve((lost ? failures.pop() : undefined) ?? []),
+      }))
+      try {
+        const ws = workspace(new FakeSandbox('ssh'))
+        const agent = await ws.session('agent', { profile: 'agent' })
+        const result = await agent.shell(line)
+        expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([status, stderr])
+        expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+        await ws.close()
+      } finally {
+        registerPipeServer(drain)
+      }
+    },
+  )
+
   it('lands the writes of a line that times out', async () => {
+    // Its status stays the timeout's; a landing that fails is logged.
     const synced: boolean[] = []
     registerPipeServer((files, session) => ({
       ...drain(files, session),
       sync: () => {
         synced.push(lineRunning())
-        return Promise.resolve()
+        return Promise.resolve(
+          synced.length > 1 ? [] : [['/data/a.bin', edquot('/data/a.bin')] as [string, unknown]],
+        )
+      },
+    }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const ws = workspace(new FakeSandbox('ssh'), [], undefined, {
+        '@line': new Limit({ timeoutSeconds: 0.05 }),
+      })
+      const agent = await ws.session('agent', { profile: 'agent' })
+      const result = await agent.shell('python3 slow.py')
+      expect(result.exitCode).toBe(124)
+      expect(DEC.decode(result.stderr)).not.toContain('Disk quota exceeded')
+      expect(synced).toEqual([false, false])
+      expect(warn).toHaveBeenCalledWith('fake: /data/a.bin: Disk quota exceeded')
+      await ws.close()
+    } finally {
+      warn.mockRestore()
+      registerPipeServer(drain)
+    }
+  })
+
+  it('logs what a landing the deadline stopped could not land', async () => {
+    // One prefix's landing failed and the next one ran out the deadline: the
+    // line hears of neither, so the failure that came back is logged.
+    let calls = 0
+    registerPipeServer((files, session) => ({
+      ...drain(files, session),
+      sync: async () => {
+        calls += 1
+        if (calls === 1) return [['/data/a.bin', edquot('/data/a.bin')] as [string, unknown]]
+        if (calls === 2) await new Promise((resolve) => setTimeout(resolve, 200))
+        return []
+      },
+    }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const ws = workspace(new FakeSandbox('ssh'), [], undefined, {
+        '@line': new Limit({ timeoutSeconds: 0.05 }),
+      })
+      const agent = await ws.session('agent', { profile: 'agent' })
+      expect((await agent.shell('python3 job.py')).exitCode).toBe(124)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect(warn).toHaveBeenCalledWith('fake: /data/a.bin: Disk quota exceeded')
+      await ws.close()
+    } finally {
+      warn.mockRestore()
+      registerPipeServer(drain)
+    }
+  })
+
+  it('lands again a landing the deadline stopped', async () => {
+    // The landing at the program's exit counts against the line's deadline;
+    // one the deadline stops is landed again before the line returns.
+    const synced: boolean[] = []
+    registerPipeServer((files, session) => ({
+      ...drain(files, session),
+      sync: async () => {
+        synced.push(lineRunning())
+        if (synced.length === 1) await new Promise((resolve) => setTimeout(resolve, 300))
+        return []
       },
     }))
     try {
@@ -810,8 +910,8 @@ describe('SandboxMounts', () => {
         '@line': new Limit({ timeoutSeconds: 0.05 }),
       })
       const agent = await ws.session('agent', { profile: 'agent' })
-      expect((await agent.shell('python3 slow.py')).exitCode).toBe(124)
-      expect(synced).toEqual([false, false])
+      expect((await agent.shell('python3 job.py')).exitCode).toBe(124)
+      expect(synced).toEqual([false, false, false])
       await ws.close()
     } finally {
       registerPipeServer(drain)
