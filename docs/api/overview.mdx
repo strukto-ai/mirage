@@ -4,9 +4,10 @@ description: "The Mirage HTTP API: where it runs, how to authenticate, and how e
 icon: book-open
 ---
 
-The Mirage HTTP API serves workspaces over JSON at `/v1`. The local daemon
-(Python or TypeScript) and the hosted API answer the same routes with the
-same bodies, so a client written against one works against the other.
+The Mirage HTTP API creates workspaces, runs shell commands and reads or writes
+files. Routes are under `/v1`. The local daemon runs on Python or TypeScript.
+The hosted API serves the subset marked **Daemon and hosted** in the reference.
+Shared routes use the same request and response bodies on both hosts.
 
 <Note>
 Embedding Mirage in a Python or TypeScript program? Use the library instead:
@@ -18,38 +19,42 @@ it runs the same workspaces in process, with no server. See
 
 | Host | Base URL | Routes |
 | --- | --- | --- |
+| Hosted API | `https://api.strukto.ai` | Rows marked **Daemon and hosted** in the reference, plus the hosted API's own account routes |
 | Local daemon | `http://127.0.0.1:8765` by default | Every route in the [reference](/api/reference) |
-| Hosted API | Your hosted API URL | Rows marked **daemon and hosted** in the reference, plus the hosted API's own account routes |
 
 The `mirage` CLI starts a daemon on the first command that needs one. To run
 one from code, see [Launch a server](/home/access/http#launch-a-server).
 
-## Authenticate
+## Start here
 
-Send the server's token on every request:
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/api/quickstart">
+    Create a workspace and run a shell command.
+  </Card>
+  <Card title="API reference" icon="list" href="/api/reference">
+    Search endpoints by resource, parameter or response field.
+  </Card>
+  <Card title="Authentication" icon="key" href="/api/authentication">
+    Connect with a server token or JWT.
+  </Card>
+  <Card title="Errors" icon="triangle-exclamation" href="/api/errors">
+    Handle HTTP failures and command exit codes.
+  </Card>
+</CardGroup>
 
-```bash
-curl http://127.0.0.1:8765/v1/workspaces \
-  -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
-```
+## Resource groups
 
-`GET /v1/health` needs no token. A daemon with no token set accepts every
-request, so set one before anyone else can reach it. Tokens, JWTs and
-per-account workspaces are covered in [Auth](/home/access/http#auth) and
-[Configure authentication](/home/access/http#configure-authentication).
+**Workspaces** contains lifecycle operations, shell execution, VFS file operations,
+documents and asks. These operations create workspaces or act within one.
 
-## Errors
+**Saved configurations** contains reusable VFS, CLI and runtime definitions. They
+exist independently of a workspace. For example, Workspaces → VFS reads and writes
+files; Saved configurations → VFS manages backend configurations to use in mounts.
+Templates describe whole workspace configurations. Policies manage reusable rules.
 
-A `200` from `POST /v1/workspaces/{workspace_id}/shell` means the server ran
-the line, not that the line succeeded: check `exit_code`. Other errors return
-JSON with a `detail` message, but an auth or `Host` refusal can be plain text,
-so check `Content-Type` before parsing. The full status table is in
-[Errors](/home/access/http#errors); requests past a limit answer `429` with
-`Retry-After` ([rate limits](/home/access/http#rate-limits)).
+## Contract
 
-## Reference and contract
-
-- [API reference](/api/reference): every operation, searchable and filterable
+- [API reference](/api/reference): endpoints, searchable and filterable
   by resource.
 - [`openapi.yaml`](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml):
   the OpenAPI document the reference is generated from. Both servers are

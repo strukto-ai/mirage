@@ -184,7 +184,7 @@ repos:
         pass_filenames: false
       - id: api-reference
         name: Generated API reference
-        entry: python/.venv/bin/python scripts/gen_api_reference.py --check
+        entry: python/.venv/bin/python scripts/gen_api_reference.py --selftest --check
         language: system
-        files: ^(docs/openapi\.yaml|docs/api/reference\.mdx|scripts/gen_api_reference\.py)$
+        files: ^(docs/openapi\.yaml|docs/api-display\.overlay\.json|docs/api/reference\.mdx|scripts/gen_api_reference\.py)$
         pass_filenames: false
