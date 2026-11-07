@@ -288,7 +288,6 @@ class ProcessTable:
             if entry is None or entry[1] is not handle:
                 return
             del self._live[pid]
-            self._ancestors.pop(pid, None)
             self._ended.pop(pid, None)
             self._ended[pid] = handle.record
             self._prune()
@@ -433,9 +432,28 @@ class ProcessTable:
             )
         return [kept[pid] for pid in sorted(kept)]
 
+    def tree(self, pid: int) -> set[int]:
+        """The pid and those of every process under it the table keeps,
+        live or ended. Each is found by its whole ancestry, kept for as
+        long as its record is, so a process stays under an ancestor
+        whose own record has gone.
+
+        Args:
+            pid (int): the process at the root.
+        """
+        with self._lock:
+            self._prune()
+            kept = self._ended.keys() | self._live.keys()
+            return {pid} | {
+                other
+                for other in kept
+                if pid in self._ancestors.get(other, ())
+            }
+
     def _prune(self) -> None:
-        """Drop the oldest ended records past the history's bounds; they
-        are kept in the order they ended."""
+        """Drop the oldest ended records past the history's bounds, and
+        the ancestry of each a live process does not reuse; they are kept
+        in the order they ended."""
         cutoff = self._now() - HISTORY_SECONDS
         while self._ended:
             pid, record = next(iter(self._ended.items()))
@@ -445,6 +463,8 @@ class ProcessTable:
             ):
                 break
             del self._ended[pid]
+            if pid not in self._live:
+                self._ancestors.pop(pid, None)
 
     def queued(self) -> bool:
         """Whether a runner that was started has yet to begin."""

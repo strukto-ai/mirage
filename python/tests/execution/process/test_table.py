@@ -1,5 +1,6 @@
 import asyncio
 import errno
+from collections.abc import Awaitable, Callable
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -731,3 +732,49 @@ async def test_an_ended_process_stays_listed_until_its_history_lapses():
     finally:
         release.set()
         await live.join()
+
+
+# A process stays in its ancestor's tree after the process between them has
+# ended and its record lapsed, and a process outside it never joins.
+@pytest.mark.asyncio
+async def test_a_tree_keeps_a_live_grandchild_whose_parent_lapsed():
+    clock = [100.0]
+    processes = ProcessTable(now=lambda: clock[0])
+    release, middle_done = asyncio.Event(), asyncio.Event()
+
+    async def held() -> int:
+        await release.wait()
+        return 0
+
+    async def middle() -> int:
+        await middle_done.wait()
+        return 0
+
+    def start(
+        command: str, run: Callable[[], Awaitable[int]], parent: int | None
+    ) -> ProcessHandle:
+        return processes.start(
+            session_id="a",
+            command=command,
+            cwd=PathSpec.from_str_path("/"),
+            run=run,
+            parent=parent,
+        )
+
+    root = start("root", held, None)
+    child = start("child", middle, root.record.pid)
+    grandchild = start("grandchild", held, child.record.pid)
+    other = start("other", held, None)
+    try:
+        middle_done.set()
+        await child.join()
+        clock[0] += HISTORY_SECONDS + 1
+        assert child.record.pid not in [r.pid for r in processes.records()]
+        assert processes.tree(root.record.pid) == {
+            root.record.pid,
+            grandchild.record.pid,
+        }
+    finally:
+        release.set()
+        for handle in (root, grandchild, other):
+            await handle.join()

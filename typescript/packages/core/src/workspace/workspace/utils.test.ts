@@ -15,12 +15,8 @@
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
 
-import { LOCAL_MACHINE } from '../../execution/constants.ts'
-import type { Process } from '../../execution/process/types.ts'
-import { ProcessId } from '../../execution/types.ts'
-import { PathSpec } from '../../types.ts'
 import { SessionState } from '../session/session.ts'
-import { commandName, forkForCall, processTree } from './utils.ts'
+import { commandName, forkForCall } from './utils.ts'
 
 describe('commandName', () => {
   it.each([
@@ -74,43 +70,5 @@ describe('forkForCall', () => {
       OPTIND: '1',
       OPTERR: '1',
     })
-  })
-})
-
-function processOf(pid: number, parent: number | null): Process {
-  return {
-    id: new ProcessId('w', pid),
-    sessionId: 's1',
-    line: null,
-    parent,
-    group: 1,
-    command: 'sh',
-    cwd: PathSpec.fromStrPath('/'),
-    machine: LOCAL_MACHINE,
-    startedAt: 0,
-    runtime: null,
-    machinePid: null,
-    state: 'running',
-    endedAt: null,
-    exit: null,
-    signal: null,
-    error: null,
-  }
-}
-
-// A process's tree is it and every process under it, however deep, and none
-// of its siblings or its parent.
-describe('processTree', () => {
-  it('holds every process under the root', () => {
-    const records = [
-      processOf(1, null),
-      processOf(2, 1),
-      processOf(3, 2),
-      processOf(4, 1),
-      processOf(5, 3),
-    ]
-    expect([...processTree(records, 2)].sort()).toEqual([2, 3, 5])
-    expect([...processTree(records, 4)]).toEqual([4])
-    expect([...processTree(records, 9)]).toEqual([9])
   })
 })

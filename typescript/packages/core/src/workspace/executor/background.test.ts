@@ -367,8 +367,9 @@ describe('a job that is one program', () => {
 })
 
 // One daemon runs a workspace's lines at a time: a line on another daemon's
-// workspace is refused, naming the daemon that holds the lease, while that
-// daemon lists, kills and waits on the jobs through the store.
+// workspace is refused, naming the daemon that holds the lease, and listed as
+// ended with why, while that daemon lists, kills and waits on the jobs
+// through the store.
 it('another daemon reaches a job but runs no line', async () => {
   const store = new RAMWorkspaceStateStore()
   const a = sharing(store)
@@ -378,6 +379,9 @@ it('another daemon reaches a job but runs no line', async () => {
     const refused = await b.shell('jobs', { sessionId: 's' }).catch((err: unknown) => err)
     expect(refused).toBeInstanceOf(WorkspaceHeldError)
     expect((refused as WorkspaceHeldError).holder).toBe(a.jobTable.daemon)
+    const [line] = b.lines()
+    expect([line?.command, line?.state, line?.exit]).toEqual(['jobs', 'exited', null])
+    expect(line?.error).toMatch(/^WorkspaceHeldError: /)
     await b.jobTable.sync('s')
     const [seen] = b.jobTable.listJobs('s')
     expect([seen?.id, seen?.command, seen?.state]).toEqual([1, 'sleep 30', 'running'])

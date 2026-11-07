@@ -14,7 +14,6 @@
 
 from typing import Any
 
-from mirage.execution.process.types import Process
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 
@@ -56,25 +55,3 @@ def fork_for_call(
     if env is not None:
         overrides["vars"] = {**session.vars, **vars_from_env(env)}
     return session.fork(**overrides)
-
-
-def process_tree(records: list[Process], pid: int) -> set[int]:
-    """The pid and those of every process it started, followed through
-    each record's parent.
-
-    Args:
-        records (list[Process]): the processes to look through.
-        pid (int): the process at the root.
-    """
-    children: dict[int, list[int]] = {}
-    for record in records:
-        if record.parent is not None:
-            children.setdefault(record.parent, []).append(record.pid)
-    tree: set[int] = set()
-    todo = [pid]
-    while todo:
-        current = todo.pop()
-        if current not in tree:
-            tree.add(current)
-            todo.extend(children.get(current, []))
-    return tree

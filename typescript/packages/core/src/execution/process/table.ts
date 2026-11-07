@@ -144,7 +144,6 @@ export class ProcessTable {
       (id) => {
         if (this.runners.get(id)?.handle !== handle) return
         this.runners.delete(id)
-        this.ancestors.delete(id)
         this.history.delete(id)
         this.history.set(id, handle.record)
         this.prune()
@@ -323,12 +322,32 @@ export class ProcessTable {
     return [...kept.entries()].sort(([a], [b]) => a - b).map(([, record]) => record)
   }
 
-  /** Drop the oldest ended records past the history's bounds; they are kept in the order they ended. */
+  /**
+   * The pid and those of every process under it the table keeps, live or
+   * ended. Each is found by its whole ancestry, kept for as long as its
+   * record is, so a process stays under an ancestor whose own record has
+   * gone.
+   */
+  tree(pid: number): Set<number> {
+    this.prune()
+    const tree = new Set([pid])
+    for (const other of [...this.history.keys(), ...this.runners.keys()]) {
+      if (this.ancestors.get(other)?.includes(pid) === true) tree.add(other)
+    }
+    return tree
+  }
+
+  /**
+   * Drop the oldest ended records past the history's bounds, and the
+   * ancestry of each a live process does not reuse; they are kept in the
+   * order they ended.
+   */
   private prune(): void {
     const cutoff = this.now() - HISTORY_SECONDS
     for (const [pid, record] of this.history) {
       if (this.history.size <= HISTORY_MAX_RECORDS && (record.endedAt ?? 0) > cutoff) break
       this.history.delete(pid)
+      if (!this.runners.has(pid)) this.ancestors.delete(pid)
     }
   }
 

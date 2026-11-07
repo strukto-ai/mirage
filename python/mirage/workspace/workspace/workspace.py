@@ -269,7 +269,7 @@ from mirage.workspace.workspace.mounts import (
 from mirage.workspace.workspace.routing import Router
 from mirage.workspace.workspace.runtimes import Runtimes
 from mirage.workspace.workspace.types import VFSMount
-from mirage.workspace.workspace.utils import fork_for_call, process_tree
+from mirage.workspace.workspace.utils import fork_for_call
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -2662,7 +2662,7 @@ class Workspace:
         if job_id is not None:
             job = self.job(job_id)
             tree = (
-                process_tree(records, job.pid)
+                self.process_table.tree(job.pid)
                 if job is not None and job.pid is not None
                 else set()
             )
@@ -3128,7 +3128,8 @@ class Workspace:
                 the line, started only once the session is held.
             line (LineHandle | None): the line's record, listed as
                 waiting from here; ended as stopped, or with the error,
-                should it never start.
+                should it fail before it ends, as a line refused the
+                workspace's lease does.
         """
         ambient = get_current_session_for(self._session_mgr)
         if ambient is not None and session_id in (None, ambient.session_id):
@@ -3150,12 +3151,12 @@ class Workspace:
                     raise RuntimeError("Workspace is closed")
                 return await run()
         except (asyncio.CancelledError, MirageAbortError):
-            if line is not None and line.record.state == LineState.WAITING:
+            if line is not None:
                 line.stop(LINE_STOP_SIGNAL)
                 line.end(128 + LINE_STOP_SIGNAL)
             raise
         except Exception as exc:
-            if line is not None and line.record.state == LineState.WAITING:
+            if line is not None:
                 line.end(None, f"{type(exc).__name__}: {exc}")
             raise
 

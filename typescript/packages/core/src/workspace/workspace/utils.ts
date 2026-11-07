@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Process } from '../../execution/process/types.ts'
 import { varsFromEnv } from '../session/session.ts'
 import type { SessionState } from '../session/session.ts'
 
@@ -41,26 +40,4 @@ export function forkForCall(
       ? { vars: { ...Object.fromEntries(session.vars.records()), ...varsFromEnv(env) } }
       : {}),
   })
-}
-
-/**
- * The pid and those of every process it started, followed through each
- * record's parent.
- */
-export function processTree(records: readonly Process[], pid: number): Set<number> {
-  const children = new Map<number, number[]>()
-  for (const record of records) {
-    if (record.parent === null) continue
-    const siblings = children.get(record.parent) ?? []
-    siblings.push(record.id.pid)
-    children.set(record.parent, siblings)
-  }
-  const tree = new Set<number>()
-  const todo = [pid]
-  for (let current = todo.pop(); current !== undefined; current = todo.pop()) {
-    if (tree.has(current)) continue
-    tree.add(current)
-    todo.push(...(children.get(current) ?? []))
-  }
-  return tree
 }

@@ -20,6 +20,7 @@ import pytest
 from mirage.bridge.sync import handed
 from mirage.execution.errors import WorkspaceHeldError
 from mirage.execution.job import JobState
+from mirage.execution.line.types import LineState
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import (
     AsyncLineIterator,
@@ -764,8 +765,9 @@ def _sharing(store: RAMWorkspaceStateStore) -> Workspace:
 
 
 # One daemon runs a workspace's lines at a time: a line on another daemon's
-# workspace is refused, naming the daemon that holds the lease, while that
-# daemon lists, kills and waits on the jobs through the store.
+# workspace is refused, naming the daemon that holds the lease, and listed
+# as ended with why, while that daemon lists, kills and waits on the jobs
+# through the store.
 @pytest.mark.asyncio
 async def test_another_daemon_reaches_a_job_but_runs_no_line():
     store = RAMWorkspaceStateStore()
@@ -775,6 +777,13 @@ async def test_another_daemon_reaches_a_job_but_runs_no_line():
         with pytest.raises(WorkspaceHeldError) as held:
             await b.shell("jobs", session_id="s")
         assert held.value.holder == a.job_table.daemon
+        [refused] = b.lines()
+        assert (refused.command, refused.state, refused.exit) == (
+            "jobs",
+            LineState.EXITED,
+            None,
+        )
+        assert (refused.error or "").startswith("WorkspaceHeldError: ")
         await b.job_table.sync("s")
         [seen] = b.job_table.list_jobs("s")
         assert (seen.id, seen.command, seen.state) == (

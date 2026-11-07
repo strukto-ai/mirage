@@ -199,7 +199,7 @@ import type {
   SessionExecuteOptions,
   WorkspaceOptions,
 } from './types.ts'
-import { forkForCall, processTree } from './utils.ts'
+import { forkForCall } from './utils.ts'
 
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
@@ -1396,7 +1396,7 @@ export class Workspace {
     let tree: Set<number> | null = null
     if (filter.jobId !== undefined) {
       const pid = this.job(filter.jobId)?.pid ?? null
-      tree = pid === null ? new Set() : processTree(records, pid)
+      tree = pid === null ? new Set() : this.processTable.tree(pid)
     }
     return records.filter(
       (process) =>
@@ -2347,7 +2347,8 @@ export class Workspace {
     await abortable(this.ensureSessionsLoaded(), signal)
     const key = sessionId ?? this.sessionManager.defaultId
     // The line is listed as waiting from here, and ended as stopped, or
-    // with the error, should it never start.
+    // with the error, should it fail before it ends, as a line refused the
+    // workspace's lease does.
     if (line !== undefined) this.lineTable.start(line)
     try {
       return await this.lineLock.withLock(
@@ -2359,7 +2360,7 @@ export class Workspace {
         signal,
       )
     } catch (err) {
-      if (line?.record.state === 'waiting') {
+      if (line !== undefined) {
         if (err instanceof DOMException && err.name === 'AbortError') {
           line.stop(LINE_STOP_SIGNAL)
           line.end(128 + LINE_STOP_SIGNAL)
