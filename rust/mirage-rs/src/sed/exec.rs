@@ -8,7 +8,7 @@ use crate::request::{Opening, Reply, Request, WriteMode, bytes};
 use super::debug;
 use super::io::{Failure, Feed, Input, Io, LIMIT, Line, LineReader, MAX_LEN, Notes, read_error};
 use super::script::{Address, Command, Part, Program, Subst, Translit};
-use super::text::{Refusal, convert, list, resolve, unit};
+use super::text::{Refusal, absolute, convert, list, resolve, unit};
 
 const STDOUT: &[u8] = b"/dev/stdout";
 const STDERR: &[u8] = b"/dev/stderr";
@@ -991,13 +991,14 @@ impl Machine {
                 self.edit_link = None;
                 let name = self.feed.inputs[index].name.clone();
                 // A link edited in place is replaced by its own name, so
-                // the edit lands there, not where it led.
+                // the edit lands there, not where it led. The name goes as
+                // sed built it, a `..` in it walked past the links before.
                 let path = if self.opts.follow || linked {
-                    resolve(&name, &self.opts.cwd)
+                    absolute(&name, &self.opts.cwd)
                 } else {
                     self.paths.get(index).cloned().unwrap_or_default()
                 };
-                self.edited.insert(path.clone());
+                self.edited.insert(resolve(&path, &self.opts.cwd));
                 self.edit_path = Some(path.clone());
                 self.edit_started = false;
                 self.edit.clear();
@@ -1006,7 +1007,9 @@ impl Machine {
                     .suffix
                     .as_deref()
                     .map(|suffix| backup_name(&name, suffix))
-                    .filter(|backup| resolve(backup, &self.opts.cwd) != path);
+                    .filter(|backup| {
+                        resolve(backup, &self.opts.cwd) != resolve(&path, &self.opts.cwd)
+                    });
                 self.edit_spool = (linked && !self.opts.follow).then(|| self.io.fd());
                 // The replacement opens before the edit reads on, so a
                 // refused one is reported first.
