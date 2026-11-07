@@ -978,11 +978,14 @@ function jobFromDict(j: JobSnapshot): JobHandle {
  */
 function restoreRecords(ws: WorkspaceLike, state: WorkspaceStateDict): void {
   const store = ws.jobTable.store
-  const byEnd = (a: { endedAt: number | null }, b: { endedAt: number | null }): number =>
-    (a.endedAt ?? 0) - (b.endedAt ?? 0)
-  for (const line of (state.lines ?? []).map(lineFromFields).sort(byEnd)) store.note(line)
+  for (const line of (state.lines ?? [])
+    .map(lineFromFields)
+    .sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0)))
+    store.note(line)
   const workspaceId = ws.processTable.workspaceId
-  const records = (state.process_records ?? []).map(processFromFields).sort(byEnd)
+  const records = (state.process_records ?? [])
+    .map(processFromFields)
+    .sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0))
   for (const record of records) {
     store.note({ ...record, id: new ProcessId(workspaceId, record.id.pid) })
   }
