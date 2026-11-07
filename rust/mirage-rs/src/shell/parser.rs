@@ -78,6 +78,9 @@ pub(super) struct Placed {
     /// a heredoc's delimiter that ended mid-line, or at the second `(` of
     /// a `((` it rereads as subshells.
     pub echo_from: Option<usize>,
+    /// The last byte bash quotes when it quotes its reread copy of a `((`:
+    /// the one past the `)` closing its second `(`.
+    pub echo_last: Option<usize>,
 }
 
 impl Fail {
@@ -361,6 +364,7 @@ fn joined(
                     .map(|&(index, from)| (index, to_source(from)))
                     .collect(),
                 echo_from: placed.echo_from.map(to_source),
+                echo_last: placed.echo_last.map(to_source),
             })
         });
         let mut first = Fail {
@@ -546,8 +550,16 @@ fn said(source: &[u8], newlines: &[usize], fail: &Fail) -> Vec<Said> {
     let mut out = Vec::new();
     for (index, text) in fail.lines.iter().enumerate() {
         let near = text.starts_with(b"syntax error near");
-        let text = if ending && near && !text.starts_with(b"syntax error near unexpected") {
+        let bare = near && !text.starts_with(b"syntax error near unexpected");
+        let line_start = memchr::memrchr(b'\n', &source[..last]).map_or(0, |i| i + 1);
+        let clipped;
+        let text = if ending && bare {
             &b"syntax error".to_vec()
+        } else if bare && at < line_start && end > line_start {
+            // A text that a line continuation splits is named from the line
+            // bash's reader stands on.
+            clipped = line(&[b"syntax error near `", &source[line_start..end], b"'"]);
+            &clipped
         } else {
             text
         };
@@ -567,13 +579,19 @@ fn said(source: &[u8], newlines: &[usize], fail: &Fail) -> Vec<Said> {
         });
         if near {
             let start = memchr::memrchr(b'\n', &source[..last]).map_or(0, |i| i + 1);
+            let end = memchr::memchr(b'\n', &source[last..]).map_or(source.len(), |i| last + i);
             let start = fail
                 .placed
                 .as_deref()
                 .and_then(|placed| placed.echo_from)
-                .filter(|&from| (start..=at).contains(&from))
+                .filter(|&from| (start..=end).contains(&from))
                 .unwrap_or(start);
-            let end = memchr::memchr(b'\n', &source[last..]).map_or(source.len(), |i| last + i);
+            let end = fail
+                .placed
+                .as_deref()
+                .and_then(|placed| placed.echo_last)
+                .filter(|&to| to >= start)
+                .map_or(end, |to| end.min(to + 1));
             // bash -c doubles the backslash it keeps in its own copy.
             let mut text = if ending {
                 Vec::new()

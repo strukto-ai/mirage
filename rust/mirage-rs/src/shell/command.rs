@@ -118,7 +118,14 @@ impl Parser<'_> {
                 return Err(self.refusal(self.i, end, vec![line], false));
             }
             if self.peek() != b')' {
-                return self.fail(self.i);
+                let mut fail = self.unexpected(self.i);
+                // A `((` there bash rereads as subshells, quoting its copy.
+                if self.starts(b"((") {
+                    if let Ok(close) = self.scan_matched(self.i + 2, self.i + 1, b'(', b')') {
+                        fail = super::compound::reread_from(fail, self.i + 1, close);
+                    }
+                }
+                return Err(fail);
             }
             self.i = open;
         }
@@ -255,7 +262,7 @@ impl Parser<'_> {
         match self.s.get(end) {
             Some(b'=') => true,
             Some(b'+') => self.s.get(end + 1) == Some(&b'='),
-            Some(b'[') => super::lex::bracket_end(self.s, end).is_some_and(|mut close| {
+            Some(b'[') => self.scan_bracket(end + 1, end).is_ok_and(|mut close| {
                 while self.s[close..].starts_with(b"\\\n") {
                     close += 2;
                 }
@@ -596,8 +603,20 @@ impl Parser<'_> {
         if closes && (is_blank(self.peek()) || self.at_command_end()) {
             return Ok(Syn::node("file_redirect", children));
         }
+        // After `>&` or `<&` digits are the descriptor duplicated, with a
+        // `<` or `>` after them or not.
+        let mut dup = matches!(*op, ">&" | "<&");
         loop {
             self.skip_blank();
+            let digits = digits_end(self.s, self.i);
+            if std::mem::take(&mut dup)
+                && digits > self.i
+                && matches!(self.s.get(digits), Some(b'<' | b'>'))
+            {
+                children.push(Syn::leaf("number", self.i, digits).with_field("destination"));
+                self.i = digits;
+                break;
+            }
             if self.at_command_end() || self.at_redirect() || self.starts(b"<<<") {
                 break;
             }

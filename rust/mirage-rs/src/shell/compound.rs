@@ -440,9 +440,13 @@ impl Parser<'_> {
     }
 }
 
-fn reread_from(mut fail: Fail, from: usize, close: usize) -> Fail {
+/// `fail` from inside a `((` bash rereads as subshells, whose second `(`
+/// is at `from` and closes at `close`: bash quotes its reread copy, from
+/// that `(` to the byte past its `)`.
+pub(super) fn reread_from(mut fail: Fail, from: usize, close: usize) -> Fail {
     if fail.at <= close {
         fail.echo_from(from);
+        fail.placed.get_or_insert_default().echo_last = Some(close + 1);
     }
     fail
 }

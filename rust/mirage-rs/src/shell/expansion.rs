@@ -14,18 +14,14 @@ impl Parser<'_> {
     pub(super) fn expansion(&mut self) -> R<Syn> {
         self.enter()?;
         let at = self.i;
-        self.scan_brace(at + 2, at + 1)?;
+        // bash ends a `${` at the first `}` a quote or nested expansion
+        // leaves, a bare `{` opening nothing.
+        let end = self.scan_brace(at + 2, at + 1)?;
         let mark = self.mark();
         self.i += 2;
         let mut children = vec![Syn::token("${", at, at + 2)];
         let parsed = self.expansion_body(&mut children);
         if parsed.is_err() || self.peek() != b'}' {
-            let Some(end) = super::lex::pair_end(self.s, at + 1, b'{', b'}') else {
-                return match parsed {
-                    Err(fail) => Err(fail),
-                    Ok(()) => self.fail(self.i),
-                };
-            };
             self.forget(mark);
             children.truncate(1);
             self.check_raw(at + 2, end - 1, true)?;
