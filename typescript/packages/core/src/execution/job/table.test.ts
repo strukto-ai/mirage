@@ -213,7 +213,7 @@ describe('JobTable.kill', () => {
     while (dec(await j.console.snapshot(Channel.STDOUT)) === '') await Promise.resolve()
     expect(await jt.kill(j.id, '', signal)).toBe(true)
     expect([j.status, j.exitCode]).toEqual([JobStatus.KILLED, code])
-    expect((await j.process?.join())?.exitCode).toBe(code)
+    expect((await j.process?.join())?.exit).toBe(code)
   })
 
   // bash's `wait` returns once a killed child has gone, with the status it
@@ -627,13 +627,13 @@ it('keeps a disowned process visible until its cancelled runner really exits', a
   const view = table.processes.view('a')
   expect(await table.disown(job.id, 'a')).toBe(true)
   expect(table.listJobs('a')).toEqual([])
-  expect(view.list().map((info) => info.pid)).toEqual([process.info.pid])
+  expect(view.list().map((info) => info.id.pid)).toEqual([process.record.id.pid])
   await table.killAll()
   expect(job.status).toBe(JobStatus.KILLED)
   expect(view.list().map((info) => info.state)).toEqual(['stopping'])
   if (release.fire === undefined) throw new Error('runner did not start')
   release.fire()
-  expect(await process.join()).toMatchObject({ exitCode: 0, cancellationRequested: true })
+  expect(await process.join()).toMatchObject({ exit: 0, signal: null })
   expect(view.list()).toEqual([])
 })
 
@@ -650,14 +650,14 @@ it('does not restart process IDs with shell job numbers', async () => {
   const pa = a.process,
     pb = b.process
   if (pa === null || pb === null) throw new Error('missing process')
-  expect(pa.info.pid).not.toBe(pb.info.pid)
+  expect(pa.record.id.pid).not.toBe(pb.record.id.pid)
   await table.kill(a.id, 'a')
   await table.reap(a.id, 'a')
   const replacement = await submit('a')
   expect(replacement.id).toBe(1)
   const pr = replacement.process
   if (pr === null) throw new Error('missing process')
-  expect(pr.info.pid).toBeGreaterThan(pb.info.pid)
+  expect(pr.record.id.pid).toBeGreaterThan(pb.record.id.pid)
   await table.killAll()
   await Promise.all([pa.join(), pb.join(), pr.join()])
 })
@@ -679,7 +679,7 @@ it('settles an already aborted job without entering its runner', async () => {
   await table.wait(job.id)
   expect(entered).toBe(false)
   expect(job.status).toBe(JobStatus.KILLED)
-  expect(await job.process?.join()).toMatchObject({ exitCode: 137, cancellationRequested: true })
+  expect(await job.process?.join()).toMatchObject({ exit: 137, signal: 9 })
 })
 
 it('a refused job gives its number back', async () => {
@@ -1496,7 +1496,7 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
 
 /** A table whose processes are published on `store`, as a workspace's are. */
 function publishing(store: RAMJobStore): JobTable {
-  const processes: ProcessTable = new ProcessTable(undefined, undefined, () => {
+  const processes: ProcessTable = new ProcessTable(undefined, undefined, undefined, () => {
     table.processesChanged()
   })
   const table: JobTable = new JobTable(store, processes)
@@ -1519,7 +1519,7 @@ describe('JobTable process plane', () => {
   // table lists them.
   it('publishes its processes while it runs any', async () => {
     const store = new RAMJobStore(30)
-    const processes: ProcessTable = new ProcessTable(undefined, undefined, () => {
+    const processes: ProcessTable = new ProcessTable(undefined, undefined, undefined, () => {
       a.processesChanged()
     })
     const a: JobTable = new JobTable(store, processes, null, new ManualClock())

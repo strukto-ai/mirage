@@ -295,7 +295,7 @@ async function replay(seed: number): Promise<string[]> {
     expect(result.exitCode, line).toBe(0)
     seen.push(stdoutStr(result))
   }
-  for (const event of await ws.observer.events()) seen.push(String(event.execution_id))
+  for (const event of await ws.observer.events()) seen.push(String(event.process))
   const copy = await ws.copy()
   open.push(copy)
   seen.push(copy.mount('/data').mountId)

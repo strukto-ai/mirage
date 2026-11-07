@@ -323,7 +323,7 @@ export class JobTable {
     abort: AbortController
     cwd: string
     sessionId?: string
-    parentPid?: number | null
+    parent?: number | null
     limit?: number | null
     // The job is one simple command (`Job.simple`).
     simple?: boolean
@@ -346,7 +346,7 @@ export class JobTable {
     try {
       process = this.processes.start({
         sessionId,
-        parentPid: init.parentPid ?? null,
+        parent: init.parent ?? null,
         command: init.command,
         cwd: PathSpec.fromStrPath(init.cwd),
         run: async () => {
@@ -382,7 +382,7 @@ export class JobTable {
     }
     try {
       const jobConsole = new JobConsole(this.store.console(name))
-      jobConsole.bindExecution(process.info.executionId)
+      jobConsole.bindProcess(process.record.id.toString())
       job = new Job({
         id: jobId,
         command: init.command,
@@ -403,13 +403,13 @@ export class JobTable {
     job.process = process
     this.sessionJobs(sessionId).set(job.id, job)
     const plane = this.plane
-    const pid = process.info.pid
+    const pid = process.record.id.pid
     plane.jobTables.set(pid, this)
     void process.join().then(() => plane.jobTables.delete(pid))
     // An abort from elsewhere stops the runner; one the runner's own stop
     // sent is that stop, which a KILL here would cut short.
     const onAbort = () => {
-      if (!process.info.cancellationRequested) process.terminate()
+      if (process.signal === null) process.terminate()
     }
     init.abort.signal.addEventListener('abort', onAbort, { once: true })
     if (init.abort.signal.aborted) process.terminate()
@@ -434,7 +434,7 @@ export class JobTable {
     const [chunks] = await job.console.readFrom(0)
     for (const chunk of chunks) await store.append(chunk.channel, chunk.data)
     const restored = new JobConsole(store, true)
-    if (job.executionId !== null) restored.bindExecution(job.executionId)
+    if (job.processId !== null) restored.bindProcess(job.processId)
     job.console = restored
     job.owner = this.owner
     job.consoleName = name
@@ -1204,17 +1204,18 @@ export class JobTable {
   private records(): Record<string, RecordFields> {
     const records: Record<string, RecordFields> = {}
     for (const handle of this.processes.live()) {
-      const info = handle.info
-      records[String(info.pid)] = {
-        pid: info.pid,
-        parent: info.parentPid,
-        group: info.groupId,
-        session: info.sessionId,
-        command: info.command,
-        cwd: info.cwd.virtual,
-        started_at: info.startedAt,
-        state: info.state,
-        execution: info.executionId,
+      const record = handle.record
+      records[String(record.id.pid)] = {
+        pid: record.id.pid,
+        parent: record.parent,
+        group: record.group,
+        session: record.sessionId,
+        command: record.command,
+        cwd: record.cwd.virtual,
+        machine: record.machine.toString(),
+        started_at: record.startedAt,
+        state: record.state,
+        line: record.line?.toString() ?? null,
         runs: Object.values(handle.runs),
       }
     }
@@ -1301,7 +1302,7 @@ export class JobTable {
       }
     }
     for (const handle of this.processes.live()) {
-      if (handle.info.pid === pid) {
+      if (handle.record.id.pid === pid) {
         handle.terminate(signal)
         return
       }

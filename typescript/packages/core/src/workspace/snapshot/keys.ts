@@ -67,7 +67,7 @@ export const CacheKey = Object.freeze({
 } as const)
 
 export const JobKey = Object.freeze({
-  EXECUTION_ID: 'execution_id',
+  PROCESS: 'process',
   ID: 'id',
   COMMAND: 'command',
   CWD: 'cwd',

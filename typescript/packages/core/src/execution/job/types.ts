@@ -96,10 +96,14 @@ export class Job {
    * job number stands in.
    */
   get pid(): number {
-    return this.process?.info.pid ?? this.id
+    return this.process?.record.id.pid ?? this.id
   }
 
-  get executionId(): string | null {
-    return this.process?.info.executionId ?? this.console.executionId
+  /**
+   * The id of the process the job runs as, as text: its runner's here, its
+   * console's for a job restored or run elsewhere.
+   */
+  get processId(): string | null {
+    return this.process?.record.id.toString() ?? this.console.process
   }
 }

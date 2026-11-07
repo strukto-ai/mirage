@@ -212,7 +212,7 @@ describe('closeWorkspace', () => {
 
     const closing = ws.close()
     await job.console.waitFinished()
-    expect(job.process?.info.state).toBe('stopping')
+    expect(job.process?.record.state).toBe('stopping')
     release.fire?.()
     await closing
 
@@ -241,10 +241,10 @@ describe('closeWorkspace', () => {
     await ws.close()
 
     expect(job.status).toBe(JobStatus.KILLED)
-    expect(job.process?.info.state).toBe('stopping')
+    expect(job.process?.record.state).toBe('stopping')
     release.fire?.()
     await job.process?.join()
-    expect(job.process?.info.state).toBe('exited')
+    expect(job.process?.record.state).toBe('exited')
   })
 
   it('is idempotent with a job running', async () => {

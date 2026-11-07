@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from mirage.execution.process.child import ChildProcess
 from mirage.execution.process.config import ProcessPermissions
-from mirage.execution.process.types import ProcessInfo, SpawnRequest
+from mirage.execution.process.types import Process, SpawnRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +33,7 @@ class ProcessView:
     found, probed and signalled through the members the view sees.
     """
 
-    list: Callable[[], tuple[ProcessInfo, ...]]
+    list: Callable[[], tuple[Process, ...]]
     check_spawn: Callable[[], None]
     probe: Callable[[int], bool]
     terminate: Callable[[int, int], bool]

@@ -73,7 +73,7 @@ async def drive_from_host(ws: Workspace) -> None:
         )
     await writer
     info = await child.wait()
-    print(f"  grep pid={child.pid} exit={info.exit_code}")
+    print(f"  grep pid={child.pid} exit={info.exit}")
 
     tally = ws.spawn(
         SpawnRequest(argv=("sh", "-c", "cut -d' ' -f2 | sort | uniq -c"))
@@ -94,7 +94,7 @@ async def drive_from_host(ws: Workspace) -> None:
     stuck.terminate()
     info = await stuck.wait()
     print(
-        f"  terminate sleep 30 -> exit={info.exit_code} "
+        f"  terminate sleep 30 -> exit={info.exit} "
         f"after {(time.monotonic() - started) * 1000:.0f}ms"
     )
 
@@ -128,7 +128,7 @@ async def nothing_outlives_close(ws: Workspace) -> None:
     await sh(ws, "sleep 60 &", "agent-a")
     await sh(ws, "sleep 60 | sleep 60 &", "agent-b")
     ws.spawn(SpawnRequest(argv=("sleep", "60")))
-    live = [p.info for p in ws.processes.live()]
+    live = [p.record for p in ws.processes.live()]
     print(
         f"  live before close: {len(live)} -> "
         + ", ".join(f"{i.pid}:{i.command}" for i in live)

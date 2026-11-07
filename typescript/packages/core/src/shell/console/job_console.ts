@@ -30,17 +30,18 @@ import { decodeText, encodeText } from '../bytes.ts'
 export class JobConsole {
   private readonly backing: ConsoleStore
   private finishedFlag: boolean
-  private execution: string | null = null
+  private boundProcess: string | null = null
 
-  get executionId(): string | null {
-    return this.execution
+  /** The id of the process whose output this is, as text. */
+  get process(): string | null {
+    return this.boundProcess
   }
 
-  /** Associate this job's output with its one managed execution. */
-  bindExecution(executionId: string): void {
-    if (this.execution !== null && this.execution !== executionId)
-      throw new Error('console already belongs to another execution')
-    this.execution = executionId
+  /** Associate this job's output with its one managed process, by its id as text. */
+  bindProcess(process: string): void {
+    if (this.boundProcess !== null && this.boundProcess !== process)
+      throw new Error('console already belongs to another process')
+    this.boundProcess = process
   }
 
   /**

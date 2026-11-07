@@ -14,7 +14,7 @@
 
 import type { ChildProcess } from './child.ts'
 import type { ProcessPermissions } from './config.ts'
-import type { ProcessInfo, SpawnRequest } from './types.ts'
+import type { Process, SpawnRequest } from './types.ts'
 
 /**
  * Profile-scoped operations. Seeing a process grants no streams; invisible
@@ -25,7 +25,7 @@ import type { ProcessInfo, SpawnRequest } from './types.ts'
  * through the members the view sees.
  */
 export interface ProcessView {
-  readonly list: () => readonly ProcessInfo[]
+  readonly list: () => readonly Process[]
   readonly checkSpawn: () => void
   readonly probe: (pid: number) => boolean
   readonly terminate: (pid: number, signal: number) => boolean

@@ -25,7 +25,7 @@ from e2b import CommandExitException, NotFoundException, SandboxException
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
-from mirage.context.session_context import run_with_execution
+from mirage.context.session_context import run_as_process
 from mirage.execution.process.table import ProcessTable
 from mirage.io.types import materialize
 from mirage.runtime.sandbox.constants import (
@@ -407,7 +407,7 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
         )
         return result.exit_code
 
-    runner = ProcessTable(bind=run_with_execution).start(
+    runner = ProcessTable(bind=run_as_process).start(
         session_id="s",
         command="sleep",
         cwd=PathSpec.from_str_path("/"),

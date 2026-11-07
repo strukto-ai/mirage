@@ -248,7 +248,7 @@ async def handle_pipe(
                 partial(run_segment, i, cmd),
                 session.process_id,
             )
-            children[i].session.process_id = process.info.pid
+            children[i].session.process_id = process.record.pid
             stages[i] = process
             children[i].frame.shell = (
                 None if _shell_stage(cmd, session) else process

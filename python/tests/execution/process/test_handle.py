@@ -17,20 +17,25 @@ import threading
 
 import pytest
 
-from mirage.context.session_context import current_caller, run_with_execution
+from mirage.context.session_context import current_caller, run_as_process
+from mirage.execution.constants import LOCAL_MACHINE
 from mirage.execution.process.handle import ProcessHandle
-from mirage.execution.process.types import ProcessInfo, ProcessState
+from mirage.execution.process.types import Process, ProcessState
+from mirage.execution.types import ProcessId
 from mirage.types import PathSpec
 
 
-def _info() -> ProcessInfo:
-    return ProcessInfo(
-        pid=7,
+def _info() -> Process:
+    return Process(
+        id=ProcessId("w", 7),
         session_id="a",
+        line=None,
+        parent=None,
+        group=7,
         command="line",
         cwd=PathSpec.from_str_path("/"),
+        machine=LOCAL_MACHINE,
         started_at=0.0,
-        execution_id="exec_test",
     )
 
 
@@ -48,7 +53,7 @@ async def test_a_finished_runner_reports_its_code_and_its_pid():
     handle = ProcessHandle(_info(), _exits_3, finished.append)
     handle.start()
     info = await handle.join()
-    assert (info.state, info.exit_code, finished) == (
+    assert (info.state, info.exit, finished) == (
         ProcessState.EXITED,
         3,
         [7],
@@ -62,7 +67,7 @@ async def test_a_failing_runner_exits_1_with_its_failure(eager):
     handle = ProcessHandle(_info(), _raises, finished.append)
     handle.start(eager)
     info = await handle.join()
-    assert (info.exit_code, info.failure, finished) == (1, "boom", [7])
+    assert (info.exit, info.error, finished) == (1, "boom", [7])
 
 
 @pytest.mark.asyncio
@@ -75,14 +80,14 @@ async def test_terminate_asks_once_and_the_runner_exits_137():
         return 0
 
     handle = ProcessHandle(
-        _info(), run, lambda _pid: None, bind=run_with_execution
+        _info(), run, lambda _pid: None, bind=run_as_process
     )
     handle.start()
     await started.wait()
     assert handle.terminate() is True
     assert handle.terminate() is False
     info = await handle.join()
-    assert (info.exit_code, info.cancellation_requested) == (137, True)
+    assert (info.exit, info.signal) == (137, 9)
 
 
 # A program the runner runs where an interrupt reaches it hands back what
@@ -108,7 +113,7 @@ async def test_a_program_returns_unless_interrupted_and_a_stop_still_stops():
     async with asyncio.timeout(5):
         await started.wait()
         assert handle.terminate()
-        assert (await handle.join()).exit_code == 137
+        assert (await handle.join()).exit == 137
     assert outcome == [(3, None)]
 
 
@@ -137,7 +142,7 @@ async def test_an_interrupted_program_names_its_signal_until_it_ends():
     handle.start()
     await started.wait()
     handle.interrupt(2)
-    assert ((await handle.join()).exit_code, seen) == (2, [2, None])
+    assert ((await handle.join()).exit, seen) == (2, [2, None])
 
 
 # A program that takes only some signals runs on through the others.
@@ -159,7 +164,7 @@ async def test_a_program_runs_on_through_a_signal_it_does_not_take():
     handle.start()
     await started.wait()
     handle.interrupt(3)
-    assert (await handle.join()).exit_code == 0
+    assert (await handle.join()).exit == 0
 
 
 # A stop stands for the signal a kill named: the runner reads it from the
@@ -181,14 +186,14 @@ async def test_a_runner_stopped_with_a_signal_exits_128_plus_it(signal, code):
         return 0
 
     handle = ProcessHandle(
-        _info(), run, lambda _pid: None, bind=run_with_execution
+        _info(), run, lambda _pid: None, bind=run_as_process
     )
     handle.start()
     await started.wait()
     assert handle.signal is None
     assert handle.terminate(signal) is True
     info = await handle.join()
-    assert (info.exit_code, handle.signal, seen) == (code, signal, [signal])
+    assert (info.exit, handle.signal, seen) == (code, signal, [signal])
 
 
 # A KILL while the runner still stops under a gentler signal takes over,
@@ -205,7 +210,7 @@ async def test_a_kill_takes_over_a_gentler_stop():
         return 0
 
     handle = ProcessHandle(
-        _info(), run, lambda _pid: None, children.append, run_with_execution
+        _info(), run, lambda _pid: None, children.append, run_as_process
     )
     handle.start()
     await started.wait()
@@ -214,7 +219,7 @@ async def test_a_kill_takes_over_a_gentler_stop():
     assert handle.terminate(9) is True
     assert handle.terminate(9) is False
     info = await handle.join()
-    assert (info.exit_code, handle.signal, children) == (137, 9, [15, 9])
+    assert (info.exit, handle.signal, children) == (137, 9, [15, 9])
 
 
 # A KILL another thread sends while the stopped runner settles is either
@@ -229,7 +234,7 @@ async def test_a_kill_racing_the_settle_is_the_status_it_reports():
         return 0
 
     handle = ProcessHandle(
-        _info(), run, lambda _pid: None, bind=run_with_execution
+        _info(), run, lambda _pid: None, bind=run_as_process
     )
     handle.start()
     await started.wait()
@@ -247,7 +252,7 @@ async def test_a_kill_racing_the_settle_is_the_status_it_reports():
     held.wait()
     info = await handle.join()
     thread.join()
-    assert (killed, info.exit_code) == ([True], 137)
+    assert (killed, info.exit) == ([True], 137)
 
 
 # The native runs a runner has going are kept under their keys until each
@@ -283,14 +288,14 @@ async def test_a_program_that_handled_the_signal_keeps_its_own_status():
         return 0
 
     handle = ProcessHandle(
-        _info(), run, lambda _pid: None, bind=run_with_execution
+        _info(), run, lambda _pid: None, bind=run_as_process
     )
     handle.start()
     await started.wait()
     assert handle.program_code is None
     assert handle.terminate(15) is True
     info = await handle.join()
-    assert (info.exit_code, handle.program_code) == (143, 3)
+    assert (info.exit, handle.program_code) == (143, 3)
 
 
 # An eager start runs a runner that never waits to its end before start
@@ -300,7 +305,7 @@ async def test_an_eager_runner_that_never_waits_is_done_once_started():
     handle = ProcessHandle(_info(), _exits_3, lambda _pid: None)
     handle.start(eager=True)
     assert handle.task.done()
-    assert (await handle.join()).exit_code == 3
+    assert (await handle.join()).exit == 3
 
 
 # A runner stopping itself while its eager start still runs (a `kill
@@ -315,11 +320,11 @@ async def test_a_runner_that_stops_itself_during_an_eager_start_exits_137():
         return 0
 
     handle = ProcessHandle(
-        _info(), run, lambda _pid: None, bind=run_with_execution
+        _info(), run, lambda _pid: None, bind=run_as_process
     )
     handle.start(eager=True)
     info = await handle.join()
-    assert (info.exit_code, info.cancellation_requested) == (137, True)
+    assert (info.exit, info.signal) == (137, 9)
 
 
 async def _hangs() -> int:
@@ -354,4 +359,4 @@ async def test_reap_answers_a_status_unless_the_host_stopped_the_runner():
     waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
         await waiter
-    assert (await waited.join()).exit_code == 137
+    assert (await waited.join()).exit == 137

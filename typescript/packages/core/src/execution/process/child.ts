@@ -1,7 +1,7 @@
 import { PipeClosed } from '../../shell/errors.ts'
 import { materialize } from '../../io/types.ts'
 import type { ProcessHandle } from './handle.ts'
-import type { ProcessInfo } from './types.ts'
+import type { Process } from './types.ts'
 import type { ProcessInput, ProcessOutput } from './stdio.ts'
 
 export interface ProcessResult {
@@ -28,13 +28,13 @@ export class ChildProcess {
     this.stderr = output.stderr.stream()
   }
   get pid(): number {
-    return this.process.info.pid
+    return this.process.record.id.pid
   }
   closeOutput(stream: 'stdout' | 'stderr'): void {
     this.output[stream].stop()
   }
   poll(): number | null {
-    return this.process.info.exitCode
+    return this.process.record.exit
   }
   /**
    * Stop the child with `signal`; its status is 128 plus it.
@@ -45,7 +45,7 @@ export class ChildProcess {
   terminate(signal = 9): void {
     this.cancel(signal)
   }
-  wait(): Promise<ProcessInfo> {
+  wait(): Promise<Process> {
     return this.process.join()
   }
   async communicate(data: Uint8Array = new Uint8Array()): Promise<ProcessResult> {
@@ -65,7 +65,7 @@ export class ChildProcess {
         materialize(this.stderr),
         this.wait(),
       ])
-      return { stdout, stderr, exitCode: info.exitCode ?? 1 }
+      return { stdout, stderr, exitCode: info.exit ?? 1 }
     } catch (error) {
       this.terminate()
       throw error

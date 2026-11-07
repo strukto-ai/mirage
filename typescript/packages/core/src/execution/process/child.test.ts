@@ -65,7 +65,7 @@ describe('ChildProcess', () => {
     )
     await running
     child.terminate()
-    expect(await child.wait()).toMatchObject({ exitCode: 137, cancellationRequested: true })
+    expect(await child.wait()).toMatchObject({ exit: 137, signal: 9 })
     expect(child.poll()).toBe(137)
   })
 })

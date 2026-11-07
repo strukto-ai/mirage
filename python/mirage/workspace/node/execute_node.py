@@ -1466,7 +1466,7 @@ async def _execute_node(
         execs = len(statements) == 1 and nested_shell(statements[0], session)
 
         def forked(process: ProcessHandle) -> None:
-            child.session.process_id = process.info.pid
+            child.session.process_id = process.record.pid
             child.frame.shell = None if execs else process
 
         owner = current_caller().process

@@ -30,7 +30,7 @@ import { Workspace } from '../../../workspace.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { SSHRuntime } from './runtime.ts'
 import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
-import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
+import { runAsProcess } from '@struktoai/mirage-core/context/session_context'
 import type { Ssh2Sdk } from './sdk.ts'
 
 vi.mock('node:os', async (original) => ({
@@ -323,7 +323,7 @@ describe('SSHRuntime cancellation', () => {
     const runtime = new HungRuntime()
     const controller = new AbortController()
     const started = new Promise((resolve) => runtime.channel.once('eof', resolve))
-    const runner = new ProcessTable(runWithExecution).start({
+    const runner = new ProcessTable(undefined, undefined, runAsProcess).start({
       sessionId: 's',
       command: 'sleep',
       cwd: PathSpec.fromStrPath('/'),
@@ -334,7 +334,7 @@ describe('SSHRuntime cancellation', () => {
     })
     await started
     expect(runner.terminate(15)).toBe(true)
-    expect((await runner.join()).exitCode).toBe(143)
+    expect((await runner.join()).exit).toBe(143)
     expect([runtime.channel.signals, runtime.channel.closed]).toEqual([signals, true])
   })
 

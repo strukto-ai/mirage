@@ -1,7 +1,8 @@
 import { expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { ProcessTable } from './table.ts'
-import { currentExecutionId, runWithExecution } from '../../context/session_context.ts'
+import { LineId } from '../types.ts'
+import { currentProcessId, runAsProcess } from '../../context/session_context.ts'
 import type { ProcessHandle } from './handle.ts'
 
 function gate() {
@@ -18,20 +19,20 @@ function gate() {
 }
 
 it('isolates execution context between concurrent runners', async () => {
-  const processes = new ProcessTable(runWithExecution)
+  const processes = new ProcessTable(undefined, undefined, runAsProcess)
   const release = gate()
-  const seen: (string | null)[][] = []
-  const handles = ['first', 'second'].map((executionId) =>
+  const seen: (string | undefined)[][] = []
+  const handles = ['first', 'second'].map((line) =>
     processes.start({
       sessionId: 'same',
       command: 'probe',
       cwd: PathSpec.fromStrPath('/'),
-      executionId,
+      line: new LineId(line),
       cancel: () => undefined,
       run: async () => {
-        const before = currentExecutionId()
+        const before = currentProcessId()
         await release.promise
-        seen.push([before, currentExecutionId()])
+        seen.push([before?.toString(), currentProcessId()?.toString()])
         return 0
       },
     }),
@@ -39,11 +40,13 @@ it('isolates execution context between concurrent runners', async () => {
   await Promise.resolve()
   release.release()
   await Promise.all(handles.map((handle) => handle.join()))
-  expect(seen.sort()).toEqual([
-    ['first', 'first'],
-    ['second', 'second'],
+  const ids = handles.map((handle) => handle.record.id.toString()).sort()
+  expect(seen.sort()).toEqual(ids.map((id) => [id, id]))
+  expect(handles.map((handle) => handle.record.line?.toString()).sort()).toEqual([
+    'first',
+    'second',
   ])
-  expect(currentExecutionId()).toBeNull()
+  expect(currentProcessId()).toBeNull()
 })
 
 it('does not give execution ancestry cancellation ownership', async () => {
@@ -56,7 +59,7 @@ it('does not give execution ancestry cancellation ownership', async () => {
     sessionId: 'a',
     command: 'parent',
     cwd: PathSpec.fromStrPath('/'),
-    executionId: 'request',
+    line: new LineId('request'),
     cancel: () => {
       abort.abort()
     },
@@ -89,10 +92,10 @@ it('does not give execution ancestry cancellation ownership', async () => {
   await started.promise
   const child = children[0]
   if (child === undefined) throw new Error('child was not started')
-  expect(child.info.parentPid).toBeNull()
+  expect(child.record.parent).toBeNull()
   root.terminate()
   await root.join()
-  expect(child.info.state).toBe('running')
+  expect(child.record.state).toBe('running')
   release.release()
   await child.join()
 })
@@ -134,7 +137,7 @@ it('does not claim exit before finally completes', async () => {
   expect(process.terminate()).toBe(true)
   expect(process.terminate()).toBe(false)
   await cleaning.promise
-  expect(view.list()).toMatchObject([{ state: 'stopping', exitCode: null }])
+  expect(view.list()).toMatchObject([{ state: 'stopping', exit: null }])
   let joined = false
   const joining = process.join().then((info) => {
     joined = true
@@ -146,8 +149,8 @@ it('does not claim exit before finally completes', async () => {
   release.release()
   expect(await joining).toMatchObject({
     state: 'exited',
-    exitCode: 137,
-    cancellationRequested: true,
+    exit: 137,
+    signal: 9,
   })
   expect(view.list()).toEqual([])
   expect(process.terminate()).toBe(false)
@@ -170,18 +173,18 @@ it('scopes immutable views and revokes them when a session ID is reused', async 
   const a = start('a'),
     b = start('b')
   const oldView = processes.view('a')
-  expect(oldView.list()).toEqual([a.info])
-  expect(Object.isFrozen(a.info)).toBe(true)
+  expect(oldView.list()).toEqual([a.record])
+  expect(Object.isFrozen(a.record)).toBe(true)
   expect(Object.isFrozen(oldView.list())).toBe(true)
   processes.revokeSession('a')
   const newView = processes.view('a'),
     replacement = start('a')
   expect(oldView.list()).toEqual([])
-  expect(newView.list()).toEqual([replacement.info])
-  expect(new Set([a.info.pid, b.info.pid, replacement.info.pid]).size).toBe(3)
+  expect(newView.list()).toEqual([replacement.record])
+  expect(new Set([a.record.id.pid, b.record.id.pid, replacement.record.id.pid]).size).toBe(3)
   release.release()
   expect(
-    (await Promise.all([a.join(), b.join(), replacement.join()])).map((info) => info.exitCode),
+    (await Promise.all([a.join(), b.join(), replacement.join()])).map((info) => info.exit),
   ).toEqual([7, 7, 7])
   expect(processes.live()).toEqual([])
 })
@@ -195,7 +198,7 @@ it('observes runner failures and retires them', async () => {
     cancel: () => undefined,
     run: () => Promise.reject(new Error('failed cleanup')),
   })
-  expect(await process.join()).toMatchObject({ exitCode: 1, failure: 'failed cleanup' })
+  expect(await process.join()).toMatchObject({ exit: 1, error: 'failed cleanup' })
   expect(processes.live()).toEqual([])
 })
 
@@ -213,13 +216,14 @@ it('keeps natural exit distinct from a cancellation request that was ignored', a
     },
   })
   expect(process.terminate()).toBe(true)
-  expect(process.info).toMatchObject({ state: 'stopping', exitCode: null })
+  expect(process.record).toMatchObject({ state: 'stopping', exit: null })
   release.release()
   expect(await process.join()).toMatchObject({
     state: 'exited',
-    exitCode: 0,
-    cancellationRequested: true,
+    exit: 0,
+    signal: null,
   })
+  expect(process.signal).toBe(9)
 })
 
 it('closes admission and requests cancellation of every live runner', async () => {
@@ -245,9 +249,8 @@ it('closes admission and requests cancellation of every live runner', async () =
   expect(cancelled).toEqual(['a', 'b'])
   expect(() => processes.start(init('a'))).toThrow('stopped')
   release.release()
-  expect(
-    (await Promise.all([a.join(), b.join()])).every((info) => info.cancellationRequested),
-  ).toBe(true)
+  await Promise.all([a.join(), b.join()])
+  expect([a.signal, b.signal]).toEqual([9, 9])
   expect(processes.live()).toEqual([])
 })
 
@@ -269,8 +272,10 @@ it('a workspace list grants no kill', async () => {
     kill: 'session',
     max: null,
   }))
-  expect(view.list()).toMatchObject([{ pid: child.info.pid, command: 'secret argument' }])
-  expect(() => view.terminate(child.info.pid, 15)).toThrow(
+  expect(view.list()).toMatchObject([
+    { id: { pid: child.record.id.pid }, command: 'secret argument' },
+  ])
+  expect(() => view.terminate(child.record.id.pid, 15)).toThrow(
     expect.objectContaining({ code: 'EPERM' }),
   )
   expect(view.permissions()).toEqual({ list: 'workspace', kill: 'session', max: null })
@@ -351,27 +356,30 @@ it('group cancellation reaches grandchildren after an intermediate exits', async
   const root = processes.start(init)
   const middle = processes.start({
     ...init,
-    parentPid: root.info.pid,
+    parent: root.record.id.pid,
     run: () => Promise.resolve(0),
   })
-  const leaf = processes.start({ ...init, parentPid: middle.info.pid })
+  const leaf = processes.start({ ...init, parent: middle.record.id.pid })
   await middle.join()
-  expect(leaf.info.groupId).toBe(root.info.pid)
+  expect(leaf.record.group).toBe(root.record.id.pid)
   root.terminate()
-  expect(() => processes.start({ ...init, parentPid: root.info.pid })).toThrow('accepting children')
+  expect(() => processes.start({ ...init, parent: root.record.id.pid })).toThrow(
+    'accepting children',
+  )
   await processes.drain()
-  expect((await leaf.join()).cancellationRequested).toBe(true)
+  await leaf.join()
+  expect(leaf.signal).not.toBeNull()
   expect(processes.live()).toEqual([])
 })
 
 it('cancellation reaches a grandchild past an exited parent below the group leader', async () => {
   const processes = new ProcessTable()
   const init = { sessionId: 'a', command: 'runner', cwd: PathSpec.fromStrPath('/') }
-  const held = (parentPid?: number) => {
+  const held = (parent?: number) => {
     const release = gate()
     return processes.start({
       ...init,
-      ...(parentPid === undefined ? {} : { parentPid }),
+      ...(parent === undefined ? {} : { parent }),
       cancel: () => {
         release.release()
       },
@@ -382,18 +390,19 @@ it('cancellation reaches a grandchild past an exited parent below the group lead
     })
   }
   const root = held()
-  const job = held(root.info.pid)
+  const job = held(root.record.id.pid)
   const middle = processes.start({
     ...init,
-    parentPid: job.info.pid,
+    parent: job.record.id.pid,
     cancel: () => undefined,
     run: () => Promise.resolve(0),
   })
-  const leaf = held(middle.info.pid)
+  const leaf = held(middle.record.id.pid)
   await middle.join()
   job.terminate()
-  expect((await leaf.join()).cancellationRequested).toBe(true)
-  expect(root.info.cancellationRequested).toBe(false)
+  await leaf.join()
+  expect(leaf.signal).not.toBeNull()
+  expect(root.signal).toBeNull()
   root.terminate()
   await root.join()
 })
@@ -403,11 +412,11 @@ it('cancellation reaches a grandchild past an exited parent below the group lead
 it('stopping a runner alone leaves its children running', async () => {
   const processes = new ProcessTable()
   const init = { sessionId: 'a', command: 'runner', cwd: PathSpec.fromStrPath('/') }
-  const held = (parentPid?: number) => {
+  const held = (parent?: number) => {
     const release = gate()
     return processes.start({
       ...init,
-      ...(parentPid === undefined ? {} : { parentPid }),
+      ...(parent === undefined ? {} : { parent }),
       cancel: () => {
         release.release()
       },
@@ -418,11 +427,12 @@ it('stopping a runner alone leaves its children running', async () => {
     })
   }
   const parent = held()
-  const child = held(parent.info.pid)
+  const child = held(parent.record.id.pid)
   expect(parent.terminate(2, false)).toBe(true)
   expect(parent.signal).toBe(2)
-  expect((await parent.join()).cancellationRequested).toBe(true)
-  expect(child.info.cancellationRequested).toBe(false)
+  await parent.join()
+  expect(parent.signal).not.toBeNull()
+  expect(child.signal).toBeNull()
   child.terminate()
   await child.join()
 })
@@ -434,13 +444,13 @@ it('stopping a runner alone leaves its children running', async () => {
 it("a group signal ends an ignoring shell's program and stops the rest", async () => {
   const processes = new ProcessTable()
   const init = { sessionId: 'a', command: 'sh', cwd: PathSpec.fromStrPath('/') }
-  const hung = (parentPid: number | null, extra: { ownGroup?: boolean } = {}) => {
+  const hung = (parent: number | null, extra: { ownGroup?: boolean } = {}) => {
     const stopped = gate()
     return processes.start({
       ...init,
       ...extra,
       command: 'sleep',
-      parentPid,
+      parent,
       cancel: () => {
         stopped.release()
       },
@@ -455,7 +465,7 @@ it("a group signal ends an ignoring shell's program and stops the rest", async (
   const outcome: [number | null, number | null][] = []
   const child = processes.start({
     ...init,
-    parentPid: parent.info.pid,
+    parent: parent.record.id.pid,
     ignores: new Set([2]),
     cancel: () => undefined,
     run: async () => {
@@ -473,18 +483,18 @@ it("a group signal ends an ignoring shell's program and stops the rest", async (
       return 0
     },
   })
-  const other = hung(parent.info.pid)
-  const forked = hung(child.info.pid)
-  const outside = hung(parent.info.pid, { ownGroup: true })
+  const other = hung(parent.record.id.pid)
+  const forked = hung(child.record.id.pid)
+  const outside = hung(parent.record.id.pid, { ownGroup: true })
   await started.promise
-  expect(processes.signalGroup(parent.info.groupId, 2)).toBe(true)
-  expect((await child.join()).exitCode).toBe(0)
-  expect((await other.join()).exitCode).toBe(130)
-  expect((await forked.join()).exitCode).toBe(130)
-  expect((await parent.join()).exitCode).toBe(130)
+  expect(processes.signalGroup(parent.record.group, 2)).toBe(true)
+  expect((await child.join()).exit).toBe(0)
+  expect((await other.join()).exit).toBe(130)
+  expect((await forked.join()).exit).toBe(130)
+  expect((await parent.join()).exit).toBe(130)
   expect(outcome).toEqual([[null, 2]])
   expect(outside.signal).toBeNull()
-  expect(processes.signalGroup(outside.info.pid + 1, 2)).toBe(false)
+  expect(processes.signalGroup(outside.record.id.pid + 1, 2)).toBe(false)
   outside.terminate()
   await outside.join()
 })
@@ -512,12 +522,12 @@ it('takes a given pid while it is free', async () => {
       return 0
     },
   })
-  expect([first.info.pid, held.info.pid]).toEqual([7, 8])
+  expect([first.record.id.pid, held.record.id.pid]).toEqual([7, 8])
   await first.join()
   const again = processes.start({ ...init, pid: 7, run: () => Promise.resolve(0) })
-  expect(again.info.pid).toBe(7)
+  expect(again.record.id.pid).toBe(7)
   await again.join()
-  expect(processes.live().map((p) => p.info.pid)).toEqual([8])
+  expect(processes.live().map((p) => p.record.id.pid)).toEqual([8])
   held.terminate()
   await held.join()
 })
@@ -540,7 +550,7 @@ it('stopping an exited runner stops what it left running', async () => {
   const left = processes.start({
     ...init,
     command: 'sleep',
-    parentPid: parent.info.pid,
+    parent: parent.record.id.pid,
     run: async () => {
       await release.promise
       throw new DOMException('aborted', 'AbortError')
@@ -549,20 +559,20 @@ it('stopping an exited runner stops what it left running', async () => {
   await parent.join()
   expect(parent.terminate(15)).toBe(false)
   const info = await left.join()
-  expect([info.exitCode, info.cancellationRequested]).toEqual([143, true])
+  expect([info.exit, info.signal]).toEqual([143, 15])
 })
 
 // A kill reaches the whole group with the signal it named, so a native
 // program a child runner started receives that signal too.
 it('a group stopped with a signal passes it to every child', async () => {
   const processes = new ProcessTable()
-  const start = (parentPid: number | null): ProcessHandle => {
+  const start = (parent: number | null): ProcessHandle => {
     const abort = new AbortController()
     return processes.start({
       sessionId: 'a',
       command: 'runner',
       cwd: PathSpec.fromStrPath('/'),
-      parentPid,
+      parent,
       cancel: () => {
         abort.abort()
       },
@@ -577,10 +587,10 @@ it('a group stopped with a signal passes it to every child', async () => {
     })
   }
   const root = start(null)
-  const child = start(root.info.pid)
+  const child = start(root.record.id.pid)
   expect(root.terminate(15)).toBe(true)
-  expect([(await root.join()).exitCode, child.signal]).toEqual([143, 15])
-  expect((await child.join()).exitCode).toBe(143)
+  expect([(await root.join()).exit, child.signal]).toEqual([143, 15])
+  expect((await child.join()).exit).toBe(143)
 })
 
 // A caller's setup from the new process (the session's $$) runs before the
@@ -595,10 +605,10 @@ it('runs started before the runner with the process live', async () => {
     cwd: PathSpec.fromStrPath('/'),
     cancel: () => undefined,
     started: (process) => {
-      order.push(`started ${String(process.info.pid)}`)
+      order.push(`started ${String(process.record.id.pid)}`)
     },
     run: () => {
-      order.push(`run ${JSON.stringify(processes.live().map((p) => p.info.pid))}`)
+      order.push(`run ${JSON.stringify(processes.live().map((p) => p.record.id.pid))}`)
       return Promise.resolve(0)
     },
   })
@@ -610,7 +620,7 @@ it('runs started before the runner with the process live', async () => {
 // once it is live, so the next publish lists it.
 it('tells the publisher of each runner it started', async () => {
   const live: number[] = []
-  const processes: ProcessTable = new ProcessTable(undefined, undefined, () => {
+  const processes: ProcessTable = new ProcessTable(undefined, undefined, undefined, () => {
     live.push(processes.live().length)
   })
   for (let i = 0; i < 2; i++) {

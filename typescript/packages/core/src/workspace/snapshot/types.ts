@@ -64,7 +64,7 @@ export interface SessionSnapshot {
 }
 
 export interface JobSnapshot {
-  execution_id?: string | null
+  process?: string | null
   id: number
   command: string
   cwd: string

@@ -41,7 +41,7 @@ async def _rows(
     io = await ws.shell(line)
     assert io.exit_code == exit_code, await io.stderr_str()
     rows = ws.vfs.records[start:]
-    assert all(r.execution_id for r in rows)
+    assert all(r.process for r in rows)
     return [
         (r.op, r.path, r.bytes)
         for r in rows

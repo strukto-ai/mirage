@@ -34,7 +34,7 @@ import type { RunResult } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
 import { ProcessTable } from '../../execution/process/table.ts'
 import type { ProcessHandle } from '../../execution/process/handle.ts'
-import { runWithExecution } from '../../context/session_context.ts'
+import { runAsProcess } from '../../context/session_context.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -445,7 +445,7 @@ describe('RemoteSandbox', () => {
       cwd: PathSpec.fromStrPath('/'),
       signal: abort.signal,
     }
-    const runner = new ProcessTable(runWithExecution).start({
+    const runner = new ProcessTable(undefined, undefined, runAsProcess).start({
       sessionId: 's',
       command: 'yes',
       cwd: ctx.cwd,
@@ -458,7 +458,7 @@ describe('RemoteSandbox', () => {
       expect(box.execs).toHaveLength(1)
     })
     expect(runner.terminate(2)).toBe(true)
-    expect((await runner.join()).exitCode).toBe(130)
+    expect((await runner.join()).exit).toBe(130)
     const execId = box.execs[0]?.[2][EXEC_ID] ?? ''
     expect(box.execs.map(([line]) => line)).toEqual(['yes', reapLine(execId, 2)])
   })
@@ -482,14 +482,14 @@ describe('RemoteSandbox', () => {
     }
     const box = new WatchedBox({ captures: ['yes'] })
     const ctx = { stdin: null, flags: { c: 'yes' }, env: {}, cwd: PathSpec.fromStrPath('/') }
-    runner = new ProcessTable(runWithExecution).start({
+    runner = new ProcessTable(undefined, undefined, runAsProcess).start({
       sessionId: 's',
       command: 'yes',
       cwd: ctx.cwd,
       cancel: () => undefined,
       run: async () => (await box.runLine(undefined, [], [], ctx)).exitCode,
     })
-    expect((await runner.join()).exitCode).toBe(0)
+    expect((await runner.join()).exit).toBe(0)
     const tag = box.execs[0]?.[2][EXEC_ID] ?? ''
     expect(seen).toEqual([
       { [`box:${tag}`]: { runtime: 'recbox', tag, command: '/bin/sh -c yes' } },

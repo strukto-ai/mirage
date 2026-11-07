@@ -59,5 +59,5 @@ async def test_terminate_cancels_a_child_that_never_answers():
     await started.wait()
     child.terminate()
     info = await child.wait()
-    assert (info.exit_code, info.cancellation_requested) == (137, True)
+    assert (info.exit, info.signal) == (137, 9)
     assert child.poll() == 137

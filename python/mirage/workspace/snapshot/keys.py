@@ -70,7 +70,7 @@ class CacheKey(StrEnum):
 
 
 class JobKey(StrEnum):
-    EXECUTION_ID = "execution_id"
+    PROCESS = "process"
     ID = "id"
     COMMAND = "command"
     CWD = "cwd"

@@ -60,11 +60,13 @@ class Job:
     reported: bool = False
 
     @property
-    def execution_id(self) -> str | None:
+    def process_id(self) -> str | None:
+        """The id of the process the job runs as, as text: its runner's
+        here, its console's for a job restored or run elsewhere."""
         return (
-            self.process.info.execution_id
+            str(self.process.record.id)
             if self.process is not None
-            else self.console.execution_id
+            else self.console.process
         )
 
     @property
@@ -74,7 +76,7 @@ class Job:
         A job restored from a snapshot or run by another workspace has
         no runner here, so its job number stands in.
         """
-        return self.process.info.pid if self.process is not None else self.id
+        return self.process.record.pid if self.process is not None else self.id
 
 
 JobRunner = Callable[

@@ -1,19 +1,14 @@
 import { isAborting } from '../../errors/fs.ts'
 import type { JsonValue } from '../../types.ts'
 import { SignalStop } from '../../utils/abort.ts'
-import type { ProcessInfo, ProcessRunner } from './types.ts'
+import type { Process, ProcessRunner } from './types.ts'
 
 /**
- * Runs a runner as part of its execution, so what it records names it and
- * the runner it is. The workspace hands over the caller's binder: the
- * process layer sits below the session the caller carries, so it cannot
- * import it.
+ * Runs a runner as the process it is, so what it records names it. The
+ * workspace hands over the caller's binder: the process layer sits below
+ * the session the caller carries, so it cannot import it.
  */
-export type ExecutionBind = <T>(
-  executionId: string,
-  run: () => Promise<T>,
-  process: ProcessHandle,
-) => Promise<T>
+export type ExecutionBind = <T>(run: () => Promise<T>, process: ProcessHandle) => Promise<T>
 
 /** Host-side runner lifecycle; cancellation and actual completion are separate.
  * A cancellation stands for a signal: a native program the runner started
@@ -32,7 +27,7 @@ export class ProcessHandle {
    * whoever waits for it as well.
    */
   revoked = false
-  private current: ProcessInfo
+  private current: Process
   private stopSignal: number | null = null
   private stopped = false
   private exitedCode: number | null = null
@@ -41,18 +36,19 @@ export class ProcessHandle {
   // The programs `program` runs, each with the signal `interrupt` sent it.
   private readonly programs = new Map<AbortController, number | null>()
   private readonly takes = new Map<AbortController, ReadonlySet<number> | null>()
-  private completion!: Promise<ProcessInfo>
+  private completion!: Promise<Process>
 
   constructor(
-    info: ProcessInfo,
+    record: Process,
     private readonly run: ProcessRunner,
     private readonly cancel: (signal: number) => void,
     private readonly finished: (pid: number) => void,
     private readonly cancelChildren: (signal: number) => void = () => undefined,
-    private readonly bind: ExecutionBind = (_id, run) => run(),
+    private readonly bind: ExecutionBind = (run) => run(),
     readonly ignores: ReadonlySet<number> = new Set(),
+    private readonly now: () => number = () => Date.now() / 1000,
   ) {
-    this.current = Object.freeze(info)
+    this.current = Object.freeze(record)
   }
 
   /**
@@ -66,14 +62,13 @@ export class ProcessHandle {
   start(eager = false): void {
     const work = () => {
       this.begun = true
-      return this.bind(this.current.executionId, this.run, this)
+      return this.bind(this.run, this)
     }
     this.task = eager ? (async () => work())() : Promise.resolve().then(work)
     this.completion = this.task.then(
       (code) => this.settle(code, null, this.finished),
       (error: unknown) => {
         const aborted = error instanceof Error && error.name === 'AbortError'
-        if (aborted) this.current = Object.freeze({ ...this.current, cancellationRequested: true })
         this.stopped = aborted
         return this.settle(
           aborted ? 128 + (this.stopSignal ?? 9) : 1,
@@ -84,7 +79,7 @@ export class ProcessHandle {
     )
   }
 
-  get info(): ProcessInfo {
+  get record(): Process {
     return this.current
   }
 
@@ -102,7 +97,7 @@ export class ProcessHandle {
   get endedBy(): number | null {
     if (this.stopped) return this.stopSignal ?? 9
     const ended = this.programSignal
-    return ended !== null && this.current.exitCode === 128 + ended ? ended : null
+    return ended !== null && this.current.exit === 128 + ended ? ended : null
   }
 
   /** The signal `interrupt` stops the program the runner runs right now with, null while none is stopping. */
@@ -223,18 +218,14 @@ export class ProcessHandle {
       if (children) this.cancelChildren(signal)
       return false
     }
-    if (this.current.cancellationRequested) {
+    if (this.current.state === 'stopping') {
       if (signal !== 9 || this.stopSignal === 9) return false
       this.stopSignal = signal
       if (children) this.cancelChildren(signal)
       return true
     }
     const previous = this.current
-    this.current = Object.freeze({
-      ...this.current,
-      state: 'stopping',
-      cancellationRequested: true,
-    })
+    this.current = Object.freeze({ ...this.current, state: 'stopping' })
     this.stopSignal = signal
     try {
       if (children) this.cancelChildren(signal)
@@ -247,17 +238,29 @@ export class ProcessHandle {
     return true
   }
 
-  private settle(
-    code: number,
-    failure: string | null,
-    finished: (pid: number) => void,
-  ): ProcessInfo {
-    this.current = Object.freeze({ ...this.current, state: 'exited', exitCode: code, failure })
-    finished(this.current.pid)
+  private settle(code: number, error: string | null, finished: (pid: number) => void): Process {
+    const stop = this.stopSignal
+    const ended = this.programSignal
+    const signal = this.stopped
+      ? (stop ?? 9)
+      : stop !== null && code === 128 + stop
+        ? stop
+        : ended !== null && code === 128 + ended
+          ? ended
+          : null
+    this.current = Object.freeze({
+      ...this.current,
+      state: 'exited',
+      endedAt: this.now(),
+      exit: code,
+      signal,
+      error,
+    })
+    finished(this.current.id.pid)
     return this.current
   }
 
-  join(): Promise<ProcessInfo> {
+  join(): Promise<Process> {
     return this.completion
   }
 

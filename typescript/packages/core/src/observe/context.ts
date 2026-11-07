@@ -14,7 +14,7 @@
 
 import {
   currentCaller,
-  currentExecutionId,
+  currentProcessId,
   liveCallers,
   runWithCaller,
 } from '../context/session_context.ts'
@@ -284,7 +284,7 @@ export function finishRecord(
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
     mountId: currentCaller().recording?.mountId ?? null,
-    executionId: currentExecutionId(),
+    process: currentProcessId()?.toString() ?? null,
   })
 }
 
@@ -341,7 +341,7 @@ export function recordStream(
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
     mountId: currentCaller().recording?.mountId ?? null,
-    executionId: currentExecutionId(),
+    process: currentProcessId()?.toString() ?? null,
   })
   rec.complete = false
   state.records.push(rec)

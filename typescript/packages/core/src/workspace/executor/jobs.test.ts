@@ -619,7 +619,7 @@ describe('jobs are scoped to the session that launched them', () => {
       expect(stdoutStr(await ws.shell('jobs', { sessionId: 'a' }))).toBe('')
       expect(
         Number(stdoutStr(await ws.shell('sleep 30 & echo $!', { sessionId: 'a' }))),
-      ).toBeGreaterThan(old?.process?.info.pid ?? 0)
+      ).toBeGreaterThan(old?.process?.record.id.pid ?? 0)
       expect(ws.jobTable.get(1, 'a')).not.toBeNull()
       const io = await ws.shell('wait %2', { sessionId: 'a' })
       expect(io.exitCode).toBe(127)
@@ -775,8 +775,8 @@ it('kill -0 checks signal permission without cancelling the process', async () =
       ws.processes
         .view('owner')
         .list()
-        .find((info) => info.pid === pid)?.cancellationRequested,
-    ).toBe(false)
+        .find((info) => info.id.pid === pid)?.state,
+    ).toBe('running')
   } finally {
     await ws.close()
   }

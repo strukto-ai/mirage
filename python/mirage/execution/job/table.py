@@ -388,7 +388,7 @@ class JobTable:
         run: JobRunner,
         cwd: str,
         session_id: str = "",
-        parent_pid: int | None = None,
+        parent: int | None = None,
         limit: int | None = None,
         simple: bool = False,
     ) -> Job:
@@ -407,7 +407,8 @@ class JobTable:
             run (JobRunner): produces the job's output and its result.
             cwd (str): working directory the job was started from.
             session_id (str): session whose job list the job joins.
-            parent_pid (int | None): the runner that started the job.
+            parent (int | None): the pid of the runner that started the
+                job.
             limit (int | None): the session's process cap
                 (``processes.max``); None for no cap.
             simple (bool): the job is one simple command (``Job.simple``).
@@ -457,7 +458,7 @@ class JobTable:
                 command=command,
                 cwd=PathSpec.from_str_path(cwd),
                 run=execute,
-                parent_pid=parent_pid,
+                parent=parent,
                 limit=limit,
                 ignores=IGNORED_SIGNALS,
             )
@@ -466,7 +467,7 @@ class JobTable:
             raise
         try:
             console = JobConsole(self.store.console(name))
-            console.bind_execution(process.info.execution_id)
+            console.bind_process(str(process.record.id))
             job = Job(
                 id=job_id,
                 command=command,
@@ -484,7 +485,7 @@ class JobTable:
             raise
         job.process = process
         self._jobs.setdefault(session_id, {})[job_id] = job
-        plane, pid = self._plane, process.info.pid
+        plane, pid = self._plane, process.record.pid
         plane._job_tables[pid] = self
         process.task.add_done_callback(
             lambda _: plane._job_tables.pop(pid, None)
@@ -510,8 +511,8 @@ class JobTable:
         for chunk in chunks:
             await console.append(chunk.channel, chunk.data)
         restored = JobConsole(console, finished=True)
-        if job.execution_id is not None:
-            restored.bind_execution(job.execution_id)
+        if job.process_id is not None:
+            restored.bind_process(job.process_id)
         job.console = restored
         job.owner = self.owner
         job.console_name = name
@@ -1381,17 +1382,18 @@ class JobTable:
         them, each with the native runs it has going."""
         records: dict[str, RecordFields] = {}
         for handle in self.processes.live():
-            info = handle.info
-            records[str(info.pid)] = {
-                "pid": info.pid,
-                "parent": info.parent_pid,
-                "group": info.group_id,
-                "session": info.session_id,
-                "command": info.command,
-                "cwd": info.cwd.virtual,
-                "started_at": info.started_at,
-                "state": info.state.value,
-                "execution": info.execution_id,
+            record = handle.record
+            records[str(record.pid)] = {
+                "pid": record.pid,
+                "parent": record.parent,
+                "group": record.group,
+                "session": record.session_id,
+                "command": record.command,
+                "cwd": record.cwd.virtual,
+                "machine": str(record.machine),
+                "started_at": record.started_at,
+                "state": record.state.value,
+                "line": str(record.line) if record.line is not None else None,
                 "runs": list(handle.runs.values()),
             }
         return records
@@ -1473,7 +1475,7 @@ class JobTable:
                 await table.kill(job.id, job.session_id, signal)
                 return
         for handle in self.processes.live():
-            if handle.info.pid == pid:
+            if handle.record.pid == pid:
                 handle.terminate(signal)
                 return
 

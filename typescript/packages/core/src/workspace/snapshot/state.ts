@@ -900,7 +900,7 @@ async function jobToDict(j: Job): Promise<JobSnapshot> {
     exit_code: j.exitCode,
     created_at: j.createdAt,
     session_id: j.sessionId,
-    execution_id: j.executionId,
+    process: j.processId,
   }
 }
 
@@ -926,7 +926,7 @@ function restoredConsole(j: JobSnapshot): JobConsole {
     data: new TextEncoder().encode(outcome),
   })
   const console = new JobConsole(new RAMConsoleStore(null, chunks), true)
-  if (j.execution_id !== null && j.execution_id !== undefined) console.bindExecution(j.execution_id)
+  if (j.process !== null && j.process !== undefined) console.bindProcess(j.process)
   return console
 }
 

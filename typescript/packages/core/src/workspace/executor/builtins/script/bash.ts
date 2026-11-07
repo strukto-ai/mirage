@@ -266,7 +266,7 @@ export async function handleBash(
     // the shell's `$$`, whose own subshells and programs it forks.
     const runner = currentCaller().process
     if (runner !== null) {
-      session.shellPid = runner.info.pid
+      session.shellPid = runner.record.id.pid
       if (jobTable !== undefined) context.frame.shell = runner
     }
     io = await run()
@@ -310,7 +310,7 @@ async function inProcess(
       abort.abort()
     },
     (forked) => {
-      session.processId = session.shellPid = forked.info.pid
+      session.processId = session.shellPid = forked.record.id.pid
       context.frame.shell = forked
     },
   )

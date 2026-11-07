@@ -26,7 +26,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from mirage.context.session_context import run_with_execution
+from mirage.context.session_context import run_as_process
 from mirage.execution.process.table import ProcessTable
 from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
 from mirage.runtime.sandbox.program import (
@@ -304,7 +304,7 @@ def _start_runner(
 async def test_a_runner_killed_with_term_lets_the_child_handle_it(tmp_path):
     pid_file, said = tmp_path / "pid", tmp_path / "said"
     runner = _start_runner(
-        ProcessTable(bind=run_with_execution),
+        ProcessTable(bind=run_as_process),
         f"trap 'echo bye > {said}; exit 0' TERM; echo $$ > {pid_file}; "
         "while :; do sleep 0.05; done",
     )
@@ -313,7 +313,7 @@ async def test_a_runner_killed_with_term_lets_the_child_handle_it(tmp_path):
     async with asyncio.timeout(5):
         info = await runner.join()
     assert said.read_text() == "bye\n"
-    assert info.exit_code == 143
+    assert info.exit == 143
 
 
 @pytest.mark.asyncio
@@ -322,7 +322,7 @@ async def test_a_runner_killed_with_kill_gives_the_child_no_handler(
 ):
     pid_file, said = tmp_path / "pid", tmp_path / "said"
     runner = _start_runner(
-        ProcessTable(bind=run_with_execution),
+        ProcessTable(bind=run_as_process),
         f"trap 'echo bye > {said}; exit 0' TERM; echo $$ > {pid_file}; "
         "while :; do sleep 0.05; done",
     )
@@ -331,7 +331,7 @@ async def test_a_runner_killed_with_kill_gives_the_child_no_handler(
     async with asyncio.timeout(5):
         info = await runner.join()
     assert not said.exists()
-    assert info.exit_code == 137
+    assert info.exit == 137
     assert await _ended(child)
 
 
@@ -342,7 +342,7 @@ async def test_a_runner_killed_with_kill_gives_the_child_no_handler(
 async def test_a_kill_during_the_grace_ends_it(tmp_path):
     pid_file = tmp_path / "pid"
     runner = _start_runner(
-        ProcessTable(bind=run_with_execution),
+        ProcessTable(bind=run_as_process),
         f"trap '' TERM; echo $$ > {pid_file}; while :; do sleep 0.05; done",
     )
     child = await _wait_for_pid(pid_file)
@@ -353,7 +353,7 @@ async def test_a_kill_during_the_grace_ends_it(tmp_path):
     async with asyncio.timeout(5):
         info = await runner.join()
     assert time.monotonic() - killed < 0.5
-    assert info.exit_code == 137
+    assert info.exit == 137
     assert await _ended(child)
 
 
@@ -375,7 +375,7 @@ async def test_a_direct_child_that_handles_the_signal_leaves_its_status(
 ):
     pid_file = tmp_path / "pid"
     runner = _start_runner(
-        ProcessTable(bind=run_with_execution),
+        ProcessTable(bind=run_as_process),
         f"{trap}echo $$ > {pid_file}; while :; do sleep 0.05; done",
         direct,
     )
@@ -383,7 +383,7 @@ async def test_a_direct_child_that_handles_the_signal_leaves_its_status(
     assert runner.terminate(signum)
     async with asyncio.timeout(5):
         info = await runner.join()
-    assert (info.exit_code, runner.program_code) == (128 + signum, code)
+    assert (info.exit, runner.program_code) == (128 + signum, code)
 
 
 # A kill reaches the program once, as bash's does: a handler that counts
@@ -403,7 +403,7 @@ async def test_a_kill_signals_the_child_once(tmp_path):
         "    time.sleep(0.05)\n"
     )
     runner = _start_runner(
-        ProcessTable(bind=run_with_execution),
+        ProcessTable(bind=run_as_process),
         f"exec {shlex.quote(sys.executable)} -c {shlex.quote(program)}",
     )
     await _wait_for_pid(pid_file)
@@ -431,7 +431,7 @@ async def test_a_group_answering_eperm_is_gone(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "killpg", darwin)
     pid_file = tmp_path / "pid"
     runner = _start_runner(
-        ProcessTable(bind=run_with_execution),
+        ProcessTable(bind=run_as_process),
         f"trap 'exit 0' TERM; echo $$ > {pid_file}; "
         "while :; do sleep 0.05; done",
     )
@@ -439,7 +439,7 @@ async def test_a_group_answering_eperm_is_gone(tmp_path, monkeypatch):
     assert runner.terminate(signal.SIGTERM)
     async with asyncio.timeout(5):
         info = await runner.join()
-    assert (info.exit_code, info.failure) == (143, None)
+    assert (info.exit, info.error) == (143, None)
 
 
 # The grace is the group's: a descendant still handling the signal after
@@ -448,7 +448,7 @@ async def test_a_group_answering_eperm_is_gone(tmp_path, monkeypatch):
 async def test_a_descendant_keeps_the_grace_after_its_parent_exits(tmp_path):
     pid_file, said = tmp_path / "pid", tmp_path / "said"
     runner = _start_runner(
-        ProcessTable(bind=run_with_execution),
+        ProcessTable(bind=run_as_process),
         f'sh -c \'trap "sleep 0.3; echo bye > {said}; exit 0" TERM; '
         f"while :; do sleep 0.05; done' >/dev/null 2>&1 & "
         f"echo $$ > {pid_file}; wait",
@@ -467,7 +467,7 @@ async def test_a_descendant_keeps_the_grace_after_its_parent_exits(tmp_path):
 async def test_a_descendant_that_ignores_the_signal_is_killed(tmp_path):
     pid_file, kid_file = tmp_path / "pid", tmp_path / "kid"
     runner = _start_runner(
-        ProcessTable(bind=run_with_execution),
+        ProcessTable(bind=run_as_process),
         "sh -c \"trap '' TERM; while :; do sleep 0.05; done\" "
         f">/dev/null 2>&1 & echo $! > {kid_file}; echo $$ > {pid_file}; wait",
     )
@@ -486,7 +486,7 @@ async def test_a_descendant_that_ignores_the_signal_is_killed(tmp_path):
 async def test_a_handler_writing_its_output_finishes_in_the_grace(tmp_path):
     pid_file, said = tmp_path / "pid", tmp_path / "said"
     runner = _start_runner(
-        ProcessTable(bind=run_with_execution),
+        ProcessTable(bind=run_as_process),
         f"trap 'head -c 300000 /dev/zero; head -c 300000 /dev/zero >&2; "
         f"echo bye > {said}; exit 0' TERM; echo $$ > {pid_file}; "
         "while :; do sleep 0.05; done",
@@ -517,7 +517,7 @@ async def test_a_handler_reading_its_input_sees_it_end(tmp_path):
     )
 
     runner = _start_runner(
-        ProcessTable(bind=run_with_execution),
+        ProcessTable(bind=run_as_process),
         f"exec {shlex.quote(sys.executable)} -c {shlex.quote(program)}",
         True,
         _one_then_open(),
@@ -537,14 +537,14 @@ async def test_a_child_that_ignores_the_signal_is_killed_after_the_grace(
 ):
     pid_file = tmp_path / "pid"
     runner = _start_runner(
-        ProcessTable(bind=run_with_execution),
+        ProcessTable(bind=run_as_process),
         f"trap '' TERM; echo $$ > {pid_file}; while :; do sleep 0.05; done",
     )
     child = await _wait_for_pid(pid_file)
     assert runner.terminate(signal.SIGTERM)
     async with asyncio.timeout(5):
         info = await runner.join()
-    assert info.exit_code == 143
+    assert info.exit == 143
     assert await _ended(child)
 
 
@@ -670,7 +670,7 @@ async def test_a_kept_child_is_a_native_run_of_its_runner(tmp_path):
         )
         return ran.exit_code
 
-    runner = ProcessTable(bind=run_with_execution).start(
+    runner = ProcessTable(bind=run_as_process).start(
         session_id="s", command="sh", cwd=PathSpec.from_str_path("/"), run=run
     )
     pid = await _wait_for_pid(pid_file)
@@ -681,7 +681,7 @@ async def test_a_kept_child_is_a_native_run_of_its_runner(tmp_path):
         f"sh -c 'echo $$ > {pid_file}; sleep 0.3'",
     )
     assert abs(float(run["started_at"]) - time.time()) < 5
-    assert (await runner.join()).exit_code == 0
+    assert (await runner.join()).exit == 0
     assert runner.runs == {}
 
 
@@ -702,7 +702,7 @@ async def test_a_kept_child_that_exits_first_marks_its_run(tmp_path):
         )
         return ran.exit_code
 
-    runner = ProcessTable(bind=run_with_execution).start(
+    runner = ProcessTable(bind=run_as_process).start(
         session_id="s", command="sh", cwd=PathSpec.from_str_path("/"), run=run
     )
     key = f"host:{await _wait_for_pid(pid_file)}"
@@ -711,7 +711,7 @@ async def test_a_kept_child_that_exits_first_marks_its_run(tmp_path):
             await asyncio.sleep(0.01)
     exited = runner.runs[key]["exited_at"]
     assert isinstance(exited, float) and abs(exited - time.time()) < 5
-    assert (await runner.join()).exit_code == 0
+    assert (await runner.join()).exit == 0
     assert runner.runs == {}
 
 

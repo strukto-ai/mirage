@@ -188,8 +188,8 @@ export class MirageSubprocess extends SubprocessRuntime {
           drain(launched.stdout, stdout, outTail, process.stdout),
           drain(launched.stderr, stderr, errTail, process.stderr),
         ])
-        if (info.failure !== null) throw new Error(info.failure)
-        return { exitCode: info.exitCode, signal: null }
+        if (info.error !== null) throw new Error(info.error)
+        return { exitCode: info.exit, signal: null }
       })
       .catch((error: unknown) => {
         terminate()
@@ -207,7 +207,7 @@ export class MirageSubprocess extends SubprocessRuntime {
         for (;;) {
           const active = workspace.processes
             .live()
-            .filter((process) => process.info.groupId === pid)
+            .filter((process) => process.record.group === pid)
           if (active.length === 0) break
           await Promise.all(active.map((process) => process.join()))
         }

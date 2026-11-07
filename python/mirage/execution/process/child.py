@@ -4,10 +4,10 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Literal
 
-from mirage.io.stream import materialize
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.stdio import ProcessInput, ProcessOutput
-from mirage.execution.process.types import ProcessInfo
+from mirage.execution.process.types import Process
+from mirage.io.stream import materialize
 from mirage.shell.errors import PipeClosed
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class ChildProcess:
 
     @property
     def pid(self) -> int:
-        return self._process.info.pid
+        return self._process.record.pid
 
     def close_output(self, stream: Literal["stdout", "stderr"]) -> None:
         (
@@ -52,7 +52,7 @@ class ChildProcess:
         ).stop()
 
     def poll(self) -> int | None:
-        return self._process.info.exit_code
+        return self._process.record.exit
 
     def terminate(self, signal: int = 9) -> None:
         """Stop the child with ``signal``; its status is 128 plus it.
@@ -63,7 +63,7 @@ class ChildProcess:
         """
         self._cancel(signal)
 
-    async def wait(self) -> ProcessInfo:
+    async def wait(self) -> Process:
         return await self._process.join()
 
     async def communicate(self, data: bytes = b"") -> ProcessResult:
@@ -76,7 +76,7 @@ class ChildProcess:
                 self.stdin.close()
 
         try:
-            _, stdout, stderr, info = await asyncio.gather(
+            _, stdout, stderr, record = await asyncio.gather(
                 feed(),
                 materialize(self.stdout),
                 materialize(self.stderr),
@@ -85,7 +85,7 @@ class ChildProcess:
             return ProcessResult(
                 stdout,
                 stderr,
-                info.exit_code if info.exit_code is not None else 1,
+                record.exit if record.exit is not None else 1,
             )
         except BaseException:
             self.terminate()

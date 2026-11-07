@@ -21,7 +21,7 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Limit, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
-import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
+import { runAsProcess } from '@struktoai/mirage-core/context/session_context'
 import type { E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/sdk'
 import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/runtime/sandbox/e2b/constants'
 import type { Context } from '@struktoai/mirage-core/commands/config'
@@ -485,7 +485,7 @@ describe('E2B cancellation and validation', () => {
     const runtime = makeRuntime()
     await runtime.connect()
     const abort = new AbortController()
-    const runner = new ProcessTable(runWithExecution).start({
+    const runner = new ProcessTable(undefined, undefined, runAsProcess).start({
       sessionId: 's',
       command: 'sleep',
       cwd: PathSpec.fromStrPath('/'),
@@ -499,7 +499,7 @@ describe('E2B cancellation and validation', () => {
       expect(FakeSandbox.last.commands.handles).toHaveLength(1)
     })
     expect(runner.terminate(15)).toBe(true)
-    expect((await runner.join()).exitCode).toBe(143)
+    expect((await runner.join()).exit).toBe(143)
     expect(FakeSandbox.last.commands.handles[0]).toMatchObject({ killed, disconnected: true })
     expect(FakeSandbox.last.commands.calls).toHaveLength(1)
   })

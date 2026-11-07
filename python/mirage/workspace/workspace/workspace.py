@@ -17,6 +17,7 @@ import dataclasses
 import errno
 import logging
 import shutil
+import socket
 import tempfile
 from collections import deque
 from collections.abc import (
@@ -61,7 +62,7 @@ from mirage.context import (
     set_program_invocation,
     set_refusal_sink,
 )
-from mirage.context.session_context import run_with_execution
+from mirage.context.session_context import run_as_process
 from mirage.core.history.constants import HISTFILESIZE
 from mirage.errors.fs import enoent
 from mirage.events.base import EventRuntime
@@ -73,6 +74,7 @@ from mirage.execution.process.stdio import ProcessInput, ProcessOutput
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import SpawnRequest
 from mirage.execution.process.view import ProcessView
+from mirage.execution.types import MachineId
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget
@@ -408,8 +410,9 @@ class Workspace:
         self._drift = DriftQueue()
         # A line binds the system clock only once its process has started.
         self.processes = ProcessTable(
-            self._ids,
-            bind=run_with_execution,
+            self._workspace_id,
+            MachineId("host", socket.gethostname()),
+            bind=run_as_process,
             changed=lambda: self.job_table.processes_changed(),
             now=lambda: (
                 system_now()
@@ -1483,11 +1486,11 @@ class Workspace:
             command=shell_join(argv),
             cwd=cwd,
             run=run,
-            parent_pid=session.process_id,
+            parent=session.process_id,
             limit=session.processes.max,
         )
-        child.process_id = process.info.pid
-        child.shell_pid = process.info.pid
+        child.process_id = process.record.pid
+        child.shell_pid = process.record.pid
 
         def cancel(signal: int) -> None:
             process.terminate(signal)
@@ -2751,7 +2754,7 @@ class Workspace:
             if await self.job_table.kill(job.id, job.session_id):
                 killed += 1
         for process in self.processes.live():
-            if session_id in (None, process.info.session_id):
+            if session_id in (None, process.record.session_id):
                 if process.terminate():
                     killed += 1
         return killed

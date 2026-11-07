@@ -19,7 +19,7 @@ from mirage.context.session_context import (
     CallerToken,
     bind_caller,
     current_caller,
-    current_execution_id,
+    current_process_id,
     reset_caller,
 )
 from mirage.observe.record import (
@@ -377,7 +377,7 @@ def finish_record(
         fingerprint=fingerprint,
         revision=revision,
         mount_id=recorder.mount_id if recorder is not None else None,
-        execution_id=current_execution_id(),
+        process=str(pid) if (pid := current_process_id()) else None,
     )
 
 
@@ -482,7 +482,7 @@ def record_stream(
         fingerprint=fingerprint,
         revision=revision,
         mount_id=rec.mount_id,
-        execution_id=current_execution_id(),
+        process=str(pid) if (pid := current_process_id()) else None,
     )
     op_rec.complete = False
     rec.sink.append(op_rec)

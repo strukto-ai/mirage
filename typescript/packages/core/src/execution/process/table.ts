@@ -3,8 +3,8 @@ import { underCeiling, type PathSpec, type ProcessScope } from '../../types.ts'
 import { ProcessHandle, type ExecutionBind } from './handle.ts'
 import type { ProcessRunner } from './types.ts'
 import type { ProcessView } from './view.ts'
-import { newExecutionId } from '../context.ts'
-import type { IdSource } from '../../utils/ids.ts'
+import { LOCAL_MACHINE } from '../constants.ts'
+import { type LineId, type MachineId, ProcessId } from '../types.ts'
 import { systemNow } from '../../utils/clock.ts'
 
 /**
@@ -31,22 +31,21 @@ export class ProcessTable {
   ceiling: number | null = null
 
   /**
-   * @param bind runs each runner as part of its execution, so what it
-   *   records names it; the workspace hands over the caller's
-   *   `runWithExecution`. Without one a runner runs as it is.
-   */
-  /**
-   * @param bind runs a process's body under its execution id.
-   * @param ids where a process's execution id is drawn when its caller names
-   *   none; omitted means the system source.
+   * @param workspaceId the workspace whose pids these are.
+   * @param machine where a process runs unless its caller names another,
+   *   the workspace's own machine.
+   * @param bind runs each runner as the process it is, so what it records
+   *   names it; the workspace hands over the caller's `runAsProcess`.
+   *   Without one a runner runs as it is.
    * @param changed called once a runner is started, so whoever publishes the
    *   live runners knows to.
    * @param now the epoch seconds a process starts at, which `ps` shows;
    *   omitted means the running workspace's system time.
    */
   constructor(
-    private readonly bind: ExecutionBind = (_id, run) => run(),
-    private readonly ids?: IdSource,
+    readonly workspaceId = '',
+    readonly machine: MachineId = LOCAL_MACHINE,
+    private readonly bind: ExecutionBind = (run) => run(),
     private readonly changed?: () => void,
     private readonly now: () => number = systemNow,
   ) {}
@@ -68,7 +67,9 @@ export class ProcessTable {
    * passes it has nothing left to do first, so the runner then starts at
    * once, unless a runner started before it has yet to begin: runners begin
    * in the order they were started, so a job's redirect lands before the
-   * line that started it reads the file. `ignores` are the signals the
+   * line that started it reads the file. `parent` is the pid of the runner
+   * this one is a child of, and `line` the line it runs for, its parent's
+   * when absent. `ignores` are the signals the
    * runner ignores, which stop neither it nor what it started. `pid` is the
    * pid to run under, a session's `$$` that each of its lines takes in
    * turn; a fresh one when absent or when a live runner holds it.
@@ -81,9 +82,9 @@ export class ProcessTable {
     cwd: PathSpec
     run: ProcessRunner
     cancel: () => void
-    parentPid?: number | null
+    parent?: number | null
     limit?: number | null
-    executionId?: string
+    line?: LineId | null
     started?: (handle: ProcessHandle) => void
     ignores?: ReadonlySet<number>
     pid?: number | null
@@ -93,32 +94,33 @@ export class ProcessTable {
     const limit = underCeiling(init.limit ?? null, this.ceiling)
     if (
       limit !== null &&
-      [...this.runners.values()].filter(({ handle }) => handle.info.sessionId === init.sessionId)
+      [...this.runners.values()].filter(({ handle }) => handle.record.sessionId === init.sessionId)
         .length >= limit
     )
       throw Object.assign(new Error('Resource temporarily unavailable'), { code: 'EAGAIN' })
-    const parent = init.parentPid == null ? undefined : this.runners.get(init.parentPid)
-    if (
-      init.parentPid != null &&
-      (parent === undefined || parent.handle.info.cancellationRequested)
-    )
+    const above = init.parent == null ? undefined : this.runners.get(init.parent)
+    if (init.parent != null && above?.handle.record.state !== 'running')
       throw new Error('parent process is no longer accepting children')
     const pid = init.pid == null || this.runners.has(init.pid) ? this.nextPid : init.pid
     this.nextPid = Math.max(this.nextPid, pid + 1)
     const handle: ProcessHandle = new ProcessHandle(
       {
-        pid,
-        executionId: init.executionId ?? newExecutionId(this.ids),
-        parentPid: init.parentPid ?? null,
-        groupId: (init.ownGroup === true ? undefined : parent?.handle.info.groupId) ?? pid,
+        id: new ProcessId(this.workspaceId, pid),
         sessionId: init.sessionId,
+        line: init.line ?? (above === undefined ? null : above.handle.record.line),
+        parent: init.parent ?? null,
+        group: (init.ownGroup === true ? undefined : above?.handle.record.group) ?? pid,
         command: init.command,
         cwd: init.cwd,
+        machine: this.machine,
         startedAt: this.now(),
+        runtime: null,
+        machinePid: null,
         state: 'running',
-        cancellationRequested: false,
-        exitCode: null,
-        failure: null,
+        endedAt: null,
+        exit: null,
+        signal: null,
+        error: null,
       },
       init.run,
       () => {
@@ -134,12 +136,13 @@ export class ProcessTable {
       },
       this.bind,
       init.ignores,
+      this.now,
     )
     const eager = init.started !== undefined && !this.queued()
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
     this.ancestors.set(
       pid,
-      init.parentPid == null ? [] : [...(this.ancestors.get(init.parentPid) ?? []), init.parentPid],
+      init.parent == null ? [] : [...(this.ancestors.get(init.parent) ?? []), init.parent],
     )
     init.started?.(handle)
     handle.start(eager)
@@ -174,14 +177,16 @@ export class ProcessTable {
   }
 
   private members(groupId: number): ProcessHandle[] {
-    const depth = (handle: ProcessHandle) => this.ancestors.get(handle.info.pid)?.length ?? 0
+    const depth = (handle: ProcessHandle) => this.ancestors.get(handle.record.id.pid)?.length ?? 0
     return this.live()
-      .filter((handle) => handle.info.groupId === groupId)
+      .filter((handle) => handle.record.group === groupId)
       .sort((a, b) => depth(b) - depth(a))
   }
 
   private under(pid: number): ProcessHandle[] {
-    return this.live().filter((child) => this.ancestors.get(child.info.pid)?.includes(pid) === true)
+    return this.live().filter(
+      (child) => this.ancestors.get(child.record.id.pid)?.includes(pid) === true,
+    )
   }
 
   view(
@@ -191,17 +196,17 @@ export class ProcessTable {
     const generation = this.generations.get(sessionId) ?? 0
     const valid = () => (this.generations.get(sessionId) ?? 0) === generation
     const allowed = (scope: ProcessScope, handle: ProcessHandle) =>
-      scope === 'workspace' || handle.info.sessionId === sessionId
+      scope === 'workspace' || handle.record.sessionId === sessionId
     const visible = (handle: ProcessHandle) => {
-      const entry = this.runners.get(handle.info.pid)
+      const entry = this.runners.get(handle.record.id.pid)
       if (
-        handle.info.sessionId === sessionId &&
+        handle.record.sessionId === sessionId &&
         entry !== undefined &&
         entry.generation !== generation
       )
         return null
       if (!valid() || !allowed(permissions().list, handle)) return null
-      return handle.info
+      return handle.record
     }
     const signalTarget = (pid: number): ProcessHandle | null => {
       const entry = this.runners.get(pid)
@@ -235,7 +240,7 @@ export class ProcessTable {
         const handle = signalTarget(pid)
         return (
           handle !== null &&
-          (handle.ignores.has(signal) || handle.terminate(signal, handle.info.parentPid !== null))
+          (handle.ignores.has(signal) || handle.terminate(signal, handle.record.parent !== null))
         )
       },
       permissions: () => (valid() ? permissions() : null),
@@ -256,7 +261,7 @@ export class ProcessTable {
   revokeSession(sessionId: string): void {
     this.generations.set(sessionId, (this.generations.get(sessionId) ?? 0) + 1)
     for (const process of this.live()) {
-      if (process.info.sessionId !== sessionId) continue
+      if (process.record.sessionId !== sessionId) continue
       process.revoked = true
       process.terminate()
     }

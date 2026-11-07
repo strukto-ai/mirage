@@ -18,6 +18,7 @@ import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 import { watch } from '@struktoai/mirage-core/io/web/gateway'
+import { MachineId } from '@struktoai/mirage-core/execution/types'
 import { refuseUnseenAddresses, watchNetwork } from '@struktoai/mirage-core/io/web/network'
 import './io/spool.ts'
 
@@ -27,6 +28,12 @@ export class Workspace extends CoreWorkspace {
   protected static override async buildSavedVfs(entry: MountSnapshot): Promise<BaseVFS | null> {
     const build = savedVfsBuild(entry, (name) => knownVfsNames().includes(name))
     return build === null ? null : buildVfs(build.name, build.config)
+  }
+
+  /** The page this workspace runs in, by its host. */
+  protected override hostMachine(): MachineId {
+    const host = globalThis.location.host
+    return new MachineId('browser', host === '' ? 'page' : host)
   }
 
   constructor(...args: ConstructorParameters<typeof CoreWorkspace>) {

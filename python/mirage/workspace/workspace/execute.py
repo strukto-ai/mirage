@@ -34,6 +34,7 @@ from mirage.execution.context import new_execution_id
 from mirage.execution.job import JobTable, JobWaits
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
+from mirage.execution.types import LineId
 from mirage.io import IOResult
 from mirage.io.errors import MemoryExhausted
 from mirage.io.gateway import run_with_egress
@@ -428,7 +429,7 @@ async def recurse(
                 return done[0].exit_code
 
             def started(process: ProcessHandle) -> None:
-                session.process_id = process.info.pid
+                session.process_id = process.record.pid
                 context.frame.shell = process
 
             process = start_shell(
@@ -660,7 +661,7 @@ async def _run_line(
                 reset_current_session(token)
 
         def started(process: ProcessHandle) -> None:
-            session.process_id = session.shell_pid = process.info.pid
+            session.process_id = session.shell_pid = process.record.pid
 
         try:
             process = ws.processes.start(
@@ -669,7 +670,7 @@ async def _run_line(
                 cwd=PathSpec.from_str_path(cwd or session.cwd),
                 run=run,
                 limit=session.processes.max,
-                execution_id=execution_scope.id,
+                line=LineId(execution_scope.id),
                 started=started,
                 ignores=SHELL_IGNORED_SIGNALS,
                 pid=session.shell_pid,

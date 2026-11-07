@@ -24,6 +24,7 @@ import type {
   VfsExplanation,
 } from '../policy/types.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
+import type { ProcessId } from '../execution/types.ts'
 import { fromUnits, units } from '../rs/document.ts'
 import { visibilityMatcher } from '../rs/policy.ts'
 import { useVoice } from '../shell/voice.ts'
@@ -140,11 +141,8 @@ export interface Caller {
   // output is a value (a substitution's) to send another level's stream
   // bytes toward it.
   readonly enclosing: JobConsole | null
-  // The execution (a line, a job, a spawned process) the call runs in,
-  // which its records name.
-  readonly execution: string | null
-  // The managed runner the call runs in, whose kill signal a native
-  // program it started receives.
+  // The managed runner the call runs in, which its records name and whose
+  // kill signal a native program it started receives.
   readonly process: ProcessHandle | null
   // What preCommand judged the running command on, which a connection it
   // opens reports.
@@ -203,7 +201,6 @@ const UNBOUND: Caller = {
   command: null,
   declared: null,
   enclosing: null,
-  execution: null,
   process: null,
   invocation: null,
   vfsMount: null,
@@ -326,30 +323,22 @@ export async function* withCaller<T>(source: AsyncIterable<T>, caller: Caller): 
   }
 }
 
-/** The execution the current call runs in; never a sibling's on hosts
- * without task isolation. */
-export function currentExecutionId(): string | null {
-  const id = currentCaller().execution
+/** The process the current call runs in, which its records name; never a
+ * sibling's on hosts without task isolation. */
+export function currentProcessId(): ProcessId | null {
+  const process = currentCaller().process
   if (
-    id === null ||
-    liveCallers().some((caller) => caller.execution !== null && caller.execution !== id)
+    process === null ||
+    liveCallers().some((caller) => caller.process !== null && caller.process !== process)
   ) {
     return null
   }
-  return id
+  return process.record.id
 }
 
-/**
- * Run `run` as part of the execution `executionId`, which its records name.
- *
- * @param process the managed runner it is, when it is one.
- */
-export function runWithExecution<T>(
-  executionId: string,
-  run: () => Promise<T>,
-  process: ProcessHandle | null = null,
-): Promise<T> {
-  return runWithCaller({ ...currentCaller(), execution: executionId, process }, run)
+/** Run `run` as the managed runner `process`. */
+export function runAsProcess<T>(run: () => Promise<T>, process: ProcessHandle): Promise<T> {
+  return runWithCaller({ ...currentCaller(), process }, run)
 }
 
 function runChanged<T>(changes: Partial<Caller>, fn: () => Promise<T>): Promise<T> {

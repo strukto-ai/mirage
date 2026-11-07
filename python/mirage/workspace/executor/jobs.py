@@ -40,11 +40,12 @@ from mirage.execution.job.constants import (
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import (
-    ProcessInfo,
+    Process,
     ProcessRunner,
     ProcessState,
 )
 from mirage.execution.process.view import ProcessView
+from mirage.execution.types import LineId, MachineId, ProcessId
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, hold_inputs
 from mirage.io.errors import PipeClosed
@@ -354,7 +355,7 @@ def report_jobs(
             job.reported
             or job.status == JobStatus.RUNNING
             or process is None
-            or process.info.parent_pid != session.process_id
+            or process.record.parent != session.process_id
         ):
             continue
         ended = (
@@ -393,7 +394,7 @@ def report_reaped(
     listed = signal_reported(reaped[-1][0].ended_by)
     processes = [
         (
-            process.info.pid,
+            process.record.pid,
             code,
             process.ended_by,
             reported_command(node) if listed else "",
@@ -433,7 +434,7 @@ def start_shell(
             command=command,
             cwd=PathSpec.from_str_path(session.cwd),
             run=run,
-            parent_pid=parent_pid,
+            parent=parent_pid,
             limit=session.processes.max,
             started=started,
             ignores=SHELL_IGNORED_SIGNALS,
@@ -652,7 +653,7 @@ async def handle_background(
                     handed=job_handed,
                     cancel=None,
                     execution_scope=ExecutionScope(
-                        execution_id=job.execution_id
+                        execution_id=job.process_id
                     ),
                     ends_shell=True,
                     jobs=job_table.child(),
@@ -760,7 +761,7 @@ async def handle_background(
             run=_run_bg,
             cwd=bg_session.cwd,
             session_id=session.session_id,
-            parent_pid=session.process_id,
+            parent=session.process_id,
             limit=session.processes.max,
             simple=_one_program(left, session),
         )
@@ -782,7 +783,7 @@ async def handle_background(
     if job.process is not None:
         job.process.task.add_done_callback(release_job)
         job.process.task.add_done_callback(drop_unrun_holds)
-        bg_session.process_id = job.process.info.pid
+        bg_session.process_id = job.process.record.pid
     session.last_bg_job_id = job.pid
     waits = session.job_waits
     if waits is not None and waits.reaches(
@@ -1577,7 +1578,7 @@ async def handle_kill(
             continue
         signalled = True
     runner = current_caller().process
-    if runner is not None and runner.info.cancellation_requested:
+    if runner is not None and runner.record.state == ProcessState.STOPPING:
         # The shell running kill stopped itself (`kill $$`): the signal
         # lands here, before its next statement.
         raise asyncio.CancelledError
@@ -1616,7 +1617,7 @@ async def _kill_group(
     for job in jobs:
         if (
             job.process is not None
-            and job.process.info.group_id == group
+            and job.process.record.group == group
             and signal not in job.process.ignores
         ):
             await job_table.kill(job.id, session_id, signal)
@@ -2036,14 +2037,14 @@ def _elapsed(seconds: int) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-def _started(fact: str, info: ProcessInfo, ctx: _PsContext) -> str:
+def _started(fact: str, info: Process, ctx: _PsContext) -> str:
     """One start-time column, lstart, start, stime or bsdstart, in the
     layouts measured from procps-ng 4.0.4's ``ps -o`` output: a day-old
     start prints its date, a recent one its clock.
 
     Args:
         fact (str): lstart, start, stime or bsdstart.
-        info (ProcessInfo): the runner.
+        info (Process): the runner.
         ctx (_PsContext): the line's shared facts.
     """
     start = datetime.fromtimestamp(info.started_at, ctx.zone)
@@ -2062,9 +2063,7 @@ def _started(fact: str, info: ProcessInfo, ctx: _PsContext) -> str:
     return gnu_strftime(start, "%H:%M")
 
 
-def _ps_cell(
-    key: str, info: ProcessInfo, ctx: _PsContext, owner: str = ""
-) -> str:
+def _ps_cell(key: str, info: Process, ctx: _PsContext, owner: str = "") -> str:
     """One -o cell for a managed runner.
 
     The owner columns print the workspace user and the session's
@@ -2077,7 +2076,7 @@ def _ps_cell(
 
     Args:
         key (str): the column key.
-        info (ProcessInfo): the runner.
+        info (Process): the runner.
         ctx (_PsContext): the line's shared facts.
         owner (str): the owner prefix of another workspace's runner;
             empty for this workspace's.
@@ -2091,14 +2090,14 @@ def _ps_cell(
         if not owner
         and info.session_id == ctx.session_id
         and ctx.shell_pid is not None
-        else info.group_id or info.pid
+        else info.group or info.pid
     )
     if fact == "pid":
         return f"{tag}{info.pid}"
     if fact == "ppid":
-        return f"{tag}{info.parent_pid}" if info.parent_pid else "0"
+        return f"{tag}{info.parent}" if info.parent else "0"
     if fact == "pgid":
-        return f"{tag}{info.group_id or info.pid}"
+        return f"{tag}{info.group or info.pid}"
     if fact == "sid":
         return f"{tag}{session}"
     if fact in ("stat", "state"):
@@ -2120,22 +2119,25 @@ def _ps_cell(
     return info.command
 
 
-def _remote_info(record: RecordFields) -> ProcessInfo:
+def _remote_info(workspace_id: str, record: RecordFields) -> Process:
     """Another workspace's runner as its process record keeps it.
 
     Args:
+        workspace_id (str): the workspace the store serves.
         record (RecordFields): the record.
     """
-    return ProcessInfo(
-        pid=record["pid"],
+    line = record["line"]
+    return Process(
+        id=ProcessId(workspace_id, record["pid"]),
         session_id=record["session"],
+        line=LineId(line) if line is not None else None,
+        parent=record["parent"],
+        group=record["group"],
         command=record["command"],
         cwd=PathSpec.from_str_path(record["cwd"]),
+        machine=MachineId.parse(record["machine"]),
         started_at=record["started_at"],
-        execution_id=record["execution"],
         state=ProcessState(record["state"]),
-        parent_pid=record["parent"],
-        group_id=record["group"],
     )
 
 
@@ -2208,10 +2210,10 @@ async def handle_ps(
     processes = _process_view(job_table, session)
     every = options.all or not (options.pids or options.remote)
     runs = {
-        handle.info.pid: list(handle.runs.values())
+        handle.record.pid: list(handle.runs.values())
         for handle in job_table.processes.live()
     }
-    rows: list[tuple[str, ProcessInfo, list[dict[str, JsonValue]]]] = [
+    rows: list[tuple[str, Process, list[dict[str, JsonValue]]]] = [
         ("", info, runs.get(info.pid, []))
         for info in processes.list()
         if every or info.pid in options.pids
@@ -2230,7 +2232,11 @@ async def handle_ps(
                 for prefix, pid in options.remote
             ):
                 rows.append(
-                    (tags[owner], _remote_info(record), record["runs"])
+                    (
+                        tags[owner],
+                        _remote_info(job_table.processes.workspace_id, record),
+                        record["runs"],
+                    )
                 )
     if options.columns:
         keys = [key for key, _ in options.columns]

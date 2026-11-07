@@ -21,7 +21,7 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.config import Context
-from mirage.context.session_context import run_with_execution
+from mirage.context.session_context import run_as_process
 from mirage.execution.process.table import ProcessTable
 from mirage.io.types import materialize
 from mirage.runtime.errors import UnsupportedExecutionError
@@ -244,13 +244,13 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
     async def run() -> int:
         return (await box.run_line(None, [], [], ctx)).exit_code
 
-    runner = ProcessTable(bind=run_with_execution).start(
+    runner = ProcessTable(bind=run_as_process).start(
         session_id="s", command="yes", cwd=ctx.cwd, run=run
     )
     while not box.execs:
         await asyncio.sleep(0)
     assert runner.terminate(2)
-    assert (await runner.join()).exit_code == 130
+    assert (await runner.join()).exit == 130
     exec_id = box.exec_envs[0][EXEC_ID]
     assert [line for line, _, _ in box.execs] == ["yes", reap_line(exec_id, 2)]
 
@@ -275,10 +275,10 @@ async def test_a_run_in_the_box_is_kept_on_its_runner_while_it_runs():
     async def run() -> int:
         return (await box.run_line(None, [], [], ctx)).exit_code
 
-    runner = ProcessTable(bind=run_with_execution).start(
+    runner = ProcessTable(bind=run_as_process).start(
         session_id="s", command="yes", cwd=ctx.cwd, run=run
     )
-    assert (await runner.join()).exit_code == 0
+    assert (await runner.join()).exit == 0
     tag = box.exec_envs[0][EXEC_ID]
     assert seen == [
         {

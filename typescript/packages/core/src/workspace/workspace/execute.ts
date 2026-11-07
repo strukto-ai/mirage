@@ -33,6 +33,7 @@ import {
   SHELL_IGNORED_SIGNALS,
 } from '../../shell/constants.ts'
 import type { ProcessHandle } from '../../execution/process/handle.ts'
+import { LineId } from '../../execution/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../utils/bytes.ts'
@@ -361,7 +362,7 @@ async function runLine(
     let process: ProcessHandle
     try {
       process = env.jobTable.processes.start({
-        executionId: executionScope.id,
+        line: new LineId(executionScope.id),
         sessionId: targetSession.sessionId,
         limit: targetSession.processes.max,
         command,
@@ -370,7 +371,7 @@ async function runLine(
           abort.abort()
         },
         started: (line) => {
-          targetSession.processId = targetSession.shellPid = line.info.pid
+          targetSession.processId = targetSession.shellPid = line.record.id.pid
         },
         ignores: SHELL_IGNORED_SIGNALS,
         pid: targetSession.shellPid,
@@ -887,7 +888,7 @@ async function runPreparedLine(
                   abort.abort()
                 },
                 (forked) => {
-                  session.processId = forked.info.pid
+                  session.processId = forked.record.id.pid
                   innerContext.frame.shell = forked
                 },
               )

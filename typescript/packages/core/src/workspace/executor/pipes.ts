@@ -217,7 +217,7 @@ export async function handlePipe(
         stopped.abort()
       },
     )
-    child.processId = process.info.pid
+    child.processId = process.record.id.pid
     stages[i] = process
     childEvaluation.frame.shell = shellStage(cmd, session) ? null : process
     return process.reap(parentSignal ?? null).then((code) => {

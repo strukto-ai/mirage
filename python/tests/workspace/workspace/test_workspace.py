@@ -691,7 +691,7 @@ async def _replay(seed: int) -> list[str]:
             assert result.exit_code == 0, line
             seen.append(await result.stdout_str())
         seen.extend(
-            str(event.get("execution_id"))
+            str(event.get("process"))
             for event in await ws.observer.events()
         )
         copy = await ws.copy()

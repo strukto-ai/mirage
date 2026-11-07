@@ -1362,7 +1362,7 @@ async function executeNodeBody(
     const execs =
       statements.length === 1 && statements[0] !== undefined && nestedShell(statements[0], session)
     const forked = (process: ProcessHandle): void => {
-      child.session.processId = process.info.pid
+      child.session.processId = process.record.id.pid
       child.frame.shell = execs ? null : process
     }
     const run = async (): Promise<number> => {

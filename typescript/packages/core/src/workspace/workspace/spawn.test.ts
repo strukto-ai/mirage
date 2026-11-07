@@ -54,7 +54,7 @@ it('revokes captured process entry points on profile replacement', async () => {
     const child = ws.spawn({ argv: ['sleep', '30'] }, 'a')
     child.stdin.close()
     const view = ws.processes.view('a')
-    expect(view.list().map((info) => info.pid)).toEqual([child.pid])
+    expect(view.list().map((info) => info.id.pid)).toEqual([child.pid])
     expect(ws.processes.view('b').list()).toEqual([])
     await ws.setSessionProfile('a', { processes: { max: 1 } })
     expect(view.list()).toEqual([])
@@ -74,7 +74,7 @@ it('terminate stops a child with the signal it names', async () => {
   try {
     const child = ws.spawn({ argv: ['sleep', '30'] })
     child.terminate(15)
-    expect((await child.wait()).exitCode).toBe(143)
+    expect((await child.wait()).exit).toBe(143)
     expect(child.poll()).toBe(143)
   } finally {
     await ws.close()
@@ -325,7 +325,7 @@ it("records a spawned command's reads under its own execution", async () => {
     const info = await child.wait()
     const reads = ws.vfs.records.filter((r) => r.path === '/data/f')
     expect(reads.length).toBeGreaterThan(0)
-    expect(new Set(reads.map((r) => r.executionId))).toEqual(new Set([info.executionId]))
+    expect(new Set(reads.map((r) => r.process))).toEqual(new Set([info.id.toString()]))
   } finally {
     await ws.close()
   }

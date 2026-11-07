@@ -27,6 +27,8 @@ import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 import { reapHostRun } from './runtime/sandbox/program.ts'
+import { MachineId } from '@struktoai/mirage-core/execution/types'
+import { hostname } from 'node:os'
 import { watch } from './io/gateway.ts'
 import { releaseNetwork, watchNetwork } from './io/network.ts'
 import type { JsonValue } from '@struktoai/mirage-core/types'
@@ -48,6 +50,11 @@ export class Workspace extends CoreWorkspace {
   /** A host run a lapsed workspace left reaches this host's processes. */
   protected override reapHostRun(run: Record<string, JsonValue>, signum: number): Promise<boolean> {
     return reapHostRun(run, signum)
+  }
+
+  /** This host, by its name. */
+  protected override hostMachine(): MachineId {
+    return new MachineId('host', hostname())
   }
 
   private fuseSetupPromise: Promise<void> | null = null

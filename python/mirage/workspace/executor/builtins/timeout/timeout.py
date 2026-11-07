@@ -405,7 +405,7 @@ async def _supervise(
         return ran[0][1].exit_code
 
     def forked(process: ProcessHandle) -> None:
-        child.session.process_id = process.info.pid
+        child.session.process_id = process.record.pid
         child.frame.shell = process
 
     try:
@@ -413,7 +413,7 @@ async def _supervise(
             session_id=session.session_id,
             command=inner,
             cwd=PathSpec.from_str_path(session.cwd),
-            parent_pid=session.process_id,
+            parent=session.process_id,
             run=run,
             limit=session.processes.max,
             started=forked,
@@ -600,7 +600,7 @@ async def _stop(
     if foreground:
         deliver(process, signal)
     else:
-        processes.signal_group(process.info.group_id, signal)
+        processes.signal_group(process.record.group, signal)
     if signal not in process.ignores:
         await asyncio.wait({process.task})
 

@@ -3,14 +3,14 @@ import errno
 from collections.abc import Callable
 from threading import RLock
 
-from mirage.execution.context import new_execution_id
+from mirage.execution.constants import LOCAL_MACHINE
 from mirage.execution.process.config import ProcessPermissions, ProcessScope
 from mirage.execution.process.handle import ExecutionBind, ProcessHandle
-from mirage.execution.process.types import ProcessInfo, ProcessRunner
+from mirage.execution.process.types import Process, ProcessRunner, ProcessState
 from mirage.execution.process.view import ProcessView
+from mirage.execution.types import LineId, MachineId, ProcessId
 from mirage.types import PathSpec, under_ceiling
 from mirage.utils.clock import system_now
-from mirage.utils.ids import IdSource
 
 
 def deliver(handle: ProcessHandle, signal: int) -> None:
@@ -34,8 +34,9 @@ class ProcessTable:
     live registry; holders of their handles retain the final result.
 
     Args:
-        ids (IdSource | None): where a process's execution id is drawn
-            when its caller names none; None means the system source.
+        workspace_id (str): the workspace whose pids these are.
+        machine (MachineId): where a process runs unless its caller
+            names another, the workspace's own machine.
         bind (ExecutionBind | None): runs each process under its host's
             execution context; None runs its body as supplied.
         changed (Callable[[], None] | None): called once a runner is
@@ -47,12 +48,14 @@ class ProcessTable:
 
     def __init__(
         self,
-        ids: IdSource | None = None,
+        workspace_id: str = "",
+        machine: MachineId = LOCAL_MACHINE,
         bind: ExecutionBind | None = None,
         changed: Callable[[], None] | None = None,
         now: Callable[[], float] = system_now,
     ) -> None:
-        self._ids = ids
+        self.workspace_id = workspace_id
+        self.machine = machine
         self._now = now
         self._bind = bind
         self._changed = changed
@@ -73,9 +76,9 @@ class ProcessTable:
         command: str,
         cwd: PathSpec,
         run: ProcessRunner,
-        parent_pid: int | None = None,
+        parent: int | None = None,
         limit: int | None = None,
-        execution_id: str | None = None,
+        line: LineId | None = None,
         started: Callable[[ProcessHandle], None] | None = None,
         ignores: frozenset[int] = frozenset(),
         pid: int | None = None,
@@ -88,13 +91,14 @@ class ProcessTable:
             command (str): display text, never parsed by this layer.
             cwd (PathSpec): working directory at launch.
             run (ProcessRunner): asynchronous execution and cleanup.
-            parent_pid (int | None): the runner this one is a child of.
+            parent (int | None): the pid of the runner this one is a
+                child of.
             limit (int | None): the most runners the session may hold,
                 this one included, held under ``ceiling``; None for no
                 cap. Stopping runners count until they finish cleanup and
                 leave the live registry.
-            execution_id (str | None): external execution identity for
-                an admitted root; children receive a fresh identity.
+            line (LineId | None): the line the runner runs for; None
+                takes its parent's.
             started (Callable[[ProcessHandle], None] | None): what the
                 caller sets up from the process before its runner runs
                 (the session's ``$$``, the shell its programs run in). A
@@ -125,7 +129,7 @@ class ProcessTable:
                 and sum(
                     1
                     for _, handle in self._live.values()
-                    if handle.info.session_id == session_id
+                    if handle.record.session_id == session_id
                 )
                 >= limit
             ):
@@ -135,43 +139,42 @@ class ProcessTable:
             if pid is None or pid in self._live:
                 pid = self._next_pid
             self._next_pid = max(self._next_pid, pid + 1)
-            parent = (
-                self._live.get(parent_pid) if parent_pid is not None else None
-            )
-            if parent_pid is not None and (
-                parent is None or parent[1].info.cancellation_requested
+            above = self._live.get(parent) if parent is not None else None
+            if parent is not None and (
+                above is None or above[1].record.state != ProcessState.RUNNING
             ):
                 raise RuntimeError(
                     "parent process is no longer accepting children"
                 )
-            group_id = (
-                parent[1].info.group_id
-                if parent is not None and not own_group
-                else pid
-            )
             handle = ProcessHandle(
-                ProcessInfo(
-                    pid,
+                Process(
+                    ProcessId(self.workspace_id, pid),
                     session_id,
+                    line
+                    if line is not None or above is None
+                    else above[1].record.line,
+                    parent,
+                    above[1].record.group
+                    if above is not None and not own_group
+                    else pid,
                     command,
                     cwd,
+                    self.machine,
                     self._now(),
-                    execution_id=execution_id or new_execution_id(self._ids),
-                    parent_pid=parent_pid,
-                    group_id=group_id,
                 ),
                 run,
                 lambda done: self._retire(done, handle),
                 lambda signal: self.terminate_children(pid, signal),
                 self._bind,
                 ignores,
+                self._now,
             )
             eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
             self._ancestors[pid] = (
                 ()
-                if parent_pid is None
-                else (*self._ancestors.get(parent_pid, ()), parent_pid)
+                if parent is None
+                else (*self._ancestors.get(parent, ()), parent)
             )
         if started is not None:
             started(handle)
@@ -220,10 +223,10 @@ class ProcessTable:
                 (
                     handle
                     for _, handle in self._live.values()
-                    if handle.info.group_id == group_id
+                    if handle.record.group == group_id
                 ),
                 key=lambda handle: (
-                    -len(self._ancestors.get(handle.info.pid, ()))
+                    -len(self._ancestors.get(handle.record.pid, ()))
                 ),
             )
 
@@ -232,7 +235,7 @@ class ProcessTable:
             return [
                 handle
                 for _, handle in self._live.values()
-                if pid in self._ancestors.get(handle.info.pid, ())
+                if pid in self._ancestors.get(handle.record.pid, ())
             ]
 
     def _retire(self, pid: int, handle: ProcessHandle) -> None:
@@ -255,21 +258,23 @@ class ProcessTable:
             return self._generations.get(session_id, 0) == generation
 
         def allowed(scope: ProcessScope, handle: ProcessHandle) -> bool:
-            return scope == "workspace" or handle.info.session_id == session_id
+            return (
+                scope == "workspace" or handle.record.session_id == session_id
+            )
 
-        def visible(handle: ProcessHandle) -> ProcessInfo | None:
-            entry = self._live.get(handle.info.pid)
+        def visible(handle: ProcessHandle) -> Process | None:
+            entry = self._live.get(handle.record.pid)
             if (
-                handle.info.session_id == session_id
+                handle.record.session_id == session_id
                 and entry is not None
                 and entry[0] != generation
             ):
                 return None
             if not valid() or not allowed(permissions().list, handle):
                 return None
-            return handle.info
+            return handle.record
 
-        def list_visible() -> tuple[ProcessInfo, ...]:
+        def list_visible() -> tuple[Process, ...]:
             with self._lock:
                 return tuple(
                     info
@@ -301,7 +306,7 @@ class ProcessTable:
                 return handle is not None and (
                     signal in handle.ignores
                     or handle.terminate(
-                        signal, children=handle.info.parent_pid is not None
+                        signal, children=handle.record.parent is not None
                     )
                 )
 
@@ -354,7 +359,7 @@ class ProcessTable:
                 self._generations.get(session_id, 0) + 1
             )
         for process in self.live():
-            if process.info.session_id == session_id:
+            if process.record.session_id == session_id:
                 process.revoked = True
                 process.terminate()
 

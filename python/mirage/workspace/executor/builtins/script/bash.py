@@ -284,7 +284,7 @@ async def handle_bash(
         # pid the shell's `$$`, whose own subshells and programs it forks.
         runner = current_caller().process
         if runner is not None:
-            session.shell_pid = runner.info.pid
+            session.shell_pid = runner.record.pid
             if job_table is not None:
                 context.frame.shell = runner
         io = await run()
@@ -325,7 +325,7 @@ async def _in_process(
     session = context.session
 
     def started(process: ProcessHandle) -> None:
-        session.process_id = session.shell_pid = process.info.pid
+        session.process_id = session.shell_pid = process.record.pid
         context.frame.shell = process
 
     process = start_shell(

@@ -42,7 +42,7 @@ import { runWithSystemClock, ShiftedClock, SystemClock } from '@struktoai/mirage
 import { FAKETIME_LIBRARIES } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
 import type { ProcessHandle } from '@struktoai/mirage-core/execution/process/handle'
-import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
+import { runAsProcess } from '@struktoai/mirage-core/context/session_context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { PIPE_DIAGNOSTIC_BYTES } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { ProcessInput } from '@struktoai/mirage-core/execution/process/stdio'
@@ -100,7 +100,7 @@ function shRunner(
   stdin: AsyncIterable<Uint8Array> | null = null,
 ): ProcessHandle {
   const abort = new AbortController()
-  return new ProcessTable(runWithExecution).start({
+  return new ProcessTable(undefined, undefined, runAsProcess).start({
     sessionId: 's',
     command: 'sh',
     cwd: PathSpec.fromStrPath('/'),
@@ -199,7 +199,7 @@ describe('runProgram', () => {
     )
     await escapedPid(pidFile)
     expect(runner.terminate(15)).toBe(true)
-    expect((await runner.join()).exitCode).toBe(143)
+    expect((await runner.join()).exit).toBe(143)
     expect(readFileSync(said, 'utf8')).toBe('bye\n')
   })
 
@@ -212,7 +212,7 @@ describe('runProgram', () => {
     )
     const child = await escapedPid(pidFile)
     expect(runner.terminate(9)).toBe(true)
-    expect((await runner.join()).exitCode).toBe(137)
+    expect((await runner.join()).exit).toBe(137)
     expect(existsSync(said)).toBe(false)
     expect(await ended(child)).toBe(true)
   })
@@ -229,7 +229,7 @@ describe('runProgram', () => {
     await new Promise((resolve) => setTimeout(resolve, 100))
     const killed = Date.now()
     expect(runner.terminate(9)).toBe(true)
-    expect((await runner.join()).exitCode).toBe(137)
+    expect((await runner.join()).exit).toBe(137)
     expect(Date.now() - killed).toBeLessThan(500)
     expect(await ended(child)).toBe(true)
   })
@@ -254,7 +254,7 @@ describe('runProgram', () => {
       )
       await escapedPid(pidFile)
       expect(runner.terminate(signum)).toBe(true)
-      expect((await runner.join()).exitCode).toBe(128 + signum)
+      expect((await runner.join()).exit).toBe(128 + signum)
       expect(runner.programCode).toBe(code)
     },
   )
@@ -299,7 +299,7 @@ describe('runProgram', () => {
       await escapedPid(pidFile)
       expect(runner.terminate(15)).toBe(true)
       const info = await runner.join()
-      expect([info.exitCode, info.failure]).toEqual([143, null])
+      expect([info.exit, info.error]).toEqual([143, null])
     } finally {
       spy.mockRestore()
     }
@@ -387,7 +387,7 @@ describe('runProgram', () => {
     const runner = shRunner(`trap '' TERM; echo $$ > ${pidFile}; while :; do sleep 0.05; done`)
     const child = await escapedPid(pidFile)
     expect(runner.terminate(15)).toBe(true)
-    expect((await runner.join()).exitCode).toBe(143)
+    expect((await runner.join()).exit).toBe(143)
     expect(await ended(child)).toBe(true)
   })
 
@@ -642,7 +642,7 @@ describe('host runs', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
     const children = new Set<ChildProcess>()
-    const runner = new ProcessTable(runWithExecution).start({
+    const runner = new ProcessTable(undefined, undefined, runAsProcess).start({
       sessionId: 's',
       command: 'sh',
       cwd: PathSpec.fromStrPath('/'),
@@ -662,7 +662,7 @@ describe('host runs', () => {
       `sh -c 'echo $$ > ${pidFile}; sleep 0.3'`,
     ])
     expect(Math.abs((run?.started_at as number) - Date.now() / 1000)).toBeLessThan(5)
-    expect((await runner.join()).exitCode).toBe(0)
+    expect((await runner.join()).exit).toBe(0)
     expect(runner.runs).toEqual({})
   })
 
@@ -672,7 +672,7 @@ describe('host runs', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
     const children = new Set<ChildProcess>()
-    const runner = new ProcessTable(runWithExecution).start({
+    const runner = new ProcessTable(undefined, undefined, runAsProcess).start({
       sessionId: 's',
       command: 'sh',
       cwd: PathSpec.fromStrPath('/'),
@@ -691,7 +691,7 @@ describe('host runs', () => {
     }
     const exited = runner.runs[key]?.exited_at
     expect(typeof exited === 'number' && Math.abs(exited - Date.now() / 1000) < 5).toBe(true)
-    expect((await runner.join()).exitCode).toBe(0)
+    expect((await runner.join()).exit).toBe(0)
     expect(runner.runs).toEqual({})
   })
 

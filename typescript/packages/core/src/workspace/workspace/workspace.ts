@@ -31,7 +31,7 @@ import {
   runAsProgram,
   runExplaining,
   runWithCaller,
-  runWithExecution,
+  runAsProcess,
   runWithRefusalSink,
   runWithSession,
   sessionAccess,
@@ -67,6 +67,8 @@ import { statedProcesses, type ProcessPermissions } from '../../execution/proces
 import { ProcessInput, ProcessOutput } from '../../execution/process/stdio.ts'
 import { ProcessTable } from '../../execution/process/table.ts'
 import type { SpawnRequest } from '../../execution/process/types.ts'
+import { LOCAL_MACHINE } from '../../execution/constants.ts'
+import type { MachineId } from '../../execution/types.ts'
 import type { ProcessView } from '../../execution/process/view.ts'
 import { DiffPool } from '../../rs/diff_pool.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
@@ -312,8 +314,9 @@ export class Workspace {
     const sessionId = options.sessionId ?? this.ids.uuid7()
     // A line binds the system clock only once its process has started.
     this.processes = new ProcessTable(
-      runWithExecution,
-      this.ids,
+      this.wsId,
+      this.hostMachine(),
+      runAsProcess,
       () => {
         this.jobTable.processesChanged()
       },
@@ -758,6 +761,15 @@ export class Workspace {
     return Promise.resolve(false)
   }
 
+  /**
+   * The machine this workspace runs on, where its builtins and the programs
+   * it runs here run. Core cannot name its host; Node's and the browser's
+   * workspaces do.
+   */
+  protected hostMachine(): MachineId {
+    return LOCAL_MACHINE
+  }
+
   /** Add a runtime entry to the workspace's ordered set; `Runtimes.add` places it. */
   addRuntime(runtime: RuntimeEntry): Runtime {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
@@ -923,7 +935,7 @@ export class Workspace {
       sessionId: session.sessionId,
       command: shellJoin(argv),
       cwd,
-      parentPid: session.processId,
+      parent: session.processId,
       limit: session.processes.max,
       cancel: () => {
         abort.abort()
@@ -938,10 +950,10 @@ export class Workspace {
               'session changed during hydration; retry spawn after ensureSessionsLoaded',
             )
           admission.checkSpawn()
-          // The handle bound the child's execution id and itself around
-          // this run; the caller captured at spawn holds the spawning one's.
-          const { execution, process: runner } = currentCaller()
-          const bound = { ...caller, execution, process: runner }
+          // The handle bound itself around this run; the caller captured at
+          // spawn holds the spawning one's.
+          const { process: runner } = currentCaller()
+          const bound = { ...caller, process: runner }
           const result = await runWithCaller(bound, async () => {
             const view = sessionView(child, this.policies)
             for (const [name, value] of Object.entries(env ?? {})) {
@@ -969,8 +981,8 @@ export class Workspace {
         }
       },
     })
-    child.processId = process.info.pid
-    child.shellPid = process.info.pid
+    child.processId = process.record.id.pid
+    child.shellPid = process.record.id.pid
     return new ChildProcess(process, input, output, (signal) => {
       process.terminate(signal)
     })
@@ -2085,7 +2097,7 @@ export class Workspace {
       if (await this.jobTable.kill(job.id, job.sessionId)) killed += 1
     }
     for (const runner of this.processes.live()) {
-      if (sessionId !== undefined && runner.info.sessionId !== sessionId) continue
+      if (sessionId !== undefined && runner.record.sessionId !== sessionId) continue
       if (runner.terminate()) killed += 1
     }
     return killed

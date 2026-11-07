@@ -5,26 +5,27 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from mirage.context.session_context import (
-    current_execution_id,
-    run_with_execution,
+    current_process_id,
+    run_as_process,
 )
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import ProcessState
+from mirage.execution.types import LineId
 from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
 async def test_execution_context_isolated_between_concurrent_runners():
-    processes = ProcessTable(bind=run_with_execution)
+    processes = ProcessTable(bind=run_as_process)
     release = asyncio.Event()
     seen = []
 
     async def run():
-        before = current_execution_id()
+        before = current_process_id()
         await release.wait()
-        seen.append((before, current_execution_id()))
+        seen.append((before, current_process_id()))
         return 0
 
     handles = [
@@ -33,15 +34,22 @@ async def test_execution_context_isolated_between_concurrent_runners():
             command="probe",
             cwd=PathSpec.from_str_path("/"),
             run=run,
-            execution_id=identity,
+            line=LineId(identity),
         )
         for identity in ("first", "second")
     ]
     await asyncio.sleep(0)
     release.set()
     await asyncio.gather(*(handle.join() for handle in handles))
-    assert sorted(seen) == [("first", "first"), ("second", "second")]
-    assert current_execution_id() is None
+    ids = sorted(str(handle.record.id) for handle in handles)
+    assert sorted((str(a), str(b)) for a, b in seen) == [
+        (pid, pid) for pid in ids
+    ]
+    assert {handle.record.line for handle in handles} == {
+        LineId("first"),
+        LineId("second"),
+    }
+    assert current_process_id() is None
 
 
 @pytest.mark.asyncio
@@ -72,14 +80,14 @@ async def test_execution_ancestry_does_not_grant_cancellation_ownership():
         command="parent",
         cwd=PathSpec.from_str_path("/"),
         run=parent,
-        execution_id="request",
+        line=LineId("request"),
     )
     await started.wait()
     child_handle = children[0]
-    assert child_handle.info.parent_pid is None
+    assert child_handle.record.parent is None
     root.terminate()
     await root.join()
-    assert child_handle.info.state == ProcessState.RUNNING
+    assert child_handle.record.state == ProcessState.RUNNING
     release.set()
     await child_handle.join()
 
@@ -115,7 +123,7 @@ async def test_cancel_does_not_claim_exit_before_finally_finishes():
     await cleaning.wait()
     [info] = view.list()
     assert info.state == ProcessState.STOPPING
-    assert info.exit_code is None
+    assert info.exit is None
     waiter = asyncio.create_task(process.join())
     await asyncio.sleep(0)
     assert not waiter.done()
@@ -134,7 +142,7 @@ async def test_cancel_does_not_claim_exit_before_finally_finishes():
     release.set()
     result = await process.join()
     assert result.state == ProcessState.EXITED
-    assert result.exit_code == 137 and result.cancellation_requested
+    assert (result.exit, result.signal) == (137, 9)
     assert result.pid not in [i.pid for i in view.list()]
     assert not process.terminate()
 
@@ -155,20 +163,20 @@ async def test_views_are_immutable_scoped_and_revoked_on_session_reuse():
         session_id="b", command="b", cwd=PathSpec.from_str_path("/"), run=run
     )
     old_view = processes.view("a")
-    assert old_view.list() == (a.info,)
+    assert old_view.list() == (a.record,)
     with pytest.raises(FrozenInstanceError):
-        a.info.command = "changed"
+        a.record.command = "changed"
     processes.revoke_session("a")
     new_view = processes.view("a")
     replacement = processes.start(
         session_id="a", command="new", cwd=PathSpec.from_str_path("/"), run=run
     )
     assert old_view.list() == ()
-    assert new_view.list() == (replacement.info,)
-    assert len({a.info.pid, b.info.pid, replacement.info.pid}) == 3
+    assert new_view.list() == (replacement.record,)
+    assert len({a.record.pid, b.record.pid, replacement.record.pid}) == 3
     release.set()
     assert [
-        info.exit_code
+        info.exit
         for info in await asyncio.gather(
             a.join(), b.join(), replacement.join()
         )
@@ -190,8 +198,8 @@ async def test_failed_runner_is_observed_and_retired():
         run=run,
     )
     result = await process.join()
-    assert result.exit_code == 1
-    assert result.failure == "failed cleanup"
+    assert result.exit == 1
+    assert result.error == "failed cleanup"
     assert processes.live() == ()
 
 
@@ -210,7 +218,7 @@ async def test_prestart_cancellation_still_completes_and_retires():
         run=run,
     )
     process.task.cancel()
-    assert (await process.join()).exit_code == 137
+    assert (await process.join()).exit == 137
     assert processes.live() == ()
 
 
@@ -238,7 +246,7 @@ async def test_stop_closes_admission_and_cancels_every_live_runner():
             run=run,
         )
     assert all(
-        result.cancellation_requested
+        result.signal == 9
         for result in await asyncio.gather(a.join(), b.join())
     )
     assert processes.live() == ()
@@ -269,7 +277,7 @@ async def test_join_can_cross_event_loops_without_blocking_the_runner():
     )
     await asyncio.sleep(0)
     release.set()
-    assert (await asyncio.wait_for(waiter, 2)).exit_code == 12
+    assert (await asyncio.wait_for(waiter, 2)).exit == 12
 
 
 @pytest.mark.asyncio
@@ -290,9 +298,9 @@ async def test_workspace_list_does_not_grant_kill():
     grants = ProcessPermissions(list="workspace")
     view = processes.view("observer", lambda: grants)
     [info] = view.list()
-    assert info.pid == child.info.pid and info.command == "secret argument"
+    assert info.pid == child.record.pid and info.command == "secret argument"
     with pytest.raises(PermissionError) as denied:
-        view.terminate(child.info.pid, 15)
+        view.terminate(child.record.pid, 15)
     assert denied.value.errno == errno.EPERM
     assert view.permissions() == grants
     processes.revoke_session("observer")
@@ -386,17 +394,17 @@ async def test_cancel_group_reaches_grandchild_after_intermediate_exit():
         command="middle",
         cwd=PathSpec.from_str_path("/"),
         run=quick,
-        parent_pid=root.info.pid,
+        parent=root.record.pid,
     )
     leaf = processes.start(
         session_id="a",
         command="leaf",
         cwd=PathSpec.from_str_path("/"),
         run=run,
-        parent_pid=middle.info.pid,
+        parent=middle.record.pid,
     )
     await middle.join()
-    assert leaf.info.group_id == root.info.pid
+    assert leaf.record.group == root.record.pid
     root.terminate()
     with pytest.raises(RuntimeError, match="accepting children"):
         processes.start(
@@ -404,10 +412,10 @@ async def test_cancel_group_reaches_grandchild_after_intermediate_exit():
             command="late",
             cwd=PathSpec.from_str_path("/"),
             run=run,
-            parent_pid=root.info.pid,
+            parent=root.record.pid,
         )
     await processes.drain()
-    assert (await leaf.join()).cancellation_requested
+    assert (await leaf.join()).signal is not None
     assert processes.live() == ()
 
 
@@ -423,24 +431,24 @@ async def test_cancel_reaches_a_grandchild_past_an_exited_parent_below_the_leade
     async def quick():
         return 0
 
-    def start(runner, parent_pid=None):
+    def start(runner, parent=None):
         return processes.start(
             session_id="a",
             command="runner",
             cwd=PathSpec.from_str_path("/"),
             run=runner,
-            parent_pid=parent_pid,
+            parent=parent,
         )
 
     root = start(run)
-    job = start(run, root.info.pid)
-    middle = start(quick, job.info.pid)
-    leaf = start(run, middle.info.pid)
+    job = start(run, root.record.pid)
+    middle = start(quick, job.record.pid)
+    leaf = start(run, middle.record.pid)
     await middle.join()
     job.terminate()
     async with asyncio.timeout(5):
-        assert (await leaf.join()).cancellation_requested
-    assert not root.info.cancellation_requested
+        assert (await leaf.join()).signal is not None
+    assert root.record.state == ProcessState.RUNNING
     release.set()
     await root.join()
 
@@ -470,13 +478,13 @@ async def test_stopping_an_exited_runner_stops_what_it_left_running():
         command="sleep",
         cwd=PathSpec.from_str_path("/"),
         run=_hangs,
-        parent_pid=parent.info.pid,
+        parent=parent.record.pid,
     )
     await parent.join()
     assert parent.terminate(15) is False
     async with asyncio.timeout(5):
         info = await left.join()
-    assert (info.exit_code, info.cancellation_requested) == (143, True)
+    assert (info.exit, info.signal) == (143, 15)
 
 
 # A signal the runner's jobs ignore stops the runner alone, under the
@@ -495,12 +503,12 @@ async def test_stopping_a_runner_alone_leaves_its_children_running():
         command="sleep",
         cwd=PathSpec.from_str_path("/"),
         run=_hangs,
-        parent_pid=parent.info.pid,
+        parent=parent.record.pid,
     )
     assert parent.terminate(2, children=False)
     async with asyncio.timeout(5):
-        assert (await parent.join()).exit_code == 130
-    assert not child.info.cancellation_requested
+        assert (await parent.join()).exit == 130
+    assert child.record.state == ProcessState.RUNNING
     child.terminate()
     await child.join()
 
@@ -534,7 +542,7 @@ async def test_a_group_signal_ends_an_ignoring_shells_program_and_stops_the_rest
         command="sh",
         cwd=PathSpec.from_str_path("/"),
         run=shell,
-        parent_pid=parent.info.pid,
+        parent=parent.record.pid,
         ignores=frozenset({2}),
     )
     other = processes.start(
@@ -542,33 +550,33 @@ async def test_a_group_signal_ends_an_ignoring_shells_program_and_stops_the_rest
         command="sleep",
         cwd=PathSpec.from_str_path("/"),
         run=_hangs,
-        parent_pid=parent.info.pid,
+        parent=parent.record.pid,
     )
     forked = processes.start(
         session_id="a",
         command="sleep",
         cwd=PathSpec.from_str_path("/"),
         run=_hangs,
-        parent_pid=child.info.pid,
+        parent=child.record.pid,
     )
     outside = processes.start(
         session_id="a",
         command="timeout",
         cwd=PathSpec.from_str_path("/"),
         run=_hangs,
-        parent_pid=parent.info.pid,
+        parent=parent.record.pid,
         own_group=True,
     )
     async with asyncio.timeout(5):
         await started.wait()
-        assert processes.signal_group(parent.info.group_id, 2)
-        assert (await child.join()).exit_code == 0
-        assert (await other.join()).exit_code == 130
-        assert (await forked.join()).exit_code == 130
-        assert (await parent.join()).exit_code == 130
+        assert processes.signal_group(parent.record.group, 2)
+        assert (await child.join()).exit == 0
+        assert (await other.join()).exit == 130
+        assert (await forked.join()).exit == 130
+        assert (await parent.join()).exit == 130
     assert outcome == [(None, 2)]
     assert outside.signal is None
-    assert not processes.signal_group(outside.info.pid + 1, 2)
+    assert not processes.signal_group(outside.record.pid + 1, 2)
     outside.terminate()
     await outside.join()
 
@@ -592,7 +600,7 @@ async def test_a_given_pid_is_taken_while_free():
         run=_hangs,
         pid=7,
     )
-    assert (first.info.pid, held.info.pid) == (7, 8)
+    assert (first.record.pid, held.record.pid) == (7, 8)
     await first.join()
     again = processes.start(
         session_id="a",
@@ -601,9 +609,9 @@ async def test_a_given_pid_is_taken_while_free():
         run=_exits_0,
         pid=7,
     )
-    assert again.info.pid == 7
+    assert again.record.pid == 7
     await again.join()
-    assert [p.info.pid for p in processes.live()] == [8]
+    assert [p.record.pid for p in processes.live()] == [8]
     held.terminate()
     await held.join()
 
@@ -629,12 +637,12 @@ async def test_a_group_stopped_with_a_signal_passes_it_to_every_child():
         command="child",
         cwd=PathSpec.from_str_path("/"),
         run=run,
-        parent_pid=root.info.pid,
+        parent=root.record.pid,
     )
     await asyncio.sleep(0)
     assert root.terminate(15)
-    assert ((await root.join()).exit_code, child.signal) == (143, 15)
-    assert (await child.join()).exit_code == 143
+    assert ((await root.join()).exit, child.signal) == (143, 15)
+    assert (await child.join()).exit == 143
 
 
 # A caller's setup from the new process (the session's $$) runs before the
@@ -646,7 +654,7 @@ async def test_started_runs_before_the_runner_with_the_process_live():
     order: list[str] = []
 
     async def run() -> int:
-        order.append(f"run {[p.info.pid for p in processes.live()]}")
+        order.append(f"run {[p.record.pid for p in processes.live()]}")
         return 0
 
     handle = processes.start(
@@ -654,7 +662,7 @@ async def test_started_runs_before_the_runner_with_the_process_live():
         command="probe",
         cwd=PathSpec.from_str_path("/"),
         run=run,
-        started=lambda process: order.append(f"started {process.info.pid}"),
+        started=lambda process: order.append(f"started {process.record.pid}"),
     )
     await handle.join()
     assert order == ["started 1", "run [1]"]

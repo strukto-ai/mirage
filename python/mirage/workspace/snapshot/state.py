@@ -1027,7 +1027,7 @@ async def _job_to_dict(job: Job) -> dict[str, Any]:
         JobKey.EXIT_CODE: job.exit_code,
         JobKey.CREATED_AT: job.created_at,
         JobKey.SESSION_ID: job.session_id,
-        JobKey.EXECUTION_ID: job.execution_id,
+        JobKey.PROCESS: job.process_id,
     }
 
 
@@ -1068,8 +1068,8 @@ def _restored_console(
         )
     )
     console = JobConsole(RAMConsoleStore(chunks=chunks), finished=True)
-    if execution_id := d.get(JobKey.EXECUTION_ID):
-        console.bind_execution(execution_id)
+    if process := d.get(JobKey.PROCESS):
+        console.bind_process(process)
     return console
 
 

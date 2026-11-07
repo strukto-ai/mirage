@@ -18,7 +18,7 @@ import { CLI } from '../../commands/cli/types.ts'
 import { Command } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { currentExecutionId } from '../../context/session_context.ts'
+import { currentProcessId } from '../../context/session_context.ts'
 import { ExecutionScope } from '../execution.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode, VFSName } from '../../types.ts'
@@ -68,7 +68,7 @@ it('links a pipeline CLI and operation history to the admitted execution', async
       handlers: {
         '': new CLIHandler({
           fn: () => {
-            seen.push(currentExecutionId())
+            seen.push(currentProcessId()?.toString() ?? null)
             return [ENC.encode('tracked\n'), new IOResult()]
           },
         }),

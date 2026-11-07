@@ -249,7 +249,7 @@ async def test_a_job_killed_with_a_signal_exits_128_plus_it(signal, code):
     assert await table.kill(job.id, "a", signal)
     assert (job.status, job.exit_code) == (JobStatus.KILLED, code)
     assert job.process is not None
-    assert (await job.process.join()).exit_code == code
+    assert (await job.process.join()).exit == code
 
 
 async def _submit_handling(
@@ -388,14 +388,13 @@ async def test_disowned_job_keeps_process_identity_until_runner_really_exits():
     view = table.processes.view("a")
     assert await table.disown(job.id, "a")
     assert table.list_jobs("a") == []
-    assert [i.pid for i in view.list()] == [process.info.pid]
+    assert [i.pid for i in view.list()] == [process.record.pid]
     await table.kill_all()
     assert job.status == JobStatus.KILLED
     assert [i.state for i in view.list()] == ["stopping"]
     release.set()
     result = await process.join()
-    assert result.exit_code == 0
-    assert result.cancellation_requested
+    assert result.exit == 0
     assert view.list() == ()
 
 
@@ -405,12 +404,12 @@ async def test_process_ids_do_not_restart_with_shell_job_numbers():
     a = await _submit(table, "a")
     b = await _submit(table, "b")
     assert a.id == b.id == 1
-    assert a.process.info.pid != b.process.info.pid
+    assert a.process.record.pid != b.process.record.pid
     await table.kill(a.id, "a")
     await table.reap(a.id, "a")
     replacement = await _submit(table, "a")
     assert replacement.id == 1
-    assert replacement.process.info.pid > b.process.info.pid
+    assert replacement.process.record.pid > b.process.record.pid
     await table.kill_all()
     await asyncio.gather(
         a.process.join(), b.process.join(), replacement.process.join()

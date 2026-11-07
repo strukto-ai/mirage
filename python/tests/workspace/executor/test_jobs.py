@@ -21,6 +21,7 @@ import pytest
 from mirage.bridge.sync import handed
 from mirage.execution.job import Job, JobStatus, JobTable
 from mirage.execution.job import table as job_table_module
+from mirage.execution.process.types import ProcessState
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import (
     AsyncLineIterator,
@@ -1081,7 +1082,7 @@ async def test_closing_a_session_purges_its_jobs():
         ws.create_session("a")
         assert (await ws.shell("jobs", session_id="a")).stdout == b""
         io = await ws.shell("sleep 30 & echo $!", session_id="a")
-        assert int(io.stdout) > old.process.info.pid
+        assert int(io.stdout) > old.process.record.pid
         assert ws.job_table.get(1, "a") is not None
         io = await ws.shell("wait %2", session_id="a")
         assert io.exit_code == 127
@@ -1269,7 +1270,7 @@ async def test_kill_zero_respects_signal_permissions_without_cancelling():
             await ws.shell(f"kill -0 {pid}", session_id="owner")
         ).exit_code == 0
         [info] = [i for i in ws.processes.view("owner").list() if i.pid == pid]
-        assert info.cancellation_requested is False
+        assert info.state == ProcessState.RUNNING
     finally:
         await ws.close()
 

@@ -76,9 +76,9 @@ def bound_session():
 
 
 def test_a_changed_caller_keeps_the_rest_and_refuses_a_stranger():
-    base = Caller(execution="e", command_started=1)
+    base = Caller(command="e", command_started=1)
     moved = base.changed({"command_started": 2})
-    assert (moved.execution, moved.command_started) == ("e", 2)
+    assert (moved.command, moved.command_started) == ("e", 2)
     assert base.command_started == 1
     with pytest.raises(AttributeError):
         base.changed({"no_such_field": 1})
@@ -86,15 +86,15 @@ def test_a_changed_caller_keeps_the_rest_and_refuses_a_stranger():
 
 def _undo_bindings() -> None:
     before = current_caller()
-    first = bind_caller(before.changed({"execution": "a"}))
+    first = bind_caller(before.changed({"command": "a"}))
     second = bind_caller(current_caller().changed({"command_started": 7}))
     reset_caller(first)
     now = current_caller()
-    assert (now.execution, now.command_started) == (None, 7)
+    assert (now.command, now.command_started) == (None, 7)
     reset_caller(second)
     now = current_caller()
-    assert (now.execution, now.command_started) == (None, None)
-    third = bind_caller(now.changed({"execution": "b"}))
+    assert (now.command, now.command_started) == (None, None)
+    third = bind_caller(now.changed({"command": "b"}))
     reset_caller(third)
     assert current_caller() is now
 

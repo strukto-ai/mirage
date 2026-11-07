@@ -355,13 +355,13 @@ export async function handleTimeout(
       sessionId: session.sessionId,
       command: inner,
       cwd: PathSpec.fromStrPath(session.cwd),
-      parentPid: session.processId,
+      parent: session.processId,
       cancel: () => {
         abort.abort(new SignalStop(process.signal ?? SIGKILL))
       },
       limit: session.processes.max,
       started: (forked) => {
-        child.session.processId = forked.info.pid
+        child.session.processId = forked.record.id.pid
         child.frame.shell = forked
       },
       ignores: SHELL_IGNORED_SIGNALS,
@@ -397,7 +397,7 @@ export async function handleTimeout(
   // command already knows the signal.
   const send = (number: number): void => {
     if (foreground) deliver(process, number)
-    else processes.signalGroup(process.info.groupId, number)
+    else processes.signalGroup(process.record.group, number)
   }
   const watch = supervise(run, abort.signal, send, sink, held, seconds, lineSignal, {
     signal,

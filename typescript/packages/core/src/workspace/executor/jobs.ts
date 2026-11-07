@@ -34,7 +34,8 @@ import { type Decisions, isPending } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { ProcessHandle } from '../../execution/process/handle.ts'
 import type { ProcessTable } from '../../execution/process/table.ts'
-import type { ProcessInfo, ProcessRunner, ProcessState } from '../../execution/process/types.ts'
+import type { Process, ProcessRunner, ProcessState } from '../../execution/process/types.ts'
+import { LineId, MachineId, ProcessId } from '../../execution/types.ts'
 import type { ProcessView } from '../../execution/process/view.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { concat } from '../../utils/bytes.ts'
@@ -358,7 +359,7 @@ export function reportJobs(context: EvaluationContext, jobTable: JobTable | null
     if (
       job.reported ||
       job.status === JobStatus.RUNNING ||
-      process?.info.parentPid !== session.processId
+      process?.record.parent !== session.processId
     ) {
       continue
     }
@@ -388,7 +389,7 @@ export function reportReaped(
   const listed = signalReported(reaped[reaped.length - 1]?.[0].endedBy ?? null)
   const processes = reaped.map(
     ([process, code, node]) =>
-      [process.info.pid, code, process.endedBy, listed ? reportedCommand(node) : ''] as const,
+      [process.record.id.pid, code, process.endedBy, listed ? reportedCommand(node) : ''] as const,
   )
   frame.reports.push(encodeText(signalReport(shellVoice(), processes, true)))
 }
@@ -405,7 +406,7 @@ export function startShell(
   session: SessionState,
   command: string,
   run: ProcessRunner,
-  parentPid: number | null,
+  parent: number | null,
   cancel: () => void,
   started?: (process: ProcessHandle) => void,
 ): ProcessHandle {
@@ -416,7 +417,7 @@ export function startShell(
       cwd: PathSpec.fromStrPath(session.cwd),
       run,
       cancel,
-      parentPid,
+      parent,
       limit: session.processes.max,
       ...(started === undefined ? {} : { started }),
       ignores: SHELL_IGNORED_SIGNALS,
@@ -541,7 +542,7 @@ export async function handleBackground(
         const opts: ExecuteNodeOpts = {
           sink: console_,
           signal: AbortSignal.any([abort.signal, expiry.signal, ...(stop === null ? [] : [stop])]),
-          executionScope: new ExecutionScope(undefined, job.executionId ?? undefined),
+          executionScope: new ExecutionScope(undefined, job.processId ?? undefined),
           endsShell: true,
           jobTable: jobTable.child(),
         }
@@ -689,7 +690,7 @@ export async function handleBackground(
       abort,
       cwd: bgSession.cwd,
       sessionId: session.sessionId,
-      parentPid: session.processId,
+      parent: session.processId,
       limit: session.processes.max,
       simple: oneProgram(left, session),
       // A job whose runner never begins skips runBg's finally, so its
@@ -715,7 +716,7 @@ export async function handleBackground(
       throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
     throw err
   }
-  bgSession.processId = job.process?.info.pid ?? null
+  bgSession.processId = job.process?.record.id.pid ?? null
   session.lastBgJobId = job.pid
   if (session.jobWaits?.reaches(output, jobStreams(left, session)) === true)
     session.jobWaits.add(job)
@@ -1418,7 +1419,7 @@ async function killGroup(
   for (const job of jobs) {
     if (
       job.process !== null &&
-      job.process.info.groupId === group &&
+      job.process.record.group === group &&
       !job.process.ignores.has(signal)
     )
       await jobTable.kill(job.id, sessionId, signal)
@@ -1784,7 +1785,7 @@ function elapsed(seconds: number): string {
  * measured from procps-ng 4.0.4's `ps -o` output: a day-old start prints its
  * date, a recent one its clock.
  */
-function started(fact: string, info: ProcessInfo, ctx: PsContext): string {
+function started(fact: string, info: Process, ctx: PsContext): string {
   const start = new Date(info.startedAt * 1000)
   if (fact === 'lstart') return gnuStrftime(start, '%a %b %e %H:%M:%S %Y', ctx.zone)
   const old = ctx.now - info.startedAt > 86400
@@ -1806,7 +1807,7 @@ function started(fact: string, info: ProcessInfo, ctx: PsContext): string {
  * profile this one cannot name. A runner of the calling session belongs to the
  * session `$$` leads; another session's to its own group.
  */
-function psCell(key: string, info: ProcessInfo, ctx: PsContext, owner = ''): string {
+function psCell(key: string, info: Process, ctx: PsContext, owner = ''): string {
   const fact = PS_COLUMNS[key]?.[3] ?? ''
   const fixed = PS_FIXED[fact]
   if (fixed !== undefined) return fixed
@@ -1814,13 +1815,13 @@ function psCell(key: string, info: ProcessInfo, ctx: PsContext, owner = ''): str
   const session =
     owner === '' && info.sessionId === ctx.sessionId && ctx.shellPid !== null
       ? ctx.shellPid
-      : info.groupId || info.pid
-  if (fact === 'pid') return `${tag}${String(info.pid)}`
-  if (fact === 'ppid') return info.parentPid ? `${tag}${String(info.parentPid)}` : '0'
-  if (fact === 'pgid') return `${tag}${String(info.groupId || info.pid)}`
+      : info.group || info.id.pid
+  if (fact === 'pid') return `${tag}${String(info.id.pid)}`
+  if (fact === 'ppid') return info.parent ? `${tag}${String(info.parent)}` : '0'
+  if (fact === 'pgid') return `${tag}${String(info.group || info.id.pid)}`
   if (fact === 'sid') return `${tag}${String(session)}`
   if (fact === 'stat' || fact === 'state') {
-    return PS_STATES[info.state] + (fact === 'stat' && info.pid === session ? 's' : '')
+    return PS_STATES[info.state] + (fact === 'stat' && info.id.pid === session ? 's' : '')
   }
   if (fact === 'comm') {
     const head = info.command.split(/\s+/).find((w) => w !== '') ?? ''
@@ -1837,20 +1838,25 @@ function psCell(key: string, info: ProcessInfo, ctx: PsContext, owner = ''): str
 }
 
 /** Another workspace's runner as its process record keeps it. */
-function remoteInfo(record: RecordFields): ProcessInfo {
+function remoteInfo(workspaceId: string, record: RecordFields): Process {
+  const line = record.line as string | null
   return {
-    pid: record.pid as number,
+    id: new ProcessId(workspaceId, record.pid as number),
     sessionId: record.session as string,
+    line: line === null ? null : new LineId(line),
+    parent: record.parent as number | null,
+    group: record.group as number,
     command: record.command as string,
     cwd: PathSpec.fromStrPath(record.cwd as string),
+    machine: MachineId.parse(record.machine as string),
     startedAt: record.started_at as number,
-    executionId: record.execution as string,
+    runtime: null,
+    machinePid: null,
     state: record.state as ProcessState,
-    cancellationRequested: false,
-    exitCode: null,
-    failure: null,
-    parentPid: record.parent as number | null,
-    groupId: record.group as number,
+    endedAt: null,
+    exit: null,
+    signal: null,
+    error: null,
   }
 }
 
@@ -1913,12 +1919,12 @@ export async function handlePs(
   const processes = processView(jobTable, session)
   const every = options.all || (options.pids.size === 0 && options.remote.length === 0)
   const runs = new Map(
-    jobTable.processes.live().map((handle) => [handle.info.pid, Object.values(handle.runs)]),
+    jobTable.processes.live().map((handle) => [handle.record.id.pid, Object.values(handle.runs)]),
   )
-  const rows: [string, ProcessInfo, Record<string, JsonValue>[]][] = processes
+  const rows: [string, Process, Record<string, JsonValue>[]][] = processes
     .list()
-    .filter((info) => every || options.pids.has(info.pid))
-    .map((info) => ['', info, runs.get(info.pid) ?? []])
+    .filter((info) => every || options.pids.has(info.id.pid))
+    .map((info) => ['', info, runs.get(info.id.pid) ?? []])
   const remote = await jobTable.remoteProcesses()
   const granted = processes.permissions()
   const tags = ownerTags(Object.keys(remote))
@@ -1931,7 +1937,7 @@ export async function handlePs(
       )
         rows.push([
           tags.get(owner) ?? owner,
-          remoteInfo(record),
+          remoteInfo(jobTable.processes.workspaceId, record),
           record.runs as Record<string, JsonValue>[],
         ])
     }
@@ -1961,7 +1967,7 @@ export async function handlePs(
       )
   } else {
     lines = rows.flatMap(([owner, info, native]) => [
-      `${owner !== '' ? `${owner}:` : ''}${String(info.pid)}\t${info.command}`,
+      `${owner !== '' ? `${owner}:` : ''}${String(info.id.pid)}\t${info.command}`,
       ...native.map((run) => `-\t└ ${runWhere(run)}: ${run.command as string}`),
     ])
   }

@@ -23,7 +23,7 @@ from mirage import MountMode, Workspace
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec import CommandSpec
-from mirage.context.session_context import current_execution_id
+from mirage.context.session_context import current_process_id
 from mirage.io.types import IOResult
 from mirage.observe.store import RAMObserverStore
 from mirage.policy import Action, CommandContext, Deny, Policy
@@ -68,7 +68,7 @@ async def test_execution_identity_links_pipeline_threaded_cli_and_observation():
     seen = []
 
     def probe(config, paths, texts, ctx):
-        seen.append(current_execution_id())
+        seen.append(current_process_id())
         return b"tracked\n", IOResult()
 
     ws.register_cli(

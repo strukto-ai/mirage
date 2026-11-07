@@ -16,22 +16,28 @@ import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { stopSignal } from '../../utils/abort.ts'
 import { ProcessHandle } from './handle.ts'
-import type { ProcessInfo } from './types.ts'
+import type { Process } from './types.ts'
+import { LOCAL_MACHINE } from '../constants.ts'
+import { ProcessId } from '../types.ts'
 
-function info(): ProcessInfo {
+function info(): Process {
   return {
-    pid: 7,
+    id: new ProcessId('w', 7),
     sessionId: 'a',
+    line: null,
+    parent: null,
+    group: 7,
     command: 'line',
     cwd: PathSpec.fromStrPath('/'),
+    machine: LOCAL_MACHINE,
     startedAt: 0,
-    executionId: 'exec_test',
+    runtime: null,
+    machinePid: null,
     state: 'running',
-    cancellationRequested: false,
-    exitCode: null,
-    failure: null,
-    parentPid: null,
-    groupId: 0,
+    endedAt: null,
+    exit: null,
+    signal: null,
+    error: null,
   }
 }
 
@@ -76,14 +82,14 @@ describe('ProcessHandle', () => {
     )
     handle.start()
     const done = await handle.join()
-    expect([done.state, done.exitCode, finished]).toEqual(['exited', 3, [7]])
+    expect([done.state, done.exit, finished]).toEqual(['exited', 3, [7]])
   })
 
   it('a failing runner exits 1 with its failure', async () => {
     const handle = new ProcessHandle(info(), raises, ignore, ignore)
     handle.start()
     const done = await handle.join()
-    expect([done.exitCode, done.failure]).toEqual([1, 'boom'])
+    expect([done.exit, done.error]).toEqual([1, 'boom'])
   })
 
   // A program the runner runs where an interrupt reaches it hands back what
@@ -157,7 +163,7 @@ describe('ProcessHandle', () => {
     expect(handle.terminate()).toBe(true)
     expect(handle.terminate()).toBe(false)
     const done = await handle.join()
-    expect([done.exitCode, done.cancellationRequested]).toEqual([137, true])
+    expect([done.exit, done.signal]).toEqual([137, 9])
   })
 
   // A stop stands for the signal a kill named: the binder hands the runner
@@ -186,7 +192,7 @@ describe('ProcessHandle', () => {
       },
       ignore,
       ignore,
-      (_id, run, process) => {
+      (run, process) => {
         bound.push(process)
         return run()
       },
@@ -195,7 +201,7 @@ describe('ProcessHandle', () => {
     expect(handle.signal).toBeNull()
     expect(handle.terminate(signal)).toBe(true)
     const done = await handle.join()
-    expect([done.exitCode, handle.signal, bound]).toEqual([code, signal, [handle]])
+    expect([done.exit, handle.signal, bound]).toEqual([code, signal, [handle]])
   })
 
   // A KILL while the runner still stops under a gentler signal takes over,
@@ -229,7 +235,7 @@ describe('ProcessHandle', () => {
     expect(handle.terminate(9)).toBe(true)
     expect(handle.terminate(9)).toBe(false)
     const done = await handle.join()
-    expect([done.exitCode, handle.signal, children]).toEqual([137, 9, [15, 9]])
+    expect([done.exit, handle.signal, children]).toEqual([137, 9, [15, 9]])
   })
 
   // The native runs a runner has going are kept under their keys until each
@@ -274,7 +280,7 @@ describe('ProcessHandle', () => {
     expect(handle.programCode).toBeNull()
     expect(handle.terminate(15)).toBe(true)
     const done = await handle.join()
-    expect([done.exitCode, handle.programCode]).toEqual([143, 3])
+    expect([done.exit, handle.programCode]).toEqual([143, 3])
   })
 
   // An eager start runs the runner up to its first wait before start
@@ -310,7 +316,7 @@ describe('ProcessHandle', () => {
     )
     handle.start(true)
     const ended = await handle.join()
-    expect([ended.exitCode, ended.failure, finished]).toEqual([1, 'boom', [ended.pid]])
+    expect([ended.exit, ended.error, finished]).toEqual([1, 'boom', [ended.id.pid]])
   })
 
   // Reaping a runner waits for it as wait(2) does: its code, or 128 plus the

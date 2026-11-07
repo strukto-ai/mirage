@@ -9,8 +9,13 @@ from threading import RLock
 from typing import Any, Protocol, TypeVar, cast
 
 from mirage.concurrency.limiter import owned_task
-from mirage.execution.process.types import ProcessInfo, ProcessRunner, ProcessState
+from mirage.execution.process.types import (
+    Process,
+    ProcessRunner,
+    ProcessState,
+)
 from mirage.types import JsonValue
+from mirage.utils.clock import system_now
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +27,6 @@ class ExecutionBind(Protocol):
 
     async def __call__(
         self,
-        execution_id: str,
         run: ProcessRunner,
         process: ProcessHandle,
     ) -> int: ...
@@ -47,14 +51,16 @@ class ProcessHandle:
 
     def __init__(
         self,
-        info: ProcessInfo,
+        record: Process,
         run: ProcessRunner,
         finished: Callable[[int], None],
         cancel_children: Callable[[int], None] = lambda signal: None,
         bind: ExecutionBind | None = None,
         ignores: frozenset[int] = frozenset(),
+        now: Callable[[], float] = system_now,
     ) -> None:
-        self._info = info
+        self._record = record
+        self._now = now
         self.ignores = ignores
         self._run = run
         self._bind = bind
@@ -67,7 +73,7 @@ class ProcessHandle:
         self._program_code: int | None = None
         self._program_signal: int | None = None
         self._runs: dict[str, dict[str, JsonValue]] = {}
-        self._completion: Future[ProcessInfo] = Future()
+        self._completion: Future[Process] = Future()
         self.begun = False
         # The host stopped it (its table stopped, its session closed),
         # which ends whoever waits for it as well.
@@ -94,12 +100,12 @@ class ProcessHandle:
         self.begun = True
         if self._bind is None:
             return await self._run()
-        return await self._bind(self._info.execution_id, self._run, self)
+        return await self._bind(self._run, self)
 
     @property
-    def info(self) -> ProcessInfo:
+    def record(self) -> Process:
         with self._lock:
-            return self._info
+            return self._record
 
     @property
     def signal(self) -> int | None:
@@ -119,7 +125,7 @@ class ProcessHandle:
             return self.signal or 9
         with self._lock:
             ended = self._program_signal
-            code = self._info.exit_code
+            code = self._record.exit
         return ended if ended is not None and code == 128 + ended else None
 
     @property
@@ -274,8 +280,8 @@ class ProcessHandle:
         if signal in self.ignores:
             return False
         with self._lock:
-            exited = self._info.state == ProcessState.EXITED
-            stopped = not exited and not self._info.cancellation_requested
+            exited = self._record.state == ProcessState.EXITED
+            stopped = self._record.state == ProcessState.RUNNING
             escalated = (
                 not exited
                 and not stopped
@@ -285,10 +291,8 @@ class ProcessHandle:
             if stopped:
                 self._signal = signal
                 self.task.get_loop().call_soon_threadsafe(self.task.cancel)
-                self._info = replace(
-                    self._info,
-                    state=ProcessState.STOPPING,
-                    cancellation_requested=True,
+                self._record = replace(
+                    self._record, state=ProcessState.STOPPING
                 )
             elif escalated:
                 self._signal = signal
@@ -300,27 +304,35 @@ class ProcessHandle:
         cancelled = task.cancelled()
         error = None if cancelled else task.exception()
         if error is not None:
-            logger.debug("process %d failed: %s", self._info.pid, error)
+            logger.debug("process %d failed: %s", self._record.pid, error)
         with self._lock:
             # Read with the exit published, so a KILL another thread sends
             # meanwhile is either refused or the status it reports.
             if cancelled:
                 code = 128 + (self._signal or 9)
+                signal: int | None = self._signal or 9
             else:
                 code = 1 if error is not None else task.result()
-            self._info = replace(
-                self._info,
+                stop, ended = self._signal, self._program_signal
+                if stop is not None and code == 128 + stop:
+                    signal = stop
+                elif ended is not None and code == 128 + ended:
+                    signal = ended
+                else:
+                    signal = None
+            self._record = replace(
+                self._record,
                 state=ProcessState.EXITED,
-                exit_code=code,
-                cancellation_requested=self._info.cancellation_requested
-                or cancelled,
-                failure=str(error) if error is not None else None,
+                ended_at=self._now(),
+                exit=code,
+                signal=signal,
+                error=str(error) if error is not None else None,
             )
-            info = self._info
-        self._finished(info.pid)
-        self._completion.set_result(info)
+            record = self._record
+        self._finished(record.pid)
+        self._completion.set_result(record)
 
-    async def join(self) -> ProcessInfo:
+    async def join(self) -> Process:
         """Wait asynchronously, including from a different event loop."""
         return await asyncio.shield(asyncio.wrap_future(self._completion))
 
