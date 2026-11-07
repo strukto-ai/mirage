@@ -1443,6 +1443,11 @@ describe('workspace cancel, kill, stop and start', () => {
         expect(r.json<{ id: string }>().id).toBe('keep')
       }
       expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toEqual([])
+      // State kept with no config, as a workspace created before configs
+      // were saved: it stops again, and cannot be started.
+      rmSync(join(root, 'state', 'configs', 'keep.json'))
+      expect((await post(app, '/v1/workspaces/keep/stop')).statusCode).toBe(200)
+      expect((await post(app, '/v1/workspaces/keep/start')).statusCode).toBe(404)
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })

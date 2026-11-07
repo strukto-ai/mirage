@@ -108,6 +108,23 @@ async def _has_state(request: Request, workspace_id: str) -> bool:
         await store.close()
 
 
+async def _stopped(request: Request, workspace_id: str) -> bool:
+    """Whether the caller's ``workspace_id``, not live, is stopped: its
+    state or its config is kept.
+
+    Args:
+        request (Request): the request, for the registry and its account.
+        workspace_id (str): the id asked about.
+    """
+    registry = request.app.state.registry
+    account = request.state.account
+    if not await registry.allows(workspace_id, account, 0.0):
+        return False
+    if await _has_state(request, workspace_id):
+        return True
+    return await registry.saved_config(workspace_id, account) is not None
+
+
 @asynccontextmanager
 async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
     """Hold the caller's claim on ``workspace_id`` while it is built.
@@ -635,7 +652,7 @@ async def stop_workspace(
     registry = request.app.state.registry
     account = request.state.account
     live = registry.visible(workspace_id, account) is not None
-    if not live and await registry.saved_config(workspace_id, account) is None:
+    if not live and not await _stopped(request, workspace_id):
         raise HTTPException(status_code=404, detail="workspace not found")
     if live or registry.removing(workspace_id):
         await registry.stop(workspace_id)

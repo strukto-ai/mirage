@@ -231,6 +231,20 @@ async function hasState(host: ServerHost, id: string): Promise<boolean> {
 }
 
 /**
+ * Whether `account`'s `id`, not live, is stopped: its state or its config
+ * is kept. Mirrors Python's `_stopped`.
+ */
+async function stopped(
+  deps: WorkspaceRoutesDeps,
+  id: string,
+  account: string | null,
+): Promise<boolean> {
+  if (!(await deps.registry.allows(id, account, 0))) return false
+  if (await hasState(deps.host, id)) return true
+  return (await deps.registry.savedConfig(id, account)) !== null
+}
+
+/**
  * Set `reply`'s status and hand back `body` unsent. Code that holds an id
  * answers this way, so the route sends only once the id is released and a
  * client that read the answer finds the id free.
@@ -709,7 +723,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
   app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/stop', async (req, reply) => {
     const { id } = req.params
     const live = deps.registry.visible(id, req.account) !== null
-    if (!live && (await deps.registry.savedConfig(id, req.account)) === null) {
+    if (!live && !(await stopped(deps, id, req.account))) {
       return reply.status(404).send({ detail: 'workspace not found' })
     }
     if (live || deps.registry.removing(id)) await deps.registry.stop(id)

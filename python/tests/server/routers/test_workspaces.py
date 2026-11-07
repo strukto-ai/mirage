@@ -1726,6 +1726,13 @@ async def test_a_second_stop_answers_as_the_first(tmp_path):
             assert r.status_code == 200, r.text
             assert r.json()["id"] == "keep"
         assert (await client.get("/v1/workspaces")).json() == []
+        # State kept with no config, as a workspace created before configs
+        # were saved: it stops again, and cannot be started.
+        (tmp_path / "state" / "configs" / "keep.json").unlink()
+        r = await client.post("/v1/workspaces/keep/stop")
+        assert r.status_code == 200, r.text
+        r = await client.post("/v1/workspaces/keep/start")
+        assert r.status_code == 404
 
 
 @pytest.mark.asyncio
