@@ -32,6 +32,7 @@ from mirage.commands.config import (
     registered_commands,
 )
 from mirage.commands.spec import SPECS
+from mirage.io.async_line_iterator import SharedInput
 from mirage.io.cooperative import chunks
 from mirage.io.types import IOResult
 from mirage.types import LineFacts, PathSpec
@@ -65,7 +66,13 @@ async def _run_builder(
             exit_code=1,
             stderr=f"{builder.name}: no workspace files\n".encode(),
         )
-    if reading.split and ctx.stdin is not None:
+    # sed cuts a shared input itself, so what it hands back takes the rest
+    # of the chunk it stopped in.
+    if (
+        reading.split
+        and ctx.stdin is not None
+        and not (builder.name == "sed" and isinstance(ctx.stdin, SharedInput))
+    ):
         # A RAM or cache read arrives as one whole chunk, over which a
         # scan that splits its buffer per line is quadratic and cannot be
         # cancelled until it ends; stdin is cut into pieces with a yield

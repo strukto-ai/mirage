@@ -1,5 +1,7 @@
 import pytest
 
+from mirage.commands.spec.builtin_specs import SPECS
+from mirage.commands.spec.standard import help_page
 from mirage.commands.spec.usage import (
     ambiguous_option_error,
     extra_operand_error,
@@ -40,6 +42,18 @@ def test_unknown_long_option_reports_full_token():
         b"Try 'cat --help' for more information.\n"
     )
     assert code == 1
+
+
+def test_sed_follows_a_refusal_with_its_usage_page():
+    msg, code = unknown_option_error("sed", "--bogus")
+    page = help_page("sed", SPECS["sed"])
+    assert msg == (
+        b"sed: unrecognized option '--bogus'\n"
+        + page[page.index(b"Usage: ") :]
+    )
+    assert code == 1
+    msg, _ = unknown_option_error("sed", "--bogus", builtin=False)
+    assert msg.endswith(b"\nTry 'sed --help' for more information.\n")
 
 
 # ripgrep 14.1.1's refusals: no usage hint, and the similar flags its

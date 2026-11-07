@@ -51,14 +51,14 @@ describe('sed -f', () => {
   // A script file runs whole, every command in it, after any -e.
   it.each([
     ['s/hello/HI/\ns/world/EARTH/\n', {}],
-    ['s/world/EARTH/\n', { e: 's/hello/HI/' }],
+    ['s/world/EARTH/\n', { expression: 's/hello/HI/' }],
   ])('runs the script file %j', async (script, extra) => {
     const vfs = new RAMVFS()
     vfs.store.files.set('/tmp/prog.sed', ENC.encode(script))
     vfs.store.files.set('/tmp/in.txt', ENC.encode('hello world\n'))
     const out = await runSed(vfs, [], [PathSpec.fromStrPath('/tmp/in.txt')], {
       ...extra,
-      f: ['/tmp/prog.sed'],
+      file: ['/tmp/prog.sed'],
     })
     expect(out).toBe('HI EARTH\n')
   })
@@ -72,7 +72,9 @@ describe('sed -i beyond s and d', () => {
     const vfs = new RAMVFS()
     vfs.store.dirs.add('/tmp')
     vfs.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\nthree\n'))
-    const out = await runSed(vfs, [script], [PathSpec.fromStrPath('/tmp/a.txt')], { i: true })
+    const out = await runSed(vfs, [script], [PathSpec.fromStrPath('/tmp/a.txt')], {
+      in_place: true,
+    })
     expect(out).toBe('')
     expect(DEC.decode(vfs.store.files.get('/tmp/a.txt'))).toBe(want)
   })

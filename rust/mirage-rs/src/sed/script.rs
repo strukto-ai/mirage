@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
 
+use super::debug::{self, Source};
 use super::text::{Refusal, unit};
 
 /// The release whose behaviour this follows; `v` refuses a newer one.
@@ -10,6 +11,9 @@ const VERSION: &[u8] = b"4.9";
 const BLANKS: &[u8] = b" \t";
 const SPACES: &[u8] = b" \t\n\x0b\x0c\r";
 const RECURSIVE: &str = "recursive escaping after \\c not allowed";
+const SANDBOXED: &str = "e/r/w commands disabled in sandbox mode";
+/// The commands --posix does not know.
+const EXTENSIONS: &[u8] = b"eFLQRTvWz";
 /// The one expression error GNU words without a place.
 const CLASS_SYNTAX: &str = "character class syntax is";
 
@@ -75,7 +79,7 @@ pub(super) struct Command {
     pub(super) negate: bool,
     /// `a`, `i` and `c`'s text, None when there is none at all.
     pub(super) text: Option<Vec<u8>>,
-    label: Vec<u8>,
+    pub(super) label: Vec<u8>,
     /// Where `b`, `t` and `T` jump; where `{` ends.
     pub(super) target: usize,
     /// The file `r`, `R`, `w` or `W` names, by its place in the
@@ -104,6 +108,8 @@ pub(super) struct Program {
     pub(super) rfiles: Vec<Vec<u8>>,
     pub(super) reader_files: Vec<Vec<u8>>,
     pub(super) quiet: bool,
+    /// Under --debug, each command as it lists.
+    pub(super) listing: Vec<Vec<u8>>,
 }
 
 /// The script's pieces as one text, joined by newlines, read one byte at
@@ -277,13 +283,48 @@ fn escape(text: &[u8], at: usize) -> Result<Option<(u8, usize)>, Recursive> {
     Ok(Some((control, at + 1)))
 }
 
+/// Where the bracket expression opening at `text[at]` ends, past its
+/// `]`: a `]` first in it is one of its members, as is everything inside
+/// a `[:class:]`, `[.symbol.]` or `[=equivalent=]`.
+fn bracket_end(text: &[u8], at: usize) -> usize {
+    let mut i = at + 1;
+    if text.get(i) == Some(&b'^') {
+        i += 1;
+    }
+    if text.get(i) == Some(&b']') {
+        i += 1;
+    }
+    while i < text.len() {
+        match text[i] {
+            b']' => return i + 1,
+            b'[' if matches!(text.get(i + 1), Some(b':' | b'.' | b'=')) => {
+                let kind = text[i + 1];
+                i += 2;
+                while i < text.len() && !(text[i] == kind && text.get(i + 1) == Some(&b']')) {
+                    i += 1;
+                }
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+    text.len()
+}
+
 /// An expression's text as regcomp gets it from sed: the escapes sed
 /// reads itself turned into the bytes they stand for, which keep whatever
-/// meaning they have there (`\x2e` is any character).
-fn regex_text(raw: &[u8]) -> Result<Vec<u8>, Recursive> {
+/// meaning they have there (`\x2e` is any character). Under --posix a
+/// bracket expression is left as written, its backslashes members.
+fn regex_text(raw: &[u8], posix: bool) -> Result<Vec<u8>, Recursive> {
     let mut out = Vec::with_capacity(raw.len());
     let mut i = 0;
     while i < raw.len() {
+        if posix && raw[i] == b'[' {
+            let end = bracket_end(raw, i);
+            out.extend_from_slice(&raw[i..end]);
+            i = end;
+            continue;
+        }
         if raw[i] != b'\\' || i + 1 >= raw.len() {
             out.push(raw[i]);
             i += 1;
@@ -373,13 +414,31 @@ fn version_after(a: &[u8], b: &[u8]) -> bool {
     left > right
 }
 
+/// How a script is read: its expressions' syntax, and the options that
+/// refuse or change what it may hold.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Syntax {
+    pub(super) extended: bool,
+    pub(super) utf8: bool,
+    /// --posix: the commands, addresses, flags and escapes sed adds to
+    /// POSIX's are refused or read as their characters.
+    pub(super) posix: bool,
+    /// --sandbox: `e`, `r`, `w` and the commands like them are refused.
+    pub(super) sandbox: bool,
+    /// -z: lines end at a NUL, where an `M` expression's `^` and `$` hold.
+    pub(super) null_data: bool,
+    /// --debug: the program keeps how each command lists.
+    pub(super) debug: bool,
+}
+
 /// Reads a script into a `Program` the way GNU sed 4.9 does.
 struct Compiler {
     src: Script,
-    extended: bool,
-    utf8: bool,
+    syntax: Syntax,
     program: Program,
     blocks: Vec<usize>,
+    /// Under --debug, each expression's text, by its place.
+    sources: Vec<Source>,
 }
 
 type Compiled<T> = Result<T, Refusal>;
@@ -479,7 +538,7 @@ impl Compiler {
 
     /// Refuse a delimiter that opens a multibyte character.
     fn delimiter(&self, delim: u8) -> Compiled<()> {
-        if self.utf8 && (0xC2..=0xFD).contains(&delim) {
+        if self.syntax.utf8 && (0xC2..=0xFD).contains(&delim) {
             return Err(self.fail("delimiter character is not a single-byte character"));
         }
         Ok(())
@@ -491,7 +550,7 @@ impl Compiler {
         };
         if ch.is_ascii_digit() {
             let first = self.number();
-            if self.src.skip(BLANKS) == Some(b'~') {
+            if !self.syntax.posix && self.src.skip(BLANKS) == Some(b'~') {
                 self.src.get();
                 self.src.skip(BLANKS);
                 let step = if self.src.peek().is_some_and(|c| c.is_ascii_digit()) {
@@ -529,7 +588,11 @@ impl Compiler {
         };
         let raw = self.delimited(delim, "unterminated address regex")?;
         let (mut icase, mut multiline) = (false, false);
-        while let Some(flag) = self.src.skip(BLANKS).filter(|f| *f == b'I' || *f == b'M') {
+        while let Some(flag) = self
+            .src
+            .skip(BLANKS)
+            .filter(|f| !self.syntax.posix && (*f == b'I' || *f == b'M'))
+        {
             self.src.get();
             if flag == b'I' {
                 icase = true;
@@ -542,7 +605,7 @@ impl Compiler {
 
     fn second_address(&mut self) -> Compiled<Address> {
         let ch = self.src.skip(BLANKS);
-        if ch == Some(b'+') || ch == Some(b'~') {
+        if !self.syntax.posix && (ch == Some(b'+') || ch == Some(b'~')) {
             self.src.get();
             self.src.skip(BLANKS);
             if !self.src.peek().is_some_and(|c| c.is_ascii_digit()) {
@@ -639,18 +702,34 @@ impl Compiler {
             }
             return Ok(None);
         }
-        let text = regex_text(raw).map_err(|_| self.fail(RECURSIVE))?;
+        let text = regex_text(raw, self.syntax.posix).map_err(|_| self.fail(RECURSIVE))?;
         let options = Options {
-            extended: self.extended,
-            dialect: Dialect::Sed,
+            extended: self.syntax.extended,
+            dialect: if self.syntax.posix {
+                Dialect::SedPosix
+            } else {
+                Dialect::Sed
+            },
             ignore_case: icase,
-            utf8: self.utf8,
+            utf8: self.syntax.utf8,
             multiline,
             word: false,
         };
-        match Posix::compile(&text, &options) {
+        let compiled = if self.syntax.null_data {
+            Posix::compile_null_data(&text, &options)
+        } else {
+            Posix::compile(&text, &options)
+        };
+        match compiled {
             Ok(compiled) => {
                 self.program.regexes.push(compiled);
+                if self.syntax.debug {
+                    self.sources.push(Source {
+                        text,
+                        icase,
+                        multiline,
+                    });
+                }
                 Ok(Some(self.program.regexes.len() - 1))
             }
             Err(message) if message.starts_with(CLASS_SYNTAX) => {
@@ -708,11 +787,14 @@ impl Compiler {
             Some(name) => name,
         };
         cmd.name = name;
+        if self.syntax.posix && EXTENSIONS.contains(&name) {
+            return Err(self.fail_named("unknown command: `", name, "'"));
+        }
         self.check_addresses(&cmd, bang)?;
         match name {
             b'{' => {
                 self.blocks.push(self.program.commands.len());
-                self.program.commands.push(cmd);
+                self.push(cmd, &[]);
             }
             b'}' => {
                 let Some(start) = self.blocks.pop() else {
@@ -723,63 +805,78 @@ impl Compiler {
                 }
                 self.program.commands[start].target = self.program.commands.len();
                 self.end_of_command()?;
-                self.program.commands.push(cmd);
+                self.push(cmd, &[]);
             }
             b'=' | b'd' | b'D' | b'F' | b'g' | b'G' | b'h' | b'H' | b'n' | b'N' | b'p' | b'P'
             | b'x' | b'z' => {
                 self.end_of_command()?;
-                self.program.commands.push(cmd);
+                self.push(cmd, &[]);
             }
             // sed 4.9 still reads `L` as `l` reads, and refuses it where
             // it runs.
             b'l' | b'L' | b'q' | b'Q' => {
                 self.src.skip(BLANKS);
-                if self.src.peek().is_some_and(|c| c.is_ascii_digit()) {
+                if !self.syntax.posix && self.src.peek().is_some_and(|c| c.is_ascii_digit()) {
                     // `l` and `q` keep their number's low 32 bits as a
                     // signed int.
                     cmd.number = Some(i64::from(self.number() as u32 as i32));
                 }
                 self.end_of_command()?;
-                self.program.commands.push(cmd);
+                self.push(cmd, &[]);
             }
             b'a' | b'i' | b'c' => {
                 cmd.text = self.text(name)?;
-                self.program.commands.push(cmd);
+                self.push(cmd, &[]);
             }
             b':' => {
                 cmd.label = self.label();
                 if cmd.label.is_empty() {
                     return Err(self.fail("\":\" lacks a label"));
                 }
-                self.program.commands.push(cmd);
+                self.push(cmd, &[]);
             }
             b'b' | b't' | b'T' => {
                 cmd.label = self.label();
-                self.program.commands.push(cmd);
+                self.push(cmd, &[]);
             }
             b'r' | b'R' | b'w' | b'W' => {
+                if self.syntax.sandbox {
+                    return Err(self.fail(SANDBOXED));
+                }
                 let file = self.filename()?;
                 cmd.file = match name {
                     b'r' => listed(&mut self.program.rfiles, file),
                     b'R' => listed(&mut self.program.reader_files, file),
                     _ => listed(&mut self.program.wfiles, file),
                 };
-                self.program.commands.push(cmd);
+                self.push(cmd, &[]);
             }
             b's' => {
                 cmd.subst = Some(Box::new(self.substitute()?));
-                self.program.commands.push(cmd);
+                self.push(cmd, &[]);
             }
             b'v' => self.version()?,
             b'y' => {
-                cmd.translit = Some(self.transliterate()?);
+                let (translit, shown) = self.transliterate()?;
+                cmd.translit = Some(translit);
                 self.end_of_command()?;
-                self.program.commands.push(cmd);
+                self.push(cmd, &shown);
             }
+            b'e' if self.syntax.sandbox => return Err(self.fail(SANDBOXED)),
             b'e' => return Err(self.fail("`e' command not supported")),
             _ => return Err(self.fail_named("unknown command: `", name, "'")),
         }
         Ok(())
+    }
+
+    /// Add a command to the program, and under --debug how it lists, `y`
+    /// carrying its strings.
+    fn push(&mut self, cmd: Command, y: &[u8]) {
+        if self.syntax.debug {
+            let line = debug::listed(&cmd, &self.program, &self.sources, y);
+            self.program.listing.push(line);
+        }
+        self.program.commands.push(cmd);
     }
 
     /// Refuse addresses the command cannot take, where GNU does: line 0
@@ -787,9 +884,11 @@ impl Compiler {
     fn check_addresses(&self, cmd: &Command, bang: Option<usize>) -> Compiled<()> {
         let (first, second) = (cmd.addr1, cmd.addr2);
         if let Some(first) = first.filter(|first| first.number() == 0) {
+            // `0,/re/` and `0r` are sed's own; --posix takes neither.
             let zero_line = matches!(first, Address::Line(_))
-                && !matches!(second, Some(Address::Regex(_)))
-                && !(cmd.name == b'r' && second.is_none());
+                && (self.syntax.posix
+                    || (!matches!(second, Some(Address::Regex(_)))
+                        && !(cmd.name == b'r' && second.is_none())));
             if zero_line {
                 return Err(self.fail_at(bang, "invalid usage of line address 0"));
             }
@@ -844,10 +943,20 @@ impl Compiler {
             Some(b'\\') => {
                 self.src.get();
                 match self.src.peek() {
+                    // POSIX's text never runs on into the next piece.
+                    Some(b'\n') if self.syntax.posix && self.src.joined(self.src.pos) => {
+                        return Err(self.fail("incomplete command"));
+                    }
                     Some(b'\n') => self.src.pos += 1,
+                    None if self.syntax.posix => return Err(self.fail("incomplete command")),
                     None => return Ok(None),
                     Some(_) => {}
                 }
+            }
+            // The one-line form is sed's own.
+            Some(_) if self.syntax.posix => {
+                self.src.get();
+                return Err(self.fail("expected \\ after `a', `c' or `i'"));
             }
             Some(_) => {}
         }
@@ -959,7 +1068,7 @@ impl Compiler {
                 i += 2;
                 continue;
             }
-            if b"LUluE".contains(&next) {
+            if !self.syntax.posix && b"LUluE".contains(&next) {
                 flush(&mut parts, &mut literal);
                 parts.push(Part::Case(next));
                 i += 2;
@@ -1040,9 +1149,13 @@ impl Compiler {
                         return Err(self.fail("number option to `s' command may not be zero"));
                     }
                 }
-                b'i' | b'I' => icase = true,
-                b'm' | b'M' => multiline = true,
-                b'e' => return Err(self.fail("`e' command not supported")),
+                b'i' | b'I' if !self.syntax.posix => icase = true,
+                b'm' | b'M' if !self.syntax.posix => multiline = true,
+                b'w' if self.syntax.sandbox => return Err(self.fail(SANDBOXED)),
+                b'e' if !self.syntax.posix && self.syntax.sandbox => {
+                    return Err(self.fail(SANDBOXED));
+                }
+                b'e' if !self.syntax.posix => return Err(self.fail("`e' command not supported")),
                 b'w' => {
                     let file = self.filename()?;
                     subst.wfile = Some(listed(&mut self.program.wfiles, file));
@@ -1086,7 +1199,9 @@ impl Compiler {
         }
     }
 
-    fn transliterate(&mut self) -> Compiled<Translit> {
+    /// `y`'s table, and under --debug how it lists: a byte table's
+    /// changes in byte order, a character table's strings as given.
+    fn transliterate(&mut self) -> Compiled<(Translit, Vec<u8>)> {
         let delim = match self.src.get() {
             None | Some(b'\n' | b'\\') => return Err(self.fail("unterminated `y' command")),
             Some(delim) => delim,
@@ -1098,7 +1213,7 @@ impl Compiler {
             let mut out = Vec::new();
             let mut at = 0;
             while at < text.len() {
-                let len = unit(text, at, self.utf8);
+                let len = unit(text, at, self.syntax.utf8);
                 out.push(text[at..at + len].to_vec());
                 at += len;
             }
@@ -1108,24 +1223,33 @@ impl Compiler {
         if left.len() != right.len() {
             return Err(self.fail("strings for `y' command are different lengths"));
         }
-        if !self.utf8 {
+        if !self.syntax.utf8 {
+            // A byte named twice takes its last mapping.
             let mut table = Box::new([0u8; 256]);
             for (byte, slot) in table.iter_mut().enumerate() {
                 *slot = byte as u8;
             }
-            let mut seen = [false; 256];
             for (a, b) in left.iter().zip(&right) {
-                if !std::mem::replace(&mut seen[usize::from(a[0])], true) {
-                    table[usize::from(a[0])] = b[0];
-                }
+                table[usize::from(a[0])] = b[0];
             }
-            return Ok(Translit::Bytes(table));
+            let translit = Translit::Bytes(table);
+            let shown = if self.syntax.debug {
+                debug::table(&translit)
+            } else {
+                Vec::new()
+            };
+            return Ok((translit, shown));
         }
+        let shown = if self.syntax.debug {
+            [b"/".as_slice(), &source, b"/", &target, b"/"].concat()
+        } else {
+            Vec::new()
+        };
         let mut table = HashMap::new();
         for (a, b) in left.into_iter().zip(right) {
             table.entry(a).or_insert(b);
         }
-        Ok(Translit::Chars(table))
+        Ok((Translit::Chars(table), shown))
     }
 
     /// One `y` string: read up to its delimiter first, so no escape can
@@ -1187,15 +1311,14 @@ fn listed(names: &mut Vec<Vec<u8>>, name: Vec<u8>) -> usize {
 /// opened before the refusal, which GNU has already emptied.
 pub(super) fn compile(
     pieces: Vec<Piece>,
-    extended: bool,
-    utf8: bool,
+    syntax: Syntax,
 ) -> Result<Program, (Refusal, Vec<Vec<u8>>)> {
     let mut compiler = Compiler {
         src: Script::new(pieces),
-        extended,
-        utf8,
+        syntax,
         program: Program::default(),
         blocks: Vec::new(),
+        sources: Vec::new(),
     };
     match compiler.compile() {
         Ok(()) => Ok(compiler.program),

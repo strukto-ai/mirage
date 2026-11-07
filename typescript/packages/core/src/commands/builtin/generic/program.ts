@@ -33,7 +33,7 @@ export const FILE_KEYS: Readonly<Record<string, string>> = {
   grep: 'file',
   rg: 'file',
   zgrep: 'file',
-  sed: 'f',
+  sed: 'file',
   awk: 'f',
   jq: 'from_file',
 }
@@ -249,11 +249,11 @@ export async function prepareProgram(
     out[key] = []
     out.regexp = pattern === null ? [] : [pattern]
   } else if (name === 'sed') {
-    const expressions = fl.asList('e').values()
+    const expressions = fl.asList('expression').values()
     const scripts = pieces.map((data) => decodeText(data)).values()
-    out.e = fl
-      .occurrences('e', 'f')
-      .map(([kind]) => (kind === 'e' ? expressions : scripts).next().value ?? '')
+    out.expression = fl
+      .occurrences('expression', 'file')
+      .map(([kind]) => (kind === 'expression' ? expressions : scripts).next().value ?? '')
   } else {
     texts = [pieces.map((data) => decodeText(data)).join('\n'), ...texts]
   }

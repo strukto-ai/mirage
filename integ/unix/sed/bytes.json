@@ -108,10 +108,10 @@
     {
       "id": "sed_bytes_roundtrip_list",
       "seq": 14470108,
-      "command": "( export LC_ALL=C; printf '\\303\\251\\377\\n' | sed '' | od -An -tx1; printf '\\303\\251\\377\\n' | sed -n l )",
+      "command": "( export LC_ALL=C; printf '\\303\\251\\377\\n' | sed '' | od -An -tx1; printf '\\303\\251\\377\\n' | sed -n l; printf 'a\\0b\\nc\\0d' | sed -z '=;s/^/>/' | od -An -c; printf 'a\\nb\\0' | sed -z 's/^/>/Mg;l' | od -An -c )",
       "expect": {
         "exit": 0,
-        "stdout": " c3 a9 ff 0a\n\\303\\251\\377$\n",
+        "stdout": " c3 a9 ff 0a\n\\303\\251\\377$\n   1  \\0   >   a  \\0   2  \\0   >   b  \\n   c  \\0   3  \\0   >   d\n   >   a   \\   n   b   $  \\0   >   a  \\n   b  \\0\n",
         "stderr": ""
       }
     },

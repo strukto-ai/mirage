@@ -44,9 +44,12 @@ function bind(b: GenericCommand, vfs: string | null, stream: Reading['stream']):
     }
     const run: Context = {
       ...ctx,
-      // head guards its own pulls and needs the descriptor cursor to return lookahead.
+      // head guards its own pulls and needs the descriptor cursor to return
+      // lookahead; sed cuts a shared input itself, so what it hands back takes
+      // the rest of the chunk it stopped in.
       stdin:
-        ctx.stdin === null || (b.name === 'head' && ctx.stdin instanceof SharedInput)
+        ctx.stdin === null ||
+        ((b.name === 'head' || b.name === 'sed') && ctx.stdin instanceof SharedInput)
           ? ctx.stdin
           : guardInput(ctx.stdin, ctx, reading.split),
     }

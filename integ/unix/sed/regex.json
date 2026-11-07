@@ -332,10 +332,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a|b\\n' | sed 's/a|b/X/'",
+      "command": "printf 'a|b\\n' | sed 's/a|b/X/'; printf 'a|b ab\\n' | sed --posix 's/a\\|b/X/g'; printf 'aa+\\n' | sed --posix 's/a\\+/X/'; printf 'ab\\n' | sed --posix 's/\\w/X/'; printf 'a\\tb\\n' | sed --posix 's/[\\t]/X/'",
       "expect": {
         "exit": 0,
-        "stdout": "X\n",
+        "stdout": "X\nX ab\naX\nab\na\tb\n",
         "stderr": ""
       }
     },

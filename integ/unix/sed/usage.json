@@ -3,7 +3,7 @@
     {
       "id": "sed_missing_script",
       "seq": 960030,
-      "note": "GNU 9.7 prints its usage block and exits 1; mirage names the problem in one line. Run on every backend so a wrapper cannot grow its own spelling again.",
+      "note": "sed follows an option error with its usage, and prints only its usage when no script is given, exit 1; the page is mirage's own. Run on every backend so a wrapper cannot grow its own spelling again.",
       "targets": [
         "ram",
         "disk",
@@ -29,11 +29,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "sed",
+      "command": "sed --s p 2>&1 | head -2; sed",
       "expect": {
         "exit": 1,
-        "stdout": "",
-        "stderr": "sed: missing script\n"
+        "stdout": "sed: option '--s' is ambiguous; possibilities: '--silent' '--sandbox' '--separate'\nUsage: sed [OPTION]... {script-only-if-no-other-script} [input-file]...\n",
+        "stderr": "Usage: sed [OPTION]... {script-only-if-no-other-script} [input-file]...\n\nFlags:\n  -i, --in-place <SUFFIX>             rewrite each file; -iSUFFIX keeps a backup\n  -e, --expression <SCRIPT>           one piece of the script, joined in order\n  -f, --file <FILE>                   read a piece of the script from FILE\n  --follow-symlinks                   with -i, rewrite what a link points to\n  -n, --quiet, --silent               print only what the script prints\n  --debug                             show the program and trace each command\n  -E, -r, --regexp-extended           read regular expressions as ERE\n  -l, --line-length <N>               wrap l output at N chars; 0 never wraps\n  --posix                             refuse what POSIX sed does not have\n  --sandbox                           refuse running programs and opening files\n  -s, --separate                      number lines and match $ per file\n  -u, --unbuffered                    read only as far as each line needs\n  -z, --null-data, --zero-terminated  lines end at NUL, not newline\n  -b, --binary                        accepted; input is always raw bytes\n  --help                              Show this help and exit\n  --version                           Show version information and exit\n"
       }
     },
     {

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import aclosing
 from functools import partial
@@ -22,20 +23,31 @@ from mirage.commands.quote import quote_text
 from mirage.context.session_context import current_caller
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
-from mirage.errors.fs import strerror_of
+from mirage.errors.fs import eisdir, enoent, exdev, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
-from mirage.errors.types import FsCondition
-from mirage.io.cooperative import chunks
+from mirage.errors.types import FsCondition, OperationNotSupportedError
+from mirage.io.async_line_iterator import SharedInput
+from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.io.spool import ByteSpool, spooled_pair
 from mirage.io.stream import drain
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.writer import ByteWriter
+from mirage.io.yield_budget import YieldBudget
 from mirage.rs.stream import Served, open_stream, serve_requests
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import byte_view, text_view
 from mirage.shell.join import shell_join
-from mirage.types import FileType, JsonValue, PathSpec, ReadStreamFn
+from mirage.types import (
+    LINK_TARGET_KEY,
+    FileType,
+    JsonValue,
+    PathSpec,
+    ReadStreamFn,
+)
+from mirage.view.types import LinkView, MountView
+
+logger = logging.getLogger(__name__)
 
 STDIN_NAMES = frozenset({"-", "/dev/stdin"})
 
@@ -81,6 +93,12 @@ class StreamHost:
             one of its operands names; empty leaves both to the stream.
         local (Callable[[PathSpec], bool] | None): Whether the mount
             serves an operand; None for every one, as it resolved them.
+        links (LinkView | None): The workspace's links, which a readlink
+            reads; None outside a workspace.
+        mounts (MountView | None): Where the mounts meet, which a copy
+            standing in for a rename does not cross.
+        unbuffered (bool): The stream read no further into standard input
+            than it used, so what it hands back the next command reads.
     """
 
     def __init__(
@@ -94,16 +112,24 @@ class StreamHost:
         dash: bool = True,
         command: str = "",
         local: Callable[[PathSpec], bool] | None = None,
+        links: LinkView | None = None,
+        mounts: MountView | None = None,
+        unbuffered: bool = False,
     ) -> None:
         self.operands = operands
         self.dash = dash
         self.command = command
         self.stream = stream
         self.stdin = resolve_source(stdin)
+        self.shared = stdin if isinstance(stdin, SharedInput) else None
+        self.left: tuple[bytes, int] = (b"", 0)
         self.dispatch = dispatch
         self.cwd = cwd
         self.shell = shell
         self.local = local
+        self.links = links
+        self.mounts = mounts
+        self.unbuffered = unbuffered
         self.caller = current_caller()
         self.inputs: dict[int, AsyncIterator[bytes]] = {}
         self.named: dict[int, PathSpec] = {}
@@ -112,8 +138,19 @@ class StreamHost:
         self.errors = ByteSpool()
 
     async def stdin_view(self) -> AsyncIterator[bytes]:
-        async for chunk in self.stdin:
-            yield chunk
+        if self.shared is None:
+            async for chunk in self.stdin:
+                yield chunk
+            return
+        # Shared input arrives whole and is cut here, so what the stream
+        # hands back takes the rest of its chunk with it.
+        budget = YieldBudget()
+        while (whole := await self.shared.lines.read_chunk()) is not None:
+            for offset in range(0, len(whole), CHUNK_SIZE):
+                await budget.run()
+                self.left = (whole, offset + CHUNK_SIZE)
+                yield whole[offset : offset + CHUNK_SIZE]
+        self.left = (b"", 0)
 
     async def read_path(
         self, name: str | PathSpec, local: bool = False
@@ -221,6 +258,15 @@ class StreamHost:
             return await self._write(request, data)
         if op in ("unlink", "mkdir", "stat"):
             return await self._path_op(op, str(request["path"]))
+        if op == "readlink":
+            return await self._readlink(str(request["path"]))
+        if op in ("copy", "rename"):
+            return await self._move(
+                op, str(request["path"]), str(request["to"])
+            )
+        if op == "unread":
+            self._unread(data)
+            return Served({})
         if op == "fill" and isinstance(into := request.get("into"), int):
             return await self._fill(into, request)
         if op == "flush":
@@ -363,6 +409,87 @@ class StreamHost:
             return Served({})
         kind = "dir" if found.type == FileType.DIRECTORY else "file"
         return Served({"kind": kind})
+
+    async def _readlink(self, name: str) -> Served:
+        """What a link holds, or that the name is no link; a name nothing
+        stands at answers why. The name itself is never followed."""
+        if self.dispatch is None:
+            return Served({"fatal": "file output requires a workspace"})
+        path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
+        link = None if self.links is None else self.links.stat_at(path.virtual)
+        target = None if link is None else link.extra.get(LINK_TARGET_KEY)
+        if isinstance(target, str):
+            return Served({"target": byte_view(target)})
+        try:
+            found, _ = await self.dispatch("stat", path)
+            if found is None:
+                raise enoent(path)
+        except WALK_ERRORS as exc:
+            return Served(_failure(exc))
+        return Served({})
+
+    async def _move(self, op: str, source: str, target: str) -> Served:
+        """Move a name, a link as itself, or keep a copy of a file as a
+        rename would put it there (``_keep``)."""
+        if self.dispatch is None:
+            return Served({"fatal": "file output requires a workspace"})
+        src = PathSpec.from_str_path(text_view(source), cwd=self.cwd.virtual)
+        dst = PathSpec.from_str_path(text_view(target), cwd=self.cwd.virtual)
+        try:
+            if op == "rename":
+                await self.dispatch("rename", src, dst=dst)
+            else:
+                await self._keep(src, dst)
+        except WALK_ERRORS as exc:
+            return Served(_failure(exc))
+        return Served({})
+
+    async def _keep(self, src: PathSpec, dst: PathSpec) -> None:
+        """Keep file ``src`` under ``dst`` as rename(2) would move it
+        there: in place of a file standing at ``dst``, refused onto a
+        directory or another mount, its permission bits kept. The store
+        copies the bytes where it can; otherwise they stream through."""
+        assert self.dispatch is not None
+        if self.mounts is not None and self.mounts.root_of(
+            src.virtual
+        ) != self.mounts.root_of(dst.virtual):
+            raise exdev(src)
+        try:
+            standing, _ = await self.dispatch("stat", dst)
+        except FileNotFoundError as exc:
+            logger.debug("no file stands at %s: %s", dst.virtual, exc)
+            standing = None
+        if standing is not None:
+            if standing.type == FileType.DIRECTORY:
+                raise eisdir(dst)
+            await self.dispatch("unlink", dst)
+        original, _ = await self.dispatch("stat", src)
+        try:
+            await self.dispatch("copy", src, dst=dst)
+        except OperationNotSupportedError as exc:
+            logger.debug("%s copies through mirage: %s", src.virtual, exc)
+            data, _ = await self.dispatch("read", src)
+            await self.dispatch("write", dst, data=data)
+        mode = None if original is None else original.mode
+        if mode is None:
+            return
+        try:
+            await self.dispatch("setattr", dst, mode=mode)
+        except OperationNotSupportedError as exc:
+            logger.debug("%s keeps no permission bits: %s", dst.virtual, exc)
+
+    def _unread(self, data: bytes) -> None:
+        """Give standard input back what the stream read of it and left,
+        so the next command reads on from there: -u read no further than
+        it used, and a file's offset goes back to where the stream
+        stopped."""
+        if self.shared is None or not (
+            self.unbuffered or self.shared.seekable
+        ):
+            return
+        chunk, offset = self.left
+        self.shared.lines.unread(data + chunk[offset:])
+        self.left = (b"", 0)
 
     async def _write(
         self, request: Mapping[str, JsonValue], data: bytes

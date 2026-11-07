@@ -28,11 +28,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'one\\ntwo\\n' > /data/fcC_i; sed -i 'y/o/0/' /data/fcC_i; cat /data/fcC_i; sed -i -n p /data/fcC_i; cat /data/fcC_i; rm /data/fcC_i",
+      "command": "printf 'one\\ntwo\\n' > /data/fcC_i; sed -i 'y/o/0/' /data/fcC_i; cat /data/fcC_i; sed -i -n p /data/fcC_i; cat /data/fcC_i; rm /data/fcC_i; printf 'x\\n' > /data/fcC_ib; sed -i.bak s/x/X/ /data/fcC_ib; sed --in-place= s/X/Y/ /data/fcC_ib; cat /data/fcC_ib /data/fcC_ib.bak; (cd /data && sed -i'old_*' s/Y/Z/ fcC_ib && cat fcC_ib old_fcC_ib); printf 'x\\n' > /data/su; sed -ib s/x/X/ /data/su; echo rc=$?; cat /data/su; rm /data/fcC_ib /data/fcC_ib.bak /data/old_fcC_ib /data/su",
       "expect": {
         "exit": 0,
-        "stdout": "0ne\ntw0\n0ne\ntw0\n",
-        "stderr": ""
+        "stdout": "0ne\ntw0\n0ne\ntw0\nY\nx\nZ\nY\nrc=4\nx\n",
+        "stderr": "sed: cannot rename /data/su: Is a directory\n"
       },
       "flags": [
         "i",
@@ -75,6 +75,45 @@
       },
       "flags": [
         "i"
+      ]
+    },
+    {
+      "id": "sed_i_replaces_a_link_unless_it_follows_it",
+      "seq": 15300011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' > /data/fcC_il; ln -s fcC_il /data/fcC_ll; sed -i s/a/A/ /data/fcC_ll; cat /data/fcC_il /data/fcC_ll; readlink /data/fcC_ll; echo rl=$?; ln -sf fcC_il /data/fcC_ll; sed -i.k s/a/B/ /data/fcC_ll; readlink /data/fcC_ll.k; cat /data/fcC_il /data/fcC_ll; ln -sf fcC_il /data/fcC_ll; sed -i.bak --follow-symlinks s/a/C/ /data/fcC_ll; cat /data/fcC_il /data/fcC_il.bak; readlink /data/fcC_ll; sed -n --follow-symlinks F /data/fcC_ll; ln -s fcC_none /data/fcC_ld; sed --follow-symlinks p /data/fcC_ld; echo rc=$?; ln -s fcC_lo /data/fcC_lo; sed --follow-symlinks p /data/fcC_lo; echo rc=$?; rm /data/fcC_il /data/fcC_il.bak /data/fcC_ll /data/fcC_ll.k /data/fcC_ld /data/fcC_lo",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nA\nrl=1\nfcC_il\na\nB\nC\na\nfcC_il\n/data/fcC_il\nrc=4\nrc=4\n",
+        "stderr": "sed: couldn't readlink /data/fcC_none: No such file or directory\nsed: couldn't follow symlink /data/fcC_lo: Too many levels of symbolic links\n"
+      },
+      "flags": [
+        "i",
+        "follow-symlinks"
       ]
     }
   ]

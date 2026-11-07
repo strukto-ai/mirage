@@ -57,7 +57,7 @@ async def _run(accessor, index, path, expr, **kwargs):
 async def test_sed_inplace_rejected(mock_github_api, github_env):
     accessor, index = github_env
     text, io = await _run(
-        accessor, index, "src/main.py", "s/import/X/", i=True
+        accessor, index, "src/main.py", "s/import/X/", in_place=True
     )
     assert text == ""
     assert io.exit_code == 1

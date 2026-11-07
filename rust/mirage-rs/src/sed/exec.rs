@@ -5,6 +5,7 @@ use crate::regex::posix::{Posix, Spans, Walk};
 use crate::regex::{STEPS, Step};
 use crate::request::{Opening, Reply, Request, WriteMode, bytes};
 
+use super::debug;
 use super::io::{Failure, Feed, Input, Io, LIMIT, Line, LineReader, MAX_LEN, Notes, read_error};
 use super::script::{Address, Command, Part, Program, Subst, Translit};
 use super::text::{Refusal, convert, list, resolve, unit};
@@ -48,6 +49,17 @@ pub(super) struct Options {
     pub(super) utf8: bool,
     /// What a `w` file's name resolves against.
     pub(super) cwd: Vec<u8>,
+    /// The byte lines end at: -z's NUL, or the newline.
+    pub(super) delimiter: u8,
+    /// --posix: `N` on the last line quits without printing.
+    pub(super) posix: bool,
+    /// --follow-symlinks: each input is read, named and edited as what
+    /// its links lead to.
+    pub(super) follow: bool,
+    /// -i's SUFFIX: each edited file is kept under the name it gives.
+    pub(super) suffix: Option<Vec<u8>>,
+    /// --debug: the program, then each step, goes to standard output.
+    pub(super) debug: bool,
 }
 
 /// Wait on a poll, returning from a step that cannot go on yet.
@@ -148,6 +160,12 @@ enum Phase {
 /// serves.
 pub(super) struct Machine {
     commands: Vec<Command>,
+    /// Under --debug, each command as it lists.
+    listing: Vec<Vec<u8>>,
+    /// How many blocks --debug's trace stands in.
+    depth: usize,
+    /// Whether --debug traced the command at `pc` for this visit.
+    traced: bool,
     regexes: Vec<Posix>,
     rfiles: Vec<Vec<u8>>,
     reader_files: Vec<Vec<u8>>,
@@ -165,6 +183,10 @@ pub(super) struct Machine {
     edit_err: Vec<u8>,
     edit_code: i32,
     edit_reader: Option<LineReader>,
+    /// Whether the input -i opens next was looked up, and found a link.
+    edit_link: Option<bool>,
+    /// Where the file -i edits now is kept before the edit lands.
+    edit_backup: Option<Vec<u8>>,
     edited: HashSet<Vec<u8>>,
     main_missing: bool,
     stdout_missing: bool,
@@ -238,25 +260,25 @@ fn pick(last: &mut Option<usize>, regex: Option<usize>) -> Result<usize, Refusal
     }
 }
 
-fn put(buf: &mut Vec<u8>, missing: &mut bool, text: &[u8]) {
+fn put(buf: &mut Vec<u8>, missing: &mut bool, text: &[u8], end: u8) {
     if text.is_empty() {
         return;
     }
     if std::mem::take(missing) {
-        buf.push(b'\n');
+        buf.push(end);
     }
     buf.extend_from_slice(text);
 }
 
-/// A line, or what a line lacked its newline: anything written after it
-/// puts that newline first.
-fn put_line(buf: &mut Vec<u8>, missing: &mut bool, text: &[u8], newline: bool) {
+/// A line ending at `end`, or what a line lacked its `end`: anything
+/// written after it puts that `end` first.
+fn put_line(buf: &mut Vec<u8>, missing: &mut bool, text: &[u8], newline: bool, end: u8) {
     if std::mem::take(missing) {
-        buf.push(b'\n');
+        buf.push(end);
     }
     buf.extend_from_slice(text);
     if newline {
-        buf.push(b'\n');
+        buf.push(end);
     } else {
         *missing = true;
     }
@@ -362,6 +384,8 @@ struct Rewrite {
     at: usize,
     out: Vec<u8>,
     replaced: bool,
+    /// Under --debug, the groups of the first match.
+    first: Option<Spans>,
 }
 
 /// The pattern space after `s`, None when nothing was replaced. Each
@@ -371,7 +395,7 @@ fn substitute(
     regex: &mut Posix,
     subst: &Subst,
     ps: &[u8],
-    utf8: bool,
+    (utf8, debug): (bool, bool),
     rewrite: &mut Rewrite,
     budget: &mut u64,
 ) -> Result<Poll<Option<Vec<u8>>>, Refusal> {
@@ -391,6 +415,9 @@ fn substitute(
             Step::Paused => return Ok(Poll::Pending),
         };
         rewrite.seen += 1;
+        if debug && rewrite.seen == 1 {
+            keep_first(rewrite, &groups);
+        }
         if rewrite.seen <= skip {
             continue;
         }
@@ -411,6 +438,12 @@ fn substitute(
     let mut out = std::mem::take(&mut rewrite.out);
     out.extend_from_slice(&ps[rewrite.at..]);
     Ok(Poll::Ready(Some(out)))
+}
+
+/// Under --debug, the groups of the first match, which the trace shows.
+#[cold]
+fn keep_first(rewrite: &mut Rewrite, groups: &Spans) {
+    rewrite.first = Some(groups.clone());
 }
 
 fn translate(table: &Translit, ps: &mut Vec<u8>, utf8: bool) -> Result<(), Refusal> {
@@ -448,6 +481,23 @@ fn couldnt(what: &[u8], name: &[u8], text: &[u8]) -> Vec<u8> {
         b"\n",
     ]
     .concat()
+}
+
+/// The name -i's SUFFIX keeps `name` under: each `*` in it the name as
+/// given, or with no `*` the name with the suffix after it.
+fn backup_name(name: &[u8], suffix: &[u8]) -> Vec<u8> {
+    if !suffix.contains(&b'*') {
+        return [name, suffix].concat();
+    }
+    let mut out = Vec::with_capacity(suffix.len() + name.len());
+    for &c in suffix {
+        if c == b'*' {
+            out.extend_from_slice(name);
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// The line sed gives an operand -i could not read or write, worded as
@@ -492,6 +542,7 @@ impl Machine {
             rfiles,
             reader_files,
             quiet,
+            listing,
         } = program;
         let mut files: Vec<WFile> = Vec::new();
         let targets = wfiles
@@ -527,14 +578,18 @@ impl Machine {
             separate: opts.separate || opts.in_place,
             ..opts
         };
+        let (delimiter, follow) = (opts.delimiter, opts.follow);
         Machine {
             commands,
+            listing,
+            depth: 0,
+            traced: false,
             regexes,
             rfiles,
             reader_files,
             opts,
             io: Io::default(),
-            feed: Feed::new(inputs),
+            feed: Feed::new(inputs, delimiter, follow),
             notes: Notes::default(),
             paths,
             out: Vec::new(),
@@ -545,6 +600,8 @@ impl Machine {
             edit_err: Vec::new(),
             edit_code: 0,
             edit_reader: None,
+            edit_link: None,
+            edit_backup: None,
             edited: HashSet::new(),
             main_missing: false,
             stdout_missing: false,
@@ -602,6 +659,11 @@ impl Machine {
             line_length: 0,
             utf8: false,
             cwd,
+            delimiter: b'\n',
+            posix: false,
+            follow: false,
+            suffix: None,
+            debug: false,
         };
         let mut machine = Machine::new(program, opts, Vec::new(), Vec::new());
         let mut message = refusal.message;
@@ -719,6 +781,10 @@ impl Machine {
             Phase::Open => self.open_step(),
             Phase::Snapshot(index) => self.snapshot_step(index),
             Phase::Begin => {
+                if self.opts.debug {
+                    let names = self.commands.iter().map(|cmd| cmd.name);
+                    debug::program(&self.listing, names, &mut self.out);
+                }
                 if !self.opts.in_place {
                     self.restart();
                     self.phase = Phase::Take;
@@ -745,7 +811,11 @@ impl Machine {
                         }
                         self.newline = newline;
                         (self.pc, self.stage, self.applied) = (0, 0, false);
+                        self.traced = false;
                         self.phase = Phase::Cycle;
+                        if self.opts.debug {
+                            self.trace_input();
+                        }
                     }
                 }
                 Ok(())
@@ -778,6 +848,7 @@ impl Machine {
         }
     }
 
+    #[cold]
     fn open_step(&mut self) -> Result<(), Refusal> {
         if self.stage == 0 {
             self.stage = 1;
@@ -804,6 +875,7 @@ impl Machine {
 
     /// Read `R` file `index` whole: one that does not open reads as empty,
     /// any other failure is reported when the script gets to it.
+    #[cold]
     fn snapshot_step(&mut self, index: usize) -> Result<(), Refusal> {
         if index >= self.reader_files.len() {
             self.phase = Phase::Begin;
@@ -816,6 +888,7 @@ impl Machine {
                     &mut self.io,
                     self.reader_files[index].clone(),
                     Opening::File,
+                    self.opts.delimiter,
                 ),
                 Vec::new(),
             ),
@@ -828,7 +901,7 @@ impl Machine {
                 }
                 Poll::Ready(Ok(Some((mut text, newline)))) => {
                     if newline {
-                        text.push(b'\n');
+                        text.push(self.opts.delimiter);
                     }
                     room(self.snapshotted, text.len())?;
                     self.snapshotted += text.len();
@@ -853,18 +926,38 @@ impl Machine {
         Ok(())
     }
 
-    /// -i: open input `index`; one that cannot be read is reported and
-    /// passed over, and a directory ends the run.
+    /// -i: open input `index`, looked up first; one that cannot be read is
+    /// reported and passed over, and a directory ends the run.
+    #[cold]
     fn edit_open(&mut self, index: usize) {
         if self.quit.is_some() || self.panic.is_some() || index >= self.feed.inputs.len() {
             self.phase = Phase::Finish { sent: false };
             return;
         }
+        let linked = match self.edit_link {
+            Some(linked) => linked,
+            None => match self.feed.resolve(index, &mut self.io) {
+                Poll::Pending => return,
+                Poll::Ready(Err(message)) => {
+                    self.fail(Refusal::new(message, 4));
+                    return;
+                }
+                Poll::Ready(Ok(linked)) => {
+                    self.edit_link = Some(linked);
+                    linked
+                }
+            },
+        };
         let mut reader = match self.edit_reader.take() {
             Some(reader) => reader,
             None => {
                 let input = &self.feed.inputs[index];
-                LineReader::new(&mut self.io, input.name.clone(), input.opening)
+                LineReader::new(
+                    &mut self.io,
+                    input.name.clone(),
+                    input.opening,
+                    self.opts.delimiter,
+                )
             }
         };
         match reader.peek(&mut self.io) {
@@ -883,6 +976,7 @@ impl Machine {
                 let line = operand_failure(name, &failure, name);
                 self.edit_err.extend_from_slice(&line);
                 self.edit_code = self.edit_code.max(failure_code(&failure));
+                self.edit_link = None;
                 self.phase = if failure.names(&["EISDIR"]) {
                     Phase::Finish { sent: false }
                 } else {
@@ -890,11 +984,37 @@ impl Machine {
                 };
             }
             Poll::Ready(Ok(_)) => {
-                let path = self.paths.get(index).cloned().unwrap_or_default();
+                self.edit_link = None;
+                let name = self.feed.inputs[index].name.clone();
+                // A link edited in place is replaced by its own name, so
+                // the edit lands there, not where it led.
+                let path = if self.opts.follow || linked {
+                    resolve(&name, &self.opts.cwd)
+                } else {
+                    self.paths.get(index).cloned().unwrap_or_default()
+                };
                 self.edited.insert(path.clone());
-                self.edit_path = Some(path);
+                self.edit_path = Some(path.clone());
                 self.edit_started = false;
                 self.edit.clear();
+                let backup = self
+                    .opts
+                    .suffix
+                    .as_deref()
+                    .map(|suffix| backup_name(&name, suffix))
+                    .filter(|backup| resolve(backup, &self.opts.cwd) != path);
+                // A link the edit replaces moves to its backup as itself,
+                // or goes, so the edit lands in a file of its own name.
+                let replaced = linked && !self.opts.follow;
+                self.edit_backup = backup.clone().filter(|_| !replaced);
+                match backup.filter(|_| replaced) {
+                    Some(to) => self.io.push(Request::Rename {
+                        from: path.clone(),
+                        to,
+                    }),
+                    None if replaced => self.io.push(Request::Unlink { path: path.clone() }),
+                    None => {}
+                }
                 // The replacement opens before the edit reads on, so a
                 // refused one is reported first.
                 self.send_edit();
@@ -907,8 +1027,18 @@ impl Machine {
         }
     }
 
-    /// The inputs have ended, or `q` stopped: -i commits the edit.
+    /// The inputs have ended, or `q` stopped: -i commits the edit, and
+    /// what `q` left unread of standard input goes back to it.
+    #[cold]
     fn end_of_input(&mut self) {
+        if self.quit.is_some() && !self.opts.in_place && self.feed.on_stdin() {
+            if let Some(reader) = &mut self.feed.reader {
+                let data = reader.rest();
+                if !data.is_empty() {
+                    self.io.push(Request::Unread { data });
+                }
+            }
+        }
         self.phase = match &self.edit_path {
             Some(_) => Phase::EditDone {
                 index: self.feed.index.unwrap_or_default(),
@@ -934,10 +1064,14 @@ impl Machine {
         });
     }
 
+    #[cold]
     fn edit_done(&mut self, index: usize, sent: bool) {
         if !sent {
             if !self.edit.is_empty() || !self.edit_started {
                 self.send_edit();
+            }
+            if let (Some(to), Some(from)) = (self.edit_backup.take(), self.edit_path.clone()) {
+                self.io.push(Request::Copy { from, to });
             }
             let path = self.edit_path.clone();
             self.io.push(Request::Flush { path });
@@ -999,10 +1133,15 @@ impl Machine {
         Ok(Poll::Ready(Some(line)))
     }
 
-    fn is_last(&mut self) -> Poll<bool> {
-        self.feed
+    fn is_last(&mut self) -> Result<Poll<bool>, Refusal> {
+        match self
+            .feed
             .more(self.opts.separate, &mut self.io, &mut self.notes)
-            .map(|more| !more)
+        {
+            Poll::Pending => Ok(Poll::Pending),
+            Poll::Ready(Ok(more)) => Ok(Poll::Ready(!more)),
+            Poll::Ready(Err(message)) => Err(Refusal::new(message, 4)),
+        }
     }
 
     fn matches(&mut self, addr: Address) -> Result<Poll<bool>, Refusal> {
@@ -1011,7 +1150,7 @@ impl Machine {
             // `0r` is the one command line 0 addresses: it runs on the
             // first line, where the script reaches it.
             Address::Line(number) => line == number.max(1),
-            Address::Last => wait!(self.is_last()),
+            Address::Last => wait!(self.is_last()?),
             Address::Regex(regex) => {
                 let index = pick(&mut self.last_regex, regex)?;
                 match self.regexes[index].test(&self.ps, &mut self.regex_budget) {
@@ -1119,23 +1258,37 @@ impl Machine {
     }
 
     fn print(&mut self, text: &[u8]) {
+        let end = self.opts.delimiter;
         let mut missing = std::mem::take(&mut self.main_missing);
-        put(self.main(text.len() + 1), &mut missing, text);
+        put(self.main(text.len() + 1), &mut missing, text, end);
         self.main_missing = missing;
     }
 
     fn print_line(&mut self, text: &[u8], newline: bool) {
+        let end = self.opts.delimiter;
         let mut missing = std::mem::take(&mut self.main_missing);
-        put_line(self.main(text.len() + 2), &mut missing, text, newline);
+        put_line(self.main(text.len() + 2), &mut missing, text, newline, end);
         self.main_missing = missing;
     }
 
+    /// `i` and `c` text: under -z its last newline is the NUL that ends
+    /// the line it stands for.
+    fn print_text(&mut self, text: &[u8]) {
+        match text.split_last() {
+            Some((b'\n', body)) if self.opts.delimiter != b'\n' => self.print_line(body, true),
+            _ => self.print(text),
+        }
+    }
+
     fn write_line(&mut self, target: usize, text: &[u8], newline: bool) -> Result<(), Refusal> {
+        let end = self.opts.delimiter;
         match self.targets[target] {
-            Target::Stdout => put_line(&mut self.out, &mut self.stdout_missing, text, newline),
+            Target::Stdout => {
+                put_line(&mut self.out, &mut self.stdout_missing, text, newline, end);
+            }
             Target::Stderr => {
                 room(self.notes.stderr.len() + self.err_out.len(), text.len() + 1)?;
-                put_line(&mut self.err_out, &mut self.err_missing, text, newline);
+                put_line(&mut self.err_out, &mut self.err_missing, text, newline, end);
                 // A loop that never ends its cycle still hands stderr on.
                 if self.err_out.len() >= LIMIT {
                     self.boundary();
@@ -1143,7 +1296,7 @@ impl Machine {
             }
             Target::File(file) => {
                 let out = &mut self.files[file];
-                put_line(&mut out.buf, &mut out.missing, text, newline);
+                put_line(&mut out.buf, &mut out.missing, text, newline, end);
                 if out.buf.len() >= LIMIT {
                     self.route(file);
                 }
@@ -1210,6 +1363,7 @@ impl Machine {
     /// The end of the run: every `w` file's output goes out, each later
     /// spelling's tail lands past what the spellings before it wrote, and
     /// each file is committed.
+    #[cold]
     fn finish(&mut self) {
         for index in 0..self.files.len() {
             self.route(index);
@@ -1257,6 +1411,7 @@ impl Machine {
                     &mut self.io,
                     self.reader_files[index].clone(),
                     Opening::File,
+                    self.opts.delimiter,
                 ))),
             };
             self.readers.insert(index, lines);
@@ -1278,7 +1433,7 @@ impl Machine {
             Poll::Pending => Ok(Poll::Pending),
             Poll::Ready(Ok(Some((mut text, newline)))) => {
                 if newline {
-                    text.push(b'\n');
+                    text.push(self.opts.delimiter);
                 }
                 Ok(Poll::Ready(Some(text)))
             }
@@ -1352,9 +1507,61 @@ impl Machine {
         Ok(())
     }
 
+    /// --debug: the line the cycle read, and the pattern space it holds.
+    #[cold]
+    fn trace_input(&mut self) {
+        let name = match self.feed.name() {
+            b"-" => b"STDIN".as_slice(),
+            name => name,
+        };
+        let line = format!("' line {}\n", self.line);
+        self.out
+            .extend_from_slice(&[b"INPUT:   '".as_slice(), name, line.as_bytes()].concat());
+        self.trace_space(false);
+    }
+
+    /// --debug: the pattern space, or the hold space, as the trace shows
+    /// it.
+    #[cold]
+    fn trace_space(&mut self, hold: bool) {
+        let (label, space) = if hold {
+            (b"HOLD:    ".as_slice(), &self.hold)
+        } else {
+            (b"PATTERN: ".as_slice(), &self.ps)
+        };
+        self.out.extend_from_slice(label);
+        debug::escape(&mut self.out, space, false);
+        self.out.push(b'\n');
+    }
+
+    /// --debug: command `pc` as it lists, as deep as the trace's blocks
+    /// stand.
+    #[cold]
+    fn trace_command(&mut self, pc: usize) {
+        self.out.extend_from_slice(b"COMMAND: ");
+        self.out.extend(std::iter::repeat_n(b' ', self.depth * 2));
+        self.out.extend_from_slice(&self.listing[pc]);
+        self.out.push(b'\n');
+    }
+
+    fn trace_end(&mut self) {
+        if self.opts.debug {
+            self.out.extend_from_slice(b"END-OF-CYCLE:\n");
+        }
+    }
+
     fn command(&mut self) -> Result<(), Refusal> {
         let pc = self.pc;
+        if self.opts.debug && !self.traced && pc < self.commands.len() {
+            // A `}` the script reaches closes the block it is in.
+            if self.commands[pc].name == b'}' {
+                self.depth = self.depth.saturating_sub(1);
+            }
+            self.traced = true;
+            self.trace_command(pc);
+        }
         let Some(cmd) = self.commands.get(pc) else {
+            self.trace_end();
             if !self.opts.quiet {
                 let ps = std::mem::take(&mut self.ps);
                 self.print_line(&ps, self.newline);
@@ -1369,8 +1576,14 @@ impl Machine {
             match self.applies(pc)? {
                 Poll::Pending => return Ok(()),
                 Poll::Ready(false) => {
-                    let cmd = &self.commands[pc];
-                    self.pc = if name == b'{' { cmd.target + 1 } else { pc + 1 };
+                    let target = self.commands[pc].target;
+                    self.pc = if name == b'{' { target + 1 } else { pc + 1 };
+                    // A block passed over lists its `}`, which closes
+                    // nothing.
+                    if self.opts.debug && name == b'{' {
+                        self.trace_command(target);
+                    }
+                    self.traced = false;
                     return Ok(());
                 }
                 Poll::Ready(true) => self.applied = true,
@@ -1380,7 +1593,7 @@ impl Machine {
         match self.execute(pc, name)? {
             // It runs again from its stage once the host answers.
             Poll::Pending => self.pc = pc,
-            Poll::Ready(()) => (self.applied, self.stage) = (false, 0),
+            Poll::Ready(()) => (self.applied, self.stage, self.traced) = (false, 0, false),
         }
         Ok(())
     }
@@ -1393,18 +1606,26 @@ impl Machine {
     }
 
     fn first_line(&self) -> (usize, bool) {
-        match memchr::memchr(b'\n', &self.ps) {
+        match memchr::memchr(self.opts.delimiter, &self.ps) {
             Some(cut) => (cut, true),
             None => (self.ps.len(), self.newline),
         }
     }
 
     /// Run command `pc`, its address taken; `Pending` to run it again
-    /// from `stage` once the host answers.
+    /// from `stage` once the host answers. Its one caller is the command
+    /// loop, which it stays part of.
+    #[inline(always)]
     fn execute(&mut self, pc: usize, name: u8) -> Result<Poll<()>, Refusal> {
         let printing = !self.opts.quiet;
+        let debug = self.opts.debug;
         match name {
-            b'{' | b'}' | b':' => {}
+            b'{' => {
+                if debug {
+                    self.depth += 1;
+                }
+            }
+            b'}' | b':' => {}
             b'p' => {
                 let ps = std::mem::take(&mut self.ps);
                 self.print_line(&ps, self.newline);
@@ -1442,19 +1663,24 @@ impl Machine {
                     regex,
                     subst,
                     &self.ps,
-                    self.opts.utf8,
+                    (self.opts.utf8, debug),
                     &mut self.rewrite,
                     &mut self.regex_budget,
                 );
                 if let Ok(Poll::Pending) = rewritten {
                     return Ok(Poll::Pending);
                 }
+                let first = self.rewrite.first.take();
                 let spare = std::mem::take(&mut self.rewrite.out);
                 self.rewrite = Rewrite {
                     out: spare,
                     ..Rewrite::default()
                 };
-                if let Poll::Ready(Some(result)) = rewritten? {
+                let rewritten = rewritten?;
+                if let Some(groups) = first {
+                    debug::registers(&mut self.out, &self.ps, &groups);
+                }
+                if let Poll::Ready(Some(result)) = rewritten {
                     let (print, wfile) = (subst.print, subst.wfile);
                     let mut old = std::mem::replace(&mut self.ps, result);
                     old.clear();
@@ -1473,15 +1699,24 @@ impl Machine {
                     self.ps = ps;
                     written?;
                 }
+                if debug {
+                    self.trace_space(false);
+                }
             }
-            b'd' => self.end_cycle(false),
-            b'D' => match memchr::memchr(b'\n', &self.ps) {
+            b'd' => {
+                self.trace_end();
+                self.end_cycle(false);
+            }
+            b'D' => match memchr::memchr(self.opts.delimiter, &self.ps) {
                 // The cycle restarts without reading, and the appends wait
                 // for the line it ends on.
                 Some(cut) => {
                     self.ps.drain(..=cut);
                     self.boundary();
                     self.pc = 0;
+                    if debug {
+                        self.trace_space(false);
+                    }
                 }
                 None => self.end_cycle(false),
             },
@@ -1508,13 +1743,21 @@ impl Machine {
                     return Ok(Poll::Pending);
                 }
                 if !wait!(self.next_line(false)?) {
+                    self.trace_end();
                     self.phase = Phase::Ended { quit: false };
+                } else if debug {
+                    self.trace_space(false);
                 }
             }
             b'N' => {
                 if self.stage == 0 {
-                    if wait!(self.is_last()) {
-                        self.pc = self.commands.len();
+                    if wait!(self.is_last()?) {
+                        // POSIX's `N` quits there without printing.
+                        if self.opts.posix {
+                            self.end_cycle(true);
+                        } else {
+                            self.pc = self.commands.len();
+                        }
                         return Ok(Poll::Ready(()));
                     }
                     self.dump();
@@ -1525,6 +1768,9 @@ impl Machine {
                     self.pc = self.commands.len();
                     return Ok(Poll::Ready(()));
                 }
+                if debug {
+                    self.trace_space(false);
+                }
             }
             b'a' => {
                 if let Some(text) = &self.commands[pc].text {
@@ -1534,7 +1780,7 @@ impl Machine {
             }
             b'i' => {
                 if let Some(text) = self.commands[pc].text.clone() {
-                    self.print(&text);
+                    self.print_text(&text);
                 }
             }
             b'c' => {
@@ -1542,14 +1788,16 @@ impl Machine {
                 let ranged = cmd.addr2.is_some() && !cmd.negate;
                 if !ranged || !self.ranges.contains_key(&pc) {
                     if let Some(text) = cmd.text.clone() {
-                        self.print(&text);
+                        self.print_text(&text);
                     }
                 }
+                self.trace_end();
                 self.end_cycle(false);
             }
             b'=' => {
-                let text = format!("{}\n", self.line);
-                self.print(text.as_bytes());
+                let mut text = self.line.to_string().into_bytes();
+                text.push(self.opts.delimiter);
+                self.print(&text);
             }
             b'L' => {
                 return Err(Refusal::new(
@@ -1559,7 +1807,8 @@ impl Machine {
             }
             b'l' => {
                 let width = self.commands[pc].number.unwrap_or(self.opts.line_length);
-                let text = list(&self.ps, width, MAX_LEN).ok_or_else(exhausted)?;
+                let text =
+                    list(&self.ps, width, MAX_LEN, self.opts.delimiter).ok_or_else(exhausted)?;
                 self.print(&text);
             }
             b'q' => {
@@ -1620,7 +1869,7 @@ impl Machine {
             }
             b'H' => {
                 room(self.hold.len(), 1 + self.ps.len())?;
-                self.hold.push(b'\n');
+                self.hold.push(self.opts.delimiter);
                 self.hold.extend_from_slice(&self.ps);
                 self.hold_newline = self.newline;
             }
@@ -1630,7 +1879,7 @@ impl Machine {
             }
             b'G' => {
                 room(self.ps.len(), 1 + self.hold.len())?;
-                self.ps.push(b'\n');
+                self.ps.push(self.opts.delimiter);
                 self.ps.extend_from_slice(&self.hold);
                 self.newline = self.hold_newline;
             }
@@ -1647,24 +1896,37 @@ impl Machine {
                 // The input opened last, which a look-ahead may have moved
                 // past the line's own.
                 let mut text = self.feed.name().to_vec();
-                text.push(b'\n');
+                text.push(self.opts.delimiter);
                 self.print(&text);
             }
             _ => {}
         }
+        if debug {
+            self.trace_spaces(name);
+        }
         Ok(Poll::Ready(()))
+    }
+
+    /// --debug: the spaces command `name` changed; `g` shows the hold
+    /// space, as sed 4.9's trace does.
+    #[cold]
+    fn trace_spaces(&mut self, name: u8) {
+        match name {
+            b'h' | b'H' | b'g' => self.trace_space(true),
+            b'G' | b'y' | b'z' => self.trace_space(false),
+            b'x' => {
+                self.trace_space(false);
+                self.trace_space(true);
+            }
+            _ => {}
+        }
     }
 
     /// `n` and `N` past their first stage: whether a line follows, and if
     /// so read it in, appended after a newline when `append`.
     fn next_line(&mut self, append: bool) -> Result<Poll<bool>, Refusal> {
         if self.stage == 1 {
-            if !append
-                && !wait!(
-                    self.feed
-                        .more(self.opts.separate, &mut self.io, &mut self.notes)
-                )
-            {
+            if !append && wait!(self.is_last()?) {
                 return Ok(Poll::Ready(false));
             }
             self.stage = 2;
@@ -1674,7 +1936,7 @@ impl Machine {
         };
         if append {
             room(self.ps.len(), 1 + text.len())?;
-            self.ps.push(b'\n');
+            self.ps.push(self.opts.delimiter);
             self.ps.extend_from_slice(&text);
         } else {
             let old = std::mem::replace(&mut self.ps, text);
@@ -1703,6 +1965,28 @@ impl Machine {
         }
         match request {
             Request::Read { fd, .. } => self.answer_read(fd, reply, data),
+            Request::Readlink { .. } => {
+                if let Some(resolving) = &mut self.feed.resolving {
+                    resolving.answer(reply);
+                }
+            }
+            Request::Copy { .. } | Request::Rename { .. } | Request::Unlink { .. } => {
+                // The file could not be kept, or its link not replaced:
+                // nothing of the edit lands, and the run ends.
+                if let Some(error) = &reply.error {
+                    let index = self.feed.index.unwrap_or_default();
+                    let message = [
+                        b"sed: cannot rename ".as_slice(),
+                        &self.feed.inputs[index].name,
+                        b": ",
+                        &bytes(error),
+                        b"\n",
+                    ]
+                    .concat();
+                    self.io.requests.clear();
+                    self.fail(Refusal::new(message, 4));
+                }
+            }
             Request::Write { path, .. } | Request::Flush { path: Some(path) } => {
                 let Some(error) = &reply.error else {
                     return Ok(());

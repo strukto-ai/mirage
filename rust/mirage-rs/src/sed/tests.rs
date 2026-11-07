@@ -9,6 +9,9 @@ struct Run {
     err: String,
     status: i32,
     files: HashMap<String, Vec<u8>>,
+    links: HashMap<String, String>,
+    /// What standard input still held once the run ended.
+    stdin: String,
     drains: usize,
 }
 
@@ -20,6 +23,8 @@ fn run_host(config: Json, mut host: Host) -> Run {
         err: String::from_utf8_lossy(&host.err).into_owned(),
         status,
         files: host.files,
+        links: host.links,
+        stdin: String::from_utf8_lossy(&host.stdin).into_owned(),
         drains: host.drains,
     }
 }
@@ -989,4 +994,533 @@ fn the_line_length_reads_as_atoi() {
         (12, 1, 0, 0)
     );
     assert_eq!((read(b"2147483648"), read(&[b'9'; 40])), (0, 0));
+}
+
+fn with(script: &str, stdin: &str, extra: Json) -> Run {
+    let mut config = json!({"pieces": expressions(&[script]), "cwd": "/"});
+    for (key, value) in extra.as_object().expect("an object") {
+        config[key] = value.clone();
+    }
+    run_host(config, Host::with(&[], stdin))
+}
+
+#[test]
+fn null_data_lines_end_at_nul() {
+    for (script, data, want) in [
+        ("s/^/>/", "a\0b\0c", ">a\0>b\0>c"),
+        ("s/\\n/N/;s/^/>/", "a\nb\0c\0", ">aNb\0>c\0"),
+        ("N;s/\\n/+/", "a\0b\0", "a\0b\0"),
+        ("N;s/a\\x00/A+/", "a\0b\0", "A+b\0"),
+        ("N;P;D", "a\0b\0", "a\0b\0"),
+        ("P;d", "a\nb\0c\0", "a\nb\0c\0"),
+        ("D", "a\nb\0c\0", ""),
+        ("H;$!d;x", "a\0b\0", "\0a\0b\0"),
+        ("G", "a\0b\0", "a\0\0b\0\0"),
+        ("=", "a\0b\0", "1\x00a\x002\x00b\x00"),
+        ("1a X", "a\0b\0", "a\0X\nb\0"),
+        ("1i X", "a\0b\0", "X\0a\0b\0"),
+        ("1c X", "a\0b\0", "X\0b\0"),
+        ("1i\\\nX\\\nY", "a\0b\0", "X\nY\0a\0b\0"),
+        ("1c\\\nX\\\nY", "a\0b\0", "X\nY\0b\0"),
+        ("1,2c\\\nX", "a\0b\0", "X\0"),
+        ("F", "a\0b\0", "-\0a\0-\0b\0"),
+        ("1z", "a\0b\0", "\0b\0"),
+        ("y/a/\\n/", "a\0b\0", "\n\0b\0"),
+        ("s/\\n/,/g", "a\nb\n", "a,b,"),
+        ("a X", "a\0b", "a\0X\nb\0X\n"),
+        ("$G", "a\0b", "a\0b\0\0"),
+        ("=", "a\0b", "1\x00a\x002\x00b"),
+        ("i X", "a\0b", "X\0a\0X\0b"),
+        ("N;s/^b/B/M", "a\0b\0", "a\0B\0"),
+        ("N;s/a$/A/M", "a\0b\0", "A\0b\0"),
+        ("s/^a/A/Mg;s/y$/Y/M", "x\nay\nb\0", "x\nay\nb\0"),
+        ("N;s/a.b/X/M", "a\0b\0", "a\0b\0"),
+        ("s/a.b/X/M", "a\nb\0", "a\nb\0"),
+        ("N;s/a[^x]b/X/M", "a\0b\0", "a\0b\0"),
+        ("N;s/a.b/X/", "a\0b\0", "X\0"),
+        ("N;s/a[^x]b/X/", "a\0b\0", "X\0"),
+        ("N;s/^/>/Mg", "a\0b\0", ">a\0>b\0"),
+        ("N;s/$/</Mg", "a\0b\0", "a<\0b<\0"),
+        ("s/$/</Mg", "a\nb\0", "a\nb<\0"),
+    ] {
+        let run = with(script, data, json!({"null_data": true}));
+        assert_eq!(
+            (run.out.as_str(), run.err.as_str(), run.status),
+            (want, "", 0),
+            "{script}"
+        );
+    }
+    let quiet = |script: &str, data: &str| {
+        with(script, data, json!({"null_data": true, "quiet": true})).out
+    };
+    assert_eq!(quiet("l", "a\0b\0"), "a$\0b$\0");
+    assert_eq!(quiet("l 5", "abcdefghij\0"), "abcd\\\0efgh\\\0ij$\0");
+    assert_eq!(quiet("$p", "a\0b"), "b");
+    assert_eq!(quiet("p;p", "a\0b"), "a\0a\0b\0b");
+    let run = with("1q5", "a\0b\0", json!({"null_data": true}));
+    assert_eq!((run.out.as_str(), run.status), ("a\0", 5));
+}
+
+#[test]
+fn null_data_reads_and_writes_records_at_nul() {
+    let z = json!({"null_data": true});
+    for (body, want) in [
+        ("r1\0r2\0", "a\0r1\0b\0r2\0"),
+        ("r1\nr2\n", "a\0r1\nr2\nb\0"),
+        ("r1", "a\0r1b\0"),
+    ] {
+        let run = files_run(
+            "R rf",
+            &["/in"],
+            &[("/in", "a\0b\0"), ("rf", body)],
+            z.clone(),
+        );
+        assert_eq!(run.out, want, "{body:?}");
+    }
+    let wrote = |script: &str, data: &str| {
+        let run = files_run(script, &["/in"], &[("/in", data)], z.clone());
+        String::from_utf8_lossy(&run.files["out"]).into_owned()
+    };
+    assert_eq!(wrote("w out", "a\0b\0"), "a\0b\0");
+    assert_eq!(wrote("W out", "a\nb\0c\0"), "a\nb\0c\0");
+    assert_eq!(wrote("s/a/X/w out", "a\0b\0"), "X\0");
+    let run = files_run(
+        "s/a/A/",
+        &["/z"],
+        &[("/z", "a\0b\0")],
+        json!({"null_data": true, "in_place": true, "paths": ["/z"]}),
+    );
+    assert_eq!(run.files["/z"], b"A\0b\0");
+}
+
+fn refused_with(pieces: &[&str], extra: Json) -> (String, i32) {
+    let mut config = json!({"pieces": expressions(pieces)});
+    for (key, value) in extra.as_object().expect("an object") {
+        config[key] = value.clone();
+    }
+    let run = run_host(config, Host::with(&[], "a\n"));
+    (run.err, run.status)
+}
+
+#[test]
+fn posix_refuses_what_sed_adds() {
+    for (script, want) in [
+        ("s/A/X/I", "char 7: unknown option to `s'"),
+        ("s/a/b/i", "char 7: unknown option to `s'"),
+        ("s/^a/X/M", "char 8: unknown option to `s'"),
+        ("s/a/b/m", "char 7: unknown option to `s'"),
+        ("s/a/b/e", "char 7: unknown option to `s'"),
+        ("/A/Id", "char 4: unknown command: `I'"),
+        ("/^x/Md", "char 5: unknown command: `M'"),
+        ("0,/a/d", "char 6: invalid usage of line address 0"),
+        ("1~2d", "char 2: unknown command: `~'"),
+        ("1~0d", "char 2: unknown command: `~'"),
+        ("1,+1d", "char 3: unexpected `,'"),
+        ("1,~2d", "char 3: unexpected `,'"),
+        ("/a/,+1{/b/d}", "char 5: unexpected `,'"),
+        ("1a hello", "char 4: expected \\ after `a', `c' or `i'"),
+        ("1i hello", "char 4: expected \\ after `a', `c' or `i'"),
+        ("1c hello", "char 4: expected \\ after `a', `c' or `i'"),
+        ("a\\", "char 2: incomplete command"),
+        ("F", "char 1: unknown command: `F'"),
+        ("1Q", "char 2: unknown command: `Q'"),
+        ("1q5", "char 3: extra characters after command"),
+        ("l 3", "char 3: extra characters after command"),
+        ("R rf", "char 1: unknown command: `R'"),
+        ("W /dev/stdout", "char 1: unknown command: `W'"),
+        ("T", "char 1: unknown command: `T'"),
+        ("v 4.2", "char 1: unknown command: `v'"),
+        ("z", "char 1: unknown command: `z'"),
+        ("e echo hi", "char 1: unknown command: `e'"),
+        ("l;L", "char 3: unknown command: `L'"),
+        ("y/a/b/;F", "char 8: unknown command: `F'"),
+    ] {
+        assert_eq!(
+            refused_with(&[script], json!({"posix": true})),
+            (format!("sed: -e expression #1, {want}\n"), 1),
+            "{script}"
+        );
+    }
+}
+
+#[test]
+fn posix_reads_escapes_and_ends_as_posix_does() {
+    let posix = |script: &str, data: &str, extended: bool| {
+        let run = with(script, data, json!({"posix": true, "extended": extended}));
+        assert_eq!((run.err.as_str(), run.status), ("", 0), "{script}");
+        run.out
+    };
+    for (script, data, want) in [
+        ("s/a\\+/X/", "a+\n", "X\n"),
+        ("s/a\\?/X/", "a?\n", "X\n"),
+        ("s/a\\|b/X/", "a|b\n", "X\n"),
+        ("s/\\w/X/", "w\n", "X\n"),
+        ("s/\\</X/", "<a\n", "Xa\n"),
+        ("s/\\bx/X/", "bx\n", "X\n"),
+        ("s/\\`a/X/", "`a\n", "X\n"),
+        ("s/[\\x61]/X/g", "ax\\1\n", "aXXX\n"),
+        ("s/[\\n]/N/g", "nx\\\n", "NxN\n"),
+        ("s/[\\t]/T/g", "tx\\\n", "TxT\n"),
+        ("s/\\x2e/X/", "a.b\n", "X.b\n"),
+        ("s/a/\\U&/", "ab\n", "Uab\n"),
+        ("s/a/\\u&x/", "ab\n", "uaxb\n"),
+        ("s/\\(a\\)\\{1,\\}b/X/", "ab\n", "X\n"),
+        ("N;N", "a\nb\n", ""),
+        ("N", "a\nb\nc\n", "a\nb\n"),
+        ("$!N;P;D", "a\nb\nc\n", "a\nb\nc\n"),
+        ("1{p;p}", "a\n", "a\na\na\n"),
+        ("a\\\n  x", "a\n", "a\n  x\n"),
+    ] {
+        assert_eq!(posix(script, data, false), want, "{script}");
+    }
+    assert_eq!(posix("s/a{1,}/X/;s/\\w/W/", "aa\n", true), "X\n");
+    assert_eq!(posix("s/\\<a/X/", "ab\n", true), "ab\n");
+    assert_eq!(posix("s/[\\t]/X/", "tab\n", true), "Xab\n");
+    assert_eq!(out("s/[\\x61]/X/g", "ax\\1\n"), "Xx\\1\n");
+    assert_eq!(out("s/[\\n]/N/g", "nx\\\n"), "nx\\\n");
+}
+
+#[test]
+fn sandbox_refuses_commands_that_reach_files() {
+    for (script, want) in [
+        ("w out", "#1, char 1"),
+        ("r g", "#1, char 1"),
+        ("e echo hi", "#1, char 1"),
+        ("s/a/b/w out", "#1, char 7"),
+        ("s/a/echo b/e", "#1, char 12"),
+        ("R g", "#1, char 1"),
+        ("W out", "#1, char 1"),
+        ("1{p;w out\n}", "#1, char 5"),
+    ] {
+        assert_eq!(
+            refused_with(&[script], json!({"sandbox": true})),
+            (
+                format!("sed: -e expression {want}: e/r/w commands disabled in sandbox mode\n"),
+                1
+            ),
+            "{script}"
+        );
+    }
+    assert_eq!(
+        refused_with(&["1p", "w x"], json!({"sandbox": true})).0,
+        "sed: -e expression #2, char 1: e/r/w commands disabled in sandbox mode\n"
+    );
+    assert_eq!(with("1p", "a\n", json!({"sandbox": true})).out, "a\na\n");
+}
+
+fn linked(files: &[(&str, &str)], links: &[(&str, &str)]) -> Host {
+    let mut host = Host::with(files, "");
+    host.links = links
+        .iter()
+        .map(|(name, target)| (name.to_string(), target.to_string()))
+        .collect();
+    host
+}
+
+fn edit(script: &str, operands: &[&str], host: Host, extra: Json) -> Run {
+    let mut config = json!({
+        "pieces": expressions(&[script]),
+        "inputs": operands,
+        "paths": operands,
+        "in_place": true,
+        "cwd": "/",
+    });
+    for (key, value) in extra.as_object().expect("an object") {
+        config[key] = value.clone();
+    }
+    run_host(config, host)
+}
+
+fn file(run: &Run, name: &str) -> String {
+    String::from_utf8_lossy(&run.files[name]).into_owned()
+}
+
+#[test]
+fn a_suffix_keeps_each_file_before_its_edit() {
+    let host = || Host::with(&[("/f", "a\nb\n"), ("/g", "x\n")], "");
+    let run = edit("s/a/A/", &["/f", "/g"], host(), json!({"suffix": ".bak"}));
+    assert_eq!((run.err.as_str(), run.status), ("", 0));
+    assert_eq!(
+        (file(&run, "/f"), file(&run, "/f.bak")),
+        ("A\nb\n".into(), "a\nb\n".into())
+    );
+    assert_eq!(file(&run, "/g.bak"), "x\n");
+    let run = edit("s/a/A/", &["/f"], host(), json!({"suffix": ""}));
+    assert!(!run.files.contains_key("/f.bak"));
+    let run = edit("s/a/A/", &["/f"], host(), json!({"suffix": "*"}));
+    assert_eq!((run.files.len(), file(&run, "/f")), (2, "A\nb\n".into()));
+    let run = edit("1q", &["/f", "/g"], host(), json!({"suffix": ".bak"}));
+    assert_eq!(
+        (file(&run, "/f"), file(&run, "/f.bak")),
+        ("a\n".into(), "a\nb\n".into())
+    );
+    assert!(!run.files.contains_key("/g.bak"));
+    let run = edit(
+        "s/a/A/",
+        &["d/f"],
+        Host::with(&[("d/f", "a\n")], ""),
+        json!({"suffix": "bak/*.o"}),
+    );
+    assert_eq!(file(&run, "bak/d/f.o"), "a\n");
+}
+
+#[test]
+fn a_backup_that_cannot_be_kept_ends_the_run_unedited() {
+    let run = edit(
+        "s/a/A/",
+        &["f", "g"],
+        Host::with(&[("f", "a\n"), ("g", "a\n")], ""),
+        json!({"suffix": "/missing/*"}),
+    );
+    assert_eq!(
+        (run.err.as_str(), run.status),
+        ("sed: cannot rename f: No such file or directory\n", 4)
+    );
+    assert_eq!(
+        (file(&run, "f"), file(&run, "g")),
+        ("a\n".into(), "a\n".into())
+    );
+    let mut host = Host::with(&[("/f", "a\n")], "");
+    host.directories.push("/f.bak".into());
+    let run = edit("s/a/A/", &["/f"], host, json!({"suffix": ".bak"}));
+    assert_eq!(
+        (run.err.as_str(), run.status, file(&run, "/f")),
+        ("sed: cannot rename /f: Is a directory\n", 4, "a\n".into())
+    );
+}
+
+#[test]
+fn an_edit_replaces_a_link_unless_it_follows_it() {
+    let host = || linked(&[("/f", "a\nb\n")], &[("/l", "f")]);
+    let run = edit("s/a/A/", &["/l"], host(), json!({}));
+    assert_eq!((run.err.as_str(), run.status), ("", 0));
+    assert_eq!(
+        (file(&run, "/l"), file(&run, "/f")),
+        ("A\nb\n".into(), "a\nb\n".into())
+    );
+    assert!(run.links.is_empty());
+    let run = edit("s/a/A/", &["/l"], host(), json!({"suffix": ".bak"}));
+    assert_eq!(run.links["/l.bak"], "f");
+    assert_eq!(
+        (file(&run, "/l"), file(&run, "/f")),
+        ("A\nb\n".into(), "a\nb\n".into())
+    );
+    let run = edit(
+        "s/a/A/",
+        &["/l"],
+        host(),
+        json!({"follow_symlinks": true, "suffix": ".bak"}),
+    );
+    assert_eq!((run.err.as_str(), run.status), ("", 0));
+    assert_eq!(
+        (file(&run, "/f"), file(&run, "/f.bak")),
+        ("A\nb\n".into(), "a\nb\n".into())
+    );
+    assert_eq!(run.links["/l"], "f");
+    assert!(!run.files.contains_key("/l"));
+}
+
+fn follow(script: &str, operands: &[&str], host: Host) -> Run {
+    run_host(
+        json!({
+            "pieces": expressions(&[script]),
+            "inputs": operands,
+            "cwd": "/",
+            "follow_symlinks": true,
+            "quiet": true,
+        }),
+        host,
+    )
+}
+
+#[test]
+fn following_names_each_input_as_its_links_lead() {
+    let files = [("f", "a\nb\n"), ("/w/f", "w\n"), ("g", "x\n")];
+    let run = follow(
+        "F",
+        &["l", "abs", "d/up", "-"],
+        linked(&files, &[("l", "f"), ("abs", "/w/f"), ("d/up", "../f")]),
+    );
+    assert_eq!(
+        (run.out.as_str(), run.err.as_str()),
+        ("f\nf\n/w/f\nd/../f\nd/../f\n", "")
+    );
+    let run = follow("p", &["f", "l", "g"], linked(&files, &[("l", "nowhere")]));
+    assert_eq!(
+        (run.out.as_str(), run.err.as_str(), run.status),
+        (
+            "a\nb\n",
+            "sed: couldn't readlink nowhere: No such file or directory\n",
+            4
+        )
+    );
+    let run = follow("$p", &["f", "l"], linked(&files, &[("l", "nowhere")]));
+    assert_eq!((run.out.as_str(), run.status), ("", 4));
+    let run = follow("p", &["missing", "f"], linked(&files, &[]));
+    assert_eq!(
+        (run.out.as_str(), run.err.as_str(), run.status),
+        (
+            "",
+            "sed: couldn't readlink missing: No such file or directory\n",
+            4
+        )
+    );
+    let run = follow("p", &["l1"], linked(&files, &[("l1", "l2"), ("l2", "l1")]));
+    assert_eq!(
+        (run.err.as_str(), run.status),
+        (
+            "sed: couldn't follow symlink l1: Too many levels of symbolic links\n",
+            4
+        )
+    );
+    let chain = |count: usize| {
+        let names: Vec<(String, String)> = (0..count)
+            .map(|at| {
+                let target = if at == 0 {
+                    "f".into()
+                } else {
+                    format!("l{}", at - 1)
+                };
+                (format!("l{at}"), target)
+            })
+            .collect();
+        let links: Vec<(&str, &str)> = names
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        follow("F", &[&format!("l{}", count - 1)], linked(&files, &links)).status
+    };
+    assert_eq!((chain(40), chain(41)), (0, 4));
+}
+
+#[test]
+fn quitting_hands_standard_input_back_what_it_left() {
+    let run = sed("1q", "one\ntwo\nthree\n");
+    assert_eq!(
+        (run.out.as_str(), run.stdin.as_str()),
+        ("one\n", "two\nthree\n")
+    );
+    let run = run_host(
+        json!({"pieces": expressions(&["2q"]), "quiet": true}),
+        Host::with(&[], "one\ntwo\nthree\n"),
+    );
+    assert_eq!((run.out.as_str(), run.stdin.as_str()), ("", "three\n"));
+    assert_eq!(sed("2d", "one\ntwo\nthree\n").stdin, "");
+}
+
+fn traced(script: &str, data: &str, extra: Json) -> String {
+    let mut config = json!({"pieces": expressions(&[script]), "debug": true, "cwd": "/"});
+    for (key, value) in extra.as_object().expect("an object") {
+        config[key] = value.clone();
+    }
+    let run = run_host(config, Host::with(&[], data));
+    assert_eq!(run.err, "", "{script}");
+    run.out
+}
+
+#[test]
+fn debug_lists_the_program_then_each_step() {
+    let ab = "a\nb\n";
+    for (script, data, want) in [
+        (
+            "s/a/X/",
+            ab,
+            "SED PROGRAM:\n  s/a/X/\nINPUT:   'STDIN' line 1\nPATTERN: a\nCOMMAND: s/a/X/\nMATCHED REGEX REGISTERS\n  regex[0] = 0-1 'a'\nPATTERN: X\nEND-OF-CYCLE:\nX\nINPUT:   'STDIN' line 2\nPATTERN: b\nCOMMAND: s/a/X/\nPATTERN: b\nEND-OF-CYCLE:\nb\n",
+        ),
+        (
+            "$!N;P;D",
+            ab,
+            "SED PROGRAM:\n  $! N\n  P\n  D\nINPUT:   'STDIN' line 1\nPATTERN: a\nCOMMAND: $! N\nPATTERN: a\\nb\nCOMMAND: P\na\nCOMMAND: D\nPATTERN: b\nCOMMAND: $! N\nCOMMAND: P\nb\nCOMMAND: D\n",
+        ),
+        (
+            "0,/a/{h;G;x;H;g}",
+            ab,
+            "SED PROGRAM:\n  0,/a/ {\n    h\n    G\n    x\n    H\n    g\n  }\nINPUT:   'STDIN' line 1\nPATTERN: a\nCOMMAND: 0,/a/ {\nCOMMAND:   h\nHOLD:    a\nCOMMAND:   G\nPATTERN: a\\na\nCOMMAND:   x\nPATTERN: a\nHOLD:    a\\na\nCOMMAND:   H\nHOLD:    a\\na\\na\nCOMMAND:   g\nHOLD:    a\\na\\na\nCOMMAND: }\nEND-OF-CYCLE:\na\na\na\nINPUT:   'STDIN' line 2\nPATTERN: b\nCOMMAND: 0,/a/ {\nCOMMAND: }\nEND-OF-CYCLE:\nb\n",
+        ),
+        (
+            "1{b};p",
+            ab,
+            "SED PROGRAM:\n  1 {\n    b\n  }\n  p\nINPUT:   'STDIN' line 1\nPATTERN: a\nCOMMAND: 1 {\nCOMMAND:   b\nEND-OF-CYCLE:\na\nINPUT:   'STDIN' line 2\nPATTERN: b\nCOMMAND:   1 {\nCOMMAND:   }\nCOMMAND:   p\nb\nEND-OF-CYCLE:\nb\n",
+        ),
+        (
+            "n;n",
+            ab,
+            "SED PROGRAM:\n  n\n  n\nINPUT:   'STDIN' line 1\nPATTERN: a\nCOMMAND: n\na\nPATTERN: b\nCOMMAND: n\nb\nEND-OF-CYCLE:\n",
+        ),
+        (
+            "2Q3",
+            ab,
+            "SED PROGRAM:\n  2 Q 3\nINPUT:   'STDIN' line 1\nPATTERN: a\nCOMMAND: 2 Q 3\nEND-OF-CYCLE:\na\nINPUT:   'STDIN' line 2\nPATTERN: b\nCOMMAND: 2 Q 3\n",
+        ),
+        (
+            "1q",
+            ab,
+            "SED PROGRAM:\n  1 q\nINPUT:   'STDIN' line 1\nPATTERN: a\nCOMMAND: 1 q\na\n",
+        ),
+        (
+            "y/ba/xy/",
+            "ab\n",
+            "SED PROGRAM:\n  y/ab/yx/\nINPUT:   'STDIN' line 1\nPATTERN: ab\nCOMMAND: y/ab/yx/\nPATTERN: yx\nEND-OF-CYCLE:\nyx\n",
+        ),
+        (
+            "s/\\(a\\)\\(b\\)*/[\\1&\\U\\2\\E\\l\\u\\n\\t]/",
+            "ab\n",
+            "SED PROGRAM:\n  s/\\\\(a\\\\)\\\\(b\\\\)*/[\\1&\\U\\2\\E\\l\\u\n\t]/\nINPUT:   'STDIN' line 1\nPATTERN: ab\nCOMMAND: s/\\\\(a\\\\)\\\\(b\\\\)*/[\\1&\\U\\2\\E\\l\\u\n\t]/\nMATCHED REGEX REGISTERS\n  regex[0] = 0-2 'ab'\n  regex[1] = 0-1 'a'\n  regex[2] = 1-2 'b'\nPATTERN: [aabB\\n\\t]\nEND-OF-CYCLE:\n[aabB\n\t]\n",
+        ),
+        (
+            "1a hello",
+            ab,
+            "SED PROGRAM:\n  1 a\\hello\n\nINPUT:   'STDIN' line 1\nPATTERN: a\nCOMMAND: 1 a\\hello\n\nEND-OF-CYCLE:\na\nhello\nINPUT:   'STDIN' line 2\nPATTERN: b\nCOMMAND: 1 a\\hello\n\nEND-OF-CYCLE:\nb\n",
+        ),
+        (
+            "2c\\\nC",
+            ab,
+            "SED PROGRAM:\n  2 c\\C\n\nINPUT:   'STDIN' line 1\nPATTERN: a\nCOMMAND: 2 c\\C\n\nEND-OF-CYCLE:\na\nINPUT:   'STDIN' line 2\nPATTERN: b\nCOMMAND: 2 c\\C\n\nC\nEND-OF-CYCLE:\n",
+        ),
+        (
+            "s/a/b/pmIg3w out",
+            "a\n",
+            "SED PROGRAM:\n  s/a/b/imgp3wout\nINPUT:   'STDIN' line 1\nPATTERN: a\nCOMMAND: s/a/b/imgp3wout\nMATCHED REGEX REGISTERS\n  regex[0] = 0-1 'a'\nPATTERN: a\nEND-OF-CYCLE:\na\n",
+        ),
+        (
+            "/a\\/b/p;\\%a%p;\\,x\\,y,p;!d;0~3d;$d;/a/I,/b/M!d",
+            "",
+            "SED PROGRAM:\n  /a\\/b/ p\n  /a/ p\n  /x,y/ p\n  !d\n  0~3 d\n  $ d\n  /a/I,/b/M! d\n",
+        ),
+        (
+            "p",
+            "a\t\x07\x08\\/\u{1b}\n",
+            "SED PROGRAM:\n  p\nINPUT:   'STDIN' line 1\nPATTERN: a\\t\\a\\o010\\\\/\\o033\nCOMMAND: p\na\t\x07\x08\\/\u{1b}\nEND-OF-CYCLE:\na\t\x07\x08\\/\u{1b}\n",
+        ),
+        ("", "", "SED PROGRAM:\n"),
+    ] {
+        assert_eq!(traced(script, data, json!({})), want, "{script}");
+    }
+    assert_eq!(
+        traced("s/a/b/", "a\0", json!({"null_data": true})),
+        "SED PROGRAM:\n  s/a/b/\nINPUT:   'STDIN' line 1\nPATTERN: a\nCOMMAND: s/a/b/\nMATCHED REGEX REGISTERS\n  regex[0] = 0-1 'a'\nPATTERN: b\nEND-OF-CYCLE:\nb\0"
+    );
+    let run = edit(
+        "s/a/b/",
+        &["/f"],
+        Host::with(&[("/f", "a\n")], ""),
+        json!({"debug": true}),
+    );
+    assert_eq!(
+        (run.out.as_str(), file(&run, "/f")),
+        (
+            "SED PROGRAM:\n  s/a/b/\nINPUT:   '/f' line 1\nPATTERN: a\nCOMMAND: s/a/b/\nMATCHED REGEX REGISTERS\n  regex[0] = 0-1 'a'\nPATTERN: b\nEND-OF-CYCLE:\n",
+            "b\n".into()
+        )
+    );
+}
+
+#[test]
+fn a_byte_y_names_twice_takes_the_last() {
+    assert_eq!(out("y/aa/ab/", "a\n"), "b\n");
+    let run = run_host(
+        json!({"pieces": expressions(&["y/\u{e9}\u{e9}/ab/"]), "utf8": true}),
+        Host::with(&[], "\u{e9}\n"),
+    );
+    assert_eq!(run.out, "a\n");
 }

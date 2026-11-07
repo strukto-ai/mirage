@@ -833,6 +833,12 @@ OLD_OPTION_EXIT = 2
 # name (GNU diffutils style: `diff: Try 'diff --help' ...`).
 USAGE_HINT_PREFIX = frozenset({"diff", "cmp", "patch"})
 
+# Commands that print their usage page where the rest print the
+# `Try '--help'` line: sed follows every option error, and a missing
+# script, with its usage. The page is mirage's own, rendered from the
+# spec.
+USAGE_PAGE = frozenset({"sed"})
+
 # How many distinct readings one spec keeps before it starts over. A
 # line reads each command's words from classification, admission,
 # routing and dispatch, a few dozen times with two or three distinct

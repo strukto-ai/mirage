@@ -3,6 +3,7 @@
 //! steps per call, every input and every file it reads or writes a
 //! request the host serves.
 
+mod debug;
 mod exec;
 mod io;
 mod script;
@@ -19,7 +20,7 @@ use crate::{Stream, StreamError, parse_config};
 
 use self::exec::{Machine, Options};
 use self::io::Input;
-use self::script::{Piece, compile};
+use self::script::{Piece, Syntax, compile};
 
 /// The steps one `drain` runs before the host may yield.
 const STEPS: usize = 20_000;
@@ -52,6 +53,24 @@ struct Config {
     /// -i.
     #[serde(default)]
     in_place: bool,
+    /// --posix.
+    #[serde(default)]
+    posix: bool,
+    /// --sandbox.
+    #[serde(default)]
+    sandbox: bool,
+    /// -z.
+    #[serde(default)]
+    null_data: bool,
+    /// --follow-symlinks.
+    #[serde(default)]
+    follow_symlinks: bool,
+    /// --debug.
+    #[serde(default)]
+    debug: bool,
+    /// -i's SUFFIX, none when it keeps no backup.
+    #[serde(default, deserialize_with = "crate::latin1_opt")]
+    suffix: Option<Vec<u8>>,
     /// -l as typed, which GNU reads with `atoi`; none is 70.
     #[serde(default, deserialize_with = "crate::latin1_opt")]
     line_length: Option<Vec<u8>>,
@@ -89,7 +108,15 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             file: piece.file,
         })
         .collect();
-    let (machine, writes) = match compile(pieces, config.extended, config.utf8) {
+    let syntax = Syntax {
+        extended: config.extended,
+        utf8: config.utf8,
+        posix: config.posix,
+        sandbox: config.sandbox,
+        null_data: config.null_data,
+        debug: config.debug,
+    };
+    let (machine, writes) = match compile(pieces, syntax) {
         Ok(program) => {
             let writes = !program.wfiles.is_empty();
             let mut inputs: Vec<Input> = config
@@ -114,6 +141,11 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
                 line_length: line_length(config.line_length.as_deref()),
                 utf8: config.utf8,
                 cwd: config.cwd,
+                delimiter: if config.null_data { 0 } else { b'\n' },
+                posix: config.posix,
+                follow: config.follow_symlinks,
+                suffix: config.suffix.filter(|suffix| !suffix.is_empty()),
+                debug: config.debug,
             };
             (Machine::new(program, opts, inputs, config.paths), writes)
         }

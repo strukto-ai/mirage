@@ -62,6 +62,9 @@ pub(crate) struct Shape {
     /// `^` and `$` match at each line's edges, and neither `.` nor a
     /// negated set matches a newline.
     pub(crate) multiline: bool,
+    /// sed -z: multi-line matching takes a NUL for the line's end, and
+    /// `.` and a negated set leave out the NUL as well as the newline.
+    pub(crate) nul_lines: bool,
     /// Under UTF-8, word characters are `[[:alnum:]_]` by Unicode rather
     /// than ASCII's.
     pub(crate) unicode_words: bool,
@@ -199,7 +202,7 @@ impl Compiler {
                 if self.shape.multiline {
                     members.without(b'\n');
                 }
-                if self.shape.dot_skips_nul {
+                if self.shape.dot_skips_nul || (self.shape.multiline && self.shape.nul_lines) {
                     members.without(0);
                 }
                 self.set(members)?;
@@ -211,6 +214,9 @@ impl Compiler {
                 let mut members = Members::of(set, self.shape.utf8, self.shape.ignore_case);
                 if self.shape.multiline && set.negated && set.bracket {
                     members.without(b'\n');
+                    if self.shape.nul_lines {
+                        members.without(0);
+                    }
                 }
                 self.set(members)?;
             }
@@ -430,12 +436,15 @@ impl Program {
         let after = self.is_word(unit_at(hay, pos, end, utf8).map(|(unit, _)| unit));
         let multiline = self.shape.multiline;
         let consumed = self.shape.consumed_newlines;
+        let line_end = if self.shape.nul_lines { 0 } else { b'\n' };
         Some(match edge {
             Edge::Look(Look::Start) => {
-                pos == begin || (hay[pos - 1] == b'\n' && (multiline || (consumed && pos > start)))
+                pos == begin
+                    || (multiline && hay[pos - 1] == line_end)
+                    || (consumed && pos > start && hay[pos - 1] == b'\n')
             }
             Edge::Look(Look::End) => {
-                if pos == end || (multiline && hay[pos] == b'\n') {
+                if pos == end || (multiline && hay[pos] == line_end) {
                     true
                 } else if consumed && hay[pos] == b'\n' {
                     // Only if the match goes on past this newline.
@@ -444,7 +453,7 @@ impl Program {
                     false
                 }
             }
-            Edge::Look(Look::GroupedEnd) => pos == end || (multiline && hay[pos] == b'\n'),
+            Edge::Look(Look::GroupedEnd) => pos == end || (multiline && hay[pos] == line_end),
             Edge::Look(Look::SubjectStart) => pos == begin,
             Edge::Look(Look::SubjectEnd) => pos == end,
             Edge::Look(Look::Word) => before != after,
@@ -458,8 +467,10 @@ impl Program {
 
     /// One instruction at `pos`: the next state, or None when this path
     /// fails there. A `Split` pushes its second branch; a `Match` is the
-    /// caller's to judge.
+    /// caller's to judge. It is the inner loop of `run` and `captures`, and
+    /// stays part of both.
     #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
     fn step(
         &self,
         hay: &[u8],

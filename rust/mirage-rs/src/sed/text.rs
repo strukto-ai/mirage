@@ -72,9 +72,9 @@ pub(super) fn convert(
 
 /// `l`'s rendering: escapes for the C controls and the backslash, octal
 /// for every other byte outside printable ASCII, lines folded at `width`
-/// without splitting an escape, and `$` at the end; None once it would
-/// pass `limit` bytes.
-pub(super) fn list(ps: &[u8], width: i64, limit: usize) -> Option<Vec<u8>> {
+/// without splitting an escape, and `$` at the end, each output line
+/// ending at `end`; None once it would pass `limit` bytes.
+pub(super) fn list(ps: &[u8], width: i64, limit: usize, end: u8) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(ps.len() + 2);
     let mut used: i64 = 0;
     let mut piece = Vec::with_capacity(4);
@@ -97,13 +97,13 @@ pub(super) fn list(ps: &[u8], width: i64, limit: usize) -> Option<Vec<u8>> {
         }
         let len = piece.len() as i64;
         if width > 0 && used + len > width - 1 {
-            out.extend_from_slice(b"\\\n");
+            out.extend_from_slice(&[b'\\', end]);
             used = 0;
         }
         out.extend_from_slice(&piece);
         used += len;
     }
-    out.extend_from_slice(b"$\n");
+    out.extend_from_slice(&[b'$', end]);
     Some(out)
 }
 

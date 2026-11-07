@@ -15,9 +15,10 @@
 import type { util } from 'zod'
 import { currentCaller } from '../../../context/session_context.ts'
 import { classify } from '../../../errors/classify.ts'
-import { enoent, isWalkError, strerrorOf } from '../../../errors/fs.ts'
+import { eisdir, enoent, exdev, isWalkError, strerrorOf } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
-import { chunks } from '../../../io/cooperative.ts'
+import { SharedInput } from '../../../io/async_line_iterator.ts'
+import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
 import { ByteSpool, spooledPair } from '../../../io/spool.ts'
 import { drain } from '../../../io/stream.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
@@ -25,11 +26,13 @@ import { ByteWriter } from '../../../io/writer.ts'
 import { openStream, serveRequests, type Served } from '../../../rs/stream.ts'
 import { byteView, textView } from '../../../shell/bytes.ts'
 import { shellJoin } from '../../../shell/join.ts'
-import { FileType, PathSpec, type FileStat } from '../../../types.ts'
+import { FileType, LINK_TARGET_KEY, PathSpec, type FileStat } from '../../../types.ts'
+import { concat } from '../../../utils/bytes.ts'
 import type { Context } from '../../config.ts'
 import { quoteText } from '../../quote.ts'
 import { callerStream } from '../generic_bind/dispatch.ts'
-import { dispatchOf } from './links.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import { dispatchOf, linksOf, mountsOf } from './links.ts'
 import { isStdin, resolveSource } from './stream.ts'
 
 const STDIN_NAMES: ReadonlySet<string> = new Set(['-', '/dev/stdin'])
@@ -66,11 +69,15 @@ function failure(err: unknown): Record<string, util.JSONType> {
  * `fsErrorLine` words it, and that may create no file one of its operands
  * names, empty leaving both to the stream;
  * `local`: whether the mount serves an operand, every one by default, as it
- * resolved them. Mirrors Python's StreamHost.
+ * resolved them; `unbuffered`: the stream read no further into standard
+ * input than it used, so what it hands back the next command reads.
+ * Mirrors Python's StreamHost.
  */
 export class StreamHost {
   readonly errors = new ByteSpool()
   private readonly stdin: AsyncIterator<Uint8Array>
+  private readonly shared: SharedInput | undefined
+  private left: Uint8Array = new Uint8Array()
   private readonly caller = currentCaller()
   private readonly inputs = new Map<number, AsyncIterator<Uint8Array>>()
   private readonly named = new Map<number, PathSpec>()
@@ -84,11 +91,27 @@ export class StreamHost {
     private readonly dash = true,
     private readonly command = '',
     private readonly local: (path: PathSpec) => boolean = () => true,
+    private readonly unbuffered = false,
   ) {
     this.stdin = resolveSource(ctx.stdin)[Symbol.asyncIterator]()
+    this.shared = ctx.stdin instanceof SharedInput ? ctx.stdin : undefined
   }
 
   async *stdinView(): AsyncIterable<Uint8Array> {
+    const shared = this.shared
+    if (shared !== undefined) {
+      // Shared input arrives whole and is cut here, so what the stream
+      // hands back takes the rest of its chunk with it.
+      for (let chunk = await shared.lines.readChunk(); chunk !== null;) {
+        for (let offset = 0; offset < chunk.byteLength; offset += CHUNK_SIZE) {
+          this.left = chunk.subarray(offset + CHUNK_SIZE)
+          yield chunk.subarray(offset, offset + CHUNK_SIZE)
+        }
+        chunk = await shared.lines.readChunk()
+      }
+      this.left = new Uint8Array()
+      return
+    }
     for (;;) {
       const next = await this.stdin.next()
       if (next.done === true) return
@@ -178,6 +201,18 @@ export class StreamHost {
       case 'mkdir':
       case 'stat':
         return this.pathOp(request.op, typeof request.path === 'string' ? request.path : '')
+      case 'readlink':
+        return this.readlink(typeof request.path === 'string' ? request.path : '')
+      case 'copy':
+      case 'rename':
+        return this.move(
+          request.op,
+          typeof request.path === 'string' ? request.path : '',
+          typeof request.to === 'string' ? request.to : '',
+        )
+      case 'unread':
+        this.unread(data)
+        return { reply: {} }
       case 'fill':
         if (typeof request.into === 'number') return this.fill(request.into, request)
         break
@@ -419,6 +454,96 @@ export class StreamHost {
     }
     if (op !== 'stat' || found === null || found === undefined) return { reply: {} }
     return { reply: { kind: (found as FileStat).type === FileType.DIRECTORY ? 'dir' : 'file' } }
+  }
+
+  /**
+   * What a link holds, or that the name is no link; a name nothing stands at
+   * answers why. The name itself is never followed.
+   */
+  private async readlink(name: string): Promise<Served> {
+    const dispatch = dispatchOf(this.ctx)
+    if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
+    const path = PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd)
+    const target = linksOf(this.ctx)?.statAt(path.virtual)?.extra[LINK_TARGET_KEY]
+    if (typeof target === 'string') return { reply: { target: byteView(target) } }
+    try {
+      const [found] = await dispatch('stat', path)
+      if (found === null || found === undefined) throw enoent(path)
+    } catch (error) {
+      if (!isWalkError(error)) throw error
+      return { reply: failure(error) }
+    }
+    return { reply: {} }
+  }
+
+  /**
+   * Move a name, a link as itself, or keep a copy of a file as a rename would
+   * put it there (`keep`).
+   */
+  private async move(op: 'copy' | 'rename', source: string, target: string): Promise<Served> {
+    const dispatch = dispatchOf(this.ctx)
+    if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
+    const src = PathSpec.fromStrPath(textView(source), undefined, this.ctx.cwd)
+    const dst = PathSpec.fromStrPath(textView(target), undefined, this.ctx.cwd)
+    try {
+      if (op === 'rename') await dispatch('rename', src, [dst])
+      else await this.keep(dispatch, src, dst)
+    } catch (error) {
+      if (!isWalkError(error)) throw error
+      return { reply: failure(error) }
+    }
+    return { reply: {} }
+  }
+
+  /**
+   * Keep file `src` under `dst` as rename(2) would move it there: in place of
+   * a file standing at `dst`, refused onto a directory or another mount, its
+   * permission bits kept. The store copies the bytes where it can; otherwise
+   * they stream through.
+   */
+  private async keep(dispatch: DispatchFn, src: PathSpec, dst: PathSpec): Promise<void> {
+    const mounts = mountsOf(this.ctx)
+    if (mounts !== undefined && mounts.rootOf(src.virtual) !== mounts.rootOf(dst.virtual)) {
+      throw exdev(src)
+    }
+    let standing: unknown
+    try {
+      ;[standing] = await dispatch('stat', dst)
+    } catch (error) {
+      if (classify(error) !== 'ENOENT') throw error
+      standing = null
+    }
+    if (standing !== null && standing !== undefined) {
+      if ((standing as FileStat).type === FileType.DIRECTORY) throw eisdir(dst)
+      await dispatch('unlink', dst)
+    }
+    const [original] = await dispatch('stat', src)
+    try {
+      await dispatch('copy', src, [dst])
+    } catch (error) {
+      if (classify(error) !== 'ENOTSUP') throw error
+      const [data] = await dispatch('read', src)
+      await dispatch('write', dst, [data])
+    }
+    const mode = (original as FileStat | null | undefined)?.mode
+    if (mode === null || mode === undefined) return
+    try {
+      await dispatch('setattr', dst, [], { mode })
+    } catch (error) {
+      if (classify(error) !== 'ENOTSUP') throw error
+    }
+  }
+
+  /**
+   * Give standard input back what the stream read of it and left, so the
+   * next command reads on from there: -u read no further than it used, and a
+   * file's offset goes back to where the stream stopped.
+   */
+  private unread(data: Uint8Array): void {
+    const shared = this.shared
+    if (shared === undefined || !(this.unbuffered || shared.seekable)) return
+    shared.lines.unread(concat([data, this.left]))
+    this.left = new Uint8Array()
   }
 
   /**

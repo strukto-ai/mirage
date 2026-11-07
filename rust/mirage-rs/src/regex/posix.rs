@@ -99,15 +99,32 @@ pub(crate) struct Posix {
 impl Posix {
     pub(crate) fn compile(pattern: &[u8], options: &Options) -> Result<Posix, &'static str> {
         let parsed = parse::parse(pattern, options.extended, options.utf8, options.dialect)?;
-        Self::build(&parsed.ast, parsed.groups, options)
+        Self::build(&parsed.ast, parsed.groups, options, false)
     }
 
-    fn build(ast: &Ast, groups: usize, options: &Options) -> Result<Posix, &'static str> {
+    /// `compile` for sed -z, whose lines end at a NUL: under multi-line
+    /// matching `^` and `$` hold at a NUL alone, and neither `.` nor a
+    /// negated set matches a NUL or a newline.
+    pub(crate) fn compile_null_data(
+        pattern: &[u8],
+        options: &Options,
+    ) -> Result<Posix, &'static str> {
+        let parsed = parse::parse(pattern, options.extended, options.utf8, options.dialect)?;
+        Self::build(&parsed.ast, parsed.groups, options, true)
+    }
+
+    fn build(
+        ast: &Ast,
+        groups: usize,
+        options: &Options,
+        nul_lines: bool,
+    ) -> Result<Posix, &'static str> {
         let unicode_words = options.utf8 && options.dialect != Dialect::Grep;
         let shape = Shape {
             ignore_case: options.ignore_case,
             utf8: options.utf8,
             multiline: options.multiline,
+            nul_lines,
             unicode_words,
             // awk's anchors hold at the subject's edges alone.
             consumed_newlines: !matches!(options.dialect, Dialect::Grep | Dialect::Awk)
@@ -140,11 +157,12 @@ impl Posix {
                 utf8: options.utf8,
                 terminator: None,
                 multiline: options.multiline,
+                nul_lines,
                 dot_skips_nul: shape.dot_skips_nul,
             };
             Some(Automata::new(
                 &lower.pattern(ast, options.word, false),
-                b'\n',
+                if nul_lines { 0 } else { b'\n' },
             )?)
         };
         // A raw byte under UTF-8 could be found inside a character, where

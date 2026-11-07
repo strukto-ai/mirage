@@ -63,11 +63,6 @@ export const GZIP_RETRY_SUFFIXES = ['.gz', '.z', '-z', '.Z'] as const
 export const GZIP_TAR_SUFFIXES = ['.tgz', '.taz'] as const
 export const GZIP_MAX_SUFFIX = 30
 
-// GNU answers a missing script with its whole thirty-nine line usage block
-// and exit 1; mirage names the problem in one line instead, because the
-// block is GNU's own prose and reproducing it buys a mirage user nothing.
-export const SED_MISSING_SCRIPT = 'sed: missing script'
-
 export const AWK_USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
 
 // The word an `-exec` argument that stands for the match is spelled as.

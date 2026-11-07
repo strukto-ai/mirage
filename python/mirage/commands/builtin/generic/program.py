@@ -31,7 +31,7 @@ FILE_KEYS = {
     "grep": "file",
     "rg": "file",
     "zgrep": "file",
-    "sed": "f",
+    "sed": "file",
     "awk": "f",
     "jq": "from_file",
 }
@@ -303,11 +303,11 @@ async def prepare_program(
         out[key] = []
         out["regexp"] = [] if pattern is None else [pattern]
     elif name == "sed":
-        expressions = iter(fl.as_list("e"))
+        expressions = iter(fl.as_list("expression"))
         scripts = iter(decode_text(data) for data in pieces)
-        out["e"] = [
-            next(expressions) if kind == "e" else next(scripts)
-            for kind, _ in fl.occurrences("e", "f")
+        out["expression"] = [
+            next(expressions) if kind == "expression" else next(scripts)
+            for kind, _ in fl.occurrences("expression", "file")
         ]
     else:
         texts = [

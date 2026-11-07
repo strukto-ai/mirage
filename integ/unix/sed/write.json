@@ -98,11 +98,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sw3 && printf 'old\\n' > /data/sw3/o && printf 'a\\n' | sed -e 'w /data/sw3/o' -e k; echo rc=$?; wc -c < /data/sw3/o",
+      "command": "mkdir -p /data/sw3 && printf 'old\\n' > /data/sw3/o && printf 'a\\n' | sed -e 'w /data/sw3/o' -e k; echo rc=$?; wc -c < /data/sw3/o; printf 'a\\n' | sed --sandbox 'w /data/sw3/p'; echo rc=$?; printf 'a\\n' | sed --sandbox 's/a/b/w /data/sw3/p'; echo rc=$?; printf 'a\\n' | sed --sandbox -n 'p;R /data/sw3/o'; echo rc=$?; printf 'a\\n' | sed --sandbox 'e echo hi'; echo rc=$?; ls /data/sw3",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\n0\n",
-        "stderr": "sed: -e expression #2, char 1: unknown command: `k'\n"
+        "stdout": "rc=1\n0\nrc=1\nrc=1\nrc=1\nrc=1\no\n",
+        "stderr": "sed: -e expression #2, char 1: unknown command: `k'\nsed: -e expression #1, char 1: e/r/w commands disabled in sandbox mode\nsed: -e expression #1, char 7: e/r/w commands disabled in sandbox mode\nsed: -e expression #1, char 3: e/r/w commands disabled in sandbox mode\nsed: -e expression #1, char 1: e/r/w commands disabled in sandbox mode\n"
       }
     },
     {

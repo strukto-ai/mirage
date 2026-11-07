@@ -103,10 +103,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo 'hello world' | sed 's/.*/\\U&/;s/\\(O\\) \\(W\\)/\\L\\1\\E \\2/'; echo 'hello world' | sed 's/\\w\\+/\\u&/g'; echo 'hELLO' | sed 's/.*/\\u\\L&/'; echo 'hello' | sed 's/.*/\\L\\u&/'; echo 'ab' | sed 's/\\(x*\\)\\(a\\)/\\u\\1\\2/'; echo 'abc' | sed 's/abc/\\u\\lX/'",
+      "command": "echo 'hello world' | sed 's/.*/\\U&/;s/\\(O\\) \\(W\\)/\\L\\1\\E \\2/'; echo 'hello world' | sed 's/\\w\\+/\\u&/g'; echo 'hELLO' | sed 's/.*/\\u\\L&/'; echo 'hello' | sed 's/.*/\\L\\u&/'; echo 'ab' | sed 's/\\(x*\\)\\(a\\)/\\u\\1\\2/'; echo 'abc' | sed 's/abc/\\u\\lX/'; echo 'hello' | sed --posix 's/h/\\U&/'",
       "expect": {
         "exit": 0,
-        "stdout": "HELLo WORLD\nHello World\nhello\nHello\nAb\nx\n",
+        "stdout": "HELLo WORLD\nHello World\nhello\nHello\nAb\nx\nUhello\n",
         "stderr": ""
       }
     },

@@ -8,8 +8,11 @@ from collections.abc import (
 )
 from dataclasses import dataclass
 
-from mirage.commands.builtin.constants import SED_MISSING_SCRIPT
-from mirage.commands.builtin.utils.links import dispatch_of
+from mirage.commands.builtin.utils.links import (
+    dispatch_of,
+    links_of,
+    mounts_of,
+)
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import is_stdin
 from mirage.commands.builtin.utils.stream_host import (
@@ -18,8 +21,10 @@ from mirage.commands.builtin.utils.stream_host import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.compile import compile_spec, expand_long
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.usage import usage_hint
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
@@ -37,27 +42,53 @@ def _failed(stderr: str, exit_code: int) -> tuple[None, IOResult]:
 @dataclass(frozen=True, slots=True)
 class SedFlags:
     in_place: bool = False
+    # -i's SUFFIX, none when it keeps no backup.
+    suffix: str | None = None
     suppress: bool = False
     extended: bool = False
     separate: bool = False
     line_length: str | None = None
     scripts: tuple[str | PathSpec, ...] = ()
+    null_data: bool = False
+    unbuffered: bool = False
+    posix: bool = False
+    sandbox: bool = False
+    debug: bool = False
+    follow_symlinks: bool = False
+
+
+def edits_in_place(fl: FlagView) -> bool:
+    """Whether the line edits in place: -i given, with a suffix or none
+    (``--in-place=``).
+
+    Args:
+        fl (FlagView): the line's flags.
+    """
+    return fl.raw("in_place") not in (None, False)
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> SedFlags:
     fl = FlagView(flags, spec=SPECS["sed"])
-    expressions = iter(fl.as_list("e"))
-    files = iter(fl.as_paths("f"))
+    expressions = iter(fl.as_list("expression"))
+    files = iter(fl.as_paths("file"))
+    in_place = fl.raw("in_place")
     return SedFlags(
-        in_place=fl.as_bool("i"),
-        suppress=fl.as_bool("n"),
-        extended=fl.as_bool("E") or fl.as_bool("r"),
+        in_place=edits_in_place(fl),
+        suffix=in_place if isinstance(in_place, str) and in_place else None,
+        suppress=fl.as_bool("quiet"),
+        extended=fl.as_bool("regexp_extended"),
         separate=fl.as_bool("separate"),
         line_length=fl.as_text("line_length"),
         scripts=tuple(
-            next(expressions) if name == "e" else next(files)
-            for name, _ in fl.occurrences("e", "f")
+            next(expressions) if name == "expression" else next(files)
+            for name, _ in fl.occurrences("expression", "file")
         ),
+        null_data=fl.as_bool("null_data"),
+        unbuffered=fl.as_bool("unbuffered"),
+        posix=fl.as_bool("posix"),
+        sandbox=fl.as_bool("sandbox"),
+        debug=fl.as_bool("debug"),
+        follow_symlinks=fl.as_bool("follow_symlinks"),
     )
 
 
@@ -71,32 +102,41 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
         operands (Sequence[str | PathSpec]): the line's operands; the
             first is the script when no ``-e`` or ``-f`` gave one.
     """
-    if fl.as_bool("i") or fl.raw("f") is not None:
+    if edits_in_place(fl) or fl.raw("file") is not None:
         return LineFacts()
-    scripts = fl.as_list("e") or [
+    scripts = fl.as_list("expression") or [
         w if isinstance(w, str) else w.raw_path for w in operands[:1]
     ]
     if not scripts:
         return LineFacts(writes=False)
-    extended = fl.as_bool("E") or fl.as_bool("r")
-    return LineFacts(writes=_script_writes(tuple(scripts), extended))
+    syntax = (
+        fl.as_bool("regexp_extended"),
+        fl.as_bool("posix"),
+        fl.as_bool("sandbox"),
+    )
+    return LineFacts(writes=_script_writes(tuple(scripts), syntax))
 
 
-_write_checks: dict[tuple[tuple[str, ...], bool], bool] = {}
+_write_checks: dict[tuple[tuple[str, ...], tuple[bool, bool, bool]], bool] = {}
 
 
-def _script_writes(scripts: tuple[str, ...], extended: bool) -> bool:
+def _script_writes(
+    scripts: tuple[str, ...], syntax: tuple[bool, bool, bool]
+) -> bool:
     cacheable = sum(len(script) + 1 for script in scripts) <= 4096
-    key = (scripts, extended)
+    key = (scripts, syntax)
     if cacheable and (known := _write_checks.get(key)) is not None:
         del _write_checks[key]
         _write_checks[key] = known
         return known
+    extended, posix, sandbox = syntax
     engine = open_stream(
         "sed",
         {
             "pieces": [{"text": byte_view(script)} for script in scripts],
             "extended": extended,
+            "posix": posix,
+            "sandbox": sandbox,
         },
     )
     writes = bool(json.loads(engine.metadata())["writes"])
@@ -134,13 +174,21 @@ def _script_origins(
         if word == "--":
             break
         if word.startswith("--"):
-            if word == "--line-length":
+            name, eq, value = word.partition("=")
+            spelled = expand_long(compile_spec(SPECS["sed"]), name)
+            option = spelled[0] if len(spelled) == 1 else name
+            if option in _VALUED and not eq:
+                value = argv[i] if i < len(argv) else ""
                 i += 1
+            out.extend(_origin(option, value))
             continue
         if not word.startswith("-") or word == "-":
             continue
         for j in range(1, len(word)):
             c = word[j]
+            # -i takes the rest of the word as its suffix.
+            if c == "i":
+                break
             if c not in "efl":
                 continue
             value = word[j + 1 :]
@@ -151,6 +199,25 @@ def _script_origins(
                 out.append(value if c == "f" else None)
             break
     return out if len(out) == count else None
+
+
+# The long options that take their value as the next word.
+_VALUED = frozenset({"--expression", "--file", "--line-length"})
+
+
+def _origin(option: str, value: str) -> list[str | None]:
+    """What one long option adds to ``_script_origins``: a script file's
+    name, None for an expression, nothing for any other option.
+
+    Args:
+        option (str): the long option, its prefix expanded.
+        value (str): its value.
+    """
+    if option == "--file":
+        return [value]
+    if option == "--expression":
+        return [None]
+    return []
 
 
 def _positional_as_paths(
@@ -237,7 +304,7 @@ async def sed_generic(
     if not flag_script and texts:
         pieces.append({"text": byte_view(texts[0])})
     if not pieces:
-        return _failed(f"{SED_MISSING_SCRIPT}\n", 1)
+        return _failed(f"{usage_hint('sed')}\n", 1)
     if parsed.in_place and not writable:
         # A backend with no write op refuses the edit itself, not a file:
         # the line names no operand, so sed's step wording is not it.
@@ -263,6 +330,14 @@ async def sed_generic(
         "quiet": parsed.suppress,
         "separate": parsed.separate,
         "in_place": parsed.in_place,
+        "suffix": (
+            None if parsed.suffix is None else byte_view(parsed.suffix)
+        ),
+        "posix": parsed.posix,
+        "sandbox": parsed.sandbox,
+        "null_data": parsed.null_data,
+        "follow_symlinks": parsed.follow_symlinks,
+        "debug": parsed.debug,
         "line_length": (
             None
             if parsed.line_length is None
@@ -279,6 +354,9 @@ async def sed_generic(
         dispatch_of(ctx),
         ctx.cwd,
         dash=not parsed.in_place,
+        links=links_of(ctx),
+        mounts=mounts_of(ctx),
+        unbuffered=parsed.unbuffered,
     )
     io = IOResult()
     return hosted_stream("sed", config, host, io), io
