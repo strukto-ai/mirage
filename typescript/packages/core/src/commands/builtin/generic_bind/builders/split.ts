@@ -26,7 +26,10 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 const FLAGS = [
   'lines',
   'bytes',
+  'line_bytes',
   'number',
+  'elide_empty_files',
+  'verbose',
   'suffix_length',
   'numeric_suffixes',
   'hex_suffixes',

@@ -10,7 +10,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import usage_hint
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import eisdir, enoent, enotdir
+from mirage.errors.fs import eisdir, enoent, enotdir, fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition
@@ -79,10 +79,13 @@ class TruncateFlags:
     Args:
         size (Size): the ``-s`` spec.
         no_create (bool): ``-c``; an absent name stays absent, silently.
+        reference (PathSpec | None): ``-r``; the file whose size a
+            relative ``-s`` counts from, in place of each operand's own.
     """
 
     size: Size
     no_create: bool
+    reference: PathSpec | None = None
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags | IOResult:
@@ -96,8 +99,12 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags | IOResult:
         TruncateFlags | IOResult: the flags, or truncate's refusal.
     """
     fl = FlagView(flags, spec=SPECS["truncate"])
+    reference = fl.as_path("reference")
+    typed = fl.texts("size")
+    if reference is not None:
+        typed.append(("reference", ""))
     try:
-        values = scan("truncate", fl.texts("size"))
+        values = scan("truncate", typed)
     except StreamRefusal as refusal:
         return refused(refusal)
     size = values["size"]
@@ -111,6 +118,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags | IOResult:
     return TruncateFlags(
         size=Size(mode=cast(SizeMode, mode), number=int(number)),
         no_create=fl.as_bool("no_create"),
+        reference=reference,
     )
 
 
@@ -137,10 +145,18 @@ async def truncate_generic(
         raise UsageError(
             f"truncate: missing file operand\n{usage_hint('truncate')}", 1
         )
+    base: int | None = None
+    if flags.reference is not None:
+        try:
+            base = (await stat(flags.reference)).size or 0
+        except FS_ERRORS as exc:
+            label = shell_quote_always(flags.reference.raw_path)
+            line = f"truncate: cannot stat {label}: {fs_strerror(exc)}\n"
+            return None, IOResult(exit_code=1, stderr=encode_text(line))
     errors: list[str] = []
     for path in paths:
         try:
-            refused = await _truncate_one(path, flags, stat, truncate_fn)
+            refused = await _truncate_one(path, flags, stat, truncate_fn, base)
         except FS_ERRORS as exc:
             errors.append(fs_error_line("truncate", path, exc))
         else:
@@ -155,6 +171,7 @@ async def _truncate_one(
     flags: TruncateFlags,
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     truncate_fn: Callable[[PathSpec, int, bool], Awaitable[None]],
+    base: int | None = None,
 ) -> str | None:
     """One operand, in the order GNU's open settles it, and the line GNU
     prints when the open went through but the length did not take.
@@ -179,6 +196,8 @@ async def _truncate_one(
         flags (TruncateFlags): the parsed flags.
         stat (Callable): stats a path; raises when missing.
         truncate_fn (Callable): sets the length and enforces no_create.
+        base (int | None): the ``-r`` file's size, which a relative size
+            counts from instead of the operand's.
     """
     directory = False
     try:
@@ -201,7 +220,7 @@ async def _truncate_one(
     slashed = path.raw_path.endswith("/") and not ends_at_dot(path.raw_path)
     if directory or (slashed and not flags.no_create):
         raise eisdir(path)
-    size = resolve_size(flags.size, current)
+    size = resolve_size(flags.size, current if base is None else base)
     try:
         await truncate_fn(path, size, flags.no_create)
     except OSError as exc:

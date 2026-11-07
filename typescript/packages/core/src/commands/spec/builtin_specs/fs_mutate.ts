@@ -187,11 +187,10 @@ export const SPECS: Record<string, CommandSpec> = {
   }),
   rm: new CommandSpec({
     arguments: [
-      new Argument('-r', { action: 'store_true' }),
-      new Argument('-R', { action: 'store_true' }),
-      new Argument('-f', { action: 'store_true' }),
-      new Argument('-v', { action: 'store_true' }),
-      new Argument('-d', { action: 'store_true' }),
+      new Argument(['-r', '-R', '--recursive'], { action: 'store_true' }),
+      new Argument(['-f', '--force'], { action: 'store_true' }),
+      new Argument(['-v', '--verbose'], { action: 'store_true' }),
+      new Argument(['-d', '--dir'], { action: 'store_true' }),
       new Argument('-i', { action: 'store_true' }),
       new Argument('-I', { action: 'store_true' }),
       new Argument('--preserve-root', { action: 'store_true' }),
@@ -238,6 +237,7 @@ export const SPECS: Record<string, CommandSpec> = {
     arguments: [
       new Argument(['-c', '--no-create'], { action: 'store_true' }),
       new Argument(['-s', '--size']),
+      new Argument(['-r', '--reference'], { type: 'path' }),
       PATHS_OPERAND,
     ],
   }),

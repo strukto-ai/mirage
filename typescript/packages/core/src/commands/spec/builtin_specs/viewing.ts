@@ -134,10 +134,12 @@ export const SPECS: Record<string, CommandSpec> = {
   }),
   tail: new CommandSpec({
     arguments: [
-      new Argument('-n', { numericShorthand: true }),
-      new Argument('-c'),
-      new Argument('-q', { action: 'store_true' }),
-      new Argument('-v', { action: 'store_true' }),
+      new Argument(['-n', '--lines'], { numericShorthand: true }),
+      new Argument(['-c', '--bytes']),
+      new Argument(['-q', '--quiet'], { action: 'store_true' }),
+      new Argument('--silent', { action: 'store_true' }),
+      new Argument(['-v', '--verbose'], { action: 'store_true' }),
+      new Argument(['-z', '--zero-terminated'], { action: 'store_true' }),
       new Argument(['-f', '--follow'], { nargs: '?', attachedOnly: true, shortValue: false }),
       new Argument('-F', { action: 'store_true' }),
       new Argument('--retry', { action: 'store_true' }),

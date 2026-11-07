@@ -19,15 +19,27 @@ const OFF_T_MAX: u128 = i64::MAX as u128;
 const HINT: &str = "Try 'truncate --help' for more information.";
 
 pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
-    if let Some((name, _)) = options.iter().find(|(name, _)| name != "size") {
+    if let Some((name, _)) = options
+        .iter()
+        .find(|(name, _)| name != "size" && name != "reference")
+    {
         return Err(unknown("truncate", name));
     }
-    let Some(raw) = last(options, "size") else {
-        let refused =
-            format!("truncate: you must specify either '--size' or '--reference'\n{HINT}");
-        return Err(StreamError::refusal(refused.as_bytes(), 1));
+    let reference = last(options, "reference").is_some();
+    let (mode, size) = match last(options, "size") {
+        Some(raw) => size(raw)?,
+        None if reference => ("extend", 0),
+        None => {
+            let refused =
+                format!("truncate: you must specify either '--size' or '--reference'\n{HINT}");
+            return Err(StreamError::refusal(refused.as_bytes(), 1));
+        }
     };
-    let (mode, size) = size(raw)?;
+    if reference && mode == "absolute" {
+        let refused =
+            format!("truncate: you must specify a relative '--size' with '--reference'\n{HINT}");
+        return Err(StreamError::refusal(refused.as_bytes(), 1));
+    }
     let mut values = Values::new();
     values.insert(
         "size".to_owned(),
@@ -100,6 +112,30 @@ mod tests {
 
     fn size(raw: &str) -> serde_json::Value {
         scan("truncate", &[("size", raw.as_bytes())]).expect(raw)["size"].clone()
+    }
+
+    #[test]
+    fn a_reference_takes_a_relative_size_or_none() {
+        let typed: &[(&str, &[u8])] = &[("reference", b"")];
+        assert_eq!(
+            scan("truncate", typed).expect("read")["size"],
+            json!({"mode": "extend", "size": "0"})
+        );
+        let typed: &[(&str, &[u8])] = &[("reference", b""), ("size", b"<5")];
+        assert_eq!(
+            scan("truncate", typed).expect("read")["size"],
+            json!({"mode": "at_most", "size": "5"})
+        );
+        let typed: &[(&str, &[u8])] = &[("size", b"10"), ("reference", b"")];
+        assert_eq!(
+            refusal("truncate", typed),
+            (
+                "truncate: you must specify a relative '--size' with '--reference'\n\
+                 Try 'truncate --help' for more information."
+                    .to_owned(),
+                1
+            )
+        );
     }
 
     #[test]

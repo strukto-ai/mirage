@@ -66,12 +66,14 @@ class TailCounts:
         from_line (int | None): the line printing starts at.
         byte_count (int | None): bytes kept from the end.
         from_byte (int | None): the byte printing starts at.
+        terminator (int): the byte that ends a line, NUL under ``-z``.
     """
 
     lines: int | None = None
     from_line: int | None = None
     byte_count: int | None = None
     from_byte: int | None = None
+    terminator: int = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,7 +163,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TailFlags | IOResult:
     """
     fl = FlagView(flags, spec=SPECS["tail"])
     raw = fl.raw("follow")
-    typed = fl.texts("n", "c", "sleep_interval")
+    typed = fl.texts("lines", "bytes", "sleep_interval")
     if isinstance(raw, str):
         typed.append(("follow", raw))
     try:
@@ -174,20 +176,26 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TailFlags | IOResult:
     )
     # The last of -q and -v decides, as in GNU tail, and so does the last
     # of -n and -c.
-    order = fl.typed_order("q", "v")
+    order = fl.typed_order("quiet", "silent", "verbose")
     headers = order[-1] if order else None
-    units = fl.typed_order("n", "c")
+    units = fl.typed_order("lines", "bytes")
     unit = units[-1] if units else None
-    lines, from_line = _counts_of(None if unit == "c" else values["lines"])
+    lines, from_line = _counts_of(None if unit == "bytes" else values["lines"])
     byte_count, from_byte = _counts_of(
-        None if unit == "n" else values["bytes"]
+        None if unit == "lines" else values["bytes"]
     )
     interval = values["sleep_interval"]
     assert interval is None or isinstance(interval, (int, float))
     return TailFlags(
-        counts=TailCounts(lines, from_line, byte_count, from_byte),
-        quiet=headers == "q",
-        verbose=headers == "v",
+        counts=TailCounts(
+            lines,
+            from_line,
+            byte_count,
+            from_byte,
+            0 if fl.as_bool("zero_terminated") else 10,
+        ),
+        quiet=headers in ("quiet", "silent"),
+        verbose=headers == "verbose",
         follow=follow,
         follow_name=by_name,
         retry=retry,
@@ -202,6 +210,7 @@ async def tail(
     c: int | None = None,
     from_line: int | None = None,
     from_byte: int | None = None,
+    terminator: int = 10,
 ) -> AsyncGenerator[bytes, None]:
     forward = from_byte is not None or from_line is not None
     byte_mode = from_byte is not None or (from_line is None and c is not None)
@@ -220,7 +229,7 @@ async def tail(
             "mode": "skip" if forward else "last",
             "unit": "bytes" if byte_mode else "records",
             "count": str(count),
-            "terminator": 10,
+            "terminator": terminator,
         },
     )
     budget = YieldBudget()
@@ -255,6 +264,7 @@ async def tail_multi(
     c: int | None = None,
     from_line: int | None = None,
     from_byte: int | None = None,
+    terminator: int = 10,
     show_headers: bool = False,
     unread: frozenset[str] = frozenset(),
     io: IOResult | None = None,
@@ -300,7 +310,12 @@ async def tail_multi(
                 chunks(source)
                 if selected
                 else tail(
-                    source, n=n, c=c, from_line=from_line, from_byte=from_byte
+                    source,
+                    n=n,
+                    c=c,
+                    from_line=from_line,
+                    from_byte=from_byte,
+                    terminator=terminator,
                 )
             )
             async for chunk in output:
@@ -416,7 +431,11 @@ async def _tail_file(
     n = counts.lines if counts.lines is not None else 10
     from_end = counts.from_line is None and counts.from_byte is None
     if not is_stdin(path) and from_end:
-        if counts.byte_count is None and last_lines is not None:
+        if (
+            counts.byte_count is None
+            and counts.terminator == 10
+            and last_lines is not None
+        ):
             answer = await last_lines(path, abs(n))
             if answer is not None:
                 async for part in chunks(answer):
@@ -451,7 +470,7 @@ async def _tail_file(
                         "mode": "reverse",
                         "unit": "records",
                         "count": str(abs(n)),
-                        "terminator": 10,
+                        "terminator": counts.terminator,
                     },
                 )
                 try:
@@ -499,6 +518,7 @@ async def _tail_file(
             c=counts.byte_count,
             from_line=counts.from_line,
             from_byte=counts.from_byte,
+            terminator=counts.terminator,
         )
     ) as output:
         async for part in output:
@@ -718,6 +738,7 @@ async def _follow(
                             c=counts.byte_count,
                             from_line=counts.from_line,
                             from_byte=counts.from_byte,
+                            terminator=counts.terminator,
                         )
                     ]
                 )
@@ -935,6 +956,7 @@ async def tail_generic(
         counts.byte_count is None
         and counts.from_line is None
         and counts.from_byte is None
+        and counts.terminator == 10
     )
     if (
         parsed.follow
@@ -1016,6 +1038,7 @@ async def tail_generic(
             c=counts.byte_count,
             from_line=counts.from_line,
             from_byte=counts.from_byte,
+            terminator=counts.terminator,
             show_headers=show_headers,
             unread=unread,
             io=io,
@@ -1027,6 +1050,7 @@ async def tail_generic(
         c=counts.byte_count,
         from_line=counts.from_line,
         from_byte=counts.from_byte,
+        terminator=counts.terminator,
     )
     if parsed.verbose and not parsed.quiet:
         # -v heads a stdin nobody named with the name it gives `-`.

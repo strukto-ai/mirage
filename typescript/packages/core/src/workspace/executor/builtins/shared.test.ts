@@ -33,7 +33,6 @@ import {
   readonlyRefusal,
   recordDelimiter,
   refusal,
-  splitValueFlags,
   requireView,
 } from './shared.ts'
 
@@ -85,30 +84,6 @@ describe('builtins/shared: operands and flags', () => {
   it('absPath resolves a relative operand against the cwd', () => {
     expect(absPath(PathSpec.fromStrPath('/data/f.txt'), '/tmp')).toBe('/data/f.txt')
     expect(absPath('f.txt', '/data')).toBe('/data/f.txt')
-  })
-
-  it('splitValueFlags takes a detached value', () => {
-    const { flags, values, operands, bad } = splitValueFlags(
-      ['-c', '-t', '202601021530', 'f.txt'],
-      'acmh',
-      'tdr',
-    )
-    expect(bad).toBeNull()
-    expect([...flags]).toEqual(['c'])
-    expect(values.get('t')).toBe('202601021530')
-    expect(operands).toEqual(['f.txt'])
-  })
-
-  it('splitValueFlags takes an attached value', () => {
-    const { values, operands, bad } = splitValueFlags(['-t202601021530', 'f'], 'acmh', 'tdr')
-    expect(bad).toBeNull()
-    expect(values.get('t')).toBe('202601021530')
-    expect(operands).toEqual(['f'])
-  })
-
-  it('splitValueFlags reports an unknown letter', () => {
-    const { bad } = splitValueFlags(['-q', 'f'], 'Rvf', '')
-    expect(bad).toBe('q')
   })
 })
 

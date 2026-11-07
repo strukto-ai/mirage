@@ -15,7 +15,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.constants import OPERAND
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.standard import version_line
+from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
@@ -64,6 +64,16 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UnzipFlags:
         dest=dest if isinstance(dest, (PathSpec, str)) else None,
         excludes=tuple(fl.as_list("x")),
     )
+
+
+def _usage_block() -> str:
+    """mirage's unzip usage, from its ``Usage:`` line on.
+
+    Info-ZIP answers a bare line, and a line whose options it cannot
+    read, with its usage block and no message of its own.
+    """
+    page = help_page("unzip", SPECS["unzip"]).decode()
+    return page[page.index("Usage: ") :].rstrip("\n")
 
 
 def _patterns(
@@ -127,7 +137,18 @@ async def unzip_generic(
         # and mirage's version line is that banner here.
         if letters["v"]:
             return version_line("unzip"), IOResult()
-        raise ValueError("unzip: missing operand")
+        if (
+            not any(letters.values())
+            and parsed.dest is None
+            and parsed.quiet == 0
+            and not parsed.excludes
+        ):
+            return (_usage_block() + "\n").encode(), IOResult()
+        raise UsageError(_usage_block(), exit_code=USAGE_EXIT)
+    # Info-ZIP reads every dash word before the archive as options, so one
+    # that reached here held a letter it does not know.
+    if paths[0].raw_path.startswith("-"):
+        raise UsageError(_usage_block(), exit_code=USAGE_EXIT)
     if not letters["Z"]:
         for letter in ZIPINFO_LETTERS:
             if letters[letter]:

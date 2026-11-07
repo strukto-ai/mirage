@@ -70,8 +70,10 @@ SPECS: dict[str, CommandSpec] = {
     "stat": CommandSpec(
         arguments=(
             Argument("-c", "--format"),
+            Argument("--printf"),
             Argument("-f", "--file-system", action="store_true"),
             Argument("-L", "--dereference", action="store_true"),
+            Argument("-t", "--terse", action="store_true"),
             PATHS_OPERAND,
         )
     ),
@@ -159,14 +161,14 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "df": CommandSpec(
         arguments=(
-            Argument("-h", action="store_true"),
-            Argument("-H", action="store_true"),
+            Argument("-h", "--human-readable", action="store_true"),
+            Argument("-H", "--si", action="store_true"),
             Argument("-k", action="store_true"),
-            Argument("-i", action="store_true"),
-            Argument("-a", action="store_true"),
-            Argument("-T", action="store_true"),
-            Argument("-P", action="store_true"),
-            Argument("-B"),
+            Argument("-i", "--inodes", action="store_true"),
+            Argument("-a", "--all", action="store_true"),
+            Argument("-T", "--print-type", action="store_true"),
+            Argument("-P", "--portability", action="store_true"),
+            Argument("-B", "--block-size"),
             PATHS_OPERAND,
         )
     ),

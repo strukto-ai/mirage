@@ -143,11 +143,10 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "rm": CommandSpec(
         arguments=(
-            Argument("-r", action="store_true"),
-            Argument("-R", action="store_true"),
-            Argument("-f", action="store_true"),
-            Argument("-v", action="store_true"),
-            Argument("-d", action="store_true"),
+            Argument("-r", "-R", "--recursive", action="store_true"),
+            Argument("-f", "--force", action="store_true"),
+            Argument("-v", "--verbose", action="store_true"),
+            Argument("-d", "--dir", action="store_true"),
             # Non-interactive control plane: -i/-I are accepted no-ops
             # (there is no prompt; removal always proceeds).
             Argument("-i", action="store_true"),
@@ -176,6 +175,7 @@ SPECS: dict[str, CommandSpec] = {
         arguments=(
             Argument("-c", "--no-create", action="store_true"),
             Argument("-s", "--size"),
+            Argument("-r", "--reference", type="path"),
             PATHS_OPERAND,
         )
     ),

@@ -182,7 +182,12 @@ SPECS: dict[str, CommandSpec] = {
             # apart, so both refuse without it.
             Argument("-l", "--lines", numeric_shorthand=True),
             Argument("-b", "--bytes"),
+            Argument("-C", "--line-bytes"),
             Argument("-n", "--number"),
+            Argument("-e", "--elide-empty-files", action="store_true"),
+            # Every write goes straight to its piece already.
+            Argument("-u", "--unbuffered", action="store_true"),
+            Argument("--verbose", action="store_true"),
             # GNU: -d/-x never take an argument; only --numeric-suffixes=
             # and --hex-suffixes= carry one, so `-d10` is -d and ten lines.
             Argument(

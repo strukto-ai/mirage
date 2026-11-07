@@ -34,8 +34,17 @@ struct Config {
     lines: Option<Vec<u8>>,
     #[serde(default, deserialize_with = "crate::latin1_opt")]
     bytes: Option<Vec<u8>>,
+    /// -C: at most this many bytes of whole records a piece.
+    #[serde(default, deserialize_with = "crate::latin1_opt")]
+    line_bytes: Option<Vec<u8>>,
     #[serde(default, deserialize_with = "crate::latin1_opt")]
     number: Option<Vec<u8>>,
+    /// -e: under -n, a piece with nothing in it makes no file.
+    #[serde(default)]
+    elide_empty_files: bool,
+    /// --verbose: each file is announced on the output as it is made.
+    #[serde(default)]
+    verbose: bool,
     #[serde(default, deserialize_with = "crate::latin1_opt")]
     suffix_length: Option<Vec<u8>>,
     /// -d, or `--numeric-suffixes=START`: `true`, or the start as typed.
@@ -57,6 +66,9 @@ struct Config {
 enum Mode {
     /// -l and -b: `limit` lines, or bytes, a piece.
     Cut { limit: u64, lines: bool },
+    /// -C: as many whole records as fit in `limit` bytes; a record longer
+    /// than that is cut into pieces of `limit`, its tail starting the next.
+    Records { limit: u64 },
     /// -n: `count` pieces of the whole input, by bytes, by lines or round
     /// robin; `only` writes the one, from 1, to the output and no file.
     Chunks {
@@ -134,6 +146,8 @@ struct Plan {
     input: Vec<u8>,
     prefix: Vec<u8>,
     additional: Vec<u8>,
+    elide: bool,
+    verbose: bool,
 }
 
 /// A count as split reads one: C blanks, at most one `+`, and decimal
@@ -159,7 +173,7 @@ fn positive(value: &[u8], what: &str) -> Result<u64, Vec<u8>> {
         .ok_or_else(|| refusal(what, value))
 }
 
-fn byte_count(value: &[u8]) -> Result<u64, Vec<u8>> {
+fn byte_count(value: &[u8], what: &str) -> Result<u64, Vec<u8>> {
     let (digits, multiplier) = (1..=3.min(value.len()))
         .rev()
         .find_map(|len| {
@@ -169,8 +183,7 @@ fn byte_count(value: &[u8]) -> Result<u64, Vec<u8>> {
             ))
         })
         .unwrap_or((value, 1));
-    let digits =
-        positive(digits, "number of bytes").map_err(|_| refusal("number of bytes", value))?;
+    let digits = positive(digits, what).map_err(|_| refusal(what, value))?;
     Ok(digits.saturating_mul(u64::try_from(multiplier).unwrap_or(u64::MAX)))
 }
 
@@ -276,8 +289,27 @@ fn plan(config: Config) -> Result<Plan, Vec<u8>> {
         .as_deref()
         .map(|v| positive(v, "number of lines"))
         .transpose()?;
-    let byte_limit = config.bytes.as_deref().map(byte_count).transpose()?;
+    let byte_limit = config
+        .bytes
+        .as_deref()
+        .map(|v| byte_count(v, "number of bytes"))
+        .transpose()?;
+    // GNU words a refused -C as it does a refused line count.
+    let record_limit = config
+        .line_bytes
+        .as_deref()
+        .map(|v| byte_count(v, "number of lines"))
+        .transpose()?;
     let number = config.number.as_deref().map(chunks).transpose()?;
+    let ways = [
+        lines.is_some(),
+        byte_limit.is_some(),
+        record_limit.is_some(),
+        number.is_some(),
+    ];
+    if ways.iter().filter(|&&way| way).count() > 1 {
+        return Err([b"split: cannot split in more than one way".as_slice(), HINT].concat());
+    }
     let separator = match config.separator.as_deref() {
         None => b'\n',
         Some(b"\\0") => 0,
@@ -292,13 +324,14 @@ fn plan(config: Config) -> Result<Plan, Vec<u8>> {
     if let Some(extra) = config.operands.get(2) {
         return Err([b"split: extra operand '".as_slice(), extra, b"'", HINT].concat());
     }
-    let mode = match (number, byte_limit, lines) {
+    let mode = match (number, byte_limit, record_limit, lines) {
         (Some(mode), ..) => mode,
-        (None, Some(limit), _) => Mode::Cut {
+        (None, Some(limit), ..) => Mode::Cut {
             limit,
             lines: false,
         },
-        (None, None, lines) => Mode::Cut {
+        (None, None, Some(limit), _) => Mode::Records { limit },
+        (None, None, None, lines) => Mode::Cut {
             limit: lines.unwrap_or(1000),
             lines: true,
         },
@@ -325,6 +358,8 @@ fn plan(config: Config) -> Result<Plan, Vec<u8>> {
         input: operands.next().unwrap_or_else(|| b"-".to_vec()),
         prefix: operands.next().unwrap_or_else(|| b"x".to_vec()),
         additional: config.additional_suffix,
+        elide: config.elide_empty_files,
+        verbose: config.verbose,
     })
 }
 
@@ -370,6 +405,10 @@ struct Split {
     index: u64,
     /// Under r/N, the lines this pass has read.
     line: u64,
+    /// Under -C, the record read so far that no separator has ended yet.
+    hold: Vec<u8>,
+    /// What --verbose says, for the output.
+    said: Vec<u8>,
     status: i32,
     stderr: Vec<u8>,
 }
@@ -403,6 +442,8 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         scanned: 0,
         index: 0,
         line: 0,
+        hold: Vec::new(),
+        said: Vec::new(),
         status: 0,
         stderr: Vec::new(),
     }))
@@ -439,6 +480,22 @@ impl Split {
 
     fn named(&self, suffix: &[u8]) -> Vec<u8> {
         [self.plan.prefix.as_slice(), suffix, &self.plan.additional].concat()
+    }
+
+    /// --verbose's line for a file about to be made.
+    fn announce(&mut self, name: &[u8]) {
+        if self.plan.verbose {
+            self.said.extend_from_slice(b"creating file '");
+            self.said.extend_from_slice(quoted(name).as_bytes());
+            self.said.extend_from_slice(b"'\n");
+        }
+    }
+
+    /// A new piece under the next name, announced.
+    fn start(&mut self) -> Option<Piece> {
+        let name = self.name()?;
+        self.announce(&name);
+        Some(Piece::new(name))
     }
 
     fn put(&mut self, from: usize, to: usize, out: &mut Vec<u8>) {
@@ -484,6 +541,12 @@ impl Split {
                 }
                 return;
             }
+            Mode::Records { limit } => {
+                if self.ready() {
+                    self.records(limit);
+                }
+                return;
+            }
             Mode::Chunks { kind, count, only } => (kind, count, only),
         };
         if self.index >= only.unwrap_or(count) {
@@ -514,10 +577,10 @@ impl Split {
             return;
         }
         if self.sink.is_none() {
-            let Some(name) = self.name() else {
+            let Some(piece) = self.start() else {
                 return;
             };
-            self.sink = Some(Sink::File(Piece::new(name)));
+            self.sink = Some(Sink::File(piece));
         }
         let need = limit - self.filled;
         let (take, full) = if lines {
@@ -546,9 +609,89 @@ impl Split {
         }
     }
 
+    /// -C over what the input holds now: each record ended by a
+    /// separator, or by the input's end, is placed whole; one still open
+    /// is held while it may yet fit the piece, and placed in part once it
+    /// cannot.
+    fn records(&mut self, limit: u64) {
+        let rest = self.input.rest();
+        if rest.is_empty() {
+            let record = std::mem::take(&mut self.hold);
+            self.place(record, limit);
+            self.close();
+            self.phase = Phase::Done;
+            return;
+        }
+        if let Some(at) = memchr::memchr(self.plan.separator, rest) {
+            let mut record = std::mem::take(&mut self.hold);
+            record.extend_from_slice(&rest[..=at]);
+            self.input.at += at + 1;
+            self.place(record, limit);
+            return;
+        }
+        let known = (self.hold.len() + rest.len()) as u64;
+        if self.filled + known <= limit {
+            self.hold.extend_from_slice(rest);
+            self.input.at = self.input.buf.len();
+            return;
+        }
+        if self.filled > 0 {
+            self.close();
+            return;
+        }
+        let mut open = std::mem::take(&mut self.hold);
+        open.extend_from_slice(rest);
+        self.input.at = self.input.buf.len();
+        let cut = usize::try_from(limit).unwrap_or(usize::MAX);
+        self.hold = open.split_off(cut);
+        self.fill(&open, limit);
+    }
+
+    /// Place one whole record: in the piece being cut when it fits, else
+    /// in the next, cut into pieces of `limit` when it is longer than one.
+    fn place(&mut self, record: Vec<u8>, limit: u64) {
+        let mut record = record.as_slice();
+        while !record.is_empty() {
+            let size = record.len() as u64;
+            if self.filled + size <= limit {
+                self.fill(record, limit);
+                return;
+            }
+            if self.filled > 0 {
+                self.close();
+                continue;
+            }
+            let cut = usize::try_from(limit).unwrap_or(usize::MAX);
+            self.fill(&record[..cut], limit);
+            record = &record[cut..];
+        }
+    }
+
+    /// Add `data` to the piece being cut, started if there is none, and
+    /// close it once it holds `limit` bytes.
+    fn fill(&mut self, data: &[u8], limit: u64) {
+        if self.sink.is_none() {
+            let Some(piece) = self.start() else {
+                return;
+            };
+            self.sink = Some(Sink::File(piece));
+        }
+        if let Some(Sink::File(piece)) = &mut self.sink {
+            piece.put(data, &mut self.io);
+        }
+        self.filled += data.len() as u64;
+        if self.filled >= limit {
+            self.close();
+        }
+    }
+
     /// Piece `index` of -n: `size` bytes of the spool from `start`, which
     /// the host writes to its file, or to the output under K/N.
     fn range(&mut self, start: u64, size: u64, only: Option<u64>) {
+        if size == 0 && only.is_none() && self.plan.elide {
+            self.index += 1;
+            return;
+        }
         match only {
             Some(k) if self.index + 1 == k && size > 0 => {
                 self.io.push(Request::Emit {
@@ -561,6 +704,7 @@ impl Split {
                 let Some(path) = self.name() else {
                     return;
                 };
+                self.announce(&path);
                 let mode = WriteMode::Window {
                     fd: self.spool,
                     skip: start,
@@ -657,7 +801,13 @@ impl Split {
                     // The group holds what one piece would.
                     let mut piece = Piece::new(self.named(&suffix.unwrap_or_default()));
                     piece.limit /= usize::try_from(want).unwrap_or(1);
-                    piece.create(&mut self.io);
+                    // Under -e a piece is made by its first line, if any.
+                    piece.elide = self.plan.elide;
+                    if !piece.elide {
+                        let name = piece.name.clone();
+                        self.announce(&name);
+                        piece.create(&mut self.io);
+                    }
                     Sink::File(piece)
                 }
             };
@@ -688,7 +838,14 @@ impl Split {
         if let Some(sink) = slot.and_then(|at| self.group.get_mut(usize::try_from(at).ok()?)) {
             let data = &self.input.buf[self.input.at..self.input.at + end];
             match sink {
-                Sink::File(piece) => piece.put(data, &mut self.io),
+                Sink::File(piece) => {
+                    if piece.elide && !piece.touched && self.plan.verbose {
+                        self.said.extend_from_slice(b"creating file '");
+                        self.said.extend_from_slice(quoted(&piece.name).as_bytes());
+                        self.said.extend_from_slice(b"'\n");
+                    }
+                    piece.put(data, &mut self.io);
+                }
                 Sink::Out => out.extend_from_slice(data),
             }
         }
@@ -718,6 +875,7 @@ impl Stream for Split {
                 break;
             }
             self.step(out);
+            out.append(&mut self.said);
         }
         Ok(())
     }

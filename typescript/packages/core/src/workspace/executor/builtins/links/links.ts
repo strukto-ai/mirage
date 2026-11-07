@@ -204,8 +204,7 @@ export async function stripLinkOperands(
   if (name === 'rm') {
     const spec = SPECS.rm
     if (spec !== undefined) {
-      // Keyed by the dashed spelling the line used, not the dest.
-      force = parseCommand(spec, [...args], cwd, 'rm').flags['-f'] === true
+      force = parseCommand(spec, [...args], cwd, 'rm').flags['--force'] === true
     }
   }
   const verb = name === 'rm' ? 'remove' : 'unlink'

@@ -32,8 +32,8 @@ from mirage.workspace.executor.builtins.scope import _scope_path
 from mirage.workspace.executor.builtins.shared import (
     fail,
     ok,
+    parse_line,
     result,
-    split_value_flags,
 )
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.mount import MountEntry
@@ -69,33 +69,27 @@ def _parse_block(text: str) -> tuple[int, str] | None:
     return value, t
 
 
-def _last_format(args: list[str | PathSpec]) -> str | None:
-    """The last size-format flag (-h/-H/-k/-B) in the leading option run.
+def _block_spelling(args: list[str | PathSpec]) -> str:
+    """How the last block-size option was typed, for its refusal.
 
-    GNU df lets a later size flag override the earlier ones (``df -h -B1M``
-    prints a block header, ``df -B1M -h`` prints ``Size``), so the display
-    format is whichever of these appears last rather than a fixed
-    precedence. Returns the flag letter, or None when none are present.
+    GNU names the option as the line spelled it: ``-B x`` is an invalid
+    ``-B`` argument, ``--block-size=x`` an invalid ``--block-size`` one.
 
     Args:
         args (list[str | PathSpec]): args after the command name.
     """
-    last: str | None = None
-    i = 0
-    while i < len(args):
-        s = _scope_path(args[i])
-        if s == "--" or not (len(s) >= 2 and s[0] == "-" and s[1] != "-"):
+    spelled = "-B"
+    for arg in args:
+        word = _scope_path(arg)
+        if word == "--":
             break
-        body = s[1:]
-        for j, c in enumerate(body):
-            if c in "hHkB":
-                last = c
-            if c == "B":
-                if not body[j + 1 :]:
-                    i += 1
-                break
-        i += 1
-    return last
+        if word.startswith("--"):
+            name = word[2:].split("=", 1)[0]
+            if len(name) > 1 and "block-size".startswith(name):
+                spelled = "--block-size"
+        elif word.startswith("-") and "B" in word[1:]:
+            spelled = "-B"
+    return spelled
 
 
 def _human_si(n: int) -> str:
@@ -343,30 +337,36 @@ async def handle_df(
         dispatch (DispatchFn): op dispatcher (FILE existence check).
         args (list[str | PathSpec]): args after the command name.
     """
-    flags, values, operands, bad = split_value_flags(args, "hHkiaTP", "B")
-    if bad is not None:
-        return fail("df", f"df: invalid option -- '{bad}'\n", 2)
+    parsed, fl, refused = parse_line("df", args, session.cwd)
+    if refused is not None:
+        return refused
+    operands: list[str | PathSpec] = list(parsed.paths)
 
-    posix = "P" in flags
+    posix = fl.as_bool("portability")
     b_parsed = None
-    if "B" in values:
-        b_parsed = _parse_block(values["B"])
+    block_text = fl.as_str("block_size")
+    if block_text is not None:
+        b_parsed = _parse_block(block_text)
         if b_parsed is None:
-            return fail("df", f"df: invalid -B argument '{values['B']}'\n", 1)
+            option = _block_spelling(args)
+            return fail(
+                "df", f"df: invalid {option} argument '{block_text}'\n", 1
+            )
 
     # GNU resolves the mutually overriding size flags last-wins, so -h/-H
     # (human) or -k/-B (block) is chosen by whichever appears last.
-    last_fmt = _last_format(args)
-    si = last_fmt == "H"
-    human = last_fmt in ("h", "H")
-    if last_fmt == "B" and b_parsed is not None:
+    order = fl.typed_order("human_readable", "si", "k", "block_size")
+    last_fmt = order[-1] if order else None
+    si = last_fmt == "si"
+    human = last_fmt in ("human_readable", "si")
+    if last_fmt == "block_size" and b_parsed is not None:
         block, block_label = b_parsed[0], f"{b_parsed[1]}-blocks"
     else:
         block = 1024
         block_label = "1024-blocks" if posix else "1K-blocks"
 
-    inodes = "i" in flags
-    show_type = "T" in flags
+    inodes = fl.as_bool("inodes")
+    show_type = fl.as_bool("print_type")
 
     mounts, errors = await _target_mounts(
         registry, dispatch, session, operands
