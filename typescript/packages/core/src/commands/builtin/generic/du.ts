@@ -221,7 +221,7 @@ export function parseFlags(ctx: Context): DuFlags | IOResult {
     'threshold',
   )
   const when = fl.raw('time')
-  const timed = when !== undefined && when !== null && when !== false
+  const timed = when !== undefined && when !== false
   if (typeof when === 'string') typed.push(['time', when])
   const style = fl.asStr('time_style') ?? ctx.env?.TIME_STYLE
   if (timed && style !== undefined) typed.push(['time_style', style])
