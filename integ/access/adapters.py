@@ -206,6 +206,28 @@ async def beside_answer(
     return {**answer, "beside": await asyncio.wait_for(held, 60)}
 
 
+def _logs_as_events(
+    page: dict[str, Any], vfs: bool, last: int | None
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for item in reversed(page["items"]):
+        events.append({"type": "command", "command": item["command"]})
+        if vfs:
+            events.extend(
+                {"type": "vfs", "vfs": call["op"], "path": call["path"]}
+                for call in item["mounts"]
+            )
+        events.append(
+            {
+                "type": "result",
+                "exit_code": item["exit_code"],
+                "stdout": item["stdout"],
+                "stderr": item["stderr"],
+            }
+        )
+    return events if last is None else events[max(0, len(events) - last) :]
+
+
 class Recorder:
     """What the run touched: HTTP routes per server and CLI commands."""
 
@@ -816,12 +838,10 @@ class HttpSteps:
     async def history(
         self, wid: str, vfs: bool, last: int | None
     ) -> list[dict[str, Any]]:
-        params: dict[str, str] = {"vfs": "true"} if vfs else {}
-        if last is not None:
-            params["last"] = str(last)
-        return await self._ok(
-            "GET", f"/v1/workspaces/{wid}/logs", params=params
+        page = await self._ok(
+            "GET", f"/v1/workspaces/{wid}/logs", params={"limit": "200"}
         )
+        return _logs_as_events(page, vfs, last)
 
     async def asks(self, wid: str) -> list[tuple[str, str]]:
         return [
@@ -1048,12 +1068,8 @@ class CliSteps:
     async def history(
         self, wid: str, vfs: bool, last: int | None
     ) -> list[dict[str, Any]]:
-        args = ["workspace", "logs", wid]
-        if vfs:
-            args.append("--vfs")
-        if last is not None:
-            args += ["--last", str(last)]
-        return await self._json(*args)
+        page = await self._json("workspace", "logs", wid, "--limit", "200")
+        return _logs_as_events(page, vfs, last)
 
     async def asks(self, wid: str) -> list[tuple[str, str]]:
         return [

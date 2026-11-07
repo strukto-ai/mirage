@@ -13,10 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+from click import unstyle
 from typer.testing import CliRunner
 
 from mirage.cli import workspace as workspace_cli
@@ -205,97 +208,66 @@ def test_an_explained_create_reads_as_its_verdict_and_answers():
     assert _format_workspace_explanation(allowed) == "[allow]"
 
 
-def test_history_asks_for_what_its_options_name(fake):
-    fake.answer = _FakeResponse(200, b"[]")
+def test_logs_queries_and_preserves_json_page(fake):
+    fake.answer = _FakeResponse(200, b'{"items": [], "next": null}')
     result = _invoke(
-        "logs",
-        "w",
-        "--session",
-        "s1",
-        "--since",
-        "5",
-        "--last",
-        "2",
-        "--vfs",
+        "logs", "w", "--session", "s1", "--limit", "2", "--after", "cursor"
     )
     assert result.exit_code == 0, result.output
-    method, path, kwargs = fake.calls[0]
-    assert (method, path, kwargs["params"]) == (
+    assert json.loads(result.output) == {"items": [], "next": None}
+    assert fake.calls[0] == (
         "GET",
         "/v1/workspaces/w/logs",
-        {"session_id": "s1", "since": "5", "last": "2", "vfs": "true"},
+        {"params": {"session": "s1", "limit": "2", "after": "cursor"}},
     )
 
 
-def test_logs_help_and_removed_history_command():
-    help_result = _invoke("logs", "--help")
-    assert help_result.exit_code == 0
-    assert "--session" in help_result.output
-    assert "--since" in help_result.output
-    assert "--last" in help_result.output
-    assert "--vfs" in help_result.output
+def test_logs_help_and_removed_options():
+    result = _invoke("logs", "--help")
+    assert result.exit_code == 0
+    for flag in ("--session", "--limit", "--after", "--jsonl"):
+        assert flag in unstyle(result.output)
+    for flag in ("--since", "--last", "--vfs"):
+        assert _invoke("logs", "w", flag, "1").exit_code != 0
     assert _invoke("history", "w").exit_code != 0
 
 
-def test_history_reads_as_one_row_per_entry():
-    lines = _format_logs(
-        [
-            {
-                "type": "command",
-                "session": "s1",
-                "timestamp": 0,
-                "command": "cat /d/a",
-            },
-            {
-                "type": "vfs",
-                "session": "s1",
-                "timestamp": 0,
-                "vfs": "read",
-                "path": "/d/a",
-            },
-            {
-                "type": "result",
-                "session": "s1",
-                "timestamp": 1000,
-                "exit_code": 1,
-                "stdout": "hi\n",
-                "stderr": "cat: x: No such file\n",
-            },
-        ]
-    ).splitlines()
-    assert [line.split() for line in lines] == [
-        ["TIME", "SESSION", "TYPE", "EXIT", "ENTRY"],
-        ["1970-01-01", "00:00:00", "s1", "command", "cat", "/d/a"],
-        ["1970-01-01", "00:00:00", "s1", "vfs", "read", "/d/a"],
-        [
-            "1970-01-01",
-            "00:00:01",
-            "s1",
-            "result",
-            "1",
-            "hi\\ncat:",
-            "x:",
-            "No",
-            "such",
-            "file\\n",
-        ],
-    ]
-    assert _format_logs([]) == "No logs."
-
-
-def test_a_multiline_command_stays_on_its_row():
+def test_logs_terminal_rows_and_cursor():
     table = _format_logs(
-        [
-            {
-                "type": "command",
-                "session": "s1",
-                "timestamp": 0,
-                "command": "cat <<EOF\nhi\nEOF",
-            }
-        ]
+        {
+            "items": [
+                {
+                    "started_at": 1,
+                    "exit_code": 0,
+                    "command": "echo hi\necho bye",
+                }
+            ],
+            "next": "cursor",
+        }
     )
-    assert table.splitlines()[1].split()[-1] == "<<EOF\\nhi\\nEOF"
-    assert len(table.splitlines()) == 2
+    assert table.splitlines()[1].split() == [
+        "1970-01-01",
+        "00:00:01",
+        "0",
+        "echo",
+        "hi\\necho",
+        "bye",
+    ]
+    assert table.splitlines()[-1] == "Next page: --after cursor"
+    assert _format_logs({"items": [], "next": None}) == "No logs."
+
+
+def test_logs_jsonl_streams_without_json_wrapping(fake, monkeypatch):
+    @contextmanager
+    def stream(method, path, **kwargs):
+        fake.calls.append((method, path, kwargs))
+        yield httpx.Response(200, content=b'{"command":"echo hi"}\n')
+
+    monkeypatch.setattr(fake, "stream", stream, raising=False)
+    result = _invoke("logs", "w", "--jsonl", "--session", "s1")
+    assert result.exit_code == 0, result.exception
+    assert result.output == '{"command":"echo hi"}\n'
+    assert fake.calls[0][2]["params"]["format"] == "jsonl"
 
 
 def test_create_from_a_template_sends_its_name_and_the_id(fake):

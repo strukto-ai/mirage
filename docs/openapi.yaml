@@ -238,44 +238,31 @@ paths:
       operationId: workspace_logs_v1_workspaces__workspace_id__logs_get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
-        - name: session_id
+        - name: session
           in: query
-          required: false
-          description: Only this session's records; every session's when absent.
+          description: Only this session; absent or empty selects all sessions.
           schema:
             type: string
-        - name: since
+            pattern: ^[A-Za-z0-9._-]{0,64}$
+        - name: limit
           in: query
-          required: false
-          description: Include records at or after this Unix timestamp, in milliseconds.
+          description: Commands per JSON page. Ignored for JSONL export.
           schema:
-            anyOf:
-              - type: integer
-                minimum: 0
-              - type: 'null'
-        - name: last
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: after
           in: query
-          required: false
-          description: Return only the newest this many records, ordered oldest first.
+          description: Opaque next cursor from the previous page with the same filters. Ignored
+            for JSONL export.
           schema:
-            anyOf:
-              - type: integer
-                minimum: 0
-              - type: 'null'
-        - name: vfs
-          in: query
-          required: false
-          description: Include filesystem operation records alongside commands and results.
-          schema:
-            type: boolean
-            default: false
+            type: string
         - name: format
           in: query
-          required: false
-          description: Return JSON or download the same records as JSON Lines.
+          description: jsonl downloads all retained matching commands; other values select JSON.
           schema:
             type: string
-            enum: [json, jsonl]
             default: json
       responses:
         '200':
@@ -283,27 +270,22 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: object
-                  additionalProperties: true
-                title: Response Workspace Logs V1 Workspaces  Workspace Id  Logs Get
+                $ref: '#/components/schemas/LogPage'
               example:
-                - type: command
-                  session: 01a1b425-ec80-7038-86e0-75b597344043
-                  timestamp: 1794009600000
-                  cwd: /
-                  id: exec_01a1b470-6a0a-705a-bb61-aab01f2bde66
-                  command: echo hello
-                - type: result
-                  session: 01a1b425-ec80-7038-86e0-75b597344043
-                  timestamp: 1794009600008
-                  cwd: /
-                  parent: exec_01a1b470-6a0a-705a-bb61-aab01f2bde66
-                  duration_ms: 8
-                  exit_code: 0
-                  stdout: "hello\n"
-                  stderr: ''
+                items:
+                  - id: c1
+                    command: echo hi
+                    cwd: /
+                    started_at: 1700000000
+                    duration_ms: 8
+                    exit_code: 0
+                    stdout: |
+                      hi
+                    stderr: ''
+                    user_id: null
+                    api_key_id: null
+                    mounts: []
+                next: null
             application/x-ndjson:
               schema:
                 type: string
@@ -324,22 +306,24 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: >-
-        Return recorded commands and results, oldest first. A command record names
-        the shell line; its result links back through parent and includes stdout,
-        stderr, exit_code and duration_ms. The timestamp field and the since filter
-        use Unix milliseconds. Set vfs=true to include filesystem operation records.
-        An empty JSON response is []. With format=jsonl, the same records are
-        returned oldest first as newline-delimited JSON, with an attachment
-        filename of logs.jsonl. The [HTTP guide](/home/access/http#cloud-workspace-logs)
-        describes the different Cloud response and pagination.
+        '403':
+          $ref: '#/components/responses/403'
+      description: 'Return completed commands newest first by start time and ID, with their
+        mount calls. JSON started_at values are Unix seconds; durations are milliseconds. JSONL
+        exports all retained matching commands oldest first as command, vfs and result records,
+        linked by parent, with timestamp in Unix milliseconds. JSONL ignores limit and after.
+        Empty JSON is {items: [], next: null}; empty JSONL has an empty body. Retention is server-specific.
+        Cursors are opaque and server-specific; pagination is not a snapshot.'
       tags:
         - Workspaces
       x-hosts:
         - daemon
+        - hosted
       servers:
+        - url: https://api.strukto.ai
+          description: Cloud API
         - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+          description: Local daemon
   /v1/workspaces/{workspace_id}/stop:
     post:
       summary: Stop a workspace
@@ -4748,6 +4732,113 @@ paths:
       x-hosts: *id002
 components:
   schemas:
+    CommandLog:
+      properties:
+        id:
+          title: Id
+          type: string
+        command:
+          title: Command
+          type: string
+        cwd:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Cwd
+        started_at:
+          title: Started At
+          type: number
+        duration_ms:
+          title: Duration Ms
+          type: number
+        exit_code:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Exit Code
+        stdout:
+          title: Stdout
+          type: string
+        stderr:
+          title: Stderr
+          type: string
+        user_id:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: User Id
+        api_key_id:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Api Key Id
+        mounts:
+          items:
+            $ref: '#/components/schemas/LogMount'
+          title: Mounts
+          type: array
+      required:
+        - id
+        - command
+        - cwd
+        - started_at
+        - duration_ms
+        - exit_code
+        - stdout
+        - stderr
+        - user_id
+        - api_key_id
+        - mounts
+      title: CommandLog
+      type: object
+    LogMount:
+      properties:
+        op:
+          title: Op
+          type: string
+        path:
+          title: Path
+          type: string
+        source:
+          title: Source
+          type: string
+        bytes:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Bytes
+        started_at:
+          title: Started At
+          type: number
+        duration_ms:
+          title: Duration Ms
+          type: number
+      required:
+        - op
+        - path
+        - source
+        - bytes
+        - started_at
+        - duration_ms
+      title: LogMount
+      type: object
+    LogPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/CommandLog'
+          title: Items
+          type: array
+        next:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Next
+      required:
+        - items
+        - next
+      title: LogPage
+      type: object
     AnswerAskRequest:
       properties:
         answer:

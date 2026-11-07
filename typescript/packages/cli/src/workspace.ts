@@ -179,46 +179,22 @@ interface AskRecord {
   note: string
 }
 
-interface LogEntry {
-  type: string
-  session: string
-  timestamp: number
-  command?: string
-  exit_code?: number
-  stdout?: string
-  stderr?: string
-  vfs?: string
-  path?: string
+interface LogPage {
+  items: { id: string; command: string; started_at: number; exit_code: number | null }[]
+  next: string | null
 }
 
-function formatLogs(items: LogEntry[]): string {
-  if (items.length === 0) return 'No logs.'
-  return formatTable(
-    ['TIME', 'SESSION', 'TYPE', 'EXIT', 'ENTRY'],
-    items.map((e) => [
-      new Date(e.timestamp).toISOString().slice(0, 19).replace('T', ' '),
-      e.session,
-      e.type,
-      e.exit_code === undefined ? '' : String(e.exit_code),
-      logEntry(e),
+function formatLogs(page: LogPage): string {
+  if (page.items.length === 0) return 'No logs.'
+  const text = formatTable(
+    ['TIME', 'EXIT', 'COMMAND'],
+    page.items.map((item) => [
+      new Date(item.started_at * 1000).toISOString().slice(0, 19).replace('T', ' '),
+      item.exit_code === null ? '' : String(item.exit_code),
+      item.command.replaceAll('\n', '\\n'),
     ]),
   )
-}
-
-/**
- * A history entry's text on one row: the line, the vfs call, or the start
- * of what the line wrote, its newlines escaped. Mirrors Python's
- * `_log_entry`.
- */
-function logEntry(e: LogEntry): string {
-  const text = (
-    e.type === 'command'
-      ? (e.command ?? '')
-      : e.type === 'vfs'
-        ? `${e.vfs ?? ''} ${e.path ?? ''}`
-        : (e.stdout ?? '') + (e.stderr ?? '')
-  ).replaceAll('\n', '\\n')
-  return text.length <= 60 ? text : `${text.slice(0, 57)}...`
+  return page.next === null ? text : `${text}\nNext page: --after ${page.next}`
 }
 
 function formatAsks(items: AskRecord[]): string {
@@ -436,30 +412,41 @@ export function registerWorkspaceCommands(program: Command): Command {
     })
 
   ws.command('logs')
-    .description('Show what the workspace ran, oldest first.')
+    .description('Show completed commands, newest first.')
     .argument('<id>')
-    .option('--session <sessionId>', "Only this session's entries")
-    .option('--since <ms>', 'Only entries at or after this epoch ms')
-    .option('--last <count>', 'Only the newest this many entries')
-    .option('--vfs', 'Include each call a line made to a mount')
+    .option('--session <sessionId>', "Only this session's commands")
+    .option('--limit <count>', 'Commands per page (1-200)', '50')
+    .option('--after <cursor>', 'Cursor from the previous page')
+    .option('--jsonl', 'Export all matching retained commands, oldest first')
     .action(
       async (
         id: string,
-        opts: { session?: string; since?: string; last?: string; vfs?: boolean },
+        opts: { session?: string; limit: string; after?: string; jsonl?: boolean },
       ) => {
-        const params = new URLSearchParams()
-        if (opts.session !== undefined) params.set('session_id', opts.session)
-        if (opts.since !== undefined) params.set('since', opts.since)
-        if (opts.last !== undefined) params.set('last', opts.last)
-        if (opts.vfs === true) params.set('vfs', 'true')
-        const c = makeClient()
-        await c.ensureRunning({ allowSpawn: false })
-        const qs = params.toString()
-        const r = await c.request(
+        const params = new URLSearchParams({ limit: opts.limit })
+        if (opts.session !== undefined) params.set('session', opts.session)
+        if (opts.after !== undefined) params.set('after', opts.after)
+        if (opts.jsonl === true) params.set('format', 'jsonl')
+        const client = makeClient()
+        await client.ensureRunning({ allowSpawn: false })
+        const response = await client.request(
           'GET',
-          `/v1/workspaces/${encodeURIComponent(id)}/logs${qs === '' ? '' : `?${qs}`}`,
+          `/v1/workspaces/${encodeURIComponent(id)}/logs?${params.toString()}`,
         )
-        emit((await handleResponse(r)) as LogEntry[], formatLogs)
+        if (opts.jsonl === true && response.status < 400) {
+          if (response.body === null) return
+          const chunks: AsyncIterable<Uint8Array> = response.body
+          for await (const chunk of chunks) {
+            await new Promise<void>((resolve, reject) => {
+              process.stdout.write(chunk, (error) => {
+                if (error === null || error === undefined) resolve()
+                else reject(error)
+              })
+            })
+          }
+          return
+        }
+        emit((await handleResponse(response)) as LogPage, formatLogs)
       },
     )
   ws.command('list-asks')

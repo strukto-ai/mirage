@@ -326,44 +326,30 @@ Returns the workspace object.
 
 <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/logs`
 
-<ParamField query="session_id" type="string">Only this session's entries.</ParamField>
-<ParamField query="since" type="integer">Only entries at or after this time, in epoch milliseconds.</ParamField>
-<ParamField query="last" type="integer">Only the newest this many entries.</ParamField>
-<ParamField query="vfs" type="boolean" default="false">Add a `vfs` entry for each call a line made to a mount.</ParamField>
-<ParamField query="format" type="string" default="json">Use `jsonl` to download the filtered records as newline-delimited JSON.</ParamField>
+Cloud and the daemon return the same command page.
 
-Returns what the workspace ran, oldest first. A line is a `command` entry
-when it starts and a `result` entry when it ends, which names the line as its
-`parent`; a line still running has no `result` yet. With `vfs`, each call the
-line made to a mount is a `vfs` entry between them.
+<ParamField query="session" type="string">Only this session's commands. Absent or empty selects all sessions.</ParamField>
+<ParamField query="limit" type="integer" default="50">Commands per JSON page, from 1 to 200.</ParamField>
+<ParamField query="after" type="string">The previous page's opaque `next` cursor. Keep the same workspace and session filter.</ParamField>
+<ParamField query="format" type="string" default="json">Use `jsonl` to export all retained matching commands, ignoring `limit` and `after`.</ParamField>
+
+JSON contains completed commands newest first by start time and ID, with each
+command's mount calls. `started_at` uses Unix seconds; `duration_ms` uses
+milliseconds. The daemon returns null for unavailable identity fields.
 
 ```json
-[
-  {"type": "command", "id": "exec_01a1", "command": "cat /data/a.txt", "cwd": "/", "session": "s1", "timestamp": 1792630121040},
-  {"type": "vfs", "parent": "exec_01a1", "vfs": "read", "path": "/data/a.txt", "source": "s3", "bytes": 6, "duration_ms": 12, "session": "s1", "timestamp": 1792630121048},
-  {"type": "result", "parent": "exec_01a1", "exit_code": 0, "stdout": "hello\n", "stderr": "", "duration_ms": 21, "cwd": "/", "session": "s1", "timestamp": 1792630121061}
-]
+{"items":[{"id":"c1","command":"echo hi","cwd":"/","started_at":1700000000,"duration_ms":8,"exit_code":0,"stdout":"hi\n","stderr":"","user_id":null,"api_key_id":null,"mounts":[]}],"next":null}
 ```
 
-`stdout` and `stderr` keep their first 4096 characters.
-### Cloud workspace logs
+`next` is null on the last page. An empty page is `{"items":[],"next":null}`.
+Pagination is not a snapshot; retention can remove records between requests.
 
-Cloud also exposes `GET /v1/workspaces/{id}/logs` at `https://api.strukto.ai`,
-but returns paginated command objects instead of the daemon's array of records.
-`session` filters one session. `limit` defaults to 50 and accepts 1–200; pass
-the opaque `next` cursor as `after` to fetch the next page with the same
-session filter. The response is `{"items": [...], "next": null}` on the
-last page, ordered newest first by command start time and ID. Each item has
-`id`, `command`, `cwd`, `started_at`, `duration_ms`, `exit_code`, `stdout`,
-`stderr`, `user_id`, `api_key_id`, and `mounts`. Mounts contain `op`, `path`,
-`source`, `bytes`, `started_at`, and `duration_ms`. JSON `started_at` values
-are Unix seconds. Durations are milliseconds.
-
-`format=jsonl` downloads all retained matching commands oldest first, ignoring
-`limit` and `after`. Each command is followed by its VFS calls and result,
-whose `parent` identifies the command. JSONL `timestamp` values are Unix
-milliseconds. The attachment uses `application/x-ndjson` and a workspace-named
-`-logs.jsonl` filename. Retention limits both response formats.
+JSONL downloads command groups oldest first, each containing the command,
+its VFS calls and its result. Children link to the command ID through
+`parent`. JSONL `timestamp` values use Unix milliseconds. The attachment has
+an `application/x-ndjson` content type and a `<workspace>-logs.jsonl` filename.
+An empty export has an empty body. `stdout` and `stderr` contain recorded
+output, which can be truncated by the recorder.
 
 ### Delete a workspace
 

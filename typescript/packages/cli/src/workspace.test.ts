@@ -76,6 +76,18 @@ async function fakeServer(): Promise<{ url: string; seen: Seen[]; server: Server
         type: req.headers['content-type'] ?? '',
         body: Buffer.concat(chunks).toString('latin1'),
       })
+      if (url.includes('/logs')) {
+        if (url.includes('format=jsonl')) {
+          res
+            .writeHead(200, { 'content-type': 'application/x-ndjson' })
+            .end('{"type":"command","command":"echo hi"}\n')
+        } else {
+          res
+            .writeHead(200, { 'content-type': 'application/json' })
+            .end('{"items":[],"next":"cursor"}')
+        }
+        return
+      }
       if (req.method === 'GET') {
         res.writeHead(200, { 'content-type': 'application/x-tar' }).end('TAR')
         return
@@ -182,6 +194,56 @@ describe('mirage workspace set-profile', () => {
       expect(seen).toEqual([])
     } finally {
       server.close()
+    }
+  })
+})
+
+describe('mirage workspace logs', () => {
+  it.each([false, true])('uses the console contract with jsonl=%s', async (jsonl) => {
+    const home = mkdtempSync(join(tmpdir(), 'mirage-logs-'))
+    tempDirs.push(home)
+    const { url, seen, server } = await fakeServer()
+    try {
+      const child = spawn(
+        process.execPath,
+        [
+          BIN,
+          'workspace',
+          'logs',
+          'w',
+          '--session',
+          's1',
+          '--limit',
+          '2',
+          '--after',
+          'opaque',
+          ...(jsonl ? ['--jsonl'] : []),
+        ],
+        { env: { ...process.env, MIRAGE_HOME: home, MIRAGE_DAEMON_URL: url } },
+      )
+      let stdout = ''
+      let stderr = ''
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString()
+      })
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString()
+      })
+      const code = await new Promise<number | null>((resolve) => child.on('close', resolve))
+      expect(stderr).toBe('')
+      expect(code).toBe(0)
+      expect(seen[0]?.url).toBe(
+        `/v1/workspaces/w/logs?limit=2&session=s1&after=opaque${jsonl ? '&format=jsonl' : ''}`,
+      )
+      if (jsonl) expect(stdout).toBe('{"type":"command","command":"echo hi"}\n')
+      else expect(JSON.parse(stdout)).toEqual({ items: [], next: 'cursor' })
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => {
+          if (error === undefined) resolve()
+          else reject(error)
+        }),
+      )
     }
   })
 })
