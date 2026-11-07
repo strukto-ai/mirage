@@ -147,11 +147,49 @@ export function repoNumber(
   urlKind: 'issues' | 'pull',
 ): [RepoRef, number] {
   const raw = value ?? ''
-  if (/^\d+$/.test(raw)) return [repoFor(accessor, fl), Number(raw)]
-  const match = /^https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)\/?$/.exec(raw)
-  if (match?.[3] !== urlKind) throw new Error(`a ${label} number is required`)
-  checkHost(accessor, new URL(raw).hostname)
+  const found = numberedSubject(accessor, fl, raw, urlKind)
+  if (found !== null) return found
+  throw new Error(`invalid ${label} format: ${JSON.stringify(raw)}`)
+}
+
+/** The number a selector spells out, `#` optional; null for anything else. */
+export function subjectNumber(raw: string): number | null {
+  const digits = raw.startsWith('#') ? raw.slice(1) : raw
+  return /^\d+$/.test(digits) ? Number(digits) : null
+}
+
+/**
+ * The subject a selector names outright, as gh reads one: its number, `#`
+ * optional, or its URL, of which gh reads the path alone, so a tab or a
+ * fragment after the number is fine. An issue command takes a pull
+ * request's URL too. Null for anything else, which a pull request command
+ * reads as a branch.
+ */
+export function numberedSubject(
+  accessor: GitHubAccount,
+  fl: FlagView,
+  raw: string,
+  urlKind: 'issues' | 'pull',
+): [RepoRef, number] | null {
+  const number = subjectNumber(raw)
+  if (number !== null) return [repoFor(accessor, fl), number]
+  if (!URL.canParse(raw)) return null
+  const url = new URL(raw)
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+  const match = /^\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/.exec(url.pathname)
+  if (match === null || (urlKind === 'pull' && match[3] !== 'pull')) return null
+  checkHost(accessor, url.hostname)
   return [parseRepo(`${match[1] ?? ''}/${match[2] ?? ''}`), Number(match[4])]
+}
+
+/**
+ * The branch gh reads from the checkout, which a workspace has no
+ * equivalent of, so the install's `branch` stands in for it; null when the
+ * install names none.
+ */
+export function currentBranch(accessor: GitHubAccount): string | null {
+  const branch = accessor.config.branch
+  return branch === undefined || branch === '' ? null : branch
 }
 
 export function csvValues(values: readonly string[]): string[] {

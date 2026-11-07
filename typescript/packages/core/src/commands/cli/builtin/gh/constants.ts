@@ -528,7 +528,7 @@ export const HELP_TOPICS: Record<string, string> = {
   environment:
     'This gh reads no environment variables: `GH_TOKEN`, `GITHUB_TOKEN`, `GH_HOST`, `GH_REPO`\n' +
     "and the rest of gh's list have no effect here.\n\n" +
-    'The token, the API base URL, the default repository and the default branch come from the\n' +
+    'The token, the API base URL, the default repository and the current branch come from the\n' +
     "workspace's gh configuration: `token`, `base_url`, `repo` and `branch`.\n",
   'exit-codes':
     'gh follows normal conventions regarding exit codes.\n\n' +

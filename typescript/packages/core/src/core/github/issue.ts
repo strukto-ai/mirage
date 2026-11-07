@@ -64,6 +64,16 @@ export async function editIssue(
   body: Record<string, unknown>,
 ): Promise<unknown> {
   await getIssue(transport, ref, number)
+  return updateIssue(transport, ref, number, body)
+}
+
+/** Patch an issue the caller has already read, as `gh issue edit` reads every one first. */
+export function updateIssue(
+  transport: GitHubTransport,
+  ref: RepoRef,
+  number: number,
+  body: Record<string, unknown>,
+): Promise<unknown> {
   return transport.request('PATCH', path(ref, `/${String(number)}`), body)
 }
 

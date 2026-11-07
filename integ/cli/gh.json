@@ -1,6 +1,19 @@
 {
   "cases": [
     {
+      "id": "gh_install_branch_dev_is_made_off_main",
+      "seq": 568998,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "main=$(gh api repos/integ/repo-cli/git/ref/heads/main --jq .object.sha) && gh api repos/integ/repo-cli/git/refs -f ref=refs/heads/dev -f sha=$main --jq .ref && gh api repos/integ/repo-cli/contents/dev.md -X PUT -f message='Add dev.md' -f branch=dev -f content=ZGV2Cg== --jq .content.path",
+      "expect": {
+        "exit": 0,
+        "stdout": "refs/heads/dev\ndev.md\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "gh_repo_view_default_repo",
       "seq": 569000,
       "targets": [
@@ -521,7 +534,7 @@
       }
     },
     {
-      "id": "gh_pr_create_requires_explicit_noninteractive_fields",
+      "id": "gh_pr_create_takes_an_explicit_head_and_base",
       "seq": 569041,
       "targets": [
         "cli-gh"
@@ -2414,7 +2427,7 @@
       "command": "sha=$(gh api repos/integ-user/url-fork/git/ref/heads/main --jq .object.sha) && gh api -X POST repos/integ-user/url-fork/git/refs -f ref=refs/heads/side -f sha=$sha > /dev/null && gh repo fork git@github.com:integ-user/url-fork.git --org acme --fork-name narrow --default-branch-only && gh api repos/acme/narrow/branches --jq '[.[].name]' && gh repo fork integ-user/url-fork --org acme --fork-name wide > /dev/null && gh api repos/acme/wide/branches --jq '[.[].name] | sort'",
       "expect": {
         "exit": 0,
-        "stdout": "✓ Created fork acme/narrow\n[\"main\"]\n[\"docs-pass\",\"feature\",\"main\",\"old\",\"side\"]\n",
+        "stdout": "✓ Created fork acme/narrow\n[\"main\"]\n[\"dev\",\"docs-pass\",\"feature\",\"main\",\"old\",\"side\"]\n",
         "stderr": ""
       }
     },
@@ -2715,6 +2728,123 @@
         "exit": 0,
         "stdout": "✓ Reopened issue integ/repo-cli#13 (reopened)\n[\"OPEN\",[\"still broken\"]]\n",
         "stderr": "! Issue integ/repo-cli#13 (reopened) is already open\n"
+      }
+    },
+    {
+      "id": "gh_workflow_run_without_ref_takes_the_default_branch",
+      "seq": 9940110,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh workflow run ci.yml && gh run list --limit 1 --json event,headBranch --jq '.[0]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"event\":\"workflow_dispatch\",\"headBranch\":\"main\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_pr_create_opens_the_current_branch_into_the_default_branch",
+      "seq": 9940111,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr create -t current -b 'from dev' && gh pr view --json headRefName,baseRefName,title --jq '[.headRefName,.baseRefName,.title]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "https://github.com/integ/repo-cli/pull/14\n[\"dev\",\"main\",\"current\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_pr_selector_is_a_number_a_url_or_a_branch",
+      "seq": 9940112,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr view dev --json number --jq .number; gh pr view '#14' --json headRefName --jq .headRefName; gh pr view https://github.com/integ/repo-cli/pull/14/files --json title --jq .title; gh pr view nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "14\ndev\ncurrent\n",
+        "stderr": "gh pr view: no pull requests found for branch \"nope\"\n"
+      }
+    },
+    {
+      "id": "gh_pr_close_and_reopen_take_no_current_branch",
+      "seq": 9940113,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr close; echo $?; gh pr reopen; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n",
+        "stderr": "cannot close pull request: number, url, or branch required\ngh pr reopen: accepts 1 arg(s), received 0\n"
+      }
+    },
+    {
+      "id": "gh_issue_selector_is_a_number_or_a_url",
+      "seq": 9940114,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue view '#4' --json number --jq .number; gh issue view dev",
+      "expect": {
+        "exit": 1,
+        "stdout": "4\n",
+        "stderr": "gh issue view: invalid issue format: \"dev\"\n"
+      }
+    },
+    {
+      "id": "gh_pr_create_refuses_a_second_open_pull_request",
+      "seq": 9940115,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr create -t again -b 'from dev'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh pr create: a pull request for branch \"dev\" into branch \"main\" already exists:\nhttps://github.com/integ/repo-cli/pull/14\n"
+      }
+    },
+    {
+      "id": "gh_issue_and_pr_verbs_count_their_selectors",
+      "seq": 9940116,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue view; gh issue view 1 2; gh issue edit --title x; gh pr view 1 2; gh pr close 1 2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh issue view: accepts 1 arg(s), received 0\ngh issue view: accepts 1 arg(s), received 2\ngh issue edit: requires at least 1 arg(s), only received 0\ngh pr view: accepts at most 1 arg(s), received 2\ntoo many arguments\n"
+      }
+    },
+    {
+      "id": "gh_edit_without_a_field_is_refused",
+      "seq": 9940117,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue edit 4; gh pr edit 14",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "field to edit flag required when not running interactively\n--title, --body, --reviewer, --assignee, --label, --project, or --milestone required when not running interactively\n"
+      }
+    },
+    {
+      "id": "gh_issue_edit_takes_several_issues",
+      "seq": 9940118,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue edit 13 4 --add-label bug && gh issue view 13 --json labels --jq '[.labels[].name]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "https://github.com/integ/repo-cli/issues/13\nhttps://github.com/integ/repo-cli/issues/4\n[\"bug\"]\n",
+        "stderr": ""
       }
     }
   ]

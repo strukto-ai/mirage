@@ -554,7 +554,7 @@ HELP_TOPICS: dict[str, str] = {
         "`GITHUB_TOKEN`, `GH_HOST`, `GH_REPO`\n"
         "and the rest of gh's list have no effect here.\n\n"
         "The token, the API base URL, the default repository and the "
-        "default branch come from the\n"
+        "current branch come from the\n"
         "workspace's gh configuration: `token`, `base_url`, `repo` and "
         "`branch`.\n"
     ),
