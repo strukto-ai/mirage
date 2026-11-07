@@ -25,6 +25,7 @@ import {
 } from '../../shell/console/index.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { sleep } from '../../utils/abort.ts'
+import { SystemClock } from '../../utils/clock.ts'
 import { KILLED_EXIT_CODE, WATCH_RETRY_SECONDS } from './constants.ts'
 import type { Job, JobState } from './types.ts'
 
@@ -126,7 +127,8 @@ export class JobHandle {
     this.workspaceId = init.workspaceId ?? ''
     this.line = init.line ?? null
     this.group = init.group ?? null
-    this.now = init.now ?? (() => Date.now() / 1000)
+    const clock = new SystemClock()
+    this.now = init.now ?? (() => clock.now())
     if (init.state !== undefined) this.state = init.state
     if (init.exitCode !== undefined) this.exitCode = init.exitCode
     if (init.signal !== undefined) this.signal = init.signal

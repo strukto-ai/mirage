@@ -97,8 +97,13 @@ KEPT_ON_SYSTEM_CLOCK = {
     ),
     ("execution/job/table.py", "asyncio.sleep"): (
         "paces the renewal of the owner's lease, which expires on real "
-        "time in the store, and the retry of a failed watch; a manual "
-        "clock's sleep returns at once and would spin both"
+        "time in the store; a manual clock's sleep returns at once and "
+        "would spin it"
+    ),
+    ("execution/job/handle.py", "asyncio.sleep"): (
+        "paces the retry of a failed watch, which reads the store on real "
+        "time; a manual clock's sleep returns at once and would spin the "
+        "retry"
     ),
     ("execution/job/table.py", "time.time"): (
         "stamps seen_at on the process records, which a host reap compares "

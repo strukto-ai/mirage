@@ -14,7 +14,6 @@
 
 import asyncio
 import logging
-import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
@@ -35,6 +34,7 @@ from mirage.shell.console import (
     exit_outcome,
     killed_outcome,
 )
+from mirage.utils.clock import SystemClock
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
@@ -108,7 +108,9 @@ class JobHandle:
     workspace_id: str = ""
     line: LineId | None = None
     group: int | None = None
-    now: Callable[[], float] = field(default=time.time, repr=False)
+    now: Callable[[], float] = field(
+        default_factory=lambda: SystemClock().now, repr=False
+    )
 
     @property
     def record(self) -> Job:

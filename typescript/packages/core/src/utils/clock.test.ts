@@ -69,7 +69,7 @@ const KEPT_ON_SYSTEM_CLOCK: Record<string, string> = {
     'replace; on a manual clock a clock sleep would end the bound before the job ' +
     "stops. It also paces the owner's lease, renewing it and checking another " +
     "owner's, which expires on real time in the store",
-  'execution/job/table.ts sleep':
+  'execution/job/handle.ts sleep':
     'paces the retry of a failed watch, which reads the store on real time; a ' +
     "manual clock's sleep returns at once and would spin the retry",
   'execution/job/table.ts Date.now':
