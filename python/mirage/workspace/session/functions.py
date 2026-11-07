@@ -37,9 +37,15 @@ class FunctionSite:
         aliases (Mapping[str, str] | None): the aliases the body runs,
             as its definition saw them (``alias_view``); None to read
             them as they are when it runs.
+        name (str): what the body's diagnostics name as their source:
+            the file it was sourced from, else ``environment``.
+        row (int): the row the definition starts on as its text was
+            typed, which the body's ``$LINENO`` counts from.
     """
 
     source: str
     mark: tuple[int, int]
     origin: Occurrence | None
     aliases: Mapping[str, str] | None = None
+    name: str = "environment"
+    row: int = 0

@@ -85,7 +85,7 @@ async def test_a_capped_store_refuses_growth_past_its_cap():
     try:
         assert (await _run(ws, "printf 12345678 > /a/f"))[0] == 0
         code, err = await _run(ws, "printf 123 > /a/g")
-        assert (code, err) == (1, "/a/g: Disk quota exceeded\n")
+        assert (code, err) == (1, "bash: line 1: /a/g: Disk quota exceeded\n")
         assert data.usage is not None
         assert (data.usage.limit, data.usage.used) == (10, 8)
         assert (await _run(ws, "printf 12 > /a/g"))[0] == 0

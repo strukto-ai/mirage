@@ -144,7 +144,7 @@ describe('shell arrays', () => {
       const [code, out, err] = await runResult(ws, 'a=(1); a[-5]=x; echo rc=$?')
       expect(code).toBe(1)
       expect(out).toBe('')
-      expect(err).toBe('bash: a[-5]: bad array subscript\n')
+      expect(err).toBe('bash: line 1: a[-5]: bad array subscript\n')
     } finally {
       await ws.close()
     }

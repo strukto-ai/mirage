@@ -172,15 +172,26 @@ class InlineAwait(Generic[_T]):
 
 
 class OutputStream:
-    """Own producer cleanup even when its byte iterator was never started."""
+    """Own producer cleanup even when its byte iterator was never started.
+
+    Args:
+        source (AsyncIterator[bytes]): the bytes.
+        close (Callable[[], Awaitable[None]]): releases what the producer
+            holds.
+        eager (bool): pulling ahead reads nothing (a command with no
+            input or file operands, ``seq``), so a pipe takes what fits
+            in its buffer as a writer's own process would write it.
+    """
 
     def __init__(
         self,
         source: AsyncIterator[bytes],
         close: Callable[[], Awaitable[None]],
+        eager: bool = False,
     ) -> None:
         self._source = source
         self._close = close
+        self.eager = eager
         self._pull: InlineAwait[bytes] | None = None
         self._closing: asyncio.Task[None] | None = None
 

@@ -382,7 +382,7 @@
       "expect": {
         "exit": 1,
         "stdout": "declare -Ar QAK=([k]=\"v\" )\n",
-        "stderr": "bash: QAK: readonly variable\n"
+        "stderr": "bash: line 1: QAK: readonly variable\n"
       }
     },
     {
@@ -417,7 +417,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\ndeclare -a QAL=([0]=\"1\" [1]=\"2\")\n",
-        "stderr": "bash: declare: QAL: cannot convert indexed to associative array\n"
+        "stderr": "bash: line 1: declare: QAL: cannot convert indexed to associative array\n"
       }
     },
     {
@@ -592,7 +592,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: declare: 1+: syntax error: operand expected (error token is \"+\")\n"
+        "stderr": "bash: line 1: declare: 1+: syntax error: operand expected (error token is \"+\")\n"
       }
     },
     {
@@ -662,7 +662,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\ndeclare -- QBF=\"1\"\ndeclare -r QBG=\"1\"\n",
-        "stderr": "bash: declare: QBG: readonly variable\n"
+        "stderr": "bash: line 1: declare: QBG: readonly variable\n"
       }
     },
     {
@@ -767,7 +767,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=2\n",
-        "stderr": "bash: declare: +q: invalid option\ndeclare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]\n"
+        "stderr": "bash: line 1: declare: +q: invalid option\ndeclare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]\n"
       }
     },
     {
@@ -802,7 +802,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\none\n",
-        "stderr": "bash: qcaf: readonly function\nbash: unset: qcaf: cannot unset: readonly function\n"
+        "stderr": "bash: line 1: qcaf: readonly function\nbash: line 1: unset: qcaf: cannot unset: readonly function\n"
       }
     },
     {
@@ -837,7 +837,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nqcbf () \ndeclare -fr qcbf\n",
-        "stderr": "bash: readonly: qcbnothere: not a function\n"
+        "stderr": "bash: line 1: readonly: qcbnothere: not a function\n"
       }
     },
     {
@@ -1047,7 +1047,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nrc=1\ndeclare -Ar M=([k]=\"v\" )\ndeclare -ir N=\"1\"\ndeclare -r S=\"1\"\ndeclare -ar T=([0]=\"1\")\ndeclare -ar W=([0]=\"1\" [1]=\"2\")\ndeclare -ar X=([0]=\"1\" [1]=\"2\")\ndeclare -r Z\n",
-        "stderr": "bash: readonly: W: cannot convert indexed to associative array\n"
+        "stderr": "bash: line 1: readonly: W: cannot convert indexed to associative array\n"
       }
     },
     {
@@ -1082,7 +1082,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\ndeclare -A X=([k]=\"v\" )\ndeclare -a X=([0]=\"1\" [1]=\"2\")\n",
-        "stderr": "bash: X: cannot convert indexed to associative array\nbash: M: cannot convert associative to indexed array\n"
+        "stderr": "bash: line 1: X: cannot convert indexed to associative array\nbash: line 1: M: cannot convert associative to indexed array\n"
       }
     },
     {
@@ -1152,7 +1152,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\ndeclare -a X=([0]=\"9\" [1]=\"2\")\ndeclare -a S=([0]=\"1\")\ndeclare -A M=([0]=\"1\" )\ndeclare -a Y=([0]=\"1\" [1]=\"2\")\n",
-        "stderr": "bash: declare: Y: cannot convert indexed to associative array\nbash: declare: R: readonly variable\n"
+        "stderr": "bash: line 1: declare: Y: cannot convert indexed to associative array\nbash: line 1: declare: R: readonly variable\n"
       }
     },
     {
@@ -1187,7 +1187,7 @@
       "expect": {
         "exit": 1,
         "stdout": "declare -- G=\"new\"\nrc=1\ndeclare -ax A=([0]=\"new\" [1]=\"keep\")\nx=4\ndeclare -aix N=([0]=\"8\" [1]=\"x++\")\ndeclare -r R=\"1\"\ndeclare -ax A=([0]=\"new\" [1]=\"keep\")\ndeclare -aix N=([0]=\"8\" [1]=\"x++\")\n0\n",
-        "stderr": "bash: export: ref: cannot convert indexed to associative array\n"
+        "stderr": "bash: line 1: export: ref: cannot convert indexed to associative array\n"
       }
     },
     {
@@ -1292,7 +1292,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nrc=0\nrc=0\nrc=1\ndeclare -A MAP=([k]=\"v\" )\ndeclare -Ax M2=([k]=\"v\" )\ndeclare -A M3=([k]=\"v\" )\ndeclare -A M4=([k]=\"v\" )\n",
-        "stderr": "bash: MAP: 'stray': must use subscript when assigning associative array\nbash: M2: 's2': must use subscript when assigning associative array\nbash: M3: s3: must use subscript when assigning associative array\nbash: M4: 's4': must use subscript when assigning associative array\nbash: declare: `1BAD=x': not a valid identifier\n"
+        "stderr": "bash: line 1: MAP: 'stray': must use subscript when assigning associative array\nbash: line 1: M2: 's2': must use subscript when assigning associative array\nbash: line 1: M3: s3: must use subscript when assigning associative array\nbash: line 1: M4: 's4': must use subscript when assigning associative array\nbash: line 1: declare: `1BAD=x': not a valid identifier\n"
       }
     }
   ]

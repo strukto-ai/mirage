@@ -44,6 +44,18 @@ export function sameLine(root: TSNodeLike, before: TSNodeLike, after: TSNodeLike
 }
 
 /**
+ * The row `node` starts on, or ends on, in its text as typed, where a line
+ * the parse joined to the next (a backslash before the newline) still
+ * counts. Mirrors Python's source_row.
+ */
+export function sourceRow(node: TSNodeLike, end = false): number {
+  const row = (end ? node.endPosition?.row : node.startPosition?.row) ?? 0
+  if (!(node instanceof ProgramNode)) return row
+  const index = end ? Math.max(node.endIndex - 1, node.startIndex) : node.startIndex
+  return node.program.row(node.program.offsets[index] ?? index)
+}
+
+/**
  * The row the shell began reading `node`'s command on. bash reads a whole
  * line before running any of it, and a complete command spanning lines
  * whole, with the rest of the line it ends on: a command after a `;`, or

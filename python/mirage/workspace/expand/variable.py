@@ -46,6 +46,7 @@ from mirage.shell.helpers import get_text, source_parts
 from mirage.shell.parameter import bad_substitution, scan_parameter
 from mirage.shell.types import ArithWrite, TSNodeLike
 from mirage.shell.types import NodeType as NT
+from mirage.shell.voice import shell_voice
 from mirage.utils.glob_walk import escape_glob, mark_globs
 from mirage.utils.path import expand_tilde
 from mirage.view.types import SessionView
@@ -68,6 +69,7 @@ from mirage.workspace.session.elements import assign_element, landed_arith
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.session.state import (
     RandomReader,
+    deref,
     nameref_target,
     next_random,
     positional_params,
@@ -147,7 +149,7 @@ def guard_expansion_write(session: SessionState, *names: str) -> None:
             ensure_var_visible(session, name)
         except PolicyDenied as exc:
             raise DiscardSignal(
-                encode_text(f"bash: {exc.strerror}\n")
+                encode_text(f"{shell_voice()}{exc.strerror}\n")
             ) from exc
 
 
@@ -161,7 +163,7 @@ def _write_refusal(exc: PolicyDenied | ArithError) -> ExitSignal:
         exc (PolicyDenied | ArithError): the refusal.
     """
     if isinstance(exc, PolicyDenied):
-        return DiscardSignal(encode_text(f"bash: {exc.strerror}\n"))
+        return DiscardSignal(encode_text(f"{shell_voice()}{exc.strerror}\n"))
     return exc.signal(fatal=True)
 
 
@@ -269,12 +271,12 @@ async def expansion_write(
         raise _write_refusal(exc) from exc
     if status == "readonly":
         raise DiscardSignal(
-            encode_text(f"bash: {name}: readonly variable\n"),
+            encode_text(f"{shell_voice()}{name}: readonly variable\n"),
             contained_code=contained,
         )
     if status != "ok":
         raise DiscardSignal(
-            encode_text(f"bash: {name}[{key}]: bad array subscript\n")
+            encode_text(f"{shell_voice()}{name}[{key}]: bad array subscript\n")
         )
 
 
@@ -339,6 +341,9 @@ def _lookup_var(
     if var in assocs:
         # `$m` on an associative array is `${m["0"]}`, the literal key.
         return assocs[var].get("0", "")
+    dynamic = session.dynamic_value(deref(session, var) or var)
+    if dynamic is not None:
+        return dynamic
     # `$PWD` is deliberately absent here: `cd` writes it into the env like
     # any exported variable, so it can be assigned, unset and printed by
     # `env`, exactly as bash allows. Resolving it here instead would make
@@ -1107,7 +1112,9 @@ async def _unset_error(
         )
     ref = p.var_name if p.subscript is None else f"{p.var_name}[{p.subscript}]"
     return ExitSignal(
-        127, stderr=encode_text(f"bash: {ref}: {message}\n"), contained_code=1
+        127,
+        stderr=encode_text(f"{shell_voice()}{ref}: {message}\n"),
+        contained_code=1,
     )
 
 
@@ -1311,6 +1318,10 @@ async def _expand_braces(
             if drawn is not None:
                 val = str(drawn)
                 var_in_env = True
+        if not var_in_env:
+            dynamic = session.dynamic_value(p.var_name)
+            if dynamic is not None:
+                val, var_in_env = dynamic, True
         if not var_in_env and p.var_name in env:
             val = env[p.var_name]
             var_in_env = True
@@ -1441,7 +1452,7 @@ def _bad_subscript(p: _BraceParse) -> DiscardSignal:
     """
     return DiscardSignal(
         encode_text(
-            f"bash: {p.var_name}[{p.subscript}]: bad array subscript\n"
+            f"{shell_voice()}{p.var_name}[{p.subscript}]: bad array subscript\n"
         )
     )
 
@@ -1587,7 +1598,7 @@ async def _expand_splat(
         if triggered:
             raise DiscardSignal(
                 encode_text(
-                    f"bash: ${p.var_name}: cannot assign in this way\n"
+                    f"{shell_voice()}${p.var_name}: cannot assign in this way\n"
                 )
             )
     if star and quoted:

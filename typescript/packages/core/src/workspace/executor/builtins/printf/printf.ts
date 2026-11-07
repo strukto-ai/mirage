@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import { usageHint } from '../../../../commands/spec/usage.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { isProgramInvocation } from '../../../../context/session_context.ts'
@@ -71,7 +72,7 @@ export async function handlePrintf(
     if (parsed === null) {
       // bash validates the name before formatting, so a bad name
       // suppresses the conversion errors the format would report.
-      return fail('printf', `bash: printf: \`${target}': not a valid identifier\n`, 2)
+      return fail('printf', `${shellVoice()}printf: \`${target}': not a valid identifier\n`, 2)
     }
   }
   const first = args[0]
@@ -97,7 +98,7 @@ export async function handlePrintf(
       // requires an argument` is a separate change.
       return fail(
         'printf',
-        `bash: printf: -${first[1] ?? ''}: invalid option\n${builtinUsage('printf')}`,
+        `${shellVoice()}printf: -${first[1] ?? ''}: invalid option\n${builtinUsage('printf')}`,
         2,
       )
     }
@@ -138,11 +139,14 @@ export async function handlePrintf(
       throw signal
     }
     if (!(err instanceof PolicyDenied)) throw err
-    return fail('printf', errors + `bash: ${err.message}\n`)
+    return fail('printf', errors + `${shellVoice()}${err.message}\n`)
   }
-  if (status === 'readonly') return fail('printf', errors + `bash: ${base}: readonly variable\n`)
-  if (status === 'denied') return fail('printf', errors + `bash: ${base}: permission denied\n`)
-  if (status !== 'ok') return fail('printf', errors + `bash: ${target}: bad array subscript\n`)
+  if (status === 'readonly')
+    return fail('printf', errors + `${shellVoice()}${base}: readonly variable\n`)
+  if (status === 'denied')
+    return fail('printf', errors + `${shellVoice()}${base}: permission denied\n`)
+  if (status !== 'ok')
+    return fail('printf', errors + `${shellVoice()}${target}: bad array subscript\n`)
   return result('printf', { exitCode, stderr: errors })
 }
 

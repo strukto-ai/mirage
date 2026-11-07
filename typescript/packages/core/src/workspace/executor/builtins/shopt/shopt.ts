@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -52,9 +53,17 @@ export function handleShopt(
 ): RedirectResult {
   const scan = scanOptions(args, 'pqosu')
   if (scan.bad !== null)
-    return fail('shopt', `bash: shopt: ${scan.bad}: invalid option\n${builtinUsage('shopt')}`, 2)
+    return fail(
+      'shopt',
+      `${shellVoice()}shopt: ${scan.bad}: invalid option\n${builtinUsage('shopt')}`,
+      2,
+    )
   if (scan.letters.includes('s') && scan.letters.includes('u')) {
-    return fail('shopt', 'bash: shopt: cannot set and unset shell options simultaneously\n', 1)
+    return fail(
+      'shopt',
+      `${shellVoice()}shopt: cannot set and unset shell options simultaneously\n`,
+      1,
+    )
   }
   const reusable = scan.letters.includes('p')
   const quiet = scan.letters.includes('q')
@@ -78,7 +87,9 @@ export function handleShopt(
   }
   for (const name of names) {
     if (!table.has(name) || (setO && !SET_OPTION_NAMES.has(name))) {
-      errors.push(`bash: shopt: ${name}: invalid ${setO ? 'option name' : 'shell option name'}`)
+      errors.push(
+        `${shellVoice()}shopt: ${name}: invalid ${setO ? 'option name' : 'shell option name'}`,
+      )
       status = 1
       continue
     }

@@ -32,6 +32,7 @@ from mirage.shell.console import JobConsole
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
 from mirage.shell.job_table import JobTable
 from mirage.shell.join import shell_join
+from mirage.shell.voice import shell_voice
 from mirage.utils.path import resolve_path
 from mirage.vfs.bin import BinViewVFS
 from mirage.workspace.evaluation import EvaluationContext, child_context
@@ -153,12 +154,13 @@ async def handle_exec_path(
             if isinstance(exc, FileNotFoundError)
             else CANNOT_EXECUTE_STATUS
         )
-        return script_error(path, strerror, code)
+        return script_error(f"{shell_voice()}{path}", strerror, code, path)
     if is_binary(data):
         return script_error(
-            path,
+            f"{shell_voice()}{path}",
             "cannot execute binary file: Exec format error",
             CANNOT_EXECUTE_STATUS,
+            path,
         )
     script = decode_text(data)
     target = namespace.session_links(session).follow(

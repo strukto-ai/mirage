@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.context import program_invocation
+from mirage.context import session_voice
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
@@ -45,9 +45,9 @@ async def handle_pwd(
         operands, PWD_OPTIONS, shell_physical
     )
     if bad_opt is not None:
-        voice = "" if program_invocation(session) else "bash: "
         err = encode_text(
-            f"{voice}pwd: -{bad_opt}: invalid option\n{builtin_usage('pwd')}"
+            f"{session_voice(session)}pwd: -{bad_opt}: invalid option\n"
+            f"{builtin_usage('pwd')}"
         )
         return (
             None,

@@ -53,6 +53,27 @@ export class ParsedProgram {
     this.released = true
     this.references -= 1
   }
+
+  private newlines: number[] | null = null
+
+  /** The row a char of the line as typed is on: the newlines before it,
+   * found once per parse. Mirrors Python's row. */
+  row(at: number): number {
+    if (this.newlines === null) {
+      const found: number[] = []
+      for (let i = this.original.indexOf('\n'); i !== -1; i = this.original.indexOf('\n', i + 1))
+        found.push(i)
+      this.newlines = found
+    }
+    let low = 0
+    let high = this.newlines.length
+    while (low < high) {
+      const middle = (low + high) >> 1
+      if ((this.newlines[middle] ?? 0) < at) low = middle + 1
+      else high = middle
+    }
+    return low
+  }
 }
 
 /** A node of a parsed program; every read checks the program is still held.

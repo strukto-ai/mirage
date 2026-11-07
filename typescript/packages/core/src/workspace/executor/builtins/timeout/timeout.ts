@@ -32,12 +32,24 @@ import { ensureStream, OutputStream, yieldBytes } from '../../../../io/stream.ts
 import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult, materialize, OutputState } from '../../../../io/types.ts'
 import type { ProcessHandle } from '../../../../process/handle.ts'
-import { ProcessTable } from '../../../../process/table.ts'
+import { ProcessTable, deliver } from '../../../../process/table.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
-import { NOT_FOUND_STATUS, TIMEOUT_STATUS } from '../../../../shell/constants.ts'
-import { IGNORED_SIGNALS, STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
+import {
+  CONTINUE_SIGNALS,
+  NOT_FOUND_STATUS,
+  SHELL_IGNORED_SIGNALS,
+  SIGCHLD,
+  SIGKILL,
+  SIGNALS,
+  SIGRTMAX,
+  SIGRTMIN,
+  SIGSTOP,
+  STOP_SIGNALS,
+  TIMEOUT_STATUS,
+} from '../../../../shell/constants.ts'
+import { STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { abortable, atDeadline, runCancellable, SignalStop } from '../../../../utils/abort.ts'
 import { PathSpec } from '../../../../types.ts'
@@ -47,20 +59,7 @@ import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
-import {
-  CONTINUE_SIGNALS,
-  FORK_FAILED,
-  SELF_KILLING_SIGNALS,
-  SIGCHLD,
-  SIGKILL,
-  SIGNAL_ALIASES,
-  SIGNALS,
-  SIGRTMAX,
-  SIGRTMIN,
-  SIGSTOP,
-  STOP_SIGNALS,
-  TIMEOUT_NAMES,
-} from './constants.ts'
+import { FORK_FAILED, SELF_KILLING_SIGNALS, SIGNAL_ALIASES, TIMEOUT_NAMES } from './constants.ts'
 
 const UNIT_SECONDS: Readonly<Record<string, number>> = Object.freeze({
   '': 1,
@@ -248,6 +247,9 @@ interface Supervision {
   signal: number
   killAfter: number
   foreground: boolean
+  // The command ignores the signal (a shell's QUIT), which stops only the
+  // program it runs right now: timeout waits for it as for one it goes on.
+  ignored: boolean
   preserve: boolean
   verbose: boolean
   name: string
@@ -345,6 +347,7 @@ export async function handleTimeout(
   const abort = new AbortController()
   const inner = shellJoin(command)
   const child = childContext(context)
+  const foreground = parse.flags.f === true
   let ran: IOResult | undefined
   let process: ProcessHandle
   try {
@@ -357,9 +360,12 @@ export async function handleTimeout(
         abort.abort(new SignalStop(process.signal ?? SIGKILL))
       },
       limit: session.processes.max,
-      started: (info) => {
-        child.session.processId = info.pid
+      started: (forked) => {
+        child.session.processId = forked.info.pid
+        child.frame.shell = forked
       },
+      ignores: SHELL_IGNORED_SIGNALS,
+      ownGroup: !foreground,
       run: async () => {
         // timeout execs its command, so a builtin that is also a program
         // answers as the program.
@@ -384,22 +390,20 @@ export async function handleTimeout(
   // The run may be abandoned and reject later; without a handler that
   // becomes an unhandled rejection and can crash the process.
   run.catch(() => undefined)
-  const foreground = parse.flags.f === true
-  // timeout signals its own process group unless --foreground, so the jobs
-  // the command started end with it, or, when their shells ignore the
-  // signal, the programs they run right now do; the command itself gets it
-  // either way. The group hears it before the command stops, as a stop
-  // reaches children first, so a native program that ends with the command
-  // already knows the signal.
+  // timeout signals its own process group unless --foreground, so what the
+  // command started ends with it, or, where a shell ignores the signal, the
+  // program it runs right now does; the command itself gets it either way.
+  // The deepest hear it first, so a native program that ends with the
+  // command already knows the signal.
   const send = (number: number): void => {
-    const ignored = IGNORED_SIGNALS.has(number)
-    if (ignored && !foreground) process.signalChildren(number)
-    process.terminate(number, !foreground && !ignored)
+    if (foreground) deliver(process, number)
+    else processes.signalGroup(process.info.groupId, number)
   }
   const watch = supervise(run, abort.signal, send, sink, held, seconds, lineSignal, {
     signal,
     killAfter,
     foreground,
+    ignored: process.ignores.has(signal),
     preserve: parse.flags.p === true,
     verbose: parse.flags.v === true,
     name,
@@ -459,7 +463,10 @@ async function supervise(
   const { signal, killAfter, foreground } = how
   const stops = STOP_SIGNALS.has(signal) && (foreground || signal === SIGSTOP)
   const carriesOn =
-    (signal === SIGCHLD && !foreground) || CONTINUE_SIGNALS.has(signal) || STOP_SIGNALS.has(signal)
+    (signal === SIGCHLD && !foreground) ||
+    CONTINUE_SIGNALS.has(signal) ||
+    STOP_SIGNALS.has(signal) ||
+    how.ignored
   // -k's KILL, armed at the deadline itself for a run the signal leaves
   // going, which may hold the event loop past it.
   const kill: { at: Promise<typeof TIMED_OUT> | null; cancel: () => void } = {
@@ -467,7 +474,7 @@ async function supervise(
     cancel: () => undefined,
   }
   const reached = (): void => {
-    if (stops || !carriesOn) send(signal)
+    if (stops || !carriesOn || how.ignored) send(signal)
     if (!carriesOn || killAfter === 0) return
     kill.at = new Promise((resolve) => {
       kill.cancel = atDeadline(killAfter, () => {

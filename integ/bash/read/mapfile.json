@@ -172,7 +172,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\n",
-        "stderr": "bash: mapfile: `1bad': not a valid identifier\nbash: mapfile: mfg: not an indexed array\n"
+        "stderr": "bash: line 1: mapfile: `1bad': not a valid identifier\nbash: line 1: mapfile: mfg: not an indexed array\n"
       }
     },
     {
@@ -312,7 +312,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1 n=0\na\nb\nrc=1 n=0\na\nb\nrc=1\nrc=1\nrc=0 4294967295\n",
-        "stderr": "bash: mapfile: ²: invalid line count\nbash: mapfile: ٣: invalid line count\nbash: mapfile: 4294967296: invalid array origin\nbash: mapfile: 99999999999999999999999999: invalid array origin\n"
+        "stderr": "bash: line 1: mapfile: ²: invalid line count\nbash: line 1: mapfile: ٣: invalid line count\nbash: line 1: mapfile: 4294967296: invalid array origin\nbash: line 1: mapfile: 99999999999999999999999999: invalid array origin\n"
       }
     }
   ]

@@ -172,7 +172,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\n",
-        "stderr": "bash: read: x: invalid timeout specification\nbash: read: 3: invalid file descriptor: Bad file descriptor\n"
+        "stderr": "bash: line 1: read: x: invalid timeout specification\nbash: line 1: read: 3: invalid file descriptor: Bad file descriptor\n"
       }
     },
     {
@@ -242,7 +242,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1 rnx=[]\nabc\nrc=1 rnx=[]\nabc\n",
-        "stderr": "bash: read: \u00b2: invalid number\nbash: read: \u0663: invalid number\n"
+        "stderr": "bash: line 1: read: ²: invalid number\nbash: line 1: read: ٣: invalid number\n"
       }
     }
   ]

@@ -59,7 +59,10 @@ async def test_a_write_into_the_view_is_refused_as_read_only():
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     io = await ws.shell("echo x > /usr/bin/ls")
     assert io.exit_code == 1
-    assert await io.stderr_str() == "/usr/bin/ls: Read-only file system\n"
+    assert (
+        await io.stderr_str()
+        == "bash: line 1: /usr/bin/ls: Read-only file system\n"
+    )
     io = await ws.shell("chmod 644 /usr/bin/ls; stat -c %a /usr/bin/ls")
     assert await io.stderr_str() == (
         "chmod: changing permissions of '/usr/bin/ls': Read-only file system\n"

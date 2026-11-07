@@ -44,6 +44,7 @@ from mirage.context.session_context import (
     in_landing,
     reset_caller,
     run_landing,
+    session_voice,
     with_caller,
 )
 from mirage.types import (
@@ -553,3 +554,12 @@ async def test_run_landing_marks_its_own_calls_alone():
 
     landed, other = await asyncio.gather(run_landing(landing()), beside())
     assert (landed, other, in_landing()) == (True, False, False)
+
+
+def test_a_session_speaks_as_what_it_is_reading():
+    session = SessionState(session_id="voice")
+    assert session_voice(None) == "bash: "
+    assert session_voice(session) == "bash: line 1: "
+    session._parse_name = "environment"
+    session._line_row = 2
+    assert session_voice(session) == "environment: line 3: "

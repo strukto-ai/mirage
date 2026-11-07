@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from mirage.context import get_current_evaluation
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.shell.console import Channel, JobConsole
@@ -42,7 +43,12 @@ class FakeShell:
         if sink is not None and self.early:
             await sink.emit(Channel.STDOUT, self.early)
         if self.delay:
-            await asyncio.sleep(self.delay)
+            # The line's program, which a signal its shell ignores stops.
+            shell = get_current_evaluation().frame.shell
+            assert shell is not None
+            _, signal = await shell.program(lambda: asyncio.sleep(self.delay))
+            if signal is not None:
+                return IOResult(exit_code=128 + signal)
         return IOResult(stdout=b"done\n", exit_code=self.exit_code)
 
 
@@ -478,13 +484,13 @@ async def test_an_int_ends_the_program_a_job_runs_and_the_job_goes_on():
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         io = await ws.shell(
-            "timeout -s INT 0.1 sh -c '{ sleep 30; echo $? > /a; } & "
+            "timeout -s INT 1 sh -c '{ sleep 30; echo $? > /a; } & "
             "{ sleep 30 | cat; echo ${PIPESTATUS[@]} > /b; } & "
             "sleep 30 && : || echo $? > /c & "
             "{ true | sleep 30 | true; echo ${PIPESTATUS[@]} > /e; } & "
             "{ (sleep 30; echo in > /f); echo $? > /g; } & "
             "f() { sleep 30; echo > /d; }; f & sleep 30'; "
-            "sleep 0.3; cat /a /b /c /e /g; test -e /d || test -e /f; echo $?"
+            "sleep 1.5; cat /a /b /c /e /g; test -e /d || test -e /f; echo $?"
         )
         out = (await io.stdout_str()).splitlines()
     finally:
@@ -499,9 +505,9 @@ async def test_a_quit_ends_the_program_a_job_runs_and_every_job_goes_on():
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         io = await ws.shell(
-            "timeout -s QUIT 0.1 sh -c '{ sleep 30; echo $? > /a; } & "
+            "timeout -s QUIT 1 sh -c '{ sleep 30; echo $? > /a; } & "
             "f() { sleep 30; echo $? > /d; }; f & sleep 30'; "
-            "sleep 0.3; cat /a /d"
+            "sleep 1.5; cat /a /d"
         )
         out = (await io.stdout_str()).splitlines()
     finally:

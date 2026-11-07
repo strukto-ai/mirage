@@ -27,10 +27,10 @@ describe('[ as a command', () => {
   it.each([
     ['[ a == a ] && echo y', 'y\n', ''],
     ['[ $ ] && echo y', 'y\n', ''],
-    ['[ a =~ a ]; echo $?', '2\n', 'bash: [: =~: binary operator expected\n'],
-    ['[ 1 + 1 ]; echo $?', '2\n', 'bash: [: +: binary operator expected\n'],
-    ['[ a += b ]; echo $?', '2\n', 'bash: [: +=: binary operator expected\n'],
-    ['[ a -= b ]; echo $?', '2\n', 'bash: [: -=: binary operator expected\n'],
+    ['[ a =~ a ]; echo $?', '2\n', 'bash: line 1: [: =~: binary operator expected\n'],
+    ['[ 1 + 1 ]; echo $?', '2\n', 'bash: line 1: [: +: binary operator expected\n'],
+    ['[ a += b ]; echo $?', '2\n', 'bash: line 1: [: +=: binary operator expected\n'],
+    ['[ a -= b ]; echo $?', '2\n', 'bash: line 1: [: -=: binary operator expected\n'],
   ])('hands every operator in %j to test as a word', async (line, out, err) => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     const io = await ws.shell(line)

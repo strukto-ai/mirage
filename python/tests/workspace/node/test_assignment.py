@@ -76,7 +76,7 @@ async def test_an_associative_subscript_that_expands_empty_aborts_the_line():
     ws = _ws()
     out, err, code = await _run(ws, "declare -A m; e=; m[$e]=v; echo REACHED")
     assert out == ""
-    assert err == "bash: m[$e]: bad array subscript\n"
+    assert err == "bash: line 1: m[$e]: bad array subscript\n"
     assert code == 1
 
 
@@ -95,7 +95,7 @@ async def test_assigning_a_readonly_name_aborts_the_line():
     ws = _ws()
     out, err, code = await _run(ws, "readonly r=1; r=2; echo REACHED")
     assert out == ""
-    assert err == "bash: r: readonly variable\n"
+    assert err == "bash: line 1: r: readonly variable\n"
     assert code == 1
 
 

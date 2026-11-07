@@ -83,6 +83,8 @@ export interface RunHandlerOpts {
    * over; absent filters none.
    */
   vfs?: Files | null
+  /** The handler reads nothing, so its stream may be pulled ahead (`OutputStream.eager`). */
+  eager?: boolean
 }
 
 /**
@@ -258,11 +260,15 @@ export async function runHandler(
   const pulled = framed(stream, io, voice)
   const lazy = !(stream instanceof Uint8Array)
   return [
-    new OutputStream(pulled, async () => {
-      await closeQuietly(source)
-      await closeQuietly(stream)
-      if (drop !== undefined && lazy) await drop()
-    }),
+    new OutputStream(
+      pulled,
+      async () => {
+        await closeQuietly(source)
+        await closeQuietly(stream)
+        if (drop !== undefined && lazy) await drop()
+      },
+      opts.eager === true,
+    ),
     io,
   ]
 }

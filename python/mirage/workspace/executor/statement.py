@@ -32,8 +32,9 @@ from mirage.io.spool import spooled_pair
 from mirage.io.stream import async_chain, discard_streams
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
+from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
+from mirage.shell.constants import ERREXIT_EXEMPT_TYPES, NESTED_SHELLS
 from mirage.shell.descriptors import (
     Inherited,
     Recorder,
@@ -48,8 +49,10 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.parse.names import literal_text
+from mirage.shell.printer import command_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
+from mirage.shell.voice import shell_voice
 from mirage.workspace.abort import line_status_writer
 from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.lookup.constants import BASH_BUILTINS
@@ -239,30 +242,107 @@ def forks(
     """
     if command is None or command.type != NT.COMMAND:
         return command is not None and command.type == NT.SUBSHELL
-    rest: list[str | None] = (
-        list(words)
-        if words is not None
-        else [
-            _spelled(part)
-            for part in get_parts(command)
-            if part.type != NT.VARIABLE_ASSIGNMENT
-        ]
-    )
-    functions = True
-    while rest and rest[0] == "command":
-        rest, functions = rest[1:], False
-        while rest and (rest[0] or "").startswith("-"):
-            option = rest.pop(0) or ""
-            if option == "--":
-                break
-            if "v" in option or "V" in option:
-                return False
-    if not rest:
+    invoked = _invoked(command, words)
+    if invoked is None:
         return False
-    name = rest[0]
+    name, functions = invoked
     return name is None or (
         name not in BASH_BUILTINS
         and not (functions and name in session.functions)
+    )
+
+
+def _invoked(
+    command: TSNodeLike, words: Sequence[str] | None
+) -> tuple[str | None, bool] | None:
+    """The word a command runs once ``command`` and its options are read
+    off, and whether a function may answer it (``command X`` masks
+    functions); None for ``command -v``, which is the builtin, and for
+    no word left to run. Words past that one are never spelled.
+
+    Args:
+        command (TSNodeLike): the command.
+        words (Sequence[str] | None): what its words expanded to, its name
+            first, once they have.
+    """
+    spelled = (
+        (word,)
+        for word in (
+            words
+            if words is not None
+            else (
+                _spelled(part)
+                for part in get_parts(command)
+                if part.type != NT.VARIABLE_ASSIGNMENT
+            )
+        )
+    )
+    functions = True
+    head = next(spelled, None)
+    while head is not None and head[0] == "command":
+        functions = False
+        head = next(spelled, None)
+        while head is not None and (head[0] or "").startswith("-"):
+            option = head[0] or ""
+            head = next(spelled, None)
+            if option == "--":
+                break
+            if "v" in option or "V" in option:
+                return None
+    return None if head is None else (head[0], functions)
+
+
+def nested_shell(node: TSNodeLike, session: SessionState) -> bool:
+    """Whether a statement runs a nested shell (``sh -c``), which bash
+    execs in place of a shell that forked to run it alone, so a signal
+    to that shell ends it.
+
+    Args:
+        node (TSNodeLike): the statement.
+        session (SessionState): the shell running it.
+    """
+    command = (
+        get_redirects(node)[0]
+        if node.type == NT.REDIRECTED_STATEMENT
+        else node
+    )
+    if command is None or command.type != NT.COMMAND:
+        return False
+    invoked = _invoked(command, None)
+    if invoked is None:
+        return False
+    name, functions = invoked
+    return name in NESTED_SHELLS and not (
+        functions and name in session.functions
+    )
+
+
+def redirected_body(node: TSNodeLike) -> bool:
+    """Whether a node is what a redirected statement runs under its
+    redirects: a fork's redirects are its own, so the report of how it
+    ended goes around them (``( kill -9 $BASHPID ) 2>/dev/null``).
+
+    Args:
+        node (TSNodeLike): the node.
+    """
+    parent = node.parent
+    if parent is None or parent.type != NT.REDIRECTED_STATEMENT:
+        return False
+    body = parent.child_by_field_name("body")
+    return body is not None and body.id == node.id
+
+
+def reported_command(node: TSNodeLike) -> str:
+    """How bash's report names a command its shell forked: as its
+    printer renders it, with the redirects of the statement the command
+    is the body of.
+
+    Args:
+        node (TSNodeLike): the command.
+    """
+    parent = node.parent
+    return command_text(
+        parent if parent is not None and redirected_body(node) else node
     )
 
 
@@ -596,6 +676,23 @@ async def statement_output(
     if err:
         written.append((Channel.STDERR, err, False))
     return written
+
+
+def write_error_line(command: str, program: bool = False) -> bytes:
+    """Bash's line for a write its descriptor refused, in the name of
+    what wrote, its command's first word: a builtin speaks in the
+    shell's voice (``bash: line 1: echo: write error: ...``), a program
+    in its own.
+
+    Args:
+        command (str): the writer's command.
+        program (bool): the writer is a program ``exec`` ran, which
+            speaks in its own voice whatever its name.
+    """
+    words = command.split()
+    name = words[0] if words else "bash"
+    voice = shell_voice() if name in BASH_BUILTINS and not program else ""
+    return encode_text(f"{voice}{name}: write error: Bad file descriptor\n")
 
 
 async def land(

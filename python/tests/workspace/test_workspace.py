@@ -281,14 +281,16 @@ def test_readonly_bare_name_registers():
     ws = _ws()
     io = _exec(ws, "RO=1; readonly RO; RO=2")
     assert io.exit_code == 1
-    assert io.stderr == b"bash: RO: readonly variable\n"
+    assert io.stderr == b"bash: line 1: RO: readonly variable\n"
 
 
 def test_readonly_array_form_registers():
     ws = _ws()
     io = _exec(ws, "readonly -a RA=(x y); unset 'RA[1]'; echo rc=$?")
     assert _stdout(io) == b"rc=1\n"
-    assert io.stderr == (b"bash: unset: RA: cannot unset: readonly variable\n")
+    assert io.stderr == (
+        b"bash: line 1: unset: RA: cannot unset: readonly variable\n"
+    )
 
 
 # ── operators ──────────────────────────────────
@@ -483,7 +485,7 @@ def test_c_style_for_readonly_aborts_with_1():
         ws, "readonly i=5; for ((i=0;i<2;i++)); do echo x; done; echo c=$?"
     )
     assert _stdout(io) == b"c=1\n"
-    assert b"bash: i: readonly variable\n" in (io.stderr or b"")
+    assert b"bash: line 1: i: readonly variable\n" in (io.stderr or b"")
 
     ws = _ws()
     io = _exec(
@@ -2554,7 +2556,7 @@ def test_unknown_command_not_found():
     ws = _ws()
     io = _exec(ws, "nosuchcmd /ram/*.txt")
     assert io.exit_code == 127
-    assert io.stderr == b"nosuchcmd: command not found\n"
+    assert io.stderr == b"bash: line 1: nosuchcmd: command not found\n"
 
 
 # ── additional fixes ────────────────────────────────────────────────────

@@ -80,6 +80,6 @@ describe('unsupportedDescriptor', () => {
     ]) {
       expect(unsupportedDescriptor(redirects(line))).toBeNull()
     }
-    expect(new TextDecoder().decode(badDescriptorLine(3))).toBe('3: Bad file descriptor\n')
+    expect(new TextDecoder().decode(badDescriptorLine(3))).toBe('bash: 3: Bad file descriptor\n')
   })
 })

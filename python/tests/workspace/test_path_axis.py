@@ -120,11 +120,11 @@ def test_hide_speaks_before_the_mode():
     create = _run(ws, "echo x > /repo/secrets/new.txt")
     assert (
         create.stderr or b""
-    ) == b"/repo/secrets/new.txt: No such file or directory\n"
+    ) == b"bash: line 1: /repo/secrets/new.txt: No such file or directory\n"
     clobber = _run(ws, "echo x > /repo/secrets/key.pem")
     assert (
         clobber.stderr or b""
-    ) == b"/repo/secrets/key.pem: No such file or directory\n"
+    ) == b"bash: line 1: /repo/secrets/key.pem: No such file or directory\n"
     kept = asyncio.run(ws.shell("cat /repo/secrets/key.pem"))
     assert kept.stdout == b"PRIVATE needle\n"
 
@@ -276,7 +276,7 @@ def test_a_write_below_the_mode_reads_read_only_file_system():
     assert refused.exit_code != 0
     assert (
         refused.stderr or b""
-    ) == b"/repo/public/new.txt: Read-only file system\n"
+    ) == b"bash: line 1: /repo/public/new.txt: Read-only file system\n"
 
 
 def test_a_deeper_show_mode_refines_the_mount_cap():
@@ -300,7 +300,9 @@ def test_a_deeper_show_mode_refines_the_mount_cap():
     assert ok.exit_code == 0, ok.stderr
     assert (ok.stdout or b"") == b"out\n"
     held = _run(ws, "echo x > /repo/README.md")
-    assert (held.stderr or b"") == b"/repo/README.md: Read-only file system\n"
+    assert (
+        held.stderr or b""
+    ) == b"bash: line 1: /repo/README.md: Read-only file system\n"
 
 
 def test_a_show_mode_never_grants_past_the_configured_mode():
@@ -314,7 +316,7 @@ def test_a_show_mode_never_grants_past_the_configured_mode():
     assert refused.exit_code != 0
     assert (
         refused.stderr or b""
-    ) == b"/repo/build/a.txt: Read-only file system\n"
+    ) == b"bash: line 1: /repo/build/a.txt: Read-only file system\n"
 
 
 def test_a_show_without_a_covering_hide_restricts_nothing():

@@ -26,15 +26,18 @@ import { EnvVar, type EnvEntries } from '../../secrets/config.ts'
 import { ShellArray } from '../../shell/array.ts'
 import { Terminal, type JobOutput } from '../../shell/console/index.ts'
 import {
+  BASHPID,
   BIN_PREFIX,
   IFS_DEFAULT,
+  LINENO,
   RANDOM,
   RANDOM_UNSET,
   SHELL_ARGV0,
 } from '../../shell/constants.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 import type { JobTable, JobWaits } from '../../shell/job_table/index.ts'
-import type { AliasExpansion } from '../../shell/types.ts'
+import { sourceRow } from '../../shell/helpers.ts'
+import type { AliasExpansion, TSNodeLike } from '../../shell/types.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { attrsFromLetters, copyVar, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
 import type { Limit, MountMode } from '../../types.ts'
@@ -413,6 +416,9 @@ export class SessionState {
   randomState: number | null = null
   randomSeed: string | null = null
   randomLast = 0
+  // `$LINENO` and `$BASHPID` once the shell unset them: ordinary variables
+  // from then on, as bash's are. A fork keeps them so.
+  plainSpecials: ReadonlySet<string> = new Set()
   positionalArgs: string[]
   // What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
   // sets it to the script file it is running, or to the name given after
@@ -487,6 +493,20 @@ export class SessionState {
   // for a line, a function's definition row for its body, which is parsed
   // again from its own source but reads aliases where it was written.
   parseRow = 0
+  // The same row as `$LINENO` counts it, every line as typed: a row the parse
+  // joined to the next (a backslash before the newline) counts.
+  lineRow = 0
+  // What the running parse's diagnostics name as their source: null for the
+  // shell's own input, `environment` for a function defined there, the file
+  // for one sourced; and the command running in it, whose line is `$LINENO`
+  // (`lineNumber`).
+  parseName: string | null = null
+  lineNode: TSNodeLike | null = null
+  // The row the next nested parse starts on, which a sourced file (0) and
+  // the rest of an input read again (its own parse's) set; null numbers it
+  // on from the running command's line, as `eval` and `$( )` do, or from 0
+  // for a shell's own input.
+  parseFrom: number | null = null
   // Where each function was defined (`FunctionSite`), so its body expands
   // the aliases of that place and its approvals stand under it; a function
   // loaded from a stored session has none and runs as a parse of its own.
@@ -536,6 +556,9 @@ export class SessionState {
   // innermost last: a local `RANDOM` is an ordinary variable for the
   // function's extent, and the generator resumes when it returns.
   localRandom: (string | null)[] = []
+  // Whether `LINENO` or `BASHPID` was plain where a frame made it local,
+  // one entry per local, innermost last.
+  localPlain: [string, boolean][] = []
   mountModes: ReadonlyMap<string, MountMode> | null
   visibility: Visibility
   hideReasons: readonly HideReason[]
@@ -668,6 +691,7 @@ export class SessionState {
     // again; a fork given new variables starts them.
     if (overrides.vars === undefined) forked.vars = vars
     if (this.randomSeed === RANDOM_UNSET) forked.randomSeed = RANDOM_UNSET
+    forked.plainSpecials = this.plainSpecials
     forked.versions = this.versions
     forked.ids = this.ids
     forked.terminalOutput = this.terminalOutput
@@ -719,12 +743,16 @@ export class SessionState {
     const child = this.fork()
     child.parseCurrent = this.parseCurrent
     child.parseRow = this.parseRow
+    child.lineRow = this.lineRow
+    child.parseName = this.parseName
+    child.lineNode = this.lineNode
     child.aliasExpansion = this.aliasExpansion
     child.localVars = this.localVars === null ? null : copyLocals(this.localVars)
     child.localFrames = this.localFrames.map((frame) =>
       frame === this.localVars && child.localVars !== null ? child.localVars : copyLocals(frame),
     )
     child.localRandom = [...this.localRandom]
+    child.localPlain = [...this.localPlain]
     if (child.randomSeed !== RANDOM_UNSET) child.drawAfresh()
     return child
   }
@@ -791,6 +819,7 @@ export class SessionState {
     child.getoptsPos = 0
     child.getoptsOptind = null
     child.errexitIgnored = false
+    child.plainSpecials = new Set()
     child.drawAfresh()
     return child
   }
@@ -801,6 +830,34 @@ export class SessionState {
     delete this.functions[name]
     this.functionSites.delete(name)
     this.exportedFunctions.delete(name)
+  }
+
+  /**
+   * The line of the command running, `$LINENO`: its row in the text that
+   * spelled it, numbered on from where that text's parse starts (`lineRow`).
+   */
+  get lineNumber(): number {
+    return this.lineRow + (this.lineNode === null ? 0 : sourceRow(this.lineNode)) + 1
+  }
+
+  /**
+   * The process running the command, `$BASHPID`: the subshell, stage or
+   * substitution it runs in, else the shell itself. Mirrors Python's bash_pid.
+   */
+  get bashPid(): number {
+    return this.processId ?? this.shellPid ?? 0
+  }
+
+  /**
+   * What the shell computes a read of `$LINENO` or `$BASHPID` to
+   * (`lineNumber`, `bashPid`); null for any other name and for one the shell
+   * unset, which reads as it was assigned. Mirrors Python's dynamic_value.
+   */
+  dynamicValue(name: string): string | null {
+    if (this.plainSpecials.has(name)) return null
+    if (name === LINENO) return String(this.lineNumber)
+    if (name === BASHPID) return String(this.bashPid)
+    return null
   }
 
   /**

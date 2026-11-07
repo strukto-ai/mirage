@@ -444,7 +444,7 @@ describe('rm and unlink reach a link through the dispatcher', () => {
       const cd = await ws.shell('cd /data/dl.sec', { sessionId: 'agent' })
       expect(DEC.decode(hidden.stdout)).toBe('1\n1\n')
       expect(cd.exitCode).toBe(1)
-      expect(err(cd)).toBe('bash: cd: /data/dl.sec: No such file or directory\n')
+      expect(err(cd)).toBe('bash: line 1: cd: /data/dl.sec: No such file or directory\n')
       const seen = await ws.shell(`${probe}; cd /data/dl.sec && pwd`)
       expect(DEC.decode(seen.stdout)).toBe('0\n0\n/data/dl.sec\n')
     } finally {

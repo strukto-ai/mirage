@@ -18,6 +18,7 @@ from mirage.io.errors import PipeClosed  # noqa: F401
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.shell.types import ArithWrite
+from mirage.shell.voice import shell_voice
 
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
@@ -73,7 +74,7 @@ class ArithError(ValueError):
             fatal (bool): the context ends the shell on it.
         """
         lead = f"{cmd}: " if cmd and not self.in_subscript else ""
-        stderr = encode_text(f"bash: {lead}{self}\n")
+        stderr = encode_text(f"{shell_voice()}{lead}{self}\n")
         if fatal or self.in_subscript:
             return ExitSignal(1, stderr=stderr, contained_code=1)
         return DiscardSignal(stderr)
@@ -111,7 +112,7 @@ class ReadonlyVariableError(Exception):
         Args:
             fatal (bool): the context ends the shell on it.
         """
-        stderr = encode_text(f"bash: {self}\n")
+        stderr = encode_text(f"{shell_voice()}{self}\n")
         if fatal or self.in_subscript:
             return ExitSignal(1, stderr=stderr, contained_code=1)
         return DiscardSignal(stderr)
@@ -209,7 +210,7 @@ class UnboundVariable(ExitSignal):
     def __init__(self, name: str) -> None:
         super().__init__(
             127,
-            stderr=encode_text(f"bash: {name}: unbound variable\n"),
+            stderr=encode_text(f"{shell_voice()}{name}: unbound variable\n"),
             contained_code=1,
         )
 
@@ -227,7 +228,7 @@ class TooManyMatches(DiscardSignal):
     """
 
     def __init__(self, reason: str) -> None:
-        super().__init__(encode_text(f"bash: {reason}\n"))
+        super().__init__(encode_text(f"{shell_voice()}{reason}\n"))
         self.reason = reason
 
 
@@ -256,7 +257,9 @@ class BadSubstitution(DiscardSignal):
             fixed (bool): whether this level's name is final.
         """
         if not self.fixed:
-            self.stderr = encode_text(f"bash: {word}: bad substitution\n")
+            self.stderr = encode_text(
+                f"{shell_voice()}{word}: bad substitution\n"
+            )
             self.fixed = fixed
         return self
 

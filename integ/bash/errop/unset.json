@@ -28,7 +28,7 @@
       "expect": {
         "exit": 127,
         "stdout": "",
-        "stderr": "bash: ERRQ1: parameter null or not set\n"
+        "stderr": "bash: line 1: ERRQ1: parameter null or not set\n"
       }
     },
     {
@@ -59,7 +59,7 @@
       "expect": {
         "exit": 127,
         "stdout": "",
-        "stderr": "bash: ERRQ3: parameter not set\n"
+        "stderr": "bash: line 1: ERRQ3: parameter not set\n"
       }
     }
   ]

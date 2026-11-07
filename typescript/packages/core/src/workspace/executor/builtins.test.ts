@@ -1716,7 +1716,10 @@ function slowShell(
 ): {
   lines: string[]
   peak: () => number
-  fn: (script: string, opts: { sessionId: string }) => Promise<IOResult>
+  fn: (
+    script: string,
+    opts: { sessionId: string; context?: EvaluationContext },
+  ) => Promise<IOResult>
 } {
   const lines: string[] = []
   let active = 0
@@ -1724,12 +1727,29 @@ function slowShell(
   return {
     lines,
     peak: () => peak,
-    fn: async (script: string) => {
+    fn: async (script, opts) => {
       lines.push(script)
       active += 1
       peak = Math.max(peak, active)
-      await new Promise((resolve) => setTimeout(resolve, delays[script] ?? 10))
+      const wait = (stop: AbortSignal | null) =>
+        new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, delays[script] ?? 10)
+          stop?.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer)
+              reject(stop.reason as Error)
+            },
+            { once: true },
+          )
+        })
+      // The line's program, which a signal its shell ignores stops.
+      const shell = opts.context?.frame.shell ?? null
+      let signal: number | null = null
+      if (shell === null) await wait(null)
+      else [, signal] = await shell.program(wait)
       active -= 1
+      if (signal !== null) return new IOResult({ exitCode: 128 + signal })
       return new IOResult({
         stdout: new TextEncoder().encode(`ran:${script}\n`),
         exitCode: exitCodes[script] ?? 0,
@@ -3073,13 +3093,13 @@ describe('handleTimeout', () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       const io = await ws.shell(
-        "timeout -s INT 0.1 sh -c '{ sleep 30; echo $? > /a; } & " +
+        "timeout -s INT 1 sh -c '{ sleep 30; echo $? > /a; } & " +
           '{ sleep 30 | cat; echo ${PIPESTATUS[@]} > /b; } & ' +
           'sleep 30 && : || echo $? > /c & ' +
           '{ true | sleep 30 | true; echo ${PIPESTATUS[@]} > /e; } & ' +
           '{ (sleep 30; echo in > /f); echo $? > /g; } & ' +
           "f() { sleep 30; echo > /d; }; f & sleep 30'; " +
-          'sleep 0.3; cat /a /b /c /e /g; test -e /d || test -e /f; echo $?',
+          'sleep 1.5; cat /a /b /c /e /g; test -e /d || test -e /f; echo $?',
       )
       expect(decode(io.stdout).split('\n')).toEqual([
         '130',
@@ -3101,9 +3121,9 @@ describe('handleTimeout', () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       const io = await ws.shell(
-        "timeout -s QUIT 0.1 sh -c '{ sleep 30; echo $? > /a; } & " +
+        "timeout -s QUIT 1 sh -c '{ sleep 30; echo $? > /a; } & " +
           "f() { sleep 30; echo $? > /d; }; f & sleep 30'; " +
-          'sleep 0.3; cat /a /d',
+          'sleep 1.5; cat /a /d',
       )
       expect(decode(io.stdout).split('\n')).toEqual(['131', '131', ''])
     } finally {

@@ -122,7 +122,7 @@
       "seq": 960016,
       "targets": ["hf-hub"],
       "command": "echo -n hi > /repo/new.txt",
-      "expect": { "exit": 1, "stdout": "", "stderr": "/repo/new.txt: Operation not supported\n" }
+      "expect": { "exit": 1, "stdout": "", "stderr": "bash: line 1: /repo/new.txt: Operation not supported\n" }
     },
     {
       "id": "hf_hub_a_mount_mkdir_is_refused",
@@ -157,7 +157,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "/repo/new.txt: Operation not supported\nls: cannot access '/repo/new.txt': No such file or directory\n"
+        "stderr": "bash: line 1: /repo/new.txt: Operation not supported\nls: cannot access '/repo/new.txt': No such file or directory\n"
       }
     },
     {

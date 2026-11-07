@@ -48,11 +48,11 @@ describe('Workspace.shell', () => {
     const { ws } = buildWorkspace()
     const res = await ws.shell('RO=1; readonly RO; RO=2')
     expect(res.exitCode).toBe(1)
-    expect(new TextDecoder().decode(res.stderr)).toBe('bash: RO: readonly variable\n')
+    expect(new TextDecoder().decode(res.stderr)).toBe('bash: line 1: RO: readonly variable\n')
     const res2 = await ws.shell("readonly -a RA=(x y); unset 'RA[1]'; echo rc=$?")
     expect(new TextDecoder().decode(res2.stdout)).toBe('rc=1\n')
     expect(new TextDecoder().decode(res2.stderr)).toBe(
-      'bash: unset: RA: cannot unset: readonly variable\n',
+      'bash: line 1: unset: RA: cannot unset: readonly variable\n',
     )
     await ws.close()
   })
@@ -286,7 +286,9 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
     seed(ram)
     const res = await ws.shell('nosuchcmd /ram/*.txt')
     expect(res.exitCode).toBe(127)
-    expect(new TextDecoder().decode(res.stderr)).toBe('nosuchcmd: command not found\n')
+    expect(new TextDecoder().decode(res.stderr)).toBe(
+      'bash: line 1: nosuchcmd: command not found\n',
+    )
     await ws.close()
   })
 
@@ -334,7 +336,9 @@ describe('Object.prototype-colliding names', () => {
     const { ws } = buildWorkspace()
     const res = await ws.shell('toString')
     expect(res.exitCode).toBe(127)
-    expect(new TextDecoder().decode(res.stderr)).toContain('toString: command not found')
+    expect(new TextDecoder().decode(res.stderr)).toContain(
+      'bash: line 1: toString: command not found',
+    )
     await ws.close()
   })
 

@@ -83,7 +83,10 @@ async def test_a_capped_root_counts_what_it_holds_and_refuses_growth(tmp_path):
         assert (await ws.shell("printf 12345678 > /d/a")).exit_code == 0
         refused = await ws.shell("printf 123 > /d/b")
         assert refused.exit_code == 1
-        assert await refused.stderr_str() == "/d/b: Disk quota exceeded\n"
+        assert (
+            await refused.stderr_str()
+            == "bash: line 1: /d/b: Disk quota exceeded\n"
+        )
         assert (
             await ws.shell("rm /d/a; printf 1234567 > /d/b")
         ).exit_code == 0

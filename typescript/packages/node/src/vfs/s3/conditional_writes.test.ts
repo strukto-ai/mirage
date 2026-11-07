@@ -570,7 +570,7 @@ describe('conditional writes on an S3 mount', () => {
       "mv: cannot move '/s3/g' to '/s3/f': '/s3/f' ",
       1,
     ],
-    ['append', null, 'echo x >> /s3/f', 'f', 'PutObject', '/s3/f: ', 1],
+    ['append', null, 'echo x >> /s3/f', 'f', 'PutObject', 'bash: line 1: /s3/f: ', 1],
     ['truncate', null, 'truncate -s 1 /s3/f', 'f', 'PutObject', 'truncate: ', 1],
     ['truncate-0', 'cat /s3/f', 'truncate -s 0 /s3/f', 'f', 'after', 'truncate: ', 1],
     ['rm-unread', null, 'rm /s3/f', 'f', 'DeleteObject', 'rm: ', 1],

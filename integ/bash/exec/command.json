@@ -67,7 +67,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=127\nrc=127\nX\nrc=127\n-vprintf: warning: ignoring excess arguments, starting with 'x'\n[]\n[: missing ']'\nrc=2\n-vprintf: warning: ignoring excess arguments, starting with 'x'\na\nb\n/data\nc\nd\n",
-        "stderr": "bash: exec: nosuchcmd: not found\nbash: exec: f: not found\n"
+        "stderr": "bash: line 1: exec: nosuchcmd: not found\nbash: line 1: exec: f: not found\n"
       }
     },
     {

@@ -38,6 +38,7 @@ from mirage.runtime.types import (
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
+from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
 from mirage.view.types import FollowOperands
 from mirage.workspace.evaluation import EvaluationContext
@@ -251,7 +252,9 @@ async def run_on_mount(
         if mount is None:
             return None, IOResult(
                 exit_code=NOT_FOUND_STATUS,
-                stderr=encode_text(f"{cmd_name}: command not found"),
+                stderr=encode_text(
+                    f"{shell_voice()}{cmd_name}: command not found"
+                ),
             )
     if cmd_name == "find":
         flag_kwargs = scalar_find_flags(flag_kwargs)

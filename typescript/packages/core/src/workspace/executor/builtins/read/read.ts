@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import { parseShellOptions, SHELL_SPECS } from '../../../../commands/spec/shell.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { isFsError } from '../../../../errors/fs.ts'
@@ -212,7 +213,7 @@ export async function handleRead(
   const parse = parseShellOptions(SHELL_SPECS.read, args)
   if (parse.invalid !== null) {
     const token = parse.invalid.startsWith('--') ? parse.invalid : `-${parse.invalid}`
-    const err = encodeText(`bash: read: ${token}: invalid option\n${builtinUsage('read')}`)
+    const err = encodeText(`${shellVoice()}read: ${token}: invalid option\n${builtinUsage('read')}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
@@ -221,7 +222,7 @@ export async function handleRead(
   }
   if (parse.needsValue !== null) {
     const err = encodeText(
-      `bash: read: -${parse.needsValue}: option requires an argument\n${builtinUsage('read')}`,
+      `${shellVoice()}read: -${parse.needsValue}: option requires an argument\n${builtinUsage('read')}`,
     )
     return [
       null,
@@ -234,7 +235,7 @@ export async function handleRead(
   const delim = recordDelimiter(typeof flags.d === 'string' ? flags.d : null)
   for (const key of ['n', 'N'] as const) {
     if (typeof flags[key] === 'string' && countOperand(flags[key]) === null) {
-      return readRefusal(`bash: read: ${flags[key]}: invalid number\n`)
+      return readRefusal(`${shellVoice()}read: ${flags[key]}: invalid number\n`)
     }
   }
   let nchars: number | null = null
@@ -246,18 +247,20 @@ export async function handleRead(
   if (typeof flags.t === 'string') {
     timeout = readTimeout(flags.t)
     if (timeout === null) {
-      return readRefusal(`bash: read: ${flags.t}: invalid timeout specification\n`)
+      return readRefusal(`${shellVoice()}read: ${flags.t}: invalid timeout specification\n`)
     }
   }
   if (typeof flags.u === 'string' && flags.u !== '0') {
     const descriptor = /^\d+$/.test(flags.u) ? session.descriptors.get(Number(flags.u)) : undefined
     if (descriptor?.source == null)
-      return readRefusal(`bash: read: ${flags.u}: invalid file descriptor: Bad file descriptor\n`)
+      return readRefusal(
+        `${shellVoice()}read: ${flags.u}: invalid file descriptor: Bad file descriptor\n`,
+      )
     stdin = descriptor.source
   }
   const arrayName = typeof flags.a === 'string' ? flags.a : null
   if (arrayName !== null && !isValidName(arrayName)) {
-    return readRefusal(`bash: read: \`${arrayName}': not a valid identifier\n`)
+    return readRefusal(`${shellVoice()}read: \`${arrayName}': not a valid identifier\n`)
   }
   const variables = parse.operands.length > 0 ? parse.operands : ['REPLY']
   const view = requireView(state)
@@ -278,7 +281,7 @@ export async function handleRead(
     } catch (err) {
       if (!isFsError(err) || (err as { code?: string }).code !== 'EBADF') throw err
       // stdin is closed or write-only (`read x <&-`, `read x 0<&1`).
-      return readRefusal('bash: read: read error: 0: Bad file descriptor\n')
+      return readRefusal(`${shellVoice()}read: read error: 0: Bad file descriptor\n`)
     }
   }
   if (!raw) line = unescapeRead(line)
@@ -354,7 +357,7 @@ async function readStore(
   }
   if (status === 'readonly') return readonlyRefusal('read', base)
   if (status === 'denied') {
-    const err = encodeText(`bash: ${base}: permission denied\n`)
+    const err = encodeText(`${shellVoice()}${base}: permission denied\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
@@ -362,7 +365,7 @@ async function readStore(
     ]
   }
   if (status !== 'ok') {
-    const err = encodeText(`bash: read: ${varName}: bad array subscript\n`)
+    const err = encodeText(`${shellVoice()}read: ${varName}: bad array subscript\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),

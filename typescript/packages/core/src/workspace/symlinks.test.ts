@@ -285,7 +285,7 @@ describe('symlinks (namespace-backed)', () => {
     const ws = buildWorkspace()
     const r = await ws.shell('set -o bogusname')
     expect(r.exitCode).toBe(2)
-    expect(dec(r.stderr)).toBe('bash: set: bogusname: invalid option name\n')
+    expect(dec(r.stderr)).toBe('bash: line 1: set: bogusname: invalid option name\n')
     await ws.close()
   })
 
@@ -305,7 +305,7 @@ describe('symlinks (namespace-backed)', () => {
     const ws = buildWorkspace()
     const r = await ws.shell('pwd -x')
     expect(r.exitCode).toBe(2)
-    expect(dec(r.stderr)).toBe('bash: pwd: -x: invalid option\npwd: usage: pwd [-LP]\n')
+    expect(dec(r.stderr)).toBe('bash: line 1: pwd: -x: invalid option\npwd: usage: pwd [-LP]\n')
     await ws.close()
   })
 

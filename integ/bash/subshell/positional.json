@@ -31,7 +31,7 @@
       "command": "(set -- a b c; (set -- x); echo $#); spf() { ( shift; echo \"in $1\" ); ( set -- z ); echo \"out $1\"; }; spf a b; for spi in 1 2; do ( break; echo sub$spi ); done 2>&1",
       "expect": {
         "exit": 0,
-        "stdout": "3\nin b\nout a\nbash: break: only meaningful in a `for', `while', or `until' loop\nsub1\nbash: break: only meaningful in a `for', `while', or `until' loop\nsub2\n",
+        "stdout": "3\nin b\nout a\nbash: line 1: break: only meaningful in a `for', `while', or `until' loop\nsub1\nbash: line 1: break: only meaningful in a `for', `while', or `until' loop\nsub2\n",
         "stderr": ""
       }
     },

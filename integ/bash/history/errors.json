@@ -10,7 +10,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/.bash_history: Read-only file system\n"
+        "stderr": "bash: line 1: /.bash_history: Read-only file system\n"
       }
     },
     {
@@ -36,7 +36,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: history: abc: numeric argument required\n"
+        "stderr": "bash: line 1: history: abc: numeric argument required\n"
       }
     },
     {
@@ -49,7 +49,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "bash: history: -z: invalid option\nhistory: usage: history [-c] [-d offset] [n] or history -anrw [filename] or history -ps arg [arg...]\n"
+        "stderr": "bash: line 1: history: -z: invalid option\nhistory: usage: history [-c] [-d offset] [n] or history -anrw [filename] or history -ps arg [arg...]\n"
       }
     },
     {
@@ -62,7 +62,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: history: 999: history position out of range\n"
+        "stderr": "bash: line 1: history: 999: history position out of range\n"
       }
     },
     {
@@ -75,7 +75,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: history: too many arguments\n"
+        "stderr": "bash: line 1: history: too many arguments\n"
       }
     }
   ]

@@ -417,7 +417,7 @@
       "expect": {
         "exit": 0,
         "stdout": "f\nrc=127\nrc=127\nf\n2\nrc=127\nrc=127\nrc=1\nrc=0\n",
-        "stderr": "bash: nbr: maximum nesting level exceeded (32)\nbash: nbt: maximum nesting level exceeded (32)\n"
+        "stderr": "bash: line 1: nbr: maximum nesting level exceeded (32)\nbash: line 1: nbt: maximum nesting level exceeded (32)\n"
       }
     },
     {

@@ -23,7 +23,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/pg/public/tables/books/rows.jsonl: Read-only file system\n"
+        "stderr": "bash: line 1: /pg/public/tables/books/rows.jsonl: Read-only file system\n"
       }
     },
     {

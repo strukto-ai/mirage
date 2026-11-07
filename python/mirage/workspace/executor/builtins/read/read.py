@@ -22,6 +22,7 @@ from mirage.policy import PolicyDenied
 from mirage.shell.array import make_array
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.escapes import ends_escaped
+from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.read.constants import (
@@ -83,14 +84,14 @@ async def _read_store(
     if status == "readonly":
         return readonly_refusal("read", base)
     if status == "denied":
-        err = encode_text(f"bash: {base}: permission denied\n")
+        err = encode_text(f"{shell_voice()}{base}: permission denied\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),
             ExecutionNode(command="read", exit_code=1, stderr=err),
         )
     if status != "ok":
-        err = encode_text(f"bash: read: {var}: bad array subscript\n")
+        err = encode_text(f"{shell_voice()}read: {var}: bad array subscript\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),
@@ -305,7 +306,7 @@ async def handle_read(
             else f"-{parse.invalid}"
         )
         err = encode_text(
-            f"bash: read: {token}: invalid option\n{builtin_usage('read')}"
+            f"{shell_voice()}read: {token}: invalid option\n{builtin_usage('read')}"
         )
         return (
             None,
@@ -314,7 +315,7 @@ async def handle_read(
         )
     if parse.needs_value is not None:
         missing = encode_text(
-            f"bash: read: -{parse.needs_value}: option requires an argument\n"
+            f"{shell_voice()}read: -{parse.needs_value}: option requires an argument\n"
             f"{builtin_usage('read')}"
         )
         return (
@@ -333,7 +334,9 @@ async def handle_read(
             continue
         count = count_operand(str(flags[key]))
         if count is None:
-            return _read_refusal(f"bash: read: {flags[key]}: invalid number\n")
+            return _read_refusal(
+                f"{shell_voice()}read: {flags[key]}: invalid number\n"
+            )
     which = _last_count_flag(args)
     if which == "N":
         exact = count_operand(str(flags["N"]))
@@ -344,21 +347,21 @@ async def handle_read(
         timeout = _read_timeout(str(flags["t"]))
         if timeout is None:
             return _read_refusal(
-                f"bash: read: {flags['t']}: invalid timeout specification\n"
+                f"{shell_voice()}read: {flags['t']}: invalid timeout specification\n"
             )
     if "u" in flags and str(flags["u"]) != "0":
         fd = str(flags["u"])
         descriptor = session.descriptors.get(int(fd)) if fd.isdigit() else None
         if descriptor is None or descriptor.source is None:
             return _read_refusal(
-                f"bash: read: {fd}: invalid file "
+                f"{shell_voice()}read: {fd}: invalid file "
                 "descriptor: Bad file descriptor\n"
             )
         stdin = descriptor.source
     array_name = str(flags["a"]) if "a" in flags else None
     if array_name is not None and not is_valid_name(array_name):
         return _read_refusal(
-            f"bash: read: `{array_name}': not a valid identifier\n"
+            f"{shell_voice()}read: `{array_name}': not a valid identifier\n"
         )
     variables = parse.operands or ["REPLY"]
     view = require_view(state)
@@ -382,7 +385,7 @@ async def handle_read(
         except BadDescriptorError:
             # stdin is closed or write-only (`read x <&-`, `read x 0<&1`).
             return _read_refusal(
-                "bash: read: read error: 0: Bad file descriptor\n"
+                f"{shell_voice()}read: read error: 0: Bad file descriptor\n"
             )
     if not raw:
         line = _unescape_read(line)

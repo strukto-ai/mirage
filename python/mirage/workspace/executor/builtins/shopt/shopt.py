@@ -20,6 +20,7 @@ from mirage.shell.constants import (
     SET_OPTION_NAMES,
     SHOPT_DEFAULTS,
 )
+from mirage.shell.voice import shell_voice
 from mirage.workspace.executor.builtins.alias import (
     AliasMark,
     alias_mark,
@@ -81,13 +82,15 @@ async def handle_shopt(
     if scan.bad is not None:
         return fail(
             "shopt",
-            f"bash: shopt: {scan.bad}: invalid option\n{builtin_usage('shopt')}",
+            f"{shell_voice()}shopt: {scan.bad}: invalid option\n"
+            f"{builtin_usage('shopt')}",
             2,
         )
     if "s" in scan.letters and "u" in scan.letters:
         return fail(
             "shopt",
-            "bash: shopt: cannot set and unset shell options simultaneously\n",
+            f"{shell_voice()}shopt: "
+            "cannot set and unset shell options simultaneously\n",
             1,
         )
     reusable = "p" in scan.letters
@@ -115,7 +118,7 @@ async def handle_shopt(
     for name in names:
         if name not in table or (set_o and name not in SET_OPTION_NAMES):
             kind = "option name" if set_o else "shell option name"
-            errors.append(f"bash: shopt: {name}: invalid {kind}")
+            errors.append(f"{shell_voice()}shopt: {name}: invalid {kind}")
             status = 1
             continue
         if setting is None:

@@ -140,7 +140,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/views/Wrong__viwFeatGrid000001.jsonl: No such file or directory\n"
+        "stderr": "bash: line 1: /airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/views/Wrong__viwFeatGrid000001.jsonl: No such file or directory\n"
       }
     },
     {

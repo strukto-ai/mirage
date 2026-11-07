@@ -38,6 +38,7 @@ from mirage.shell.errors import (
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import ShellValue, VarAttr
+from mirage.shell.voice import shell_voice
 from mirage.shell.xtrace import trace_assignment
 from mirage.types import word_text
 from mirage.view.types import SessionView
@@ -108,7 +109,9 @@ def _refuse_readonly(view: SessionView, key: str) -> None:
         key (str): the variable being written.
     """
     if view.is_readonly(key, False):
-        raise DiscardSignal(encode_text(f"bash: {key}: readonly variable\n"))
+        raise DiscardSignal(
+            encode_text(f"{shell_voice()}{key}: readonly variable\n")
+        )
 
 
 async def _assign_var(
@@ -140,7 +143,7 @@ async def _assign_var(
     except PolicyDenied as exc:
         raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
     except ReadonlyVariableError as exc:
-        raise DiscardSignal(encode_text(f"bash: {exc}\n")) from exc
+        raise DiscardSignal(encode_text(f"{shell_voice()}{exc}\n")) from exc
     except ArithError as exc:
         raise exc.signal(fatal=True) from exc
 
@@ -325,7 +328,7 @@ async def execute_assignment(
                 text,
                 exit_code=assignment_status(context.frame, sub_seq),
                 stderr="".join(
-                    f"bash: {key}: {word}: must use subscript when "
+                    f"{shell_voice()}{key}: {word}: must use subscript when "
                     "assigning associative array\n"
                     for word in bad_words
                 ),
@@ -376,7 +379,9 @@ async def execute_assignment(
             # the expanded text.
             name_text = text.partition("=")[0].removesuffix("+")
             raise DiscardSignal(
-                encode_text(f"bash: {name_text}: bad array subscript\n")
+                encode_text(
+                    f"{shell_voice()}{name_text}: bad array subscript\n"
+                )
             )
         if amap is not None:
             # The subscript is the key: no arithmetic, `m[1+1]`
@@ -402,7 +407,9 @@ async def execute_assignment(
             # Same fatal shape as the empty subscript above.
             name_text = text.partition("=")[0].removesuffix("+")
             raise DiscardSignal(
-                encode_text(f"bash: {name_text}: bad array subscript\n")
+                encode_text(
+                    f"{shell_voice()}{name_text}: bad array subscript\n"
+                )
             )
         _refuse_readonly(view, key)
         slot, added = (

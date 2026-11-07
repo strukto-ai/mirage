@@ -49,28 +49,30 @@ from mirage.io.stream import (
 )
 from mirage.io.types import ByteSource, OutputState
 from mirage.process.handle import ProcessHandle
-from mirage.process.table import ProcessTable
-from mirage.process.types import ProcessInfo
+from mirage.process.table import ProcessTable, deliver
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.console.pipe import PipeConsole
-from mirage.shell.constants import NOT_FOUND_STATUS, TIMEOUT_STATUS
-from mirage.shell.job_table.constants import IGNORED_SIGNALS
-from mirage.shell.join import shell_join
-from mirage.types import PathSpec
-from mirage.workspace.evaluation import EvaluationContext, child_context
-from mirage.workspace.executor.builtins.timeout.constants import (
+from mirage.shell.constants import (
     CONTINUE_SIGNALS,
-    FORK_FAILED,
-    SELF_KILLING_SIGNALS,
+    NOT_FOUND_STATUS,
+    SHELL_IGNORED_SIGNALS,
     SIGCHLD,
     SIGKILL,
-    SIGNAL_ALIASES,
     SIGNALS,
     SIGRTMAX,
     SIGRTMIN,
     SIGSTOP,
     STOP_SIGNALS,
+    TIMEOUT_STATUS,
+)
+from mirage.shell.join import shell_join
+from mirage.types import PathSpec
+from mirage.workspace.evaluation import EvaluationContext, child_context
+from mirage.workspace.executor.builtins.timeout.constants import (
+    FORK_FAILED,
+    SELF_KILLING_SIGNALS,
+    SIGNAL_ALIASES,
     TIMEOUT_NAMES,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
@@ -402,8 +404,9 @@ async def _supervise(
             await child.session.close_inputs()
         return ran[0][1].exit_code
 
-    def forked(info: ProcessInfo) -> None:
-        child.session.process_id = info.pid
+    def forked(process: ProcessHandle) -> None:
+        child.session.process_id = process.info.pid
+        child.frame.shell = process
 
     try:
         process = processes.start(
@@ -414,6 +417,8 @@ async def _supervise(
             run=run,
             limit=session.processes.max,
             started=forked,
+            ignores=SHELL_IGNORED_SIGNALS,
+            own_group=not foreground,
         )
     except BlockingIOError:
         return _refuse(FORK_FAILED)
@@ -423,6 +428,7 @@ async def _supervise(
         # deadline answered.
         try:
             return await _deadline(
+                processes,
                 process,
                 ran,
                 console,
@@ -488,6 +494,7 @@ async def _streamed(
 
 
 async def _deadline(
+    processes: ProcessTable,
     process: ProcessHandle,
     ran: list[tuple[bytes | None, IOResult]],
     console: JobConsole,
@@ -503,6 +510,7 @@ async def _deadline(
     """Wait for the run, and at the deadline do what the signal does.
 
     Args:
+        processes (ProcessTable): the table the command runs in.
         process (ProcessHandle): the command's process.
         ran (list[tuple[bytes | None, IOResult]]): its drained output
             and result, once it ended on its own.
@@ -543,46 +551,58 @@ async def _deadline(
         # The command stops, or timeout never wakes: only -k's KILL
         # ends the wait, and not even that once timeout stopped itself.
         if stops:
-            await _stop(process, signal, foreground)
+            await _stop(processes, process, signal, foreground)
         if kill_after == 0 or (signal == SIGSTOP and not foreground):
             await asyncio.get_running_loop().create_future()
         await asyncio.sleep(kill_after)
         if not task.done():
-            await _stop(process, SIGKILL, foreground)
+            await _stop(processes, process, SIGKILL, foreground)
         say(SIGKILL)
         return await _ended(console, held, said, 137)
-    if signal in CONTINUE_SIGNALS or signal in STOP_SIGNALS:
+    ignored = signal in process.ignores
+    if signal in CONTINUE_SIGNALS or signal in STOP_SIGNALS or ignored:
+        if ignored:
+            # A shell that ignores the signal lives on past the program
+            # it stops; timeout waits for it, and -k's KILL ends the wait.
+            await _stop(processes, process, signal, foreground)
         done, _ = await asyncio.wait(
             {task}, timeout=kill_after if kill_after else None
         )
         if task not in done:
-            await _stop(process, SIGKILL, foreground)
+            await _stop(processes, process, SIGKILL, foreground)
             say(SIGKILL)
             return await _ended(console, held, said, 137)
         code = task.result() if preserve else TIMEOUT_STATUS
         return await _ended(console, held, said, code, finished=True)
-    await _stop(process, signal, foreground)
+    await _stop(processes, process, signal, foreground)
     if signal in SELF_KILLING_SIGNALS and (
         not foreground or signal == SIGKILL
     ):
         return await _ended(console, held, said, 128 + signal)
+    if not task.cancelled():
+        code = task.result() if preserve else TIMEOUT_STATUS
+        return await _ended(console, held, said, code, finished=True)
     return await _ended(
         console, held, said, 128 + signal if preserve else TIMEOUT_STATUS
     )
 
 
-async def _stop(process: ProcessHandle, signal: int, foreground: bool) -> None:
-    # timeout signals its own process group unless --foreground, so the
-    # jobs the command started end with it, or, when their shells ignore
-    # the signal, the programs they run right now do; the command itself
-    # gets it either way. The group hears it before the command stops, as
-    # a stop reaches children first, so a native program that ends with
-    # the command already knows the signal.
-    ignored = signal in IGNORED_SIGNALS
-    if ignored and not foreground:
-        process.signal_children(signal)
-    process.terminate(signal, children=not foreground and not ignored)
-    await _cancel(process.task)
+async def _stop(
+    processes: ProcessTable,
+    process: ProcessHandle,
+    signal: int,
+    foreground: bool,
+) -> None:
+    # timeout signals its own process group unless --foreground, so what
+    # the command started ends with it, or, where a shell ignores the
+    # signal, the program it runs right now does; the command itself gets
+    # it either way. One the signal stops is waited for.
+    if foreground:
+        deliver(process, signal)
+    else:
+        processes.signal_group(process.info.group_id, signal)
+    if signal not in process.ignores:
+        await asyncio.wait({process.task})
 
 
 async def _cancel(task: asyncio.Future[Any]) -> None:

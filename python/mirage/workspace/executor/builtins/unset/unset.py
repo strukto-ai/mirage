@@ -16,6 +16,7 @@ from mirage.policy import PolicyDenied
 from mirage.shell.array import array_extent, array_unset
 from mirage.shell.constants import FUNCNAME
 from mirage.shell.errors import ArithError
+from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.help import flag_help
@@ -180,7 +181,8 @@ async def handle_unset(
             continue
         return fail(
             "unset",
-            f"bash: unset: {tok}: invalid option\n" + builtin_usage("unset"),
+            f"{shell_voice()}unset: {tok}: invalid option\n"
+            + builtin_usage("unset"),
             2,
         )
     for name in args[i:]:
@@ -193,7 +195,7 @@ async def handle_unset(
             if view.is_readonly(name, False):
                 return fail(
                     "unset",
-                    f"bash: unset: {name}: cannot unset: readonly variable\n",
+                    f"{shell_voice()}unset: {name}: cannot unset: readonly variable\n",
                 )
             try:
                 await view.unset(name, follow_ref=False)
@@ -204,7 +206,7 @@ async def handle_unset(
             if name in session.readonly_functions:
                 return fail(
                     "unset",
-                    f"bash: unset: {name}: cannot unset: readonly function\n",
+                    f"{shell_voice()}unset: {name}: cannot unset: readonly function\n",
                 )
             session.remove_function(name)
             continue
@@ -218,7 +220,7 @@ async def handle_unset(
         if base in session.readonly_vars:
             return fail(
                 "unset",
-                f"bash: unset: {base}: cannot unset: readonly variable\n",
+                f"{shell_voice()}unset: {base}: cannot unset: readonly variable\n",
             )
         existed = (
             is_element
@@ -249,12 +251,12 @@ async def handle_unset(
                 if status == "notarray"
                 else f"unset: {name[len(base) :]}: bad array subscript"
             )
-            return fail("unset", f"bash: {detail}\n")
+            return fail("unset", f"{shell_voice()}{detail}\n")
         if mode == "auto" and not existed and name in session.functions:
             if name in session.readonly_functions:
                 return fail(
                     "unset",
-                    f"bash: unset: {name}: cannot unset: readonly function\n",
+                    f"{shell_voice()}unset: {name}: cannot unset: readonly function\n",
                 )
             session.remove_function(name)
     return ok("unset")

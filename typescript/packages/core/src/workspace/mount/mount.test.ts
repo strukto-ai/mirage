@@ -527,7 +527,10 @@ it('runs a command registered for one filetype only on that filetype', async () 
     const csv = await ws.shell('summarize /ram/x.csv')
     const txt = await ws.shell('summarize /ram/x.txt')
     expect([csv.exitCode, csv.stdoutText]).toEqual([0, 'ok'])
-    expect([txt.exitCode, txt.stderrText]).toEqual([127, 'summarize: command not found'])
+    expect([txt.exitCode, txt.stderrText]).toEqual([
+      127,
+      'bash: line 1: summarize: command not found',
+    ])
   } finally {
     await ws.close()
   }

@@ -585,8 +585,8 @@ describe('handleRedirect accepts PathSpec targets', () => {
 // A trailing redirect binds to the command it follows, whatever the parse
 // wrapped it around: a pipeline in an &&/|| list, a list the parse pulled
 // into a pipeline's first stage, a pipeline pulled in the same way, and a
-// `!`. Every row is GNU bash 5.2 in debian:stable-slim (redirect errors
-// without bash's `bash: line N:` prefix); PS prints $? and PIPESTATUS.
+// `!`. Every row is GNU bash 5.2 in debian:stable-slim; PS prints $? and
+// PIPESTATUS.
 const PS = '; echo "rc=$? ps=${PIPESTATUS[*]}"'
 const BINDS: [string, string, string, number][] = [
   ["true && printf 'x\\n' | cat < /data/b.txt", '1\n2\n3\n', '', 0],
@@ -598,7 +598,7 @@ const BINDS: [string, string, string, number][] = [
   [
     "true && printf 'x\\n' | cat < /nonexistent" + PS,
     'rc=1 ps=0 1\n',
-    '/nonexistent: No such file or directory\n',
+    'bash: line 1: /nonexistent: No such file or directory\n',
     0,
   ],
   ["true && printf 'x\\n' | cat < /data/b.txt && echo after", '1\n2\n3\nafter\n', '', 0],
@@ -622,7 +622,12 @@ const BINDS: [string, string, string, number][] = [
   ["! printf 'x\\n' | cat < /data/b.txt | cat" + PS, '1\n2\n3\nrc=1 ps=0 0 0\n', '', 0],
   ['! cat < /data/b.txt | tr 1 X' + PS, 'X\n2\n3\nrc=1 ps=0 0\n', '', 0],
   ['! false | true > /dev/null' + PS, 'rc=1 ps=1 0\n', '', 0],
-  ['! cat < /nonexistent' + PS, 'rc=0 ps=1\n', '/nonexistent: No such file or directory\n', 0],
+  [
+    '! cat < /nonexistent' + PS,
+    'rc=0 ps=1\n',
+    'bash: line 1: /nonexistent: No such file or directory\n',
+    0,
+  ],
   ['true && { echo e >&2; echo o; } |& cat > /data/p; cat /data/p', 'e\no\n', '', 0],
 ]
 
@@ -752,9 +757,6 @@ describe('fd-table routing end-to-end', () => {
   })
 })
 
-// GNU bash 5.2.37 pinned: both `cat < missing` and `echo x > /nosuchdir/f`
-// answer "bash: line 1: <target>: No such file or directory", exit 1, and
-// never name the command. mirage drops the "bash: line N:" prefix, matching
 describe('handleRedirect numeric targets', () => {
   it('routes a close or dup by the descriptor claimed, not the operator', async () => {
     const { ws } = makeIntegrationWS()
@@ -767,7 +769,7 @@ describe('handleRedirect numeric targets', () => {
       expect(await runResult(ws, 'echo x 1<&-; echo code=$?')).toEqual([
         0,
         'code=1\n',
-        'echo: write error: Bad file descriptor\n',
+        'bash: line 1: echo: write error: Bad file descriptor\n',
       ])
       expect(await runResult(ws, 'cat /data/missing 2<&1; echo code=$?')).toEqual([
         0,
@@ -787,7 +789,7 @@ describe('handleRedirect numeric targets', () => {
       expect(await runResult(ws, 'echo 0 >&-; echo code=$?')).toEqual([
         0,
         'code=1\n',
-        'echo: write error: Bad file descriptor\n',
+        'bash: line 1: echo: write error: Bad file descriptor\n',
       ])
       expect(await runResult(ws, 'exec 2<&-; cat /data/missing; echo code=$?')).toEqual([
         0,
@@ -801,8 +803,9 @@ describe('handleRedirect numeric targets', () => {
   })
 })
 
-// the house style of the other shell-attributed error
-// ("nosuchcmd: command not found").
+// GNU bash 5.2.37 pinned: both `cat < missing` and `echo x > /nosuchdir/f`
+// answer "bash: line 1: <target>: No such file or directory", exit 1, and
+// never name the command.
 describe('handleRedirect missing < source', () => {
   it('is shell-attributed, not command-attributed', async () => {
     const { ws } = makeIntegrationWS()
@@ -810,7 +813,7 @@ describe('handleRedirect missing < source', () => {
       const [exit, out, err] = await runResult(ws, 'cat < /data/missing')
       expect(exit).toBe(1)
       expect(out).toBe('')
-      expect(err).toBe('/data/missing: No such file or directory\n')
+      expect(err).toBe('bash: line 1: /data/missing: No such file or directory\n')
     } finally {
       await ws.close()
     }
@@ -822,7 +825,7 @@ describe('handleRedirect missing < source', () => {
       const [exit, out, err] = await runResult(ws, 'echo hi < /data/missing')
       expect(exit).toBe(1)
       expect(out).toBe('')
-      expect(err).toBe('/data/missing: No such file or directory\n')
+      expect(err).toBe('bash: line 1: /data/missing: No such file or directory\n')
     } finally {
       await ws.close()
     }
@@ -834,7 +837,7 @@ describe('handleRedirect missing < source', () => {
       const [exit, out, err] = await runResult(ws, 'cat < /data/missing; echo next')
       expect(exit).toBe(0)
       expect(out).toBe('next\n')
-      expect(err).toBe('/data/missing: No such file or directory\n')
+      expect(err).toBe('bash: line 1: /data/missing: No such file or directory\n')
     } finally {
       await ws.close()
     }
@@ -860,7 +863,7 @@ describe('handleRedirect missing < source', () => {
       const [exit, out, err] = await runResult(ws, 'cat < /data/missing | wc -l')
       expect(exit).toBe(0)
       expect(out.trim()).toBe('0')
-      expect(err).toBe('/data/missing: No such file or directory\n')
+      expect(err).toBe('bash: line 1: /data/missing: No such file or directory\n')
     } finally {
       await ws.close()
     }
@@ -871,7 +874,7 @@ describe('handleRedirect missing < source', () => {
     try {
       const [exit, , err] = await runResult(ws, 'cd /data && cat < missing')
       expect(exit).toBe(1)
-      expect(err).toBe('missing: No such file or directory\n')
+      expect(err).toBe('bash: line 1: missing: No such file or directory\n')
     } finally {
       await ws.close()
     }
@@ -882,7 +885,7 @@ describe('handleRedirect missing < source', () => {
     try {
       const [exit, , err] = await runResult(ws, 'cat < /data/missing < /data/good')
       expect(exit).toBe(1)
-      expect(err).toBe('/data/missing: No such file or directory\n')
+      expect(err).toBe('bash: line 1: /data/missing: No such file or directory\n')
     } finally {
       await ws.close()
     }
@@ -916,7 +919,7 @@ describe('handleRedirect missing < source', () => {
     )
     expect([io.exitCode, decode(await materialize(io.stderr))]).toEqual([
       1,
-      '/data/missing: backend exploded\n',
+      'bash: /data/missing: backend exploded\n',
     ])
     expect(executeNode).not.toHaveBeenCalled()
   })
@@ -929,7 +932,7 @@ describe('handleRedirect unwritable > target', () => {
       const [exit, out, err] = await runResult(ws, 'echo x > /nodir/f')
       expect(exit).toBe(1)
       expect(out).toBe('')
-      expect(err).toBe('/nodir/f: No such file or directory\n')
+      expect(err).toBe('bash: line 1: /nodir/f: No such file or directory\n')
     } finally {
       await ws.close()
     }
@@ -941,7 +944,7 @@ describe('handleRedirect unwritable > target', () => {
       const [exit, out, err] = await runResult(ws, 'echo x > /nodir/f; echo next')
       expect(exit).toBe(0)
       expect(out).toBe('next\n')
-      expect(err).toBe('/nodir/f: No such file or directory\n')
+      expect(err).toBe('bash: line 1: /nodir/f: No such file or directory\n')
       const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined)
       const originalWrite = data.write.bind(data)
       const originalPwrite = data.pwrite.bind(data)
@@ -978,7 +981,7 @@ describe('handleRedirect unwritable > target', () => {
             expect(await runResult(ws, 'echo hi > /data/out; echo next')).toEqual([
               0,
               'next\n',
-              `/data/out: ${reason}\n`,
+              `bash: line 1: /data/out: ${reason}\n`,
             ])
             failing = new Set(['/data/err'])
             for (const redirects of ['> /data/out 2> /data/err', '2> /data/err > /data/out']) {
@@ -1028,7 +1031,7 @@ describe('handleRedirect unwritable > target', () => {
       try {
         const [exit, , err] = await runResult(ws, line)
         expect(exit).toBe(1)
-        expect(err).toBe('/nodir/f: No such file or directory\n')
+        expect(err).toBe('bash: line 1: /nodir/f: No such file or directory\n')
       } finally {
         await ws.close()
       }
@@ -1042,7 +1045,7 @@ describe('handleRedirect unwritable > target', () => {
     try {
       const [exit, , err] = await runResult(ws, 'echo x > /nodir/f > /data/out')
       expect(exit).toBe(1)
-      expect(err).toBe('/nodir/f: No such file or directory\n')
+      expect(err).toBe('bash: line 1: /nodir/f: No such file or directory\n')
       expect(await runExit(ws, 'test -e /data/out')).toBe(1)
     } finally {
       await ws.close()
@@ -1056,7 +1059,7 @@ describe('handleRedirect unwritable > target', () => {
     try {
       const [exit, , err] = await runResult(ws, `echo y > /data/out2 ${redirect} /nodir/g`)
       expect(exit).toBe(1)
-      expect(err).toBe('/nodir/g: No such file or directory\n')
+      expect(err).toBe('bash: line 1: /nodir/g: No such file or directory\n')
       expect(await runExit(ws, 'test -e /data/out2')).toBe(0)
       const [, out] = await runResult(ws, 'cat /data/out2')
       expect(out).toBe('')
@@ -1084,7 +1087,7 @@ describe('handleRedirect unwritable > target', () => {
     )
     expect([io.exitCode, decode(await materialize(io.stderr))]).toEqual([
       1,
-      '/ram/out.txt: backend exploded\n',
+      'bash: /ram/out.txt: backend exploded\n',
     ])
   })
 
@@ -1105,26 +1108,26 @@ describe('handleRedirect unwritable > target', () => {
     )
     expect([io.exitCode, decode(await materialize(io.stderr))]).toEqual([
       1,
-      '/ram/out.txt: backend exploded\n',
+      'bash: /ram/out.txt: backend exploded\n',
     ])
   })
 })
 
 describe('descriptor zero duplication', () => {
   it.each([
-    ['echo x 1>&0', '', 'echo: write error: Bad file descriptor\n', 1],
+    ['echo x 1>&0', '', 'bash: line 1: echo: write error: Bad file descriptor\n', 1],
     // A self-dup never reopens a closed descriptor, transient or
     // persistent; a file redirect on it does.
     [
       'touch /data/marker 1>&- 1>&1 2>&1; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
       '',
-      '1: Bad file descriptor\nrc=1\ne=1\n',
+      'bash: line 1: 1: Bad file descriptor\nrc=1\ne=1\n',
       0,
     ],
     [
       'exec 1>&-; touch /data/marker 1>&1 2>&1; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
       '',
-      '1: Bad file descriptor\nrc=1\ne=1\n',
+      'bash: line 1: 1: Bad file descriptor\nrc=1\ne=1\n',
       0,
     ],
     [
@@ -1135,12 +1138,17 @@ describe('descriptor zero duplication', () => {
     ],
     ['echo x 2>&0 1>&2', '', '', 1],
     ['echo x 0>&1 1>&0', 'x\n', '', 0],
-    ['echo x 1>&0 0>&1', '', 'echo: write error: Bad file descriptor\n', 1],
+    ['echo x 1>&0 0>&1', '', 'bash: line 1: echo: write error: Bad file descriptor\n', 1],
     ['echo x 1>&0 2>&1', '', '', 1],
     // A dup from a descriptor closed earlier on the line refuses the
     // line, and the command never runs; a self-dup stays a no-op.
-    ['touch /data/marker 0<&- 1<&0; test -e /data/marker', '', '0: Bad file descriptor\n', 1],
-    ['echo hi 1>&- 2>&1', '', '1: Bad file descriptor\n', 1],
+    [
+      'touch /data/marker 0<&- 1<&0; test -e /data/marker',
+      '',
+      'bash: line 1: 0: Bad file descriptor\n',
+      1,
+    ],
+    ['echo hi 1>&- 2>&1', '', 'bash: line 1: 1: Bad file descriptor\n', 1],
     ['cat 0<&- 0<&0 </data/a.txt', 'a', '', 0],
     // `>&word` on a descriptor other than 1 is bash's ambiguous redirect,
     // refused before the command runs; bare and on 1 it is the both-streams
@@ -1148,14 +1156,24 @@ describe('descriptor zero duplication', () => {
     [
       'touch /data/marker 3>&/data/foo; test -e /data/marker || test -e /data/foo',
       '',
-      '/data/foo: ambiguous redirect\n',
+      'bash: line 1: /data/foo: ambiguous redirect\n',
       1,
     ],
-    ['echo x 2>&/data/foo; test -e /data/foo', '', '/data/foo: ambiguous redirect\n', 1],
+    [
+      'echo x 2>&/data/foo; test -e /data/foo',
+      '',
+      'bash: line 1: /data/foo: ambiguous redirect\n',
+      1,
+    ],
     ['( echo out; echo err >&2 ) 1>&/data/both; cat /data/both', 'out\nerr\n', '', 0],
     // An output redirect leaves its descriptor write-only.
     ['cat 1>/data/out 0<&1; wc -c < /data/out', '0\n', 'cat: -: Bad file descriptor\n', 0],
-    ['echo x 1>&0 2>/data/err; cat /data/err', 'echo: write error: Bad file descriptor\n', '', 0],
+    [
+      'echo x 1>&0 2>/data/err; cat /data/err',
+      'bash: line 1: echo: write error: Bad file descriptor\n',
+      '',
+      0,
+    ],
     ['echo x 0>/data/out 1>&0; cat /data/out', 'x\n', '', 0],
     ['cat </data/a.txt 1<&0 0<&1 1>/data/out; cat /data/out', 'a', '', 0],
     // bash 5.2: stdout is open for writing only, so the read fails.
@@ -1165,13 +1183,13 @@ describe('descriptor zero duplication', () => {
     [
       'exec 1>&-; touch /data/marker 2>&1; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
       '',
-      '1: Bad file descriptor\nrc=1\ne=1\n',
+      'bash: line 1: 1: Bad file descriptor\nrc=1\ne=1\n',
       0,
     ],
     [
       'exec 0<&-; touch /data/marker 1<&0; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
       '',
-      '0: Bad file descriptor\nrc=1\ne=1\n',
+      'bash: line 1: 0: Bad file descriptor\nrc=1\ne=1\n',
       0,
     ],
     ['exec 1>&-; true 1>&1; echo rc=$? >&2', '', 'rc=0\n', 0],
@@ -1212,7 +1230,7 @@ it('opens a standard descriptor in the other direction', async () => {
     expect((await ws.shell('cat /data/input')).stdoutText).toBe('')
     const one = await ws.shell('( exec 1</data/source; echo hi; echo rc=$? >&2 )')
     expect(one.stdoutText).toBe('')
-    expect(one.stderrText).toBe('echo: write error: Bad file descriptor\nrc=1\n')
+    expect(one.stderrText).toBe('bash: line 1: echo: write error: Bad file descriptor\nrc=1\n')
     const two = await ws.shell('( exec 2</data/source; echo hi >&2; echo rc=$? )')
     expect(two.stdoutText).toBe('rc=1\n')
   } finally {
@@ -1327,7 +1345,12 @@ describe('descriptor identities survive dups', () => {
     ['exec 0>/data/f; echo x >&0; exec 1>&0; echo y; exec 1>&2; cat /data/f >&2', '', 'x\ny\n', 0],
     ['exec 0>/data/f; echo x 1>&0 2>&0; cat /data/f', 'x\n', '', 0],
     ['exec 0<&1; echo x >&0', 'x\n', '', 0],
-    ['echo x >&0; echo rc=$?', 'rc=1\n', 'echo: write error: Bad file descriptor\n', 0],
+    [
+      'echo x >&0; echo rc=$?',
+      'rc=1\n',
+      'bash: line 1: echo: write error: Bad file descriptor\n',
+      0,
+    ],
   ])('%s', async (line, out, err, code) => {
     const { ws } = makeIntegrationWS()
     try {
@@ -1354,7 +1377,7 @@ describe('handleRedirect trailing slash', () => {
     ]) {
       const [code, , err] = await runResult(ws, line)
       const target = line.split(' ').pop() ?? ''
-      expect([code, err], line).toEqual([1, `${target}: Is a directory\n`])
+      expect([code, err], line).toEqual([1, `bash: line 1: ${target}: Is a directory\n`])
     }
     expect(await runExit(ws, 'test -e /data/missing')).toBe(1)
     expect(await runExit(ws, 'test -e /data/marker')).toBe(1)
@@ -1366,7 +1389,7 @@ describe('handleRedirect trailing slash', () => {
     // (empty) by the time the second open refuses.
     const { ws } = makeIntegrationWS()
     const [code, , err] = await runResult(ws, 'echo hi > /data/a > /data/missing/')
-    expect([code, err]).toEqual([1, '/data/missing/: Is a directory\n'])
+    expect([code, err]).toEqual([1, 'bash: line 1: /data/missing/: Is a directory\n'])
     expect(await runExit(ws, 'test -f /data/a')).toBe(0)
     expect(await run(ws, 'cat /data/a')).toBe('')
   })
@@ -1381,7 +1404,10 @@ describe('handleRedirect trailing slash', () => {
       'set -C; echo hi > /data/nodir/f > /data/reg',
     ]) {
       const [code, , err] = await runResult(ws, line)
-      expect([code, err], line).toEqual([1, '/data/nodir/f: No such file or directory\n'])
+      expect([code, err], line).toEqual([
+        1,
+        'bash: line 1: /data/nodir/f: No such file or directory\n',
+      ])
     }
     expect(await runExit(ws, 'test -e /data/nodir')).toBe(1)
     expect(await runExit(ws, 'test -e /data/missing')).toBe(1)
@@ -1479,7 +1505,7 @@ describe('a redirect the store refuses', () => {
   // bash 5.2 in debian:stable-slim: a target it cannot open fails the
   // command that owns it with status 1, before any later `2>` of that
   // command applies, and the list goes on.
-  const refused = '/data/r.txt: upload refused: 503\n'
+  const refused = 'bash: line 1: /data/r.txt: upload refused: 503\n'
   it.each([
     ['echo once > /data/r.txt 2>/dev/null; echo "s=$?"', 's=1\n', refused],
     ['echo once 2>/dev/null > /data/r.txt; echo "s=$?"', 's=1\n', ''],
@@ -1516,7 +1542,7 @@ describe('a redirect the store refuses', () => {
       const io = await ws.shell(`cat ${op} /data/r.txt; echo "s=$?"`)
       expect([io.stdoutText, io.stderrText]).toEqual([
         's=1\n',
-        '/data/r.txt: download refused: 503\n',
+        'bash: line 1: /data/r.txt: download refused: 503\n',
       ])
     } finally {
       await ws.close()
@@ -1529,7 +1555,10 @@ describe('a redirect the store refuses', () => {
     const ws = rejecting(new RejectingVFS(new Error('stat refused: 503'), false, false, true))
     try {
       const io = await ws.shell('set -C; echo x > /data/r.txt; echo "s=$?"')
-      expect([io.stdoutText, io.stderrText]).toEqual(['s=1\n', '/data/r.txt: stat refused: 503\n'])
+      expect([io.stdoutText, io.stderrText]).toEqual([
+        's=1\n',
+        'bash: line 1: /data/r.txt: stat refused: 503\n',
+      ])
     } finally {
       await ws.close()
     }

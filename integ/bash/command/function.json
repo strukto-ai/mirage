@@ -277,7 +277,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=127\n",
-        "stderr": "fb: command not found\n"
+        "stderr": "environment: line 2: fb: command not found\n"
       }
     },
     {
@@ -452,7 +452,7 @@
       "expect": {
         "exit": 0,
         "stdout": "d1\nd2\nd3\nnext 1\ns1\ns2 s3\nafter 0\nparen=1\npipe=0\n",
-        "stderr": "bash: fnest: maximum function nesting level exceeded (3)\nbash: fsub: maximum function nesting level exceeded (3)\nbash: fnest: maximum function nesting level exceeded (3)\nbash: fnest: maximum function nesting level exceeded (3)\n"
+        "stderr": "environment: line 1: fnest: maximum function nesting level exceeded (3)\nenvironment: line 2: fsub: maximum function nesting level exceeded (3)\nenvironment: line 1: fnest: maximum function nesting level exceeded (3)\nenvironment: line 1: fnest: maximum function nesting level exceeded (3)\n"
       }
     },
     {
@@ -487,7 +487,7 @@
       "expect": {
         "exit": 0,
         "stdout": "\nafter 0\nnext 1\n",
-        "stderr": "bash: fdef: maximum function nesting level exceeded (32)\nbash: fdef: maximum function nesting level exceeded (32)\n"
+        "stderr": "environment: line 1: fdef: maximum function nesting level exceeded (32)\nenvironment: line 1: fdef: maximum function nesting level exceeded (32)\n"
       }
     }
   ]

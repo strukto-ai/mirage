@@ -258,11 +258,11 @@ async def test_readonly_preset_refuses_with_bash_wording():
     try:
         io = await ws.shell("EDITOR=x")
         assert io.exit_code == 1
-        assert io.stderr == b"bash: EDITOR: readonly variable\n"
+        assert io.stderr == b"bash: line 1: EDITOR: readonly variable\n"
         io = await ws.shell("unset EDITOR")
         assert io.exit_code == 1
         assert io.stderr == (
-            b"bash: unset: EDITOR: cannot unset: readonly variable\n"
+            b"bash: line 1: unset: EDITOR: cannot unset: readonly variable\n"
         )
         io = await ws.shell("echo $EDITOR")
         assert (await io.stdout_str()) == "vi\n"

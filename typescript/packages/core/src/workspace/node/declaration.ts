@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import { IOResult } from '../../io/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
@@ -110,7 +111,7 @@ function declareOptionRefusal(
     .find((c) => !DECLARE_LETTERS.has(c))
   if (bad === undefined) return null
   const sign = flagChars.has(bad) ? '-' : '+'
-  return fail(cmd, `bash: ${cmd}: ${sign}${bad}: invalid option\n${builtinUsage(cmd)}`, 2)
+  return fail(cmd, `${shellVoice()}${cmd}: ${sign}${bad}: invalid option\n${builtinUsage(cmd)}`, 2)
 }
 
 /**
@@ -341,7 +342,7 @@ export async function executeDeclaration(
       const held = heldValue(session, bare)
       const conflict = kindConflict(held, kind)
       if (conflict !== null) {
-        conversionErrors.push(`bash: ${cmdWord}: ${bare}: ${conflict}`)
+        conversionErrors.push(`${shellVoice()}${cmdWord}: ${bare}: ${conflict}`)
         continue
       }
       const isMap = held !== null && typeof held === 'object' && !(held instanceof ShellArray)

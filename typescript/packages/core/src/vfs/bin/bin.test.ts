@@ -70,7 +70,7 @@ describe('BinViewVFS', () => {
     try {
       let io = await ws.shell('echo x > /usr/bin/ls')
       expect(io.exitCode).toBe(1)
-      expect(DEC.decode(io.stderr)).toBe('/usr/bin/ls: Read-only file system\n')
+      expect(DEC.decode(io.stderr)).toBe('bash: line 1: /usr/bin/ls: Read-only file system\n')
       io = await ws.shell('chmod 644 /usr/bin/ls; stat -c %a /usr/bin/ls')
       expect(DEC.decode(io.stderr)).toBe(
         "chmod: changing permissions of '/usr/bin/ls': Read-only file system\n",

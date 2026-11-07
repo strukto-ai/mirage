@@ -102,7 +102,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n0022\nrc=2\n0022\n",
-        "stderr": "bash: umask: 999: octal number out of range\nbash: umask: -x: invalid option\numask: usage: umask [-p] [-S] [mode]\n"
+        "stderr": "bash: line 1: umask: 999: octal number out of range\nbash: line 1: umask: -x: invalid option\numask: usage: umask [-p] [-S] [mode]\n"
       }
     }
   ]

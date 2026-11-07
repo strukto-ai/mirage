@@ -105,7 +105,7 @@ def test_declare_p_reports_an_unknown_name(shell):
     rc, out, err = shell.mirage_result("G=good; declare -p G NOPE")
     assert rc == 1
     assert out == 'declare -- G="good"\n'
-    assert err == "bash: declare: NOPE: not found\n"
+    assert err == "bash: line 1: declare: NOPE: not found\n"
 
 
 def test_pwd_is_exported_from_startup(shell):
@@ -207,7 +207,7 @@ def test_a_bare_local_declares_without_assigning(shell):
 
 def test_local_outside_a_function_is_refused(shell):
     _, out, err = shell.mirage_result("local x=1; echo rc=$?")
-    assert err == "bash: local: can only be used in a function\n"
+    assert err == "bash: line 1: local: can only be used in a function\n"
     assert out == "rc=1\n"
     # `declare` is the spelling that is legal at top level.
     assert shell.mirage("declare x=1; declare -p x") == 'declare -- x="1"\n'

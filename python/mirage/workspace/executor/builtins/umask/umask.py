@@ -15,6 +15,7 @@
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
+from mirage.shell.voice import shell_voice
 from mirage.utils.mode import parse_chmod
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.shared import builtin_usage, fail
@@ -62,7 +63,7 @@ def parse_umask(text: str, current: int) -> int | str:
     """
     if text.isdigit():
         if not all(c in "01234567" for c in text):
-            return f"bash: umask: {text}: octal number out of range\n"
+            return f"{shell_voice()}umask: {text}: octal number out of range\n"
         # bash 5.2 clamps an octal value past 0777 to 0777 (`umask 07777`
         # and `umask 1000` both leave 0777) rather than refusing it; only
         # a non-octal digit is out of range.
@@ -74,15 +75,16 @@ def parse_umask(text: str, current: int) -> int | str:
             i += 1
         if i >= len(clause) or clause[i] not in "+-=":
             bad = clause[i] if i < len(clause) else ""
-            return f"bash: umask: `{bad}': invalid symbolic mode operator\n"
+            return f"{shell_voice()}umask: `{bad}': invalid symbolic mode operator\n"
         for ch in clause[i + 1 :]:
             if ch not in "+-=rwx":
                 return (
-                    f"bash: umask: `{ch}': invalid symbolic mode character\n"
+                    f"{shell_voice()}umask: `{ch}': "
+                    "invalid symbolic mode character\n"
                 )
     parsed = parse_chmod(text, perms)
     if parsed is None:
-        return f"bash: umask: `{text}': invalid symbolic mode character\n"
+        return f"{shell_voice()}umask: `{text}': invalid symbolic mode character\n"
     return 0o777 & ~parsed
 
 
@@ -108,7 +110,8 @@ async def handle_umask(
     if scan.bad is not None:
         return fail(
             "umask",
-            f"bash: umask: {scan.bad}: invalid option\n{builtin_usage('umask')}",
+            f"{shell_voice()}umask: {scan.bad}: invalid option\n"
+            f"{builtin_usage('umask')}",
             2,
         )
     symbolic = "S" in scan.letters

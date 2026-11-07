@@ -25,20 +25,20 @@ const CASES: [string, string, string][] = [
   [
     'echo a > /ram/f; set -C; echo b > /ram/f; echo rc=$?; cat /ram/f',
     'rc=1\na\n',
-    '/ram/f: cannot overwrite existing file\n',
+    'bash: line 1: /ram/f: cannot overwrite existing file\n',
   ],
   // Existence is the test, not size: an empty file still refuses.
   [
     ': > /ram/f; set -C; echo b > /ram/f; echo rc=$?',
     'rc=1\n',
-    '/ram/f: cannot overwrite existing file\n',
+    'bash: line 1: /ram/f: cannot overwrite existing file\n',
   ],
   // `>|` overrides for one redirect, and does not clear the option.
   ['echo a > /ram/f; set -C; echo b >| /ram/f; echo rc=$?; cat /ram/f', 'rc=0\nb\n', ''],
   [
     'echo a > /ram/f; set -C; echo b >| /ram/f; echo c > /ram/f; echo rc=$?',
     'rc=1\n',
-    '/ram/f: cannot overwrite existing file\n',
+    'bash: line 1: /ram/f: cannot overwrite existing file\n',
   ],
   // A new target and `>>` are both allowed.
   ['set -C; echo b > /ram/new; echo rc=$?; cat /ram/new', 'rc=0\nb\n', ''],
@@ -47,26 +47,30 @@ const CASES: [string, string, string][] = [
   [
     'echo a > /ram/f; set -C; ls /nope 2> /ram/f; echo rc=$?; cat /ram/f',
     'rc=1\na\n',
-    '/ram/f: cannot overwrite existing file\n',
+    'bash: line 1: /ram/f: cannot overwrite existing file\n',
   ],
   [
     'echo a > /ram/f; set -C; echo b &> /ram/f; echo rc=$?; cat /ram/f',
     'rc=1\na\n',
-    '/ram/f: cannot overwrite existing file\n',
+    'bash: line 1: /ram/f: cannot overwrite existing file\n',
   ],
   // bash stops at the first refused open: one message, neither written.
   [
     'echo a > /ram/x; echo a > /ram/y; set -C; echo b > /ram/x > /ram/y; echo rc=$?; cat /ram/x /ram/y',
     'rc=1\na\na\n',
-    '/ram/x: cannot overwrite existing file\n',
+    'bash: line 1: /ram/x: cannot overwrite existing file\n',
   ],
   // A directory under the option answers in GNU's wording for that case.
-  ['mkdir -p /ram/d; set -C; echo b > /ram/d; echo rc=$?', 'rc=1\n', '/ram/d: Is a directory\n'],
+  [
+    'mkdir -p /ram/d; set -C; echo b > /ram/d; echo rc=$?',
+    'rc=1\n',
+    'bash: line 1: /ram/d: Is a directory\n',
+  ],
   // The letter and the long name are the same option, and `+C` clears it.
   [
     'echo a > /ram/f; set -o noclobber; echo b > /ram/f; echo rc=$?',
     'rc=1\n',
-    '/ram/f: cannot overwrite existing file\n',
+    'bash: line 1: /ram/f: cannot overwrite existing file\n',
   ],
   ['echo a > /ram/f; set -C; set +C; echo b > /ram/f; echo rc=$?; cat /ram/f', 'rc=0\nb\n', ''],
   // Off by default: the ordinary overwrite is untouched.
@@ -92,7 +96,7 @@ describe('set -C noclobber', () => {
       'echo a > /ram/f; set -C; touch /ram/marker > /ram/f;' + ' echo rc=$?; ls /ram/marker',
     )
     expect(stderrStr(io)).toBe(
-      '/ram/f: cannot overwrite existing file\n' +
+      'bash: line 1: /ram/f: cannot overwrite existing file\n' +
         "ls: cannot access '/ram/marker': No such file or directory\n",
     )
     expect(stdoutStr(io)).toBe('rc=1\n')
@@ -120,7 +124,7 @@ describe('set -C noclobber', () => {
     const io = await ws.shell(
       'set -C; echo x > /ram/dup > /ram/dup; echo rc=$?; cat /ram/dup; echo end',
     )
-    expect(stderrStr(io)).toBe('/ram/dup: cannot overwrite existing file\n')
+    expect(stderrStr(io)).toBe('bash: line 1: /ram/dup: cannot overwrite existing file\n')
     // The first redirect still created it, and the command never ran, so
     // the file is there and empty.
     expect(stdoutStr(io)).toBe('rc=1\nend\n')
@@ -134,12 +138,12 @@ describe('set -C noclobber', () => {
     const ap = await ws.shell(
       'set -C; echo x >> /ram/ap > /ram/ap; echo rc=$?; cat /ram/ap; echo end',
     )
-    expect(stderrStr(ap)).toBe('/ram/ap: cannot overwrite existing file\n')
+    expect(stderrStr(ap)).toBe('bash: line 1: /ram/ap: cannot overwrite existing file\n')
     expect(stdoutStr(ap)).toBe('rc=1\nend\n')
     const ov = await ws.shell(
       'set -C; echo x >| /ram/ov > /ram/ov; echo rc=$?; cat /ram/ov; echo end',
     )
-    expect(stderrStr(ov)).toBe('/ram/ov: cannot overwrite existing file\n')
+    expect(stderrStr(ov)).toBe('bash: line 1: /ram/ov: cannot overwrite existing file\n')
     expect(stdoutStr(ov)).toBe('rc=1\nend\n')
     await ws.close()
   })

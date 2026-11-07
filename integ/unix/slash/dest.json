@@ -506,7 +506,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/slashx/missing/: Is a directory\n/data/slashx/missing/../r: No such file or directory\n"
+        "stderr": "bash: line 1: /data/slashx/missing/: Is a directory\nbash: line 1: /data/slashx/missing/../r: No such file or directory\n"
       }
     },
     {
@@ -541,7 +541,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/slashx/reg/: Is a directory\n/data/slashx/reg/: Is a directory\ntruncate: cannot open '/data/slashx/reg/' for writing: Is a directory\n"
+        "stderr": "bash: line 1: /data/slashx/reg/: Is a directory\nbash: line 1: /data/slashx/reg/: Is a directory\ntruncate: cannot open '/data/slashx/reg/' for writing: Is a directory\n"
       }
     },
     {

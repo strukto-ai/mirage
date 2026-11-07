@@ -14,7 +14,7 @@
       "expect": {
         "exit": 0,
         "stdout": "0\n1\n1\nnext\n",
-        "stderr": "/data2/b: Disk quota exceeded\n"
+        "stderr": "bash: line 1: /data2/b: Disk quota exceeded\n"
       }
     },
     {
@@ -64,7 +64,7 @@
       "expect": {
         "exit": 0,
         "stdout": "0\n1\n",
-        "stderr": "/data2/a: Disk quota exceeded\n"
+        "stderr": "bash: line 1: /data2/a: Disk quota exceeded\n"
       }
     },
     {
@@ -127,7 +127,7 @@
       "expect": {
         "exit": 0,
         "stdout": "1\n1\n",
-        "stderr": "/data2/s: Disk quota exceeded\n"
+        "stderr": "bash: line 1: /data2/s: Disk quota exceeded\n"
       }
     },
     {
@@ -179,7 +179,7 @@
       "expect": {
         "exit": 0,
         "stdout": "0\n0\n1\n",
-        "stderr": "/data/new: Disk quota exceeded\n"
+        "stderr": "bash: line 1: /data/new: Disk quota exceeded\n"
       }
     }
   ]

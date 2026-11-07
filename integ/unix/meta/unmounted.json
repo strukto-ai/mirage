@@ -277,7 +277,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/unmounted/out.txt: No such file or directory\n"
+        "stderr": "bash: line 1: /unmounted/out.txt: No such file or directory\n"
       }
     },
     {

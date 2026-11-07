@@ -56,6 +56,7 @@ from mirage.shell.helpers import get_redirects
 from mirage.shell.join import shell_join
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
+from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
 from mirage.workspace.executor.builtins.exec.constants import (
     CLOSED,
@@ -79,6 +80,7 @@ from mirage.workspace.executor.statement import (
     Written,
     answer_closed,
     record_status,
+    write_error_line,
     writer_forks,
 )
 from mirage.workspace.executor.traps import clear_traps
@@ -401,7 +403,7 @@ def _error_line(label: str, exc: Exception) -> bytes:
         label (str): the target as typed.
         exc (Exception): what the dispatcher raised.
     """
-    return encode_text(f"{label}: {strerror_of(exc)}\n")
+    return encode_text(f"{shell_voice()}{label}: {strerror_of(exc)}\n")
 
 
 def _exec_failure(
@@ -597,6 +599,33 @@ async def _route(
     return None, None, False
 
 
+async def route_rebound(
+    dispatch: DispatchFn,
+    session: SessionState,
+    channel: Channel,
+    data: bytes,
+) -> tuple[ByteSource | None, ByteSource | None, bool] | None:
+    """Send one write where an ``exec`` binding points its channel, for
+    a redirect level whose own descriptor the binding shadows: None
+    while the channel is unbound, else what is left for the level's
+    stdout and stderr (``exec >&2`` crosses over, a file takes it all)
+    and whether the binding refused the write (``exec 1<f``).
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        session (SessionState): shell session state.
+        channel (Channel): the stream the write is on.
+        data (bytes): the bytes written.
+    """
+    stdout = channel == Channel.STDOUT
+    binding = session.exec_stdout if stdout else session.exec_stderr
+    if binding is None:
+        return None
+    return await _route(
+        dispatch, session, binding, data, TO_STDOUT if stdout else TO_STDERR
+    )
+
+
 def _stdout_to_stderr(node: TSNodeLike) -> bool:
     """Whether a statement sends its own stdout to stderr (``>&2``).
 
@@ -718,11 +747,7 @@ async def divert_statement(
             failed = failed or channel == Channel.STDOUT
             unwritable = unwritable or channel == Channel.STDERR
     if failed:
-        words = command.split()
-        line = encode_text(
-            f"{words[0] if words else 'bash'}: write error: "
-            "Bad file descriptor\n"
-        )
+        line = write_error_line(command)
         io.exit_code = 1
         await _routed(dispatch, session, Channel.STDERR, line, rest)
     elif unwritable and io.exit_code == 0 and _stdout_to_stderr(statement):

@@ -19,6 +19,7 @@ from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.join import shell_join
+from mirage.shell.voice import shell_voice
 from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.getopt import last_of, scan_options
 from mirage.workspace.executor.builtins.lookup import (
@@ -62,7 +63,9 @@ def _probe(
         kind = classify(name, session, registry)
         if kind is None:
             if mode == "V":
-                err_lines.append(f"bash: command: {name}: not found\n")
+                err_lines.append(
+                    f"{shell_voice()}command: {name}: not found\n"
+                )
             continue
         any_found = True
         if mode == "V":
@@ -121,7 +124,7 @@ async def handle_command_builtin(
         return result(
             "command",
             exit_code=2,
-            stderr=f"bash: command: {scan.bad}: invalid option\n"
+            stderr=f"{shell_voice()}command: {scan.bad}: invalid option\n"
             + builtin_usage("command"),
         )
     mode = last_of(scan.letters, "vV")

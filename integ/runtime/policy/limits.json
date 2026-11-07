@@ -1440,7 +1440,7 @@
           "expect": {
             "exit": 0,
             "stdout": "rc=1\n0\n",
-            "stderr": "/ram/n: Disk quota exceeded\n"
+            "stderr": "bash: line 1: /ram/n: Disk quota exceeded\n"
           }
         },
         {

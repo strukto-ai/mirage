@@ -80,20 +80,20 @@ const CASES: [string, string][] = [
 ]
 
 const ERROR_CASES: [string, number, string, string][] = [
-  ['echo ${UNSET:?}; echo after', 127, '', 'bash: UNSET: parameter null or not set\n'],
-  ['echo ${UNSET:?custom msg}', 127, '', 'bash: UNSET: custom msg\n'],
-  ['echo ${UNSET?}', 127, '', 'bash: UNSET: parameter not set\n'],
+  ['echo ${UNSET:?}; echo after', 127, '', 'bash: line 1: UNSET: parameter null or not set\n'],
+  ['echo ${UNSET:?custom msg}', 127, '', 'bash: line 1: UNSET: custom msg\n'],
+  ['echo ${UNSET?}', 127, '', 'bash: line 1: UNSET: parameter not set\n'],
   [
     '(echo ${UNSET:?}); echo after code=$?',
     0,
     'after code=1\n',
-    'bash: UNSET: parameter null or not set\n',
+    'bash: line 1: UNSET: parameter null or not set\n',
   ],
   [
     'echo ${UNSET:?} | cat; echo after code=$?',
     0,
     'after code=0\n',
-    'bash: UNSET: parameter null or not set\n',
+    'bash: line 1: UNSET: parameter null or not set\n',
   ],
 ]
 
@@ -138,27 +138,27 @@ const SLICE_CASES: [string, number, string, string][] = [
     'sales=(1 2); echo "a${sales[vid]:.2f}b"',
     1,
     '',
-    'bash: sales[vid]: .2f: syntax error: operand expected (error token is ".2f")\n',
+    'bash: line 1: sales[vid]: .2f: syntax error: operand expected (error token is ".2f")\n',
   ],
   [
     'x=; echo "a${x:.2f}b"',
     1,
     '',
-    'bash: x: .2f: syntax error: operand expected (error token is ".2f")\n',
+    'bash: line 1: x: .2f: syntax error: operand expected (error token is ".2f")\n',
   ],
   [
     'set -- ""; echo "a${1:.2f}b"',
     1,
     '',
-    'bash: 1: .2f: syntax error: operand expected (error token is ".2f")\n',
+    'bash: line 1: 1: .2f: syntax error: operand expected (error token is ".2f")\n',
   ],
   [
     'a=(); a[3]=x; echo "[${a[@]:.2f}]"',
     1,
     '',
-    'bash: a[@]: .2f: syntax error: operand expected (error token is ".2f")\n',
+    'bash: line 1: a[@]: .2f: syntax error: operand expected (error token is ".2f")\n',
   ],
-  ['set -u; echo "a${x:.2f}b"', 127, '', 'bash: x: unbound variable\n'],
+  ['set -u; echo "a${x:.2f}b"', 127, '', 'bash: line 1: x: unbound variable\n'],
   ['set -- a ""; echo "[${2-u}] [${2+s}] [${3-u}] [${3+s}]"', 0, '[] [s] [u] []\n', ''],
 ]
 
@@ -178,35 +178,45 @@ describe('substring of an unset parameter', () => {
 // `set -u` over subscripted references and the arithmetic in a subscript
 // or a substring bound, pinned on bash 5.2.37 (debian:stable-slim).
 const NOUNSET_CASES: [string, number, string, string][] = [
-  ['set -u; a=(1); echo "[${a[5]}]"; echo after', 127, '', 'bash: a[5]: unbound variable\n'],
-  ['set -u; a=(1); i=5; echo "[${a[i]:1}]"', 127, '', 'bash: a[i]: unbound variable\n'],
-  ['set -u; a=(1); echo "[${a[5]#x}]"', 127, '', 'bash: a[5]: unbound variable\n'],
-  ['set -u; declare -A m; k=x; echo "[${m[$k]}]"', 127, '', 'bash: m[$k]: unbound variable\n'],
+  [
+    'set -u; a=(1); echo "[${a[5]}]"; echo after',
+    127,
+    '',
+    'bash: line 1: a[5]: unbound variable\n',
+  ],
+  ['set -u; a=(1); i=5; echo "[${a[i]:1}]"', 127, '', 'bash: line 1: a[i]: unbound variable\n'],
+  ['set -u; a=(1); echo "[${a[5]#x}]"', 127, '', 'bash: line 1: a[5]: unbound variable\n'],
+  [
+    'set -u; declare -A m; k=x; echo "[${m[$k]}]"',
+    127,
+    '',
+    'bash: line 1: m[$k]: unbound variable\n',
+  ],
   [
     'set -u; x=s; echo "[${x[0]}]"; echo "[${x[1]}]"',
     127,
     '[s]\n',
-    'bash: x[1]: unbound variable\n',
+    'bash: line 1: x[1]: unbound variable\n',
   ],
-  ['set -u; arr=(1); echo "a${arr[vid]:.2f}b"', 127, '', 'bash: vid: unbound variable\n'],
+  ['set -u; arr=(1); echo "a${arr[vid]:.2f}b"', 127, '', 'bash: line 1: vid: unbound variable\n'],
   [
     'set -u; arr=(1); vid=3; echo "a${arr[vid]:.2f}b"',
     127,
     '',
-    'bash: arr[vid]: unbound variable\n',
+    'bash: line 1: arr[vid]: unbound variable\n',
   ],
-  ['set -u; a=(1); echo "[${a[i+4]}]"', 127, '', 'bash: i: unbound variable\n'],
-  ['set -u; w=v; a=(1); echo "[${a[w]}]"', 127, '', 'bash: v: unbound variable\n'],
-  ['set -u; x=hello; echo "[${x:1:v}]"', 127, '', 'bash: v: unbound variable\n'],
-  ['set -u; a=(x y z); echo "[${a[@]:v}]"', 127, '', 'bash: v: unbound variable\n'],
-  ["set -u; a=(1); unset 'a[v]'; echo after", 127, '', 'bash: v: unbound variable\n'],
-  ['set -u; a=(1); [[ -v a[v] ]]; echo after', 127, '', 'bash: v: unbound variable\n'],
-  ['set -u; a[v]=1; echo after', 127, '', 'bash: v: unbound variable\n'],
+  ['set -u; a=(1); echo "[${a[i+4]}]"', 127, '', 'bash: line 1: i: unbound variable\n'],
+  ['set -u; w=v; a=(1); echo "[${a[w]}]"', 127, '', 'bash: line 1: v: unbound variable\n'],
+  ['set -u; x=hello; echo "[${x:1:v}]"', 127, '', 'bash: line 1: v: unbound variable\n'],
+  ['set -u; a=(x y z); echo "[${a[@]:v}]"', 127, '', 'bash: line 1: v: unbound variable\n'],
+  ["set -u; a=(1); unset 'a[v]'; echo after", 127, '', 'bash: line 1: v: unbound variable\n'],
+  ['set -u; a=(1); [[ -v a[v] ]]; echo after', 127, '', 'bash: line 1: v: unbound variable\n'],
+  ['set -u; a[v]=1; echo after', 127, '', 'bash: line 1: v: unbound variable\n'],
   [
     'set -u; (a=(1); echo "[${a[5]}]"); echo "rc=$?"',
     0,
     'rc=1\n',
-    'bash: a[5]: unbound variable\n',
+    'bash: line 1: a[5]: unbound variable\n',
   ],
   [
     'set -u; a=(1); echo "[${a[5]-d}] [${a[5]:-d}] [${a[5]+s}] [${a[5]:+s}] [${#a[5]}]"',

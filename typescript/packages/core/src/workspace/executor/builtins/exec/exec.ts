@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { callerSignal, runAsProgram } from '../../../../context/session_context.ts'
 import { isAborting, isMissingPath, strerrorOf } from '../../../../errors/fs.ts'
@@ -57,7 +58,13 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { createFile, writeDescription } from '../../create.ts'
 import { programHead } from '../../find_action_dispatch.ts'
-import { answerClosed, recordStatus, writerForks, type Written } from '../../statement.ts'
+import {
+  answerClosed,
+  recordStatus,
+  writeErrorLine,
+  writerForks,
+  type Written,
+} from '../../statement.ts'
 import { clearTraps } from '../../traps.ts'
 import { scanOptions } from '../getopt.ts'
 import { toScope } from '../scope.ts'
@@ -131,7 +138,7 @@ export async function handleExecCommand(
 
 /** bash's line for a redirect target it could not open. */
 function errorLine(label: string, err: unknown): Uint8Array {
-  return encodeText(`${label}: ${strerrorOf(err)}\n`)
+  return encodeText(`${shellVoice()}${label}: ${strerrorOf(err)}\n`)
 }
 
 /** The shell-attributed refusal of an `exec` redirect line; the line is
@@ -262,6 +269,24 @@ async function route(
   if (target === CLOSED) await discardStreams(data)
   else await append(dispatch, target, data)
   return [null, null, false]
+}
+
+/**
+ * Send one write where an `exec` binding points its channel, for a redirect
+ * level whose own descriptor the binding shadows: null while the channel is
+ * unbound, else what is left for the level's stdout and stderr (`exec >&2`
+ * crosses over, a file takes it all). Mirrors Python's route_rebound.
+ */
+export async function routeRebound(
+  dispatch: DispatchFn,
+  session: SessionState,
+  channel: Channel,
+  data: Uint8Array,
+): Promise<[ByteSource | null, ByteSource | null, boolean] | null> {
+  const stdout = channel === Channel.STDOUT
+  const binding = stdout ? session.execStdout : session.execStderr
+  if (binding === null) return null
+  return route(dispatch, session, binding, data, stdout ? TO_STDOUT : TO_STDERR)
 }
 
 type StreamBindings = Pick<SessionState, (typeof EXEC_STREAM_FIELDS)[number] | 'descriptors'>
@@ -534,10 +559,8 @@ export async function divertStatement(
     }
   }
   if (failed) {
-    const first = command.trim().split(/\s+/)[0]
-    const name = first === undefined || first === '' ? 'bash' : first
     io.exitCode = 1
-    const line = encodeText(`${name}: write error: Bad file descriptor\n`)
+    const line = writeErrorLine(command)
     await routed(dispatch, session, Channel.STDERR, line, rest)
   } else if (unwritable && io.exitCode === 0 && stdoutToStderr(statement)) {
     io.exitCode = 1

@@ -31,7 +31,7 @@ describe('executeDeclaration', () => {
     const io = await ws.shell('declare -q NAME')
     expect(stdoutStr(io)).toBe('')
     expect(stderrStr(io)).toBe(
-      'bash: declare: -q: invalid option\n' +
+      'bash: line 1: declare: -q: invalid option\n' +
         'declare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] ' +
         'or declare -p [-aAfFilnrtux] [name ...]\n',
     )
@@ -50,7 +50,7 @@ describe('executeDeclaration', () => {
     const ws = makeWs()
     expect((await ws.shell('export $NOPE')).exitCode).toBe(0)
     const io = await ws.shell('export "$NOPE"')
-    expect(stderrStr(io)).toBe("bash: export: `': not a valid identifier\n")
+    expect(stderrStr(io)).toBe("bash: line 1: export: `': not a valid identifier\n")
     expect(io.exitCode).toBe(1)
   })
 
@@ -61,7 +61,7 @@ describe('executeDeclaration', () => {
     // that line never runs -- the value is read back on the next one.
     const ws = makeWs()
     const io = await ws.shell('readonly -a a=(x); readonly -a a=(y); echo REACHED')
-    expect(stderrStr(io)).toBe('bash: a: readonly variable\n')
+    expect(stderrStr(io)).toBe('bash: line 1: a: readonly variable\n')
     expect(io.exitCode).toBe(1)
     expect(stdoutStr(await ws.shell('declare -p a'))).toBe('declare -ar a=([0]="x")\n')
   })

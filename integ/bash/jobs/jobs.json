@@ -66,7 +66,7 @@
       "command": "jobs -z 2>&1; echo \"rc=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "bash: jobs: -z: invalid option\njobs: usage: jobs [-lnprs] [jobspec ...] or jobs -x command [args]\nrc=2\n",
+        "stdout": "bash: line 1: jobs: -z: invalid option\njobs: usage: jobs [-lnprs] [jobspec ...] or jobs -x command [args]\nrc=2\n",
         "stderr": ""
       }
     },
@@ -101,7 +101,7 @@
       "command": "jobs %9 2>&1; echo \"rc=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "bash: jobs: %9: no such job\nrc=1\n",
+        "stdout": "bash: line 1: jobs: %9: no such job\nrc=1\n",
         "stderr": ""
       }
     },

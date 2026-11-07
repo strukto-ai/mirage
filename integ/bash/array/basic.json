@@ -1047,7 +1047,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: ar27[-5]: bad array subscript\n"
+        "stderr": "bash: line 1: ar27[-5]: bad array subscript\n"
       }
     },
     {
@@ -1082,7 +1082,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: ar28[-5]: bad array subscript\n"
+        "stderr": "bash: line 1: ar28[-5]: bad array subscript\n"
       }
     },
     {
@@ -1302,7 +1302,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1 [keep]\n",
-        "stderr": "bash: ZBS[-5]: bad array subscript\n"
+        "stderr": "bash: line 1: ZBS[-5]: bad array subscript\n"
       },
       "targets": [
         "ram",

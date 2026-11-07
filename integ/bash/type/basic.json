@@ -156,7 +156,7 @@
       "command": "type nope_zzz 2>&1; echo \"rc=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "bash: type: nope_zzz: not found\nrc=1\n",
+        "stdout": "bash: line 1: type: nope_zzz: not found\nrc=1\n",
         "stderr": ""
       }
     }

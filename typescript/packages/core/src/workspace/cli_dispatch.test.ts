@@ -166,7 +166,7 @@ describe('CLI dispatch e2e', () => {
     await ws.unregisterCli('sl')
     const res = await ws.shell('sl message send -t x hi')
     expect(res.exitCode).toBe(127)
-    expect(dec.decode(res.stderr)).toContain('sl: command not found')
+    expect(dec.decode(res.stderr)).toContain('bash: line 1: sl: command not found')
   })
 
   it('a CLI head never resolves a mount', async () => {

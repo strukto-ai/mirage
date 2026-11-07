@@ -13,6 +13,20 @@ from mirage.utils.clock import system_now
 from mirage.utils.ids import IdSource
 
 
+def deliver(handle: ProcessHandle, signal: int) -> None:
+    """Deliver a signal to one runner of a group: one that ignores it
+    hands it to the program it runs right now, any other stops with it.
+
+    Args:
+        handle (ProcessHandle): the runner.
+        signal (int): the signal.
+    """
+    if signal in handle.ignores:
+        handle.interrupt(signal)
+    else:
+        handle.terminate(signal, children=False)
+
+
 class ProcessTable:
     """Own live runners independently of shell job-table membership.
 
@@ -62,8 +76,10 @@ class ProcessTable:
         parent_pid: int | None = None,
         limit: int | None = None,
         execution_id: str | None = None,
-        started: Callable[[ProcessInfo], None] | None = None,
+        started: Callable[[ProcessHandle], None] | None = None,
         ignores: frozenset[int] = frozenset(),
+        pid: int | None = None,
+        own_group: bool = False,
     ) -> ProcessHandle:
         """Track a runner; its caller owns admission before command effects.
 
@@ -79,17 +95,22 @@ class ProcessTable:
                 leave the live registry.
             execution_id (str | None): external execution identity for
                 an admitted root; children receive a fresh identity.
-            started (Callable[[ProcessInfo], None] | None): what the
-                caller sets up from the process's identity before its
-                runner runs (the session's ``$BASHPID``). A caller that
-                passes it has nothing left to do first, so the runner
-                then starts at once, eagerly, unless a runner started
-                before it has yet to begin: runners begin in the order
-                they were started, so a job's redirect lands before the
-                line that started it reads the file. Without it the
+            started (Callable[[ProcessHandle], None] | None): what the
+                caller sets up from the process before its runner runs
+                (the session's ``$$``, the shell its programs run in). A
+                caller that passes it has nothing left to do first, so
+                the runner then starts at once, eagerly, unless a runner
+                started before it has yet to begin: runners begin in the
+                order they were started, so a job's redirect lands before
+                the line that started it reads the file. Without it the
                 runner starts on the loop's next turn.
             ignores (frozenset[int]): the signals the runner ignores,
                 which stop neither it nor what it started.
+            pid (int | None): the pid to run under, a session's ``$$``
+                that each of its lines takes in turn; a fresh one when
+                None or when a live runner holds it.
+            own_group (bool): lead a process group of its own, as
+                timeout's command does, instead of joining its parent's.
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -111,8 +132,9 @@ class ProcessTable:
                 raise BlockingIOError(
                     errno.EAGAIN, "Resource temporarily unavailable"
                 )
-            pid = self._next_pid
-            self._next_pid += 1
+            if pid is None or pid in self._live:
+                pid = self._next_pid
+            self._next_pid = max(self._next_pid, pid + 1)
             parent = (
                 self._live.get(parent_pid) if parent_pid is not None else None
             )
@@ -122,7 +144,11 @@ class ProcessTable:
                 raise RuntimeError(
                     "parent process is no longer accepting children"
                 )
-            group_id = parent[1].info.group_id if parent is not None else pid
+            group_id = (
+                parent[1].info.group_id
+                if parent is not None and not own_group
+                else pid
+            )
             handle = ProcessHandle(
                 ProcessInfo(
                     pid,
@@ -135,10 +161,9 @@ class ProcessTable:
                     group_id=group_id,
                 ),
                 run,
-                self._retire,
+                lambda done: self._retire(done, handle),
                 lambda signal: self.terminate_children(pid, signal),
                 self._bind,
-                lambda signal: self.signal_children(pid, signal),
                 ignores,
             )
             eager = started is not None and not self.queued()
@@ -149,7 +174,7 @@ class ProcessTable:
                 else (*self._ancestors.get(parent_pid, ()), parent_pid)
             )
         if started is not None:
-            started(handle.info)
+            started(handle)
         handle.start(eager=eager)
         if self._changed is not None:
             self._changed()
@@ -169,33 +194,37 @@ class ProcessTable:
         for child in self._under(pid):
             child.terminate(signal)
 
-    def signal_children(self, pid: int, signal: int) -> None:
-        """Deliver a signal to every live runner under ``pid``, as a
-        process group gets it: a runner that ignores it (a job's shell)
-        hands it to the program it runs right now
-        (``ProcessHandle.interrupt``), and any other stops with it, so a
-        native program it started receives that signal. A runner such a
-        shell started is one of its programs, which the shell sees end
-        and goes on past, so the signal reaches it through that shell.
+    def signal_group(self, group_id: int, signal: int) -> bool:
+        """Deliver a signal to every live runner of a process group, as
+        killpg(2) does: a runner that ignores it (a shell) hands it to the
+        program it runs right now (``ProcessHandle.interrupt``), and any
+        other stops with it and leaves the rest of the group to their own
+        delivery. The deepest runners hear it first, so a native program
+        knows the signal before the shell that waits for it stops.
 
         Args:
-            pid (int): the parent or ancestor.
+            group_id (int): the group.
             signal (int): the signal.
-        """
-        for child in self._under(pid):
-            if signal in child.ignores:
-                child.interrupt(signal)
-            elif not self._ignored_above(child.info.pid, pid, signal):
-                child.terminate(signal, children=False)
 
-    def _ignored_above(self, pid: int, top: int, signal: int) -> bool:
+        Returns:
+            bool: whether the group had a live runner.
+        """
+        members = self._members(group_id)
+        for member in members:
+            deliver(member, signal)
+        return bool(members)
+
+    def _members(self, group_id: int) -> list[ProcessHandle]:
         with self._lock:
-            chain = self._ancestors.get(pid, ())
-            above = chain[chain.index(top) + 1 :] if top in chain else ()
-            return any(
-                (live := self._live.get(ancestor)) is not None
-                and signal in live[1].ignores
-                for ancestor in above
+            return sorted(
+                (
+                    handle
+                    for _, handle in self._live.values()
+                    if handle.info.group_id == group_id
+                ),
+                key=lambda handle: (
+                    -len(self._ancestors.get(handle.info.pid, ()))
+                ),
             )
 
     def _under(self, pid: int) -> list[ProcessHandle]:
@@ -206,9 +235,12 @@ class ProcessTable:
                 if pid in self._ancestors.get(handle.info.pid, ())
             ]
 
-    def _retire(self, pid: int) -> None:
+    def _retire(self, pid: int, handle: ProcessHandle) -> None:
         with self._lock:
-            self._live.pop(pid, None)
+            entry = self._live.get(pid)
+            if entry is None or entry[1] is not handle:
+                return
+            del self._live[pid]
             self._ancestors.pop(pid, None)
 
     def view(
@@ -264,9 +296,35 @@ class ProcessTable:
         def terminate(pid: int, signal: int) -> bool:
             with self._lock:
                 handle = signal_target(pid)
+                # A session's shell leaves its jobs running, as bash's do
+                # when it dies.
                 return handle is not None and (
-                    signal in handle.ignores or handle.terminate(signal)
+                    signal in handle.ignores
+                    or handle.terminate(
+                        signal, children=handle.info.parent_pid is not None
+                    )
                 )
+
+        def group(group_id: int) -> list[ProcessHandle] | None:
+            members = [
+                handle
+                for handle in self._members(group_id)
+                if visible(handle) is not None
+            ]
+            if not members:
+                return None
+            if not all(allowed(permissions().kill, h) for h in members):
+                raise PermissionError(errno.EPERM, "Operation not permitted")
+            return members
+
+        def probe_group(group_id: int) -> bool:
+            return group(group_id) is not None
+
+        def signal_group(group_id: int, signal: int) -> bool:
+            members = group(group_id)
+            for member in members or ():
+                deliver(member, signal)
+            return members is not None
 
         def granted() -> ProcessPermissions | None:
             return permissions() if valid() else None
@@ -277,6 +335,8 @@ class ProcessTable:
             probe=probe,
             terminate=terminate,
             permissions=granted,
+            probe_group=probe_group,
+            signal_group=signal_group,
         )
 
     def revoke_session(self, session_id: str) -> None:
@@ -295,6 +355,7 @@ class ProcessTable:
             )
         for process in self.live():
             if process.info.session_id == session_id:
+                process.revoked = True
                 process.terminate()
 
     def live(self) -> tuple[ProcessHandle, ...]:
@@ -336,6 +397,7 @@ class ProcessTable:
             self._stopped = True
         errors: list[Exception] = []
         for process in self.live():
+            process.revoked = True
             try:
                 process.terminate()
             except Exception as exc:

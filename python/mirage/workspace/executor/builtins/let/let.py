@@ -14,6 +14,7 @@
 
 from mirage.policy import PolicyDenied
 from mirage.shell.errors import ArithError, ReadonlyVariableError
+from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.shared import (
     fail,
@@ -52,7 +53,7 @@ async def handle_let(
         state (SessionView | None): the gated session view.
     """
     if not args:
-        return fail("let", "bash: let: expression expected\n")
+        return fail("let", f"{shell_voice()}let: expression expected\n")
     view = require_view(state)
     value = 0
     for expr in args:
@@ -65,7 +66,7 @@ async def handle_let(
                 raise exc.signal() from exc
             if isinstance(exc, ReadonlyVariableError):
                 return readonly_refusal("let", exc.name)
-            return fail("let", f"bash: let: {exc}\n")
+            return fail("let", f"{shell_voice()}let: {exc}\n")
     return result("let", exit_code=0 if value != 0 else 1)
 
 

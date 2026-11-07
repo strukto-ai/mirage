@@ -18,6 +18,7 @@ from mirage.rs.regex import posix_regex
 from mirage.shell.array import make_array
 from mirage.shell.bytes import byte_view, text_view, utf8_locale
 from mirage.shell.errors import ArithError, ReadonlyVariableError
+from mirage.shell.voice import shell_voice
 from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY,
@@ -207,7 +208,7 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
                     raise error.signal()
                 lead = f"{ctx.name}: " if isinstance(error, ArithError) else ""
                 raise CondError(
-                    f"bash: {lead}{error}", exit_code=1, fatal=False
+                    f"{shell_voice()}{lead}{error}", exit_code=1, fatal=False
                 )
             values.append(value)
         return compare(values[0], values[1])

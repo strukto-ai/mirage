@@ -27,6 +27,7 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole, OwnedStream, Terminal
 from mirage.shell.constants import FD_BOTH, FD_CLOSE
 from mirage.shell.types import Redirect, RedirectKind
+from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
 
 
@@ -60,12 +61,12 @@ def unsupported_descriptor(redirects: Iterable[Redirect]) -> int | None:
 
 
 def bad_descriptor_line(fd: int) -> bytes:
-    """Bash's error for a closed descriptor, without the line-number prefix.
+    """Bash's error for a closed descriptor, in the running shell's voice.
 
     Args:
         fd (int): the descriptor that was named.
     """
-    return encode_text(f"{fd}: Bad file descriptor\n")
+    return encode_text(f"{shell_voice()}{fd}: Bad file descriptor\n")
 
 
 async def unreadable_stdin() -> AsyncIterator[bytes]:
@@ -123,6 +124,20 @@ class FileDescription:
         return self.scope if self.landed is None else self.landed
 
 
+def output_target(output: str | FileDescription | None) -> str | None:
+    """The file a level's stdout writes as a command starts: a streamed
+    description's file wherever the line moved it, none once the line
+    removed it.
+
+    Args:
+        output (str | FileDescription | None): the level's
+            ``Recorder.output_file``.
+    """
+    if not isinstance(output, FileDescription):
+        return output
+    return None if output.lost else output.where.virtual
+
+
 class StreamOwner:
     """Who a stream a level was given belongs to: a redirect level's
     recorder, or a session, whose own line its terminal streams are."""
@@ -151,7 +166,9 @@ class Recorder(JobConsole, StreamOwner):
     one does, which a command writing to the level may not read as its
     input (``cat f >> f``), or the description a streamed redirect
     writes it through, which a rename the line makes moves and which
-    the levels below share.
+    the levels below share. ``refused`` is set when a stdout write went
+    to a descriptor that takes none (``exec 1<f``), for the statement
+    that wrote it to fail.
     """
 
     def __init__(self) -> None:
@@ -161,16 +178,7 @@ class Recorder(JobConsole, StreamOwner):
         self.writing = asyncio.Lock()
         self.pending = 0
         self.output_file: str | FileDescription | None = None
-
-    @property
-    def output_target(self) -> str | None:
-        """The file the level's stdout writes as a command starts: a
-        streamed description's file wherever the line moved it, none
-        once the line removed it."""
-        output = self.output_file
-        if not isinstance(output, FileDescription):
-            return output
-        return None if output.lost else output.where.virtual
+        self.refused = False
 
     @property
     def busy(self) -> bool:

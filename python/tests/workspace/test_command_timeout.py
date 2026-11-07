@@ -341,6 +341,7 @@ async def test_a_killed_subshell_stops_its_exit_action():
                 p
                 for p in ws.job_table.processes.live()
                 if p.info.command.startswith("(trap")
+                and p.info.parent_pid is not None
             ),
             None,
         )
@@ -351,8 +352,8 @@ async def test_a_killed_subshell_stops_its_exit_action():
         await asyncio.sleep(0.005)
     await asyncio.sleep(0.05)
     subshell().terminate()
-    with pytest.raises(asyncio.CancelledError):
-        await running
+    io = await running
+    assert await io.stdout_str() == "after\n"
     await asyncio.sleep(0.6)
     assert reached == ["started"]
 

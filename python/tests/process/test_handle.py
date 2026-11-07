@@ -320,3 +320,38 @@ async def test_a_runner_that_stops_itself_during_an_eager_start_exits_137():
     handle.start(eager=True)
     info = await handle.join()
     assert (info.exit_code, info.cancellation_requested) == (137, True)
+
+
+async def _hangs() -> int:
+    await asyncio.Event().wait()
+    return 0
+
+
+# Reaping a runner waits for it as wait(2) does: its code, or 128 plus the
+# signal that stopped it; one the host stopped (revoked) ends the wait
+# cancelled, and a waiter cancelled itself stops the runner with it.
+@pytest.mark.asyncio
+async def test_reap_answers_a_status_unless_the_host_stopped_the_runner():
+    done = ProcessHandle(_info(), _exits_3, lambda _pid: None)
+    done.start()
+    assert await done.reap() == 3
+    stopped = ProcessHandle(_info(), _hangs, lambda _pid: None)
+    stopped.start()
+    await asyncio.sleep(0)
+    stopped.terminate(15)
+    assert await stopped.reap() == 143
+    revoked = ProcessHandle(_info(), _hangs, lambda _pid: None)
+    revoked.start()
+    await asyncio.sleep(0)
+    revoked.revoked = True
+    revoked.terminate()
+    with pytest.raises(asyncio.CancelledError):
+        await revoked.reap()
+    waited = ProcessHandle(_info(), _hangs, lambda _pid: None)
+    waited.start()
+    waiter = asyncio.create_task(waited.reap())
+    await asyncio.sleep(0)
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    assert (await waited.join()).exit_code == 137

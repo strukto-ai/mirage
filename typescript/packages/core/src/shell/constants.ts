@@ -117,11 +117,14 @@ export const OUTPUT_ONLY_BUILTINS: ReadonlySet<string> = new Set([
 
 // The dynamic variables the shell answers itself: PIPESTATUS reads the
 // session's record of the last pipeline (`SessionState.pipeStatus`), FUNCNAME
-// the frames on the call stack (`SessionState.functionNames`) and RANDOM
-// steps a generator (`session/rng.ts`). None lives in the variable store.
+// the frames on the call stack (`SessionState.functionNames`), RANDOM steps a
+// generator (`session/rng.ts`), LINENO is the running command's line and
+// BASHPID the process running it. None lives in the variable store.
 export const PIPESTATUS = 'PIPESTATUS'
 export const FUNCNAME = 'FUNCNAME'
 export const RANDOM = 'RANDOM'
+export const LINENO = 'LINENO'
+export const BASHPID = 'BASHPID'
 // bash 5.2's RANDOM generator: a Park-Miller minimal-standard
 // step through Schrage's method, the value folding the state's two halves
 // and keeping 15 bits, and a draw that never repeats the value before it.
@@ -429,3 +432,98 @@ export const BUILTIN_GROUP: ReadonlyMap<ShellBuiltin, BuiltinGroup> = new Map<
 export const GRAMMAR_BUILTINS: ReadonlySet<ShellBuiltin> = new Set<ShellBuiltin>(
   [...BUILTIN_GROUP].filter(([, g]) => GROUP_TIER.get(g) === BuiltinTier.GRAMMAR).map(([b]) => b),
 )
+
+// The commands that start a shell of their own, a process whose own programs
+// a signal it ignores still reaches. Mirrors Python's NESTED_SHELLS.
+export const NESTED_SHELLS: ReadonlySet<string> = new Set<string>(
+  [...BUILTIN_GROUP].filter(([, g]) => g === BuiltinGroup.NESTED_SHELLS).map(([b]) => b),
+)
+
+// What every bash ignores, interactive or not: a QUIT stops the program a
+// shell runs right now, never the shell. Mirrors Python's
+// SHELL_IGNORED_SIGNALS.
+export const SHELL_IGNORED_SIGNALS: ReadonlySet<number> = new Set([3])
+
+// Linux's signal numbers by the names bash 5.2 gives them in `kill -l` and
+// `trap -l` (debian:stable-slim). 32 and 33 have no name; 34 to 64 are the
+// realtime range, named from its two ends. Mirrors Python's SIGNALS.
+export const SIGNALS: ReadonlyMap<number, string> = new Map([
+  [1, 'HUP'],
+  [2, 'INT'],
+  [3, 'QUIT'],
+  [4, 'ILL'],
+  [5, 'TRAP'],
+  [6, 'ABRT'],
+  [7, 'BUS'],
+  [8, 'FPE'],
+  [9, 'KILL'],
+  [10, 'USR1'],
+  [11, 'SEGV'],
+  [12, 'USR2'],
+  [13, 'PIPE'],
+  [14, 'ALRM'],
+  [15, 'TERM'],
+  [16, 'STKFLT'],
+  [17, 'CHLD'],
+  [18, 'CONT'],
+  [19, 'STOP'],
+  [20, 'TSTP'],
+  [21, 'TTIN'],
+  [22, 'TTOU'],
+  [23, 'URG'],
+  [24, 'XCPU'],
+  [25, 'XFSZ'],
+  [26, 'VTALRM'],
+  [27, 'PROF'],
+  [28, 'WINCH'],
+  [29, 'IO'],
+  [30, 'PWR'],
+  [31, 'SYS'],
+])
+
+export const SIGRTMIN = 34
+export const SIGRTMAX = 64
+
+// How bash names a signal that ended a command in its report line
+// (debian:stable-slim, bash 5.2), for each signal whose default ends a
+// process; the realtime range is "Real-time signal" and its offset from
+// RTMIN. Mirrors Python's SIGNAL_DESCRIPTIONS.
+export const SIGNAL_DESCRIPTIONS: ReadonlyMap<number, string> = new Map([
+  [1, 'Hangup'],
+  [2, 'Interrupt'],
+  [3, 'Quit'],
+  [4, 'Illegal instruction'],
+  [5, 'Trace/breakpoint trap'],
+  [6, 'Aborted'],
+  [7, 'Bus error'],
+  [8, 'Floating point exception'],
+  [9, 'Killed'],
+  [10, 'User defined signal 1'],
+  [11, 'Segmentation fault'],
+  [12, 'User defined signal 2'],
+  [13, 'Broken pipe'],
+  [14, 'Alarm clock'],
+  [15, 'Terminated'],
+  [16, 'Stack fault'],
+  [24, 'CPU time limit exceeded'],
+  [25, 'File size limit exceeded'],
+  [26, 'Virtual timer expired'],
+  [27, 'Profiling timer expired'],
+  [29, 'I/O possible'],
+  [30, 'Power failure'],
+  [31, 'Bad system call'],
+])
+
+// The signals no report names when they end a job's last process: INT and
+// PIPE end it silently, TERM as "Terminated" alone in the foreground.
+export const UNREPORTED_SIGNALS: ReadonlySet<number> = new Set([2, 13])
+export const SIGTERM = 15
+export const SIGKILL = 9
+export const SIGCHLD = 17
+export const SIGSTOP = 19
+
+// Signals whose default action leaves a process running.
+export const CONTINUE_SIGNALS: ReadonlySet<number> = new Set([0, SIGCHLD, 18, 23, 28])
+
+// The job-control stops.
+export const STOP_SIGNALS: ReadonlySet<number> = new Set([SIGSTOP, 20, 21, 22])

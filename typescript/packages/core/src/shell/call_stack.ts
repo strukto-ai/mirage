@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from './voice.ts'
 import { encodeText } from './bytes.ts'
 import { NESTING_MAX } from './constants.ts'
 import { DiscardSignal } from './errors.ts'
@@ -142,7 +143,9 @@ export class CallStack {
   admit(name: string): void {
     if (this.nesting >= NESTING_MAX) {
       throw new DiscardSignal(
-        encodeText(`bash: ${name}: maximum nesting level exceeded (${String(NESTING_MAX)})\n`),
+        encodeText(
+          `${shellVoice()}${name}: maximum nesting level exceeded (${String(NESTING_MAX)})\n`,
+        ),
       )
     }
   }

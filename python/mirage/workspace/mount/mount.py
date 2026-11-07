@@ -117,6 +117,7 @@ from mirage.observe.record import OpRecord
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import NOT_FOUND_STATUS
+from mirage.shell.voice import shell_voice
 from mirage.types import (
     FileChangeKind,
     FileStat,
@@ -154,6 +155,7 @@ from mirage.workspace.executor.command.handler import (
     mount_voice,
     run_handler,
 )
+from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 from mirage.workspace.mount.constants import HANDED, STORED_OPS
 from mirage.workspace.mount.listing import (
     beyond_window,
@@ -1148,7 +1150,9 @@ class MountEntry:
             if not handlers:
                 return None, IOResult(
                     exit_code=NOT_FOUND_STATUS,
-                    stderr=encode_text(f"{cmd_name}: command not found"),
+                    stderr=encode_text(
+                        f"{shell_voice()}{cmd_name}: command not found"
+                    ),
                 )
             with self._command_scope(ctx):
                 for cmd in handlers:
@@ -1410,7 +1414,9 @@ class MountEntry:
         if user and not path_visible(session_visibility(), self.prefix):
             return IOResult(
                 exit_code=NOT_FOUND_STATUS,
-                stderr=encode_text(f"{cmd_name}: command not found\n"),
+                stderr=encode_text(
+                    f"{shell_voice()}{cmd_name}: command not found\n"
+                ),
             )
         info_only = (
             flags.get("help") is True and has_injected_help(cmd.spec)
@@ -1478,6 +1484,9 @@ class MountEntry:
                         result, self.activity
                     ),
                     vfs=ctx.vfs,
+                    eager=not paths
+                    and ctx.stdin is None
+                    and cmd_name not in INTERPRETER_NAMES,
                 )
         finally:
             reset_caller(token)

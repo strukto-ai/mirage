@@ -137,7 +137,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=2\n",
-        "stderr": "bash: wait: `bogus': not a pid or valid job spec\nbash: wait: -x: invalid option\nwait: usage: wait [-fn] [-p var] [id ...]\n"
+        "stderr": "bash: line 1: wait: `bogus': not a pid or valid job spec\nbash: line 1: wait: -x: invalid option\nwait: usage: wait [-fn] [-p var] [id ...]\n"
       }
     },
     {
@@ -277,7 +277,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "bash: wait: -p: option requires an argument\nwait: usage: wait [-fn] [-p var] [id ...]\n"
+        "stderr": "bash: line 1: wait: -p: option requires an argument\nwait: usage: wait [-fn] [-p var] [id ...]\n"
       }
     },
     {
@@ -312,7 +312,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: wait: `bad-name': not a valid identifier\n"
+        "stderr": "bash: line 1: wait: `bad-name': not a valid identifier\n"
       }
     },
     {
@@ -347,7 +347,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: wait: locked: cannot unset: readonly variable\n"
+        "stderr": "bash: line 1: wait: locked: cannot unset: readonly variable\n"
       }
     },
     {
@@ -382,7 +382,7 @@
       "expect": {
         "exit": 127,
         "stdout": "",
-        "stderr": "bash: wait: %999: no such job\n"
+        "stderr": "bash: line 1: wait: %999: no such job\n"
       }
     },
     {

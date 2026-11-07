@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -53,7 +54,7 @@ function probe(
   for (const name of rest) {
     const kind = classify(name, session, registry)
     if (kind === null) {
-      if (mode === 'V') errLines.push(`bash: command: ${name}: not found`)
+      if (mode === 'V') errLines.push(`${shellVoice()}command: ${name}: not found`)
       continue
     }
     anyFound = true
@@ -105,7 +106,9 @@ export async function handleCommandBuiltin(
 ): Promise<RedirectResult> {
   const scan = scanOptions(args, 'pvV')
   if (scan.bad !== null) {
-    const err = encodeText(`bash: command: ${scan.bad}: invalid option\n${builtinUsage('command')}`)
+    const err = encodeText(
+      `${shellVoice()}command: ${scan.bad}: invalid option\n${builtinUsage('command')}`,
+    )
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),

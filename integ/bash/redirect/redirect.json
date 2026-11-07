@@ -958,8 +958,8 @@
       "command": "echo dynamic > \"$(printf RT)\" && cat RT\n{ echo ${rdq!y}; } 2>/dev/null; echo same\necho \"n=$?\"; exit 1 2 2>&1 | cat; rdf() { return x; }; rdf 2>/dev/null; echo \"rf=$?\"; cat > \"${rdq!y}\"; echo \"c=$?\"\ncommand -v echo > \"${rdq!y}\"; echo same\necho \"v=$?\"\nrdh() { :; }; command rdh > \"${rdq!y}\"; echo \"m=$?\"\ncat > \"${rdq!y}\" > \"$(touch rdside; printf rddest)\"; echo \"s=$?\"; test -e rdside; echo \"side=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "dynamic\nn=1\nbash: exit: too many arguments\nrf=2\nc=1\nv=1\nm=1\ns=1\nside=1\n",
-        "stderr": "bash: ${rdq!y}: bad substitution\nbash: ${rdq!y}: bad substitution\nbash: ${rdq!y}: bad substitution\nbash: ${rdq!y}: bad substitution\n"
+        "stdout": "dynamic\nn=1\nbash: line 3: exit: too many arguments\nrf=2\nc=1\nv=1\nm=1\ns=1\nside=1\n",
+        "stderr": "bash: line 3: ${rdq!y}: bad substitution\nbash: line 4: ${rdq!y}: bad substitution\nbash: line 6: ${rdq!y}: bad substitution\nbash: line 7: ${rdq!y}: bad substitution\n"
       }
     },
     {
@@ -1379,7 +1379,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "NOPE: No such file or directory\n"
+        "stderr": "bash: line 1: NOPE: No such file or directory\n"
       }
     },
     {
@@ -1409,7 +1409,7 @@
       "expect": {
         "exit": 0,
         "stdout": "next\n0 1\nrc=0\n",
-        "stderr": "NOPE: No such file or directory\nNOPE: No such file or directory\nNOPE: No such file or directory\n"
+        "stderr": "bash: line 1: NOPE: No such file or directory\nbash: line 1: NOPE: No such file or directory\nbash: line 1: NOPE: No such file or directory\n"
       }
     },
     {
@@ -1430,7 +1430,7 @@
       "expect": {
         "exit": 0,
         "stdout": "next\n",
-        "stderr": "NOPEDIR/f: No such file or directory\n"
+        "stderr": "bash: line 1: NOPEDIR/f: No such file or directory\n"
       }
     },
     {
@@ -1451,7 +1451,7 @@
       "expect": {
         "exit": 0,
         "stdout": "skipped\n",
-        "stderr": "NOPEDIR/f: No such file or directory\n"
+        "stderr": "bash: line 1: NOPEDIR/f: No such file or directory\n"
       }
     },
     {
@@ -1472,7 +1472,7 @@
       "expect": {
         "exit": 0,
         "stdout": "0\n",
-        "stderr": "NOPEDIR/g: No such file or directory\n"
+        "stderr": "bash: line 1: NOPEDIR/g: No such file or directory\n"
       }
     },
     {
@@ -1589,8 +1589,8 @@
       "command": "(mkdir -p /data/redirect-many && cd /data/redirect-many && printf 'a\\n' > a.txt && printf 'b\\n' > b.txt; cat < *.txt; echo input=$?; echo bad > *.txt; echo output=$?; echo bad >> *.txt; echo append=$?; { echo bad; } > *.txt; echo compound=$?; true | cat < *.txt; echo pipe=$?; ! cat < *.txt; echo negated=$?; echo bad > *.txt > \"$(touch later; echo skipped)\"; echo ordered=$?; test ! -e later && echo unexpanded; (exec > *.txt); echo exec=$?; cat a.txt b.txt; rm b.txt; echo bad > b.txt > *.txt; echo created=$?; test ! -s b.txt && echo empty; cat a.txt; : > b.txt; echo bad >> b.txt >> *.txt; echo appended=$?; test ! -s b.txt && echo empty; rm b.txt; { echo bad; } > b.txt > *.txt; echo grouped=$?; rm b.txt; true | echo bad > b.txt > *.txt; echo piped=$?; rm b.txt; (exec > b.txt > *.txt); echo installed=$?; test ! -s b.txt && echo empty; echo bad > missing/ > \"$(touch skipped; echo unused)\"; echo failed=$?; test ! -e skipped && echo unexpanded; rm b.txt; echo bad 2>errors >b.txt >*.txt; echo routed=$?; cat errors; echo bad 2>>errors > missing/; echo refused=$?; tail -1 errors)",
       "expect": {
         "exit": 0,
-        "stdout": "input=1\noutput=1\nappend=1\ncompound=1\npipe=1\nnegated=0\nordered=1\nunexpanded\nexec=1\na\nb\ncreated=1\nempty\na\nappended=1\nempty\ngrouped=1\npiped=1\ninstalled=1\nempty\nfailed=1\nunexpanded\nrouted=1\n*.txt: ambiguous redirect\nrefused=1\nmissing/: Is a directory\n",
-        "stderr": "*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\n*.txt: ambiguous redirect\nmissing/: Is a directory\n"
+        "stdout": "input=1\noutput=1\nappend=1\ncompound=1\npipe=1\nnegated=0\nordered=1\nunexpanded\nexec=1\na\nb\ncreated=1\nempty\na\nappended=1\nempty\ngrouped=1\npiped=1\ninstalled=1\nempty\nfailed=1\nunexpanded\nrouted=1\nbash: line 1: *.txt: ambiguous redirect\nrefused=1\nbash: line 1: missing/: Is a directory\n",
+        "stderr": "bash: line 1: *.txt: ambiguous redirect\nbash: line 1: *.txt: ambiguous redirect\nbash: line 1: *.txt: ambiguous redirect\nbash: line 1: *.txt: ambiguous redirect\nbash: line 1: *.txt: ambiguous redirect\nbash: line 1: *.txt: ambiguous redirect\nbash: line 1: *.txt: ambiguous redirect\n*.txt: ambiguous redirect\nbash: line 1: *.txt: ambiguous redirect\nbash: line 1: *.txt: ambiguous redirect\nbash: line 1: *.txt: ambiguous redirect\nbash: line 1: *.txt: ambiguous redirect\n*.txt: ambiguous redirect\nbash: line 1: missing/: Is a directory\n"
       },
       "note": "The append branch uses an existing empty target to isolate ambiguous-glob ordering. The preceding ordinary-output branch still verifies that opening the first missing target changes the second glob."
     },
@@ -1624,7 +1624,7 @@
       "expect": {
         "exit": 0,
         "stdout": "literal\nliteral\nspace\nmixed\nspace\nnew\nnoglob\nnull=1\nmissing=1\n",
-        "stderr": "*.missing: ambiguous redirect\n*.missing: No such file or directory\n"
+        "stderr": "bash: line 1: *.missing: ambiguous redirect\nbash: line 1: *.missing: No such file or directory\n"
       }
     },
     {
@@ -1657,7 +1657,7 @@
       "expect": {
         "exit": 0,
         "stdout": "empty=1\nsplit=1\nbrace=1\nquoted\n",
-        "stderr": "$empty: ambiguous redirect\n$names: ambiguous redirect\n{a,b}: ambiguous redirect\n"
+        "stderr": "bash: line 1: $empty: ambiguous redirect\nbash: line 1: $names: ambiguous redirect\nbash: line 1: {a,b}: ambiguous redirect\n"
       }
     },
     {
@@ -2065,7 +2065,7 @@
       "expect": {
         "exit": 0,
         "stdout": "st=2\nst=2\n",
-        "stderr": "bash: [: too many arguments\nbash: [: missing `]'\n"
+        "stderr": "bash: line 1: [: too many arguments\nbash: line 1: [: missing `]'\n"
       }
     },
     {
@@ -2190,7 +2190,7 @@
       "expect": {
         "exit": 0,
         "stdout": "0\n0 f\nf\nout\n0\nabsent\n",
-        "stderr": "app: Operation not supported\n"
+        "stderr": "bash: line 1: app: Operation not supported\n"
       },
       "note": "Shared append-open cannot create a missing target without native create-only. Earlier deliberate replacements still truncate before their commands, and the refused append leaves no target."
     }

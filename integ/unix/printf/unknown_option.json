@@ -12,7 +12,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "bash: printf: --: invalid option\nprintf: usage: printf [-v var] format [arguments]\n"
+        "stderr": "bash: line 1: printf: --: invalid option\nprintf: usage: printf [-v var] format [arguments]\n"
       }
     },
     {

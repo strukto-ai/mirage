@@ -159,7 +159,7 @@ def test_no_match_is_status_1_naming_the_last_pattern():
     out, err, code = _run("help zz yy")[0]
     assert (out, code) == ("", 1)
     assert err == (
-        "bash: help: no help topics match `yy'.  Try `help help' or "
+        "bash: line 1: help: no help topics match `yy'.  Try `help help' or "
         "`man -k yy' or `info yy'.\n"
     )
     assert _run("help -d wait zz")[0][2] == 0
@@ -168,7 +168,8 @@ def test_no_match_is_status_1_naming_the_last_pattern():
 def test_an_invalid_option_is_status_2_with_the_usage():
     assert _run("help -x")[0] == (
         "",
-        "bash: help: -x: invalid option\nhelp: usage: help [-dms] [pattern ...]\n",
+        "bash: line 1: "
+        "help: -x: invalid option\nhelp: usage: help [-dms] [pattern ...]\n",
         2,
     )
 
@@ -184,7 +185,7 @@ def test_a_raw_byte_pattern_is_named_as_typed():
     io = asyncio.run(go())
     assert io.exit_code == 1
     assert io.stderr == (
-        b"bash: help: no help topics match `\xff'.  Try `help help' or "
+        b"bash: line 1: help: no help topics match `\xff'.  Try `help help' or "
         b"`man -k \xff' or `info \xff'.\n"
     )
 

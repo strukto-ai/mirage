@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import { runOutput } from '../../commands/builtin/general/interpreter.ts'
 import { guardIO } from '../../commands/builtin/utils/limit.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
@@ -49,7 +50,7 @@ import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
-import { Recorder } from '../../shell/descriptors.ts'
+import { Recorder, outputTarget } from '../../shell/descriptors.ts'
 import { ArithError, DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
 import {
   ALIAS_WORD_TYPES,
@@ -77,6 +78,7 @@ import { stripSlash } from '../../utils/slash.ts'
 import { guardDispatch } from '../abort.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
+import { divertedFile } from '../executor/builtins/exec/index.ts'
 import { flagHelp } from '../executor/builtins/help/index.ts'
 import {
   acceptsLine,
@@ -288,7 +290,7 @@ export async function executeCommand(
     if (eq < 0) continue
     const key = atext.slice(0, eq)
     if (name !== '' && view.isReadonly(key, false)) {
-      refused += `bash: ${key}: readonly variable\n`
+      refused += `${shellVoice()}${key}: readonly variable\n`
       continue
     }
     const rawVal = atext.slice(eq + 1)
@@ -327,7 +329,7 @@ export async function executeCommand(
       return writeRefused(err, name !== '' ? name : k)
     }
     if (session.readonlyVars.has(k)) {
-      throw new DiscardSignal(encodeText(`bash: ${k}: readonly variable\n`))
+      throw new DiscardSignal(encodeText(`${shellVoice()}${k}: readonly variable\n`))
     }
   }
 
@@ -513,7 +515,7 @@ function rmUnseen(
 
 /** A prefix assignment a session policy refused: bash's line, exit 1. */
 function writeRefused(err: PolicyDenied, command: string): RedirectResult {
-  const stderr = encodeText(`bash: ${err.message}\n`)
+  const stderr = encodeText(`${shellVoice()}${err.message}\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr }),
@@ -815,7 +817,8 @@ async function runArgv(
         command: argv.name,
         invocation: gated?.ctx ?? null,
         declared: null,
-        outputFile: output instanceof Recorder ? output.outputTarget : null,
+        outputFile:
+          output instanceof Recorder ? outputTarget(divertedFile(context.session, output)) : null,
       },
       () =>
         commandRecords((records) => {

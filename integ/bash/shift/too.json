@@ -31,7 +31,7 @@
       "command": "shift 1 2 2>&1; echo code=$?",
       "expect": {
         "exit": 1,
-        "stdout": "bash: shift: too many arguments\n",
+        "stdout": "bash: line 1: shift: too many arguments\n",
         "stderr": ""
       }
     }

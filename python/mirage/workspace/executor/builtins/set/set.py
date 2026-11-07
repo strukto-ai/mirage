@@ -18,6 +18,7 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import SET_OPTION_DEFAULTS, SET_OPTION_NAMES
 from mirage.shell.options import parse_option_word
+from mirage.shell.voice import shell_voice
 from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.constants import SET_QUOTED_CHARS
 from mirage.workspace.executor.builtins.declare.constants import CONTROL_RE
@@ -106,7 +107,7 @@ async def handle_set(
             # has yet to wire, as `physical` once was -- reads as success.
             if option not in SET_OPTION_NAMES:
                 err = encode_text(
-                    f"bash: set: {option}: invalid option name\n"
+                    f"{shell_voice()}set: {option}: invalid option name\n"
                 )
                 return (
                     None,

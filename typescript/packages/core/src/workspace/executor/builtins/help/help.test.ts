@@ -148,7 +148,7 @@ describe('help', () => {
   it('answers no match with status 1 naming the last pattern', async () => {
     expect(await run('help zz yy')).toEqual([
       '',
-      "bash: help: no help topics match `yy'.  Try `help help' or `man -k yy' or `info yy'.\n",
+      "bash: line 1: help: no help topics match `yy'.  Try `help help' or `man -k yy' or `info yy'.\n",
       1,
     ])
     expect((await run('help -d wait zz'))[2]).toBe(0)
@@ -157,7 +157,7 @@ describe('help', () => {
   it('answers an invalid option with status 2 and the usage', async () => {
     expect(await run('help -x')).toEqual([
       '',
-      'bash: help: -x: invalid option\nhelp: usage: help [-dms] [pattern ...]\n',
+      'bash: line 1: help: -x: invalid option\nhelp: usage: help [-dms] [pattern ...]\n',
       2,
     ])
   })
@@ -168,7 +168,7 @@ describe('help', () => {
       const io = await ws.shell("help $'\\xff'")
       expect(io.exitCode).toBe(1)
       const text =
-        "bash: help: no help topics match `\xff'.  Try `help help' or `man -k \xff' or `info \xff'.\n"
+        "bash: line 1: help: no help topics match `\xff'.  Try `help help' or `man -k \xff' or `info \xff'.\n"
       expect(io.stderr).toEqual(Uint8Array.from(text, (ch) => ch.charCodeAt(0)))
     } finally {
       await ws.close()

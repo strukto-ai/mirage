@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from functools import partial
 from typing import Any
 
@@ -20,6 +20,8 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.context import (
     clear_program_invocation,
+    current_caller,
+    program_invocation,
     reset_current_session,
     reset_program_invocation,
     set_current_evaluation,
@@ -27,6 +29,7 @@ from mirage.context import (
 from mirage.io import IOResult
 from mirage.io.stream import materialize, yield_bytes
 from mirage.io.types import ByteSource
+from mirage.process.handle import ProcessHandle
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
@@ -48,6 +51,7 @@ from mirage.workspace.executor.builtins.script.script import (
 from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.control import ended
+from mirage.workspace.executor.jobs import report_reaped, start_shell
 from mirage.workspace.executor.traps import clear_traps, finish_shell
 from mirage.workspace.session.state import set_positional_params
 from mirage.workspace.types import ExecutionNode
@@ -224,9 +228,13 @@ async def handle_bash(
         else CallStack(session.shell_nesting)
     )
     cs.admit(name)
+    parent_pid = session.process_id
+    shell = context.frame.shell
+    caller = context
     context = EvaluationContext(
         context.session.new_shell(), context.frame.fork(), context
     )
+    context.frame.substitution = False
     session = context.session
     # The arguments count against max_env, a refusal ending this shell alone.
     try:
@@ -235,34 +243,97 @@ async def handle_bash(
         io = ended(sig)
         return None, io, ExecutionNode(command=name, exit_code=io.exit_code)
     session.shell_nesting = cs.nesting + 1
-    child_token = set_current_evaluation(context)
-    clear_traps(session)
-    session.job_output = JobOutput(session.job_output or session.tty.jobs)
-    session.script_name = script_name
-    for option, enable in parsed.settings:
-        session.shell_options[option] = enable
-    # A nested shell is a program of its own: the builtins it runs are
-    # its builtins again, whatever `find -exec` marked the outer line.
-    token = clear_program_invocation()
+    label = f"{name} {parsed.path}" if parsed.path else f"{name} -c {script}"
     # A nested shell is its own process, with its own jobs: its `jobs` and
     # `wait` see only them, its EXIT action's included, and they are not
     # its caller's.
     if job_table is not None:
         execute_fn = partial(execute_fn, job_table=job_table.child())
-    try:
-        io = await execute_fn(
-            script,
-            session_id=session.session_id,
-            stdin=stdin,
-            sink=sink,
+
+    async def run() -> IOResult:
+        child_token = set_current_evaluation(context)
+        clear_traps(session)
+        session.job_output = JobOutput(session.job_output or session.tty.jobs)
+        session.script_name = script_name
+        # A script file names its diagnostics, and the functions it
+        # defines, as a sourced one does.
+        session._parse_name = parsed.path if parsed.script is None else None
+        for option, enable in parsed.settings:
+            session.shell_options[option] = enable
+        # A nested shell is a program of its own: the builtins it runs are
+        # its builtins again, whatever `find -exec` marked the outer line.
+        token = clear_program_invocation()
+        try:
+            io = await execute_fn(
+                script,
+                session_id=session.session_id,
+                stdin=stdin,
+                sink=sink,
+            )
+            return await finish_shell(execute_fn, session, io, stdin)
+        finally:
+            reset_program_invocation(token)
+            reset_current_session(child_token)
+            await session.close_inputs()
+
+    if shell is None or job_table is None:
+        # Run in place of the program bash replaces (`bash -c ... &`), its
+        # pid the shell's `$$`, whose own subshells and programs it forks.
+        runner = current_caller().process
+        if runner is not None:
+            session.shell_pid = runner.info.pid
+            if job_table is not None:
+                context.frame.shell = runner
+        io = await run()
+    else:
+        io = await _in_process(
+            job_table, context, caller, parent_pid, label, run
         )
-        io = await finish_shell(execute_fn, session, io, stdin)
-    finally:
-        reset_program_invocation(token)
-        reset_current_session(child_token)
-        await session.close_inputs()
-    label = f"{name} {parsed.path}" if parsed.path else f"{name} -c {script}"
     return io.stdout, io, ExecutionNode(command=label, exit_code=io.exit_code)
+
+
+async def _in_process(
+    job_table: JobTable,
+    context: EvaluationContext,
+    caller: EvaluationContext,
+    parent_pid: int | None,
+    label: str,
+    run: Callable[[], Awaitable[IOResult]],
+) -> IOResult:
+    """Run a nested shell as a process its caller forks, whose pid is its
+    ``$$`` and which ignores a QUIT its programs still take; the caller
+    reports a signal that ended it.
+
+    Args:
+        job_table (JobTable): the caller's jobs, whose process table the
+            shell starts in.
+        context (EvaluationContext): the nested shell's evaluation.
+        caller (EvaluationContext): the evaluation that runs it.
+        parent_pid (int | None): the caller's process.
+        label (str): how ``ps`` shows it.
+        run (Callable[[], Awaitable[IOResult]]): the shell's run.
+    """
+    ran: list[IOResult] = []
+
+    async def runner() -> int:
+        ran.append(await run())
+        return ran[0].exit_code
+
+    session = context.session
+
+    def started(process: ProcessHandle) -> None:
+        session.process_id = session.shell_pid = process.info.pid
+        context.frame.shell = process
+
+    process = start_shell(
+        job_table.processes, session, label, runner, parent_pid, started
+    )
+    code = await process.reap()
+    # A program that runs it (`xargs sh -c`) is its parent, not the shell.
+    node = caller.session._line_node
+    if node is not None and not program_invocation(caller.session):
+        report_reaped(caller.frame, [(process, code, node)])
+    return ran[0] if ran else IOResult(exit_code=code)
 
 
 async def bash_builtin(call: BuiltinCall) -> Result:

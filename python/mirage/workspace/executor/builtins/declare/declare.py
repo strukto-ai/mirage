@@ -32,6 +32,7 @@ from mirage.shell.variable import (
     VarKind,
     attr_letters,
 )
+from mirage.shell.voice import shell_voice
 from mirage.shell.xtrace import trace_assignment
 from mirage.utils.hidden import var_hidden
 from mirage.view.types import SessionView
@@ -361,7 +362,8 @@ def plus_refusal(
         "A" in plus and isinstance(value, dict)
     ):
         return (
-            f"bash: {cmd}: {name}: cannot destroy array variables in this way"
+            f"{shell_voice()}{cmd}: {name}: "
+            "cannot destroy array variables in this way"
         )
     return None
 
@@ -459,21 +461,23 @@ async def store_staged_arrays(
         if view.is_readonly(name):
             if fatal or global_scope:
                 raise DiscardSignal(
-                    encode_text(f"bash: {name}: readonly variable\n")
+                    encode_text(f"{shell_voice()}{name}: readonly variable\n")
                 )
             errors.append(readonly_line(cmd, name))
             continue
         fresh = local_vars is not None and name not in local_vars
         if local_vars is not None:
-            shadow_local(session, local_vars, name)
+            shadow_local(session, local_vars, name, inherit)
         if fresh and not in_call_env(session, name):
             start_local(session, name, inherit)
         held = None if fresh and not inherit else held_value(session, name)
         conflict = kind_conflict(held, kind)
         if conflict is not None:
             if fatal:
-                raise DiscardSignal(encode_text(f"bash: {name}: {conflict}\n"))
-            errors.append(f"bash: {cmd}: {name}: {conflict}")
+                raise DiscardSignal(
+                    encode_text(f"{shell_voice()}{name}: {conflict}\n")
+                )
+            errors.append(f"{shell_voice()}{cmd}: {name}: {conflict}")
             continue
         try:
             await premark(view, name, shaping)
@@ -492,7 +496,7 @@ async def store_staged_arrays(
                     session.assocs.get(name), items, append
                 )
                 warnings.extend(
-                    f"bash: {name}: '{word}': must use subscript "
+                    f"{shell_voice()}{name}: '{word}': must use subscript "
                     "when assigning associative array"
                     for word in bad_words
                 )
@@ -631,7 +635,7 @@ def identifier_refusal(cmd: str, word: str) -> str | None:
         return None
     subscript = SUBSCRIPT_RE.fullmatch(name)
     quoted = name if subscript else word
-    return f"bash: {cmd}: `{quoted}': not a valid identifier"
+    return f"{shell_voice()}{cmd}: `{quoted}': not a valid identifier"
 
 
 def declaration_result(
@@ -788,7 +792,7 @@ async def handle_declare_print(
     for name in targets:
         line = declare_line(session, name)
         if line is None:
-            errors.append(f"bash: declare: {name}: not found")
+            errors.append(f"{shell_voice()}declare: {name}: not found")
         else:
             lines.append(line)
     return result(
@@ -898,7 +902,8 @@ def handle_declare_functions(
             cmd,
             exit_code=1 if missing or frozen else 0,
             stderr="".join(
-                f"bash: {cmd}: {name}: readonly function\n" for name in frozen
+                f"{shell_voice()}{cmd}: {name}: readonly function\n"
+                for name in frozen
             ),
         )
     if not names:
@@ -914,7 +919,9 @@ def handle_declare_functions(
         cmd,
         encode_text("".join(f"{line}\n" for line in lines)),
         1 if missing else 0,
-        "".join(f"bash: {cmd}: {name}: not found\n" for name in missing)
+        "".join(
+            f"{shell_voice()}{cmd}: {name}: not found\n" for name in missing
+        )
         if printing
         else "",
     )
@@ -952,7 +959,9 @@ async def mark_names(
     )
     if bad is not None:
         usage = builtin_usage("export" if exporting else "readonly")
-        return fail(cmd, f"bash: {cmd}: -{bad}: invalid option\n{usage}", 2)
+        return fail(
+            cmd, f"{shell_voice()}{cmd}: -{bad}: invalid option\n{usage}", 2
+        )
     on = "n" not in flags
     kind = declared_kind(flags)
     if "f" in flags:
@@ -1029,7 +1038,7 @@ async def mark_functions(
         return ok(cmd, encode_text("".join(f"{line}\n" for line in lines)))
     for name in names:
         if name not in session.functions:
-            errors.append(f"bash: {cmd}: {name}: not a function")
+            errors.append(f"{shell_voice()}{cmd}: {name}: not a function")
         elif on:
             marked.add(name)
         else:
@@ -1189,7 +1198,11 @@ async def _mark_operand(
         await view.mark(key, attr, on)
     if on:
         outlive_call(session, key)
-    return None if conflict is None else f"bash: {cmd}: {key}: {conflict}"
+    return (
+        None
+        if conflict is None
+        else f"{shell_voice()}{cmd}: {key}: {conflict}"
+    )
 
 
 def note_local_array(session: SessionState, name: str) -> bool:
@@ -1236,12 +1249,12 @@ def nameref_refusal(cmd: str, name: str, target: str) -> str | None:
         )
     if not is_valid_name(target):
         return (
-            f"bash: {cmd}: `{target}': invalid variable name for name "
+            f"{shell_voice()}{cmd}: `{target}': invalid variable name for name "
             "reference"
         )
     if target == name:
         return (
-            f"bash: {cmd}: {name}: nameref variable self references "
+            f"{shell_voice()}{cmd}: {name}: nameref variable self references "
             "not allowed"
         )
     return None
@@ -1266,7 +1279,7 @@ def reference_refusal(
         bare (bool): the operand gave no value.
     """
     if own is not None and isinstance(own.value, (ShellArray, dict)):
-        return f"bash: {cmd}: {name}: reference variable cannot be an array"
+        return f"{shell_voice()}{cmd}: {name}: reference variable cannot be an array"
     if (
         not bare
         or own is None

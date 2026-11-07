@@ -87,4 +87,4 @@ def test_parser_append_and_clobber_flags():
 )
 def test_descriptors_are_supported(line):
     assert unsupported_descriptor(_redirects(line)) is None
-    assert bad_descriptor_line(3) == b"3: Bad file descriptor\n"
+    assert bad_descriptor_line(3) == b"bash: 3: Bad file descriptor\n"

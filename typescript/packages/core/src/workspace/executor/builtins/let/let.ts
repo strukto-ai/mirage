@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { ArithError, ReadonlyVariableError } from '../../../../shell/errors.ts'
@@ -35,7 +36,7 @@ export async function handleLet(
   session: SessionState,
   state: SessionView | null = null,
 ): Promise<RedirectResult> {
-  if (args.length === 0) return fail('let', 'bash: let: expression expected\n')
+  if (args.length === 0) return fail('let', `${shellVoice()}let: expression expected\n`)
   const view = requireView(state)
   let value = 0n
   for (const expr of args) {
@@ -46,7 +47,7 @@ export async function handleLet(
       if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
       if (err.inSubscript) throw err.signal()
       if (err instanceof ReadonlyVariableError) return readonlyRefusal('let', err.varName)
-      return fail('let', `bash: let: ${err.message}\n`)
+      return fail('let', `${shellVoice()}let: ${err.message}\n`)
     }
   }
   return result('let', { exitCode: value !== 0n ? 0 : 1 })

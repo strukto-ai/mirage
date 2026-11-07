@@ -106,7 +106,7 @@ async def test_exec_command_runs_and_ends_the_line():
     assert (io.exit_code, await io.stdout_str()) == (0, "hi\n")
     io = await ws.shell("exec nosuchcmd; echo after", session_id="reader")
     assert (io.exit_code, await io.stdout_str()) == (127, "")
-    assert io.stderr == b"bash: exec: nosuchcmd: not found\n"
+    assert io.stderr == b"bash: line 1: exec: nosuchcmd: not found\n"
     io = await ws.shell("echo survived", session_id="reader")
     assert await io.stdout_str() == "survived\n"
     await ws.close()
@@ -177,7 +177,7 @@ async def test_standard_descriptors_open_in_the_other_direction():
         io = await ws.shell("( exec 1</data/source; echo hi; echo rc=$? >&2 )")
         assert await io.stdout_str() == ""
         assert await io.stderr_str() == (
-            "echo: write error: Bad file descriptor\nrc=1\n"
+            "bash: line 1: echo: write error: Bad file descriptor\nrc=1\n"
         )
         io = await ws.shell("( exec 2</data/source; echo hi >&2; echo rc=$? )")
         assert await io.stdout_str() == "rc=1\n"
@@ -202,7 +202,7 @@ async def test_a_failed_later_redirect_puts_every_earlier_one_back():
     # the descriptors, and writes the diagnostic through the descriptors
     # as they stood at the failure.
     ws = _ws()
-    missing = "/data/missing: No such file or directory\n"
+    missing = "bash: line 1: /data/missing: No such file or directory\n"
     try:
         io = await ws.shell("exec > /data/good < /data/missing; echo visible")
         assert (
@@ -255,7 +255,11 @@ async def test_dups_copy_the_terminal_stream_they_name():
             await io.stdout_str(),
             await io.stderr_str(),
             io.exit_code,
-        ) == ("/data/missing: No such file or directory\nout\n", "err\n", 0)
+        ) == (
+            "bash: line 1: /data/missing: No such file or directory\nout\n",
+            "err\n",
+            0,
+        )
     finally:
         await ws.close()
 
@@ -272,8 +276,8 @@ async def test_a_stream_bound_to_stdin_cannot_be_written():
         )
         assert (await io.stdout_str(), await io.stderr_str()) == (
             "back\n",
-            "echo: write error: Bad file descriptor\nrc=1\n"
-            "echo: write error: Bad file descriptor\n",
+            "bash: line 1: echo: write error: Bad file descriptor\nrc=1\n"
+            "bash: line 1: echo: write error: Bad file descriptor\n",
         )
         io = await ws.shell("( exec 2>&0; echo hi >&2; echo rc=$? )")
         assert (await io.stdout_str(), await io.stderr_str()) == ("rc=1\n", "")
@@ -443,7 +447,7 @@ async def test_a_stream_bound_to_stdin_cannot_be_written():
         (
             "echo x >&0; echo rc=$?",
             "rc=1\n",
-            "echo: write error: Bad file descriptor\n",
+            "bash: line 1: echo: write error: Bad file descriptor\n",
             0,
         ),
     ],

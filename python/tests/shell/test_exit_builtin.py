@@ -56,14 +56,14 @@ def test_exit_inside_function_exits_shell(shell):
 def test_exit_non_numeric_exits_2(shell):
     code, _, err = shell.mirage_result("exit abc; echo hi")
     assert code == 2
-    assert err == "bash: exit: abc: numeric argument required\n"
+    assert err == "bash: line 1: exit: abc: numeric argument required\n"
 
 
 def test_exit_too_many_arguments_abandons_the_line(shell):
     code, out, err = shell.mirage_result("exit 1 2; echo after code=$?")
     assert code == 1
     assert out == ""
-    assert err == "bash: exit: too many arguments\n"
+    assert err == "bash: line 1: exit: too many arguments\n"
 
 
 def test_exit_status_wraps_mod_256(shell):

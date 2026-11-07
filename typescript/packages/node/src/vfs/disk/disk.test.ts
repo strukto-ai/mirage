@@ -633,7 +633,7 @@ describe('DiskVFS capacity', () => {
     expect((await ws.shell('printf 12345678 > /d/a')).exitCode).toBe(0)
     const refused = await ws.shell('printf 123 > /d/b')
     expect(refused.exitCode).toBe(1)
-    expect(refused.stderrText).toBe('/d/b: Disk quota exceeded\n')
+    expect(refused.stderrText).toBe('bash: line 1: /d/b: Disk quota exceeded\n')
     expect((await ws.shell('rm /d/a; printf 1234567 > /d/b')).exitCode).toBe(0)
     expect((await ws.shell('cp /d/b /d/c')).exitCode).toBe(1)
     expect((await ws.shell('mv /d/b /d/c')).exitCode).toBe(0)

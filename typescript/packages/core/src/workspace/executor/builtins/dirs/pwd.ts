@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { isProgramInvocation } from '../../../../context/session_context.ts'
+import { sessionVoice } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -32,8 +32,9 @@ export function handlePwd(operands: DirArgs, session: SessionState): RedirectRes
   const { bad, physical } = splitModeOptions(operands, PWD_OPTIONS, shellPhysical)
   if (bad !== null) {
     // The program (`env pwd`) keeps its bare voice.
-    const voice = isProgramInvocation(session) ? '' : 'bash: '
-    const err = encodeText(`${voice}pwd: -${bad}: invalid option\n${builtinUsage('pwd')}`)
+    const err = encodeText(
+      `${sessionVoice(session)}pwd: -${bad}: invalid option\n${builtinUsage('pwd')}`,
+    )
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),

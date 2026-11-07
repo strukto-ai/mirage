@@ -26,7 +26,12 @@ import { ExecutionScope } from '../execution.ts'
 import { newExecutionId } from '../../execution/context.ts'
 import { PathSpec, underCeiling } from '../../types.ts'
 import { literalTree } from '../../shell/literal.ts'
-import { FORK_FAILED, FORK_FAILED_STATUS, INTERRUPTED_STATUS } from '../../shell/constants.ts'
+import {
+  FORK_FAILED,
+  FORK_FAILED_STATUS,
+  INTERRUPTED_STATUS,
+  SHELL_IGNORED_SIGNALS,
+} from '../../shell/constants.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -104,6 +109,7 @@ import { type StatusWriter, ExecutionNode } from '../types.ts'
 import { newStatusWriter } from '../abort.ts'
 import { failureResult, isControlFlowError, placementRefused } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
+import { startShell } from '../executor/jobs.ts'
 import { finishShell, inheritTraps } from '../executor/traps.ts'
 import { expandingAliases } from '../executor/builtins/alias/index.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
@@ -360,10 +366,11 @@ async function runLine(
         cancel: () => {
           abort.abort()
         },
-        started: (info) => {
-          targetSession.processId = info.pid
-          targetSession.shellPid ??= info.pid
+        started: (line) => {
+          targetSession.processId = targetSession.shellPid = line.info.pid
         },
+        ignores: SHELL_IGNORED_SIGNALS,
+        pid: targetSession.shellPid,
         run: async () => {
           result = await runWithSession(
             targetSession,
@@ -386,10 +393,14 @@ async function runLine(
       recordStatus(targetSession, FORK_FAILED_STATUS)
       return new ExecuteResult(new Uint8Array(), encodeText(FORK_FAILED), FORK_FAILED_STATUS)
     }
+    // Every line of a session runs under one pid, its `$$`, as one shell runs
+    // them all; the session runs one line at a time. A signal that stops the
+    // shell (`kill $$`) ends the line with 128 plus it, its jobs left running.
     try {
-      await process.task
-      if (result === undefined) throw new Error('process completed without a result')
-      return result
+      const code = await process.reap(lineOptions.signal ?? null)
+      if (result !== undefined) return result
+      recordStatus(targetSession, code)
+      return new ExecuteResult(new Uint8Array(), new Uint8Array(), code)
     } finally {
       targetSession.processId = null
     }
@@ -446,6 +457,7 @@ async function runPreparedLine(
     parent?.session === effectiveSession
       ? parent
       : new EvaluationContext(effectiveSession, parent?.frame.fork(), parent)
+  if (parent === null) context.frame.shell = currentCaller().process
   // A line read now (`eval`, `source`, a trap action, `$( )`) expands the
   // aliases as they are now, not those of the function running it.
   const outerView = effectiveSession.aliasView
@@ -756,6 +768,7 @@ async function runPreparedLine(
             const substitution = opts.substitution === true
             if (substitution) {
               innerContext = childContext(innerContext)
+              innerContext.frame.substitution = true
               session = innerContext.session
               innerOpts.session = session
               innerOpts.evaluation = innerContext
@@ -781,7 +794,7 @@ async function runPreparedLine(
               innerOpts.sink = capture
             }
 
-            try {
+            const substitute = async (): Promise<IOResult> => {
               let io: IOResult
               try {
                 const res = await env.execute(cmd, innerOpts)
@@ -801,7 +814,9 @@ async function runPreparedLine(
                 io = ended(err)
               }
               if (!substitution) return io
-              const { node, handed: outer, signal, executionScope } = opts
+              // Its EXIT action runs as the substitution, which a stop ends.
+              const { node, handed: outer, executionScope } = opts
+              const signal = innerOpts.signal
               const shellJobs = innerOpts.jobTable
               io = await finishShell(
                 (action, o) =>
@@ -821,6 +836,39 @@ async function runPreparedLine(
               )
               await capture.emit(Channel.STDOUT, await io.materializeStdout())
               await capture.emit(Channel.STDERR, await io.materializeStderr())
+              return io
+            }
+
+            try {
+              if (!substitution) return await substitute()
+              // bash forks a substitution: a process of its own, whose
+              // `$BASHPID` a signal stops alone (`$(kill -9 $BASHPID)`).
+              const abort = new AbortController()
+              innerOpts.signal =
+                innerOpts.signal === undefined
+                  ? abort.signal
+                  : AbortSignal.any([innerOpts.signal, abort.signal])
+              const done: IOResult[] = []
+              const process = startShell(
+                (innerOpts.jobTable ?? env.jobTable).processes,
+                session,
+                cmd,
+                async () => {
+                  const io = await substitute()
+                  done.push(io)
+                  return io.exitCode
+                },
+                session.processId,
+                () => {
+                  abort.abort()
+                },
+                (forked) => {
+                  session.processId = forked.info.pid
+                  innerContext.frame.shell = forked
+                },
+              )
+              const code = await process.reap(opts.signal ?? null)
+              const io = done[0] ?? new IOResult({ exitCode: code })
               await waits.join(rest)
               const [out, err] = capture.take()
               io.stdout = out.byteLength > 0 ? out : null

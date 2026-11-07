@@ -135,7 +135,7 @@ async def test_a_changed_file_is_refused_before_any_upload(drive, workspace):
     drive.put("f", b"theirs\n")
     uploads = drive.fake.count("upload")
     code, _, err = await _run(ws, f"echo mine > {drive.root}/f")
-    assert (code, err) == (1, f"{drive.root}/f: {STALE}\n")
+    assert (code, err) == (1, f"bash: line 1: {drive.root}/f: {STALE}\n")
     assert drive.fake.count("upload") == uploads
     assert drive.fake.read("f") == b"theirs\n"
 
@@ -146,7 +146,7 @@ async def test_a_write_landing_after_the_lookup_is_refused(drive, workspace):
     await _run(ws, f"cat {drive.root}/f")
     drive.fake.hooks["upload"] = lambda: drive.put("f", b"theirs\n")
     code, _, err = await _run(ws, f"echo mine > {drive.root}/f")
-    assert (code, err) == (1, f"{drive.root}/f: {STALE}\n")
+    assert (code, err) == (1, f"bash: line 1: {drive.root}/f: {STALE}\n")
     assert drive.fake.read("f") == b"theirs\n"
 
 
@@ -246,7 +246,7 @@ async def test_rm_r_names_the_first_changed_file_and_keeps_both(
     code, _, err = await _run(ws, f"rm -r {r}/d")
     assert (code, err) == (1, f"rm: cannot remove '{r}/d/a': {STALE}\n")
     code, _, err = await _run(ws, f"echo x > {r}/d/b")
-    assert (code, err) == (1, f"{r}/d/b: {STALE}\n")
+    assert (code, err) == (1, f"bash: line 1: {r}/d/b: {STALE}\n")
 
 
 @pytest.mark.asyncio
@@ -265,7 +265,7 @@ async def test_rm_r_stopped_partway_keeps_the_changed_files_version(
     code, _, err = await _run(ws, f"rm -r {r}/d")
     assert code == 1 and "Directory not empty" in err
     code, _, err = await _run(ws, f"echo z > {r}/d/s/x")
-    assert (code, err) == (1, f"{r}/d/s/x: {STALE}\n")
+    assert (code, err) == (1, f"bash: line 1: {r}/d/s/x: {STALE}\n")
     assert drive.fake.read("d/s/x") == b"theirs\n"
 
 
@@ -387,7 +387,7 @@ async def test_a_copy_onto_a_refused_file_lifts_its_refusal(drive, workspace):
         f"cat {r}/g > /dev/null; echo x > {r}/g; echo y > {r}/y; "
         f"cp {r}/f {r}/g && echo mine > {r}/g"
     )
-    assert await _run(ws, line) == (0, "", f"{r}/g: {STALE}\n")
+    assert await _run(ws, line) == (0, "", f"bash: line 1: {r}/g: {STALE}\n")
     assert drive.fake.read("g") == b"mine\n"
 
 
@@ -404,7 +404,11 @@ async def test_a_move_lifts_a_kept_version(drive, workspace, ancestor):
     await _run(ws, f"cat {r}/{key}")
     drive.put(key, b"theirs\n")
     line = f"echo x > {r}/{key}; {move}; echo new > {r}/{key}"
-    assert await _run(ws, line) == (0, "", f"{r}/{key}: {STALE}\n")
+    assert await _run(ws, line) == (
+        0,
+        "",
+        f"bash: line 1: {r}/{key}: {STALE}\n",
+    )
     assert drive.fake.read(key) == b"new\n"
 
 
@@ -456,7 +460,7 @@ async def test_a_box_folder_merge_keeps_the_versions_of_files_it_left(
     assert await _run(ws, "cp -r /box/e/d /box") == (0, "", "")
     drive.put("d/b", b"theirs\n")
     code, _, err = await _run(ws, "echo mine > /box/d/b")
-    assert (code, err) == (1, f"/box/d/b: {STALE}\n")
+    assert (code, err) == (1, f"bash: line 1: /box/d/b: {STALE}\n")
     assert drive.fake.read("d/b") == b"theirs\n"
 
 
@@ -479,7 +483,11 @@ async def test_a_box_folder_copied_whole_lifts_the_lost_marks_beneath_it(
         "cat /box/d/a > /dev/null; echo x > /box/d/a; echo y > /box/y; "
         "cp -r /box/s /box/d && echo mine > /box/d/a"
     )
-    assert await _run(ws, line) == (0, "", f"/box/d/a: {STALE}\n")
+    assert await _run(ws, line) == (
+        0,
+        "",
+        f"bash: line 1: /box/d/a: {STALE}\n",
+    )
     assert drive.fake.read("d/a") == b"mine\n"
 
 
@@ -757,7 +765,7 @@ async def test_a_read_past_an_outdated_listing_keeps_the_version(
     assert await _run(ws, "cat /dbx/n") == (0, "v1\n", "")
     drive.put("n", b"theirs\n")
     code, _, err = await _run(ws, "echo mine > /dbx/n")
-    assert (code, err) == (1, f"/dbx/n: {STALE}\n")
+    assert (code, err) == (1, f"bash: line 1: /dbx/n: {STALE}\n")
     assert drive.fake.read("n") == b"theirs\n"
 
 

@@ -12,7 +12,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "bash: history: --: invalid option\nhistory: usage: history [-c] [-d offset] [n] or history -anrw [filename] or history -ps arg [arg...]\n"
+        "stderr": "bash: line 1: history: --: invalid option\nhistory: usage: history [-c] [-d offset] [n] or history -anrw [filename] or history -ps arg [arg...]\n"
       }
     }
   ]

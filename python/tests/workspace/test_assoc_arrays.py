@@ -66,8 +66,8 @@ CASES = [
         "keyed_literal_refuses_plain_words",
         "declare -A m=([a]=1 b 2); declare -p m",
         'declare -A m=([a]="1" )\n',
-        "bash: m: 'b': must use subscript when assigning associative array\n"
-        "bash: m: '2': must use subscript when assigning associative array\n",
+        "bash: line 1: m: 'b': must use subscript when assigning associative array\n"
+        "bash: line 1: m: '2': must use subscript when assigning associative array\n",
         0,
     ),
     (
@@ -266,7 +266,7 @@ CASES = [
         "arith_readonly_refused_nonfatal",
         'readonly -A r=([k]=1); ((r[k]++)); echo "after=$?"; declare -p r',
         'after=1\ndeclare -Ar r=([k]="1" )\n',
-        "bash: r: readonly variable\n",
+        "bash: line 1: r: readonly variable\n",
         0,
     ),
     (
@@ -295,21 +295,21 @@ CASES = [
         "indexed_conversion_refused",
         "a=(1 2); declare -A a; echo rc=$?; declare -p a",
         'rc=1\ndeclare -a a=([0]="1" [1]="2")\n',
-        "bash: declare: a: cannot convert indexed to associative array\n",
+        "bash: line 1: declare: a: cannot convert indexed to associative array\n",
         0,
     ),
     (
         "assoc_to_indexed_refused",
         "declare -A m=([a]=1); declare -a m; echo rc=$?; declare -p m",
         'rc=1\ndeclare -A m=([a]="1" )\n',
-        "bash: declare: m: cannot convert associative to indexed array\n",
+        "bash: line 1: declare: m: cannot convert associative to indexed array\n",
         0,
     ),
     (
         "empty_subscript_fatal",
         "e=; declare -A m; m[$e]=v; echo unreached",
         "",
-        "bash: m[$e]: bad array subscript\n",
+        "bash: line 1: m[$e]: bad array subscript\n",
         1,
     ),
     (
@@ -408,14 +408,14 @@ ATTR_CASES = [
         "i_bad_expr_fatal",
         "declare -i n; n=1+; echo unreached",
         "",
-        'bash: 1+: syntax error: operand expected (error token is "+")\n',
+        'bash: line 1: 1+: syntax error: operand expected (error token is "+")\n',
         1,
     ),
     (
         "i_div_zero_fatal",
         "declare -i n; n=1/0; echo unreached",
         "",
-        'bash: 1/0: division by 0 (error token is "0")\n',
+        'bash: line 1: 1/0: division by 0 (error token is "0")\n',
         1,
     ),
     (
@@ -466,7 +466,7 @@ ATTR_CASES = [
         "i_readonly_cluster",
         "declare -ir n=2+2; declare -p n; n=5; echo x",
         'declare -ir n="4"\n',
-        "bash: n: readonly variable\n",
+        "bash: line 1: n: readonly variable\n",
         1,
     ),
     (
@@ -508,21 +508,23 @@ ATTR_CASES = [
         "i_read_bad_is_fatal",
         'declare -i n; read n <<< "1+"; echo "rc=$? |$n|"',
         "",
-        'bash: read: 1+: syntax error: operand expected (error token is "+")\n',
+        'bash: line 1: read: 1+: syntax error: operand expected (error token is "+")\n',
         1,
     ),
     (
         "i_printf_bad_is_fatal",
         'declare -i n; printf -v n "%s" "1+"; echo "rc=$? |$n|"',
         "",
-        'bash: printf: 1+: syntax error: operand expected (error token is "+")\n',
+        "bash: line 1: "
+        'printf: 1+: syntax error: operand expected (error token is "+")\n',
         1,
     ),
     (
         "i_declare_bad_is_fatal",
         'declare -i n=1+; echo "rc=$? |$n|"',
         "",
-        'bash: declare: 1+: syntax error: operand expected (error token is "+")\n',
+        "bash: line 1: "
+        'declare: 1+: syntax error: operand expected (error token is "+")\n',
         1,
     ),
     (
@@ -640,28 +642,28 @@ ATTR_CASES = [
         "plus_r_refused",
         "readonly R=1; declare +r R; echo rc=$?; declare -p R",
         'rc=1\ndeclare -r R="1"\n',
-        "bash: declare: R: readonly variable\n",
+        "bash: line 1: declare: R: readonly variable\n",
         0,
     ),
     (
         "plus_a_refused",
         "a=(1); declare +a a; echo rc=$?; declare -p a",
         'rc=1\ndeclare -a a=([0]="1")\n',
-        "bash: declare: a: cannot destroy array variables in this way\n",
+        "bash: line 1: declare: a: cannot destroy array variables in this way\n",
         0,
     ),
     (
         "plus_A_refused",
         "declare -A m=([k]=v); declare +A m; echo rc=$?",
         "rc=1\n",
-        "bash: declare: m: cannot destroy array variables in this way\n",
+        "bash: line 1: declare: m: cannot destroy array variables in this way\n",
         0,
     ),
     (
         "plus_unknown_letter",
         "declare +q v; echo rc=$?",
         "rc=2\n",
-        "bash: declare: +q: invalid option\n"
+        "bash: line 1: declare: +q: invalid option\n"
         "declare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] "
         "or declare -p [-aAfFilnrtux] [name ...]\n",
         0,
@@ -670,7 +672,7 @@ ATTR_CASES = [
         "minus_unknown_letter",
         "declare -q v; echo rc=$?",
         "rc=2\n",
-        "bash: declare: -q: invalid option\n"
+        "bash: line 1: declare: -q: invalid option\n"
         "declare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] "
         "or declare -p [-aAfFilnrtux] [name ...]\n",
         0,
@@ -707,14 +709,14 @@ ATTR_CASES = [
         "plus_export_kw_refused",
         "export V=1; export +x V; echo rc=$?",
         "rc=1\n",
-        "bash: export: `+x': not a valid identifier\n",
+        "bash: line 1: export: `+x': not a valid identifier\n",
         0,
     ),
     (
         "plus_readonly_kw_refused",
         "readonly +r R; echo rc=$?",
         "rc=1\n",
-        "bash: readonly: `+r': not a valid identifier\n",
+        "bash: line 1: readonly: `+r': not a valid identifier\n",
         0,
     ),
     (
@@ -736,7 +738,7 @@ FUNC_JOB_CASES = [
         "rof_refuses_redefinition",
         "f(){ echo one; }; readonly -f f; f(){ echo two; }; echo rc=$?; f",
         "rc=1\none\n",
-        "bash: f: readonly function\n",
+        "bash: line 1: f: readonly function\n",
         0,
     ),
     (
@@ -744,28 +746,28 @@ FUNC_JOB_CASES = [
         "f(){ echo one; }; readonly -f f; function f { echo two; }; "
         "echo rc=$?; f",
         "rc=1\none\n",
-        "bash: f: readonly function\n",
+        "bash: line 1: f: readonly function\n",
         0,
     ),
     (
         "rof_refuses_unset_f",
         "f(){ echo one; }; readonly -f f; unset -f f; echo rc=$?; f",
         "rc=1\none\n",
-        "bash: unset: f: cannot unset: readonly function\n",
+        "bash: line 1: unset: f: cannot unset: readonly function\n",
         0,
     ),
     (
         "rof_refuses_unset_auto",
         "f(){ echo one; }; readonly -f f; unset f; echo rc=$?; f",
         "rc=1\none\n",
-        "bash: unset: f: cannot unset: readonly function\n",
+        "bash: line 1: unset: f: cannot unset: readonly function\n",
         0,
     ),
     (
         "rof_not_a_function",
         "readonly -f nothere; echo rc=$?",
         "rc=1\n",
-        "bash: readonly: nothere: not a function\n",
+        "bash: line 1: readonly: nothere: not a function\n",
         0,
     ),
     (
@@ -787,21 +789,21 @@ FUNC_JOB_CASES = [
         "f(){ :; }; g(){ :; }; readonly -f f g; f(){ :; }; echo rc=$?; "
         "g(){ :; }; echo rc=$?",
         "rc=1\nrc=1\n",
-        "bash: f: readonly function\nbash: g: readonly function\n",
+        "bash: line 1: f: readonly function\nbash: line 1: g: readonly function\n",
         0,
     ),
     (
         "rof_inherited_by_subshell",
         "f(){ echo one; }; readonly -f f; ( f(){ echo in; }; echo rc=$? ); f",
         "rc=1\none\n",
-        "bash: f: readonly function\n",
+        "bash: line 1: f: readonly function\n",
         0,
     ),
     (
         "declare_rf_freezes",
         "f(){ echo one; }; declare -rf f; f(){ echo two; }; echo rc=$?; f",
         "rc=1\none\n",
-        "bash: f: readonly function\n",
+        "bash: line 1: f: readonly function\n",
         0,
     ),
     (
@@ -860,14 +862,14 @@ FUNC_JOB_CASES = [
         "jobs_no_such_job",
         "sleep 5 & jobs %9; echo rc=$?",
         "rc=1\n",
-        "bash: jobs: %9: no such job\n",
+        "bash: line 1: jobs: %9: no such job\n",
         0,
     ),
     (
         "jobs_bad_flag_usage",
         "jobs -q; echo rc=$?",
         "rc=2\n",
-        "bash: jobs: -q: invalid option\n"
+        "bash: line 1: jobs: -q: invalid option\n"
         "jobs: usage: jobs [-lnprs] [jobspec ...] or jobs -x command [args]\n",
         0,
     ),
@@ -922,14 +924,14 @@ REVIEW_CASES = [
         "indexed_default_neg_out",
         'a=(1 2); echo "${a[-5]:=v}"; echo after',
         "",
-        "bash: a[-5]: bad array subscript\n",
+        "bash: line 1: a[-5]: bad array subscript\n",
         1,
     ),
     (
         "indexed_default_splat",
         'a=(); echo "${a[@]:=v}"; declare -p a; echo after',
         "",
-        "bash: a[@]: bad array subscript\n",
+        "bash: line 1: a[@]: bad array subscript\n",
         1,
     ),
     (

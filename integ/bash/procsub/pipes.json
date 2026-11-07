@@ -328,7 +328,7 @@
       "expect": {
         "exit": 0,
         "stdout": "end\n",
-        "stderr": "mirage: unsupported: exec onto a process substitution\n3: Bad file descriptor\n"
+        "stderr": "mirage: unsupported: exec onto a process substitution\nbash: line 1: 3: Bad file descriptor\n"
       },
       "note": "Mirage refuses exec onto a process substitution inside a longer word as it does alone (GNU bash 5.2.37 prints \"hi\\nend\\n\"); the later write to the unopened descriptor fails as any write to one does."
     },
@@ -767,7 +767,7 @@
       "expect": {
         "exit": 0,
         "stdout": "end\n",
-        "stderr": "mirage: unsupported: exec onto a process substitution\n3: Bad file descriptor\n"
+        "stderr": "mirage: unsupported: exec onto a process substitution\nbash: line 1: 3: Bad file descriptor\n"
       },
       "note": "Mirage refuses exec onto a process substitution, which lives only as long as the command naming it (GNU bash 5.2.37 prints \"hi\\nend\\n\"); the later write to the unopened descriptor fails as any write to one does."
     },
@@ -783,7 +783,7 @@
       "expect": {
         "exit": 0,
         "stdout": "\n\n",
-        "stderr": "mirage: unsupported: exec onto a process substitution\n3: Bad file descriptor\n3: Bad file descriptor\n"
+        "stderr": "mirage: unsupported: exec onto a process substitution\nbash: line 1: 3: Bad file descriptor\nbash: line 1: 3: Bad file descriptor\n"
       },
       "note": "Mirage refuses exec onto a process substitution, which lives only as long as the command naming it (GNU bash 5.2.37 prints \"a\\nb\\n\"); the later reads of the unopened descriptor fail as any read of one does."
     },

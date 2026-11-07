@@ -41,19 +41,19 @@ def test_an_integer_value_error_ends_the_shell_in_its_builtin_voice():
     [
         (
             "echo $((1/0)); echo after",
-            'bash: 1/0: division by 0 (error token is "0")\n',
+            'bash: line 1: 1/0: division by 0 (error token is "0")\n',
         ),
         (
             "x=0; echo $((1/$x)); echo after",
-            'bash: 1/0: division by 0 (error token is "0")\n',
+            'bash: line 1: 1/0: division by 0 (error token is "0")\n',
         ),
         (
             "echo $((2**-1)); echo after",
-            'bash: 2**-1: exponent less than 0 (error token is "1")\n',
+            'bash: line 1: 2**-1: exponent less than 0 (error token is "1")\n',
         ),
         (
             "x=$((1%0)); echo after",
-            'bash: 1%0: division by 0 (error token is "0")\n',
+            'bash: line 1: 1%0: division by 0 (error token is "0")\n',
         ),
     ],
 )

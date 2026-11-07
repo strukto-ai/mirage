@@ -98,11 +98,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf \"[%s]\\n\" a\\\\\\\nb \"c\\\\\\\nd\"; echo a\\\\",
+      "command": "printf \"[%s]\\n\" a\\\\\\\nb \"c\\\\\\\nd\"; echo a\\\\\nlcf() { echo \"lineno=$LINENO\"; nolcf; }\nlcf; unset -f lcf",
       "expect": {
         "exit": 0,
-        "stdout": "[a\\b]\n[c\\d]\na\\\n",
-        "stderr": ""
+        "stdout": "[a\\b]\n[c\\d]\na\\\nlineno=4\n",
+        "stderr": "environment: line 4: nolcf: command not found\n"
       }
     },
     {
@@ -277,7 +277,7 @@
       "expect": {
         "exit": 127,
         "stdout": "[a][ b][ ][c][\td][v f]\nrc=127\ne\n",
-        "stderr": "lsw =1: command not found\n lsz: command not found\n"
+        "stderr": "bash: line 2: lsw =1: command not found\nbash: line 4:  lsz: command not found\n"
       }
     }
   ]

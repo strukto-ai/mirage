@@ -174,7 +174,7 @@ def test_bad_negative_subscript_aborts_line(shell):
     code, out, err = shell.mirage_result("a=(1); a[-5]=x; echo rc=$?")
     assert code == 1
     assert out == ""
-    assert err == "bash: a[-5]: bad array subscript\n"
+    assert err == "bash: line 1: a[-5]: bad array subscript\n"
 
 
 def test_bad_subscript_contained_by_subshell(shell):

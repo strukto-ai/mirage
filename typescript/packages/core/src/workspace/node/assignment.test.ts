@@ -69,7 +69,7 @@ describe('executeAssignment', () => {
     const ws = makeWs()
     const io = await ws.shell('declare -A m; e=; m[$e]=v; echo REACHED')
     expect(stdoutStr(io)).toBe('')
-    expect(stderrStr(io)).toBe('bash: m[$e]: bad array subscript\n')
+    expect(stderrStr(io)).toBe('bash: line 1: m[$e]: bad array subscript\n')
     expect(io.exitCode).toBe(1)
   })
 
@@ -86,7 +86,7 @@ describe('executeAssignment', () => {
     const ws = makeWs()
     const io = await ws.shell('readonly r=1; r=2; echo REACHED')
     expect(stdoutStr(io)).toBe('')
-    expect(stderrStr(io)).toBe('bash: r: readonly variable\n')
+    expect(stderrStr(io)).toBe('bash: line 1: r: readonly variable\n')
     expect(io.exitCode).toBe(1)
   })
 

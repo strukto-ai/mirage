@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import { runWithAdmission } from '../../../../context/session_context.ts'
 import { RegexError } from '../../../../rs/errors.ts'
 import { posixRegex } from '../../../../rs/regex.ts'
@@ -171,7 +172,7 @@ async function evalCondBinary(
       if (error !== null) {
         if (error.inSubscript) throw error.signal()
         const lead = error instanceof ArithError ? `${ctx.name}: ` : ''
-        throw new CondError(`bash: ${lead}${error.message}`, 1, false)
+        throw new CondError(`${shellVoice()}${lead}${error.message}`, 1, false)
       }
       values.push(value)
     }

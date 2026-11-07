@@ -24,6 +24,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
+from mirage.shell.voice import shell_voice
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError, dotted_spelling, resolve_path
 from mirage.workspace.executor.builtins.dirs.dirs import (
@@ -184,11 +185,12 @@ async def handle_cd(
                 )
             except CycleError:
                 error = (
-                    f"bash: cd: {named}: Too many levels of symbolic links\n"
+                    f"{shell_voice()}cd: {named}: "
+                    "Too many levels of symbolic links\n"
                 )
                 continue
             if refusal is not None:
-                error = f"bash: cd: {named}: {fs_strerror(refusal)}\n"
+                error = f"{shell_voice()}cd: {named}: {fs_strerror(refusal)}\n"
                 continue
         # The logical name is the candidate with `..` simplified textually
         # and links left alone; the physical one follows them. `-P`
@@ -200,7 +202,8 @@ async def handle_cd(
                 resolved = resolve_target(candidate, follow, physical)
             except CycleError:
                 error = (
-                    f"bash: cd: {named}: Too many levels of symbolic links\n"
+                    f"{shell_voice()}cd: {named}: "
+                    "Too many levels of symbolic links\n"
                 )
                 continue
         else:
@@ -219,10 +222,10 @@ async def handle_cd(
         except FileNotFoundError:
             not_found = True
         except FS_ERRORS as exc:
-            error = f"bash: cd: {named}: {fs_strerror(exc)}\n"
+            error = f"{shell_voice()}cd: {named}: {fs_strerror(exc)}\n"
             continue
         except ValueError as exc:
-            error = f"bash: cd: {named}: {exc}\n"
+            error = f"{shell_voice()}cd: {named}: {exc}\n"
             continue
         if s is None or not_found:
             if is_mount_root(resolved):
@@ -234,16 +237,16 @@ async def handle_cd(
                     raw,
                     print_path or announce,
                 )
-            error = f"bash: cd: {named}: No such file or directory\n"
+            error = f"{shell_voice()}cd: {named}: No such file or directory\n"
             continue
         if s.type != FileType.DIRECTORY:
-            error = f"bash: cd: {named}: Not a directory\n"
+            error = f"{shell_voice()}cd: {named}: Not a directory\n"
             continue
         return _cd_success(
             session, resolved, logical, spelled, raw, print_path or announce
         )
     err = encode_text(
-        error or f"bash: cd: {named}: No such file or directory\n"
+        error or f"{shell_voice()}cd: {named}: No such file or directory\n"
     )
     return (
         None,
@@ -302,7 +305,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
     is_mount = call.namespace.session_links(session).is_mount
     if bad_opt is not None:
         err = encode_text(
-            f"bash: cd: -{bad_opt}: invalid option\n{builtin_usage('cd')}"
+            f"{shell_voice()}cd: -{bad_opt}: invalid option\n{builtin_usage('cd')}"
         )
         return (
             None,
@@ -310,7 +313,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
             ExecutionNode(command="cd", exit_code=2, stderr=err),
         )
     if len(cd_operands) > 1:
-        err = b"bash: cd: too many arguments\n"
+        err = encode_text(f"{shell_voice()}cd: too many arguments\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),
@@ -319,7 +322,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
     if not cd_operands:
         home = home_dir(session)
         if home is None:
-            err = b"bash: cd: HOME not set\n"
+            err = encode_text(f"{shell_voice()}cd: HOME not set\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -338,7 +341,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
     if raw_str == "-":
         old = session.env.get("OLDPWD")
         if not old:
-            err = b"bash: cd: OLDPWD not set\n"
+            err = encode_text(f"{shell_voice()}cd: OLDPWD not set\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),

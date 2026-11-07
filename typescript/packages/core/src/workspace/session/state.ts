@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import { sessionAccess } from '../../context/session_context.ts'
 import type { SessionView } from '../../view/types.ts'
 import {
@@ -33,7 +34,9 @@ import {
   ShellArray,
 } from '../../shell/array.ts'
 import {
+  BASHPID,
   FUNCNAME,
+  LINENO,
   PIPESTATUS,
   RANDOM,
   RANDOM_MODULUS,
@@ -484,7 +487,8 @@ export function nextRandom(session: SessionState, stored: string | undefined): n
 }
 
 /**
- * Arithmetic's reads of `$RANDOM`, bound to one session.
+ * Arithmetic's reads of `$RANDOM`, bound to one session, of `$LINENO`, the
+ * running command's line, and of `$BASHPID`, the process running it.
  *
  * A read before the expression assigns `RANDOM` draws from the session
  * generator. bash seeds at the instant of an assignment and every later
@@ -524,6 +528,8 @@ export class RandomReader {
 
   /** The dynamic value of a name, null for a name that has none. */
   readonly read = (name: string): string | null => {
+    const dynamic = this.session.dynamicValue(name)
+    if (dynamic !== null) return dynamic
     if (!this.special(name)) return null
     if (this.seeded === null) {
       const value = nextRandom(this.session, visibleEnv(this.session)[name])
@@ -857,7 +863,7 @@ async function setVar(
     existing?.attrs.has(VarAttr.Nameref) === true &&
     typeof shaped === 'object'
   ) {
-    diagnostics.push(encodeText(`bash: warning: ${name}: removing nameref attribute\n`))
+    diagnostics.push(encodeText(`${shellVoice()}warning: ${name}: removing nameref attribute\n`))
   }
   let stored = existing === undefined ? makeVar(shaped) : withValue(existing, shaped)
   // An agent write to a managed name shadows session-locally: the
@@ -936,6 +942,9 @@ async function unsetVar(
   }
   // bash: unsetting RANDOM strips its special meaning for good.
   if (name === RANDOM) session.randomSeed = RANDOM_UNSET
+  else if (name === LINENO || name === BASHPID) {
+    session.plainSpecials = new Set([...session.plainSpecials, name])
+  }
 }
 
 function place(session: SessionState, name: string, v: ShellVar | null): void {
@@ -1096,18 +1105,24 @@ export function setPositionalParams(
  * `RANDOM` parks its generator marker too: a local `RANDOM` is an ordinary
  * variable for the function's extent (`local RANDOM=5; echo $RANDOM`
  * prints 5, and `local RANDOM=(7)` leaves the caller's generator alone),
- * and `restoreLocals` hands the marker back.
+ * and `restoreLocals` hands the marker back. A local `LINENO` or `BASHPID`
+ * is ordinary the same way, its `unset` the function's own; with `-I`
+ * (`inherit`) it keeps the meaning the caller's has.
  */
 export function shadowLocal(
   session: SessionState,
   locals: Map<string, ShellVar | null>,
   name: string,
+  inherit = false,
 ): void {
   if (locals.has(name)) return
   locals.set(name, sessionEntry(session.vars, name) ?? null)
   if (name === RANDOM) {
     session.localRandom.push(session.randomSeed)
     session.randomSeed = RANDOM_UNSET
+  } else if (name === LINENO || name === BASHPID) {
+    session.localPlain.push([name, session.plainSpecials.has(name)])
+    if (!inherit) session.plainSpecials = new Set([...session.plainSpecials, name])
   }
 }
 
@@ -1129,6 +1144,14 @@ export function restoreLocals(session: SessionState, locals: Map<string, ShellVa
     }
   }
   if (locals.has(RANDOM)) session.randomSeed = session.localRandom.pop() ?? null
+  for (const special of [LINENO, BASHPID]) {
+    const entry = locals.has(special) ? session.localPlain.pop() : undefined
+    if (entry === undefined) continue
+    const [name, plain] = entry
+    session.plainSpecials = plain
+      ? new Set([...session.plainSpecials, name])
+      : new Set([...session.plainSpecials].filter((kept) => kept !== name))
+  }
 }
 
 /**

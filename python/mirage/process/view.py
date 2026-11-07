@@ -29,7 +29,8 @@ class ProcessView:
     PermissionError (EPERM). The view carries no reference to mutable
     tasks. ``permissions`` answers the profile's process grants while
     the view stands and None once it is revoked, for the processes of
-    other workspaces, which only the store lists.
+    other workspaces, which only the store lists. A process group is
+    found, probed and signalled through the members the view sees.
     """
 
     list: Callable[[], tuple[ProcessInfo, ...]]
@@ -37,5 +38,7 @@ class ProcessView:
     probe: Callable[[int], bool]
     terminate: Callable[[int, int], bool]
     permissions: Callable[[], ProcessPermissions | None]
+    probe_group: Callable[[int], bool]
+    signal_group: Callable[[int, int], bool]
     depth: int = 0
     spawn: Callable[[SpawnRequest], ChildProcess] | None = None

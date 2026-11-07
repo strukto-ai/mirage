@@ -32,16 +32,19 @@ from mirage.secrets.config import EnvVar
 from mirage.shell.array import ShellArray
 from mirage.shell.console import JobOutput, Terminal
 from mirage.shell.constants import (
+    BASHPID,
     BIN_PREFIX,
     IFS_DEFAULT,
+    LINENO,
     RANDOM,
     RANDOM_UNSET,
     SHELL_ARGV0,
 )
 from mirage.shell.descriptors import Descriptor, StreamOwner
+from mirage.shell.helpers import source_row
 from mirage.shell.job_table.table import JobTable
 from mirage.shell.job_table.waits import JobWaits
-from mirage.shell.types import AliasExpansion
+from mirage.shell.types import AliasExpansion, TSNodeLike
 from mirage.shell.variable import (
     ManagedRef,
     ShellVar,
@@ -441,6 +444,11 @@ class SessionState:
     # name, innermost last: a local `RANDOM` is an ordinary variable for
     # the function's extent, and the generator resumes when it returns.
     _local_random: list[str | None] = field(default_factory=list, repr=False)
+    # Whether `LINENO` or `BASHPID` was plain where a frame made it
+    # local, one entry per local, innermost last.
+    _local_plain: list[tuple[str, bool]] = field(
+        default_factory=list, repr=False
+    )
     # The names a running `declare -g` has put at global scope
     # (`reach_global`), each with its frame and the function's local it
     # set aside: arithmetic in the declaration still reads that local.
@@ -471,6 +479,9 @@ class SessionState:
     _random_state: int | None = field(default=None, repr=False)
     _random_seed: str | None = field(default=None, repr=False)
     _random_last: int = field(default=0, repr=False)
+    # `$LINENO` and `$BASHPID` once the shell unset them: ordinary
+    # variables from then on, as bash's are. A fork keeps them so.
+    _plain_specials: frozenset[str] = field(default=frozenset(), repr=False)
     # Alias bookkeeping. bash expands an alias when it *parses* the line
     # that uses it, so a definition takes effect from the next line read
     # (`alias x=..; x` on one line finds no `x`; the same two statements
@@ -518,6 +529,20 @@ class SessionState:
     # parsed again from its own source but reads aliases where it was
     # written.
     _parse_row: int = field(default=0, repr=False)
+    # The same row as `$LINENO` counts it, every line as typed: a row the
+    # parse joined to the next (a backslash before the newline) counts.
+    _line_row: int = field(default=0, repr=False)
+    # What the running parse's diagnostics name as their source: None for
+    # the shell's own input, `environment` for a function defined there,
+    # the file for one sourced; and the command running in it, whose line
+    # is `$LINENO` (`line_number`).
+    _parse_name: str | None = field(default=None, repr=False)
+    _line_node: TSNodeLike | None = field(default=None, repr=False)
+    # The row the next nested parse starts on, which a sourced file (0)
+    # and the rest of an input read again (its own parse's) set; None
+    # numbers it on from the running command's line, as `eval` and
+    # `$( )` do, or from 0 for a shell's own input.
+    _parse_from: int | None = field(default=None, repr=False)
     # The owner of this session's terminal streams, which an `exec` copy
     # of one names (`exec 3>&1`), and whether a line of the session is
     # running, whose outermost program routes what was written to them.
@@ -866,6 +891,36 @@ class SessionState:
         return SHELL_ARGV0 if self.script_name is None else self.script_name
 
     @property
+    def line_number(self) -> int:
+        """The line of the command running, ``$LINENO``: its row in the
+        text that spelled it, numbered on from where that text's parse
+        starts (``_line_row``)."""
+        node = self._line_node
+        return self._line_row + (0 if node is None else source_row(node)) + 1
+
+    @property
+    def bash_pid(self) -> int:
+        """The process running the command, ``$BASHPID``: the subshell,
+        stage or substitution it runs in, else the shell itself."""
+        return self.process_id or self.shell_pid or 0
+
+    def dynamic_value(self, name: str) -> str | None:
+        """What the shell computes a read of ``$LINENO`` or ``$BASHPID``
+        to (``line_number``, ``bash_pid``); None for any other name and
+        for one the shell unset, which reads as it was assigned.
+
+        Args:
+            name (str): the variable read.
+        """
+        if name in self._plain_specials:
+            return None
+        if name == LINENO:
+            return str(self.line_number)
+        if name == BASHPID:
+            return str(self.bash_pid)
+        return None
+
+    @property
     def env(self) -> Mapping[str, str]:
         """The scalar variables, by name.
 
@@ -984,6 +1039,7 @@ class SessionState:
             forked.vars = kept
         if self._random_seed == RANDOM_UNSET:
             forked._random_seed = RANDOM_UNSET
+        forked._plain_specials = self._plain_specials
         forked._borrowed = [*self._borrowed, *self.open_inputs()]
         return forked
 
@@ -1002,6 +1058,9 @@ class SessionState:
         child = self.fork()
         child._parse_current = self._parse_current
         child._parse_row = self._parse_row
+        child._line_row = self._line_row
+        child._parse_name = self._parse_name
+        child._line_node = self._line_node
         child._alias_expansion = self._alias_expansion
         child._local_vars = (
             None if self._local_vars is None else copy_locals(self._local_vars)
@@ -1013,6 +1072,7 @@ class SessionState:
             for frame in self._local_frames
         ]
         child._local_random = list(self._local_random)
+        child._local_plain = list(self._local_plain)
         if child._random_seed != RANDOM_UNSET:
             child._draw_afresh()
         return child
@@ -1092,6 +1152,7 @@ class SessionState:
             _getopts_optind=None,
             errexit_ignored=False,
         )
+        child._plain_specials = frozenset()
         child._draw_afresh()
         return child
 

@@ -101,7 +101,7 @@
       "command": "(cd /data/sub && cd .. && pwd); (cd /data/nope/.. 2>&1; cd /data/a.txt/.. 2>&1; pwd); (cd /data && cd sub/../nope/.. 2>&1; cd a.txt/.. 2>&1; pwd)",
       "expect": {
         "exit": 0,
-        "stdout": "/data\nbash: cd: /data/nope/..: No such file or directory\nbash: cd: /data/a.txt/..: Not a directory\n/\nbash: cd: sub/../nope/..: No such file or directory\nbash: cd: a.txt/..: Not a directory\n/data\n",
+        "stdout": "/data\nbash: line 1: cd: /data/nope/..: No such file or directory\nbash: line 1: cd: /data/a.txt/..: Not a directory\n/\nbash: line 1: cd: sub/../nope/..: No such file or directory\nbash: line 1: cd: a.txt/..: Not a directory\n/data\n",
         "stderr": ""
       }
     },
@@ -416,7 +416,7 @@
       "command": "cd /data /data/sub 2>&1",
       "expect": {
         "exit": 1,
-        "stdout": "bash: cd: too many arguments\n",
+        "stdout": "bash: line 1: cd: too many arguments\n",
         "stderr": ""
       }
     },
@@ -451,7 +451,7 @@
       "command": "cd -x /data 2>&1",
       "expect": {
         "exit": 2,
-        "stdout": "bash: cd: -x: invalid option\ncd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n",
+        "stdout": "bash: line 1: cd: -x: invalid option\ncd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n",
         "stderr": ""
       }
     },
@@ -486,7 +486,7 @@
       "command": "(unset HOME; cd) 2>&1",
       "expect": {
         "exit": 1,
-        "stdout": "bash: cd: HOME not set\n",
+        "stdout": "bash: line 1: cd: HOME not set\n",
         "stderr": ""
       }
     },
@@ -521,7 +521,7 @@
       "command": "(cd /data && cd '~') 2>&1; (cd /data && cd ./nosuch; cd a.txt; cd /data/a.txt/) 2>&1",
       "expect": {
         "exit": 1,
-        "stdout": "bash: cd: ~: No such file or directory\nbash: cd: ./nosuch: No such file or directory\nbash: cd: a.txt: Not a directory\nbash: cd: /data/a.txt/: Not a directory\n",
+        "stdout": "bash: line 1: cd: ~: No such file or directory\nbash: line 1: cd: ./nosuch: No such file or directory\nbash: line 1: cd: a.txt: Not a directory\nbash: line 1: cd: /data/a.txt/: Not a directory\n",
         "stderr": ""
       }
     }

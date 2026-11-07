@@ -67,7 +67,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=2\n",
-        "stderr": "bash: disown: %9: no such job\nbash: disown: -x: invalid option\ndisown: usage: disown [-h] [-ar] [jobspec ... | pid ...]\n"
+        "stderr": "bash: line 1: disown: %9: no such job\nbash: line 1: disown: -x: invalid option\ndisown: usage: disown [-h] [-ar] [jobspec ... | pid ...]\n"
       }
     },
     {

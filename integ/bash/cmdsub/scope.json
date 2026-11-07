@@ -207,7 +207,7 @@
       "expect": {
         "exit": 0,
         "stdout": "y=\n",
-        "stderr": "bash: local: can only be used in a function\n"
+        "stderr": "bash: line 1: local: can only be used in a function\n"
       }
     }
   ]

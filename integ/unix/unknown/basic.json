@@ -32,7 +32,7 @@
       "expect": {
         "exit": 127,
         "stdout": "",
-        "stderr": "nosuchcmd: command not found\n"
+        "stderr": "bash: line 1: nosuchcmd: command not found\n"
       }
     }
   ]

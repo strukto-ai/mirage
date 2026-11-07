@@ -97,7 +97,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "{mount}/__nf_new__: Operation not supported\n"
+        "stderr": "bash: line 1: {mount}/__nf_new__: Operation not supported\n"
       }
     },
     {
@@ -110,7 +110,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "{mount}/__nf_new__: Read-only file system\n"
+        "stderr": "bash: line 1: {mount}/__nf_new__: Read-only file system\n"
       }
     },
     {

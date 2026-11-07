@@ -40,6 +40,6 @@ async def test_pwd_ignores_operands_and_refuses_unknown_options():
     assert out == b"/data/lk\n" and io.exit_code == 0
     out, io, node = await handle_pwd(["-x"], _session())
     assert out is None and io.exit_code == 2
-    assert (
-        io.stderr == b"bash: pwd: -x: invalid option\npwd: usage: pwd [-LP]\n"
+    assert io.stderr == (
+        b"bash: line 1: pwd: -x: invalid option\npwd: usage: pwd [-LP]\n"
     )

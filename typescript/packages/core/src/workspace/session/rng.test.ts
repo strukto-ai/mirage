@@ -191,13 +191,13 @@ describe('child RANDOM isolation', () => {
 })
 
 it.each([
-  ['RANDOM=1.5; echo ok:$?', 'ok:0\n', 'bash: 1.5:'],
-  ['RANDOM=0; : $RANDOM; RANDOM=1.5; echo $RANDOM', '24386\n', 'bash: 1.5:'],
-  ['export RANDOM=1.5; echo ok:$?', 'ok:0\n', 'bash: export: 1.5:'],
-  ['declare RANDOM=1.5; echo ok:$?', 'ok:0\n', 'bash: declare: 1.5:'],
-  ['RANDOM=1.5 x=kept; echo $x', 'kept\n', 'bash: 1.5:'],
+  ['RANDOM=1.5; echo ok:$?', 'ok:0\n', 'bash: line 1: 1.5:'],
+  ['RANDOM=0; : $RANDOM; RANDOM=1.5; echo $RANDOM', '24386\n', 'bash: line 1: 1.5:'],
+  ['export RANDOM=1.5; echo ok:$?', 'ok:0\n', 'bash: line 1: export: 1.5:'],
+  ['declare RANDOM=1.5; echo ok:$?', 'ok:0\n', 'bash: line 1: declare: 1.5:'],
+  ['RANDOM=1.5 x=kept; echo $x', 'kept\n', 'bash: line 1: 1.5:'],
   ['{ RANDOM=1.5; echo ok; } 2>/dev/null', 'ok\n', ''],
-  ['RANDOM=42; x=$(RANDOM=1.5; echo ok); echo $x $RANDOM', 'ok 17772\n', 'bash: 1.5:'],
+  ['RANDOM=42; x=$(RANDOM=1.5; echo ok); echo $x $RANDOM', 'ok 17772\n', 'bash: line 1: 1.5:'],
   ['unset RANDOM; RANDOM=1.5; echo $RANDOM', '1.5\n', ''],
   ['x=42; RANDOM=x; x=0; echo $RANDOM', '17772\n', ''],
   ['RANDOM=42; RANDOM=$RANDOM; echo $RANDOM', '9401\n', ''],
@@ -381,16 +381,25 @@ it('draws from the pending seed and settles once the session view has landed it'
 it.each([
   // An operand or subscript that does not evaluate ends the line in
   // bash's words, after landing what was assigned before it.
-  ['v=abc; echo "${v:1/0}"; echo after', 'bash: v: 1/0: division by 0 (error token is "0")\n'],
+  [
+    'v=abc; echo "${v:1/0}"; echo after',
+    'bash: line 1: v: 1/0: division by 0 (error token is "0")\n',
+  ],
   [
     'a=(1 2 3); echo "${a[@]:1/0}"; echo after',
-    'bash: a[@]: 1/0: division by 0 (error token is "0")\n',
+    'bash: line 1: a[@]: 1/0: division by 0 (error token is "0")\n',
   ],
-  ['a=(1); echo "${a[1/0]}"; echo after', 'bash: 1/0: division by 0 (error token is "0")\n'],
-  ['a=(1); a[1/0]=v; echo after', 'bash: 1/0: division by 0 (error token is "0")\n'],
-  ['a=(1); unset "a[1/0]"; echo after', 'bash: 1/0: division by 0 (error token is "0")\n'],
-  ['a=(1); [[ -v a[1/0] ]]; echo after', 'bash: 1/0: division by 0 (error token is "0")\n'],
-  ['a=(1); a[x=3,1/0]=v; echo after', 'bash: x=3,1/0: division by 0 (error token is "0")\n'],
+  [
+    'a=(1); echo "${a[1/0]}"; echo after',
+    'bash: line 1: 1/0: division by 0 (error token is "0")\n',
+  ],
+  ['a=(1); a[1/0]=v; echo after', 'bash: line 1: 1/0: division by 0 (error token is "0")\n'],
+  ['a=(1); unset "a[1/0]"; echo after', 'bash: line 1: 1/0: division by 0 (error token is "0")\n'],
+  ['a=(1); [[ -v a[1/0] ]]; echo after', 'bash: line 1: 1/0: division by 0 (error token is "0")\n'],
+  [
+    'a=(1); a[x=3,1/0]=v; echo after',
+    'bash: line 1: x=3,1/0: division by 0 (error token is "0")\n',
+  ],
 ])('a subscript or operand that fails ends the line: %s', async (command, stderr) => {
   const { ws } = makeIntegrationWS()
   try {

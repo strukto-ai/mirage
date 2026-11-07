@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../../context/session_context.ts'
-import { runAsShell } from '../../../context/session_context.ts'
+import { runAsShell, sessionVoice } from '../../../context/session_context.ts'
 import { share } from '../../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -27,6 +27,7 @@ import { DiscardSignal, ExitSignal, ReturnSignal } from '../../../shell/errors.t
 import { parseFunction } from '../../../shell/helpers.ts'
 import type { JobTable } from '../../../shell/job_table/index.ts'
 import type { ParseScope } from '../../../shell/parse/scope.ts'
+import type { TSNodeLike } from '../../../shell/types.ts'
 import type { ShellVar } from '../../../shell/variable.ts'
 import type { PathSpec } from '../../../types.ts'
 import { wordText } from '../../../types.ts'
@@ -79,7 +80,9 @@ export async function runShellFunction(
   const limit = funcnestLimit(session)
   if (cs.functionDepth >= limit) {
     throw new DiscardSignal(
-      encodeText(`bash: ${cmdName}: maximum function nesting level exceeded (${String(limit)})\n`),
+      encodeText(
+        `${sessionVoice(session)}${cmdName}: maximum function nesting level exceeded (${String(limit)})\n`,
+      ),
     )
   }
   cs.admit(cmdName)
@@ -112,11 +115,18 @@ export async function runShellFunction(
   session.localVars = savedLocals
   session.localFrames.push(savedLocals)
   // The body is parsed again from its source, so its rows restart at 0;
-  // it expands the aliases its definition saw, or reads them as a parse of
-  // its own when it came from a stored session. It was read apart from the
-  // alias that may have called it, whose guards do not reach it (`alias a=f`
-  // still lets `f`'s body run its own `a`).
-  const outerParse: [number, number] = [session.parseCurrent, session.parseRow]
+  // its diagnostics number them from the definition's row, under the name
+  // of where it was defined, and it expands the aliases its definition saw,
+  // or reads them as a parse of its own when it came from a stored session.
+  // It was read apart from the alias that may have called it, whose guards
+  // do not reach it (`alias a=f` still lets `f`'s body run its own `a`).
+  const outerParse: [number, number, number, string | null, TSNodeLike | null] = [
+    session.parseCurrent,
+    session.parseRow,
+    session.lineRow,
+    session.parseName,
+    session.lineNode,
+  ]
   const outerView = session.aliasView
   const outerExpansion = session.aliasExpansion
   session.aliasExpansion = null
@@ -128,6 +138,8 @@ export async function runShellFunction(
   } else {
     ;[session.parseCurrent, session.parseRow] = site.mark
   }
+  session.lineRow = site?.row ?? 0
+  session.parseName = site?.name ?? 'environment'
   session.aliasView = site?.aliases ?? null
   // Its commands stand under the definition's place, on a hand-off of
   // their own as every re-parse does, so two definitions of one text each
@@ -186,7 +198,13 @@ export async function runShellFunction(
     if (err instanceof ExitSignal && err.replaced !== null) lifted = [null, null]
     throw err
   } finally {
-    ;[session.parseCurrent, session.parseRow] = outerParse
+    ;[
+      session.parseCurrent,
+      session.parseRow,
+      session.lineRow,
+      session.parseName,
+      session.lineNode,
+    ] = outerParse
     session.aliasView = outerView
     session.aliasExpansion = outerExpansion
     if (nested !== null && decisions !== null) decisions.handUp(session.sessionId, nested)

@@ -18,6 +18,7 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.helpers import alias_rewrite
 from mirage.shell.types import TSNodeLike
+from mirage.shell.voice import shell_voice
 from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.alias.constants import BAD_NAME_RE
 from mirage.workspace.executor.builtins.alias.types import AliasMark
@@ -58,7 +59,8 @@ async def handle_alias(
     if scan.bad is not None:
         return fail(
             "alias",
-            f"bash: alias: {scan.bad}: invalid option\n{builtin_usage('alias')}",
+            f"{shell_voice()}alias: {scan.bad}: invalid option\n"
+            f"{builtin_usage('alias')}",
             2,
         )
     operands = scan.operands
@@ -76,9 +78,11 @@ async def handle_alias(
                 # bash quotes the whole word for an empty name (`alias
                 # =x` is `=x: not found`, oddly) and the name otherwise.
                 if not name:
-                    errors.append(f"bash: alias: {word}: not found")
+                    errors.append(f"{shell_voice()}alias: {word}: not found")
                 else:
-                    errors.append(f"bash: alias: `{name}': invalid alias name")
+                    errors.append(
+                        f"{shell_voice()}alias: `{name}': invalid alias name"
+                    )
                 continue
             held = session.aliases.get(name)
             check_env(
@@ -90,12 +94,14 @@ async def handle_alias(
             session.aliases[name] = value
             continue
         if BAD_NAME_RE.search(name):
-            errors.append(f"bash: alias: `{name}': invalid alias name")
+            errors.append(
+                f"{shell_voice()}alias: `{name}': invalid alias name"
+            )
             continue
         if name in session.aliases:
             lines.append(f"alias {name}={single_quote(session.aliases[name])}")
         else:
-            errors.append(f"bash: alias: {name}: not found")
+            errors.append(f"{shell_voice()}alias: {name}: not found")
     return result(
         "alias",
         encode_text("".join(f"{line}\n" for line in lines)) if lines else None,
@@ -124,7 +130,8 @@ async def handle_unalias(
     if scan.bad is not None:
         return fail(
             "unalias",
-            f"bash: unalias: {scan.bad}: invalid option\n{builtin_usage('unalias')}",
+            f"{shell_voice()}unalias: {scan.bad}: invalid option\n"
+            f"{builtin_usage('unalias')}",
             2,
         )
     operands = scan.operands
@@ -141,7 +148,7 @@ async def handle_unalias(
             _changing(session, name, mark)
             del session.aliases[name]
         else:
-            errors.append(f"bash: unalias: {name}: not found\n")
+            errors.append(f"{shell_voice()}unalias: {name}: not found\n")
     return finish("unalias", errors)
 
 

@@ -500,7 +500,7 @@ async def test_a_command_for_one_filetype_runs_only_on_that_filetype():
     assert (csv.exit_code, await csv.stdout_str()) == (0, "ok")
     assert (txt.exit_code, await txt.materialize_stderr()) == (
         127,
-        b"summarize: command not found",
+        b"bash: line 1: summarize: command not found",
     )
 
 

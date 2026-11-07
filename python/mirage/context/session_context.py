@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from mirage.errors.fs import eacces, enoent, erofs
 from mirage.rs.document import from_units, units
 from mirage.rs.policy import visibility_matcher
+from mirage.shell.voice import use_voice
 from mirage.types import (
     Limit,
     MountMode,
@@ -589,6 +590,31 @@ def session_umask(access: SessionAccess | None = None) -> int:
         return access.umask
     sess = get_current_session()
     return DEFAULT_UMASK if sess is None else sess.umask
+
+
+def session_voice(session: SessionState | None) -> str:
+    """The voice of ``session``'s shell (``shell_voice``). The name is the
+    file a sourced script, or a function defined in one, came from;
+    ``environment`` for a function defined in the shell's own input; else
+    the nested shell's ``$0``, else ``bash``. A builtin run as a program
+    (``env``, ``xargs``) is not the shell and leads with nothing.
+
+    Args:
+        session (SessionState | None): the shell, None outside one.
+    """
+    if session is None:
+        return "bash: "
+    if program_invocation(session):
+        return ""
+    name = session._parse_name or session.script_name or "bash"
+    return f"{name}: line {session.line_number}: "
+
+
+def _running_voice() -> str:
+    return session_voice(get_current_session())
+
+
+use_voice(_running_voice)
 
 
 def dotglob_active(access: SessionAccess | None = None) -> bool:

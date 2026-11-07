@@ -32,7 +32,7 @@
       "expect": {
         "exit": 0,
         "stdout": "argc=2 a1=AA a2=BB\nsdi=1\nfn=[source sdf]\nr=5\nfn=[]\ntop=5\ndeep=1\n",
-        "stderr": "bash: .: maximum nesting level exceeded (32)\n"
+        "stderr": "/data/sr.sh: line 1: .: maximum nesting level exceeded (32)\n"
       }
     },
     {

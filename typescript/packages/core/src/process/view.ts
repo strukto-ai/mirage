@@ -21,7 +21,8 @@ import type { ProcessInfo, SpawnRequest } from './types.ts'
  * PIDs are not found. Stopping one the view sees but may not stop throws EPERM.
  * `permissions` answers the profile's process grants while the view stands
  * and null once it is revoked, for the processes of other workspaces, which
- * only the store lists.
+ * only the store lists. A process group is found, probed and signalled
+ * through the members the view sees.
  */
 export interface ProcessView {
   readonly list: () => readonly ProcessInfo[]
@@ -29,6 +30,8 @@ export interface ProcessView {
   readonly probe: (pid: number) => boolean
   readonly terminate: (pid: number, signal: number) => boolean
   readonly permissions: () => ProcessPermissions | null
+  readonly probeGroup: (groupId: number) => boolean
+  readonly signalGroup: (groupId: number, signal: number) => boolean
   readonly depth?: number
   readonly spawn?: (request: SpawnRequest) => ChildProcess
 }

@@ -87,7 +87,7 @@
           "expect": {
             "exit": 127,
             "stdout": "",
-            "stderr": "cksum: command not found\n"
+            "stderr": "bash: line 1: cksum: command not found\n"
           }
         }
       ]

@@ -32,7 +32,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=126\nalive\n",
-        "stderr": "/data/issue1556-elf: cannot execute binary file: Exec format error\n"
+        "stderr": "bash: line 1: /data/issue1556-elf: cannot execute binary file: Exec format error\n"
       }
     },
     {
@@ -52,7 +52,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "/data/issue1556-exe: cannot execute binary file: Exec format error\n"
+        "stderr": "bash: line 1: /data/issue1556-exe: cannot execute binary file: Exec format error\n"
       }
     }
   ]

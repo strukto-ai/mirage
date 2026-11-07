@@ -1977,7 +1977,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nconst y = ;\nrc=0\n",
-        "stderr": "bash: const x = ${a * b};\n: bad substitution\nbash: ${a * b}: bad substitution\n"
+        "stderr": "bash: line 1: const x = ${a * b};\n: bad substitution\nbash: line 4: ${a * b}: bad substitution\n"
       }
     }
   ]

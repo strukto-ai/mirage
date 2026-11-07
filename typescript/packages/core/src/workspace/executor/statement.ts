@@ -37,8 +37,11 @@ import { concat } from '../../utils/bytes.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { getNegatedCommand, getParts, getRedirects } from '../../shell/helpers.ts'
 import { literalText } from '../../shell/parse/names.ts'
+import { commandText } from '../../shell/printer.ts'
+import { encodeText } from '../../shell/bytes.ts'
+import { shellVoice } from '../../shell/voice.ts'
 import { BASH_BUILTINS } from '../lookup/constants.ts'
-import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
+import { ERREXIT_EXEMPT_TYPES, NESTED_SHELLS } from '../../shell/constants.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { abortedLine, lineStatusWriter } from '../abort.ts'
@@ -185,29 +188,87 @@ export function forks(
   words: readonly string[] | null = null,
 ): boolean {
   if (command?.type !== NT.COMMAND) return command?.type === NT.SUBSHELL
-  let rest: (string | null)[] =
-    words !== null
-      ? [...words]
-      : getParts(command)
-          .filter((part) => part.type !== NT.VARIABLE_ASSIGNMENT)
-          .map(spelled)
-  let functions = true
-  while (rest[0] === 'command') {
-    rest = rest.slice(1)
-    functions = false
-    while (rest[0] !== undefined && (rest[0] ?? '').startsWith('-')) {
-      const option = rest[0] ?? ''
-      rest = rest.slice(1)
-      if (option === '--') break
-      if (option.includes('v') || option.includes('V')) return false
-    }
-  }
-  const name = rest[0]
-  if (name === undefined) return false
+  const found = invoked(command, words)
+  if (found === null) return false
+  const [name, functions] = found
   return (
     name === null ||
     (!BASH_BUILTINS.has(name) && !(functions && session.functions[name] !== undefined))
   )
+}
+
+/**
+ * The word a command runs once `command` and its options are read off, and
+ * whether a function may answer it (`command X` masks functions); null for
+ * `command -v`, which is the builtin, and for no word left to run. Words past
+ * that one are never spelled. Mirrors Python's _invoked.
+ */
+function invoked(
+  command: TSNodeLike,
+  words: readonly string[] | null,
+): [string | null, boolean] | null {
+  const spelledWords: Iterator<string | null> =
+    words !== null
+      ? words[Symbol.iterator]()
+      : (function* () {
+          for (const part of getParts(command)) {
+            if (part.type !== NT.VARIABLE_ASSIGNMENT) yield spelled(part)
+          }
+        })()
+  let functions = true
+  let head = spelledWords.next()
+  while (head.done !== true && head.value === 'command') {
+    functions = false
+    head = spelledWords.next()
+    while (head.done !== true && (head.value ?? '').startsWith('-')) {
+      const option = head.value ?? ''
+      head = spelledWords.next()
+      if (option === '--') break
+      if (option.includes('v') || option.includes('V')) return null
+    }
+  }
+  return head.done === true ? null : [head.value, functions]
+}
+
+/**
+ * Whether a statement runs a nested shell (`sh -c`), which bash execs in
+ * place of a shell that forked to run it alone, so a signal to that shell
+ * ends it. Mirrors Python's nested_shell.
+ */
+export function nestedShell(node: TSNodeLike, session: SessionState): boolean {
+  const command = node.type === NT.REDIRECTED_STATEMENT ? getRedirects(node)[0] : node
+  if (command?.type !== NT.COMMAND) return false
+  const found = invoked(command, null)
+  if (found === null) return false
+  const [name, functions] = found
+  return (
+    name !== null &&
+    NESTED_SHELLS.has(name) &&
+    !(functions && session.functions[name] !== undefined)
+  )
+}
+
+/**
+ * Whether a node is what a redirected statement runs under its redirects: a
+ * fork's redirects are its own, so the report of how it ended goes around
+ * them (`( kill -9 $BASHPID ) 2>/dev/null`). Mirrors Python's
+ * redirected_body.
+ */
+export function redirectedBody(node: TSNodeLike): boolean {
+  const parent = node.parent ?? null
+  if (parent?.type !== NT.REDIRECTED_STATEMENT) return false
+  const body = parent.childForFieldName?.('body') ?? null
+  return body?.id !== undefined && body.id === node.id
+}
+
+/**
+ * How bash's report names a command its shell forked: as its printer
+ * renders it, with the redirects of the statement the command is the body
+ * of. Mirrors Python's reported_command.
+ */
+export function reportedCommand(node: TSNodeLike): string {
+  const parent = node.parent ?? null
+  return commandText(parent !== null && redirectedBody(node) ? parent : node)
 }
 
 /** A word's text when it is literal, null when an expansion spells it. */
@@ -469,6 +530,19 @@ export async function statementOutput(
   if (out !== null) written.push([Channel.STDOUT, out, false])
   if (err !== null) written.push([Channel.STDERR, err, false])
   return written
+}
+
+/**
+ * Bash's line for a write its descriptor refused, in the name of what wrote,
+ * its command's first word: a builtin speaks in the shell's voice (`bash: line
+ * 1: echo: write error: ...`), a program in its own, and so does a program
+ * `exec` ran (`program`), whatever its name. Mirrors Python's write_error_line.
+ */
+export function writeErrorLine(command: string, program = false): Uint8Array {
+  const first = command.trim().split(/\s+/)[0] ?? ''
+  const name = first === '' ? 'bash' : first
+  const voice = BASH_BUILTINS.has(name) && !program ? shellVoice() : ''
+  return encodeText(`${voice}${name}: write error: Bad file descriptor\n`)
 }
 
 /**

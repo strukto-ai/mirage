@@ -15,6 +15,7 @@
 from mirage.shell.bytes import encode_text
 from mirage.shell.helpers import get_text
 from mirage.shell.types import TSNodeLike
+from mirage.shell.voice import shell_voice
 from mirage.workspace.evaluation import EvaluationContext
 
 
@@ -38,7 +39,7 @@ def diagnostic_stderr(node: TSNodeLike, context: EvaluationContext) -> bytes:
         in {"export", "declare", "local", "readonly", "read", "printf", "let"}
         else ""
     )
-    prefix = f"bash: {builtin}: " if builtin else "bash: "
+    prefix = f"{shell_voice()}{builtin}: " if builtin else f"{shell_voice()}"
     return b"".join(
         message
         if isinstance(message, bytes)

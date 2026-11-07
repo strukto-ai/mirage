@@ -84,6 +84,16 @@ def function_text(
     return _Printer(True, aliases).definition(name, _definition_of(body), "")
 
 
+def command_text(node: TSNodeLike) -> str:
+    """A command as bash's report of a job names it: its own rendering,
+    with redirects respelled after the words (``2> /dev/null``).
+
+    Args:
+        node (TSNodeLike): the command.
+    """
+    return _Printer(False).command(node, "")
+
+
 class _Aliases:
     """The aliases a body was read with, and the parser that reads an
     expansion again."""

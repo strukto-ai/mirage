@@ -25,16 +25,24 @@ export class ExecutionFrame {
   // and cancellation is ambient.
   abortSignal: AbortSignal | null = null
   lineTimeout: number | null = null
-  // The background job whose shell the evaluation runs in, when that shell
-  // runs commands of its own (`{ sleep 3; echo x; } &`), each of which a
-  // signal the shell ignores still reaches.
-  job: ProcessHandle | null = null
+  // The process whose shell the evaluation runs in (a line, a subshell, a
+  // pipeline stage, a nested shell, a job that runs commands of its own),
+  // each program of which a signal the shell ignores still reaches; null
+  // where the evaluation is one program run in place (`sleep 3 &`).
+  shell: ProcessHandle | null = null
+  // The report lines of the jobs a signal ended that the running command
+  // reaped, which go out after its stderr, around a redirect of its own; a
+  // command substitution's shell, and the shells it forks, make none
+  // (`substitution`).
+  reports: Uint8Array[] = []
+  substitution = false
 
   fork(): ExecutionFrame {
     const child = new ExecutionFrame()
     child.abortSignal = this.abortSignal
     child.lineTimeout = this.lineTimeout
-    child.job = this.job
+    child.shell = this.shell
+    child.substitution = this.substitution
     if (this.routing !== undefined) child.routing = this.routing
     return child
   }

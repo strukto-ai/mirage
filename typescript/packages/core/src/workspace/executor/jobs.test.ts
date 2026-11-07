@@ -177,6 +177,51 @@ describe('kill -INT and -QUIT on a job', () => {
   })
 })
 
+// Every line of a session runs under one pid, its $$: a signal to it ends the
+// line with 128 plus it, the next line's $?, and leaves its jobs running; a
+// QUIT, which every shell ignores, does nothing. A nested shell is a process
+// of its own, with a $$ of its own.
+it("$$ names the session's shell", async () => {
+  const ws = new Workspace({ '/m': [new RAMVFS(), MountMode.WRITE] }, { mode: MountMode.WRITE })
+  try {
+    const pid = stdoutStr(await ws.shell('echo $$')).trim()
+    let io = await ws.shell('sleep 0.3 & echo before; kill $$; echo after')
+    expect([stdoutStr(io), io.exitCode]).toEqual(['before\n', 143])
+    io = await ws.shell(
+      'echo $? $$; kill -QUIT $$; echo quit=$?; wait; echo job=$?; ' +
+        `[ "$(bash -c 'echo $$')" != $$ ] && echo own; ` +
+        "bash -c 'kill $$; echo no'; echo nested=$?",
+    )
+    expect(stdoutStr(io)).toBe(`143 ${pid}\nquit=0\njob=0\nown\nnested=143\n`)
+  } finally {
+    await ws.close()
+  }
+})
+
+// kill -SIG -- -PGID signals every process of a group, as killpg(2) does: the
+// session's shell leads one, which its jobs and nested shells are in. A shell
+// hands a QUIT to the program it runs right now; a job ignores an INT too,
+// which ends the line's own shell.
+it('kill signals a process group', async () => {
+  const ws = new Workspace({ '/m': [new RAMVFS(), MountMode.WRITE] }, { mode: MountMode.WRITE })
+  try {
+    let io = await ws.shell(
+      '{ sleep 1; echo "q $?"; } & sleep 0.1; kill -QUIT -- -$$; ' +
+        'wait $!; echo after=$?; kill -0 -- -$$; echo grp=$?; ' +
+        "bash -c 'kill -0 -- -$$' 2>/dev/null; echo nested=$?; " +
+        'kill -s TERM -- -999999; echo missing=$?',
+    )
+    expect(stdoutStr(io)).toBe('q 131\nafter=0\ngrp=0\nnested=1\nmissing=1\n')
+    expect(stderrStr(io)).toBe('bash: line 1: kill: (-999999) - No such process\n')
+    io = await ws.shell('{ sleep 1; echo "a $?" > /m/a; } & sleep 0.1; kill -INT -- -$$; echo no')
+    expect([stdoutStr(io), io.exitCode]).toEqual(['', 130])
+    io = await ws.shell('wait; cat /m/a')
+    expect(stdoutStr(io)).toBe('a 130\n')
+  } finally {
+    await ws.close()
+  }
+})
+
 describe('handleJobs', () => {
   it('returns empty output when no jobs', async () => {
     const jt = new JobTable()
@@ -636,7 +681,7 @@ describe('job builtins honor the process profile', () => {
       const io = await ws.shell(stop, { sessionId: 'audit' })
       expect([stdoutStr(io), new TextDecoder().decode(io.stderr)]).toEqual([
         'rc=1\n',
-        `bash: kill: (${pid}) - Operation not permitted\n`,
+        `bash: line 1: kill: (${pid}) - Operation not permitted\n`,
       ])
       expect(stdoutStr(await ws.shell(stop, { sessionId: 'ops' }))).toBe('rc=0\n')
     } finally {
@@ -758,8 +803,8 @@ it('kill succeeds when any operand was signalled', async () => {
     const result = await ws.shell(`kill 999999 %9 abc ${pid}; echo rc=$?`)
     expect(stdoutStr(result)).toBe('rc=0\n')
     expect(stderrStr(result)).toBe(
-      'bash: kill: (999999) - No such process\nbash: kill: %9: no such job\n' +
-        'bash: kill: abc: arguments must be process or job IDs\n',
+      'bash: line 1: kill: (999999) - No such process\nbash: line 1: kill: %9: no such job\n' +
+        'bash: line 1: kill: abc: arguments must be process or job IDs\n',
     )
   } finally {
     await ws.close()
@@ -1048,9 +1093,9 @@ it('kill refuses an owner:pid nobody runs', async () => {
         .split('\n')
         .filter((l) => l !== ''),
     ).toEqual([
-      'bash: kill: (ab12:3) - No such process',
-      'bash: kill: :3: arguments must be process or job IDs',
-      'bash: kill: ab12:x: arguments must be process or job IDs',
+      'bash: line 1: kill: (ab12:3) - No such process',
+      'bash: line 1: kill: :3: arguments must be process or job IDs',
+      'bash: line 1: kill: ab12:x: arguments must be process or job IDs',
     ])
     const picked = await ws.shell('ps -p ab12:3', { sessionId: 's' })
     expect([picked.exitCode, stdoutStr(picked)]).toEqual([1, ''])

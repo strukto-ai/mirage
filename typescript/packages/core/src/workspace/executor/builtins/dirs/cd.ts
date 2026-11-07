@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import { linkView } from '../../../../commands/builtin/utils/links.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
@@ -128,11 +129,11 @@ export async function handleCd(
         refusal = await dotRefusal(linkedStat(dispatch, follow), walk)
       } catch (exc) {
         if (!(exc instanceof CycleError)) throw exc
-        error = `bash: cd: ${named}: Too many levels of symbolic links\n`
+        error = `${shellVoice()}cd: ${named}: Too many levels of symbolic links\n`
         continue
       }
       if (refusal !== null) {
-        error = `bash: cd: ${named}: ${String(fsStrerror(refusal))}\n`
+        error = `${shellVoice()}cd: ${named}: ${String(fsStrerror(refusal))}\n`
         continue
       }
     }
@@ -147,7 +148,7 @@ export async function handleCd(
         resolved = resolveTarget(candidate, follow, physical)
       } catch (exc) {
         if (exc instanceof CycleError) {
-          error = `bash: cd: ${named}: Too many levels of symbolic links\n`
+          error = `${shellVoice()}cd: ${named}: Too many levels of symbolic links\n`
           continue
         }
         throw exc
@@ -168,7 +169,7 @@ export async function handleCd(
         notFound = true
       } else {
         const msg = exc instanceof Error ? exc.message : String(exc)
-        error = `bash: cd: ${named}: ${fsStrerror(exc) ?? msg}\n`
+        error = `${shellVoice()}cd: ${named}: ${fsStrerror(exc) ?? msg}\n`
         continue
       }
     }
@@ -176,16 +177,16 @@ export async function handleCd(
       if (isMountRoot(resolved)) {
         return cdSuccess(session, resolved, logical, spelled, raw, printPath || announce)
       }
-      error = `bash: cd: ${named}: No such file or directory\n`
+      error = `${shellVoice()}cd: ${named}: No such file or directory\n`
       continue
     }
     if (stat.type !== FileType.DIRECTORY) {
-      error = `bash: cd: ${named}: Not a directory\n`
+      error = `${shellVoice()}cd: ${named}: Not a directory\n`
       continue
     }
     return cdSuccess(session, resolved, logical, spelled, raw, printPath || announce)
   }
-  const err = encodeText(error ?? `bash: cd: ${named}: No such file or directory\n`)
+  const err = encodeText(error ?? `${shellVoice()}cd: ${named}: No such file or directory\n`)
   return [
     null,
     new IOResult({ exitCode: 1, stderr: err }),
@@ -233,7 +234,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   const reader = namespace.sessionLinks(session)
   const isMount = (p: string): boolean => reader.isMount(p)
   if (bad !== null) {
-    const err = encodeText(`bash: cd: -${bad}: invalid option\n${builtinUsage('cd')}`)
+    const err = encodeText(`${shellVoice()}cd: -${bad}: invalid option\n${builtinUsage('cd')}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
@@ -241,7 +242,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<RedirectResult> {
     ]
   }
   if (cdOperands.length > 1) {
-    const err = encodeText('bash: cd: too many arguments\n')
+    const err = encodeText(`${shellVoice()}cd: too many arguments\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
@@ -251,7 +252,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   if (cdOperands.length === 0) {
     const home = homeDir(session)
     if (home === null) {
-      const err = encodeText('bash: cd: HOME not set\n')
+      const err = encodeText(`${shellVoice()}cd: HOME not set\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -265,7 +266,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   if (rawStr === '-') {
     const old = session.env.OLDPWD
     if (!old) {
-      const err = encodeText('bash: cd: OLDPWD not set\n')
+      const err = encodeText(`${shellVoice()}cd: OLDPWD not set\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),

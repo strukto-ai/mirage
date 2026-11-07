@@ -102,7 +102,7 @@
       "expect": {
         "exit": 0,
         "stdout": "1\na\nrc=3\n1 a 2\nafter=b evy=2\nrc=5 evy=\n1\n2\nb\nrc=4\nrc=1\n",
-        "stderr": "bash: eval: maximum nesting level exceeded (32)\n"
+        "stderr": "bash: line 1: eval: maximum nesting level exceeded (32)\n"
       }
     },
     {

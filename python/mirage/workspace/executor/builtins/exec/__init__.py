@@ -18,6 +18,7 @@ from mirage.workspace.executor.builtins.exec.exec import (
     diverted_file,
     handle_exec_command,
     install_exec_redirects,
+    route_rebound,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "diverted_file",
     "handle_exec_command",
     "install_exec_redirects",
+    "route_rebound",
 ]

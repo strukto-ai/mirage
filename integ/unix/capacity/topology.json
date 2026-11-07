@@ -14,7 +14,7 @@
       "expect": {
         "exit": 0,
         "stdout": "1\n0\n",
-        "stderr": "/data/inner/x: Disk quota exceeded\n"
+        "stderr": "bash: line 1: /data/inner/x: Disk quota exceeded\n"
       }
     },
     {

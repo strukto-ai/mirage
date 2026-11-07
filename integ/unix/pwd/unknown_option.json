@@ -12,7 +12,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "bash: pwd: --: invalid option\npwd: usage: pwd [-LP]\n"
+        "stderr": "bash: line 1: pwd: --: invalid option\npwd: usage: pwd [-LP]\n"
       }
     }
   ]

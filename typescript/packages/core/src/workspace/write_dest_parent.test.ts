@@ -144,7 +144,9 @@ describe('redirect and tee report an unusable destination like GNU', () => {
     try {
       const io = await w.shell('echo hi > /missing/f.txt')
       expect(io.exitCode).toBe(1)
-      expect(DEC.decode(io.stderr)).toBe('/missing/f.txt: No such file or directory\n')
+      expect(DEC.decode(io.stderr)).toBe(
+        'bash: line 1: /missing/f.txt: No such file or directory\n',
+      )
     } finally {
       await w.close()
     }
@@ -156,7 +158,7 @@ describe('redirect and tee report an unusable destination like GNU', () => {
       await w.shell('echo x > /plain')
       const io = await w.shell('echo hi > /plain/f.txt')
       expect(io.exitCode).toBe(1)
-      expect(DEC.decode(io.stderr)).toBe('/plain/f.txt: Not a directory\n')
+      expect(DEC.decode(io.stderr)).toBe('bash: line 1: /plain/f.txt: Not a directory\n')
     } finally {
       await w.close()
     }
@@ -167,7 +169,9 @@ describe('redirect and tee report an unusable destination like GNU', () => {
     try {
       const io = await w.shell('echo hi >> /missing/f.txt')
       expect(io.exitCode).toBe(1)
-      expect(DEC.decode(io.stderr)).toBe('/missing/f.txt: No such file or directory\n')
+      expect(DEC.decode(io.stderr)).toBe(
+        'bash: line 1: /missing/f.txt: No such file or directory\n',
+      )
     } finally {
       await w.close()
     }

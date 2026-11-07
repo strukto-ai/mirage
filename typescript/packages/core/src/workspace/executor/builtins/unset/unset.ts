@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { arrayExtent, arrayUnset } from '../../../../shell/array.ts'
@@ -152,7 +153,11 @@ export async function handleUnset(
       i += 1
       continue
     }
-    return fail('unset', `bash: unset: ${tok}: invalid option\n${builtinUsage('unset')}`, 2)
+    return fail(
+      'unset',
+      `${shellVoice()}unset: ${tok}: invalid option\n${builtinUsage('unset')}`,
+      2,
+    )
   }
   for (const name of args.slice(i)) {
     if (mode === 'n') {
@@ -161,7 +166,7 @@ export async function handleUnset(
       // frozen reference refuses, writable target or not.
       const view = requireView(state)
       if (view.isReadonly(name, false)) {
-        return fail('unset', `bash: unset: ${name}: cannot unset: readonly variable\n`)
+        return fail('unset', `${shellVoice()}unset: ${name}: cannot unset: readonly variable\n`)
       }
       try {
         await view.unset(name, false)
@@ -173,7 +178,7 @@ export async function handleUnset(
     }
     if (mode === 'f') {
       if (session.readonlyFunctions.has(name)) {
-        return fail('unset', `bash: unset: ${name}: cannot unset: readonly function\n`)
+        return fail('unset', `${shellVoice()}unset: ${name}: cannot unset: readonly function\n`)
       }
       session.removeFunction(name)
       continue
@@ -186,7 +191,7 @@ export async function handleUnset(
     // base, not the element, in the error).
     const base = match?.[1] ?? name
     if (session.readonlyVars.has(base)) {
-      return fail('unset', `bash: unset: ${base}: cannot unset: readonly variable\n`)
+      return fail('unset', `${shellVoice()}unset: ${base}: cannot unset: readonly variable\n`)
     }
     const existed =
       isElement || name in session.env || name in session.arrays || name in session.assocs
@@ -214,11 +219,11 @@ export async function handleUnset(
         status === 'notarray'
           ? `unset: ${base}: not an array variable`
           : `unset: ${name.slice(base.length)}: bad array subscript`
-      return fail('unset', `bash: ${detail}\n`)
+      return fail('unset', `${shellVoice()}${detail}\n`)
     }
     if (mode === 'auto' && !existed && name in session.functions) {
       if (session.readonlyFunctions.has(name)) {
-        return fail('unset', `bash: unset: ${name}: cannot unset: readonly function\n`)
+        return fail('unset', `${shellVoice()}unset: ${name}: cannot unset: readonly function\n`)
       }
       session.removeFunction(name)
     }

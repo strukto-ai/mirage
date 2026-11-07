@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
@@ -43,10 +44,10 @@ async function getoptsFinish(
   // OPTIND refuses here too.
   try {
     if (!isValidName(name)) {
-      stderr = encodeText(`bash: getopts: \`${name}': not a valid identifier\n`)
+      stderr = encodeText(`${shellVoice()}getopts: \`${name}': not a valid identifier\n`)
       exitCode = 1
     } else if (session.readonlyVars.has(name)) {
-      stderr = encodeText(`bash: ${name}: readonly variable\n`)
+      stderr = encodeText(`${shellVoice()}${name}: readonly variable\n`)
       exitCode = 1
     } else {
       await view.set(name, optValue)
@@ -56,7 +57,7 @@ async function getoptsFinish(
     await view.set('OPTIND', String(newOptind))
   } catch (err) {
     if (err instanceof ReadonlyVariableError) {
-      stderr = encodeText(`bash: ${err.varName}: readonly variable\n`)
+      stderr = encodeText(`${shellVoice()}${err.varName}: readonly variable\n`)
       exitCode = 1
     } else if (err instanceof PolicyDenied) {
       stderr = encodeText(`${err.message}\n`)

@@ -27,9 +27,16 @@ export class ProcessHandle {
   task!: Promise<number>
   /** Whether the runner has started running. */
   begun = false
+  /**
+   * The host stopped it (its table stopped, its session closed), which ends
+   * whoever waits for it as well.
+   */
+  revoked = false
   private current: ProcessInfo
   private stopSignal: number | null = null
+  private stopped = false
   private exitedCode: number | null = null
+  private programSignal: number | null = null
   private readonly nativeRuns = new Map<string, Record<string, JsonValue>>()
   // The programs `program` runs, each with the signal `interrupt` sent it.
   private readonly programs = new Map<AbortController, number | null>()
@@ -43,7 +50,6 @@ export class ProcessHandle {
     private readonly finished: (pid: number) => void,
     private readonly cancelChildren: (signal: number) => void = () => undefined,
     private readonly bind: ExecutionBind = (_id, run) => run(),
-    private readonly signalChildrenOf: (signal: number) => void = () => undefined,
     readonly ignores: ReadonlySet<number> = new Set(),
   ) {
     this.current = Object.freeze(info)
@@ -68,6 +74,7 @@ export class ProcessHandle {
       (error: unknown) => {
         const aborted = error instanceof Error && error.name === 'AbortError'
         if (aborted) this.current = Object.freeze({ ...this.current, cancellationRequested: true })
+        this.stopped = aborted
         return this.settle(
           aborted ? 128 + (this.stopSignal ?? 9) : 1,
           aborted ? null : error instanceof Error ? error.message : String(error),
@@ -84,6 +91,18 @@ export class ProcessHandle {
   /** The signal the runner was stopped with, null while it runs. */
   get signal(): number | null {
     return this.stopSignal
+  }
+
+  /**
+   * The signal that ended the runner, null while it runs or once it exited
+   * on its own (a trap that handled the signal): the one it was stopped with,
+   * or the one that ended the native program its status is
+   * (`programSignaled`). Mirrors Python's ended_by.
+   */
+  get endedBy(): number | null {
+    if (this.stopped) return this.stopSignal ?? 9
+    const ended = this.programSignal
+    return ended !== null && this.current.exitCode === 128 + ended ? ended : null
   }
 
   /** The signal `interrupt` stops the program the runner runs right now with, null while none is stopping. */
@@ -133,6 +152,19 @@ export class ProcessHandle {
   }
 
   /**
+   * Record that a native program the runner started ended on a signal, which
+   * names the runner's end when its status is that program's (`true | python3
+   * -c 'os.kill(os.getpid(), 9)'`). Every statement the runner starts clears
+   * it, so only the last one's end counts. Mirrors Python's program_signaled.
+   *
+   * @param signal the signal that ended the program; null as a statement
+   *   starts.
+   */
+  programSignaled(signal: number | null): void {
+    this.programSignal = signal
+  }
+
+  /**
    * Run one program of the runner's shell where `interrupt` reaches it, as
    * bash's background job runs each program as a child that takes the INT
    * the job itself ignores. The program stops when the signal it is handed
@@ -171,15 +203,6 @@ export class ProcessHandle {
       this.programs.set(stop, signal)
       stop.abort(new SignalStop(signal))
     }
-  }
-
-  /**
-   * Deliver a signal to every runner this one started, and theirs, as a
-   * process group gets it: one that ignores it hands it to its program
-   * (`interrupt`), any other stops with it.
-   */
-  signalChildren(signal: number): void {
-    this.signalChildrenOf(signal)
   }
 
   /**
@@ -236,5 +259,22 @@ export class ProcessHandle {
 
   join(): Promise<ProcessInfo> {
     return this.completion
+  }
+
+  /**
+   * Wait for the runner from the shell that forked it, as wait(2) does: its
+   * exit status, 128 plus the signal that stopped it. A stop of the waiting
+   * shell itself (`waiter`) stops the runner with it, and a runner the host
+   * stopped (`revoked`) ends the wait with its error. Mirrors Python's reap.
+   *
+   * @param waiter the waiting shell's abort signal.
+   */
+  async reap(waiter: AbortSignal | null = null): Promise<number> {
+    try {
+      return await this.task
+    } catch (error) {
+      if (this.revoked || waiter?.aborted === true || !isAborting(error)) throw error
+      return 128 + (this.stopSignal ?? 9)
+    }
   }
 }

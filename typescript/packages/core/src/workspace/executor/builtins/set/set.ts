@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -119,7 +120,7 @@ export function handleSet(
       // Without this a typo — or an option mirage has yet to wire, as
       // `physical` once was — reads as success.
       if (!SET_OPTION_NAMES.has(option)) {
-        const err = encodeText(`bash: set: ${option}: invalid option name\n`)
+        const err = encodeText(`${shellVoice()}set: ${option}: invalid option name\n`)
         return [
           null,
           new IOResult({ exitCode: 2, stderr: err }),

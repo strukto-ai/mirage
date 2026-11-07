@@ -77,6 +77,14 @@ export function functionText(
   return new Printer(true, aliases).definition(name, definitionOf(body), '')
 }
 
+/**
+ * A command as bash's report of a job names it: its own rendering, with
+ * redirects respelled after the words (`2> /dev/null`).
+ */
+export function commandText(node: TSNodeLike): string {
+  return new Printer(false).command(node, '')
+}
+
 /** The aliases a body was read with, and the parser that reads an expansion again. */
 class Aliases {
   constructor(

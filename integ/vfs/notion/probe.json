@@ -23,7 +23,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json: Read-only file system\n"
+        "stderr": "bash: line 1: /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json: Read-only file system\n"
       }
     },
     {

@@ -67,7 +67,7 @@
       "expect": {
         "exit": 0,
         "stdout": "got:none\ngot=\ngot=b\n\nrc=1\nrc=1\n",
-        "stderr": "1) aa\n2) bb\n#? 1) a\n2) b\n#? 1) a\n2) b\n#? #? 1) a\n#? bash: REPLY: readonly variable\n1) a\n#? bash: x: readonly variable\n"
+        "stderr": "1) aa\n2) bb\n#? 1) a\n2) b\n#? 1) a\n2) b\n#? #? 1) a\n#? bash: line 1: REPLY: readonly variable\n1) a\n#? bash: line 1: x: readonly variable\n"
       }
     },
     {

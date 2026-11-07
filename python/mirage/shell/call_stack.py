@@ -19,6 +19,7 @@ from dataclasses import dataclass, field, replace
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import NESTING_MAX
 from mirage.shell.errors import DiscardSignal
+from mirage.shell.voice import shell_voice
 
 
 @dataclass
@@ -138,7 +139,7 @@ class CallStack:
         if self.nesting >= NESTING_MAX:
             raise DiscardSignal(
                 encode_text(
-                    f"bash: {name}: maximum nesting level exceeded "
+                    f"{shell_voice()}{name}: maximum nesting level exceeded "
                     f"({NESTING_MAX})\n"
                 )
             )

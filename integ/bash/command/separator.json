@@ -872,7 +872,7 @@
       "expect": {
         "exit": 0,
         "stdout": "127\n",
-        "stderr": "fi: command not found\n"
+        "stderr": "bash: line 1: fi: command not found\n"
       }
     },
     {
@@ -907,7 +907,7 @@
       "expect": {
         "exit": 0,
         "stdout": "127\n",
-        "stderr": "fi: command not found\n"
+        "stderr": "bash: line 1: fi: command not found\n"
       }
     },
     {
@@ -942,7 +942,7 @@
       "expect": {
         "exit": 0,
         "stdout": "127\n",
-        "stderr": "fi: command not found\n"
+        "stderr": "bash: line 1: fi: command not found\n"
       }
     },
     {
@@ -977,7 +977,7 @@
       "expect": {
         "exit": 0,
         "stdout": "127\n",
-        "stderr": "fi: command not found\n"
+        "stderr": "bash: line 1: fi: command not found\n"
       }
     },
     {

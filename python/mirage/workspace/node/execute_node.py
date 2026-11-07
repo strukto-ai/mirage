@@ -22,6 +22,7 @@ from typing import Any
 
 from mirage.cache.index.scope import command_scope
 from mirage.context import (
+    current_caller,
     program_invocation,
     redirect_paths_for,
     redirect_runner_for,
@@ -44,16 +45,14 @@ from mirage.io.async_line_iterator import share
 from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
+from mirage.process.handle import ProcessHandle
 from mirage.process.table import ProcessTable
-from mirage.process.types import ProcessInfo
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import (
-    FORK_FAILED,
-    FORK_FAILED_STATUS,
     SIGPIPE_STATUS,
 )
 from mirage.shell.errors import ArithError, ExitSignal, ReadonlyVariableError
@@ -86,6 +85,7 @@ from mirage.shell.types import (
     RedirectKind,
     TSNodeLike,
 )
+from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
@@ -110,7 +110,13 @@ from mirage.workspace.executor.control import (
     handle_while,
     trailed,
 )
-from mirage.workspace.executor.jobs import drained
+from mirage.workspace.executor.jobs import (
+    drained,
+    report_jobs,
+    report_reaped,
+    start_shell,
+    tell,
+)
 from mirage.workspace.executor.pipes import (
     handle_connection,
     handle_pipe,
@@ -121,7 +127,9 @@ from mirage.workspace.executor.statement import (
     assignment_status,
     forks,
     ignoring_errexit,
+    nested_shell,
     record_status,
+    redirected_body,
 )
 from mirage.workspace.executor.traps import end_shell
 from mirage.workspace.expand import (
@@ -1007,18 +1015,32 @@ async def execute_node(
             stdout, io, exec_node = await run(own_diagnostics=False)
         else:
             outer = context.frame.diagnostics
+            outer_reports = context.frame.reports
             context.frame.diagnostics = []
+            context.frame.reports = []
             try:
                 stdout, io, exec_node = await run()
                 if context.frame.diagnostics:
                     err = diagnostic_stderr(node, context)
                     io.stderr = err + await io.materialize_stderr()
                     exec_node.stderr = err + (exec_node.stderr or b"")
+                # A child it reaped is told of after its stderr, with the
+                # jobs a signal ended meanwhile, as bash tells once it
+                # reaped one.
+                if context.frame.reports and redirected_body(node):
+                    outer_reports.extend(context.frame.reports)
+                elif context.frame.reports:
+                    report = b"".join(context.frame.reports) + report_jobs(
+                        context, job_table
+                    )
+                    if report:
+                        await tell(report, io, exec_node, sink)
             except ExitSignal as exc:
                 exc.stderr = diagnostic_stderr(node, context) + exc.stderr
                 raise
             finally:
                 context.frame.diagnostics = outer
+                context.frame.reports = outer_reports
         return process_subs.own(stdout, io, exec_node), io, exec_node
     except UNWINDING as sig:
         # `exit`, `return` or `break` ends the node as its last command
@@ -1112,6 +1134,9 @@ async def _execute_node(
         else CallStack(session.shell_nesting)
     )
     session.errexit_immune = False
+    if node.type != NT.PROGRAM:
+        # The command whose line bash numbers diagnostics and `$LINENO` by.
+        session._line_node = node
     execute_fn = partial(
         execute_fn,
         handed=handed,
@@ -1461,23 +1486,36 @@ async def _execute_node(
                     reset_program_invocation(program_token)
                 await child.session.close_inputs()
 
-        def forked(info: ProcessInfo) -> None:
-            child.session.process_id = info.pid
+        # A body that is one nested shell (`( sh -c ... )`) is the
+        # subshell itself, as bash execs it there.
+        statements = [c for c in node.named_children if c.type != NT.COMMENT]
+        execs = len(statements) == 1 and nested_shell(statements[0], session)
 
-        try:
-            process = sub_table.processes.start(
-                session_id=session.session_id,
-                command=get_text(node),
-                cwd=PathSpec.from_str_path(session.cwd),
-                parent_pid=session.process_id,
-                run=run_subshell,
-                limit=session.processes.max,
-                started=forked,
-            )
-        except BlockingIOError as exc:
-            raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
-        await process.task
-        return results[0]
+        def forked(process: ProcessHandle) -> None:
+            child.session.process_id = process.info.pid
+            child.frame.shell = None if execs else process
+
+        owner = current_caller().process
+        if context.frame.shell is None and owner is not None:
+            # The whole of what its runner runs (`( sleep 3; echo x ) &`)
+            # is the runner itself, as bash forks a job's subshell once:
+            # it keeps the INT its job ignores.
+            forked(owner)
+            await run_subshell()
+            return results[0]
+        process = start_shell(
+            sub_table.processes,
+            session,
+            get_text(node),
+            run_subshell,
+            session.process_id,
+            forked,
+        )
+        code = await process.reap()
+        report_reaped(context.frame, [(process, code, node)])
+        if results:
+            return results[0]
+        return result(get_text(node), exit_code=code)
 
     if kind == NodeKind.ARITH:
         text = get_text(node)
@@ -1485,12 +1523,12 @@ async def _execute_node(
         try:
             value = await landed_arith(session, view, expr)
         except PolicyDenied as exc:
-            return fail(text, f"bash: {exc.strerror}\n")
+            return fail(text, f"{shell_voice()}{exc.strerror}\n")
         except (ArithError, ReadonlyVariableError) as exc:
             if exc.in_subscript:
                 raise exc.signal() from exc
             voice = "((: " if isinstance(exc, ArithError) else ""
-            return fail(text, f"bash: {voice}{exc}\n")
+            return fail(text, f"{shell_voice()}{voice}{exc}\n")
         return result(text, exit_code=0 if value != 0 else 1)
 
     run_body = partial(
@@ -1528,7 +1566,9 @@ async def _execute_node(
     if kind in (NodeKind.FOR, NodeKind.SELECT):
         var, values, body = get_for_parts(node)
         if not is_valid_name(var):
-            return fail(kind.value, f"bash: `{var}': not a valid identifier\n")
+            return fail(
+                kind.value, f"{shell_voice()}`{var}': not a valid identifier\n"
+            )
         if values is None:
             classified: list[str | PathSpec] = list(
                 positional_params(session, cs)
@@ -1602,7 +1642,8 @@ async def _execute_node(
             # refuses with `f: readonly function`, exit 1, and the old
             # body stays, pinned on 5.2.37.
             return fail(
-                f"function {name}", f"bash: {name}: readonly function\n"
+                f"function {name}",
+                f"{shell_voice()}{name}: readonly function\n",
             )
         source = get_function_source(node)
         held = session.functions.get(name)
@@ -1617,6 +1658,8 @@ async def _execute_node(
             alias_mark(session, node.start_point[0]),
             defined_at(node, handed),
             alias_view(session, node, alias_mark(session, read_row(node))),
+            session._parse_name or "environment",
+            session.line_number - 1,
         )
         return result(f"function {name}")
 

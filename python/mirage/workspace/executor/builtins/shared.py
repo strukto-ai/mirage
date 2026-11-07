@@ -23,6 +23,7 @@ from mirage.policy import PolicyDenied
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.errors import TooManyMatches
+from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec, word_text
 from mirage.utils.path import resolve_path
 from mirage.view.types import SessionView
@@ -270,7 +271,7 @@ def readonly_line(cmd: str, name: str) -> str:
         name (str): the frozen variable.
     """
     voice = f"{cmd}: " if cmd in ("declare", "local", "typeset") else ""
-    return f"bash: {voice}{name}: readonly variable"
+    return f"{shell_voice()}{voice}{name}: readonly variable"
 
 
 def readonly_refusal(cmd: str, name: str) -> Result:
@@ -359,7 +360,7 @@ def builtin_error(name: str, message: str) -> bytes:
         name (str): the builtin.
         message (str): what went wrong, without the newline.
     """
-    return encode_text(f"bash: {name}: {message}\n")
+    return encode_text(f"{shell_voice()}{name}: {message}\n")
 
 
 def builtin_usage(name: str) -> str:

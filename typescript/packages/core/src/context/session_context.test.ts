@@ -35,6 +35,7 @@ import {
   callerSignal,
   inLanding,
   runLanding,
+  sessionVoice,
 } from './session_context.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import { MountMode, weakerMode } from '../types.ts'
@@ -495,5 +496,14 @@ describe('runLanding', () => {
       ])
       expect([inLanding(), callerSignal()?.aborted]).toEqual([false, true])
     })
+  })
+
+  it('speaks as what a session is reading', () => {
+    const session = new SessionState({ sessionId: 'voice' })
+    expect(sessionVoice(null)).toBe('bash: ')
+    expect(sessionVoice(session)).toBe('bash: line 1: ')
+    session.parseName = 'environment'
+    session.lineRow = 2
+    expect(sessionVoice(session)).toBe('environment: line 3: ')
   })
 })

@@ -15,6 +15,14 @@
 import { EvaluationContext, childContext } from '../evaluation.ts'
 
 import { describe, expect, it } from 'vitest'
+import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { CommandSpec } from '../../commands/spec/types.ts'
+import { currentCaller } from '../../context/session_context.ts'
+import { stopSignal } from '../../runtime/sandbox/constants.ts'
+import { MountMode } from '../../types.ts'
+import { makeAbortError } from '../../utils/abort.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { Workspace } from '../workspace/workspace.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -337,4 +345,45 @@ it.each(['abort', 'timeout'])('closes a pipeline source on %s through wrappers',
     ),
   ).rejects.toBe(failure)
   expect(closed).toBe(true)
+})
+
+// A pipeline's stage is a process of its own, which a signal stops whole: in a
+// job, whose shell ignores INT, an INT to the group stops the stage, so what
+// the stage runs learns the signal it was stopped with.
+it("a stage in a job is stopped with the group's signal", async () => {
+  const ws = new Workspace({ '/m': [new RAMVFS(), MountMode.WRITE] }, { mode: MountMode.WRITE })
+  const seen: (number | null)[] = []
+  ws.registerCli(
+    'hang',
+    new CLI({
+      spec: new CommandSpec({ name: 'hang' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: (_accessor, _paths, _texts, ctx) => {
+            const runner = currentCaller().process
+            return new Promise((_resolve, reject) => {
+              ctx.signal?.addEventListener(
+                'abort',
+                () => {
+                  seen.push(stopSignal(runner))
+                  reject(makeAbortError(ctx.signal))
+                },
+                { once: true },
+              )
+            })
+          },
+        }),
+      },
+    }),
+  )
+  try {
+    const io = await ws.shell(
+      "timeout -s INT 0.2 bash -c '{ seq 1 | hang; echo ${PIPESTATUS[@]} > /m/p; } & wait'; " +
+        'sleep 0.2; cat /m/p',
+    )
+    expect(new TextDecoder().decode(io.stdout)).toBe('0 130\n')
+    expect(seen).toEqual([2])
+  } finally {
+    await ws.close()
+  }
 })
