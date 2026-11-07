@@ -1945,10 +1945,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf -v x '\\xff'; printf '%q\\n' \"$x\"",
+      "command": "printf -v x '\\xff'; printf '%q\\n' \"$x\"; (export LC_ALL=C.UTF-8; printf '[%q]\\n' $'a \\303\\251' $'\\303\\251\\342\\200\\250' $'\\377')",
       "expect": {
         "exit": 0,
-        "stdout": "$'\\377'\n",
+        "stdout": "$'\\377'\n[a\\ é]\n[$'é\\342\\200\\250']\n[$'\\377']\n",
         "stderr": ""
       }
     },

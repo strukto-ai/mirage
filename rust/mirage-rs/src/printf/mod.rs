@@ -178,10 +178,13 @@ enum Segment {
         byte: u8,
         left: u64,
     },
+    /// `input` quoted from `at`; under a UTF-8 locale (`utf8`) a character
+    /// it prints goes out as it is.
     Quote {
         input: Arc<Input>,
         at: usize,
         style: QuoteStyle,
+        utf8: bool,
     },
 }
 
@@ -238,13 +241,23 @@ impl Segment {
                 *left -= n as u64;
                 *left == 0
             }
-            Self::Quote { input, at, style } => {
+            Self::Quote {
+                input,
+                at,
+                style,
+                utf8,
+            } => {
                 let mut used = 0;
                 while *at < input.len && used + 4 <= budget {
-                    let byte = input.get(*at).expect("quote byte");
                     let before = out.len();
-                    quote_byte(byte, *at, *style, out);
-                    *at += 1;
+                    if let Some(end) = printed(input, *at, *utf8) {
+                        out.extend((*at..end).filter_map(|i| input.get(i)));
+                        *at = end;
+                    } else {
+                        let byte = input.get(*at).expect("quote byte");
+                        quote_byte(byte, *at, *style, out);
+                        *at += 1;
+                    }
                     used += out.len() - before;
                 }
                 *at == input.len
@@ -335,6 +348,7 @@ impl Printf {
                     input: raw,
                     at: 0,
                     style: QuoteStyle::Diagnostic,
+                    utf8: false,
                 },
                 Segment::bytes(format!("': {problem}\n").into_bytes()),
             ]);
@@ -484,6 +498,7 @@ impl Printf {
                                 input: raw.expect("present star argument"),
                                 at: 0,
                                 style: QuoteStyle::Diagnostic,
+                                utf8: false,
                             },
                             Segment::bytes(b"'\n".to_vec()),
                         ]);
@@ -639,6 +654,7 @@ impl Printf {
                                     input: raw,
                                     at: 0,
                                     style: QuoteStyle::Diagnostic,
+                                    utf8: false,
                                 },
                                 Segment::bytes(b"'\n".to_vec()),
                             ]);
@@ -799,6 +815,7 @@ impl Printf {
                                 } else {
                                     QuoteStyle::Shell
                                 },
+                                utf8: self.config.utf8,
                             });
                             if ansi {
                                 self.output(Segment::bytes(b"'".to_vec()));
@@ -814,7 +831,12 @@ impl Printf {
                     }
                     return self.escaped_output(&spec, raw, at, expanded_len, false);
                 }
-                if spec.kind == b'q' {
+                if let Some(end) = printed(&raw, at, self.config.utf8).filter(|_| spec.kind == b'q')
+                {
+                    plain_len += (end - at) as u64;
+                    ansi_len += (end - at) as u64;
+                    at = end;
+                } else if spec.kind == b'q' {
                     let b = raw.get(at).expect("text");
                     ansi |= !(0x20..0x7f).contains(&b);
                     let mut bytes = Vec::new();
@@ -942,6 +964,16 @@ impl Stream for Printf {
     fn take_stderr(&mut self, err: &mut Vec<u8>) {
         err.append(&mut self.stderr);
     }
+}
+
+/// Past the character past ASCII at `at` that a UTF-8 locale (`utf8`)
+/// prints, which `%q` leaves as it is; None for any other byte.
+fn printed(raw: &Input, at: usize, utf8: bool) -> Option<usize> {
+    if !utf8 || raw.get(at)? < 0x80 {
+        return None;
+    }
+    let (code, end) = character(raw, at, true);
+    (end > at + 1 && char::from_u32(code).is_some_and(crate::interp::quote::prints)).then_some(end)
 }
 
 fn character(raw: &Input, at: usize, utf8: bool) -> (u32, usize) {

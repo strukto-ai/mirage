@@ -27,7 +27,7 @@ fn control(byte: u8) -> bool {
 
 /// Whether a UTF-8 locale prints `c`: `[[:print:]]`, which leaves out the
 /// controls, the line and paragraph separators and unassigned code points.
-fn prints(c: char) -> bool {
+pub(crate) fn prints(c: char) -> bool {
     let c = u32::from(c);
     PRINT
         .binary_search_by(|&(low, high)| {
