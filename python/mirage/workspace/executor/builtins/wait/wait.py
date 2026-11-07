@@ -30,7 +30,10 @@ from mirage.workspace.executor.builtins.jobspec import (
     resolve_spec,
     session_of,
 )
-from mirage.workspace.executor.builtins.shared import builtin_usage
+from mirage.workspace.executor.builtins.shared import (
+    builtin_usage,
+    identifier_line,
+)
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
@@ -157,7 +160,7 @@ async def handle_wait(
         if IDENTIFIER_RE.fullmatch(var) is None:
             return job_result(
                 cmd_str,
-                f"{shell_voice()}wait: `{var}': not a valid identifier\n",
+                identifier_line("wait", var) + "\n",
                 1,
             )
         if view is not None and view.is_readonly(var):

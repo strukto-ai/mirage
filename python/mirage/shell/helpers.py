@@ -96,14 +96,27 @@ def line_row(node: TSNodeLike) -> int:
     """The row bash numbers ``node`` by, ``$LINENO`` and a diagnostic's
     ``line N``: a simple command's is where the token after its first
     element ends, which bash has read by the time it makes the command
-    (a redirect's operator, the element itself when none follows); any
-    other node's is the row it starts on.
+    (a redirect's operator, the element itself when none follows), or
+    where that element ends when it is an assignment, which bash takes
+    without reading on; any other node's is the row it starts on.
 
     Args:
         node (TSNodeLike): a node of a parsed program.
     """
-    if node.type != NT.COMMAND or not node.children:
+    parent = node.parent
+    if node.type == NT.VARIABLE_ASSIGNMENT:
+        if parent is None or parent.type != NT.VARIABLE_ASSIGNMENTS:
+            return source_row(node, end=True)
+        node = parent
+    if node.type == NT.VARIABLE_ASSIGNMENTS and node.children:
+        return source_row(node.children[0], end=True)
+    if (
+        node.type not in (NT.COMMAND, NT.DECLARATION_COMMAND)
+        or not node.children
+    ):
         return source_row(node)
+    if node.children[0].type == NT.VARIABLE_ASSIGNMENT:
+        return source_row(node.children[0], end=True)
     after = node.children[1] if len(node.children) > 1 else node.children[0]
     if after.type in (
         NT.FILE_REDIRECT,

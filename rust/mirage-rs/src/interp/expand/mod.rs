@@ -541,27 +541,53 @@ impl<H: Host> Expander<'_, H> {
 
     /// A word where no field splitting happens (a `case` word, a `[[`
     /// operand, a here-string), quoting removed. A `name=value` argument
-    /// (`export a=~/x`) expands its value as an assignment does.
+    /// (`export a=~/x`) expands its value as an assignment does, and an
+    /// element's subscript as a word's text (`declare d[$i]=w` names
+    /// `d[2]`).
     pub async fn word_text(&mut self, node: usize) -> Result<Vec<u8>, Fault> {
         if self.kind(node) == "variable_assignment" {
             let raw = self.text(node).to_vec();
-            let Some(eq) = raw.iter().position(|&b| b == b'=') else {
+            let start = self.tree.nodes[node].start as usize;
+            let Some(target) = self.tree.field(node, "name") else {
                 return Ok(raw);
             };
-            let value = self
-                .tree
-                .named_children(node)
-                .find(|&child| self.kind(child) != "variable_name");
-            let mut out = raw[..=eq].to_vec();
+            let value = self.tree.field(node, "value");
+            let lead = self.tree.nodes[target].end as usize - start;
+            let mut out = if self.kind(target) == "subscript" {
+                self.element_word(target).await?
+            } else {
+                raw[..lead].to_vec()
+            };
             match value {
-                Some(value) => out.extend(self.assignment(value).await?),
-                None => out.extend_from_slice(&raw[eq + 1..]),
+                Some(value) => {
+                    let from = self.tree.nodes[value].start as usize - start;
+                    out.extend_from_slice(&raw[lead..from]);
+                    out.extend(self.assignment(value).await?);
+                }
+                None => out.extend_from_slice(&raw[lead..]),
             }
             return Ok(out);
         }
         let mut chunks = self.chunks(node, false).await?;
         self.tilde(&mut chunks);
         Ok(join(&chunks))
+    }
+
+    /// An assignment word's `NAME[SUB]`, the subscript expanded where it
+    /// stands and the text between its parts kept.
+    async fn element_word(&mut self, target: usize) -> Result<Vec<u8>, Fault> {
+        let mut parts = self.tree.named_children(target);
+        let Some(name) = parts.next() else {
+            return Ok(self.text(target).to_vec());
+        };
+        let inner: Vec<usize> = parts.collect();
+        let start = self.tree.nodes[name].end as usize + 1;
+        let stop = self.tree.nodes[target].end as usize - 1;
+        let mut out = self.text(name).to_vec();
+        out.push(b'[');
+        out.extend(self.substituted(start, stop, inner).await?);
+        out.push(b']');
+        Ok(out)
     }
 
     /// An assignment's value: no field splitting, and a tilde prefix at

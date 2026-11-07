@@ -11,10 +11,10 @@ use std::sync::Arc;
 use mirage_rs::arith;
 use mirage_rs::interp::expand::{Substitution, marked};
 use mirage_rs::interp::job::{Job, Output, Running, Step};
-use mirage_rs::interp::shell::Shell as Inner;
+use mirage_rs::interp::shell::{Frame, Shell as Inner};
 use mirage_rs::interp::task::{self, Answer, Ask, Expanded, Mode, Write};
 use mirage_rs::interp::write::{Denied, Fault, Verb};
-use mirage_rs::interp::{Diagnostic, Signal, quote};
+use mirage_rs::interp::{Diagnostic, Signal, listing, quote};
 use mirage_rs::vars::{self, Assigned, Indexed, Kind, Managed, Store, Value, Var};
 
 use crate::codec::{Args, Item, one};
@@ -58,8 +58,6 @@ fn ids(source: u32) -> vars::Ids {
 
 struct Shell {
     inner: Option<Inner>,
-    /// The globals each running `declare -g` set aside, innermost last.
-    stepped: Vec<Vec<(String, Option<Arc<Var>>)>>,
     /// The bytes the records held when a task took the shell.
     parked: usize,
 }
@@ -68,7 +66,6 @@ impl Shell {
     fn wrap(inner: Inner) -> Self {
         Self {
             inner: Some(inner),
-            stepped: Vec::new(),
             parked: 0,
         }
     }
@@ -327,7 +324,7 @@ fn fault_out(fault: &Fault) -> Item {
             Item::list([Item::text("bad"), Item::text(text), Item::Bool(*fixed)])
         }
         Fault::Memory => Item::list([Item::text("memory")]),
-        Fault::Unsupported(what) => Item::list([Item::text("unsupported"), Item::text(what)]),
+        Fault::Host(what) => Item::list([Item::text("host"), Item::text(what)]),
     }
 }
 
@@ -427,16 +424,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "expand" => {
             let tree = args.handle()?;
             let node = size(args.int()?)?;
-            let mode = match args.string()?.as_str() {
-                "fields" => Mode::Fields,
-                "text" => Mode::Text,
-                "assignment" => Mode::Assignment,
-                "pattern" => Mode::Pattern,
-                "regex" => Mode::Regex,
-                "arith" => Mode::Arith,
-                "subscript" => Mode::Subscript,
-                other => return Err(format!("no expansion mode {other}")),
-            };
+            let mode: Mode = args.string()?.parse()?;
             let listens = args.flag()?;
             let tree = shell_tree(tree).ok_or_else(|| format!("no tree {tree}"))?;
             return engine.start(handle, |inner| {
@@ -531,7 +519,8 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "arith" => {
             let text = args.bytes()?;
             let listens = args.flag()?;
-            return engine.write(handle, Write::Arith { text }, listens, true);
+            let expand = args.flag()?;
+            return engine.write(handle, Write::Arith { text, expand }, listens, true);
         }
         "integer" => {
             let text = args.bytes()?;
@@ -613,7 +602,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let name = args.string()?;
             Item::Bool(shell.store()?.is_readonly(&name, args.flag()?))
         }
-        "frozen" => Item::opt(shell.store()?.frozen(&args.string()?), Item::text),
         "exported" => Item::list(
             shell
                 .store()?
@@ -633,6 +621,25 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let attr = letter(args.maybe()?)?;
             shell.store_mut()?.set_attr(&name, attr, args.flag()?);
             Item::Nil
+        }
+        "unassigned" => {
+            let name = args.string()?;
+            shell
+                .store_mut()?
+                .set_attr(&name, Some(vars::UNASSIGNED), true);
+            Item::Nil
+        }
+        "declaration" => Item::opt(
+            listing::declaration(shell.store()?, &args.string()?),
+            Item::text,
+        ),
+        "assignments" => {
+            let skip = names_in(args.list()?)?;
+            Item::list(
+                listing::assignments(shell.store()?, &skip)
+                    .into_iter()
+                    .map(Item::text),
+            )
         }
         "enter" => Item::opt(shell.store_mut()?.enter(), Item::int),
         "leave" => {
@@ -673,16 +680,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             shell.store_mut()?.unreach();
             Item::Nil
         }
-        "step_back" => {
-            let globals = shell.store_mut()?.step_back();
-            shell.stepped.push(globals);
-            Item::Nil
-        }
-        "step_forward" => {
-            let globals = shell.stepped.pop().unwrap_or_default();
-            shell.store_mut()?.step_forward(globals);
-            Item::Nil
-        }
         "next_random" => match shell.store_mut()?.next_random() {
             Ok(drawn) => Item::opt(drawn, Item::int),
             Err(error) => arith_error(&error),
@@ -714,35 +711,32 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .maybe()?
                 .map(|item| texts(one(item, Args::list)?))
                 .transpose()?;
-            let paren = args.flag()?;
-            let memory_room = optional_size(args.maybe()?)?;
-            let line = size(args.int()?)?;
-            let bash_pid = u32::try_from(args.int()?).unwrap_or(0);
-            let voice = args.bytes()?;
-            let inner = shell.shell_mut()?;
-            inner.positional = positional;
-            inner.calls = calls;
-            inner.status = status;
-            inner.pid = pid;
-            inner.last_job = last_job;
-            inner.argv0 = argv0;
-            inner.options = options;
-            inner.shopts = shopts;
-            inner.env_limit = env_limit;
-            inner.outside = outside;
-            inner
-                .vars
-                .set_specials(pipe_status, function_names, line, bash_pid, voice);
-            inner.paren = paren;
-            inner.memory_room = memory_room;
+            let frame = Frame {
+                positional,
+                calls,
+                status,
+                pid,
+                last_job,
+                argv0,
+                options,
+                shopts,
+                env_limit,
+                outside,
+                pipe_status,
+                function_names,
+                paren: args.flag()?,
+                memory_room: optional_size(args.maybe()?)?,
+                line: size(args.int()?)?,
+                bash_pid: u32::try_from(args.int()?).unwrap_or(0),
+                voice: args.bytes()?,
+            };
+            shell.shell_mut()?.apply(frame);
             Item::Nil
         }
         "conversion_scalar" => match shell.store_mut()?.conversion_scalar(&args.string()?) {
             Ok(text) => Item::opt(text, Item::text),
             Err(error) => Item::list([Item::text("error"), arith_error(&error)]),
         },
-        "status" => Item::int(shell.shell()?.status),
-        "take_substituted" => Item::opt(shell.shell_mut()?.substituted.take(), Item::int),
         other => return Err(format!("no shell operation {other}")),
     })
 }
@@ -840,7 +834,7 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             }
         }),
         "answer_resumed" => Answer::Resumed,
-        "answer_failed" => Answer::Failed(Fault::Unsupported("the host failed")),
+        "answer_failed" => Answer::Failed(Fault::Host("the host failed")),
         other => return Err(format!("no task operation {other}")),
     };
     let step = engine

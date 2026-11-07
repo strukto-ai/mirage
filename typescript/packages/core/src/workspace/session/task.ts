@@ -179,14 +179,19 @@ export async function drive(
     try {
       switch (ask[0]) {
         case 'substitute': {
-          const [stdout, stderr, status] = await host.substitute(
-            ask[1],
-            ask[2],
-            ask[3],
-            ask[4],
-            ask[5],
-          )
-          task.answerSubstituted(stdout, stderr, status)
+          try {
+            const [stdout, stderr, status] = await host.substitute(
+              ask[1],
+              ask[2],
+              ask[3],
+              ask[4],
+              ask[5],
+            )
+            task.answerSubstituted(stdout, stderr, status)
+          } finally {
+            // The child shell ends with its substitution.
+            ask[1].close()
+          }
           break
         }
         case 'process':

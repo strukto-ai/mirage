@@ -160,10 +160,11 @@ export async function executeProgram(
   // a use on the same parse and row. Restored on the way out so a nested
   // parse (`eval`, `source`, `bash -c`) does not leave its id behind.
   session.parseSeq += 1
-  const outerParse: [number, number, number, TSNodeLike | null] = [
+  const outerParse: [number, number, number, readonly number[] | null, TSNodeLike | null] = [
     session.parseCurrent,
     session.parseRow,
     session.lineRow,
+    session.lineRows,
     session.lineNode,
   ]
   session.parseCurrent = session.parseSeq
@@ -171,6 +172,8 @@ export async function executeProgram(
   session.parseFrom = null
   session.parseRow = start
   session.lineRow = lineStart
+  session.lineRows = session.reread ? rereadRows(node) : null
+  session.reread = false
   const root = !session.lineOpen
   session.lineOpen = true
   try {
@@ -190,7 +193,8 @@ export async function executeProgram(
       executeFn,
     )
   } finally {
-    ;[session.parseCurrent, session.parseRow, session.lineRow, session.lineNode] = outerParse
+    ;[session.parseCurrent, session.parseRow, session.lineRow, session.lineRows, session.lineNode] =
+      outerParse
     if (root) {
       session.lineOpen = false
       session.errexitExiting = false
@@ -548,8 +552,9 @@ async function exitShell(
  * Where the parse about to run starts: its row in the text that spelled it
  * (`parseRow`) and the same row as `$LINENO` counts it (`lineRow`). A sourced
  * file and the rest of an input read again start where `parseFrom` says; a
- * nested parse (`eval`, `$( )`) numbers on from the row the running command
- * ends on, as bash's reader stands there; any other at 0. Mirrors Python's
+ * nested parse (`eval`, a backtick) numbers on from the row the running
+ * command ends on, as bash's reader stands there, and a `$( )` or `<( )` body
+ * from the running command's own line; any other at 0. Mirrors Python's
  * parse_rows.
  */
 export function parseRows(session: SessionState, inline: boolean): [number, number] {
@@ -557,7 +562,33 @@ export function parseRows(session: SessionState, inline: boolean): [number, numb
   const running = session.lineNode
   if (!inline || running === null) return [0, 0]
   const ends = sourceRow(running, true)
-  return [session.parseRow + ends, session.lineRow + ends]
+  if (session.reread) return [session.parseRow + ends, session.lineNumber - 1]
+  return [session.parseRow + ends, session.lineRow + session.countedRow(ends)]
+}
+
+/**
+ * The line a `$( )` or `<( )` body numbers each of its rows by, on from the
+ * command running it. bash reads the body again as it prints it, a statement
+ * to a line only where a newline ended the one before, so a blank line, a
+ * newline after `;` and the rows a statement spans add none. Mirrors
+ * Python's reread_rows.
+ */
+export function rereadRows(node: TSNodeLike): number[] {
+  const rows: number[] = []
+  let line = 0
+  let newline = false
+  for (const child of node.children) {
+    if (child.isNamed !== true) {
+      newline = false
+      continue
+    }
+    if (child.type === NT.COMMENT) continue
+    if (rows.length > 0 && newline) line++
+    const last = sourceRow(child, true)
+    while (rows.length <= last) rows.push(line)
+    newline = true
+  }
+  return rows
 }
 
 /**

@@ -48,6 +48,8 @@ TRANSIENT_FIELDS = (
     "_parse_head",
     "_line_node",
     "_parse_from",
+    "_reread",
+    "_line_rows",
     "_line_open",
     "terminal",
     "_alias_expansion",

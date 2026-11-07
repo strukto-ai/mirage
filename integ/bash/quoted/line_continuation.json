@@ -98,10 +98,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf \"[%s]\\n\" a\\\\\\\nb \"c\\\\\\\nd\"; echo a\\\\\nlcf() { echo \"lineno=$LINENO\"; nolcf; }\nlcf; unset -f lcf",
+      "command": "printf \"[%s]\\n\" a\\\\\\\nb \"c\\\\\\\nd\"; echo a\\\\\nlcf() { echo \"lineno=$LINENO\"; nolcf; }\nlcf; unset -f lcf\necho $(\n\necho $LINENO) $LINENO\nzlx=$(\necho $LINENO\necho $LINENO); echo $zlx\necho $(echo $LINENO;\n echo $LINENO)\ncat <(\necho $LINENO)\nzl1=1 \\\nzl2=$LINENO; echo $zl2\nzl3=$(\n\n:) zl4=$(\necho $LINENO); echo $zl4",
       "expect": {
         "exit": 0,
-        "stdout": "[a\\b]\n[c\\d]\na\\\nlineno=4\n",
+        "stdout": "[a\\b]\n[c\\d]\na\\\nlineno=4\n8 8\n11 12\n13 13\n15\n16\n20\n",
         "stderr": "environment: line 4: nolcf: command not found\n"
       }
     },

@@ -349,10 +349,6 @@ export const BUILTIN_GROUP: ReadonlyMap<ShellBuiltin, BuiltinGroup> = new Map<
   [ShellBuiltin.TIMEOUT, BuiltinGroup.COMMAND_RUNNERS],
 ])
 
-export const GRAMMAR_BUILTINS: ReadonlySet<ShellBuiltin> = new Set<ShellBuiltin>(
-  [...BUILTIN_GROUP].filter(([, g]) => GROUP_TIER.get(g) === BuiltinTier.GRAMMAR).map(([b]) => b),
-)
-
 // The commands that start a shell of their own, a process whose own programs
 // a signal it ignores still reaches. Mirrors Python's NESTED_SHELLS.
 export const NESTED_SHELLS: ReadonlySet<string> = new Set<string>(

@@ -351,6 +351,13 @@ async def recurse(
         # A backtick's body is read as it runs, so a refusal in it names
         # the substitution, as bash's does; a `$( )` was read with its line.
         session._parse_head = f"{voice_name(session)}: command substitution: "
+        # A `$( )` or `<( )` body is read again as bash prints it, a
+        # backtick's as typed (`reread_rows`).
+        session._reread = (
+            node is not None
+            and span is None
+            and not (node.text or b"").startswith(b"`")
+        )
         child_token = set_current_evaluation(context, owner=ws.sessions)
     capture = Terminal()
     waits = JobWaits(capture.jobs)

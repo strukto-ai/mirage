@@ -41,9 +41,6 @@ const ALLOWED: Record<string, string> = {
     "the line pass's preview of a command's own prefix, on a fork of the " +
     'walked session that only policies read and nothing runs in; the run ' +
     "seeds it again through `executeCommand`'s gated loop",
-  'workspace/node/command_dispatch.ts::executeCommand':
-    'the prefix-assignment loop calls `preSessionGate` explicitly ' +
-    'before seeding, since `seedVar` is the ungated entry point',
   'workspace/session/shell_dirs.ts::changeDir':
     "the shell's own bookkeeping for the two fixed names PWD and " +
     'OLDPWD as part of a cd the router already authorized, not a name ' +

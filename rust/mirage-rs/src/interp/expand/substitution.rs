@@ -94,7 +94,6 @@ impl<H: Host> Expander<'_, H> {
             .await?;
         self.diagnostics.push(Diagnostic::Bytes(ran.stderr));
         self.shell.status = ran.status;
-        self.shell.substituted = Some(ran.status);
         let mut out = ran.stdout;
         while out.last() == Some(&b'\n') {
             out.pop();

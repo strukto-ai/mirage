@@ -28,7 +28,15 @@ import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { sessionView, visibleArrays, visibleAssocs } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { builtinUsage, countOperand, fail, recordDelimiter, requireView } from '../shared.ts'
+import {
+  builtinUsage,
+  countOperand,
+  fail,
+  identifierLine,
+  readonlyRefusal,
+  recordDelimiter,
+  requireView,
+} from '../shared.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -97,10 +105,9 @@ export async function handleMapfile(
   const strip = flags.t === true
   const callback = typeof flags.C === 'string' ? flags.C : null
   const name = parse.operands.length > 0 ? (parse.operands[0] ?? '') : 'MAPFILE'
-  if (!IDENTIFIER.test(name))
-    return fail(cmd, `${shellVoice()}${cmd}: \`${name}': not a valid identifier\n`, 1)
+  if (!IDENTIFIER.test(name)) return fail(cmd, `${identifierLine(cmd, name)}\n`, 1)
   const view = requireView(state)
-  if (view.isReadonly(name)) return fail(cmd, `${shellVoice()}${name}: readonly variable\n`, 1)
+  if (view.isReadonly(name)) return readonlyRefusal(cmd, name)
   if (name in visibleAssocs(session))
     return fail(cmd, `${shellVoice()}${cmd}: ${name}: not an indexed array\n`, 1)
 

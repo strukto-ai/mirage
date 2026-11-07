@@ -16,13 +16,16 @@ import { encodeText } from '../../../../shell/bytes.ts'
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
+import { ShellArray } from '../../../../shell/array.ts'
 import { ArithError } from '../../../../shell/errors.ts'
-import { VarAttr } from '../../../../shell/variable.ts'
+import { VarAttr, VarKind } from '../../../../shell/variable.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { Policies } from '../../../../policy/index.ts'
+import type { SubscriptFn } from '../../../expand/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import {
   appended,
+  assignElement,
   deref,
   envGet,
   evaluateInteger,
@@ -38,7 +41,6 @@ import type { BuiltinCall } from '../types.ts'
 import { SUBSCRIPT_RE } from './constants.ts'
 import {
   declarationResult,
-  declareLine,
   dropReference,
   heldValue,
   identifierRefusal,
@@ -68,7 +70,8 @@ import type { AttrMarks, Declaration, DeclarationOperand } from './types.ts'
  * `(1)`. `assignments` holds the operands in order: `NAME`, `NAME=value`,
  * `NAME+=value` and staged array literals; `options` the spelling and the
  * letters it carried, `local` with none by default; `policies` what an `-i`
- * value's assignments clear.
+ * value's assignments clear; `subscripts` expands an element operand's
+ * subscript (`declare 'd[$i]=w'`), null taking it as typed.
  */
 export async function handleLocal(
   assignments: readonly DeclarationOperand[],
@@ -76,6 +79,7 @@ export async function handleLocal(
   state: SessionView | null = null,
   options: Partial<Declaration> = {},
   policies: Policies | null = null,
+  subscripts: SubscriptFn | null = null,
 ): Promise<RedirectResult> {
   const decl: Declaration = {
     cmd: 'local',
@@ -99,7 +103,7 @@ export async function handleLocal(
   if (decl.cmd === 'local' && assignments.length === 0) {
     // A bare `local`, whatever its letters, lists the running function's
     // locals as `declare -p` prints them.
-    const listed = session.vars.shell.locals().map((name) => declareLine(session, name))
+    const listed = session.vars.shell.locals().map((name) => session.vars.shell.declaration(name))
     return ok(
       'local',
       encodeText(listed.map((line) => (line === null ? '' : `${line}\n`)).join('')),
@@ -120,6 +124,7 @@ export async function handleLocal(
       decl,
       !decl.globalScope && session.vars.shell.inFunction(),
       policies,
+      subscripts,
     )
   } finally {
     restore?.()
@@ -128,7 +133,8 @@ export async function handleLocal(
 
 /**
  * Run `handleLocal`'s operands in the scope it settled on: `scoped` is a
- * function's own scope, which a local shadows, false at global scope.
+ * function's own scope, which a local shadows, false at global scope;
+ * `subscripts` expands an element operand's subscript.
  */
 async function declareOperands(
   operands: readonly DeclarationOperand[],
@@ -137,6 +143,7 @@ async function declareOperands(
   decl: Declaration,
   scoped: boolean,
   policies: Policies | null = null,
+  subscripts: SubscriptFn | null = null,
 ): Promise<RedirectResult> {
   const { cmd, kind, shaping, marks, plus, nameref, inherit } = decl
   const errors: string[] = []
@@ -164,7 +171,7 @@ async function declareOperands(
         line =
           refused !== null
             ? null
-            : await declareOperand(session, view, operand, decl, scoped, policies)
+            : await declareOperand(session, view, operand, decl, scoped, policies, subscripts)
       } else {
         // A literal takes its marks at its place, against the target its
         // own write cleared, even when a policy refused a later literal;
@@ -218,9 +225,9 @@ function referenceLine(
 }
 
 /**
- * Declare one `NAME`, `NAME=value` or `NAME+=value` operand and mark it.
- * Returns the operand's refusal line, or null when it declared; a policy
- * denial or an `-i` value that does not evaluate throws. A `-n`
+ * Declare one `NAME`, `NAME=value`, `NAME+=value` or element operand and
+ * mark it. Returns the operand's refusal line, or null when it declared; a
+ * policy denial or an `-i` value that does not evaluate throws. A `-n`
  * declaration writes the reference itself, so a frozen reference refuses
  * it (`declare -rn r=T; declare -n r=U`) even when what it points at is
  * writable.
@@ -232,15 +239,19 @@ async function declareOperand(
   decl: Declaration,
   scoped: boolean,
   policies: Policies | null = null,
+  subscripts: SubscriptFn | null = null,
 ): Promise<string | null> {
   const { cmd, kind, plus, nameref, inherit } = decl
+  const [key, append, given] = operandParts(assign)
+  if (given !== null && SUBSCRIPT_RE.test(key)) {
+    return declareElement(session, view, key, append, given, decl, scoped, policies, subscripts)
+  }
   // The reference's own `-i -l -u` come off unless asked for, as bash's do
   // (`declare -l x=T; declare -n x=U` aims at `U`); its target's stay.
   const shaping = nameref ? unshaped(decl.shaping) : decl.shaping
   const marks = nameref ? unshaped(decl.marks) : decl.marks
   const badName = identifierRefusal(cmd, assign)
   if (badName !== null) return badName
-  const [key, append, given] = operandParts(assign)
   const fresh = scoped && !session.vars.shell.isLocal(key)
   if (given === null) {
     if (scoped) shadowLocal(session, key, inherit)
@@ -303,6 +314,57 @@ async function declareOperand(
   if (kind !== null) await dropReference(session, view, key)
   await view.set(key, value, true, assigned, added)
   await stampMarks(session, view, key, checked, marks)
+  return null
+}
+
+/**
+ * Assign one `NAME[SUB]=value` operand as bash's declaration does: the
+ * subscript expands once more (`declare 'd[$i]=w'`), the name becomes an
+ * array (a function's new local, an associative one under `-A`, a held
+ * scalar its element 0) and the element takes the value, shaped by the
+ * declaration's `-i -l -u`, before the marks go on. Returns the operand's
+ * refusal line, or null when it declared.
+ */
+async function declareElement(
+  session: SessionState,
+  view: SessionView,
+  key: string,
+  append: boolean,
+  given: string,
+  decl: Declaration,
+  scoped: boolean,
+  policies: Policies | null,
+  subscripts: SubscriptFn | null,
+): Promise<string | null> {
+  const { cmd, kind, shaping, marks, plus, nameref, inherit } = decl
+  if (nameref) return `${shellVoice()}${cmd}: ${key}: reference variable cannot be an array`
+  const open = key.indexOf('[')
+  const name = key.slice(0, open)
+  const raw = key.slice(open + 1, -1)
+  if (view.isReadonly(name)) return readonlyLine(cmd, name)
+  const fresh = scoped && !session.vars.shell.isLocal(name)
+  if (scoped) shadowLocal(session, name, inherit)
+  if (fresh && !inCallEnv(session, name)) startLocal(session, name, inherit)
+  const line = plusRefusal(cmd, session, view, name, plus)
+  if (line !== null) return line
+  const held = heldValue(session, name)
+  const conflict = kindConflict(held, kind)
+  if (conflict !== null) return `${shellVoice()}${cmd}: ${name}: ${conflict}`
+  const map = held !== null && typeof held === 'object' && !(held instanceof ShellArray)
+  const assoc = kind === VarKind.Assoc || map
+  if (raw === '' || (!assoc && (raw === '@' || raw === '*'))) {
+    return `${shellVoice()}${key}: bad array subscript`
+  }
+  if (assoc && !map) {
+    await view.set(name, typeof held === 'string' ? { '0': held } : {}, false)
+  }
+  const subscript = subscripts === null ? raw : await subscripts(raw)
+  await premark(view, name, shaping)
+  const status = await assignElement(session, policies, name, subscript, given, append)
+  if (status === 'readonly') return readonlyLine(cmd, name)
+  if (status === 'denied') return `${shellVoice()}${name}: permission denied`
+  if (status !== 'ok') return `${shellVoice()}${key}: bad array subscript`
+  await stampMarks(session, view, name, name, marks)
   return null
 }
 

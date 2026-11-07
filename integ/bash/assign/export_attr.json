@@ -238,10 +238,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "export QEK; declare -p QEK",
+      "command": "export QEK; declare -p QEK; ( declare -a QUY; declare -A QUM; declare -ai QUQ; readonly QUR; declare -a QUR; f() { local -a QUL; declare -p QUL; }; f; declare -p QUY QUM QUQ QUR; echo \"${QUY[@]@A}|${#QUY[@]}|${QUY+set}\"; set | grep -E '^QU(Y|M|W)='; declare -a QUW; QUW[0]=x; unset 'QUW[0]'; declare -p QUW; QUY+=(a); declare -p QUY; QUX=1 export -p | grep QUX; QUX=1 declare -x | grep QUX; declare -i QUI; QUI=1+2 declare -p QUI; g() { export -p | grep QUX; }; QUX=1 g )",
       "expect": {
         "exit": 0,
-        "stdout": "declare -x QEK\n",
+        "stdout": "declare -x QEK\ndeclare -a QUL\ndeclare -a QUY\ndeclare -A QUM\ndeclare -ai QUQ\ndeclare -ar QUR\ndeclare -a QUY|0|\ndeclare -a QUW=()\ndeclare -a QUY=([0]=\"a\")\ndeclare -x QUI=\"1+2\"\ndeclare -x QUX=\"1\"\n",
         "stderr": ""
       }
     },

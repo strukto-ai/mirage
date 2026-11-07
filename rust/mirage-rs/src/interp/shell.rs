@@ -38,15 +38,58 @@ pub struct Shell {
     /// The bytes the session holds outside its variables, which
     /// `max_env` counts too: functions, aliases, positional parameters.
     pub outside: usize,
-    /// The status of the last command substitution a statement ran, which
-    /// an assignment-only statement reports as its own.
-    pub substituted: Option<i32>,
     /// The shell is a `( )` subshell, a compound command forked as a stage
     /// or job, or a fork of one, which a refused `${var:=word}` ends with 2.
     pub paren: bool,
 }
 
+/// What a host hands the shell before an operation: the parameters, the
+/// options, the bounds and what the shell keeps of its own, all as the
+/// session holds them now.
+pub struct Frame {
+    pub positional: Vec<Vec<u8>>,
+    pub calls: Vec<Vec<Vec<u8>>>,
+    pub status: i32,
+    pub pid: u32,
+    pub last_job: Option<u32>,
+    pub argv0: Vec<u8>,
+    pub options: HashMap<String, bool>,
+    pub shopts: HashMap<String, bool>,
+    pub env_limit: Option<usize>,
+    pub outside: usize,
+    pub pipe_status: Vec<i32>,
+    pub function_names: Option<Vec<Vec<u8>>>,
+    pub paren: bool,
+    pub memory_room: Option<usize>,
+    pub line: usize,
+    pub bash_pid: u32,
+    pub voice: Vec<u8>,
+}
+
 impl Shell {
+    /// Take on what the host hands the shell (`Frame`).
+    pub fn apply(&mut self, frame: Frame) {
+        self.positional = frame.positional;
+        self.calls = frame.calls;
+        self.status = frame.status;
+        self.pid = frame.pid;
+        self.last_job = frame.last_job;
+        self.argv0 = frame.argv0;
+        self.options = frame.options;
+        self.shopts = frame.shopts;
+        self.env_limit = frame.env_limit;
+        self.outside = frame.outside;
+        self.vars.set_specials(
+            frame.pipe_status,
+            frame.function_names,
+            frame.line,
+            frame.bash_pid,
+            frame.voice,
+        );
+        self.paren = frame.paren;
+        self.memory_room = frame.memory_room;
+    }
+
     pub fn new(vars: Store) -> Self {
         Self {
             vars,
@@ -61,7 +104,6 @@ impl Shell {
             env_limit: None,
             memory_room: None,
             outside: 0,
-            substituted: None,
             paren: false,
         }
     }

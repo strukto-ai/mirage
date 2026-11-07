@@ -32,6 +32,8 @@ from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
     count_operand,
     fail,
+    identifier_line,
+    readonly_refusal,
     record_delimiter,
     require_view,
 )
@@ -142,12 +144,10 @@ async def handle_mapfile(
     callback = str(flags["C"]) if "C" in flags else None
     name = parse.operands[0] if parse.operands else "MAPFILE"
     if _IDENTIFIER.fullmatch(name) is None:
-        return fail(
-            cmd, f"{shell_voice()}{cmd}: `{name}': not a valid identifier\n", 1
-        )
+        return fail(cmd, identifier_line(cmd, name) + "\n", 1)
     view = require_view(state)
     if view.is_readonly(name):
-        return fail(cmd, f"{shell_voice()}{name}: readonly variable\n", 1)
+        return readonly_refusal(cmd, name)
     if name in visible_assocs(session):
         return fail(
             cmd, f"{shell_voice()}{cmd}: {name}: not an indexed array\n", 1

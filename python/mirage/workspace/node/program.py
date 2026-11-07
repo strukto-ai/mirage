@@ -143,6 +143,7 @@ async def execute_program(
         session._parse_current,
         session._parse_row,
         session._line_row,
+        session._line_rows,
         session._line_node,
     )
     session._parse_current = session._parse_seq
@@ -150,6 +151,8 @@ async def execute_program(
     session._parse_from = None
     session._parse_row = start
     session._line_row = line_start
+    session._line_rows = reread_rows(node) if session._reread else None
+    session._reread = False
     root = not session._line_open
     session._line_open = True
     try:
@@ -173,6 +176,7 @@ async def execute_program(
             session._parse_current,
             session._parse_row,
             session._line_row,
+            session._line_rows,
             session._line_node,
         ) = outer_parse
         if root:
@@ -648,9 +652,10 @@ def parse_rows(session: SessionState, inline: bool) -> tuple[int, int]:
     """Where the parse about to run starts: its row in the text that
     spelled it (``_parse_row``) and the same row as ``$LINENO`` counts it
     (``_line_row``). A sourced file and the rest of an input read again
-    start where ``_parse_from`` says; a nested parse (``eval``, ``$( )``)
-    numbers on from the row the running command ends on, as bash's reader
-    stands there; any other at 0.
+    start where ``_parse_from`` says; a nested parse (``eval``, a
+    backtick) numbers on from the row the running command ends on, as
+    bash's reader stands there, and a ``$( )`` or ``<( )`` body from the
+    running command's own line; any other at 0.
 
     Args:
         session (SessionState): shell session state.
@@ -662,7 +667,38 @@ def parse_rows(session: SessionState, inline: bool) -> tuple[int, int]:
     if not inline or running is None:
         return 0, 0
     ends = source_row(running, end=True)
-    return session._parse_row + ends, session._line_row + ends
+    if session._reread:
+        return session._parse_row + ends, session.line_number - 1
+    return session._parse_row + ends, session._line_row + session.counted_row(
+        ends
+    )
+
+
+def reread_rows(node: TSNodeLike) -> tuple[int, ...]:
+    """The line a ``$( )`` or ``<( )`` body numbers each of its rows by,
+    on from the command running it. bash reads the body again as it
+    prints it, a statement to a line only where a newline ended the one
+    before, so a blank line, a newline after ``;`` and the rows a
+    statement spans add none.
+
+    Args:
+        node (TSNodeLike): the body's program.
+    """
+    rows: list[int] = []
+    line = 0
+    newline = False
+    for child in node.children:
+        if not child.is_named:
+            newline = False
+            continue
+        if child.type == NT.COMMENT:
+            continue
+        if rows and newline:
+            line += 1
+        last = source_row(child, end=True)
+        rows.extend([line] * (last + 1 - len(rows)))
+        newline = True
+    return tuple(rows)
 
 
 def refused_row(node: TSNodeLike) -> int | None:

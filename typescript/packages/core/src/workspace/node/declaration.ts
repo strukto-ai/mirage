@@ -31,6 +31,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import {
   LISTED_ATTRIBUTES,
+  SUBSCRIPT_RE,
   VISIBLE_SCOPE_BUILTINS,
 } from '../executor/builtins/declare/constants.ts'
 import {
@@ -49,7 +50,7 @@ import {
   noteLocalArray,
 } from '../executor/builtins/index.ts'
 import { builtinUsage, fail } from '../executor/builtins/shared.ts'
-import { expandNode } from '../expand/node.ts'
+import { expandNode, expandSubscript } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -321,15 +322,21 @@ export async function executeDeclaration(
   }
   const conversionErrors: string[] = []
   const kind = declaredKind(flagChars)
-  if (kind !== null) {
+  // A bare element operand (`declare t[1]`, `local h[2]`) declares its name
+  // an array, as `declare -a t` does.
+  const elements = new Set(words.filter((word) => elementBase(word) !== word).map(elementBase))
+  const declaring = operands.map(elementBase)
+  const names = words.map(elementBase)
+  if (kind !== null || elements.size > 0) {
     // `declare -a NAME` / `declare -A NAME` with no value declare an
     // empty array of that kind, so ${#NAME[@]} is 0 and an element
     // write leaves the other slots unassigned. GNU refuses to
     // convert between the two kinds and says so per name while the
     // rest of the operands still declare.
-    const wantAssoc = kind === VarKind.Assoc
-    for (const bare of words) {
-      if (bare.includes('=')) continue
+    for (const bare of names) {
+      const want = kind ?? (elements.has(bare) ? VarKind.Indexed : null)
+      if (bare.includes('=') || want === null) continue
+      const wantAssoc = want === VarKind.Assoc
       // A hidden name refuses like any assignment spelling before
       // anything lands, and the array both branches below write (the
       // top-level one migrates an existing scalar) goes through the gate
@@ -351,7 +358,7 @@ export async function executeDeclaration(
       const local = !flagChars.has('g') && noteLocalArray(session, bare)
       if (local && fresh) startLocal(session, bare, flagChars.has('I'))
       const held = heldValue(session, bare)
-      const conflict = kindConflict(held, kind)
+      const conflict = kindConflict(held, want)
       if (conflict !== null) {
         conversionErrors.push(`${shellVoice()}${cmdWord}: ${bare}: ${conflict}`)
         continue
@@ -383,14 +390,18 @@ export async function executeDeclaration(
           throw new DiscardSignal(encodeText(`${err.message}\n`))
         }
         seedVar(session, bare, fill)
-        continue
+      } else {
+        try {
+          await view.set(bare, fill, false)
+        } catch (err) {
+          if (!(err instanceof PolicyDenied)) throw err
+          throw new DiscardSignal(encodeText(`${err.message}\n`))
+        }
       }
-      try {
-        await view.set(bare, fill, false)
-      } catch (err) {
-        if (!(err instanceof PolicyDenied)) throw err
-        throw new DiscardSignal(encodeText(`${err.message}\n`))
-      }
+      // Declared over nothing (a `local -I` holds the caller's value):
+      // `declare -p` prints no value and a bare `set` leaves it out until a
+      // write.
+      if (held === null) session.vars.shell.unassigned(bare)
     }
   }
   // declare/typeset scope like `local` inside a function (bash
@@ -399,7 +410,7 @@ export async function executeDeclaration(
   // the same path and lands on what each operand wrote, so
   // `f() { local -r A=(x); }` freezes f's own A, not the caller's.
   const result = await handleLocal(
-    operands,
+    declaring,
     session,
     view,
     {
@@ -413,6 +424,15 @@ export async function executeDeclaration(
       inherit: flagChars.has('I'),
     },
     registry.policies,
+    (text) => expandSubscript(text, context, executeFn, callStack, registry.policies),
   )
   return mergeConversionErrors(result, conversionErrors)
+}
+
+/** A bare element operand as the name it declares, any other as is. */
+function elementBase<T extends DeclarationOperand>(operand: T): T | string {
+  if (typeof operand === 'string' && !operand.includes('=') && SUBSCRIPT_RE.test(operand)) {
+    return operand.slice(0, operand.indexOf('['))
+  }
+  return operand
 }

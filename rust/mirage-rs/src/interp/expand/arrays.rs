@@ -7,8 +7,8 @@ use super::{
     splat, trim_start, within,
 };
 
-use crate::interp::quote;
 use crate::interp::write::Fault;
+use crate::interp::{listing, quote};
 use crate::vars::Indexed;
 
 impl<H: Host> Expander<'_, H> {
@@ -196,41 +196,17 @@ impl<H: Host> Expander<'_, H> {
 
     /// `${a[@]@A}`: the declaration that recreates the array, which `[@]`
     /// hands out as three words (`declare`, `-a`, `a=(...)`) and `[*]` as
-    /// one, as bash does.
+    /// one, as bash does; one never assigned has no `=(...)`.
     fn array_assignment(&self, name: &str) -> Vec<u8> {
         let vars = &self.shell.vars;
-        let cluster = vars
-            .visible(name)
-            .map(|var| var.cluster())
-            .unwrap_or_default();
-        let mut out = format!(
-            "declare -{} {name}=(",
-            if cluster.is_empty() {
-                "-".to_owned()
-            } else {
-                cluster
-            }
-        )
-        .into_bytes();
-        if let Some(map) = vars.assoc(name) {
-            for (key, value) in map.sorted() {
-                out.push(b'[');
-                out.extend(quote::key(key));
-                out.extend_from_slice(b"]=");
-                out.extend(quote::declare(value));
-                out.push(b' ');
-            }
-        } else if let Some(array) = vars.indexed(name) {
-            let parts: Vec<Vec<u8>> = array
-                .iter()
-                .map(|(index, value)| {
-                    [format!("[{index}]=").into_bytes(), quote::declare(value)].concat()
-                })
-                .collect();
-            out.extend(parts.join(&b' '));
+        let target = vars.deref(name);
+        if let Some(var) = listing::computed(vars, &target) {
+            return listing::line(&target, &var);
         }
-        out.push(b')');
-        out
+        match vars.visible(name) {
+            Some(var) => listing::line(name, var),
+            None => format!("declare -- {name}").into_bytes(),
+        }
     }
 
     /// `${a[@]@K}`: keys and values as one word, each value quoted, an

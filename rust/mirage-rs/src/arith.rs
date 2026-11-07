@@ -139,13 +139,17 @@ pub struct Outcome {
 /// What to evaluate and how: the expression, an integer `+=`'s added text
 /// (read after it in the same evaluation and added to it), `set -u`, whether
 /// a session's arrays stand behind it (without one every subscript is a
-/// syntax error), and the names whose reads a dynamic reader answers.
+/// syntax error), the names whose reads a dynamic reader answers, and
+/// whether its subscripts expand as a variable's value's do (a `let`
+/// operand, an `-i` value), where text the host already expanded
+/// (`$((...))`) expands no further.
 pub struct Request<'a> {
     pub expression: &'a [u8],
     pub added: Option<&'a [u8]>,
     pub nounset: bool,
     pub elements: bool,
     pub dynamic: &'a [String],
+    pub expand: bool,
 }
 
 /// Evaluate `request` against `vars`.
@@ -160,10 +164,11 @@ pub fn evaluate(request: &Request<'_>, vars: &mut dyn Vars) -> Outcome {
         writes: Vec::new(),
         nest: 0,
     };
+    let expand = request.expand;
     let value = record
-        .evaluate(request.expression, 0, false)
+        .evaluate(request.expression, 0, false, expand)
         .and_then(|value| match request.added {
-            Some(added) => Ok(value.wrapping_add(record.evaluate(added, 0, false)?)),
+            Some(added) => Ok(value.wrapping_add(record.evaluate(added, 0, false, expand)?)),
             None => Ok(value),
         });
     Outcome {
@@ -316,6 +321,28 @@ fn literal_end(text: &[u8], pos: usize) -> Option<usize> {
     Some(pos + 1 + len)
 }
 
+/// Index of the `))` closing a `$((` whose text starts at `start`.
+fn arith_close(text: &[u8], start: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (i, &ch) in text.iter().enumerate().skip(start) {
+        match ch {
+            b'(' => depth += 1,
+            b')' if depth == 0 => return (text.get(i + 1) == Some(&b')')).then_some(i),
+            b')' => depth -= 1,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// An error made while a subscript evaluated, marked so.
+fn in_subscript(mut err: Box<Error>) -> Box<Error> {
+    if let Error::Arith { subscript, .. } | Error::Halt { subscript } = &mut *err {
+        *subscript = true;
+    }
+    err
+}
+
 fn operator_at(text: &[u8], pos: usize) -> Option<&'static [u8]> {
     let rest = &text[pos..];
     OPERATORS.iter().find(|op| rest.starts_with(op)).copied()
@@ -335,7 +362,8 @@ enum Kind {
 /// One evaluation: the host's variables, and the writes it has made, which
 /// later reads in it see first. A variable's value and an indexed subscript
 /// are expressions of their own, read in this same record one level deeper
-/// (`x='y=5'; $((x))` leaves y at 5).
+/// (`x='y=5'; $((x))` leaves y at 5). A subscript in a value expands once
+/// before it is used (`x='e[$i]'; $((x))`), as bash expands it.
 struct Record<'v, 'd> {
     vars: &'v mut dyn Vars,
     nounset: bool,
@@ -352,7 +380,7 @@ impl Record<'_, '_> {
         self.dynamic.iter().any(|dynamic| dynamic == name)
     }
 
-    fn evaluate(&mut self, text: &[u8], depth: usize, subscript: bool) -> Step<i64> {
+    fn evaluate(&mut self, text: &[u8], depth: usize, subscript: bool, stored: bool) -> Step<i64> {
         let start = text
             .iter()
             .position(|ch| !BLANKS.contains(ch))
@@ -362,6 +390,7 @@ impl Record<'_, '_> {
             text: &text[start..],
             depth,
             subscript,
+            stored,
             pos: 0,
             tok_start: 0,
             kind: Kind::End,
@@ -377,13 +406,14 @@ impl Record<'_, '_> {
         let raw = raw.unwrap_or_default();
         match plain_decimal(&raw) {
             Some(value) => Ok(value),
-            None => self.evaluate(&raw, depth + 1, subscript),
+            None => self.evaluate(&raw, depth + 1, subscript, true),
         }
     }
 
     /// The canonical element key a target names, None for a scalar;
-    /// resolved once per reference, so `a[RANDOM]+=1` draws once.
-    fn key_of(&mut self, target: &[u8], depth: usize) -> Step<Option<Vec<u8>>> {
+    /// resolved once per reference, so `a[RANDOM]+=1` draws once. In a
+    /// `stored` text the subscript expands first.
+    fn key_of(&mut self, target: &[u8], depth: usize, stored: bool) -> Step<Option<Vec<u8>>> {
         let (name, inner) = split_target(target);
         let Some(inner) = inner else {
             return Ok(None);
@@ -396,17 +426,21 @@ impl Record<'_, '_> {
                 subscript: false,
             }));
         }
+        let expanded;
+        let inner = if stored && inner.iter().any(|ch| b"$`\\\"".contains(ch)) {
+            expanded = self.expand(inner, depth).map_err(in_subscript)?;
+            &expanded[..]
+        } else {
+            inner
+        };
         if self.vars.assoc(name)? {
             return Ok(Some(self.vars.resolve(name, inner)?));
         }
         let index = match plain_decimal(inner) {
             Some(index) => index,
-            None => self.evaluate(inner, depth + 1, true).map_err(|mut err| {
-                if let Error::Arith { subscript, .. } | Error::Halt { subscript } = &mut *err {
-                    *subscript = true;
-                }
-                err
-            })?,
+            None => self
+                .evaluate(inner, depth + 1, true, false)
+                .map_err(in_subscript)?,
         };
         Ok(Some(self.vars.resolve(name, index.to_string().as_bytes())?))
     }
@@ -433,19 +467,74 @@ impl Record<'_, '_> {
             };
             return self.coerce(raw, depth, subscript);
         }
+        let value = self.text_of(name)?;
+        self.coerce(value, depth, subscript)
+    }
+
+    /// The text a bare name holds: a dynamic name's reader first, the
+    /// pending writes next, then the host.
+    fn text_of(&mut self, name: &str) -> Step<Option<Vec<u8>>> {
         if self.dynamic(name) {
             if let Some(drawn) = self.vars.draw(name)? {
-                return self.coerce(Some(drawn), depth, subscript);
+                return Ok(Some(drawn));
             }
         }
         if let Some(pending) = self.updates.get(name).cloned() {
-            return self.coerce(Some(pending), depth, subscript);
+            return Ok(Some(pending));
         }
         let value = self.vars.read(name)?;
         if value.is_none() && self.nounset && !(self.elements && self.vars.holds_array(name)?) {
             return Err(Box::new(Error::Unbound(name.to_owned())));
         }
-        self.coerce(value, depth, subscript)
+        Ok(value)
+    }
+
+    /// A subscript expanded as bash expands one in a value, as if double
+    /// quoted: `$name` and `${name}` substitute what the name holds,
+    /// `$((...))` its value, a backslash quotes `$`, `` ` ``, `"` and
+    /// itself, and a double quote is removed. A command substitution and
+    /// every other parameter stay as typed, for the evaluator to refuse.
+    fn expand(&mut self, text: &[u8], depth: usize) -> Step<Vec<u8>> {
+        let mut out = Vec::with_capacity(text.len());
+        let mut i = 0;
+        while i < text.len() {
+            let ch = text[i];
+            if ch == b'\\' && text.get(i + 1).is_some_and(|next| b"$`\"\\".contains(next)) {
+                out.push(text[i + 1]);
+                i += 2;
+                continue;
+            }
+            if ch == b'"' {
+                i += 1;
+                continue;
+            }
+            if ch != b'$' {
+                out.push(ch);
+                i += 1;
+                continue;
+            }
+            if text[i..].starts_with(b"$((") {
+                if let Some(close) = arith_close(text, i + 3) {
+                    let inner = self.expand(&text[i + 3..close], depth)?;
+                    let value = self.evaluate(&inner, depth + 1, true, false)?;
+                    out.extend_from_slice(value.to_string().as_bytes());
+                    i = close + 2;
+                    continue;
+                }
+            }
+            let braced = text.get(i + 1) == Some(&b'{');
+            let start = i + 1 + usize::from(braced);
+            let end = name_end(text, start).filter(|&end| !braced || text.get(end) == Some(&b'}'));
+            let Some(end) = end else {
+                out.push(ch);
+                i += 1;
+                continue;
+            };
+            let name = std::str::from_utf8(&text[start..end]).unwrap_or_default();
+            out.extend(self.text_of(name)?.unwrap_or_default());
+            i = end + usize::from(braced);
+        }
+        Ok(out)
     }
 
     /// Record a write, or refuse one to a readonly name.
@@ -498,6 +587,7 @@ struct Reader<'r, 'v, 'd, 't> {
     text: &'t [u8],
     depth: usize,
     subscript: bool,
+    stored: bool,
     pos: usize,
     tok_start: usize,
     kind: Kind,
@@ -691,7 +781,7 @@ impl<'t> Reader<'_, '_, '_, 't> {
             if self.skip > 0 {
                 return Ok(value);
             }
-            (self.record.key_of(target, self.depth)?, value)
+            (self.record.key_of(target, self.depth, self.stored)?, value)
         } else if self.skip > 0 {
             let right = self.assign()?;
             return self.apply(binary, 0, right, divisor);
@@ -871,7 +961,7 @@ impl<'t> Reader<'_, '_, '_, 't> {
         if self.depth >= MAX_DEPTH {
             return Err(self.fail("expression recursion level exceeded", Some(at)));
         }
-        let key = self.record.key_of(target, self.depth)?;
+        let key = self.record.key_of(target, self.depth, self.stored)?;
         let value = self
             .record
             .read_target(target, key.as_deref(), self.depth, self.subscript)?;
@@ -974,6 +1064,7 @@ mod tests {
             nounset: false,
             elements: true,
             dynamic: &["D".to_owned()],
+            expand: false,
         };
         evaluate(&request, session)
     }
@@ -1084,6 +1175,34 @@ mod tests {
                 ("a", Some(five), "2"),
                 ("a", Some(five), "3")
             ]
+        );
+    }
+
+    #[test]
+    fn a_subscript_in_a_value_expands_once() {
+        let mut session = Session::default();
+        let e = [("0", "5"), ("1", "6"), ("2", "7")];
+        let e = e.map(|(k, v)| (k.to_owned(), v.to_owned()));
+        session.arrays.insert("e".to_owned(), e.into());
+        for (name, value) in [
+            ("i", "2"),
+            ("v", "$i"),
+            ("x", "e[$i]"),
+            ("y", "e[ \"${i}\" - $((i-1)) ]"),
+            ("z", "e[$v]"),
+        ] {
+            session.scalars.insert(name.to_owned(), value.to_owned());
+        }
+        assert_eq!(run(b"x", &mut session).value.ok(), Some(7));
+        assert_eq!(run(b"(i=0) + x", &mut session).value.ok(), Some(5));
+        assert_eq!(run(b"y", &mut session).value.ok(), Some(6));
+        assert_eq!(
+            line(b"z", &mut session),
+            b"$i: syntax error: operand expected (error token is \"$i\")"
+        );
+        assert_eq!(
+            line(b"e[$i]", &mut session),
+            b"$i: syntax error: operand expected (error token is \"$i\")"
         );
     }
 

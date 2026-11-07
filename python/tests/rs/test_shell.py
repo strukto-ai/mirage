@@ -206,7 +206,6 @@ def test_an_expansion_asks_the_host_for_a_substitution() -> None:
     assert asked == ["c"]
     assert result == ("ok", ["a", "bc", "d"])
     assert diagnostics == [b"w\n"]
-    assert shell.take_substituted() == 0
 
 
 def test_a_write_asks_the_gate_and_stops_on_a_refusal() -> None:
@@ -238,7 +237,7 @@ def test_a_running_task_holds_the_shell() -> None:
         shell.get("x")
     task.answer_failed()
     result, _ = _run(task, lambda ask: None)
-    assert result == ("unsupported", "the host failed")
+    assert result == ("host", "the host failed")
     assert shell.get("x") is None
 
 

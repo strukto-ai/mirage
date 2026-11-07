@@ -63,7 +63,10 @@ impl<H: Host> Expander<'_, H> {
     pub(super) async fn evaluate(&mut self, text: &[u8], lead: &str) -> Result<i64, Fault> {
         let mut draws = Draws::default();
         let nounset = self.shell.option("nounset");
-        let outcome = self.shell.vars.arith(&mut draws, text, None, nounset);
+        let outcome = self
+            .shell
+            .vars
+            .arith(&mut draws, text, None, nounset, false);
         let value = outcome.value;
         for write in outcome.writes {
             let (name, key) = (write.name.clone(), write.key.clone());
@@ -234,27 +237,8 @@ impl<H: Host> Expander<'_, H> {
                 return Err(within(fault, &inside, true));
             }
         };
-        let mut draws = Draws::default();
-        let nounset = self.shell.option("nounset");
-        let outcome = self.shell.vars.arith(&mut draws, &text, None, nounset);
-        let value = outcome.value;
-        for write in outcome.writes {
-            let key = write.key.clone();
-            let name = write.name.clone();
-            self.expansion_write(&name, key, write.value.into_bytes())
-                .await?;
-        }
-        self.shell.vars.settle(&mut draws).map_err(Fault::Arith)?;
-        match value {
-            Ok(value) => Ok(value.to_string().into_bytes()),
-            Err(arith::Error::Unbound(name)) => {
-                Err(Signal::unbound(self.shell.vars.voice(), &name).into())
-            }
-            Err(arith::Error::Readonly { name, subscript }) => {
-                Err(Signal::readonly(self.shell.vars.voice(), &name, subscript).into())
-            }
-            Err(error) => Err(Signal::arith(self.shell.vars.voice(), &error, "", false).into()),
-        }
+        let value = self.evaluate(&text, "").await?;
+        Ok(value.to_string().into_bytes())
     }
 }
 

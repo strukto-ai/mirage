@@ -21,19 +21,11 @@ import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import { SET_OPTION_DEFAULTS, SET_OPTION_NAMES } from '../../../../shell/constants.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
 import { concat } from '../../../../utils/bytes.ts'
-import { singleQuote } from '../../../../utils/quote.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { SessionState } from '../../../session/session.ts'
-import {
-  setPositionalParams,
-  visibleArrays,
-  visibleAssocs,
-  visibleEnv,
-} from '../../../session/state.ts'
+import { prefixTemporaries, setPositionalParams } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { SET_QUOTED_CHARS } from '../constants.ts'
-import { CONTROL_RE } from '../declare/constants.ts'
-import { arrayBody, assocBody, bashDeclareQuote, functionLines } from '../declare/declare.ts'
+import { functionLines } from '../declare/declare.ts'
 import { builtinError, builtinUsage } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 
@@ -43,35 +35,12 @@ import type { BuiltinCall } from '../types.ts'
  * which posix mode leaves out. Mirrors Python's _listing.
  */
 function listing(session: SessionState, parser?: ParseScope): string[] {
-  const values = new Map<string, string>()
-  for (const [k, v] of Object.entries(visibleEnv(session))) values.set(k, `${k}=${listedValue(v)}`)
-  for (const [k, v] of Object.entries(visibleArrays(session))) values.set(k, k + arrayBody(v))
-  for (const [k, v] of Object.entries(visibleAssocs(session))) values.set(k, k + assocBody(v))
-  const lines = [...values.keys()].sort(compareCodePoints).map((name) => values.get(name) ?? '')
+  const lines = session.vars.shell.assignments(prefixTemporaries(session))
   if (session.shellOptions.posix !== true) {
     const names = Object.keys(session.functions).sort(compareCodePoints)
     lines.push(...functionLines(session, names, true, false, parser))
   }
   return lines
-}
-
-/**
- * A value as bash's bare `set` prints it.
- *
- * `$'...'` when it holds a control character, the form `declare -p`
- * writes; single quotes when the shell would read a character in it
- * specially; bare otherwise. GNU prints `IFS=$' \t\n'`, `x='a b'` and
- * `y=a,b`.
- */
-function listedValue(value: string): string {
-  if (CONTROL_RE.test(value)) return bashDeclareQuote(value)
-  let quoted = value.startsWith('#')
-  for (let i = 0; i < value.length && !quoted; i++) {
-    const ch = value.charAt(i)
-    quoted =
-      SET_QUOTED_CHARS.has(ch) || (ch === '~' && (i === 0 || '=:'.includes(value.charAt(i - 1))))
-  }
-  return quoted ? singleQuote(value) : value
 }
 
 /**

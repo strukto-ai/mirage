@@ -68,7 +68,7 @@ import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { NodeType as NT } from '../../shell/types.ts'
-import { type ShellVar, VarAttr } from '../../shell/variable.ts'
+import { makeVar, type ShellVar, VarAttr } from '../../shell/variable.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { mergeSignals } from '../../utils/abort.ts'
@@ -115,10 +115,10 @@ import { checkEnv, entryBytes } from '../session/budget.ts'
 import type { SessionState } from '../session/session.ts'
 import {
   bindLastWord,
+  deref,
   ensureVarVisible,
   envIsReadonly,
   seedVar,
-  setAttr,
   visibleEnv,
 } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
@@ -407,7 +407,10 @@ export async function executeCommand(
     // A function's prefix scope keeps the records it saves, and the shell
     // counts them against max_env itself.
     if (temp === null) session.prefixSaves.push(savedEnvOverrides)
-    for (const [k, v] of prefixAssignments) {
+    for (const [given, v] of prefixAssignments) {
+      // A reference's temporary is its target's (`N=5 cmd` over
+      // `declare -n N=T` sets T).
+      const k = deref(session, given)
       // A first write's old record stays held; a repeat drops the earlier value.
       const old = savedEnvOverrides.has(k) ? session.vars.get(k) : undefined
       checkEnv(session, old === undefined ? 0 : entryBytes(k, old.value), entryBytes(k, v))
@@ -421,11 +424,11 @@ export async function executeCommand(
       // assignment in the *command's environment*, not merely in the
       // shell. Seeding it plain left it invisible to every reader of
       // `envSnapshot` — the command's own env, an installed CLI, a guest
-      // runtime — once that view narrowed to the exported set. The saved
-      // record is put back below, so neither the value nor the attribute
-      // outlives the command.
-      seedVar(session, k, v)
-      setAttr(session, k, VarAttr.Export)
+      // runtime — once that view narrowed to the exported set. The temporary
+      // carries that mark alone, as bash's does: `declare -i n; n=1+2 cmd`
+      // hands cmd `1+2` and `declare -p n` there prints `declare -x`. The
+      // saved record is put back below, so neither outlives the command.
+      session.vars.set(k, makeVar(v, new Set([VarAttr.Export])))
     }
     // Judged before the command reads them; on a refusal the restore
     // below puts the old values back.
