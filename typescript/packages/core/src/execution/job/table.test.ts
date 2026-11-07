@@ -145,6 +145,31 @@ function pending(abort: AbortController, prelude?: string): JobRunner {
   }
 }
 
+/** A process body that runs until it is stopped. */
+function abortable(command: string): {
+  sessionId: string
+  command: string
+  cwd: PathSpec
+  cancel: () => void
+  run: () => Promise<number>
+} {
+  const abort = new AbortController()
+  return {
+    sessionId: 's',
+    command,
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => {
+      abort.abort()
+    },
+    run: () =>
+      new Promise<number>((_resolve, reject) => {
+        abort.signal.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'))
+        })
+      }),
+  }
+}
+
 /** A published process that ran a program on `machine`. */
 function ran(pid: number, machine = 'docker:t'): Record<string, unknown> {
   return { pid, session: 's', machine, runtime: 'x' }
@@ -2055,12 +2080,14 @@ describe('JobTable process plane', () => {
   })
 
   // A daemon whose lease lapsed and was taken by another stops renewing it,
-  // and its next job is refused, naming the daemon that holds it now.
+  // hangs up what it runs, and its next job is refused, naming the daemon
+  // that holds it now.
   it('refuses the next job once another daemon took the lease', async () => {
     const store = new RAMExecutionStore(0.03)
     const a = new JobTable(store)
     const b = new JobTable(store)
     await a.claim()
+    const runner = a.processes.start(abortable('sleep 30'))
     const held = a as unknown as {
       lease: ReturnType<typeof setTimeout> | null
       keepLease: () => void
@@ -2071,9 +2098,71 @@ describe('JobTable process plane', () => {
     await b.claim()
     held.keepLease.call(a)
     await until(() => Promise.resolve(!a.claimed))
+    expect((await runner.join()).signal).toBe(1)
     const refused = await sleeping(a).catch((err: unknown) => err)
     expect((refused as WorkspaceHeldError).holder).toBe(b.daemon)
     await b.close()
+  })
+
+  // A claim reaps none of what its table runs now: a second claim waits for
+  // the first, and a record of a process this table runs is its own, not one
+  // left before a restart.
+  it('reaps none of what its table runs as it claims', async () => {
+    const store = new RAMExecutionStore()
+    const a = new JobTable(store, undefined, null, undefined, 'd')
+    const reaped: unknown[] = []
+    a.reaper = (record) => {
+      reaped.push(record.pid)
+      return Promise.resolve(true)
+    }
+    const runner = a.processes.start(abortable('sleep 30'))
+    const pid = runner.record.id.pid
+    const own = { ...ran(pid), started_at: runner.record.startedAt }
+    await store.publish('d', { [String(pid)]: own, '7': ran(7) }, 7)
+    await Promise.all([a.claim(), a.claim()])
+    await until(() => Promise.resolve(reaped.length > 0))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(reaped).toEqual([7])
+    runner.terminate()
+    await runner.join()
+    await a.close()
+  })
+
+  // A close waits for a claim under way and gives up the lease it took.
+  it('gives up the lease a pending claim takes when it closes', async () => {
+    let open!: () => void
+    const gate = new Promise<void>((resolve) => {
+      open = resolve
+    })
+    class Slow extends RAMExecutionStore {
+      override async lease(
+        daemon: string,
+        consoles: readonly string[] = [],
+      ): Promise<string | null> {
+        await gate
+        return super.lease(daemon, consoles)
+      }
+    }
+    const store = new Slow(30)
+    const a = new JobTable(store)
+    const claiming = a.claim()
+    const closing = a.close()
+    open()
+    await claiming
+    await closing
+    expect(await store.holder()).toBeNull()
+  })
+
+  // A program this daemon left before a restart that the reaper could not
+  // reach stays in its record, so a later claim tries it again.
+  it('keeps the record of a program it could not reach as it claims', async () => {
+    const store = new RAMExecutionStore()
+    await store.publish('d', { '7': ran(7) }, 7)
+    const a = new JobTable(store, undefined, null, undefined, 'd')
+    a.reaper = () => Promise.resolve(false)
+    await a.claim()
+    await until(async () => (await store.processes()).d?.['7']?.machine === 'docker:t')
+    await a.close()
   })
 
   // A job's record, and its entry in the session's list, name the line that

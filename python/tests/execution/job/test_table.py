@@ -14,7 +14,7 @@
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from functools import partial
 
 import pytest
@@ -1798,12 +1798,19 @@ async def test_the_lease_is_kept_from_the_claim_until_close():
 
 
 # A daemon whose lease lapsed and was taken by another stops renewing it,
-# and its next job is refused, naming the daemon that holds it now.
+# hangs up what it runs, and its next job is refused, naming the daemon
+# that holds it now.
 @pytest.mark.asyncio
 async def test_a_lease_taken_elsewhere_refuses_the_next_job():
     store = RAMExecutionStore(lease_seconds=0.03)
     a, b = JobTable(store), JobTable(store)
     await a.claim()
+    runner = a.processes.start(
+        session_id="s",
+        command="sleep 30",
+        cwd=PathSpec.from_str_path("/"),
+        run=_forever,
+    )
     assert a._lease is not None
     a._lease.cancel()
     a._lease = None
@@ -1815,10 +1822,92 @@ async def test_a_lease_taken_elsewhere_refuses_the_next_job():
         return not a.claimed
 
     await _until(lost)
+    async with asyncio.timeout(2):
+        assert (await runner.join()).signal == 1
     with pytest.raises(WorkspaceHeldError) as held:
         await a.submit("sleep 30", _run_forever, "/", session_id="s")
     assert held.value.holder == b.daemon
     await b.close()
+
+
+# A claim reaps none of what its table runs now: a second claim waits for
+# the first, and a record of a process this table runs is its own, not
+# one left before a restart.
+@pytest.mark.asyncio
+async def test_a_claim_reaps_none_of_what_its_table_runs():
+    store = RAMExecutionStore()
+    a = JobTable(store, daemon="d")
+    reaped: list[int] = []
+
+    async def reaper(record: dict, signum: int) -> bool:
+        reaped.append(record["pid"])
+        return True
+
+    a.reaper = reaper
+    runner = a.processes.start(
+        session_id="s",
+        command="sleep 30",
+        cwd=PathSpec.from_str_path("/"),
+        run=_forever,
+    )
+    own = {**_ran(runner.record.pid), "started_at": runner.record.started_at}
+    await store.publish("d", {str(runner.record.pid): own, "7": _ran(7)}, 7)
+    await asyncio.gather(a.claim(), a.claim())
+    async with asyncio.timeout(5):
+        while a._reaping:
+            await asyncio.sleep(0.01)
+    assert reaped == [7]
+    runner.terminate()
+    await runner.join()
+    await a.close()
+
+
+# A close waits for a claim under way and gives up the lease it took.
+@pytest.mark.asyncio
+async def test_a_close_gives_up_the_lease_a_pending_claim_takes():
+    gate = asyncio.Event()
+
+    class Slow(RAMExecutionStore):
+        async def lease(
+            self, daemon: str, consoles: Sequence[str] = ()
+        ) -> str | None:
+            await gate.wait()
+            return await super().lease(daemon, consoles)
+
+    store = Slow(lease_seconds=30.0)
+    a = JobTable(store)
+    claiming = asyncio.ensure_future(a.claim())
+    await asyncio.sleep(0.01)
+    closing = asyncio.ensure_future(a.close())
+    await asyncio.sleep(0.01)
+    gate.set()
+    async with asyncio.timeout(2):
+        await claiming
+        await closing
+    assert a._lease is None
+    assert await store.holder() is None
+
+
+# A program this daemon left before a restart that the reaper could not
+# reach stays in its record, so a later claim tries it again.
+@pytest.mark.asyncio
+async def test_a_claim_keeps_the_record_of_a_program_it_could_not_reach():
+    store = RAMExecutionStore()
+    await store.publish("d", {"7": _ran(7)}, 7)
+
+    async def reaper(record: dict, signum: int) -> bool:
+        return False
+
+    a = JobTable(store, daemon="d")
+    a.reaper = reaper
+    await a.claim()
+
+    async def kept() -> bool:
+        record = (await store.processes()).get("d", {}).get("7")
+        return record is not None and record["machine"] == "docker:t"
+
+    await _until(kept)
+    await a.close()
 
 
 # A job's record, and its entry in the session's list, name the line that
