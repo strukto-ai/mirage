@@ -335,6 +335,12 @@ async function steps(
         await get(wid).close()
         workspaces.delete(wid)
         answers.push({ text: 'stopped' })
+      } else if (kind === 'start_workspace') {
+        workspaces.set(
+          wid,
+          await build({ ...config, workspace_id: wid }, join(scratch, `${wid}.json`)),
+        )
+        answers.push({ text: step.id })
       } else if (kind === 'snapshot') {
         await get(wid).snapshot(join(scratch, prefix + (step.name as string)))
         answers.push({ text: 'saved' })

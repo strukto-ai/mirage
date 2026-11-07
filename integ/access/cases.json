@@ -260,6 +260,8 @@
     {"id": "creates_a_third", "input": {"step": "create", "id": "w3"}, "expect": {"text": "w3"}},
     {"id": "stops_it", "input": {"step": "stop_workspace", "id": "w3"}, "expect": {"text": "stopped"}},
     {"id": "lists_without_it", "input": {"step": "list"}, "expect": {"text": "w2"}},
+    {"id": "starts_it", "input": {"step": "start_workspace", "id": "w3"}, "expect": {"text": "w3"}},
+    {"id": "deletes_the_third", "input": {"step": "delete", "id": "w3"}, "expect": {"text": "deleted"}},
     {"id": "deletes_the_clone", "input": {"step": "delete", "id": "w2"}, "expect": {"text": "deleted"}}
    ]
   },

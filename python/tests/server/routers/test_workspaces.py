@@ -1755,6 +1755,23 @@ async def test_a_second_start_answers_the_running_workspace(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_clone_under_a_stopped_id_drops_its_config(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for wid in ("w", "src"):
+            body = {**_minimal_config(), "id": wid}
+            r = await client.post("/v1/workspaces", json=body)
+            assert r.status_code == 201, r.text
+        await client.post("/v1/workspaces/w/stop")
+        r = await client.post("/v1/workspaces/src/clone", json={"id": "w"})
+        assert r.status_code == 201, r.text
+        await client.post("/v1/workspaces/w/stop")
+        assert (await client.post("/v1/workspaces/w/start")).status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_start_of_an_unknown_id_is_not_found(tmp_path):
     app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
     async with AsyncClient(

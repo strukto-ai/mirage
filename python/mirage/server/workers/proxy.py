@@ -279,7 +279,7 @@ class WorkerProxy:
         """A create, load, clone or start: to the worker holding or
         creating the id it names, else to ``source``'s for a clone, else to
         a worker at random. A start names its id in the path, ``started``,
-        and sends no body."""
+        and its body goes on as sent."""
         pool = self.pool
         if self.draining:
             return await send_json(
@@ -290,11 +290,16 @@ class WorkerProxy:
             refused = await self._refused(scope, source or pool.first())
             if refused is not None:
                 return await send_answer(send, refused)
+            read = await peek(scope, receive)
             peeked = (
-                await peek(scope, receive)
+                read
                 if started is None
                 else Peeked(
-                    head=b"", more=False, id=started, lost=False, twice=False
+                    head=read.head,
+                    more=read.more,
+                    id=started,
+                    lost=False,
+                    twice=False,
                 )
             )
             if peeked.lost:

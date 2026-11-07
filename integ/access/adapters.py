@@ -777,6 +777,9 @@ class HttpSteps:
     async def stop_workspace(self, wid: str) -> None:
         await self._ok("POST", f"/v1/workspaces/{wid}/stop")
 
+    async def start_workspace(self, wid: str) -> None:
+        await self._ok("POST", f"/v1/workspaces/{wid}/start")
+
     async def snapshot(self, wid: str, name: str) -> None:
         reply = await self.http.get(f"/v1/workspaces/{wid}/snapshot")
         reply.raise_for_status()
@@ -1023,6 +1026,9 @@ class CliSteps:
     async def stop_workspace(self, wid: str) -> None:
         await self._json("workspace", "stop", wid)
 
+    async def start_workspace(self, wid: str) -> None:
+        await self._json("workspace", "start", wid)
+
     async def snapshot(self, wid: str, name: str) -> None:
         await self._json(
             "workspace", "snapshot", wid, str(self.snapshots / name)
@@ -1183,6 +1189,10 @@ class InAppSteps:
     async def stop_workspace(self, wid: str) -> None:
         await self.workspaces.pop(wid).close()
 
+    async def start_workspace(self, wid: str) -> None:
+        path = self.scratch / f"{wid}.json"
+        self.workspaces[wid] = await build_workspace_from_config(path)
+
     async def snapshot(self, wid: str, name: str) -> None:
         await self.workspaces[wid].snapshot(str(self.scratch / name))
 
@@ -1327,6 +1337,9 @@ async def run_steps(
             elif kind == "stop_workspace":
                 await steps.stop_workspace(wid)
                 answer = {"text": "stopped"}
+            elif kind == "start_workspace":
+                await steps.start_workspace(wid)
+                answer = {"text": wid}
             elif kind == "snapshot":
                 await steps.snapshot(wid, prefix + step["name"])
                 answer = {"text": "saved"}

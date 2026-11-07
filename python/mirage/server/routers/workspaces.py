@@ -853,6 +853,7 @@ async def clone_workspace(
         except ValueError as e:
             await new_ws.close()
             raise HTTPException(status_code=409, detail=str(e))
+        await registry.drop_config(wid)
     return await make_detail(entry)
 
 
@@ -976,6 +977,7 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
         except ValueError as e:
             await runner.stop()
             raise HTTPException(status_code=409, detail=str(e))
+        await registry.drop_config(wid)
     return await make_detail(entry)
 
 

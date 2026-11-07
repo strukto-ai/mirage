@@ -210,7 +210,7 @@ async def test_a_start_goes_to_the_worker_that_held_the_id(monkeypatch):
             await d.client.post("/v1/workspaces/n/stop")
         ).status_code == 200
         assert (await d.client.get("/v1/health")).json()["workspaces"] == 0
-        started = await d.client.post("/v1/workspaces/n/start")
+        started = await d.client.post("/v1/workspaces/n/start", json={})
         assert started.status_code == 200, started.text
         assert _ids(d) == [[], ["n"]]
         assert (await d.client.get("/v1/health")).json()["workspaces"] == 1

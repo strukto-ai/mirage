@@ -654,6 +654,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         await ws.close()
         return answer(reply, 409, { detail: (e as Error).message })
       }
+      await deps.registry.dropConfig(wid)
       return answer(reply, 201, await makeDetail(entry))
     })
   })
@@ -902,6 +903,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
           await newWs.close()
           return answer(reply, 409, { detail: (e as Error).message })
         }
+        await deps.registry.dropConfig(wid)
         return answer(reply, 201, await makeDetail(entry))
       })
     },
