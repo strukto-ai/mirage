@@ -372,14 +372,14 @@ fn recase_char(char: &[u8], case: Case, utf8: bool, out: &mut Vec<u8>) {
 
 /// A substring by character offsets (bytes in the C locale): `offset` from
 /// the start, `length` characters or, negative, up to that many from the
-/// end.
+/// end. A length past the end runs to it, however large.
 pub fn substring(value: &[u8], offset: usize, length: Option<i64>, utf8: bool) -> Vec<u8> {
     let (_, offsets) = units(value, utf8);
     let count = offsets.len() - 1;
     let end = match length {
         None => count,
         Some(length) if length < 0 => (count as i64 + length).max(offset as i64) as usize,
-        Some(length) => (offset as i64 + length).min(count as i64) as usize,
+        Some(length) => (offset as i64).saturating_add(length).min(count as i64) as usize,
     };
     let (start, end) = (offset.min(count), end.min(count).max(offset.min(count)));
     value[offsets[start]..offsets[end]].to_vec()
@@ -569,6 +569,7 @@ mod tests {
             substring("héllo".as_bytes(), 1, Some(2), true),
             "él".as_bytes()
         );
+        assert_eq!(substring(b"abc", 1, Some(i64::MAX), false), b"bc");
         assert_eq!(length("héllo".as_bytes(), false), 6);
     }
 

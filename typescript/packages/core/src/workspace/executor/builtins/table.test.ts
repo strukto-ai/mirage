@@ -21,17 +21,11 @@ import { BUILTINS } from './table.ts'
 // reserved in ShellBuiltin only so no CLI can take the name.
 const INTERPRETERS = new Set(['python', 'python3', 'node', 'js'])
 
-// The declaration family is the parser's (node/declaration.ts runs the
-// declaration node); the rows exist so `type` reports the words and the
-// tiers file them as grammar.
-const PARSER_OWNED = new Set(['declare', 'typeset', 'readonly'])
-
 describe('the builtin table', () => {
   it('covers every executor-run builtin', () => {
     const expected = new Set<string>()
     for (const word of Object.values(ShellBuiltin)) {
-      if (!JOB_BUILTINS.has(word) && !INTERPRETERS.has(word) && !PARSER_OWNED.has(word))
-        expected.add(word)
+      if (!JOB_BUILTINS.has(word) && !INTERPRETERS.has(word)) expected.add(word)
     }
     expect(new Set(BUILTINS.keys())).toEqual(expected)
   })
@@ -40,6 +34,8 @@ describe('the builtin table', () => {
     expect(BUILTINS.get('.')).toBe(BUILTINS.get('source'))
     expect(BUILTINS.get('sh')).toBe(BUILTINS.get('bash'))
     expect(BUILTINS.get('readarray')).toBe(BUILTINS.get('mapfile'))
+    expect(BUILTINS.get('typeset')).toBe(BUILTINS.get('declare'))
+    expect(BUILTINS.get('readonly')).toBe(BUILTINS.get('declare'))
     expect(BUILTINS.get('[')).toBe(BUILTINS.get('test'))
     expect(BUILTINS.get('[[')).toBe(BUILTINS.get('test'))
   })

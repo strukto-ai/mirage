@@ -623,10 +623,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "declare -l QBC=HeLLo; QBC=WORLD; declare -u QBD=hello; QBD+=xyz; declare -lu QBE=aBc; declare -p QBC QBD QBE",
+      "command": "declare -l QBC=HeLLo; QBC=WORLD; declare -u QBD=hello; QBD+=xyz; declare -lu QBE=aBc; declare -p QBC QBD QBE; (export LC_ALL=C; declare -u QBF=$'\\303\\251a'; declare -l QBG=$'\\303\\211A'; printf '%s %s\\n' \"$QBF\" \"$QBG\" | od -An -c; export LC_ALL=C.UTF-8; QBF=$'\\303\\251b'; printf '%s\\n' \"$QBF\" | od -An -c)",
       "expect": {
         "exit": 0,
-        "stdout": "declare -l QBC=\"world\"\ndeclare -u QBD=\"HELLOXYZ\"\ndeclare -- QBE=\"aBc\"\n",
+        "stdout": "declare -l QBC=\"world\"\ndeclare -u QBD=\"HELLOXYZ\"\ndeclare -- QBE=\"aBc\"\n 303 251   A     303 211   a  \\n\n 303 211   B  \\n\n",
         "stderr": ""
       }
     },

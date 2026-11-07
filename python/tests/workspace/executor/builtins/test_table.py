@@ -8,19 +8,9 @@ from mirage.workspace.lookup.constants import JOB_BUILTINS
 # reserved in ShellBuiltin only so no CLI can take the name.
 INTERPRETERS = frozenset({"python", "python3", "node", "js"})
 
-# The declaration family is the parser's (node/declaration.py runs the
-# declaration node); the rows exist so `type` reports the words and the
-# tiers file them as grammar.
-PARSER_OWNED = frozenset({"declare", "typeset", "readonly"})
-
 
 def test_table_covers_every_executor_builtin():
-    expected = (
-        {str(b) for b in ShellBuiltin}
-        - JOB_BUILTINS
-        - INTERPRETERS
-        - PARSER_OWNED
-    )
+    expected = {str(b) for b in ShellBuiltin} - JOB_BUILTINS - INTERPRETERS
     assert set(BUILTINS) == expected
 
 
@@ -28,6 +18,8 @@ def test_aliases_share_a_handler():
     assert BUILTINS["."] is BUILTINS["source"]
     assert BUILTINS["sh"] is BUILTINS["bash"]
     assert BUILTINS["readarray"] is BUILTINS["mapfile"]
+    assert BUILTINS["typeset"] is BUILTINS["declare"]
+    assert BUILTINS["readonly"] is BUILTINS["declare"]
     assert BUILTINS["["] is BUILTINS["test"] is BUILTINS["[["]
 
 

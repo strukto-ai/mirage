@@ -178,19 +178,18 @@ async def handle_mapfile(
         if seen <= skip:
             continue
         record = data + delim if found and not strip else data
-        replaced = arr.elements.get(index)
-        held += len(record) + (
-            _SLOT if replaced is None else -len(encode_text(replaced))
-        )
-        check_memory(held)
         text = decode_text(record)
-        array_set(arr, index, text)
-        stored += 1
-        if callback is not None and stored % quantum == 0:
-            # The record is data, not source: bash single-quotes it in
-            # the callback line, so a record reading `x; rm f`
+        if callback is not None and (stored + 1) % quantum == 0:
+            # bash runs the callback before the record lands, on the
+            # array as read so far, and keeps what the callback did to
+            # it. The record is data, not source: bash single-quotes it
+            # in the callback line, so a record reading `x; rm f`
             # arrives as one argument rather than running a second
             # command.
+            try:
+                await view.set(name, arr)
+            except PolicyDenied as exc:
+                return fail(cmd, f"{exc.strerror}\n", 1)
             io = await execute_fn(
                 f"{callback} {index} {single_quote(text)}",
                 session_id=session.session_id,
@@ -201,6 +200,17 @@ async def handle_mapfile(
             err = await materialize(io.stderr)
             if err:
                 errors.append(err)
+            arr = visible_arrays(session).get(name, ShellArray()).copy()
+            held = sum(
+                _SLOT + len(encode_text(v)) for v in arr.elements.values()
+            )
+        replaced = arr.elements.get(index)
+        held += len(record) + (
+            _SLOT if replaced is None else -len(encode_text(replaced))
+        )
+        check_memory(held)
+        array_set(arr, index, text)
+        stored += 1
         index += 1
         if not found:
             break

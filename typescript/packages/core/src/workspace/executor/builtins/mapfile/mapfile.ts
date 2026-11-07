@@ -106,7 +106,7 @@ export async function handleMapfile(
 
   const buffer = stdin !== null ? lineBuffer(stdin) : null
   const existing = visibleArrays(session)[name]
-  const arr = existing !== undefined && 'O' in flags ? existing.copy() : new ShellArray()
+  let arr = existing !== undefined && 'O' in flags ? existing.copy() : new ShellArray()
   let index = origin
   let stored = 0
   let seen = 0
@@ -123,16 +123,19 @@ export async function handleMapfile(
     seen++
     if (seen <= skip) continue
     const record = found && !strip ? concat([data, Uint8Array.of(delim)]) : data
-    const replaced = arr.elements.get(BigInt(index))
-    held += record.byteLength + (replaced === undefined ? SLOT : -encodeText(replaced).byteLength)
-    checkMemory(held)
     const text = decodeText(record)
-    arraySet(arr, index, text)
-    stored++
-    if (callback !== null && stored % quantum === 0) {
-      // The record is data, not source: bash single-quotes it in the
-      // callback line, so a record reading `x; rm f` arrives as
-      // one argument rather than running a second command.
+    if (callback !== null && (stored + 1) % quantum === 0) {
+      // bash runs the callback before the record lands, on the array as
+      // read so far, and keeps what the callback did to it. The record is
+      // data, not source: bash single-quotes it in the callback line, so a
+      // record reading `x; rm f` arrives as one argument rather than
+      // running a second command.
+      try {
+        await view.set(name, arr)
+      } catch (err) {
+        if (err instanceof PolicyDenied) return fail(cmd, `${err.message}\n`, 1)
+        throw err
+      }
       const io = await executeFn(`${callback} ${String(index)} ${singleQuote(text)}`, {
         sessionId: session.sessionId,
       })
@@ -140,7 +143,15 @@ export async function handleMapfile(
       if (out.byteLength > 0) outputs.push(out)
       const errOut = await materialize(io.stderr)
       if (errOut.byteLength > 0) errs.push(errOut)
+      arr = visibleArrays(session)[name]?.copy() ?? new ShellArray()
+      held = 0
+      for (const v of arr.elements.values()) held += SLOT + encodeText(v).byteLength
     }
+    const replaced = arr.elements.get(BigInt(index))
+    held += record.byteLength + (replaced === undefined ? SLOT : -encodeText(replaced).byteLength)
+    checkMemory(held)
+    arraySet(arr, index, text)
+    stored++
     index++
     if (!found) break
   }
