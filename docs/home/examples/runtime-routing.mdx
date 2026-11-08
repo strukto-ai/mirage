@@ -27,7 +27,8 @@ ephemeral. Mirage runs programs in it and leaves its lifecycle to Daytona.
 
 ## The workspace
 
-Two runtimes capture `python3`: `monty` first, then `daytona`. The route
+Two runtimes capture `python3`: `monty` first, then `native`, which runs it
+on the `gpu` machine, the Daytona sandbox. The route
 policy is a script that runs on Monty, read from `route.py`:
 
 ```yaml workspace.yaml
@@ -37,12 +38,16 @@ mounts:
   /data:
     vfs: ram
 
+machines:
+  gpu:
+    provider: daytona
+    sandbox_id: ${DAYTONA_GPU_SANDBOX_ID}
+
 runtimes:
   - monty
-  - name: daytona
+  - name: native
     captures: ["python3"]
-    config:
-      sandbox_id: ${DAYTONA_GPU_SANDBOX_ID}
+    machine: gpu
   - workspace
 
 route_policy:
@@ -58,7 +63,7 @@ any line that names PyTorch or CUDA to the GPU:
 ```python route.py
 def pre_execute(ctx):
     if any(word in ctx["line"] for word in ("torch", "cuda")):
-        return {"kind": "route", "runtime": "daytona", "reason": "the line uses PyTorch or CUDA"}
+        return {"kind": "route", "runtime": "native", "reason": "the line uses PyTorch or CUDA"}
 ```
 
 A line the script stays silent on runs on the first runtime that captures
@@ -86,7 +91,7 @@ RUNTIMES = {
         "language and part of the standard library, with no packages, GPU, "
         "network or subprocesses"
     ),
-    "daytona": (
+    "native": (
         "a cloud sandbox with an NVIDIA GPU, CUDA, PyTorch and the full "
         "standard library, billed while it runs"
     ),
@@ -119,7 +124,7 @@ preview and the run agree:
 
 
     class RuntimeChoice(BaseModel):
-        runtime: Literal["monty", "daytona"]
+        runtime: Literal["monty", "native"]
         reason: str
 
 
@@ -151,7 +156,7 @@ preview and the run agree:
     import { z } from 'zod'
     import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
 
-    const RuntimeChoice = z.object({ runtime: z.enum(['monty', 'daytona']), reason: z.string() })
+    const RuntimeChoice = z.object({ runtime: z.enum(['monty', 'native']), reason: z.string() })
     type Choice = z.infer<typeof RuntimeChoice>
 
     const choices = new Map<string, Choice>()

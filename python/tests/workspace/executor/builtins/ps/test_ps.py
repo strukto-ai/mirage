@@ -16,6 +16,7 @@
 import pytest
 
 from mirage.execution.job import JobTable
+from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.types import MachineId, MachinePid
 from mirage.policy.profile import SessionProfile
 from mirage.types import MountMode
@@ -27,9 +28,15 @@ from tests.fixtures.job_runners import (
     submit_settled,
 )
 
+HEADER = f"{'PID':>7} {'MACHINE':<31} {'MPID':>7} CMD"
+
 
 def _workspace() -> Workspace:
     return Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
+
+
+def _row(pid: int, command: str, machine: str = "-", mpid: str = "-") -> str:
+    return f"{pid:>7} {machine:<31} {mpid:>7} {command}"
 
 
 @pytest.mark.asyncio
@@ -39,14 +46,14 @@ async def test_ps_lists_only_the_running_jobs():
     done = await submit_settled(table, command="foo")
     await table.wait(done.id)
     out, _, _ = await handle_ps(table, ["ps"])
-    assert out == b"1\tsleep\n"
+    assert out.decode() == f"{HEADER}\n{_row(job.pid, 'sleep')}\n"
     await table.kill(job.id)
 
 
 @pytest.mark.asyncio
-async def test_ps_prints_nothing_when_no_job_is_running():
-    out, _, _ = await handle_ps(JobTable(), ["ps"])
-    assert out == b""
+async def test_ps_prints_its_header_alone_when_no_job_is_running():
+    out, io, _ = await handle_ps(JobTable(), ["ps"])
+    assert (out, io.exit_code) == (f"{HEADER}\n".encode(), 1)
 
 
 @pytest.mark.asyncio
@@ -63,7 +70,7 @@ async def test_ps_lists_the_stages_of_a_pipeline_under_a_redirect(line):
     try:
         await ws.shell("echo x > /m/f")
         out = (await ws.shell(line)).stdout
-        commands = {row.split(b"\t", 1)[1] for row in out.splitlines()}
+        commands = {row[48:] for row in out.splitlines()[1:]}
         assert {b"ps", b"cat"} <= commands
     finally:
         await ws.close()
@@ -77,7 +84,7 @@ async def test_ps_and_kill_reach_other_sessions_as_far_as_the_profile_says():
     ws.create_session("audit", profile={"processes": {"list": "workspace"}})
     ws.create_session("ops", profile={"processes": "workspace"})
     count = "ps | grep -c 'sleep 30$'"
-    stop = "kill $(ps | grep 'sleep 30$' | cut -f1); echo rc=$?"
+    stop = "kill $(ps | grep 'sleep 30$' | awk '{print $1}'); echo rc=$?"
     try:
         pid = (await ws.shell("sleep 30 & echo $!", session_id="a")).stdout
         assert (await ws.shell(count, session_id="b")).stdout == b"0\n"
@@ -127,9 +134,10 @@ async def test_ps_lays_columns_out_as_procps_does():
     ws = Workspace({"/": RAMVFS()}, mode="exec")
     try:
         pid = int((await ws.shell("sleep 30 & echo $!")).stdout)
+        shell = int((await ws.shell("echo $$")).stdout)
         cases = {
             f"ps -o pid,ppid,cmd -p {pid}": (
-                f"    PID    PPID CMD\n{pid:>7}       1 sleep 30\n"
+                f"    PID    PPID CMD\n{pid:>7} {shell:>7} sleep 30\n"
             ),
             f"ps -o cmd,pid -p {pid}": (
                 f"CMD{' ' * 25}    PID\nsleep 30{' ' * 20}{pid:>7}\n"
@@ -169,7 +177,8 @@ async def test_ps_lists_the_session_leader_with_its_owner():
         assert result.stdout.decode() == (
             "    PID    PPID    PGID     SID STAT USER       UID GROUP      "
             "GID CMD\n"
-            f"      1       0       1       1 Rs   admin    admin admin    "
+            f"{FIRST_PID:>7}       0 {FIRST_PID:>7} {FIRST_PID:>7} Rs   "
+            "admin    admin admin    "
             f"admin {line}\n"
         )
     finally:
@@ -237,8 +246,8 @@ async def test_ps_refuses_in_procps_words(args, message):
     )
 
 
-# ps lists this daemon's runners, one that is a program a runtime runs
-# followed by where it runs: a sandbox's machine, a host program's pid.
+# ps names the machine a program a runtime runs is on, and its pid there
+# once known: a host program's from its start, a machine's from a scan.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("host", [False, True])
 async def test_ps_shows_where_a_program_runs(host):
@@ -253,12 +262,14 @@ async def test_ps_shows_where_a_program_runs(host):
             job.process.set_machine_pid(MachinePid(4242, 1.0))
         else:
             assert job.process.take(MachineId("docker", "tools"), "docker")
-        where = "host 4242" if host else "docker:tools"
+        machine = str(ws.process_table.machine) if host else "docker:tools"
         own = (await ws.shell("ps", session_id="s")).stdout.decode()
-        assert own.splitlines()[:2] == [
-            f"{job.pid}\tsleep 30",
-            f"-\t└ {where}",
-        ]
+        lines = own.splitlines()
+        assert lines[0] == HEADER
+        assert (
+            _row(job.pid, "sleep 30", machine, "4242" if host else "-")
+            in lines
+        )
         await ws.shell("kill %1", session_id="s")
     finally:
         await ws.close()

@@ -591,17 +591,18 @@ def test_a_runtime_takes_max_memory_as_a_size_or_bytes():
         cfg.to_workspace_kwargs()
 
 
-def e2b_config(api_key, runtime="e2b", **extra):
+def e2b_config(api_key, provider="e2b", **extra):
     return load_config(
         {
             "mounts": {"/data": {"vfs": "ram"}},
-            "runtimes": [
-                {
-                    "name": runtime,
-                    "config": {"sandbox_id": "sbx-1", "api_key": api_key},
-                },
-                "workspace",
-            ],
+            "machines": {
+                "box": {
+                    "provider": provider,
+                    "sandbox_id": "sbx-1",
+                    "api_key": api_key,
+                }
+            },
+            "runtimes": [{"name": "native", "machine": "box"}, "workspace"],
             **extra,
         },
         env={},
@@ -609,22 +610,25 @@ def e2b_config(api_key, runtime="e2b", **extra):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("runtime", ["e2b", "daytona"])
-async def test_a_runtime_credential_reads_a_pointer(monkeypatch, runtime):
+@pytest.mark.parametrize("provider", ["e2b", "daytona"])
+async def test_a_machine_credential_reads_a_pointer(monkeypatch, provider):
     monkeypatch.setenv("E2B_TEST_KEY", "key_from_env")
     cfg = await resolve_secrets(
-        e2b_config({"from": "env", "key": "E2B_TEST_KEY"}, runtime)
+        e2b_config({"from": "env", "key": "E2B_TEST_KEY"}, provider)
     )
-    sandbox, workspace = cfg.to_workspace_kwargs()["runtimes"]
-    assert sandbox.name == runtime
-    assert sandbox.config.api_key == "key_from_env"
-    assert sandbox.config.sandbox_id == "sbx-1"
+    kwargs = cfg.to_workspace_kwargs()
+    box = kwargs["machines"]["box"]
+    assert box.provider == provider
+    assert box.config.api_key == "key_from_env"
+    assert box.config.sandbox_id == "sbx-1"
+    native, workspace = kwargs["runtimes"]
+    assert (native.name, native.default_machine) == ("native", "box")
     assert workspace == "workspace"
 
 
 @pytest.mark.asyncio
-async def test_a_runtime_pointer_builds_the_source_it_names(tmp_path):
-    # Only the runtime names the instance, so it is built for it alone.
+async def test_a_machine_pointer_builds_the_source_it_names(tmp_path):
+    # Only the machine names the instance, so it is built for it alone.
     (tmp_path / ".env").write_text("E2B_API_KEY=e2b_from_dotenv\n")
     secrets = {"team": {"source": "dotenv", "config": {"path": "unused"}}}
     cfg = await resolve_secrets(
@@ -637,46 +641,41 @@ async def test_a_runtime_pointer_builds_the_source_it_names(tmp_path):
             secrets=secrets,
         )
     )
-    e2b = cfg.to_workspace_kwargs()["runtimes"][0]
+    e2b = cfg.to_workspace_kwargs()["machines"]["box"]
     assert e2b.config.api_key == "e2b_from_dotenv"
 
 
 @pytest.mark.asyncio
-async def test_a_runtime_pointer_missing_its_field_names_the_runtime(
+async def test_a_machine_pointer_missing_its_field_names_the_machine(
     monkeypatch,
 ):
     monkeypatch.delenv("E2B_TEST_KEY", raising=False)
-    with pytest.raises(SecretsError, match=r"runtimes\.e2b\.config\.api_key"):
+    with pytest.raises(SecretsError, match=r"machines\.box\.api_key"):
         await resolve_secrets(
             e2b_config({"from": "env", "key": "E2B_TEST_KEY"})
         )
 
 
 @pytest.mark.asyncio
-async def test_the_ssh_runtime_private_key_reads_a_pointer(monkeypatch):
+async def test_the_ssh_machine_private_key_reads_a_pointer(monkeypatch):
     monkeypatch.setenv("SSH_TEST_KEY", "key-from-env")
     cfg = await resolve_secrets(
         load_config(
             {
                 "mounts": {"/data": {"vfs": "ram"}},
-                "runtimes": [
-                    {
-                        "name": "ssh",
-                        "config": {
-                            "host": "box",
-                            "private_key": {
-                                "from": "env",
-                                "key": "SSH_TEST_KEY",
-                            },
-                        },
+                "machines": {
+                    "gpu": {
+                        "provider": "ssh",
+                        "host": "box",
+                        "private_key": {"from": "env", "key": "SSH_TEST_KEY"},
                     }
-                ],
+                },
             },
             env={},
         )
     )
-    ssh = cfg.to_workspace_kwargs()["runtimes"][0]
-    assert ssh.name == "ssh"
+    ssh = cfg.to_workspace_kwargs()["machines"]["gpu"]
+    assert str(ssh.id) == "ssh:gpu"
     assert ssh.config.private_key == "key-from-env"
 
 
@@ -684,22 +683,20 @@ def e2b_mount_type(mount_type):
     return load_config(
         {
             "mounts": {"/data": {"vfs": "ram"}},
-            "runtimes": [
-                {
-                    "name": "e2b",
-                    "config": {
-                        "sandbox_id": "sbx-1",
-                        "mount_type": mount_type,
-                    },
+            "machines": {
+                "box": {
+                    "provider": "e2b",
+                    "sandbox_id": "sbx-1",
+                    "mount_type": mount_type,
                 }
-            ],
+            },
         },
         env={},
     )
 
 
 @pytest.mark.asyncio
-async def test_a_runtime_refusal_never_quotes_a_value_read_from_a_secret(
+async def test_a_machine_refusal_never_quotes_a_value_read_from_a_secret(
     monkeypatch,
 ):
     monkeypatch.setenv("E2B_TEST_MOUNT", "sekret-mount")
@@ -715,7 +712,7 @@ async def test_a_runtime_refusal_never_quotes_a_value_read_from_a_secret(
 
 
 @pytest.mark.asyncio
-async def test_a_runtime_refusal_still_quotes_a_literal():
+async def test_a_machine_refusal_still_quotes_a_literal():
     cfg = await resolve_secrets(e2b_mount_type("sshh"))
     with pytest.raises(ValueError, match="not 'sshh'"):
         cfg.to_workspace_kwargs()

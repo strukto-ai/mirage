@@ -27,6 +27,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { MAX_PID_OPERAND } from '../constants.ts'
 import { jobResult, processView, sessionOf } from '../jobspec.ts'
 import * as constants from './constants.ts'
+import { FIRST_PID } from '../../../../execution/process/constants.ts'
 import type { PsContext, PsOptions } from './types.ts'
 
 /** One `-p` list, refused in procps's words. */
@@ -60,9 +61,10 @@ function psColumns(value: string, option: string): [string, string][] {
 
 /**
  * Parse the procps selection and output options a runner answers: SysV
- * letters after one dash, BSD letters with none, and the `--pid`/`--format`
- * long forms; `-p` and `-o` repeat and accumulate. `-f` and BSD `u`/`w`/`f`
- * pick a layout the managed rows do not have, so they leave the compact one.
+ * letters after one dash, BSD letters with none, and the
+ * `--pid`/`--format`/`--forest` long forms; `-p` and `-o` repeat and
+ * accumulate. BSD `f` and `--forest` draw the forest; `-f` and BSD `u`/`w`
+ * pick a layout the processes do not have, so they leave the plain one.
  */
 function parsePs(words: string[]): PsOptions {
   const pids = new Set<number>()
@@ -71,9 +73,14 @@ function parsePs(words: string[]): PsOptions {
   }
   const columns: [string, string][] = []
   let all = false
+  let forest = false
   let at = 0
   while (at < words.length) {
     const word = words[at++] ?? ''
+    if (word === '--forest') {
+      forest = true
+      continue
+    }
     if (word.startsWith('--')) {
       const equal = word.indexOf('=')
       const option = equal < 0 ? word : word.slice(0, equal)
@@ -86,6 +93,7 @@ function parsePs(words: string[]): PsOptions {
     if (!word.startsWith('-')) {
       if (!/^[auxwf]+$/.test(word)) throw new Error('unsupported option (BSD syntax)')
       all ||= /[ax]/.test(word)
+      forest ||= word.includes('f')
       continue
     }
     let letters = word.slice(1)
@@ -104,7 +112,7 @@ function parsePs(words: string[]): PsOptions {
       else for (const item of psColumns(value, '-o')) columns.push(item)
     }
   }
-  return { pids, all, columns }
+  return { pids, all, columns, forest }
 }
 
 /** One row in procps's layout: each column padded but the last. */
@@ -152,16 +160,22 @@ function started(fact: string, info: Process, ctx: PsContext): string {
 }
 
 /**
- * One -o cell for a managed runner. The owner columns print the workspace user
- * and the session's profile, names in the id columns too, as `id` does, and
- * `-` where nobody claimed one or the runner is another session's, whose
- * profile this one cannot name. A runner of the calling session belongs to the
- * session `$$` leads; another session's to its own group.
+ * One -o cell for a process. The owner columns print the workspace user and
+ * the session's profile, names in the id columns too, as `id` does, and `-`
+ * where nobody claimed one or the runner is another session's, whose profile
+ * this one cannot name. A runner of the calling session belongs to the
+ * session `$$` leads; another session's to its own group. The machine
+ * columns name the machine a program runs on and its pid there, `-` for a
+ * process that is Mirage's own. `branch` is what a forest draws before its
+ * command.
  */
-function psCell(key: string, info: Process, ctx: PsContext): string {
+function psCell(key: string, info: Process, ctx: PsContext, branch: string): string {
   const fact = constants.COLUMNS[key]?.[3] ?? ''
   const fixed = constants.FIXED[fact]
   if (fixed !== undefined) return fixed
+  if (fact === 'machine')
+    return info.runtime !== null || info.machinePid !== null ? info.machine.toString() : '-'
+  if (fact === 'mpid') return info.machinePid !== null ? String(info.machinePid.pid) : '-'
   const session =
     info.sessionId === ctx.sessionId && ctx.shellPid !== null
       ? ctx.shellPid
@@ -175,7 +189,7 @@ function psCell(key: string, info: Process, ctx: PsContext): string {
   }
   if (fact === 'comm') {
     const head = info.command.split(/\s+/).find((w) => w !== '') ?? ''
-    return (head.split('/').pop() ?? '').slice(0, 15)
+    return branch + (head.split('/').pop() ?? '').slice(0, 15)
   }
   if (fact === 'user' || fact === 'group') {
     return (info.sessionId === ctx.sessionId ? ctx.group : null) ?? UNKNOWN_NAME
@@ -184,33 +198,51 @@ function psCell(key: string, info: Process, ctx: PsContext): string {
   if (fact === 'etime') return elapsed(age)
   if (fact === 'etimes') return String(age)
   if (['lstart', 'start', 'stime', 'bsdstart'].includes(fact)) return started(fact, info, ctx)
-  return info.command
+  return branch + info.command
 }
 
 /**
- * Where a process's program runs, as `ps` names it: `host PID` for a host
- * program, its machine (`docker:tools`) for another's.
+ * The rows as procps draws a forest: each process under its parent,
+ * siblings by pid, a process whose parent is not listed a root; each with
+ * what goes before its command. Mirrors Python's `_forest`.
  */
-function runWhere(info: Process): string {
-  if (info.machinePid !== null) return `host ${String(info.machinePid.pid)}`
-  return info.machine.toString()
+function forest(rows: readonly Process[]): [Process, string][] {
+  const listed = new Set(rows.map((info) => info.id.pid))
+  const children = new Map<number | null, Process[]>()
+  for (const info of [...rows].sort((a, b) => a.id.pid - b.id.pid)) {
+    const above = info.parent !== null && listed.has(info.parent) ? info.parent : null
+    children.set(above, [...(children.get(above) ?? []), info])
+  }
+  const drawn: [Process, string][] = []
+  const walk = (parent: number | null, trail: string): void => {
+    const kids = children.get(parent) ?? []
+    kids.forEach((kid, at) => {
+      const later = at < kids.length - 1
+      drawn.push([kid, parent === null ? '' : trail + constants.BRANCH])
+      walk(kid.id.pid, parent === null ? '' : trail + (later ? constants.BAR : constants.GAP))
+    })
+  }
+  walk(null, '')
+  return drawn
 }
 
 /**
- * List managed runners with procps's selection and `-o` columns. A runner
- * has no CPU, RSS or TTY accounting, so without `-o` the rows stay mirage's
- * compact `PID<TAB>COMMAND` and never broaden the profile's view. `-o` lays
- * out procps-ng 4.0.4's columns, every key a runner can answer (constants.COLUMNS);
- * a header row prints unless every header is empty. Selecting nothing (`-p`
- * of an absent PID) exits 1, as procps does, and an option error is
- * procps's message and usage.
+ * List processes with procps's selection and `-o` columns. The machines are
+ * scanned first, so what a program started there shows as processes of its
+ * own. Without `-o` the columns are `PID MACHINE MPID CMD`
+ * (`constants.PLAIN`); `-o` lays out procps-ng 4.0.4's columns, every key a
+ * process can answer (`constants.COLUMNS`), `machine` and `mpid` among them;
+ * a header row prints unless every header is empty. BSD `f` and `--forest`
+ * draw each command under its parent's. A `-p` number under `FIRST_PID` is
+ * a machine pid. Selecting nothing (`-p` of an absent PID) exits 1, as
+ * procps does, and an option error is procps's message and usage. A process
+ * has no CPU, RSS or TTY accounting, and ps never broadens the profile's
+ * view.
  *
- * The daemon running the line holds the workspace's lease, so its runners
- * are every one the workspace has. In the compact rows a runner that is a
- * program a runtime runs is followed by where it runs, a host program by its
- * host PID and another by its machine, as `-<TAB>└ where`.
+ * The daemon running the line holds the workspace's lease, so its processes
+ * are every one the workspace has.
  */
-export function handlePs(
+export async function handlePs(
   jobTable: JobTable,
   parts: string[],
   session: SessionState | null = null,
@@ -221,48 +253,53 @@ export function handlePs(
   try {
     options = parsePs(parts.slice(1))
   } catch (err) {
-    return Promise.resolve(
-      jobResult(cmdStr, `error: ${(err as Error).message}\n${constants.USAGE}`, 1),
-    )
+    return jobResult(cmdStr, `error: ${(err as Error).message}\n${constants.USAGE}`, 1)
   }
   const sid = sessionOf(session)
   const processes = processView(jobTable, session)
+  await processes.scan()
   const every = options.all || options.pids.size === 0
-  const rows = processes.list().filter((info) => every || options.pids.has(info.id.pid))
-  let lines: string[]
-  if (options.columns.length > 0) {
-    const keys = options.columns.map(([key]) => key)
-    const ctx: PsContext = {
-      now: systemNow(),
-      zone: (session !== null ? zoneFromEnv(session.env) : null) ?? LOCAL_ZONE,
-      group: session?.profile ?? null,
-      sessionId: sid,
-      shellPid: session?.shellPid ?? null,
-    }
-    lines = rows.map((info) =>
+  const rows = processes
+    .list()
+    .filter(
+      (info) =>
+        every ||
+        options.pids.has(info.id.pid) ||
+        (info.machinePid !== null &&
+          info.machinePid.exited == null &&
+          info.machinePid.pid < FIRST_PID &&
+          options.pids.has(info.machinePid.pid)),
+    )
+  const columns = options.columns.length > 0 ? options.columns : constants.PLAIN
+  const keys = columns.map(([key]) => key)
+  const ctx: PsContext = {
+    now: systemNow(),
+    zone: (session !== null ? zoneFromEnv(session.env) : null) ?? LOCAL_ZONE,
+    group: session?.profile ?? null,
+    sessionId: sid,
+    shellPid: session?.shellPid ?? null,
+  }
+  const drawn: [Process, string][] = options.forest
+    ? forest(rows)
+    : [...rows].sort((a, b) => a.id.pid - b.id.pid).map((info) => [info, ''])
+  const lines = drawn.map(([info, branch]) =>
+    psRow(
+      keys,
+      keys.map((key) => psCell(key, info, ctx, branch)),
+    ),
+  )
+  if (columns.some(([, header]) => header !== ''))
+    lines.unshift(
       psRow(
         keys,
-        keys.map((key) => psCell(key, info, ctx)),
+        columns.map(([, header]) => header),
       ),
     )
-    if (options.columns.some(([, header]) => header !== ''))
-      lines.unshift(
-        psRow(
-          keys,
-          options.columns.map(([, header]) => header),
-        ),
-      )
-  } else {
-    lines = rows.flatMap((info) => [
-      `${String(info.id.pid)}\t${info.command}`,
-      ...(info.runtime !== null ? [`-\t└ ${runWhere(info)}`] : []),
-    ])
-  }
   const code = rows.length > 0 ? 0 : 1
   const out = encodeText(lines.length > 0 ? lines.join('\n') + '\n' : '')
-  return Promise.resolve([
+  return [
     out,
     new IOResult({ exitCode: code }),
     new ExecutionNode({ command: cmdStr, exitCode: code }),
-  ])
+  ]
 }

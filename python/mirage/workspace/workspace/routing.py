@@ -14,11 +14,13 @@
 
 import asyncio
 import dataclasses
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
+from mirage.commands.config import Context
 from mirage.policy.decisions import op_question
-from mirage.policy.policies import agreed, settled
+from mirage.policy.policies import agreed, command_route, settled
 from mirage.policy.types import (
     Abandoned,
     Ask,
@@ -31,11 +33,11 @@ from mirage.policy.types import (
     RouteContext,
 )
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
+from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import (
-    bind_commands,
     catch_all,
+    routed,
     runtime_bindings_for,
     whole_line_runtime,
 )
@@ -50,12 +52,32 @@ from mirage.workspace.node.explain import Judged, Walked
 from mirage.workspace.session import SessionState
 from mirage.workspace.workspace.runtimes import Runtimes
 
+logger = logging.getLogger(__name__)
+
+
+def _machine_of(
+    runtime: Runtime[Any], decision: RouteDecision[RuntimeIdentity]
+) -> str:
+    """The machine a runtime would run a command on under a decision, as
+    its id; empty for the workspace's own.
+
+    Args:
+        runtime (Runtime): the runtime serving the command.
+        decision (RouteDecision): the placement.
+    """
+    try:
+        machine = runtime.machine_for(Context(machine=decision.machine))
+    except ValueError as exc:
+        logger.debug("%s: no machine to explain: %s", runtime.name, exc)
+        return ""
+    return "" if machine is None else str(machine)
+
 
 class Router:
     """Decides which runtime a typed line routes to.
 
     The order is: an inherited decision, then the ``execute()`` runtime
-    argument, then the placement stage (``pre_execute``: the configured
+    and machine arguments, then the placement stage (``pre_execute``: the configured
     route policy as a built-in, then the coded policies), then each
     command's first capturer. It reads the runtime entries and the
     registry's static bindings but owns no mutable workspace state, so
@@ -79,6 +101,7 @@ class Router:
         self,
         command: str,
         runtime: str | None,
+        machine: str | None,
         session: SessionState,
         inherited: RouteDecision[RuntimeIdentity] | None,
         judged: Callable[[], Awaitable[Sequence[tuple[Walked, list[Judged]]]]],
@@ -103,6 +126,8 @@ class Router:
             command (str): the raw command line.
             runtime (str | None): the execute() runtime argument, which
                 wins over the policy.
+            machine (str | None): the execute() machine argument, which
+                wins over the policy as the runtime does.
             session (SessionState): the effective session (cwd, env).
             inherited (RouteDecision | None): the calling line's
                 decision, for nested evals.
@@ -122,7 +147,8 @@ class Router:
             cancel (asyncio.Event | None): the run's kill channel.
 
         Raises:
-            RouteError: an unknown runtime name or a failing policy.
+            RouteError: an unknown runtime or machine name or a failing
+                policy.
             MirageAbortError: the run was killed while the host decided.
         """
         if inherited is not None:
@@ -130,7 +156,11 @@ class Router:
         entries = self._runtimes.entries
         policies = self._registry.policies
         placing = await policies.wants_for("pre_execute", session.session_id)
-        placed = None if runtime is None else self._placed(entries, runtime)
+        placed = (
+            None
+            if runtime is None and machine is None
+            else self._placed(entries, runtime, machine)
+        )
         if not placing or (held is not None and await held()):
             return placed if placed is not None else self._unplaced(entries)
         ctx = self.context(command, session, await judged())
@@ -151,7 +181,7 @@ class Router:
         if placed is not None:
             return placed
         if route is not None:
-            return self._routed(entries, route.runtime)
+            return self._routed(entries, route)
         return self._unplaced(entries)
 
     async def placement(
@@ -175,7 +205,8 @@ class Router:
                 as ``decide`` takes it.
 
         Raises:
-            RouteError: an unknown runtime name or a failing policy.
+            RouteError: an unknown runtime or machine name or a failing
+                policy.
         """
         entries = self._runtimes.entries
         policies = self._registry.policies
@@ -193,32 +224,47 @@ class Router:
         if isinstance(winner, Deny):
             return answers, winner
         if isinstance(winner, Route):
-            return answers, self._routed(entries, winner.runtime)
+            return answers, self._routed(entries, winner)
         return answers, self._unplaced(entries)
 
     def _routed(
-        self, entries: list[Runtime[Any]], name: str
+        self, entries: list[Runtime[Any]], route: Route
     ) -> RouteDecision[RuntimeIdentity]:
-        """The decision a policy's route places a line on. ``workspace``
-        keeps the line in Mirage: no line executor (an ``@line`` capture)
-        takes it, and each command stays on its first other capturer.
-        Any other name places it as the runtime argument does.
+        """The decision a policy's route places a line on (``routed``).
 
         Args:
             entries (list[Runtime]): the workspace's ordered runtimes.
-            name (str): the runtime the route names.
+            route (Route): the runtime and machine the route names.
 
         Raises:
-            RouteError: no entry has the name.
+            RouteError: no entry or machine has the name.
         """
-        if name != WorkspaceRuntime.name:
-            return self._placed(entries, name)
-        kept = [e for e in entries if WHOLE_LINE not in e.captures]
-        bindings: dict[str, Runtime[Any] | None] = {
-            command: None for entry in entries for command in entry.captures
-        }
-        bindings.update(bind_commands(kept))
-        return RouteDecision(bindings=bindings, fallback=catch_all(entries))
+        self._known_machine(route.machine)
+        try:
+            return routed(
+                entries,
+                self._registry.runtime_bindings,
+                route.runtime,
+                route.machine,
+            )
+        except ValueError as exc:
+            raise RouteError(str(exc)) from exc
+
+    def _known_machine(self, machine: str | None) -> None:
+        """Refuse a machine the workspace does not have.
+
+        Args:
+            machine (str | None): the machine a placement names.
+
+        Raises:
+            RouteError: no machine has the name.
+        """
+        if machine is None:
+            return
+        try:
+            self._runtimes.machines.get(machine)
+        except ValueError as exc:
+            raise RouteError(str(exc)) from exc
 
     def _unplaced(
         self, entries: list[Runtime[Any]]
@@ -234,13 +280,15 @@ class Router:
             fallback=catch_all(entries),
         )
 
-    def runtime_for(
+    def placement_for(
         self, one: Judged, decision: RouteDecision[RuntimeIdentity]
-    ) -> str:
+    ) -> tuple[str, str]:
         """The runtime entry that serves a command under a decision, as
-        its run places it: the ``@external`` runtime for a program no
-        name binds (a path runs through the workspace's exec path first);
-        empty when the workspace runs it itself.
+        its run places it, and the machine it runs there on: the
+        ``@external`` runtime for a program no name binds (a path runs
+        through the workspace's exec path first); both empty when the
+        workspace runs it itself. A ``pre_command`` route of the command
+        places it over the line's decision, as its run does.
 
         Args:
             one (Judged): the command's judgment and the session it was
@@ -249,7 +297,15 @@ class Router:
         """
         whole = whole_line_runtime(decision.bindings)
         if isinstance(whole, Runtime):
-            return whole.name
+            return whole.name, _machine_of(whole, decision)
+        route = command_route(one.judgment.answers)
+        if route is not None:
+            decision = routed(
+                self._runtimes.entries,
+                decision.bindings,
+                route.runtime,
+                route.machine or decision.machine,
+            )
         command = one.judgment.command
         fallback = decision.fallback
         if one.ctx is not None and one.session is not None:
@@ -263,38 +319,50 @@ class Router:
                 )
                 is not None
             ):
-                return ""
-            consumer, routed = routed_consumer(
+                return "", ""
+            consumer, rerouted = routed_consumer(
                 command, one.ctx.argv, one.session, self._registry, decision
             )
-            decision = routed or decision
+            decision = rerouted or decision
             if consumer is Consumer.EXTERNAL and "/" not in command:
                 fallback = decision.bindings.get(EXTERNAL_COMMANDS)
         serving = decision.bindings.get(command, fallback)
-        if serving is None or isinstance(serving, WorkspaceRuntime):
-            return ""
-        return serving.name
+        if not isinstance(serving, Runtime) or isinstance(
+            serving, WorkspaceRuntime
+        ):
+            return "", ""
+        return serving.name, _machine_of(serving, decision)
 
     def _placed(
-        self, entries: list[Runtime[Any]], name: str
+        self,
+        entries: list[Runtime[Any]],
+        name: str | None,
+        machine: str | None,
     ) -> RouteDecision[RuntimeIdentity]:
-        """The decision that serves a line on one named runtime: its
-        captures over the static bindings.
+        """The decision that serves a line on one named runtime, its
+        captures over the static bindings, on one named machine.
 
         Args:
             entries (list[Runtime]): the workspace's ordered runtimes.
-            name (str): the runtime entry the line is placed on.
+            name (str | None): the runtime entry the line is placed on;
+                None leaves each command on its first capturer.
+            machine (str | None): the machine it runs on.
 
         Raises:
-            RouteError: no entry has the name, or it cannot be selected.
+            RouteError: no entry or machine has the name, or the runtime
+                cannot be selected.
         """
+        self._known_machine(machine)
         try:
-            overlay = runtime_bindings_for(entries, name)
+            overlay = (
+                {} if name is None else runtime_bindings_for(entries, name)
+            )
         except ValueError as exc:
             raise RouteError(str(exc)) from exc
         return RouteDecision(
             bindings={**self._registry.runtime_bindings, **overlay},
             fallback=catch_all(entries),
+            machine=machine,
         )
 
     def context(

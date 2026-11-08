@@ -4,7 +4,8 @@ icon: /images/docker-logo.svg
 description: Run captured programs in a Docker container you started.
 ---
 
-`docker` runs captured programs in a running container, by name. You start
+The `docker` machine provider reaches a running container, by name, and the
+`native` runtime runs captured programs in it. You start
 and stop the container; Mirage only runs programs in it. Python SDK and
 Node.
 
@@ -42,37 +43,50 @@ Python in the container too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.sandbox.docker import DockerRuntime
+    from mirage.runtime.native import NativeRuntime
 
-    runtime = DockerRuntime(
-        captures=["@python", "@external"],
-        config={"container": "my-sandbox", "mount_type": "ssh"},
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "box": {
+                "provider": "docker",
+                "container": "my-sandbox",
+                "mount_type": "ssh",
+            }
+        },
+        runtimes=[NativeRuntime(["@python", "@external"], machine="box")],
     )
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { DockerRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, NativeRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-    const runtime = new DockerRuntime({
-      captures: ['@python', '@external'],
-      config: { container: 'my-sandbox', mountType: 'ssh' },
-    })
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { box: { provider: 'docker', container: 'my-sandbox', mountType: 'ssh' } },
+        runtimes: [new NativeRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+      },
+    )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="YAML" icon="file-code">
     ```yaml
     mode: exec
+    machines:
+      box:
+        provider: docker
+        container: my-sandbox
+        mount_type: ssh
     runtimes:
-      - name: docker
+      - name: native
         captures: ["@python", "@external"]
-        config:
-          container: my-sandbox
-          mount_type: ssh
+        machine: box
     mounts:
       /data:
         vfs: ram
@@ -155,4 +169,3 @@ docker exec my-sandbox mirage workspace create /tmp/sandbox.yaml
 - Sizing, GPUs, networks, volumes and bind mounts go on your own
   `docker run`. You can bake `sandbox.yaml` into the image instead of
   copying it.
-- A [timeout](/home/setup/runtime/sandbox#timeouts) does not kill the program in the container.

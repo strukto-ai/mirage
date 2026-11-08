@@ -2877,7 +2877,7 @@
         },
         {
           "op": "exec",
-          "command": "kill $(ps | grep 'sleep 30$' | cut -f1) 2>&1 | sed 's/([0-9][0-9]*)/(PID)/'",
+          "command": "kill $(ps | grep 'sleep 30$' | awk '{print $1}') 2>&1 | sed 's/([0-9][0-9]*)/(PID)/'",
           "expect": {
             "value": {
               "exit_code": 0,
@@ -2896,7 +2896,7 @@
         },
         {
           "op": "exec",
-          "command": "kill $(ps | grep 'sleep 30$' | cut -f1); echo rc=$?",
+          "command": "kill $(ps | grep 'sleep 30$' | awk '{print $1}'); echo rc=$?",
           "expect": {
             "value": {
               "exit_code": 0,

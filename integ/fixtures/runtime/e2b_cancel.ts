@@ -12,27 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LineExecutorMixin } from '@struktoai/mirage-core/runtime/mixin'
-import type { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
+import type { MachineHandle } from '@struktoai/mirage-core/machine/handle'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
 const dec = new TextDecoder()
 
-/** Run one raw line on a sandbox runtime from /home/user. */
-export function runLine(
-  runtime: LineExecutorMixin<undefined>,
-  line: string,
-  stdin: Uint8Array | null = null,
-) {
-  const ctx = { stdin, flags: { c: line }, env: {}, cwd: PathSpec.fromStrPath('/home/user') }
-  return runtime.runLine(undefined, [], [], ctx)
+/**
+ * Run one raw line on a machine from /home/user, as the native runtime runs
+ * an `@line` capture there.
+ */
+export function runLine(machine: MachineHandle, line: string, stdin: Uint8Array | null = null) {
+  const ctx = { stdin, flags: {}, env: {}, cwd: PathSpec.fromStrPath('/home/user') }
+  return machine.run(['/bin/sh', '-c', line], ctx, null, null, null)
 }
 
-async function waitForRemote(runtime: E2BRuntime, command: string): Promise<void> {
+async function waitForRemote(machine: MachineHandle, command: string): Promise<void> {
   const deadline = performance.now() + 10_000
   while (performance.now() < deadline) {
-    const result = await runLine(runtime, command)
+    const result = await runLine(machine, command)
     if (result.exitCode === 0) return
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
@@ -40,7 +38,7 @@ async function waitForRemote(runtime: E2BRuntime, command: string): Promise<void
 }
 
 export async function exerciseCancellation(
-  runtime: E2BRuntime,
+  machine: MachineHandle,
   workspace: Workspace,
 ): Promise<void> {
   for (const mode of ['caller', 'timeout']) {
@@ -55,21 +53,21 @@ export async function exerciseCancellation(
       }),
     )
     try {
-      await waitForRemote(runtime, `test -s ${path}`)
-      const survivor = runLine(runtime, 'sleep 1; printf survivor')
+      await waitForRemote(machine, `test -s ${path}`)
+      const survivor = runLine(machine, 'sleep 1; printf survivor')
       if (mode === 'caller') abort.abort()
       const result = await outcome
       if (mode === 'caller' ? result.error !== 'AbortError' : result.code !== 124) {
         throw new Error(`Unexpected ${mode} cancellation result: ${JSON.stringify(result)}`)
       }
-      await waitForRemote(runtime, `! kill -0 $(cat ${path}) 2>/dev/null`)
+      await waitForRemote(machine, `! kill -0 $(cat ${path}) 2>/dev/null`)
       if (dec.decode((await survivor).stdout) !== 'survivor')
         throw new Error('Cancellation affected a concurrent command')
     } finally {
       abort.abort()
       await outcome
       await runLine(
-        runtime,
+        machine,
         `if test -s ${path}; then kill -9 $(cat ${path}) 2>/dev/null || true; fi; rm -f ${path}`,
       )
     }

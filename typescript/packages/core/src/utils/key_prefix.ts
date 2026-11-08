@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { lstripSlash, rstripSlash, stripSlash } from '../utils/slash.ts'
+import { lstripSlash, rstripSlash, stripSlash } from './slash.ts'
 import { PathSpec } from '../types.ts'
 import { QUOTED_CHARS } from './fnmatch.ts'
 

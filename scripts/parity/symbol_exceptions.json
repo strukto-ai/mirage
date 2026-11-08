@@ -160,7 +160,7 @@
     "Pending": "TypeScript stores resolve/reject callbacks and abort-listener cleanup for FIFO admission; Python queues asyncio futures."
    }
   },
-  "runtime/sandbox/microsandbox/config": {
+  "machine/microsandbox/config": {
    "typescript_only": {
     "MICROSANDBOX_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
    }
@@ -323,7 +323,7 @@
     "SSH2_SFTP_MODULE": "ssh2's SFTP class lives in an internal module of the optional peer; asyncssh exports what Python uses."
    }
   },
-  "runtime/sandbox/mounts": {
+  "machine/mounts": {
    "typescript_only": {
     "Served": "Python keeps each served prefix as a tuple with its task; TypeScript names the record, whose promise carries no done state of its own.",
     "registerPipeServer": "node registers how it makes its PipeServer with core, since MountCore and ssh2 are node's; Python imports PipeServer directly.",
@@ -331,13 +331,13 @@
     "within": "asyncio.wait_for in Python."
    }
   },
-  "runtime/sandbox/e2b/sdk": {
+  "machine/e2b/sdk": {
    "python_only": {
     "PtySize": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and passes the PTY's size as plain fields.",
     "SandboxException": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and reads SandboxError off it."
    }
   },
-  "runtime/sandbox/mixin": {
+  "machine/mixin": {
    "python_only": {
     "PipeTransportMixin": "Python detects the pipe transport by mixin inheritance; TypeScript uses a nominal symbol, interface and type guard."
    },
@@ -347,7 +347,7 @@
     "isPipeTransport": "Nominal TypeScript pipe transport corresponds to the Python PipeTransportMixin."
    }
   },
-  "runtime/sandbox/program": {
+  "machine/program": {
    "python_only": {
     "STREAM_LIMIT": "Python's stream readers take a buffer size, the subprocess protocol's and the ssh channel's reads; Node's streams size their own.",
     "_ExitWatch": "asyncio's Process.wait answers only once every pipe closed, so run_program reads the child's exit from its stream protocol; Node's child emits 'exit' at the exit itself.",
@@ -554,13 +554,15 @@
     "use_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
     "list_lines_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
     "list_jobs_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
-    "list_processes_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands."
+    "list_processes_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands.",
+    "list_machines_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerWorkspaceCommands."
    },
    "typescript_only": {
     "LogPage": "TypeScript types the HTTP page passed to its formatter; Python uses a dictionary from the HTTP response.",
     "LineRecord": "TypeScript types the JSON records a verb prints; Python formats them as the decoded dicts.",
     "JobRecord": "TypeScript types the JSON records a verb prints; Python formats them as the decoded dicts.",
-    "ProcessRecord": "TypeScript types the JSON records a verb prints; Python formats them as the decoded dicts."
+    "ProcessRecord": "TypeScript types the JSON records a verb prints; Python formats them as the decoded dicts.",
+    "MachineRecord": "TypeScript types the JSON records a verb prints; Python formats them as the decoded dicts."
    }
   },
   "server/auth/middleware": {
@@ -1462,7 +1464,8 @@
     "configName": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
     "def": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
     "meta": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
-    "unwrap": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys."
+    "unwrap": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
+    "configTypes": "TypeScript runtimes and machine providers both describe their config as a configFields table, read by one helper; Python reads each class's dataclass fields."
    }
   },
   "server/resources/values": {
@@ -1580,6 +1583,51 @@
     "PgModule": "pg loads as node's optional peer, so TypeScript types the pool, its clients and the module structurally; Python imports asyncpg and uses its own types.",
     "PgPoolLike": "pg loads as node's optional peer, so TypeScript types the pool, its clients and the module structurally; Python imports asyncpg and uses its own types.",
     "bind": "pg binds a Buffer as BYTEA and would stringify a bare Uint8Array, so TypeScript turns each byte parameter into one; asyncpg binds Python bytes itself."
+   }
+  },
+  "execution/machine/table": {
+   "typescript_only": {
+    "HostStatus": "TypeScript names the function types of the host scan and signal the table's constructor takes; Python annotates the two callables inline.",
+    "HostSignal": "TypeScript names the function types of the host scan and signal the table's constructor takes; Python annotates the two callables inline.",
+    "foundKey": "A Map compares object keys by identity, so TypeScript spells a found process's machine, pid and start as one string; Python keys its dict by the tuple."
+   }
+  },
+  "machine/registry": {
+   "python_only": {
+    "MACHINE_MODULES": "Python imports a provider's module by path on first use; TypeScript has no import by name, so each provider module registers its class as it loads."
+   },
+   "typescript_only": {
+    "PROVIDERS": "Python imports a provider's module by path on first use; TypeScript has no import by name, so each provider module registers its class as it loads.",
+    "registerMachine": "Python imports a provider's module by path on first use; TypeScript has no import by name, so each provider module registers its class as it loads.",
+    "NODE_PROVIDERS": "The providers @struktoai/mirage-node registers, named for the hint when core is used alone; every Python provider ships in one package."
+   }
+  },
+  "policy/composition": {
+   "typescript_only": {
+    "isRoute": "A type guard for the Route answer; Python asks isinstance."
+   }
+  },
+  "runtime/native/runtime": {
+   "typescript_only": {
+    "NativeOptions": "TypeScript's constructor takes one typed options object; Python takes keyword arguments."
+   }
+  },
+  "runtime/table": {
+   "typescript_only": {
+    "MACHINE_PROVIDERS": "TypeScript's machine registry fills as packages load, so the hint for a runtimes entry naming a provider lists them here; Python reads the registry's module table.",
+    "NATIVE_KEYS": "A TypeScript object literal swallows a typo key, so the entry options are checked by hand; Python's keyword arguments raise TypeError on one."
+   }
+  },
+  "server/routers/machines": {
+   "python_only": {
+    "list_machines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerMachinesRoutes.",
+    "get_machine": "FastAPI routes are module functions; Fastify registers the same handler inline in registerMachinesRoutes.",
+    "router": "FastAPI collects a module's routes on an APIRouter the app includes; Fastify registers them on the app in registerMachinesRoutes."
+   },
+   "typescript_only": {
+    "registerMachinesRoutes": "FastAPI collects a module's routes on an APIRouter the app includes; Fastify registers them on the app in registerMachinesRoutes.",
+    "WsIdParams": "Fastify types a route's path parameters with an interface; FastAPI reads each parameter from the route function's signature.",
+    "WsMachineParams": "Fastify types a route's path parameters with an interface; FastAPI reads each parameter from the route function's signature."
    }
   }
  }

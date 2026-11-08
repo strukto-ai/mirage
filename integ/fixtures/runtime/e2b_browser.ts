@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Limit, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
-import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
+import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
+import { NativeRuntime } from '@struktoai/mirage-core/runtime/native/runtime'
 
 import { exerciseCancellation, runLine } from './e2b_cancel.ts'
 
@@ -24,14 +25,14 @@ function check(condition: boolean, message: string): asserts condition {
 }
 
 export async function exercise(config: { sandboxId: string; apiKey: string }): Promise<string[]> {
-  const runtime = new E2BRuntime({ captures: ['python3', 'node'], config })
+  const machine = new E2BMachine('e2b', config)
   const checks: string[] = []
   try {
     // Concurrent first calls also exercise the shared connection latch.
     const results = await Promise.all(
       Array.from({ length: 6 }, (_, i) =>
         runLine(
-          runtime,
+          machine,
           "python3 -c 'import sys,time,json; s=time.time(); d=sys.stdin.buffer.read(); time.sleep(2); print(json.dumps([s,time.time(),d.hex()]))'",
           new Uint8Array([i]),
         ),
@@ -56,7 +57,7 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
         b.toString(16).padStart(2, '0'),
       ).join('')
       const result = await runLine(
-        runtime,
+        machine,
         "python3 -c 'import sys,hashlib; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'",
         stdin,
       )
@@ -67,7 +68,7 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
 
     for (let i = 0; i < 6; i++) {
       const result = await runLine(
-        runtime,
+        machine,
         'printf out; printf err >&2; exit 7',
         new Uint8Array([1]),
       )
@@ -83,7 +84,8 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [runtime, 'workspace'],
+        machines: { e2b: machine },
+        runtimes: [new NativeRuntime({ captures: ['python3', 'node'], machine: 'e2b' }), 'workspace'],
       },
     )
     try {
@@ -107,14 +109,15 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
       await workspace.close()
     }
   } finally {
-    await runtime.close()
+    await machine.close()
   }
-  const cancellable = new E2BRuntime({ config })
+  const cancellable = new E2BMachine('e2b', config)
   const cancelWorkspace = new Workspace(
     { '/home/user': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [cancellable, 'workspace'],
+      machines: { e2b: cancellable },
+      runtimes: [new NativeRuntime({ captures: ['@line'], machine: 'e2b' }), 'workspace'],
       commandLimits: { '@line': new Limit({ timeoutSeconds: 5 }) },
     },
   )

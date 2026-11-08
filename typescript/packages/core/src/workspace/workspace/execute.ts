@@ -1296,6 +1296,7 @@ async function runParsedLine(
                 runWithSystemClock(env.registry.systemClock, () =>
                   runWholeLine(
                     lineRuntime,
+                    decision.machine,
                     command,
                     stdin,
                     effectiveSession,

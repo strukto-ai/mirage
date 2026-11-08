@@ -30,6 +30,7 @@ import {
   type HandOff,
   type Occurrence,
   type Pending,
+  type Route,
   type ShellExplanation,
   type ShellNode,
   type CommandWord,
@@ -182,7 +183,7 @@ export interface Judgment {
   /** The record the refused result would carry, null when the line would run. */
   readonly refusal: Refusal | null
   /** Every policy's answer to the command, in the order the chain asks them. */
-  readonly answers: readonly (Deny | Ask)[]
+  readonly answers: readonly (Deny | Ask | Route)[]
   /** The command line word by word, each with its kind and the path it names, redirect targets last. */
   readonly words: readonly CommandWord[]
 }
@@ -330,9 +331,13 @@ async function explained(
   ctx: CommandContext,
   registry: MountRegistry,
   asked: Deny | Ask | null,
-  answers: readonly (Deny | Ask)[],
+  answers: readonly (Deny | Ask | Route)[],
 ): Promise<Judgment> {
-  const document = settled(answers.filter((a) => a.policy === PermissionsPolicy.name))
+  const document = settled(
+    answers.filter(
+      (a): a is Deny | Ask => a.kind !== 'route' && a.policy === PermissionsPolicy.name,
+    ),
+  )
   const rule = document?.rule ?? null
   const base: Judgment = {
     command: ctx.command,
@@ -1126,7 +1131,7 @@ async function admitted(
   }
   const action = await resolved(
     one.ctx,
-    settled(judgment.answers),
+    refusal(judgment.answers),
     registry,
     signal,
     handed === null ? null : { line: handed, occurrence: one.occurrence },
@@ -1211,7 +1216,7 @@ async function verdictRefuses(
 ): Promise<boolean> {
   const ctx = judged.ctx
   if (ctx === undefined) return true
-  const asked = settled(judged.judgment.answers)
+  const asked = refusal(judged.judgment.answers)
   if (asked?.kind !== 'ask') return asked !== null
   const claimant: Claimant = { line: handed, occurrence: judged.occurrence }
   const standing = await registry.decisions.held(ctx, asked, claimant)
@@ -1406,7 +1411,7 @@ export async function lineHeld(
       const expl = one.judgment
       if (!isVerdict(expl) || expl.exitCode === 0) continue
       if (refuses(expl)) return true
-      const asked = settled(expl.answers)
+      const asked = refusal(expl.answers)
       if (one.ctx === undefined || asked?.kind !== 'ask' || !one.stated) continue
       const claimant: Claimant = { line: handed, occurrence: one.occurrence }
       if ((await resolved(one.ctx, asked, registry, signal, claimant)) !== null) return true
@@ -1493,7 +1498,7 @@ export function explainedLine(
   line: string,
   judged: readonly Judged[],
   verdicts: readonly Judged[],
-  runtimeOf: (one: Judged) => string,
+  placedOf: (one: Judged) => [string, string],
   reparse: (line: string) => TSNodeLike,
   wholeLine = false,
 ): ShellExplanation {
@@ -1508,7 +1513,7 @@ export function explainedLine(
     scope.judged.push(one)
   }
   const root = scopes.find((s) => s.parent === null) ?? { parent: null, source: line, judged: [] }
-  const node = scopeNode('line', root, scopes, runtimeOf, reparse)
+  const node = scopeNode('line', root, scopes, placedOf, reparse)
   // The run holds a line only on a verdict the pass may give on the gate's
   // behalf (`prejudgeLine`): a question about words the runtime completes
   // (`find -exec`, `xargs`) is the gate's, asked where it runs, so it holds
@@ -1566,6 +1571,16 @@ function sameAt(a: Occurrence | null, b: Occurrence | null): boolean {
 }
 
 /**
+ * What a command's answers come to as the gate reads them: the first Deny
+ * (two routes that disagree among them), else the first Ask; a route the
+ * answers agree on refuses nothing. Mirrors the Python `_refusal`.
+ */
+function refusal(answers: readonly (Deny | Ask | Route)[]): Deny | Ask | null {
+  const verdict = settled(answers)
+  return verdict?.kind === 'route' ? null : verdict
+}
+
+/**
  * A command's outcome, reason and source as its explanation states them:
  * the refusal it meets (`ASK` for a question waiting on the host, `DENY`
  * for any other, a policy that failed included), else the ask an approval
@@ -1574,16 +1589,16 @@ function sameAt(a: Occurrence | null, b: Occurrence | null): boolean {
  * the document's own. Mirrors the Python `_verdict_of`.
  */
 function verdictOf(judgment: Judgment): [Outcome, string, string] {
-  const decider = settled(judgment.answers)
+  const decider = refusal(judgment.answers)
   const source =
     decider?.rule !== undefined
       ? sourceOf(decider.rule)
       : judgment.source === 'commands.allow'
         ? judgment.source
         : ''
-  const refusal = judgment.refusal
-  if (refusal !== null) {
-    return [isPending(refusal) ? Outcome.ASK : Outcome.DENY, refusal.reason, source]
+  const refused = judgment.refusal
+  if (refused !== null) {
+    return [isPending(refused) ? Outcome.ASK : Outcome.DENY, refused.reason, source]
   }
   if (decider?.kind === 'ask') return [Outcome.ASK, decider.reason, source]
   if (judgment.exitCode !== 0) return [Outcome.DENY, '', source]
@@ -1599,7 +1614,7 @@ function scopeNode(
   kind: string,
   scope: Scope,
   scopes: readonly Scope[],
-  runtimeOf: (one: Judged) => string,
+  placedOf: (one: Judged) => [string, string],
   reparse: (line: string) => TSNodeLike,
 ): ShellNode {
   const text = scope.source
@@ -1622,7 +1637,7 @@ function scopeNode(
         s.parent.start === start && s.parent.end === end ? 'line' : 'substitution',
         s,
         scopes,
-        runtimeOf,
+        placedOf,
         reparse,
       ),
     )
@@ -1636,7 +1651,7 @@ function scopeNode(
       const ones = mine.get(span) ?? []
       mine.delete(span)
       if (ones.length === 0) return [{ type: 'command', text: getText(node), children: kids }]
-      return ones.map((one, i) => commandOf(one, getText(node), i === 0 ? kids : [], runtimeOf))
+      return ones.map((one, i) => commandOf(one, getText(node), i === 0 ? kids : [], placedOf))
     }
     if (SUBSTITUTIONS.has(node.type)) return take(start, end)
     const inner = node.namedChildren.flatMap(convert)
@@ -1647,7 +1662,7 @@ function scopeNode(
   for (const [span, ones] of mine) {
     const [start, end] = span.split(':').map(Number)
     const spoken = text.slice(start, end)
-    for (const item of ones.map((one) => commandOf(one, spoken, [], runtimeOf))) children.push(item)
+    for (const item of ones.map((one) => commandOf(one, spoken, [], placedOf))) children.push(item)
   }
   for (const item of take(0, Number.MAX_SAFE_INTEGER)) children.push(item)
   return { type: kind, text, children }
@@ -1658,10 +1673,11 @@ function commandOf(
   one: Judged,
   text: string,
   children: readonly ShellNode[],
-  runtimeOf: (one: Judged) => string,
+  placedOf: (one: Judged) => [string, string],
 ): CommandExplanation {
   const judgment = one.judgment
   const [outcome, reason, source] = verdictOf(judgment)
+  const [runtime, machine] = placedOf(one)
   return {
     type: 'command',
     command: judgment.command,
@@ -1673,7 +1689,8 @@ function commandOf(
     source,
     answers: judgment.answers,
     refusal: judgment.refusal,
-    runtime: runtimeOf(one),
+    runtime,
+    machine,
     text,
     children,
   }

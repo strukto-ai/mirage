@@ -1,4 +1,5 @@
 import { DEFAULT_PROCESS_PERMISSIONS, type ProcessPermissions } from './config.ts'
+import { FIRST_PID } from './constants.ts'
 import { underCeiling, type PathSpec, type ProcessScope } from '../../types.ts'
 import { ProcessHandle, type ExecutionBind } from './handle.ts'
 import type { Process, ProcessRunner } from './types.ts'
@@ -25,7 +26,7 @@ export function deliver(handle: ProcessHandle, signal: number): void {
  * from the highest the workspace's store recorded (`continueAfter`).
  */
 export class ProcessTable {
-  private nextPid = 1
+  private nextPid = FIRST_PID
   private readonly runners = new Map<number, { generation: number; handle: ProcessHandle }>()
   private readonly history = new Map<number, Process>()
   private readonly ancestors = new Map<number, readonly number[]>()
@@ -36,6 +37,19 @@ export class ProcessTable {
    * whatever profile, snapshot or store set it. Mirrors Python's `ceiling`.
    */
   ceiling: number | null = null
+  /**
+   * Brings the table in step with what each machine runs now: the
+   * processes a scan finds there join it, and leave once a scan no longer
+   * sees them. The workspace sets it, since it holds the machines. Mirrors
+   * Python's `scanner`.
+   */
+  scanner: (() => Promise<void>) | null = null
+  /**
+   * Sends a signal to a process that is a program on a machine as `kill`
+   * sent it, answering whether it ran, or null for a process Mirage stops
+   * itself. The workspace sets it. Mirrors Python's `sender`.
+   */
+  sender: ((handle: ProcessHandle, signal: number) => Promise<boolean> | null) | null = null
 
   /**
    * @param workspaceId the workspace whose pids these are.
@@ -180,7 +194,7 @@ export class ProcessTable {
     return handle
   }
 
-  /** The highest pid handed out so far, 0 before the first. */
+  /** The highest pid handed out so far, the one before `FIRST_PID` before the first. */
   get lastPid(): number {
     return this.nextPid - 1
   }
@@ -207,17 +221,37 @@ export class ProcessTable {
   }
 
   /**
-   * Deliver a signal to every live runner of a process group, as killpg(2)
-   * does: a runner that ignores it (a shell) hands it to the program it runs
-   * right now (`ProcessHandle.interrupt`), and any other stops with it and
-   * leaves the rest of the group to their own delivery. The deepest runners
-   * hear it first, so a native program knows the signal before the shell
-   * that waits for it stops. Returns whether the group had a live runner.
-   * Mirrors Python's signal_group.
+   * Bring the table in step with what each machine runs now (`scanner`), as
+   * `ps` does before it lists. Mirrors Python's `scan`.
    */
-  signalGroup(groupId: number, signal: number): boolean {
+  async scan(): Promise<void> {
+    if (this.scanner !== null) await this.scanner()
+  }
+
+  /**
+   * Send a signal to a program on a machine as `kill` sent it (`sender`):
+   * what it does with it is its own, and it ends when it exits. Answers
+   * whether it ran, once sent; null for a runner Mirage stops itself
+   * (`deliver`). Mirrors Python's `send`.
+   */
+  send(handle: ProcessHandle, signal: number): Promise<boolean> | null {
+    if (this.sender === null || handle.ignores.has(signal)) return null
+    return this.sender(handle, signal)
+  }
+
+  /**
+   * Deliver a signal to every live runner of a process group, as killpg(2)
+   * does: a program on a machine gets it as sent (`send`), a runner that
+   * ignores it (a shell) hands it to the program it runs right now
+   * (`ProcessHandle.interrupt`), and any other stops with it and leaves the
+   * rest of the group to their own delivery. The deepest runners hear it
+   * first, so a native program knows the signal before the shell that waits
+   * for it stops. Returns whether the group had a live runner. Mirrors
+   * Python's signal_group.
+   */
+  async signalGroup(groupId: number, signal: number): Promise<boolean> {
     const members = this.members(groupId)
-    for (const member of members) deliver(member, signal)
+    await signalMembers(this, members, signal)
     return members.length > 0
   }
 
@@ -290,10 +324,15 @@ export class ProcessTable {
       },
       permissions: () => (valid() ? permissions() : null),
       probeGroup: (groupId: number) => group(groupId) !== null,
-      signalGroup: (groupId: number, signal: number) => {
+      signalGroup: async (groupId: number, signal: number) => {
         const members = group(groupId)
-        for (const member of members ?? []) deliver(member, signal)
+        await signalMembers(this, members ?? [], signal)
         return members !== null
+      },
+      scan: () => this.scan(),
+      send: (pid: number, signal: number) => {
+        const handle = signalTarget(pid)
+        return handle === null ? null : this.send(handle, signal)
       },
     })
   }
@@ -377,4 +416,26 @@ export class ProcessTable {
     }
     if (errors.length > 0) throw new AggregateError(errors, 'process cancellation failed')
   }
+}
+
+/**
+ * Deliver a signal to each runner of a group, in order: Mirage's own at once
+ * (`deliver`), then the programs on machines as sent.
+ *
+ * @param table the table the runners run in.
+ * @param members the runners, deepest first.
+ * @param signal the signal.
+ */
+async function signalMembers(
+  table: ProcessTable,
+  members: readonly ProcessHandle[],
+  signal: number,
+): Promise<void> {
+  const sending: Promise<boolean>[] = []
+  for (const member of members) {
+    const sent = table.send(member, signal)
+    if (sent === null) deliver(member, signal)
+    else sending.push(sent)
+  }
+  await Promise.all(sending)
 }

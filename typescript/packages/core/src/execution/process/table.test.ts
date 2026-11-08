@@ -5,6 +5,7 @@ import { HISTORY_SECONDS } from '../constants.ts'
 import { LineId } from '../types.ts'
 import { currentProcessId, runAsProcess } from '../../context/session_context.ts'
 import type { ProcessHandle } from './handle.ts'
+import { FIRST_PID } from './constants.ts'
 
 function gate() {
   let release: () => void = () => undefined
@@ -488,14 +489,14 @@ it("a group signal ends an ignoring shell's program and stops the rest", async (
   const forked = hung(child.record.id.pid)
   const outside = hung(parent.record.id.pid, { ownGroup: true })
   await started.promise
-  expect(processes.signalGroup(parent.record.group, 2)).toBe(true)
+  expect(await processes.signalGroup(parent.record.group, 2)).toBe(true)
   expect((await child.join()).exit).toBe(0)
   expect((await other.join()).exit).toBe(130)
   expect((await forked.join()).exit).toBe(130)
   expect((await parent.join()).exit).toBe(130)
   expect(outcome).toEqual([[null, 2]])
   expect(outside.signal).toBeNull()
-  expect(processes.signalGroup(outside.record.id.pid + 1, 2)).toBe(false)
+  expect(await processes.signalGroup(outside.record.id.pid + 1, 2)).toBe(false)
   outside.terminate()
   await outside.join()
 })
@@ -510,11 +511,11 @@ it('takes a given pid while it is free', async () => {
     cwd: PathSpec.fromStrPath('/'),
     cancel: () => undefined,
   }
-  const first = processes.start({ ...init, pid: 7, run: () => Promise.resolve(0) })
+  const first = processes.start({ ...init, pid: FIRST_PID + 6, run: () => Promise.resolve(0) })
   const release = gate()
   const held = processes.start({
     ...init,
-    pid: 7,
+    pid: FIRST_PID + 6,
     cancel: () => {
       release.release()
     },
@@ -523,12 +524,12 @@ it('takes a given pid while it is free', async () => {
       return 0
     },
   })
-  expect([first.record.id.pid, held.record.id.pid]).toEqual([7, 8])
+  expect([first.record.id.pid, held.record.id.pid]).toEqual([FIRST_PID + 6, FIRST_PID + 7])
   await first.join()
-  const again = processes.start({ ...init, pid: 7, run: () => Promise.resolve(0) })
-  expect(again.record.id.pid).toBe(7)
+  const again = processes.start({ ...init, pid: FIRST_PID + 6, run: () => Promise.resolve(0) })
+  expect(again.record.id.pid).toBe(FIRST_PID + 6)
   await again.join()
-  expect(processes.live().map((p) => p.record.id.pid)).toEqual([8])
+  expect(processes.live().map((p) => p.record.id.pid)).toEqual([FIRST_PID + 7])
   held.terminate()
   await held.join()
 })
@@ -614,7 +615,7 @@ it('runs started before the runner with the process live', async () => {
     },
   })
   await handle.join()
-  expect(order).toEqual(['started 1', 'run [1]'])
+  expect(order).toEqual([`started ${String(FIRST_PID)}`, `run [${String(FIRST_PID)}]`])
 })
 
 // A table that publishes the live runners learns each one that started,

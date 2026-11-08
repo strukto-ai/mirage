@@ -4,8 +4,9 @@ icon: apple
 description: Run captured programs in containers under Apple's container tool on macOS.
 ---
 
-`apple_container` runs captured programs in a running container under
-Apple's `container` tool. It can map each session to its own container, so
+The `apple_container` machine provider reaches a running container under
+Apple's `container` tool, and the `native` runtime runs captured programs in
+it. It can map each session to its own container, so
 every agent gets one. You start the containers; Mirage only runs programs
 in them. Needs Apple silicon and macOS 26 or later. Python SDK and Node.
 
@@ -35,38 +36,45 @@ map from session ID to container, for one container per agent.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.sandbox.apple_container import AppleContainerRuntime
+    from mirage.runtime.native import NativeRuntime
 
-    runtime = AppleContainerRuntime(
-        captures=["@python", "@external"],
-        config={"container": "my-sandbox"},
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"box": {"provider": "apple_container", "container": "my-sandbox"}},
+        runtimes=[NativeRuntime(["@python", "@external"], machine="box")],
     )
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { AppleContainerRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, NativeRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-    const runtime = new AppleContainerRuntime({
-      captures: ['@python', '@external'],
-      config: { container: 'my-sandbox' },
-    })
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { box: { provider: 'apple_container', container: 'my-sandbox' } },
+        runtimes: [new NativeRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+      },
+    )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="YAML" icon="file-code">
     ```yaml
     mode: exec
+    machines:
+      box:
+        provider: apple_container
+        container: my-sandbox
+        containers:
+          agent-1: agent-1-box
     runtimes:
-      - name: apple_container
+      - name: native
         captures: ["@python", "@external"]
-        config:
-          container: my-sandbox
-          containers:
-            agent-1: agent-1-box
+        machine: box
     mounts:
       /data:
         vfs: ram

@@ -24,7 +24,7 @@ every program Mirage does not have itself. Name `@python` to run the host's
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.sandbox.sandlock import SandlockRuntime
+    from mirage.runtime.sandlock import SandlockRuntime
 
     runtime = SandlockRuntime(
         captures=["@python", "@external"],

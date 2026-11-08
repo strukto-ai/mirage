@@ -303,11 +303,19 @@ def test_a_reason_left_out_is_the_documents_default():
         assert script_action(printed, "pre_command") == Ask(DEFAULT_ASK_REASON)
 
 
-def test_a_route_places_the_line_at_pre_execute_only():
+def test_a_route_places_a_line_or_a_command_only():
     printed = _answer(kind="route", runtime="docker")
     assert script_action(printed, "pre_execute") == Route("docker")
-    with pytest.raises(ValueError, match="cannot answer route at pre_command"):
-        script_action(printed, "pre_command")
+    assert script_action(printed, "pre_command") == Route("docker")
+    with pytest.raises(ValueError, match="cannot answer route at pre_vfs"):
+        script_action(printed, "pre_vfs")
+
+
+def test_a_route_may_name_a_machine_alone():
+    printed = _answer(kind="route", machine="gpu")
+    assert script_action(printed, "pre_command") == Route(machine="gpu")
+    both = _answer(kind="route", runtime="native", machine="gpu")
+    assert script_action(both, "pre_execute") == Route("native", machine="gpu")
 
 
 def test_a_route_carries_the_reason_it_gives():
@@ -326,6 +334,7 @@ def test_a_route_carries_the_reason_it_gives():
         b'{"kind": "allow"}',
         b'{"kind": "route"}',
         b'{"kind": "deny", "runtime": "docker"}',
+        b'{"kind": "ask", "machine": "gpu"}',
         b'{"kind": "deny", "reason": "x", "policy": "Mine"}',
         b'{"kind": "deny"}\n{"kind": "ask"}',
     ],

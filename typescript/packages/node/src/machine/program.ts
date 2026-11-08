@@ -1,0 +1,835 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { type ChildProcess, execFile, spawn } from 'node:child_process'
+import { constants } from 'node:os'
+import { once } from 'node:events'
+import { constants as fsConstants, realpathSync } from 'node:fs'
+import { access, open, stat } from 'node:fs/promises'
+import { basename, delimiter, dirname, join, resolve } from 'node:path'
+import { Readable, type Writable } from 'node:stream'
+import { setTimeout as delay } from 'node:timers/promises'
+import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import {
+  EXEC_PRELUDE,
+  HOST_START_SLACK_SECONDS,
+  PIPE_DIAGNOSTIC_BYTES,
+  PIPE_DIAGNOSTIC_WAIT_SECONDS,
+  STOP_GRACE_SECONDS,
+  STOP_POLL_SECONDS,
+  stopSignal,
+} from '@struktoai/mirage-core/machine/constants'
+import { currentCaller } from '@struktoai/mirage-core/context/session_context'
+import { debuglog } from 'node:util'
+import { asyncChain, closeQuietly } from '@struktoai/mirage-core/io/stream'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import type { ProcessHandle } from '@struktoai/mirage-core/execution/process/handle'
+import type { MachineProcess } from '@struktoai/mirage-core/execution/machine/types'
+import type { MachinePid } from '@struktoai/mirage-core/execution/types'
+import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
+import { boundSystemClock } from '@struktoai/mirage-core/utils/clock'
+import { FAKETIME_LIBRARIES, faketimeEnv } from '@struktoai/mirage-core/machine/constants'
+
+/**
+ * What a process on this host needs to read the running workspace's system
+ * time (`faketimeEnv`). Empty when the workspace keeps the host's time, and
+ * when this host has no libfaketime, where the process runs on the host's
+ * clock. `env` is the process's environment, whose `LD_PRELOAD` libraries
+ * load after libfaketime. Mirrors Python's `system_time_env`.
+ */
+export async function systemTimeEnv(env: Record<string, string>): Promise<Record<string, string>> {
+  if (boundSystemClock() === null) return {}
+  const library = process.platform === 'linux' ? await faketimeLibrary() : null
+  if (library === null) {
+    debuglog('mirage')('libfaketime: none found, so the process runs on the host clock')
+    return {}
+  }
+  return faketimeEnv(library, env)
+}
+
+/**
+ * The first libfaketime this host has, null for none. Asynchronous, so a
+ * candidate on this process's own FUSE folder never blocks the loop that
+ * answers it; one that cannot be read is passed over.
+ */
+async function faketimeLibrary(): Promise<string | null> {
+  for (const path of FAKETIME_LIBRARIES) {
+    try {
+      if ((await stat(path)).isFile()) return path
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === undefined) throw err
+      debuglog('mirage')('libfaketime: passing over %s: %s', path, code)
+    }
+  }
+  return null
+}
+
+/**
+ * Host folders a kernel mount in this process serves. A child started in
+ * one, or from one, would wait inside its spawn on the loop that answers
+ * for the folder, the very loop spawning it, so it starts outside and
+ * EXEC_PRELUDE takes it in once the spawn has returned. Each name counts the
+ * mounts recording it, so one going down leaves another at its path. Mirrors
+ * Python's `SERVED`.
+ */
+export const SERVED = new Map<string, number>()
+
+/**
+ * Record `folder` in `SERVED` under each name a child's path may give it: as
+ * given, made absolute, and with its parent's links resolved. Only the parent
+ * is read, never the mount, so recording it waits on no loop. Returns the
+ * names added, for `unserve` once the mount is gone. Mirrors Python's `serve`.
+ */
+export function serve(folder: string): string[] {
+  const given = resolve(folder)
+  const names = [given]
+  try {
+    names.push(join(realpathSync(dirname(given)), basename(given)))
+  } catch (err) {
+    debuglog('mirage')('cannot resolve the parent of %s: %s', given, err)
+  }
+  for (const name of names) SERVED.set(name, (SERVED.get(name) ?? 0) + 1)
+  return names
+}
+
+/**
+ * Take one mount's names out of `SERVED`; a name another mount still records
+ * stays. Mirrors Python's `unserve`.
+ */
+export function unserve(names: string[]): void {
+  for (const name of names) {
+    const left = (SERVED.get(name) ?? 0) - 1
+    if (left > 0) SERVED.set(name, left)
+    else SERVED.delete(name)
+  }
+}
+
+/** Whether `path` lies in a folder a kernel mount here serves. */
+function served(path: string): boolean {
+  for (const folder of SERVED.keys()) {
+    if (path === folder || path.startsWith(`${rstripSlash(folder)}/`)) return true
+  }
+  return false
+}
+
+/**
+ * Where the host's own PATH finds a program, as Python's `shutil.which`
+ * does, as an absolute path: a child's environment may carry no host PATH,
+ * and a relative entry would be read against the child's directory, so the
+ * lookup cannot be left to spawn. Asynchronous, so a PATH entry on a mount
+ * this process serves never blocks the loop that answers it. An empty
+ * entry is the current directory, as for the shell. A name with a slash is
+ * taken as given, and one the PATH lacks too, so spawn reports it missing.
+ * On Windows a name without one of `PATHEXT`'s suffixes is tried with each.
+ */
+export async function onHostPath(name: string): Promise<string> {
+  if (name.includes('/')) return name
+  const suffixes =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter((s) => s !== '')
+      : []
+  const names =
+    suffixes.length === 0 || suffixes.some((s) => name.toLowerCase().endsWith(s.toLowerCase()))
+      ? [name]
+      : suffixes.map((s) => name + s)
+  // The PATH and the directory as they are at the call.
+  const candidates = (process.env.PATH ?? '')
+    .split(delimiter)
+    .flatMap((dir) => names.map((each) => resolve(dir, each)))
+  for (const candidate of candidates) {
+    try {
+      if (!(await stat(candidate)).isFile()) continue
+      await access(candidate, fsConstants.X_OK)
+      return candidate
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === undefined) throw err
+      // Not usable here (absent, not executable, an unreadable entry):
+      // the next entry may be. Opt-in (NODE_DEBUG=mirage), on stderr.
+      debuglog('mirage')('%s is not usable: %s', candidate, code)
+    }
+  }
+  return name
+}
+
+async function untilInputCloses<T>(
+  stream: Writable,
+  work: (signal: AbortSignal) => Promise<T>,
+): Promise<T | null> {
+  if (stream.destroyed) return null
+  const controller = new AbortController()
+  const closed = once(stream, 'close', { signal: controller.signal }).then(() => null)
+  try {
+    return await Promise.race([work(controller.signal), closed])
+  } finally {
+    controller.abort()
+  }
+}
+
+/**
+ * Reject as spawn would for a program that is no regular file, or a script
+ * whose `#!` interpreter is missing or cannot run: through `EXEC_PRELUDE` the
+ * shell's exec fails instead, with the shell's status and words. Opened
+ * without waiting, so a FIFO fails rather than hangs, and each path is kept as
+ * spelled, as the host follows its links before its `..`. Mirrors Python's
+ * `_check_interpreter`.
+ */
+async function checkInterpreter(executable: string, cwd: string | undefined): Promise<void> {
+  const base = cwd ?? '.'
+  const under = (path: string): string => (path.startsWith('/') ? path : `${base}/${path}`)
+  const failure = (code: 'ENOENT' | 'EACCES'): NodeJS.ErrnoException =>
+    Object.assign(new Error(`spawn ${executable} ${code}`), {
+      code,
+      errno: -constants.errno[code],
+      syscall: `spawn ${executable}`,
+      path: executable,
+    })
+  let head: Buffer | null
+  try {
+    const file = await open(under(executable), fsConstants.O_RDONLY | fsConstants.O_NONBLOCK)
+    try {
+      if ((await file.stat()).isFile()) {
+        const { buffer, bytesRead } = await file.read(Buffer.alloc(256), 0, 256, 0)
+        head = buffer.subarray(0, bytesRead)
+      } else head = null
+    } finally {
+      await file.close()
+    }
+  } catch (err) {
+    debuglog('mirage')("reading %s's first line failed: %s", executable, String(err))
+    return
+  }
+  if (head === null) throw failure('EACCES')
+  if (head[0] !== 0x23 || head[1] !== 0x21) return
+  const end = head.indexOf(0x0a, 2)
+  const name = head
+    .subarray(2, end === -1 ? head.length : end)
+    .toString('utf8')
+    .trim()
+    .split(/\s+/)[0]
+  if (name === undefined || name === '') return
+  const interpreter = under(name)
+  if (
+    !(await stat(interpreter).then(
+      () => true,
+      () => false,
+    ))
+  )
+    throw failure('ENOENT')
+  if (
+    !(await access(interpreter, fsConstants.X_OK).then(
+      () => true,
+      () => false,
+    ))
+  )
+    throw failure('EACCES')
+}
+
+/**
+ * One process run to its end: its output and its exit status. The child
+ * leads a process group of its own, and an aborted call kills the whole
+ * group and stops reading the pipes: a grandchild left alive, or one that
+ * left the group, holds the output pipes open, so 'close' would wait until
+ * it exited on its own, and the call rejects with an AbortError at once.
+ * When a `kill` stopped the runner with a signal other than KILL, the
+ * group gets that signal first (`endTree`), so the program's handlers get
+ * to run, and a `direct` child that exits on its own then leaves its status
+ * with the runner. A missing executable rejects with `hint` when one is given, else with
+ * spawn's own error. EPIPE means the command exited without draining its
+ * stdin (`head`-like), so it is not an error. An input pull still pending
+ * when the child exits is left to close on its own. One in or from a
+ * `SERVED` folder starts through `EXEC_PRELUDE`. Mirrors Python's
+ * `run_program`.
+ */
+export async function runProgram(
+  executable: string,
+  hint: string | null,
+  args: string[],
+  stdin: ByteSource | null,
+  options: {
+    // The working directory; this process's when unset.
+    cwd?: string
+    // The whole environment; this process's when unset.
+    env?: Record<string, string>
+    // Aborting kills the child and everything it started.
+    signal?: AbortSignal
+    // Where the child is kept while it runs, for `closeChildren`.
+    children?: Set<ChildProcess>
+    output?: OutputFn
+    // Receives stderr as it arrives instead of returning it.
+    errors?: OutputFn
+    // The child is the program itself, not a client that runs it elsewhere
+    // and exits on its own terms (`docker exec` answers a TERM with 0 and
+    // leaves the program running).
+    direct?: boolean
+  } = {},
+): Promise<RunResult> {
+  const { signal, children } = options
+  signal?.throwIfAborted()
+  // Read now: an abort's listener runs as the caller that aborted.
+  const runner = currentCaller().process
+  const { cwd } = options
+  const prelude =
+    process.platform !== 'win32' && (served(executable) || (cwd !== undefined && served(cwd)))
+  if (prelude) {
+    try {
+      await checkInterpreter(executable, cwd)
+    } catch (error) {
+      throw (error as NodeJS.ErrnoException).code === 'ENOENT' && hint !== null
+        ? new Error(hint)
+        : error
+    }
+    if (signal?.aborted === true) throw makeAbortError(signal)
+  }
+  const child = spawn(
+    prelude ? '/bin/sh' : executable,
+    prelude ? ['-c', EXEC_PRELUDE, 'sh', cwd ?? '.', executable, ...args] : args,
+    {
+      ...(cwd !== undefined && !prelude ? { cwd } : {}),
+      ...(options.env !== undefined ? { env: options.env } : {}),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
+    },
+  )
+  // Set by the abort listener, which flow analysis does not follow.
+  let stopping = null as Promise<void> | null
+  const abort = (): void => {
+    // The input ends first, as a pipe whose writer went away does: a
+    // handler reading it to the end gets there in the grace instead of
+    // waiting on a source that never ends.
+    child.stdin.end()
+    const signum = stopSignal(runner)
+    if (signum === null) {
+      stopTree(child)
+      return
+    }
+    stopping = endTree(child, signum, runner).then(() => {
+      stopTree(child)
+    })
+  }
+  signal?.addEventListener('abort', abort, { once: true })
+  children?.add(child)
+  // A program run directly is its runner's process on this host, which
+  // leads its own group, and when it started, so a pid the host reused is
+  // never taken for it.
+  if (
+    children !== undefined &&
+    child.pid !== undefined &&
+    runner !== null &&
+    options.direct === true
+  ) {
+    const machinePid: MachinePid = { pid: child.pid, started: Date.now() / 1000 }
+    runner.setMachinePid(machinePid)
+    child.once('exit', () => {
+      runner.setMachinePid({ ...machinePid, exited: Date.now() / 1000 })
+    })
+  }
+  const exited = new Promise<number>((resolve, reject) => {
+    child.once('error', (error: NodeJS.ErrnoException) => {
+      reject(error.code === 'ENOENT' && hint !== null ? new Error(hint) : error)
+    })
+    child.once('close', (code, name) => {
+      children?.delete(child)
+      resolve(code ?? (name === null ? 1 : 128 + constants.signals[name]))
+    })
+  })
+  // A failed spawn can arrive before its output readers finish.
+  void exited.catch(() => undefined)
+  const source = asyncChain([stdin])[Symbol.asyncIterator]()
+  const inputState = { ended: false, pulling: false }
+  const inputHasEnded = (): boolean => inputState.ended
+  child.stdin.once('close', () => {
+    inputState.ended = true
+  })
+  child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+    debuglog('mirage')('process stdin closed: %s', error)
+  })
+  const feeding = (async () => {
+    try {
+      while (!inputHasEnded()) {
+        inputState.pulling = true
+        const next = await untilInputCloses(child.stdin, () => source.next())
+        if (next !== null) inputState.pulling = false
+        if (next === null || next.done === true || inputHasEnded()) break
+        if (!child.stdin.write(next.value))
+          await untilInputCloses(child.stdin, (signal) => once(child.stdin, 'drain', { signal }))
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EPIPE' && !inputState.ended) throw err
+      debuglog('mirage')('process closed input: %s', err)
+    } finally {
+      child.stdin.end()
+    }
+  })()
+  const out: Uint8Array[] = []
+  const err: Uint8Array[] = []
+  const reading = readInto(child, child.stdout, options.output, out, signal)
+  const erring = readInto(child, child.stderr, options.errors, err, signal)
+  const pumps = Promise.all([reading, erring, feeding])
+  try {
+    await pumps
+    const code = await exited
+    if (signal?.aborted === true) {
+      if (options.direct === true && stopSignal(runner) !== null && child.exitCode !== null)
+        runner?.programExited(child.exitCode)
+      throw makeAbortError(signal)
+    }
+    if (options.direct === true && child.signalCode !== null)
+      runner?.programSignaled(constants.signals[child.signalCode])
+    const stderr = Buffer.concat(err)
+    return { stdout: Buffer.concat(out), stderr: stderr.length > 0 ? stderr : null, exitCode: code }
+  } finally {
+    if (stopping !== null) await stopping
+    if (child.exitCode === null && child.signalCode === null) stopTree(child)
+    child.stdin.destroy()
+    await Promise.allSettled([pumps, exited])
+    if (inputState.pulling) void closeQuietly(stdin)
+    else await closeQuietly(stdin)
+    signal?.removeEventListener('abort', abort)
+    children?.delete(child)
+  }
+}
+
+/**
+ * What `ps` prints given `args`, in the C locale, however long. Rejects when
+ * the host has no `ps`, or it ended on a signal before it printed everything;
+ * an exit status is its answer, as for a PID no process has.
+ */
+function ps(args: readonly string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'ps',
+      [...args],
+      { env: { ...process.env, LC_ALL: 'C' }, maxBuffer: Infinity },
+      (error, stdout) => {
+        if (error !== null && typeof (error as NodeJS.ErrnoException).code !== 'number') {
+          reject(error as Error)
+          return
+        }
+        resolve(stdout)
+      },
+    )
+  })
+}
+
+/** A start time as `ps -o lstart` prints it, in epoch seconds; throws for other text. */
+function lstart(text: string): number {
+  const found = /^\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/.exec(text)
+  if (found === null) throw new Error(`not a start time: ${text}`)
+  const [, month, day, hours, minutes, seconds, year] = found
+  const start = new Date(
+    Number(year),
+    'JanFebMarAprMayJunJulAugSepOctNovDec'.indexOf(month ?? '') / 3,
+    Number(day),
+    Number(hours),
+    Number(minutes),
+    Number(seconds),
+  )
+  return start.getTime() / 1000
+}
+
+/**
+ * When a host process started, in epoch seconds; null once no process has
+ * the PID. Rejects when the host has no `ps`.
+ */
+async function startedAt(pid: number): Promise<number | null> {
+  const text = (await ps(['-o', 'lstart=', '-p', String(pid)])).trim()
+  return text === '' ? null : lstart(text)
+}
+
+/**
+ * When each process of a process group started, in epoch seconds. Rejects
+ * when the host has no `ps`.
+ */
+async function groupStarted(group: number): Promise<number[]> {
+  const starts: number[] = []
+  for (const line of (await ps(['-A', '-o', 'pgid=,lstart='])).split('\n')) {
+    const [found = '', ...start] = line.trim().split(/\s+/)
+    if (found === String(group)) starts.push(lstart(start.join(' ')))
+  }
+  return starts
+}
+
+/**
+ * Every process of the host programs' process groups, as `ps` lists them
+ * now: each program leads a group of its own, and every member is tagged as
+ * the Mirage process whose program leads it. Rejects when the host has no
+ * `ps`. Mirrors Python's `host_status`.
+ *
+ * @param groups each program's pid, which is its group's, and the tag of the
+ *   Mirage process it is.
+ */
+export async function hostStatus(groups: ReadonlyMap<number, string>): Promise<MachineProcess[]> {
+  if (groups.size === 0 || process.platform === 'win32') return []
+  const found: MachineProcess[] = []
+  const text = await ps(['-A', '-o', 'pid=,ppid=,pgid=,lstart=,args='])
+  for (const line of text.split('\n')) {
+    const fields = line.trim().split(/\s+/)
+    if (fields.length < 8 || !/^[0-9]+$/.test(fields[2] ?? '')) continue
+    const tag = groups.get(Number(fields[2]))
+    if (tag === undefined) continue
+    let started: number
+    try {
+      started = lstart(fields.slice(3, 8).join(' '))
+    } catch (err) {
+      debuglog('mirage')('process %s: no start: %s', fields[0], err)
+      continue
+    }
+    const args = line.trim().replace(/^(\S+\s+){8}/, '')
+    found.push({
+      tag,
+      pid: Number(fields[0]),
+      ppid: Number(fields[1]),
+      started,
+      args: fields.length > 8 ? args : '',
+    })
+  }
+  return found
+}
+
+/**
+ * Send `signum` to the host process `target` names, as `kill` sent it, while
+ * its pid still names the process that started then, to the second `ps`
+ * shows (`HOST_START_SLACK_SECONDS`). Answers true once sent, false when no
+ * such process runs; rejects when the host has no `ps` or refused the
+ * signal. Mirrors Python's `signal_host`.
+ *
+ * @param target the process.
+ * @param signum the signal.
+ */
+export async function signalHost(target: MachinePid, signum: number): Promise<boolean> {
+  if (process.platform === 'win32') return false
+  const started = await startedAt(target.pid)
+  if (started === null || Math.abs(started - target.started) > HOST_START_SLACK_SECONDS)
+    return false
+  try {
+    process.kill(target.pid, signum)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ESRCH') return false
+    throw err
+  }
+  return true
+}
+
+/**
+ * Stop a host program a lapsed workspace left, the one its process record
+ * names on this host: its process group gets `signum`, then KILL after
+ * `STOP_GRACE_SECONDS`. It is reached only while its PID still names a
+ * process started when the program did, to the second `ps` shows, so a PID
+ * the host reused is left alone. A PID that names no process may still name
+ * the program's group, whose leader exited before the programs it started.
+ * That group is the program's while one of its members started by the last
+ * time the group was known to be: when the leader exited (`exited`), else
+ * when its workspace last vouched for the process (`seenAt`), with the
+ * leader still unreaped. The host gives no new
+ * process the id of a group that has members, and hands a number out again
+ * only after a full round of the others, so a group that took the id later
+ * has only members started since. One none of whose members proves it is not
+ * reached: its members may all have started since, the run's descendants, so
+ * its record stays. A group this workspace may not signal is not reached
+ * while its leader still runs
+ * (macOS answers EPERM for one that only exited unreaped). Answers true once
+ * the program is stopped or gone, false when this workspace cannot reach it.
+ * Mirrors Python's `reap_host_run`.
+ */
+export async function reapHostRun(
+  machinePid: MachinePid,
+  seenAt: number | null,
+  signum: number,
+): Promise<boolean> {
+  const { pid, started: recorded } = machinePid
+  if (process.platform === 'win32') return false
+  let started: number | null
+  let members: number[] = []
+  try {
+    started = await startedAt(pid)
+    if (started === null) members = await groupStarted(pid)
+  } catch (err) {
+    debuglog('mirage')('process %d not checked: %s', pid, err)
+    return false
+  }
+  if (started !== null) {
+    if (Math.abs(started - recorded) > HOST_START_SLACK_SECONDS) return true
+  } else {
+    if (members.length === 0) return true
+    const known = machinePid.exited ?? seenAt
+    if (known === null || !members.some((start) => start <= known + HOST_START_SLACK_SECONDS))
+      return false
+  }
+  try {
+    process.kill(-pid, signum)
+    const deadline = Date.now() + STOP_GRACE_SECONDS * 1000
+    while (Date.now() < deadline) {
+      await delay(STOP_POLL_SECONDS * 1000)
+      process.kill(-pid, 0)
+    }
+    debuglog('mirage')('process group %d outlived signal %d', pid, signum)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ESRCH') return true
+    if (code === 'EPERM') return (await startedAt(pid)) === null
+    throw err
+  }
+  try {
+    process.kill(-pid, 9)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EPERM') return (await startedAt(pid)) === null
+    debuglog('mirage')('process group %d has already exited: %s', pid, err)
+  }
+  return true
+}
+
+/**
+ * Read a child's output to its end, handing each chunk to `sink` as it
+ * arrives, or keeping it in `kept` without one. Past an abort the output is
+ * read and dropped, so a signal handler that writes is not held on a full
+ * pipe. Mirrors Python's `_read_into`.
+ */
+async function readInto(
+  child: ChildProcess,
+  stream: Readable,
+  sink: OutputFn | undefined,
+  kept: Uint8Array[],
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  try {
+    for await (const chunk of stream.iterator({ destroyOnReturn: false })) {
+      if (signal?.aborted === true) continue
+      if (sink === undefined) kept.push(chunk as Uint8Array)
+      else await abortable(sink(chunk as Uint8Array), signal)
+    }
+  } catch (error) {
+    if (!child.killed && child.signalCode === null && signal?.aborted !== true) throw error
+    debuglog('mirage')('process output closed: %s', error)
+    stream.resume()
+  }
+}
+
+/**
+ * The state a sandbox's status command printed as JSON, at `path`: the keys
+ * and indexes down to it. Throws when the command failed or its JSON holds
+ * no state. Mirrors Python's `reported_state`.
+ */
+export function reportedState(
+  result: RunResult,
+  command: string,
+  path: readonly (string | number)[],
+): string {
+  if (result.exitCode !== 0) {
+    const said = DECODER.decode(result.stderr ?? new Uint8Array()).trim()
+    throw new Error(`${command} failed: ${said}`)
+  }
+  let state: unknown
+  try {
+    state = JSON.parse(DECODER.decode(result.stdout))
+    for (const key of path) {
+      if (state === null || typeof state !== 'object' || !Object.hasOwn(state, key))
+        throw new Error(`no ${String(key)}`)
+      state = (state as Record<string | number, unknown>)[key]
+    }
+  } catch (error) {
+    throw new Error(`${command} returned unreadable json: ${String(error)}`)
+  }
+  return String(state)
+}
+
+/**
+ * A sandbox program's exec arguments, the same for every program that runs a
+ * command in a box: the program's own words (`head`: `exec -i`, smolvm's
+ * `machine exec --name M`), `/` as the working directory and each
+ * variable as `-e`, the target or `--` (`tail`: `--` where the command is
+ * a trailing var arg, so a line starting with a dash is not read as a
+ * flag), then the command.
+ *
+ * A `cwd` runs the command there through the prelude, which exits 126
+ * when the box lacks it, and defers the chdir until the shell starts, so
+ * an agent that blocks on a chdir into a passive sshfs prefix still
+ * serves the mount's pipe. Null runs it from `/` as given, for a helper
+ * pipe. Mirrors Python's `exec_args`.
+ */
+export function execArgs(
+  head: readonly string[],
+  tail: readonly string[],
+  env: Record<string, string>,
+  cwd: string | null,
+  argv: readonly string[],
+): string[] {
+  const args = [...head, '-w', '/']
+  for (const [key, value] of Object.entries(env)) args.push('-e', `${key}=${value}`)
+  for (const item of tail) args.push(item)
+  if (cwd !== null) args.push('/bin/sh', '-c', EXEC_PRELUDE, 'sh', cwd)
+  return [...args, ...argv]
+}
+
+/**
+ * Refuse a host program whose working directory this host lacks. The
+ * session cwd is a workspace path; running elsewhere instead would point
+ * a relative path at the wrong files. Mirrors Python's `cwd_refusal`.
+ */
+export async function cwdRefusal(name: string, cwd: string): Promise<RunResult | null> {
+  const here = await stat(cwd).catch((err: unknown) => {
+    if ((err as NodeJS.ErrnoException).code === undefined) throw err
+    debuglog('mirage')('cannot use %s as the working directory: %s', cwd, err)
+    return null
+  })
+  if (here?.isDirectory() === true) return null
+  return {
+    stdout: new Uint8Array(),
+    stderr: new TextEncoder().encode(`${name}: the working directory ${cwd} is not on this host\n`),
+    exitCode: CANNOT_EXECUTE_STATUS,
+  }
+}
+
+/**
+ * Signal a child and everything it started: its process group. Windows has
+ * no process group to signal, and no signal but a kill, so only the child
+ * goes there, killed. A group whose members have all exited but are not
+ * yet reaped answers EPERM on macOS where Linux answers ESRCH; either way
+ * nothing in it is left to signal. The group's signal reaches the child
+ * too, so only a KILL also goes through `child.kill`, which marks it
+ * killed: a second gentler signal would reach its handler twice. Mirrors
+ * Python's `kill_tree`.
+ *
+ * @param signum the signal, KILL (9) by default.
+ */
+export function killTree(child: ChildProcess, signum = 9): void {
+  if (child.pid === undefined || process.platform === 'win32') {
+    child.kill('SIGKILL')
+    return
+  }
+  try {
+    process.kill(-child.pid, signum)
+    if (signum === 9) child.kill(signum)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'ESRCH' && code !== 'EPERM') throw err
+    debuglog('mirage')('process group %d has already exited', child.pid)
+  }
+}
+
+/**
+ * Signal a child's process group and give the group `STOP_GRACE_SECONDS`
+ * to end. The grace is the group's: a descendant still handling the signal
+ * after the child exited keeps it, unless a KILL reaches the runner first.
+ * What is left after it is the caller's to kill (`stopTree`). Mirrors
+ * Python's `end_tree`.
+ *
+ * @param signum the signal.
+ * @param runner the runner the signal stopped, whose KILL ends the grace.
+ */
+export async function endTree(
+  child: ChildProcess,
+  signum: number,
+  runner?: ProcessHandle | null,
+): Promise<void> {
+  killTree(child, signum)
+  const deadline = Date.now() + STOP_GRACE_SECONDS * 1000
+  while (Date.now() < deadline && runner?.signal !== 9) {
+    if (child.pid === undefined || process.platform === 'win32') {
+      if (child.exitCode !== null || child.signalCode !== null) return
+    } else {
+      try {
+        process.kill(-child.pid, 0)
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code
+        if (code === 'ESRCH' || code === 'EPERM') return
+        throw err
+      }
+    }
+    await delay(STOP_POLL_SECONDS * 1000)
+  }
+  debuglog('mirage')('process group %d outlived signal %d', child.pid, signum)
+}
+
+/**
+ * Kill a child's tree and stop reading its pipes, which a descendant that
+ * left the group (a session of its own) survives the kill holding; 'close'
+ * comes once the child exits. Mirrors Python's `stop_tree`.
+ */
+function stopTree(child: ChildProcess): void {
+  killTree(child)
+  child.stdout?.destroy()
+  child.stderr?.destroy()
+}
+
+/**
+ * Kill every child still running, so none outlives the workspace, and wait
+ * for each to close. Mirrors Python's `close_children`.
+ */
+export async function closeChildren(children: Set<ChildProcess>): Promise<void> {
+  await Promise.all(
+    [...children].map(
+      (child) =>
+        new Promise<void>((resolve) => {
+          child.once('close', () => {
+            resolve()
+          })
+          stopTree(child)
+        }),
+    ),
+  )
+}
+
+/**
+ * Hold a byte transport to a sandbox helper until stopped. The tail of what
+ * the helper says on stderr is kept for `diagnostic`, so a mount that fails
+ * can say why. Stopping ends the helper's input; one that has not closed
+ * 100 ms later loses its process group and our ends of its pipes, which
+ * output nobody read would otherwise hold open, exited or not. Mirrors
+ * Python's `open_program_pipe`.
+ */
+export function openProgramPipe(executable: string, args: string[]): Promise<SandboxPipe> {
+  const child = spawn(executable, args, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
+  })
+  let said = Buffer.alloc(0)
+  child.stderr.on('data', (chunk: Buffer) => {
+    said = Buffer.concat([said, chunk]).subarray(-PIPE_DIAGNOSTIC_BYTES)
+  })
+  child.stderr.on('error', (err) => {
+    debuglog('mirage')('%s helper stderr closed: %s', executable, err)
+  })
+  child.stdin.on('error', (err) => {
+    debuglog('mirage')('%s helper stdin closed: %s', executable, err)
+  })
+  const exited = once(child, 'close').then(
+    () => true,
+    (err: unknown) => {
+      debuglog('mirage')('%s helper failed: %s', executable, err)
+      return true
+    },
+  )
+  return Promise.resolve({
+    reader: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+    writer: child.stdin,
+    diagnostic: async () => {
+      await Promise.race([
+        exited,
+        delay(PIPE_DIAGNOSTIC_WAIT_SECONDS * 1000, false, { ref: false }),
+      ])
+      return said.toString('utf8').trim()
+    },
+    stop: async () => {
+      child.stdin.end()
+      if (!(await Promise.race([exited, delay(100, false, { ref: false })]))) stopTree(child)
+      await exited
+    },
+  })
+}
+
+const DECODER = new TextDecoder()

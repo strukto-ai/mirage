@@ -9,18 +9,22 @@ Your agent uses one shell while Mirage routes commands to in-process,
 containerized or remote runtimes.
 
 Use `route_policy` to choose a runtime for each command line with a script
-or a function. Here, `monty` runs `python3` in-process, while `docker` runs
-it in a container with your packages. Start the [Docker container](/home/setup/runtime/sandbox/docker)
-`my-box` with `/jobs/train.py` and its dependencies before using this excerpt:
+or a function. Here, `monty` runs `python3` in-process, while `native` runs
+it on the `box` machine, a container with your packages. Start the
+[Docker container](/home/setup/runtime/sandbox/docker) `my-box` with
+`/jobs/train.py` and its dependencies before using this excerpt:
 
 ```yaml
 mode: exec
+machines:
+  box:
+    provider: docker
+    container: my-box
 runtimes:
   - monty
-  - name: docker
+  - name: native
     captures: ["@python"]
-    config:
-      container: my-box
+    machine: box
   - workspace
 route_policy: {script: ./route.py, runtime: monty}
 ```
@@ -29,7 +33,7 @@ route_policy: {script: ./route.py, runtime: monty}
 def pre_execute(ctx):
     paths = [p for c in ctx["commands"] for p in c["paths"]]
     if any(p.startswith("/jobs/") for p in paths):
-        return {"kind": "route", "runtime": "docker"}
+        return {"kind": "route", "runtime": "native"}
 ```
 
 `python3 /jobs/train.py` runs in the container; `cat data.csv | python3
@@ -44,8 +48,9 @@ resolved paths, and the session. It returns its answer:
 
 | Returns | Effect |
 | --- | --- |
-| `{"kind": "route", "runtime": "docker"}` | that runtime serves every command it captures |
-| `{"kind": "route", "runtime": "docker", "reason": "..."}` | the same, with why for `ws.explain(line)` to show |
+| `{"kind": "route", "runtime": "native"}` | that runtime serves every command it captures |
+| `{"kind": "route", "machine": "box"}` | the `native` runtime runs the line's programs on that machine |
+| `{"kind": "route", "runtime": "native", "reason": "..."}` | the same, with why for `ws.explain(line)` to show |
 | `{"kind": "route", "runtime": "workspace"}` | entries that capture `@line` are excluded entirely; other entries still serve their captures, and a command only an excluded entry captures is refused |
 | `None` | the first capturer in `runtimes` order serves each command |
 | `{"kind": "deny", "reason": "..."}` | the line is refused, as by any `pre_execute` program |
@@ -63,7 +68,7 @@ from mirage.policy import RouteContext
 
 def policy(ctx: RouteContext) -> str | None:
     paths = [p.virtual for c in ctx.commands for p in c.paths]
-    return "docker" if any(p.startswith("/jobs/") for p in paths) else None
+    return "native" if any(p.startswith("/jobs/") for p in paths) else None
 
 ws = Workspace(mounts, runtimes=runtimes, route_policy=policy)
 ```
@@ -78,18 +83,23 @@ These policies can also choose a runtime or refuse a command line:
 ```python
 from mirage.policy import Deny, Policy, Route, RouteContext
 
-class JobsOnDocker(Policy):
+class JobsOnTheBox(Policy):
     async def pre_execute(self, ctx: RouteContext) -> Route | Deny | None:
         if "/prod/" in ctx.line:
             return Deny("the prod tree is read only")
-        return Route("docker") if "/jobs/" in ctx.line else None
+        return Route(machine="box") if "/jobs/" in ctx.line else None
 ```
 
+A `pre_command` policy may answer a Route too, which places that one
+command alone: `Route(machine="gpu")` for `python3 train.py` in
+`ls; python3 train.py` runs only `python3` there.
+
 A line the rules refuse is never placed. A Deny beats any Route, and two
-policies naming different runtimes refuse the line. Nested lines (`$( )`,
-`eval`, `source`, `xargs`) keep the outer line's placement.
-`ws.explain(line)` shows each placement answer and each command's
-runtime. The caller's `runtime=` argument places the line itself.
+policies naming different runtimes or machines refuse the line. Nested
+lines (`$( )`, `eval`, `source`, `xargs`) keep the outer line's placement.
+`ws.explain(line)` shows each placement answer and each command's runtime
+and machine. The caller's `runtime=` and `machine=` arguments place the
+line itself.
 
 ## Ask a model
 

@@ -17,7 +17,7 @@ import {
   MountMode,
   S3VFS,
   SSHVFS,
-  SSHRuntime,
+  SSHMachine,
   Workspace,
   type S3Config,
   type SSHConfig,
@@ -81,7 +81,7 @@ async function show(ws: Workspace, command: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const runtime = new SSHRuntime({
+  const runtime = new SSHMachine({
     captures: ['python3'],
     config: { host: 'dev', hostname: HOSTNAME, username: 'ubuntu', identityFile: IDENTITY },
   })

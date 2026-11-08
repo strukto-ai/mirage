@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { varsFromEnv } from '../../workspace/session/session.ts'
-import { setAttr } from '../../workspace/session/state.ts'
+import { varsFromEnv } from './session.ts'
+import { setAttr } from './state.ts'
 import { ArithError } from '../../shell/errors.ts'
 import { VarAttr, type ShellVar } from '../../shell/variable.ts'
 import { CallStack } from '../../shell/call_stack.ts'

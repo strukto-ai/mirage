@@ -40,7 +40,7 @@ interface MachinePidResponse {
   exited: number | null
 }
 
-interface ProcessResponse {
+export interface ProcessResponse {
   pid: number
   session_id: string
   line_id: string | null
@@ -61,7 +61,7 @@ interface ProcessResponse {
 
 const STATES: readonly ProcessState[] = ['running', 'stopping', 'exited']
 
-function toResponse(record: Process): ProcessResponse {
+export function toResponse(record: Process): ProcessResponse {
   return {
     pid: record.id.pid,
     session_id: record.sessionId,

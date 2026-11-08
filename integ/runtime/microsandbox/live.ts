@@ -22,10 +22,11 @@ import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { setTimeout as delay } from 'node:timers/promises'
-import { MicrosandboxRuntime, MountMode, PathSpec, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { MicrosandboxMachine, MountMode, PathSpec, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
+import { NativeRuntime } from '@struktoai/mirage-core/runtime/native/runtime'
 
 const sandbox = process.env.MIRAGE_E2E_SANDBOX!
 assert.ok(sandbox, 'set MIRAGE_E2E_SANDBOX')
@@ -50,21 +51,22 @@ async function check(name: string, operation: () => Promise<unknown>) {
 }
 
 async function raw(command: string) {
-  return new MicrosandboxRuntime({ config: { sandbox } }).execLine(command, null, {}, '/')
+  return new MicrosandboxMachine('msb', { sandbox }).execLine(command, null, {}, '/')
 }
 
 async function transport() {
-  const runtime = new MicrosandboxRuntime({ config: { sandbox } })
+  const runtime = new MicrosandboxMachine('msb', { sandbox })
   for (const data of [null, new Uint8Array(), new Uint8Array([0, 255, 13, 10]), payload]) {
-    const result = await runtime.execute(
-      [],
+    const result = await runtime.run(
       [
         'python3',
         '-c',
         'import sys,hashlib; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())',
       ],
       { flags: {}, cwd: PathSpec.fromStrPath('/tmp'), stdin: data, env: {} },
-      { kind: 'process' },
+      null,
+      null,
+      null,
     )
     assert.equal(result.exitCode, 0, dec.decode(result.stderr ?? undefined))
     assert.equal(dec.decode(result.stdout).trim(), hash(data ?? new Uint8Array()))
@@ -72,8 +74,7 @@ async function transport() {
   }
   const words = ['a b', '$(literal)', '', '--flag', '\u2603', 'one\ntwo']
   const marker = 'quotes \' " $ and\nnewlines'
-  const result = await runtime.execute(
-    [],
+  const result = await runtime.run(
     [
       'python3',
       '-c',
@@ -84,7 +85,9 @@ async function transport() {
       ...words,
     ],
     { flags: {}, cwd: PathSpec.fromStrPath('/tmp'), env: { MARK: marker }, stdin: payload },
-    { kind: 'process' },
+    null,
+    null,
+    null,
   )
   assert.deepEqual(Buffer.from(result.stdout), Buffer.from(payload))
   assert.deepEqual(JSON.parse(dec.decode(result.stderr ?? undefined)), words)
@@ -116,13 +119,11 @@ async function modeChecks(mountType: 'ssh' | 'fuse' | 'both') {
     [prefix + '/ro']: [readonly, MountMode.READ],
   }
   if (mountType === 'both') mounts[guest] = new RAMVFS()
-  const runtime = new MicrosandboxRuntime({
-    captures: ['python3', 'dash', 'sleep'],
-    config: { sandbox, mountType },
-  })
+  const runtime = new MicrosandboxMachine('msb', { sandbox, mountType })
   const ws = new Workspace(mounts, {
     mode: MountMode.EXEC,
-    runtimes: [runtime, 'workspace'],
+    machines: { msb: runtime },
+    runtimes: [new NativeRuntime({ captures: ['python3', 'dash', 'sleep'], machine: 'msb' }), 'workspace'],
     profiles: { hidden: { paths: { hide: [prefix + '/secret.txt'] } } },
   })
   const agent = await ws.session('agent', mountType === 'fuse' ? {} : { profile: 'hidden' })
@@ -272,10 +273,8 @@ async function cycles() {
       { [host]: new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [
-          new MicrosandboxRuntime({ captures: ['python3'], config: { sandbox, mountType: 'ssh' } }),
-          'workspace',
-        ],
+        machines: { msb: new MicrosandboxMachine('msb', { sandbox, mountType: 'ssh' }) },
+        runtimes: [new NativeRuntime({ captures: ['python3'], machine: 'msb' }), 'workspace'],
       },
     )
     try {
@@ -339,7 +338,7 @@ async function within<T>(operation: Promise<T>, ms: number): Promise<T> {
   }
 }
 
-class FullInspect extends MicrosandboxRuntime {
+class FullInspect extends MicrosandboxMachine {
   protected override microsandbox(
     args: string[],
     stdin: ByteSource | null = null,
@@ -366,7 +365,7 @@ async function inspectPids() {
   })
 }
 
-class StopAfterProbe extends MicrosandboxRuntime {
+class StopAfterProbe extends MicrosandboxMachine {
   override async connect() {
     await super.connect()
     await local('msb', 'stop', sandbox, '--timeout', '10')
@@ -374,7 +373,7 @@ class StopAfterProbe extends MicrosandboxRuntime {
 }
 
 async function lifecycleChecks() {
-  const runtime = new MicrosandboxRuntime({ config: { sandbox } })
+  const runtime = new MicrosandboxMachine('msb', { sandbox })
   await check('storage_lock_does_not_block_exec_and_cancel_reaps_probe', async () => {
     const digest = hash(enc.encode(sandbox)).slice(0, 32)
     const lock = join(
@@ -401,8 +400,7 @@ async function lifecycleChecks() {
       const result = await within(raw('printf runtime-probe-ok'), 5000)
       assert.equal(result.exitCode, 0, dec.decode(result.stderr ?? undefined))
       assert.equal(dec.decode(result.stdout), 'runtime-probe-ok')
-      pending = new FullInspect({ config: { sandbox } }).execute(
-        [],
+      pending = new FullInspect('msb', { sandbox }).run(
         ['true'],
         {
           flags: {},
@@ -411,7 +409,9 @@ async function lifecycleChecks() {
           stdin: null,
           signal: controller.signal,
         },
-        { kind: 'process' },
+        null,
+        null,
+        null,
       )
       const refused = assert.rejects(pending, (error: Error) => error.name === 'AbortError')
       for (let i = 0; i < 80 && (await inspectPids()).length === 0; i++) await delay(25)
@@ -491,10 +491,8 @@ async function lifecycleChecks() {
       { '/missing-fuse': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [
-          new MicrosandboxRuntime({ captures: ['python3'], config: { sandbox, mountType: 'ssh' } }),
-          'workspace',
-        ],
+        machines: { msb: new MicrosandboxMachine('msb', { sandbox, mountType: 'ssh' }) },
+        runtimes: [new NativeRuntime({ captures: ['python3'], machine: 'msb' }), 'workspace'],
       },
     )
     const moved = await raw(
@@ -516,7 +514,10 @@ async function lifecycleChecks() {
   })
   for (const mountType of [null, 'ssh', 'both'] as const) {
     await check(`${mountType}_cached_runtime_refuses_guest_stopped_before_probe`, async () => {
-      const runtime = new MicrosandboxRuntime({ config: { sandbox, mountType } })
+      const runtime = new MicrosandboxMachine('msb', {
+        sandbox,
+        ...(mountType === null ? {} : { mountType }),
+      })
       assert.equal((await runtime.execLine('true', null, {}, '/')).exitCode, 0)
       await local('msb', 'stop', sandbox, '--timeout', '10')
       try {
@@ -532,7 +533,7 @@ async function lifecycleChecks() {
       }
     })
     await check(`${mountType}_released_cli_can_restart_after_probe`, async () => {
-      const candidate = new StopAfterProbe({ config: { sandbox, mountType } })
+      const candidate = new StopAfterProbe('msb', { sandbox, ...(mountType === null ? {} : { mountType }) })
       try {
         const pipe = await candidate.openPipe('printf race-command-ran')
         const reader = pipe.reader.getReader()

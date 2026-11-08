@@ -15,7 +15,9 @@
 import { cliSpecFor, knownCliNames } from '@struktoai/mirage-core/commands/cli/specs'
 import { NAME as MCP_CLI } from '@struktoai/mirage-core/commands/cli/mcp/constants'
 import { MCPConfig } from '@struktoai/mirage-core/core/mcp/config'
+import { knownProviders, machineClass } from '@struktoai/mirage-core/machine/registry'
 import type { EntryKind } from '@struktoai/mirage-core/resources/types'
+import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { SECRET_CONFIG_FIELDS } from '@struktoai/mirage-core/runtime/constants'
 import { knownRuntimes, runtimeClass } from '@struktoai/mirage-core/runtime/table'
 import { normalizedKey } from '@struktoai/mirage-core/utils/normalize'
@@ -153,25 +155,36 @@ function cliTypes(): TypeTable {
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => compareCodePoints(a, b)))
 }
 
-/** Every registered runtime, with the fields its config takes, a map field left out as a form cannot write one. */
+/** The fields a config takes, a map field left out as a form cannot write one. */
+function configTypes(configFields: ConfigFields): Field[] {
+  const fields: Field[] = []
+  for (const [camel, field] of Object.entries(configFields)) {
+    if (field.type === 'map') continue
+    const snake = camel.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
+    fields.push({
+      name: snake,
+      type: field.type,
+      secret: SECRET_CONFIG_FIELDS.has(snake),
+      required: field.required ?? false,
+      ...(field.options !== undefined ? { options: [...field.options] } : {}),
+      ...(field.default !== undefined ? { default: field.default } : {}),
+    })
+  }
+  return fields
+}
+
+/** Every registered runtime, with the fields its config takes. */
 function runtimeTypes(): TypeTable {
   const out: TypeTable = {}
-  for (const name of knownRuntimes()) {
-    const fields: Field[] = []
-    for (const [camel, field] of Object.entries(runtimeClass(name).configFields)) {
-      if (field.type === 'map') continue
-      const snake = camel.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
-      fields.push({
-        name: snake,
-        type: field.type,
-        secret: SECRET_CONFIG_FIELDS.has(snake),
-        required: field.required ?? false,
-        ...(field.options !== undefined ? { options: [...field.options] } : {}),
-        ...(field.default !== undefined ? { default: field.default } : {}),
-      })
-    }
-    out[name] = fields
-  }
+  for (const name of knownRuntimes()) out[name] = configTypes(runtimeClass(name).configFields)
+  return out
+}
+
+/** Every machine provider, with the fields its config takes. */
+function machineTypes(): TypeTable {
+  const out: TypeTable = {}
+  for (const provider of knownProviders())
+    out[provider] = configTypes(machineClass(provider).configFields)
   return out
 }
 
@@ -187,5 +200,6 @@ export async function typesOf(
   if (kind === 'vfs') return vfsTypes(host.vfsSchemas)
   if (kind === 'cli') return cliTypes()
   if (kind === 'runtime') return runtimeTypes()
+  if (kind === 'machine') return machineTypes()
   throw new Error(`${kind} entries have no types`)
 }

@@ -535,6 +535,7 @@ async def execute_line(
     line_handle: LineHandle | None = None,
     job_table: JobTable | None = None,
     tty: Terminal | None = None,
+    machine: str | None = None,
 ) -> IOResult:
     """The body of ``Workspace.shell``; see its docstring for the
     argument contract.
@@ -606,6 +607,7 @@ async def execute_line(
         cancel=cancel,
         record=record,
         runtime=runtime,
+        machine=machine,
         routing_decision=routing_decision,
         handed=handed,
         frame=frame,
@@ -778,6 +780,7 @@ async def run_prepared_line(
     cancel: asyncio.Event | None,
     record: bool,
     runtime: str | None,
+    machine: str | None,
     routing_decision: RouteDecision[RuntimeIdentity] | None,
     handed: HandOff | None,
     frame: LineFrame | None,
@@ -1026,6 +1029,7 @@ async def run_prepared_line(
             placed = await ws.router.decide(
                 command,
                 runtime,
+                machine,
                 effective_session,
                 routing_decision,
                 judged,
@@ -1124,6 +1128,7 @@ async def run_prepared_line(
                             ws.registry.memory,
                             run_whole_line(
                                 line_runtime,
+                                decision.machine,
                                 command,
                                 stdin,
                                 effective_session,

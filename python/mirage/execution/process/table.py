@@ -1,7 +1,7 @@
 import asyncio
 import errno
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from threading import RLock
 
 from mirage.execution.constants import (
@@ -10,6 +10,7 @@ from mirage.execution.constants import (
     LOCAL_MACHINE,
 )
 from mirage.execution.process.config import ProcessPermissions, ProcessScope
+from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.handle import ExecutionBind, ProcessHandle
 from mirage.execution.process.types import Process, ProcessRunner, ProcessState
 from mirage.execution.process.view import ProcessView
@@ -78,7 +79,7 @@ class ProcessTable:
         self._bind = bind
         self._changed = changed
         self._ended_hook = ended
-        self._next_pid = 1
+        self._next_pid = FIRST_PID
         self._live: dict[int, tuple[int, ProcessHandle]] = {}
         self._ended: dict[int, Process] = {}
         self._ancestors: dict[int, tuple[int, ...]] = {}
@@ -88,6 +89,17 @@ class ProcessTable:
         # The host's ceiling on any session's limit, a lifted one
         # included, whatever profile, snapshot or store set it.
         self.ceiling: int | None = None
+        # Brings the table in step with what each machine runs now: the
+        # processes a scan finds there join it, and leave once a scan no
+        # longer sees them. The workspace sets it, since it holds the
+        # machines.
+        self.scanner: Callable[[], Awaitable[None]] | None = None
+        # Sends a signal to a process that is a program on a machine as
+        # ``kill`` sent it, answering whether it ran, or None for a
+        # process Mirage stops itself. The workspace sets it.
+        self.sender: (
+            Callable[[ProcessHandle, int], Awaitable[bool] | None] | None
+        ) = None
 
     def start(
         self,
@@ -221,7 +233,8 @@ class ProcessTable:
 
     @property
     def last_pid(self) -> int:
-        """The highest pid handed out so far, 0 before the first."""
+        """The highest pid handed out so far, the one before
+        ``FIRST_PID`` before the first."""
         return self._next_pid - 1
 
     def continue_after(self, pid: int) -> None:
@@ -251,9 +264,35 @@ class ProcessTable:
         for child in self._under(pid):
             child.terminate(signal)
 
-    def signal_group(self, group_id: int, signal: int) -> bool:
+    async def scan(self) -> None:
+        """Bring the table in step with what each machine runs now
+        (``scanner``), as ``ps`` does before it lists."""
+        if self.scanner is not None:
+            await self.scanner()
+
+    def send(
+        self, handle: ProcessHandle, signal: int
+    ) -> Awaitable[bool] | None:
+        """Send a signal to a program on a machine as ``kill`` sent it
+        (``sender``): what it does with it is its own, and it ends when
+        it exits.
+
+        Args:
+            handle (ProcessHandle): the runner.
+            signal (int): the signal.
+
+        Returns:
+            Awaitable[bool] | None: whether it ran, once sent; None for a
+            runner Mirage stops itself (``deliver``).
+        """
+        if self.sender is None or signal in handle.ignores:
+            return None
+        return self.sender(handle, signal)
+
+    async def signal_group(self, group_id: int, signal: int) -> bool:
         """Deliver a signal to every live runner of a process group, as
-        killpg(2) does: a runner that ignores it (a shell) hands it to the
+        killpg(2) does: a program on a machine gets it as sent
+        (``send``), a runner that ignores it (a shell) hands it to the
         program it runs right now (``ProcessHandle.interrupt``), and any
         other stops with it and leaves the rest of the group to their own
         delivery. The deepest runners hear it first, so a native program
@@ -267,8 +306,7 @@ class ProcessTable:
             bool: whether the group had a live runner.
         """
         members = self._members(group_id)
-        for member in members:
-            deliver(member, signal)
+        await _signal_members(self, members, signal)
         return bool(members)
 
     def _members(self, group_id: int) -> list[ProcessHandle]:
@@ -386,10 +424,16 @@ class ProcessTable:
         def probe_group(group_id: int) -> bool:
             return group(group_id) is not None
 
-        def signal_group(group_id: int, signal: int) -> bool:
+        def send(pid: int, signal: int) -> Awaitable[bool] | None:
+            with self._lock:
+                handle = signal_target(pid)
+            if handle is None:
+                return None
+            return self.send(handle, signal)
+
+        async def signal_group(group_id: int, signal: int) -> bool:
             members = group(group_id)
-            for member in members or ():
-                deliver(member, signal)
+            await _signal_members(self, members or [], signal)
             return members is not None
 
         def granted() -> ProcessPermissions | None:
@@ -403,6 +447,8 @@ class ProcessTable:
             permissions=granted,
             probe_group=probe_group,
             signal_group=signal_group,
+            scan=self.scan,
+            send=send,
         )
 
     def revoke_session(self, session_id: str) -> None:
@@ -517,3 +563,24 @@ class ProcessTable:
                 errors.append(exc)
         if errors:
             raise ExceptionGroup("process cancellation failed", errors)
+
+
+async def _signal_members(
+    table: ProcessTable, members: list[ProcessHandle], signal: int
+) -> None:
+    """Deliver a signal to each runner of a group, in order: Mirage's
+    own at once (``deliver``), then the programs on machines as sent.
+
+    Args:
+        table (ProcessTable): the table the runners run in.
+        members (list[ProcessHandle]): the runners, deepest first.
+        signal (int): the signal.
+    """
+    sending: list[Awaitable[bool]] = []
+    for member in members:
+        sent = table.send(member, signal)
+        if sent is None:
+            deliver(member, signal)
+        else:
+            sending.append(sent)
+    await asyncio.gather(*sending)

@@ -1,21 +1,37 @@
 ---
 title: Overview
 icon: server
-description: Run captured programs in a container, VM, cloud sandbox or remote machine you already have.
+description: Run captured programs on a container, VM, cloud sandbox or remote machine you already have.
 ---
 
-A sandbox runtime runs captured programs somewhere you already have: a
-container, a microVM, a cloud sandbox or a machine over SSH. You create and
-stop it; Mirage only runs programs in it. Each runtime's `captures` defaults
-to [`@external`](/home/setup/runtime/overview#captures), every program
-Mirage does not have itself.
+A machine is somewhere you already have: a container, a microVM, a cloud
+sandbox or a host over SSH. Declare each one under `machines:` with the
+`provider` that reaches it, and run captured programs there with the
+`native` runtime, whose `machine` names it. You create and stop the machine;
+Mirage only runs programs on it. `captures` defaults to
+[`@external`](/home/setup/runtime/overview#captures), every program Mirage
+does not have itself.
 
-A program there opens workspace files at the same paths, so the sandbox
-must see the mounts. `docker`, `e2b`, `ssh`, `smolvm`, `microsandbox`, and `apple_container` pick how with `mount_type`: `ssh`
-serves them from the workspace, `fuse` from a Mirage inside the sandbox, and
-`both` mixes the two. Daytona uses a Mirage inside.
+```yaml
+machines:
+  box:
+    provider: docker
+    container: my-sandbox
+runtimes:
+  - name: native
+    machine: box
+```
 
-| Runtime | Runs programs in | Workspace files through |
+A line or a command can also name its machine: `execute(machine=)`, a
+`machine` on the shell request, or a policy's `Route(machine=)`.
+
+A program there opens workspace files at the same paths, so the machine
+must see the mounts. `docker`, `e2b`, `ssh`, `smolvm`, `microsandbox`, and
+`apple_container` pick how with `mount_type`: `ssh` serves them from the
+workspace, `fuse` from a Mirage inside the machine, and `both` mixes the two.
+Daytona uses a Mirage inside.
+
+| Provider | Runs programs in | Workspace files through |
 | --- | --- | --- |
 | [Docker](/home/setup/runtime/sandbox/docker) | A Docker container | `mount_type`: `ssh`, `fuse` or `both` |
 | [E2B](/home/setup/runtime/sandbox/e2b) | An E2B cloud sandbox | `mount_type`: `ssh`, `fuse` or `both` |
@@ -24,7 +40,10 @@ serves them from the workspace, `fuse` from a Mirage inside the sandbox, and
 | [Microsandbox](/home/setup/runtime/sandbox/microsandbox) | A microVM with its own kernel | `mount_type`: `ssh`, `fuse` or `both` |
 | [Apple Container](/home/setup/runtime/sandbox/apple_container) | A container on macOS, one per agent if you map them | `mount_type`: `ssh`, `fuse` or `both` |
 | [SSH](/home/setup/runtime/sandbox/ssh) | Any machine running `sshd` | `mount_type`: `ssh`, `fuse` or `both` |
-| [Sandlock](/home/setup/runtime/sandbox/sandlock) | This Linux host, confined | A [FUSE folder](/home/setup/fuse) you grant |
+
+[Sandlock](/home/setup/runtime/sandbox/sandlock) is a runtime, not a machine:
+it runs programs on this Linux host, confined, with a
+[FUSE folder](/home/setup/fuse) you grant.
 
 After following a provider page's **Connecting the workspace** steps, run the
 shared [workspace file check](/home/setup/runtime/overview#verify-workspace-file-access)
@@ -37,17 +56,60 @@ installed in the sandbox image or on the remote machine. For Sandlock, they
 come from this host's interpreter. Mirage forwards the captured program's
 arguments, input, environment and working directory; a working directory
 the sandbox lacks fails the program with exit 126. Each run also gets
-`MIRAGE_PROCESS`, the id of its Mirage process (`w1:9`): when a run is cut
-short, by a `head` that has read enough, a timeout or `kill`, Mirage stops
-every process in the sandbox that carries that id, with the signal `kill`
-named or TERM. `wait` returns once
-they have stopped and reports 128 plus the signal, since a sandbox does
-not report the program's own status. Each provider's
-**Runtime behavior** table describes that boundary.
+`MIRAGE_PROCESS`, the id of its Mirage process (`w1:9`), which every process
+it starts inherits. Each provider's **Runtime behavior** table describes
+that boundary.
 
 File operations reach workspace mounts through the connection configured
 for that provider. They also remain subject to the sandbox or host's own
 permissions and confinement.
+
+## Processes and signals
+
+`ps` lists a program on a machine with the machine and its pid there, and
+everything the program started as processes of their own, found by a scan
+of the machine's `/proc` for its `MIRAGE_PROCESS`:
+
+```text
+    PID MACHINE                            MPID CMD
+4194305 -                                     - ps
+4194306 docker:box                           13 python3 train.py
+4194307 docker:box                           19 sleep 300
+```
+
+`ps -o machine,mpid` selects those columns, and `ps f` or `ps --forest`
+draws each command under its parent's. A process a scan found leaves the
+list once a scan no longer sees it.
+
+`kill` sends a signal to a program on a machine as you sent it: a program
+that traps `USR1` gets it and runs on, and one that `TERM` ends exits with
+its own status, which `wait` reports. KILL is sent only when you ask for it
+(`kill -9`, `timeout -k`) or when Mirage shuts the workspace down. Mirage's
+own stops, a `head` that has read enough, a line's timeout, a cancelled
+line, send TERM, then KILL a second later, to every process on the machine
+that carries the run's `MIRAGE_PROCESS`.
+
+In a Mirage shell a pid is Mirage's: they start at 4194305, past any
+machine's own. A smaller number given to `kill`, `kill -0`, `wait` or
+`ps -p` is a machine pid, the process whose program has that pid on its
+machine; one that two machines both have is refused as an ambiguous job
+spec. Inside a program on a machine a pid is that machine's, and a line
+sent whole to a machine (`@line`) runs in that machine's shell, with its
+pids. Every one of these follows the session's `processes` grants.
+
+## Machine states
+
+Each check finds a machine in one of three states:
+
+| State | Means |
+| --- | --- |
+| `managed` | Mirage reached it and sees and stops every process its programs start there: it has `/proc` and the `sh`, `tr` and `grep` the scan runs. The workspace's own host is always `managed`. |
+| `reachable` | Mirage reached it, but sees and stops only what it started itself. |
+| `unreachable` | The last check failed. |
+
+`GET /v1/workspaces/{id}/machines` checks every machine and lists the host
+first; `GET /v1/workspaces/{id}/machines/{machine}` checks one and lists its
+processes. `mirage workspace list-machines` prints the same table.
 
 ## The sandbox image
 
@@ -84,11 +146,10 @@ its `@line` entry's `timeout_seconds` exits 124, and `max_bytes` and
 `max_lines` cap the program's output.
 
 <Warning>
-  A timeout stops the program. Sandlock kills it. For the other providers,
-  Mirage sends TERM, then KILL a second later, to every process in the
-  sandbox that carries the run's `MIRAGE_PROCESS`; that needs `/bin/sh`,
-  `tr`, `grep` and `/proc` in the sandbox, and Mirage gives up after 5 seconds
-  if the sandbox stops answering. In TypeScript, a Daytona command keeps
+  A timeout stops the program. Sandlock kills it. On a machine, Mirage sends
+  TERM, then KILL a second later, to every process there that carries the
+  run's `MIRAGE_PROCESS`; that needs `/bin/sh`, `tr`, `grep` and `/proc` on
+  the machine, and Mirage gives up after 5 seconds if it stops answering. In TypeScript, a Daytona command keeps
   running after a timeout. A Daytona sandbox has no timeout of its own, so
   it keeps running and billing. Use the provider's own limits.
 </Warning>

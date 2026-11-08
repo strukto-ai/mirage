@@ -14,7 +14,8 @@
 import { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide/runtime'
-import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
+import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
+import { NativeRuntime } from '@struktoai/mirage-core/runtime/native/runtime'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -27,9 +28,9 @@ import {
   type RedisIndexConfig,
 } from '@struktoai/mirage-core/cache/index/config'
 import { buildFileCache } from '@struktoai/mirage-core/workspace/workspace/cache'
-import { DaytonaRuntime } from './runtime/sandbox/daytona/runtime.ts'
-import { SandlockRuntime } from './runtime/sandbox/sandlock/runtime.ts'
-import { SSHRuntime } from './runtime/sandbox/ssh/runtime.ts'
+import { DaytonaMachine } from './machine/daytona/handle.ts'
+import { SandlockRuntime } from './runtime/sandlock/runtime.ts'
+import { SSHMachine } from './machine/ssh/handle.ts'
 import { DiskNamespaceStore } from './workspace/mount/namespace/disk.ts'
 import { RedisNamespaceStore } from './workspace/mount/namespace/redis.ts'
 import { DiskWorkspaceStateStore } from './workspace/store/disk.ts'
@@ -376,36 +377,40 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/max_memory must be a size/)
   })
 
-  const e2bConfig = (apiKey: unknown, extra: Record<string, unknown> = {}, runtime = 'e2b') =>
+  const e2bConfig = (apiKey: unknown, extra: Record<string, unknown> = {}, provider = 'e2b') =>
     loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      runtimes: [{ name: runtime, config: { sandbox_id: 'sbx-1', api_key: apiKey } }, 'workspace'],
+      machines: { box: { provider, sandbox_id: 'sbx-1', api_key: apiKey } },
+      runtimes: [{ name: 'native', machine: 'box' }, 'workspace'],
       ...extra,
     })
 
   it.each([
-    ['e2b', E2BRuntime],
-    ['daytona', DaytonaRuntime],
-  ])('reads a pointer in a %s credential', async (runtime, cls) => {
+    ['e2b', E2BMachine],
+    ['daytona', DaytonaMachine],
+  ])('reads a pointer in a %s credential', async (provider, cls) => {
     vi.stubEnv('E2B_TEST_KEY', 'key_from_env')
     try {
       const args = await configToWorkspaceArgs(
-        e2bConfig({ from: 'env', key: 'E2B_TEST_KEY' }, {}, runtime),
+        e2bConfig({ from: 'env', key: 'E2B_TEST_KEY' }, {}, provider),
       )
-      const [sandbox, workspace] = args.options.runtimes ?? []
-      expect(sandbox).toBeInstanceOf(cls)
-      expect((sandbox as E2BRuntime | DaytonaRuntime).config).toMatchObject({
+      const box = args.options.machines?.box
+      expect(box).toBeInstanceOf(cls)
+      expect((box as E2BMachine | DaytonaMachine).config).toMatchObject({
         apiKey: 'key_from_env',
         sandboxId: 'sbx-1',
       })
+      const [native, workspace] = args.options.runtimes ?? []
+      expect(native).toBeInstanceOf(NativeRuntime)
+      expect((native as NativeRuntime).defaultMachine).toBe('box')
       expect((workspace as { name: string }).name).toBe('workspace')
     } finally {
       vi.unstubAllEnvs()
     }
   })
 
-  it('builds the source a runtime pointer names', async () => {
-    // Only the runtime names the instance, so it is built for it alone.
+  it('builds the source a machine pointer names', async () => {
+    // Only the machine names the instance, so it is built for it alone.
     const dir = mkdtempSync(join(tmpdir(), 'mirage-runtime-secret-'))
     try {
       writeFileSync(join(dir, '.env'), 'E2B_API_KEY=e2b_from_dotenv\n')
@@ -415,30 +420,32 @@ describe('configToWorkspaceArgs', () => {
           { secrets: { team: { source: 'dotenv', config: { path: 'unused' } } } },
         ),
       )
-      const e2b = args.options.runtimes?.[0] as E2BRuntime
+      const e2b = args.options.machines?.box as E2BMachine
       expect(e2b.config.apiKey).toBe('e2b_from_dotenv')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it("reads a pointer in the ssh runtime's private key", async () => {
+  it("reads a pointer in the ssh machine's private key", async () => {
     vi.stubEnv('SSH_TEST_KEY', 'key-from-env')
     try {
       const args = await configToWorkspaceArgs(
         loadWorkspaceConfig({
           mounts: { '/data': { vfs: 'ram' } },
-          runtimes: [
-            {
-              name: 'ssh',
-              config: { host: 'box', private_key: { from: 'env', key: 'SSH_TEST_KEY' } },
+          machines: {
+            gpu: {
+              provider: 'ssh',
+              host: 'box',
+              private_key: { from: 'env', key: 'SSH_TEST_KEY' },
             },
-          ],
+          },
         }),
       )
-      const ssh = args.options.runtimes?.[0]
-      expect(ssh).toBeInstanceOf(SSHRuntime)
-      expect((ssh as SSHRuntime).config.privateKey).toBe('key-from-env')
+      const ssh = args.options.machines?.gpu
+      expect(ssh).toBeInstanceOf(SSHMachine)
+      expect(String(ssh?.id)).toBe('ssh:gpu')
+      expect((ssh as SSHMachine).config.privateKey).toBe('key-from-env')
     } finally {
       vi.unstubAllEnvs()
     }
@@ -447,10 +454,10 @@ describe('configToWorkspaceArgs', () => {
   const e2bMountType = (mountType: unknown) =>
     loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' } },
-      runtimes: [{ name: 'e2b', config: { sandbox_id: 'sbx-1', mount_type: mountType } }],
+      machines: { box: { provider: 'e2b', sandbox_id: 'sbx-1', mount_type: mountType } },
     })
 
-  it('never quotes a value a runtime refusal read from a secret', async () => {
+  it('never quotes a value a machine refusal read from a secret', async () => {
     vi.stubEnv('E2B_TEST_MOUNT', 'sekret-mount')
     try {
       const refused = await configToWorkspaceArgs(
@@ -467,16 +474,16 @@ describe('configToWorkspaceArgs', () => {
     }
   })
 
-  it('still quotes a literal a runtime refuses', async () => {
+  it('still quotes a literal a machine refuses', async () => {
     await expect(configToWorkspaceArgs(e2bMountType('sshh'))).rejects.toThrow(/not "sshh"/)
   })
 
-  it('names the runtime when its pointer misses the field', async () => {
+  it('names the machine when its pointer misses the field', async () => {
     vi.stubEnv('E2B_TEST_KEY', undefined)
     try {
       await expect(
         configToWorkspaceArgs(e2bConfig({ from: 'env', key: 'E2B_TEST_KEY' })),
-      ).rejects.toThrow(/runtimes\.e2b\.config\.apiKey/)
+      ).rejects.toThrow(/machines\.box\.apiKey/)
     } finally {
       vi.unstubAllEnvs()
     }

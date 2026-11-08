@@ -46,6 +46,8 @@ import {
   resolveProducer,
 } from '../../policy/index.ts'
 import type { EntryGate } from '../../policy/types.ts'
+import { RouteError } from '../../runtime/routing/index.ts'
+import { routed } from '../../runtime/table.ts'
 import type { DispatchFn, OutputFn, RunResult } from '../../runtime/types.ts'
 import { decodeText, encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
@@ -428,8 +430,8 @@ export async function executeCommand(
       // `TOKEN=x printenv TOKEN` prints `x` because bash puts a prefix
       // assignment in the *command's environment*, not merely in the
       // shell. Seeding it plain left it invisible to every reader of
-      // `envSnapshot` — the command's own env, an installed CLI, a guest
-      // runtime — once that view narrowed to the exported set. The temporary
+      // `envSnapshot` (the command's own env, an installed CLI, a guest
+      // runtime) once that view narrowed to the exported set. The temporary
       // carries that mark alone, as bash's does: `declare -i n; n=1+2 cmd`
       // hands cmd `1+2` and `declare -p n` there prints `declare -x`. The
       // saved record is put back below, so neither outlives the command.
@@ -815,7 +817,7 @@ async function runArgv(
     // policies bind in the same window, whether or not a gate judged the
     // line, so the command tier's policy guard can fire preVfs for the
     // backend I/O a handler performs.
-    const route = () =>
+    const run = () =>
       routeArgv(
         recurse,
         dispatch,
@@ -834,6 +836,30 @@ async function runArgv(
         parser,
         admitted,
       )
+    // A preCommand route places this command, and what it runs, over the
+    // line's placement for its run alone.
+    const route = async (): Promise<RedirectResult> => {
+      const line = context.frame.routing
+      const placed = admitted?.route ?? null
+      if (placed === null || line === undefined) return run()
+      try {
+        context.frame.routing = routed(
+          registry.runtimeEntries,
+          line.bindings,
+          placed.runtime,
+          placed.machine ?? line.machine,
+        )
+      } catch (caught) {
+        throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
+          cause: caught,
+        })
+      }
+      try {
+        return await run()
+      } finally {
+        context.frame.routing = line
+      }
+    }
     // A post method reads what the command did: its file records, gathered
     // as it runs and as its output drains, and its result node, settled
     // once the output has drained.

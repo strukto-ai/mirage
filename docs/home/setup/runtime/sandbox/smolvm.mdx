@@ -4,8 +4,9 @@ icon: /images/smolvm-logo.svg
 description: Run captured programs in a smolvm microVM with its own kernel.
 ---
 
-`smolvm` runs captured programs in a running [smolvm](https://smolmachines.com)
-microVM, by name. Each machine has its own guest kernel, on macOS, Linux and
+The `smolvm` machine provider reaches a running
+[smolvm](https://smolmachines.com) microVM, by name, and the `native` runtime
+runs captured programs in it. Each machine has its own guest kernel, on macOS, Linux and
 Windows. You create and start the machine; Mirage only runs programs in it.
 Python SDK and Node.
 
@@ -29,33 +30,43 @@ Python in the machine too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.sandbox.smolvm import SmolvmRuntime
+    from mirage.runtime.native import NativeRuntime
 
-    runtime = SmolvmRuntime(captures=["@python", "@external"], config={"machine": "mirage-box"})
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"box": {"provider": "smolvm", "machine": "mirage-box"}},
+        runtimes=[NativeRuntime(["@python", "@external"], machine="box")],
+    )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, RAMVFS, SmolvmRuntime, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, NativeRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-    const runtime = new SmolvmRuntime({
-      captures: ['@python', '@external'],
-      config: { machine: 'mirage-box' },
-    })
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { box: { provider: 'smolvm', machine: 'mirage-box' } },
+        runtimes: [new NativeRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+      },
+    )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="YAML" icon="file-code">
     ```yaml
     mode: exec
+    machines:
+      box:
+        provider: smolvm
+        machine: mirage-box
     runtimes:
-      - name: smolvm
+      - name: native
         captures: ["@python", "@external"]
-        config:
-          machine: mirage-box
+        machine: box
     mounts:
       /data:
         vfs: ram
@@ -113,4 +124,3 @@ smolvm machine exec --name mirage-box -- mirage workspace create /tmp/sandbox.ya
   while a machine is `unreachable`.
 - Lines sent to one machine share its files and processes. Give each tenant
   its own machine.
-- A [timeout](/home/setup/runtime/sandbox#timeouts) does not kill the program in the machine.

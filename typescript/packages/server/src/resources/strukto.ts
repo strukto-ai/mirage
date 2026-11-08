@@ -79,7 +79,7 @@ export async function withEntries(
   for (const ref of refs) {
     const kind = kinds.get(ref)
     if (kind === undefined) {
-      throw new ResourceError('invalid', `${ref} is not saved as a VFS, CLI or runtime`)
+      throw new ResourceError('invalid', `${ref} is not saved as a VFS, CLI, runtime or machine`)
     }
     const entry = await store.revealEntry(kind, ref)
     plain.set(ref, entry.fields)

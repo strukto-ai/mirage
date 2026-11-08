@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.runtime.sandbox.ssh import SSHRuntime
+from mirage.machine.ssh import SSHMachine
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 
@@ -53,7 +53,7 @@ data = S3VFS(
 
 proj = SSHVFS(SSHConfig(host="dev", root=REMOTE_DIR, known_hosts=None))
 
-runtime = SSHRuntime(captures=["python3"], config={"host": "dev"})
+runtime = SSHMachine(captures=["python3"], config={"host": "dev"})
 
 LOAD_PY = (
     "import csv, json, sys\n"

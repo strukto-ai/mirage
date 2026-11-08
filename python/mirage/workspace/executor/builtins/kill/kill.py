@@ -19,6 +19,7 @@ from mirage.context import (
     session_voice,
 )
 from mirage.execution.job import JobHandle, JobTable
+from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.types import ProcessState
 from mirage.execution.process.view import ProcessView
 from mirage.io import IOResult
@@ -39,6 +40,7 @@ from mirage.workspace.executor.builtins.constants import MAX_PID_OPERAND
 from mirage.workspace.executor.builtins.jobspec import (
     job_numbered,
     job_result,
+    machine_process,
     process_view,
     session_of,
 )
@@ -122,7 +124,10 @@ async def handle_kill(
     """Signal managed runners with bash's kill surface.
 
     The signal comes from ``-s``/``-n``, or from the first ``-sigspec``;
-    ``0`` probes and every other signal cancels the runner with it. Every
+    ``0`` probes, a program on a machine gets any other as sent (it ends
+    when it exits), and every other runner is cancelled with it. A
+    number under ``FIRST_PID`` is a machine pid (``machine_process``).
+    Every
     operand is tried and each failure is named in bash's words; the
     status is 0 when any operand was signalled, as bash's is. A job
     spec is ``%N``; a negative number is a process group, the session's
@@ -188,6 +193,13 @@ async def handle_kill(
     for operand in words:
         jobs = job_table.list_jobs(sid)
         pid, refusal = _kill_pid(jobs, operand)
+        if pid is not None and 0 < pid < FIRST_PID and operand.isdigit():
+            found_process, ambiguous = await machine_process(processes, pid)
+            if ambiguous:
+                errors.append(f"{voice}kill: {operand}: ambiguous job spec")
+                continue
+            pid = found_process.pid if found_process is not None else None
+            refusal = f"({operand}) - No such process"
         if pid is None:
             errors.append(f"{voice}kill: {refusal}")
             continue
@@ -209,6 +221,8 @@ async def handle_kill(
         try:
             if signal in KEPT_SIGNALS:
                 found = processes.probe(pid)
+            elif (sending := processes.send(pid, signal)) is not None:
+                found = await sending
             else:
                 found = processes.terminate(pid, signal)
                 job = next(
@@ -247,8 +261,9 @@ async def _kill_group(
     signal: int,
     session_id: str,
 ) -> bool:
-    """Signal a process group as killpg(2) does, its jobs recorded as
-    killed by a signal they take.
+    """Signal a process group as killpg(2) does, its jobs Mirage stops
+    recorded as killed by the signal; a program on a machine gets it as
+    sent.
 
     Args:
         job_table (JobTable): the session's jobs.
@@ -265,11 +280,12 @@ async def _kill_group(
         return processes.probe_group(group)
     if not processes.probe_group(group):
         return False
+    found = await processes.signal_group(group, signal)
     for job in jobs:
         if (
             job.process is not None
             and job.process.record.group == group
-            and signal not in job.process.ignores
+            and job.process.record.state == ProcessState.STOPPING
         ):
             await job_table.kill(job.id, session_id, signal)
-    return processes.signal_group(group, signal)
+    return found

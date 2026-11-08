@@ -14,6 +14,7 @@
 
 
 from mirage.execution.job import JobHandle, JobTable
+from mirage.execution.process.types import Process
 from mirage.execution.process.view import ProcessView
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
@@ -65,6 +66,37 @@ def process_view(
     return job_table.processes.view(
         session.session_id, lambda: session.processes
     )
+
+
+async def machine_process(
+    processes: ProcessView, number: int
+) -> tuple[Process | None, bool]:
+    """The process a machine pid names: a number under ``FIRST_PID``,
+    which kill, wait and ps read as the pid of a program on its machine.
+    The view is brought in step with the machines first (``scan``).
+
+    Args:
+        processes (ProcessView): the session's view of the processes.
+        number (int): the pid as typed.
+
+    Returns:
+        tuple[Process | None, bool]: the one process the view sees whose
+        program has that pid on its machine, None for none, and whether
+        processes on more than one machine have it, which bash's
+        ``ambiguous job spec`` refuses.
+    """
+    await processes.scan()
+    found = [
+        process
+        for process in processes.list()
+        if process.machine_pid is not None
+        and process.machine_pid.pid == number
+        and process.machine_pid.exited is None
+    ]
+    machines = {str(process.machine) for process in found}
+    if len(machines) > 1:
+        return None, True
+    return (found[0] if found else None), False
 
 
 def job_numbered(jobs: list[JobHandle], job_id: int) -> JobHandle | None:

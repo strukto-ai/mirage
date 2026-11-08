@@ -839,6 +839,13 @@
                   "GET /v1/workspaces/{workspace_id}/processes",
                   "GET /v1/workspaces/{workspace_id}/processes/{pid}"
                 ]
+              },
+              {
+                "group": "Machines",
+                "pages": [
+                  "GET /v1/workspaces/{workspace_id}/machines",
+                  "GET /v1/workspaces/{workspace_id}/machines/{machine_id}"
+                ]
               }
             ]
           },
@@ -917,6 +924,17 @@
                   "GET /v1/runtimes/{ref}",
                   "PUT /v1/runtimes/{ref}",
                   "DELETE /v1/runtimes/{ref}"
+                ]
+              },
+              {
+                "group": "Machines",
+                "pages": [
+                  "GET /v1/machines",
+                  "POST /v1/machines",
+                  "GET /v1/machines/types",
+                  "GET /v1/machines/{ref}",
+                  "PUT /v1/machines/{ref}",
+                  "DELETE /v1/machines/{ref}"
                 ]
               }
             ]

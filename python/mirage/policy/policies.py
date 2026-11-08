@@ -16,7 +16,7 @@ import asyncio
 import errno
 import inspect
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import fields, replace
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
@@ -810,6 +810,18 @@ def agreed(routes: list[Route]) -> Deny | Route | None:
     result = compose_settled(tuple(routes), "agreed")
     assert result is None or isinstance(result, (Deny, Route))
     return result
+
+
+def command_route(answers: Sequence[Deny | Ask | Route]) -> Route | None:
+    """The Route a command's ``pre_command`` answers agree on: None when
+    none places it, and when two disagree, which refuses the command
+    (``settled``).
+
+    Args:
+        answers (Sequence[Deny | Ask | Route]): the command's answers.
+    """
+    placed = agreed([a for a in answers if isinstance(a, Route)])
+    return placed if isinstance(placed, Route) else None
 
 
 @overload

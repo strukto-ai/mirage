@@ -392,12 +392,17 @@ export async function handleTimeout(
   run.catch(() => undefined)
   // timeout signals its own process group unless --foreground, so what the
   // command started ends with it, or, where a shell ignores the signal, the
-  // program it runs right now does; the command itself gets it either way.
-  // The deepest hear it first, so a native program that ends with the
-  // command already knows the signal.
+  // program it runs right now does; the command itself gets it either way,
+  // a program on a machine as sent. The deepest hear it first, so a native
+  // program that ends with the command already knows the signal.
   const send = (number: number): void => {
-    if (foreground) deliver(process, number)
-    else processes.signalGroup(process.record.group, number)
+    if (!foreground) {
+      void processes.signalGroup(process.record.group, number)
+      return
+    }
+    const sending = processes.send(process, number)
+    if (sending === null) deliver(process, number)
+    else void sending
   }
   const watch = supervise(run, abort.signal, send, sink, held, seconds, lineSignal, {
     signal,
@@ -475,7 +480,7 @@ async function supervise(
   }
   const reached = (): void => {
     if (stops || !carriesOn || how.ignored) send(signal)
-    if (!carriesOn || killAfter === 0) return
+    if (killAfter === 0) return
     kill.at = new Promise((resolve) => {
       kill.cancel = atDeadline(killAfter, () => {
         resolve(TIMED_OUT)
@@ -537,6 +542,21 @@ async function supervise(
         return await stop(said, 137)
       }
       return await ended(sink, held, said, how.preserve ? late.exitCode : TIMEOUT_STATUS, true)
+    }
+    // A program on a machine got the signal as sent and may outlive it:
+    // -k's KILL then ends the wait.
+    if (kill.at !== null) {
+      const late = await Promise.race([
+        run.then(
+          () => null,
+          () => null,
+        ),
+        kill.at,
+      ])
+      if (late === TIMED_OUT) {
+        say(SIGKILL)
+        return await stop(said, 137)
+      }
     }
     if (SELF_KILLING_SIGNALS.has(signal) && (!foreground || signal === SIGKILL)) {
       return await stop(said, 128 + signal)

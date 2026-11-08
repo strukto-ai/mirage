@@ -91,7 +91,7 @@ async def test_kill_refuses_in_bash_words(args, code, stderr):
 async def test_kill_marks_a_known_job_killed():
     table = JobTable()
     job = await submit_pending(table)
-    _, io, _ = await handle_kill(table, ["kill", str(job.id)])
+    _, io, _ = await handle_kill(table, ["kill", str(job.pid)])
     assert io.exit_code == 0
     assert table.get(job.id).signal is not None
 

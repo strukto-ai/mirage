@@ -22,7 +22,9 @@ import type { Process, SpawnRequest } from './types.ts'
  * `permissions` answers the profile's process grants while the view stands
  * and null once it is revoked, for the processes of other workspaces, which
  * only the store lists. A process group is found, probed and signalled
- * through the members the view sees.
+ * through the members the view sees. `scan` brings the table in step with
+ * what each machine runs now, and `send` signals a program on a machine as
+ * sent, null for a process Mirage stops itself (`terminate`).
  */
 export interface ProcessView {
   readonly list: () => readonly Process[]
@@ -31,7 +33,9 @@ export interface ProcessView {
   readonly terminate: (pid: number, signal: number) => boolean
   readonly permissions: () => ProcessPermissions | null
   readonly probeGroup: (groupId: number) => boolean
-  readonly signalGroup: (groupId: number, signal: number) => boolean
+  readonly signalGroup: (groupId: number, signal: number) => Promise<boolean>
+  readonly scan: () => Promise<void>
+  readonly send: (pid: number, signal: number) => Promise<boolean> | null
   readonly depth?: number
   readonly spawn?: (request: SpawnRequest) => ChildProcess
 }

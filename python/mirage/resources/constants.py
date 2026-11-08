@@ -17,7 +17,13 @@ import re
 
 from mirage.resources.types import EntryKind, ResourceKind
 
-ENTRY_KINDS: tuple[EntryKind, ...] = ("vfs", "cli", "runtime", "store")
+ENTRY_KINDS: tuple[EntryKind, ...] = (
+    "vfs",
+    "cli",
+    "runtime",
+    "machine",
+    "store",
+)
 
 # The one scope a local daemon serves; a hosted server keeps one per team.
 DEFAULT_SCOPE = "local"
@@ -38,6 +44,7 @@ NOUN: dict[ResourceKind, str] = {
     "vfs": "VFS",
     "cli": "CLI",
     "runtime": "runtime",
+    "machine": "machine",
     "store": "secret store",
     "policy": "policy",
     "template": "template",

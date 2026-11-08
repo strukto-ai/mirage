@@ -63,6 +63,8 @@ from mirage.policy import (
 )
 from mirage.policy.policies import post_session_gate, pre_session_gate
 from mirage.policy.types import Claimant, HandOff, SessionContext
+from mirage.runtime.routing import RouteError
+from mirage.runtime.table import routed
 from mirage.runtime.types import DispatchFn, OutputFn, RunResult
 from mirage.shell.bytes import decode_text, encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
@@ -953,6 +955,21 @@ async def _run_argv(
                 ),
             )
         )
+        # A pre_command route places this command, and what it runs, over
+        # the line's placement for its run alone.
+        line_routing = context.frame.routing
+        route = admitted.route if admitted is not None else None
+        if route is not None and line_routing is not None:
+            try:
+                context.frame.routing = routed(
+                    registry.runtime_entries,
+                    line_routing.bindings,
+                    route.runtime,
+                    route.machine or line_routing.machine,
+                )
+            except ValueError as exc:
+                reset_caller(token)
+                raise RouteError(str(exc)) from exc
         try:
             with command_records(own=True) as mine:
                 result = await _route_argv(
@@ -972,6 +989,7 @@ async def _run_argv(
                     output,
                 )
         finally:
+            context.frame.routing = line_routing
             reset_caller(token)
         if not watched:
             return result

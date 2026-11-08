@@ -1,0 +1,90 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import { MachineHandle } from '@struktoai/mirage-core/machine/handle'
+import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/machine/mixin'
+import { requireId } from '@struktoai/mirage-core/machine/config'
+import { registerMachine } from '@struktoai/mirage-core/machine/registry'
+import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
+import { DOCKER_CONFIG_FIELDS, type DockerConfig } from './config.ts'
+import { notRunningHint } from '@struktoai/mirage-core/machine/constants'
+import { DOCKER_HINT, RUNNING_STATE } from './constants.ts'
+import { execArgs, openProgramPipe, reportedState, runProgram } from '../program.ts'
+
+/**
+ * A container the user runs as a whole-line runtime.
+ *
+ * You start the container yourself; mirage only connects to it and
+ * execs lines. The `docker` program is the transport (Docker Desktop,
+ * colima, or a podman alias all work), so there is no SDK dependency
+ * and no daemon socket wiring; each line is one `docker exec -i` with
+ * the merged environment, the session cwd, real stdin, and separated
+ * stderr.
+ */
+export class DockerMachine extends MachineHandle<DockerConfig> implements PipeTransport {
+  static override readonly configFields: ConfigFields = DOCKER_CONFIG_FIELDS
+  readonly [PIPE_TRANSPORT] = true as const
+  static override readonly provider = 'docker'
+
+  constructor(name: string, config?: DockerConfig) {
+    super(name, config, DockerMachine.configFields)
+    requireId('docker', 'container', this.config.container)
+  }
+
+  // Run `docker` once; the seam tests override.
+  protected docker(
+    args: string[],
+    stdin: ByteSource | null = null,
+    output: OutputFn | null = null,
+    signal?: AbortSignal,
+    errors: OutputFn | null = null,
+  ): Promise<RunResult> {
+    return runProgram('docker', DOCKER_HINT, args, stdin, {
+      ...(signal !== undefined ? { signal } : {}),
+      ...(output !== null ? { output } : {}),
+      ...(errors !== null ? { errors } : {}),
+    })
+  }
+
+  async connect(): Promise<void> {
+    const container = this.config.container
+    const status = await this.docker(['inspect', '--format', '{{json .State}}', container])
+    const state = reportedState(status, 'docker inspect', ['Status'])
+    if (state !== RUNNING_STATE) throw new Error(notRunningHint('container', container, state, {}))
+  }
+
+  protected override execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    output: OutputFn | null,
+    errors: OutputFn | null,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    const args = execArgs(['exec', '-i'], [this.config.container], env, cwd, argv)
+    return this.docker(args, stdin, output, signal, errors)
+  }
+
+  openPipe(command: string): Promise<SandboxPipe> {
+    return openProgramPipe(
+      'docker',
+      execArgs(['exec', '-i'], [this.config.container], {}, null, ['/bin/sh', '-c', command]),
+    )
+  }
+}
+
+registerMachine('docker', DockerMachine)

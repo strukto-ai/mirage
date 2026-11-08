@@ -20,23 +20,28 @@ A runtime runs the programs in a line. Mirage's own commands (`grep`, `cat`, pip
 | [`pyodide`](/home/setup/runtime/pyodide) | `python3`, CPython in WebAssembly | Mirage workspace | TypeScript |
 | [`quickjs`](/home/setup/runtime/quickjs) | `node` and `js`, with Node.js's common APIs | Mirage workspace | both (default) |
 | [`local`](/home/setup/runtime/local) | host programs such as `python3`, `node` or `tsx` | host | Python, Node |
-| [Sandboxes](/home/setup/runtime/sandbox) | native programs | a container, VM, cloud sandbox or SSH machine, or this Linux host with Sandlock | Python, Node; E2B also in the browser |
+| [`native`](/home/setup/runtime/sandbox) | native programs | a [machine](/home/setup/runtime/sandbox): a container, VM, cloud sandbox or SSH host | Python, Node; E2B also in the browser |
+| [`sandlock`](/home/setup/runtime/sandbox/sandlock) | native programs | this Linux host, confined | Python, Node |
 
 ## Routing
 
 `runtimes` is an ordered list: the first runtime whose `captures` name a program runs it, and `workspace` takes the rest. Without the key, the list is `[monty, quickjs, workspace]` in both SDKs, and `[monty, workspace]` on [Cloudflare Workers](/typescript/cloudflare-quickstart), which runs no QuickJS.
 
 ```yaml
+machines:
+  box:
+    provider: docker
+    container: my-sandbox
+    mount_type: ssh
 runtimes:
   - monty
-  - name: docker
-    config:
-      container: my-sandbox
-      mount_type: ssh
+  - name: native
+    machine: box
   - workspace
 ```
 
-An entry is a name, or a mapping with `name`, `captures` and `config`. The
+An entry is a name, or a mapping with `name`, `captures` and `config`; a
+`native` entry names its `machine` instead of taking `config`. The
 name is a runtime Mirage ships, one you registered in code, or
 a `./file.py:Class` (Python) or `./file.mjs:Class` (TypeScript) reference to
 [your own runtime](/home/setup/runtime/custom). Config keys are snake_case in YAML for both SDKs, and a
@@ -94,11 +99,14 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
   `python3 job.py a.csv b.csv`), and permission rules judge that argv.
 
 ```yaml
+machines:
+  box:
+    provider: docker
+    container: my-sandbox
 runtimes:
-  - name: docker
+  - name: native
     captures: ["@python", "@external"]
-    config:
-      container: my-sandbox
+    machine: box
 ```
 
 Here `python3 job.py | grep error` runs `python3` in the container and

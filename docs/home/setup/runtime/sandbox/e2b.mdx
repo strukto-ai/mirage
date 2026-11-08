@@ -4,8 +4,8 @@ icon: /images/e2b-logo.svg
 description: Run captured programs in an E2B cloud sandbox you created.
 ---
 
-`e2b` runs captured programs in a running [E2B](https://e2b.dev) sandbox,
-by ID. You create the sandbox from a template; Mirage only runs programs in
+The `e2b` machine provider reaches a running [E2B](https://e2b.dev)
+sandbox, by ID, and the `native` runtime runs captured programs in it. You create the sandbox from a template; Mirage only runs programs in
 it. Python SDK, Node and browsers.
 
 ## Installation
@@ -39,42 +39,54 @@ Python in the sandbox too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.sandbox.e2b import E2BRuntime
+    from mirage.runtime.native import NativeRuntime
 
-    runtime = E2BRuntime(
-        captures=["@python", "@external"],
-        config={"sandbox_id": "sandbox-id", "mount_type": "ssh"},
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "box": {
+                "provider": "e2b",
+                "sandbox_id": "sandbox-id",
+                "mount_type": "ssh",
+            }
+        },
+        runtimes=[NativeRuntime(["@python", "@external"], machine="box")],
     )
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { E2BRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, NativeRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-    const runtime = new E2BRuntime({
-      captures: ['@python', '@external'],
-      config: { sandboxId: 'sandbox-id', mountType: 'ssh' },
-    })
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { box: { provider: 'e2b', sandboxId: 'sandbox-id', mountType: 'ssh' } },
+        runtimes: [new NativeRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+      },
+    )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
 
-    In a browser, import `E2BRuntime` from
-    `@struktoai/mirage-core/runtime/sandbox/e2b/runtime` (`pnpm add
-    @struktoai/mirage-core`), pass `apiKey`, and
-    use `mountType: 'fuse'` or leave it unset.
+    In a browser, import `@struktoai/mirage-core/machine/e2b/handle` once
+    to register the provider (`pnpm add @struktoai/mirage-core`), pass
+    `apiKey`, and use `mountType: 'fuse'` or leave it unset.
   </Tab>
   <Tab title="YAML" icon="file-code">
     ```yaml
     mode: exec
+    machines:
+      box:
+        provider: e2b
+        sandbox_id: ${E2B_SANDBOX_ID}
+        mount_type: ssh
     runtimes:
-      - name: e2b
+      - name: native
         captures: ["@python", "@external"]
-        config:
-          sandbox_id: ${E2B_SANDBOX_ID}
-          mount_type: ssh
+        machine: box
     mounts:
       /data:
         vfs: ram

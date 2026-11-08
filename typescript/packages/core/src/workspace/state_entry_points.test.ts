@@ -40,7 +40,7 @@ import { dispatched, ops } from '../test-utils.ts'
 import { MountMode, PathSpec, VFSName } from '../types.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { seedVar, setAttr } from '../workspace/session/state.ts'
+import { seedVar, setAttr } from './session/state.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { makeArray } from '../shell/array.ts'
 

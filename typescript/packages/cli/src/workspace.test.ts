@@ -153,7 +153,7 @@ async function fakeServer(): Promise<{ url: string; seen: Seen[]; server: Server
         }
         return
       }
-      if (req.method === 'GET' && /\/(lines|jobs|processes)(\?|$)/.test(url)) {
+      if (req.method === 'GET' && /\/(lines|jobs|processes|machines)(\?|$)/.test(url)) {
         res.writeHead(200, { 'content-type': 'application/json' }).end('[]')
         return
       }
@@ -334,12 +334,14 @@ describe('mirage workspace list-lines, list-jobs and list-processes', () => {
       expect(
         await mirage(url, dir, 'list-processes', 'w', '--job', 'j1', '--machine', 'docker:t'),
       ).toBe(0)
+      expect(await mirage(url, dir, 'list-machines', 'w')).toBe(0)
       expect(seen.map((s) => [s.method, s.url])).toEqual([
         ['GET', '/v1/workspaces/w/lines?state=running'],
         ['GET', '/v1/workspaces/w/jobs?session_id=s1'],
         ['GET', '/v1/workspaces/w/jobs?line_id=line_1'],
         ['GET', '/v1/workspaces/w/processes?state=exited&line_id=line_1'],
         ['GET', '/v1/workspaces/w/processes?job_id=j1&machine=docker%3At'],
+        ['GET', '/v1/workspaces/w/machines'],
       ])
     } finally {
       server.close()

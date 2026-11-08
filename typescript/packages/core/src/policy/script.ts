@@ -338,7 +338,8 @@ export async function checkProgram(
  *
  * `null` (the function returned `None`) is no opinion. Anything else is one JSON answer
  * (`Answer`): `{"kind": "deny", "reason": ...}`, `{"kind": "ask",
- * "reason": ...}`, or at `preExecute` `{"kind": "route", "runtime": ...}`.
+ * "reason": ...}`, or at `preExecute` and `preCommand` `{"kind": "route",
+ * "runtime": ..., "machine": ...}`, naming a runtime, a machine or both.
  * A deny or an ask without a reason carries the document's default one.
  * Throws a plain Error whose message is a clause about "script", for the
  * caller to prefix with whose policy it is. Mirrors the Python
@@ -361,14 +362,17 @@ export function scriptAction(output: Uint8Array, method: PolicyMethod): Deny | A
         '{"kind": "deny" | "ask" | "route", ...}, or None',
     )
   }
-  const { kind, reason, runtime } = answer.data
+  const { kind, reason, runtime, machine } = answer.data
   if (!VALIDITY[method].has(kind)) throw new Error(`script cannot answer ${kind} at ${name}`)
   const said = reason ?? ''
   if (kind === 'deny') return { kind, reason: said === '' ? DEFAULT_DENY_REASON : said }
   if (kind === 'ask') return { kind, reason: said === '' ? DEFAULT_ASK_REASON : said }
-  return said === ''
-    ? { kind, runtime: runtime ?? '' }
-    : { kind, runtime: runtime ?? '', reason: said }
+  return {
+    kind,
+    ...(runtime !== undefined && runtime !== null ? { runtime } : {}),
+    ...(machine !== undefined && machine !== null ? { machine } : {}),
+    ...(said === '' ? {} : { reason: said }),
+  }
 }
 
 /**

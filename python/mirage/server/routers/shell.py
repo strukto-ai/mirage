@@ -50,6 +50,7 @@ class ShellRequest(BaseModel):
     command: str
     cwd: str | None = None
     runtime: str | None = None
+    machine: str | None = None
     record: bool = True
 
 
@@ -64,6 +65,8 @@ def _build_shell_kwargs(
         kwargs["cwd"] = req.cwd
     if req.runtime is not None:
         kwargs["runtime"] = req.runtime
+    if req.machine is not None:
+        kwargs["machine"] = req.machine
     if stdin is not None:
         kwargs["stdin"] = stdin
     return kwargs
@@ -207,8 +210,8 @@ async def _explained(
 ) -> Response:
     """What a line would do as a session, without running any of it
     (``session.explain.shell``). Only the line is read: stdin, a working
-    directory or a runtime would change what runs, which an explanation
-    cannot follow, so each is refused.
+    directory, a runtime or a machine would change what runs, which an
+    explanation cannot follow, so each is refused.
 
     Args:
         entry (WorkspaceEntry): the workspace.
@@ -221,10 +224,13 @@ async def _explained(
         if content_type.startswith("multipart/")
         else await _parse_json_body(request)
     )
-    if req_obj is None or req_obj.cwd or req_obj.runtime:
+    if req_obj is None or req_obj.cwd or req_obj.runtime or req_obj.machine:
         raise HTTPException(
             status_code=400,
-            detail="explain takes the line alone: no stdin, cwd or runtime",
+            detail=(
+                "explain takes the line alone: no stdin, cwd, runtime or"
+                " machine"
+            ),
         )
     session = await session_of(entry, session_id)
     said = await entry.runner.call(session.explain.shell(req_obj.command))

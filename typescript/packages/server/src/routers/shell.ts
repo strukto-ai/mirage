@@ -42,6 +42,7 @@ const ShellRequest = z
     command: z.string(),
     cwd: z.string().optional(),
     runtime: z.string().optional(),
+    machine: z.string().optional(),
     record: z.boolean().optional(),
   })
   .strict()
@@ -206,7 +207,7 @@ interface ShellQuery {
 /**
  * What a line would do as a session, without running any of it
  * (`session.explain.shell`). Only the line is read: a working directory, a
- * runtime or stdin would change what runs, which an
+ * runtime, a machine or stdin would change what runs, which an
  * explanation cannot follow, so each is refused. Mirrors Python's
  * `_explained`.
  */
@@ -221,9 +222,12 @@ async function explained(
     const parsed = ShellRequest.safeParse(req.body)
     if (
       req.headers['content-type']?.startsWith('multipart/') === true ||
-      (parsed.success && (parsed.data.cwd !== undefined || parsed.data.runtime !== undefined))
+      (parsed.success &&
+        (parsed.data.cwd !== undefined ||
+          parsed.data.runtime !== undefined ||
+          parsed.data.machine !== undefined))
     ) {
-      throw new HttpError(400, 'explain takes the line alone: no stdin, cwd or runtime')
+      throw new HttpError(400, 'explain takes the line alone: no stdin, cwd, runtime or machine')
     }
     if (!parsed.success) throw new HttpError(400, `bad shell request: ${parsed.error.message}`)
     const session = await sessionOf(entry.runner.ws, req.query.session_id)
@@ -312,6 +316,7 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
             lineHandle,
             ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
             ...(body.runtime !== undefined ? { runtime: body.runtime } : {}),
+            ...(body.machine !== undefined ? { machine: body.machine } : {}),
             ...(body.record !== undefined ? { record: body.record } : {}),
             ...(stdin !== undefined ? { stdin } : {}),
             signal,

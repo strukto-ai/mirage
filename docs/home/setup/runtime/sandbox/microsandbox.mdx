@@ -4,8 +4,9 @@ icon: /images/microsandbox-logo.svg
 description: Run captured programs in an existing microsandbox microVM.
 ---
 
-Run captured programs in a running [microsandbox](https://microsandbox.dev)
-microVM, by name. You create and start the sandbox; Mirage runs programs in
+The `microsandbox` machine provider reaches a running
+[microsandbox](https://microsandbox.dev) microVM, by name, and the `native`
+runtime runs captured programs in it. You create and start the sandbox; Mirage runs programs in
 it through the `msb` CLI. Python SDK and Node.
 
 ## Installation
@@ -27,36 +28,43 @@ Add `@python` to run Python programs in the guest too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.sandbox.microsandbox import MicrosandboxRuntime
+    from mirage.runtime.native import NativeRuntime
 
-    runtime = MicrosandboxRuntime(
-        captures=["@python", "@external"],
-        config={"sandbox": "mirage-box"},
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"box": {"provider": "microsandbox", "sandbox": "mirage-box"}},
+        runtimes=[NativeRuntime(["@python", "@external"], machine="box")],
     )
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, RAMVFS, MicrosandboxRuntime, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, NativeRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-    const runtime = new MicrosandboxRuntime({
-      captures: ['@python', '@external'],
-      config: { sandbox: 'mirage-box' },
-    })
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { box: { provider: 'microsandbox', sandbox: 'mirage-box' } },
+        runtimes: [new NativeRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+      },
+    )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="YAML" icon="file-code">
     ```yaml
     mode: exec
+    machines:
+      box:
+        provider: microsandbox
+        sandbox: mirage-box
     runtimes:
-      - name: microsandbox
+      - name: native
         captures: ["@python", "@external"]
-        config:
-          sandbox: mirage-box
+        machine: box
     mounts:
       /data:
         vfs: ram

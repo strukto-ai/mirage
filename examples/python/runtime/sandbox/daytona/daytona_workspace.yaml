@@ -1,9 +1,9 @@
-# S3-centered workspace with a Daytona whole-line runtime.
+# S3-centered workspace with a Daytona machine.
 #
 # Mirage never creates, provisions, or deletes sandboxes: create one
 # yourself from the mirage-fuse snapshot (prebake_snapshot.py builds
 # it once; create_sandbox.py creates the sandbox AND provisions the
-# in-sandbox workspace), then point the runtime at its id.
+# in-sandbox workspace), then point the machine at its id.
 #
 #   set -a; source .env.development; set +a
 #   export DAYTONA_SANDBOX_ID=$(./python/.venv/bin/python \
@@ -36,10 +36,14 @@ mounts:
       aws_secret_access_key: ${AWS_SECRET_ACCESS_KEY}
       key_prefix: mirage-daytona-cli-demo
 
+machines:
+  daytona:
+    provider: daytona
+    sandbox_id: ${DAYTONA_SANDBOX_ID} # a sandbox you created and provisioned
+    api_key: ${DAYTONA_API_KEY}
+
 runtimes:
-  - name: daytona
+  - name: native
     captures: ["python3", "pip"]
-    config:
-      sandbox_id: ${DAYTONA_SANDBOX_ID} # a sandbox you created and provisioned
-      api_key: ${DAYTONA_API_KEY}
+    machine: daytona
   - workspace
