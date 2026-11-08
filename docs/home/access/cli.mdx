@@ -173,12 +173,15 @@ MIRAGE_WORKSPACE=demo mirage-bash -c 'ls /data | wc -l'
 - Calls are spelled with dashes: `mirage workspace vfs is-dir /data -w demo`.
 - Required arguments come in order, the rest as `--name VALUE`.
 - Bytes come from `--data` or `--value`, else from stdin.
-- Piped, it prints the call's JSON. In a terminal, `read` prints the text and a
-  list prints one entry per line. A call that returns nothing prints nothing.
+- `read` prints the file's bytes as they arrive, so binary files and large files
+  pass through whole. `--json` prints the JSON answer, with the bytes in base64.
+- Other calls print their JSON when piped. In a terminal, a list prints one
+  entry per line. A call that returns nothing prints nothing.
 
 ```bash
 echo "hello" | mirage workspace vfs write /data/hi.txt -w demo
 mirage workspace vfs read /data/hi.txt -w demo
+mirage workspace vfs read /data/img.png -w demo > img.png
 ```
 
 ### Relays
