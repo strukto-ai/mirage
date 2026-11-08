@@ -442,11 +442,12 @@ describe('same-session lines run one at a time', () => {
           },
         }),
       )
-      await ws.shell(line)
+      ws.createSession('s')
+      await ws.shell(line, { sessionId: 's' })
       release()
       expect(await later[0]).toMatchObject({ exitCode: 0 })
       const saved = await ws.stateStore.sessions(ws.workspaceId).load()
-      expect(saved.get(ws.defaultSessionId)?.env).toMatchObject({ X: 'late' })
+      expect(saved.get('s')?.env).toMatchObject({ X: 'late' })
     },
   )
 

@@ -253,6 +253,28 @@ async function drainToSink(sink: JobConsole, result: ExecuteResult): Promise<Exe
 }
 
 /**
+ * The session a re-entrant line continues in, and the id it names. A line
+ * run while this workspace's session is bound continues in that session
+ * unless it names another: `executeLine` runs it there and
+ * `Workspace.serializeLine` runs it inline. Only with task-local storage:
+ * the browser fallback's newest binding may belong to an unrelated call. A
+ * substitution's shell ends with it, so a host task still bound to one
+ * (started in it, run after it) is a line of its own on that session's id:
+ * it waits its turn and resolves the session as a host call naming it does.
+ */
+export function reentry(
+  sessions: SessionManager,
+  sessionId: string | undefined,
+): [SessionState | null, string | undefined] {
+  const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(sessions) : null
+  if (ambient === null || (sessionId !== undefined && sessionId !== ambient.sessionId)) {
+    return [null, sessionId]
+  }
+  if (ambient.vars.shell.closed) return [null, ambient.sessionId]
+  return [ambient, ambient.sessionId]
+}
+
+/**
  * The body of `Workspace.shell`; see its docstring for the argument
  * contract. Runs the line, then honors the sink contract for every path
  * `runLine` can answer on.
@@ -325,18 +347,10 @@ async function runLine(
   // the signal at once rather than holding the caller.
   await abortable(preflight(env), options.signal)
   // Evaluator calls carry their exact session, including ephemeral forks.
-  // Ambient re-entry is safe only with task-local storage: the browser
-  // fallback's newest frame may belong to an unrelated shell call. A
-  // substitution's shell ends with it, so a host task still bound to one
-  // (started in it, run after it) resolves its session as any host call does.
-  const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(env.sessions) : null
-  const inPlace =
-    ambient !== null &&
-    !ambient.vars.shell.closed &&
-    (options.sessionId === undefined || options.sessionId === ambient.sessionId)
+  const [ambient, sessionId] = reentry(env.sessions, options.sessionId)
+  const inPlace = ambient !== null
   const targetSession =
-    options.session ??
-    (inPlace ? ambient : env.sessions.get(options.sessionId ?? env.sessions.defaultId))
+    options.session ?? ambient ?? env.sessions.get(sessionId ?? env.sessions.defaultId)
   frame.session = targetSession
   // Whole-invocation policies must approve the result before bytes escape.
   if (await env.registry.policies.wantsFor('postExecute', targetSession.sessionId)) {

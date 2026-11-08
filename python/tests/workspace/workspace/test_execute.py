@@ -527,11 +527,11 @@ async def test_a_line_that_outlives_its_caller_saves_its_session(line):
             spec=CommandSpec(name="spawn"), handlers={"": CLIHandler(fn=spawn)}
         ),
     )
-    await ws.shell(line)
+    ws.create_session("s")
+    await ws.shell(line, session_id="s")
     gate.set()
     assert (await later[0]).exit_code == 0
-    saved = (await store.load())[ws._session_mgr.default_id]
-    assert saved["env"]["X"] == "late"
+    assert (await store.load())["s"]["env"]["X"] == "late"
     await ws.close()
 
 
