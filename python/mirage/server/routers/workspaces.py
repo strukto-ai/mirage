@@ -155,11 +155,12 @@ def _store_of(
 
 async def _kept(
     request: Request, workspace_id: str
-) -> tuple[dict[str, JsonValue] | None, float] | None:
-    """What the caller's ``workspace_id``, not live, keeps: the config it
-    starts from and when it was first created, or None when it keeps
-    neither config nor state. A saved config's store that cannot be read,
-    such as a Redis that is down, leaves the config with no creation time.
+) -> tuple[dict[str, JsonValue], float] | None:
+    """What the caller's stopped ``workspace_id`` keeps: the config it
+    starts from and when it was first created, or None when no config is
+    saved. State alone, as a rejected create leaves, is not a workspace
+    to list or start. A store that cannot be read, such as a Redis that
+    is down, leaves the config with no creation time.
 
     Args:
         request (Request): the request, for the registry and its account.
@@ -170,12 +171,12 @@ async def _kept(
     if not await registry.allows(workspace_id, account, 0.0):
         return None
     config = await registry.saved_config(workspace_id, account)
+    if config is None:
+        return None
     store = _store_of(request, config)
     try:
         meta = await store.load_meta(workspace_id)
     except Exception as exc:
-        if config is None:
-            raise
         logger.warning(
             "mirage: workspace %s's store could not be read: %s",
             workspace_id,
@@ -184,8 +185,6 @@ async def _kept(
         meta = None
     finally:
         await store.close()
-    if config is None and meta is None:
-        return None
     created_at = (meta or {}).get("created_at")
     return config, (
         float(created_at) if isinstance(created_at, (int, float)) else 0.0
@@ -200,7 +199,13 @@ async def _stopped(request: Request, workspace_id: str) -> bool:
         request (Request): the request, for the registry and its account.
         workspace_id (str): the id asked about.
     """
-    return await _kept(request, workspace_id) is not None
+    registry = request.app.state.registry
+    account = request.state.account
+    if not await registry.allows(workspace_id, account, 0.0):
+        return False
+    if await _has_state(request, workspace_id):
+        return True
+    return await registry.saved_config(workspace_id, account) is not None
 
 
 @asynccontextmanager
@@ -765,12 +770,10 @@ async def delete_workspace(
     """
     registry = request.app.state.registry
     if registry.visible(workspace_id, request.state.account) is None:
-        if not await _stopped(request, workspace_id):
+        kept = await _kept(request, workspace_id)
+        if kept is None:
             raise HTTPException(status_code=404, detail="workspace not found")
-        store = _store_of(
-            request,
-            await registry.saved_config(workspace_id, request.state.account),
-        )
+        store = _store_of(request, kept[0])
         try:
             forgotten = await registry.forget(workspace_id, store)
         finally:

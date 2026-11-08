@@ -260,15 +260,16 @@ function storeOf(
 
 /** What a stopped workspace keeps: the config it starts from, and when it was first created. */
 interface Kept {
-  config: Record<string, JsonValue> | null
+  config: Record<string, JsonValue>
   createdAt: number
 }
 
 /**
- * What `account`'s `id`, not live, keeps: its config or its state, null
- * when it keeps neither. A saved config's store that cannot be read, such
- * as a Redis that is down, leaves the config with no creation time.
- * Mirrors Python's `_kept`.
+ * What `account`'s stopped `id` keeps: the config it starts from and when
+ * it was first created, null when no config is saved. State alone, as a
+ * rejected create leaves, is not a workspace to list or start. A store
+ * that cannot be read, such as a Redis that is down, leaves the config
+ * with no creation time. Mirrors Python's `_kept`.
  */
 async function kept(
   deps: WorkspaceRoutesDeps,
@@ -277,18 +278,17 @@ async function kept(
 ): Promise<Kept | null> {
   if (!(await deps.registry.allows(id, account, 0))) return null
   const config = await deps.registry.savedConfig(id, account)
+  if (config === null) return null
   const store = storeOf(deps, config)
   let meta: Record<string, unknown> | null
   try {
     meta = await store.loadMeta(id)
   } catch (e) {
-    if (config === null) throw e
     console.warn(`mirage: workspace ${id}'s store could not be read: ${(e as Error).message}`)
     meta = null
   } finally {
     await store.close()
   }
-  if (config === null && meta === null) return null
   const createdAt = meta?.created_at
   return { config, createdAt: typeof createdAt === 'number' ? createdAt : 0 }
 }
@@ -302,7 +302,9 @@ async function stopped(
   id: string,
   account: string | null,
 ): Promise<boolean> {
-  return (await kept(deps, id, account)) !== null
+  if (!(await deps.registry.allows(id, account, 0))) return false
+  if (await hasState(deps.host, id)) return true
+  return (await deps.registry.savedConfig(id, account)) !== null
 }
 
 /**
@@ -789,10 +791,9 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
   app.delete<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id', async (req, reply) => {
     const { id } = req.params
     if (deps.registry.visible(id, req.account) === null) {
-      if (!(await stopped(deps, id, req.account))) {
-        return reply.status(404).send({ detail: 'workspace not found' })
-      }
-      const store = storeOf(deps, await deps.registry.savedConfig(id, req.account))
+      const k = await kept(deps, id, req.account)
+      if (k === null) return reply.status(404).send({ detail: 'workspace not found' })
+      const store = storeOf(deps, k.config)
       try {
         if (!(await deps.registry.forget(id, store))) {
           return reply.status(409).send({ detail: 'workspace is starting or stopping; try again' })

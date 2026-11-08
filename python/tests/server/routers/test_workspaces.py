@@ -58,6 +58,7 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.snapshot.tar_io import write_tar
 from mirage.workspace.snapshot.utils import BLOB_REF_KEY
+from mirage.workspace.store import DiskWorkspaceStateStore
 from tests.fixtures.mcp_server import TOKEN, TOOLS, served_mcp
 
 
@@ -1838,6 +1839,23 @@ async def test_a_stopped_workspace_is_deleted_from_the_store_its_config_names(
         r = await client.delete("/v1/workspaces/mine")
         assert r.status_code == 200, r.text
         assert not (own / "workspaces" / "mine").exists()
+
+
+@pytest.mark.asyncio
+async def test_an_id_with_state_but_no_saved_config_answers_404(tmp_path):
+    # A rejected create can leave state but never saves a config.
+    store = DiskWorkspaceStateStore(str(tmp_path / "state"))
+    await store.replace_meta("orphan", {})
+    await store.close()
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        assert (await client.get("/v1/workspaces/orphan")).status_code == 404
+        assert (await client.get("/v1/workspaces")).json() == []
+        assert (
+            await client.delete("/v1/workspaces/orphan")
+        ).status_code == 404
 
 
 @pytest.mark.asyncio

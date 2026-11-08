@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
-import { Workspace } from '@struktoai/mirage-node'
+import { DiskWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 import { readSnapshotTar, writeSnapshotTar } from '@struktoai/mirage-core/workspace/snapshot/tar_io'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode, type JsonValue } from '@struktoai/mirage-core/types'
@@ -1645,6 +1645,27 @@ describe('workspace cancel, kill, stop and start', () => {
       const deleted = await app.inject({ method: 'DELETE', url: '/v1/workspaces/mine' })
       expect(deleted.statusCode).toBe(200)
       expect(existsSync(join(own, 'workspaces', 'mine'))).toBe(false)
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('answers 404 for an id with state but no saved config, as a rejected create leaves', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-orphan-'))
+    const stateRoot = join(root, 'state')
+    const app = buildApp({ stateRoot })
+    try {
+      const store = new DiskWorkspaceStateStore({ root: stateRoot })
+      await store.replaceMeta('orphan', {})
+      await store.close()
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces/orphan' })).statusCode).toBe(
+        404,
+      )
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toEqual([])
+      expect(
+        (await app.inject({ method: 'DELETE', url: '/v1/workspaces/orphan' })).statusCode,
+      ).toBe(404)
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })
