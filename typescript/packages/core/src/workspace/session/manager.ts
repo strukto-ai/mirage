@@ -99,6 +99,8 @@ function seedBytes(session: SessionState, seedVars: Record<string, ShellVar>): n
 export class SessionManager extends SessionOwner {
   private readonly sessions = new Map<string, SessionState>()
   private readonly persistLock = new KeyLock()
+  // The top-level lines running on each session id.
+  private readonly running = new Map<string, number>()
   private readonly sessionStore: NamespaceStore
   private defaultIdInternal: string
   private loaded = false
@@ -412,6 +414,28 @@ export class SessionManager extends SessionOwner {
         if (this.sessions.get(session.sessionId) === session) await this.flushOne(session)
       })
     }
+  }
+
+  /** Count a top-level line running on `sessionId`. */
+  beginLine(sessionId: string): void {
+    this.running.set(sessionId, (this.running.get(sessionId) ?? 0) + 1)
+  }
+
+  /**
+   * Persist a session as a line on it ends. A line run inside a top-level
+   * one still running on it (`$( )`, `eval`) leaves that to the top-level
+   * line's end, which writes the same record; once no top-level line runs
+   * (a host task that outlived its line), the line persists its own write.
+   */
+  async endLine(sessionId: string, topLevel: boolean): Promise<void> {
+    if (topLevel) {
+      const left = (this.running.get(sessionId) ?? 1) - 1
+      if (left > 0) this.running.set(sessionId, left)
+      else this.running.delete(sessionId)
+    } else if (this.running.has(sessionId)) {
+      return
+    }
+    await this.flush(sessionId)
   }
 
   /** Wait for admitted session writes before their store closes. */

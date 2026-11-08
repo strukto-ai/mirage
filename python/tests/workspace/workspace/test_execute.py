@@ -506,6 +506,35 @@ async def test_a_line_saves_its_session_once_at_its_end():
 
 
 @pytest.mark.asyncio
+async def test_a_line_that_outlives_its_caller_saves_its_session():
+    store = RAMNamespaceStore()
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, session_store=store)
+    gate = asyncio.Event()
+    later: list[asyncio.Task[IOResult]] = []
+
+    async def late() -> IOResult:
+        await gate.wait()
+        return await ws.shell("X=late", record=False)
+
+    async def spawn(config, paths, texts, ctx):
+        later.append(asyncio.create_task(late()))
+        return None, IOResult()
+
+    ws.register_cli(
+        "spawn",
+        CLI(
+            spec=CommandSpec(name="spawn"), handlers={"": CLIHandler(fn=spawn)}
+        ),
+    )
+    await ws.shell("spawn")
+    gate.set()
+    await later[0]
+    saved = (await store.load())[ws._session_mgr.default_id]
+    assert saved["env"]["X"] == "late"
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_abort_on_the_history_record_restores_status():
     ws = Workspace(
         {"/": RAMVFS()}, mode=MountMode.WRITE, observe=_StalledObserverStore()

@@ -507,6 +507,7 @@ async function runPreparedLine(
     lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits),
     env.registry.ceilings.maxLineSeconds,
   )
+  if (parent === null) env.sessions.beginLine(targetSession.sessionId)
   try {
     // The outermost line, recorded or not, runs under its `@line` deadline,
     // which a nested one shares: past it the tree is stopped like an abort
@@ -1069,14 +1070,13 @@ async function runPreparedLine(
       effectiveSession.expandAliasesMarks.clear()
     }
     // Durable session fields (cwd, env, grants) flush at the end of
-    // every line, success or failure, mirroring Python's finally; a line
-    // run inside another on its session (`$( )`, `eval`) leaves it to that
-    // line's end, which saves the same record once. It joins under the
-    // grace like the tree: a stalled store finishes in the background
-    // instead of holding an aborted caller.
-    if (parent === null) {
-      await runCancellable(env.sessions.flush(targetSession.sessionId), options.signal)
-    }
+    // every line, success or failure, mirroring Python's finally. It joins
+    // under the grace like the tree: a stalled store finishes in the
+    // background instead of holding an aborted caller.
+    await runCancellable(
+      env.sessions.endLine(targetSession.sessionId, parent === null),
+      options.signal,
+    )
   }
 }
 
