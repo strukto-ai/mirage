@@ -733,8 +733,10 @@ export class Shell {
     const framed = this.framed
     if (framed === null) return engine('shell', op, [this.handle, ...args])
     this.framed = null
+    const items = this.frameItems(framed)
+    this.sent = null
     const answer = batch([
-      ['shell', 'frame', this.handle, ...this.frameItems(framed)],
+      ['shell', 'frame', this.handle, ...items],
       ['shell', op, this.handle, ...args],
     ])
     this.sent = { positional: framed.positional, calls: framed.calls }

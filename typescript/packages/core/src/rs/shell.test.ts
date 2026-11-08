@@ -241,10 +241,15 @@ describe('Shell', () => {
     shell.frame({ ...frame, status: 2 ** 40 })
     expect(() => shell.has('x')).toThrow('out of range')
     shell.frame(frame)
-    const [result] = run(shell.expand(word('echo $#'), 'fields', false), () => {
-      throw new Error('nothing to ask')
-    })
-    expect(result).toEqual(['ok', ['2']])
+    const count = (): unknown =>
+      run(shell.expand(word('echo $#'), 'fields', false), () => {
+        throw new Error('nothing to ask')
+      })[0]
+    expect(count()).toEqual(['ok', ['2']])
+    shell.frame({ ...frame, positional: ['c'] })
+    expect(() => shell.visibleNames('bogus')).toThrow()
+    shell.frame(frame)
+    expect(count()).toEqual(['ok', ['2']])
     shell.close()
   })
 

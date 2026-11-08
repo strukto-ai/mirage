@@ -1,6 +1,3 @@
-//! The scopes a function call and a prefix assignment open over the
-//! records, and what `declare -g` reaches past them.
-
 use super::*;
 
 /// The scope a function call or a prefix assignment opens: the records it

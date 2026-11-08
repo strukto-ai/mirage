@@ -1,6 +1,3 @@
-//! `$RANDOM`'s generator: the session's sequence, and the scratch one an
-//! arithmetic evaluation draws from until the gate has seeded the session.
-
 use super::*;
 
 /// bash 5.2's generator: Park-Miller's minimal standard stepped through
