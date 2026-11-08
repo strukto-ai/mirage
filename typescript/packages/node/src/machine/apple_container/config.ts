@@ -13,48 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import {
-  BASE_CONFIG_FIELDS,
-  nonblank,
-  type MachineConfig,
-} from '@struktoai/mirage-core/machine/config'
-import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import { BASE_CONFIG_FIELDS, type MachineConfig } from '@struktoai/mirage-core/machine/config'
 
-/** How to reach the user's running containers. */
+/** How to reach the user's running container. */
 export interface AppleContainerConfig extends MachineConfig {
-  /** Id of the running container for a session with none of its own in `containers`. */
-  container?: string
-  /** Session id to container id, one container per agent. */
-  containers?: Record<string, string>
+  /**
+   * Id of a running container. You start it yourself; give each agent a
+   * container of its own as a machine of its own.
+   */
+  container: string
 }
 
 export const APPLE_CONTAINER_CONFIG_FIELDS: ConfigFields = {
   ...BASE_CONFIG_FIELDS,
-  container: { type: 'string' },
-  containers: { type: 'map' },
-}
-
-/** Validate container ids before any session can use the runtime. */
-export function validateAppleContainerConfig(config: AppleContainerConfig): void {
-  const { container, containers = {} } = config
-  if (container === undefined && Object.keys(containers).length === 0) {
-    throw new Error('apple_container config needs container or containers')
-  }
-  if (container !== undefined && !nonblank(container)) {
-    throw new Error('apple_container container must be a nonblank id')
-  }
-  const blank = Object.entries(containers)
-    .filter(([, id]) => !nonblank(id))
-    .map(([session]) => session)
-    .sort(compareCodePoints)
-  if (blank.length > 0) {
-    throw new Error(
-      `apple_container containers must map each session to a nonblank id: ${blank.join(', ')}`,
-    )
-  }
-  if (config.mountType != null && Object.keys(containers).length > 0) {
-    throw new Error(
-      'apple_container mountType serves one session, so it cannot be combined with containers',
-    )
-  }
+  container: { type: 'string', required: true },
 }

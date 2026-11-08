@@ -19,17 +19,19 @@ from types import SimpleNamespace
 
 import pytest
 
-from mirage import MountMode, Workspace
+from mirage import MountMode, Policy, Workspace
 from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.machine.apple_container import AppleContainerMachine
 from mirage.machine.constants import EXEC_PRELUDE, PROCESS
 from mirage.machine.registry import build_machine
+from mirage.policy import Route
+from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
-from tests.fixtures.machine import machine_runtime, on
+from tests.fixtures.machine import machine_runtime
 
 
 class FakeAppleContainerMachine(AppleContainerMachine):
@@ -120,8 +122,9 @@ def test_the_prelude_resolves_a_relative_cwd_without_cdpath(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_the_first_line_inspects_its_container():
+async def test_connect_inspects_its_container():
     runtime = FakeAppleContainerMachine(config={"container": "box"})
+    await runtime.connect()
     await runtime.exec_line("pwd", None, {}, "/")
     assert runtime.calls[0][0] == ["inspect", "box"]
     assert runtime.exec_targets() == ["box"]
@@ -141,7 +144,7 @@ async def test_a_state_that_cannot_take_a_line_is_named(state, hint):
         states={"box": state}, config={"container": "box"}
     )
     with pytest.raises(RuntimeError, match=hint):
-        await runtime.exec_line("pwd", None, {}, "/")
+        await runtime.connect()
     assert runtime.exec_targets() == []
 
 
@@ -151,7 +154,7 @@ async def test_an_inspect_error_fails_loud():
         inspect_code=1, config={"container": "box"}
     )
     with pytest.raises(RuntimeError, match="container not found: box"):
-        await runtime.exec_line("pwd", None, {}, "/")
+        await runtime.connect()
 
 
 @pytest.mark.asyncio
@@ -163,32 +166,18 @@ async def test_unreadable_inspect_json_fails_loud(stdout):
         inspect_stdout=stdout, config={"container": "box"}
     )
     with pytest.raises(RuntimeError, match="unreadable json"):
-        await runtime.exec_line("pwd", None, {}, "/")
+        await runtime.connect()
 
 
 def test_config_needs_a_container():
-    with pytest.raises(ValueError, match="container or containers"):
+    with pytest.raises(TypeError, match="container"):
         AppleContainerMachine("box", config={})
-
-
-@pytest.mark.parametrize(
-    ("config", "named"),
-    [
-        ({"container": ""}, "container must be a nonblank id"),
-        ({"containers": {"agent_a": ""}}, "nonblank id: agent_a"),
-        (
-            {"container": "shared", "containers": {"b": " ", "a": "box"}},
-            "nonblank id: b",
-        ),
-        (
-            {"mount_type": "ssh", "containers": {"a": "box"}},
-            "cannot be combined with containers",
-        ),
-    ],
-)
-def test_config_refuses_what_it_cannot_serve(config, named):
-    with pytest.raises(ValueError, match=named):
-        AppleContainerMachine("box", config=config)
+    with pytest.raises(ValueError, match="needs a nonblank container"):
+        AppleContainerMachine("box", config={"container": " "})
+    with pytest.raises(TypeError, match="containers"):
+        AppleContainerMachine(
+            "box", config={"container": "box", "containers": {"a": "box"}}
+        )
 
 
 def test_registers_under_the_config_name():
@@ -293,69 +282,35 @@ async def test_process_refuses_empty_argv_and_a_stopped_container():
     assert len(runtime.calls) == 1
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "session_id", ["agent_a", "constructor", "toString", "__proto__"]
-)
-async def test_each_session_runs_in_its_own_container(session_id):
-    runtime = FakeAppleContainerMachine(
-        captures=["uname"],
-        config={
-            "container": "shared",
-            "containers": {session_id: "box-a", "agent_b": "box-b"},
-        },
-    )
-    ws = Workspace(
-        {"/d": RAMVFS()},
-        mode=MountMode.EXEC,
-        **on(runtime, "workspace"),
-    )
-    for mapped_id in (session_id, "agent_b", session_id):
-        handle = await ws.session(mapped_id)
-        assert (await handle.shell("uname")).exit_code == 0
-    assert (await ws.shell("uname")).exit_code == 0
-    assert runtime.exec_targets() == ["box-a", "box-b", "box-a", "shared"]
-    assert runtime.inspected() == ["box-a", "box-b", "shared"]
+class _OwnBox(Policy):
+    def pre_execute(self, ctx):
+        return Route(machine=ctx.session_id)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "session_id", ["agent_b", "constructor", "toString", "__proto__"]
-)
-async def test_unmapped_session_uses_fallback(session_id):
-    runtime = FakeAppleContainerMachine(
-        captures=["uname"],
-        config={"container": "shared", "containers": {"agent_a": "box-a"}},
-    )
+async def test_a_route_gives_each_session_a_container_of_its_own():
+    boxes = {
+        name: FakeAppleContainerMachine(
+            name=name, config={"container": f"box-{name}"}
+        )
+        for name in ("agent_a", "agent_b")
+    }
     ws = Workspace(
         {"/d": RAMVFS()},
         mode=MountMode.EXEC,
-        **on(runtime, "workspace"),
+        machines=boxes,
+        runtimes=[MachineRuntime(["uname"]), "workspace"],
+        policies=[_OwnBox()],
     )
-    handle = await ws.session(session_id)
-    assert (await handle.shell("uname")).exit_code == 0
-    assert runtime.exec_targets() == ["shared"]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "session_id", ["agent_b", "constructor", "toString", "__proto__"]
-)
-async def test_a_session_with_no_container_fails_loud(session_id):
-    runtime = FakeAppleContainerMachine(
-        captures=["uname"], config={"containers": {"agent_a": "box-a"}}
-    )
-    ws = Workspace(
-        {"/d": RAMVFS()},
-        mode=MountMode.EXEC,
-        **on(runtime, "workspace"),
-    )
-    handle = await ws.session(session_id)
-    result = await handle.shell("uname")
-    assert result.exit_code == 1
-    stderr = await result.stderr_str()
-    assert f"no container for session {session_id}" in stderr
-    assert not runtime.calls
+    try:
+        for session_id in ("agent_a", "agent_b", "agent_a"):
+            handle = await ws.session(session_id)
+            assert (await handle.shell("uname")).exit_code == 0
+    finally:
+        await ws.close()
+    assert boxes["agent_a"].exec_targets() == ["box-agent_a"] * 2
+    assert boxes["agent_b"].exec_targets() == ["box-agent_b"]
+    assert boxes["agent_a"].inspected() == ["box-agent_a"]
 
 
 @pytest.mark.asyncio

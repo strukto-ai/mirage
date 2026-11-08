@@ -25,10 +25,13 @@ import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { isLineExecutor, isProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { describe, expect, it, vi } from 'vitest'
+import type { Policy } from '@struktoai/mirage-core/policy/base'
+import type { Route, RouteContext } from '@struktoai/mirage-core/policy/types'
+import { MachineRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 import type { AppleContainerConfig } from './config.ts'
 import { AppleContainerMachine } from './handle.ts'
 import { Workspace } from '../../workspace.ts'
-import { captured, machineRuntime, on } from '../../../tests/fixtures/machine.ts'
+import { machineRuntime } from '../../../tests/fixtures/machine.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -107,8 +110,9 @@ function prelude(cwd: string, ...argv: string[]): ReturnType<typeof spawnSync> {
 }
 
 describe('AppleContainerMachine', () => {
-  it('the first line inspects its container', async () => {
+  it('connect inspects its container', async () => {
     const runtime = makeRuntime()
+    await runtime.connect()
     await runtime.execLine('pwd', null, {}, '/')
     expect(runtime.calls[0]?.[0]).toEqual(['inspect', 'box'])
     expect(runtime.execTargets()).toEqual(['box'])
@@ -121,14 +125,14 @@ describe('AppleContainerMachine', () => {
   ])('names why state %s cannot take a line', async (state, hint) => {
     const runtime = makeRuntime()
     runtime.states.box = state
-    await expect(runtime.execLine('pwd', null, {}, '/')).rejects.toThrow(hint)
+    await expect(runtime.connect()).rejects.toThrow(hint)
     expect(runtime.execTargets()).toEqual([])
   })
 
   it('an inspect error fails loud', async () => {
     const runtime = makeRuntime()
     runtime.inspectCode = 1
-    await expect(runtime.execLine('pwd', null, {}, '/')).rejects.toThrow('container not found: box')
+    await expect(runtime.connect()).rejects.toThrow('container not found: box')
   })
 
   it.each(['not json', '[]', '{}', '[{"status": null}]'])(
@@ -136,21 +140,14 @@ describe('AppleContainerMachine', () => {
     async (stdout) => {
       const runtime = makeRuntime()
       runtime.inspectStdout = stdout
-      await expect(runtime.execLine('pwd', null, {}, '/')).rejects.toThrow('unreadable json')
+      await expect(runtime.connect()).rejects.toThrow('unreadable json')
     },
   )
 
   it('config needs a container', () => {
-    expect(() => makeRuntime({})).toThrow('container or containers')
-  })
-
-  it.each([
-    [{ container: '' }, 'container must be a nonblank id'],
-    [{ containers: { agent_a: '' } }, 'nonblank id: agent_a'],
-    [{ container: 'shared', containers: { b: ' ', a: 'box' } }, 'nonblank id: b'],
-    [{ mountType: 'ssh', containers: { a: 'box' } }, 'cannot be combined with containers'],
-  ])('config %j is refused', (config, named) => {
-    expect(() => makeRuntime(config)).toThrow(named)
+    expect(() => makeRuntime({})).toThrow('container')
+    expect(() => makeRuntime({ container: ' ' })).toThrow('needs a nonblank container')
+    expect(() => makeRuntime({ container: 'box', containers: { a: 'box' } })).toThrow('containers')
   })
 
   it("registers under the config name 'apple_container'", () => {
@@ -357,56 +354,35 @@ it('refuses empty argv and a stopped container before executing', async () => {
   expect(runtime.calls).toHaveLength(1)
 })
 
-it.each(['agent_a', 'constructor', 'toString', '__proto__'])(
-  'runs mapped session %s in its own container',
-  async (sessionId) => {
-    const runtime = captured(
-      makeRuntime({ container: 'shared', containers: { [sessionId]: 'box-a', agent_b: 'box-b' } }),
-      ['uname'],
-    )
-    const ws = new Workspace(
-      { '/d': new RAMVFS() },
-      { mode: MountMode.EXEC, ...on(runtime, 'workspace') },
-    )
-    for (const id of [sessionId, 'agent_b', sessionId]) {
+class OwnBox implements Policy {
+  preExecute(ctx: RouteContext): Route {
+    return { kind: 'route', machine: ctx.sessionId }
+  }
+}
+
+it('gives each session a container of its own through a route', async () => {
+  const boxes = {
+    agent_a: new FakeAppleContainerMachine('agent_a', { container: 'box-agent_a' }),
+    agent_b: new FakeAppleContainerMachine('agent_b', { container: 'box-agent_b' }),
+  }
+  const ws = new Workspace(
+    { '/d': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      machines: boxes,
+      runtimes: [new MachineRuntime({ captures: ['uname'] }), 'workspace'],
+      policies: [new OwnBox()],
+    },
+  )
+  try {
+    for (const id of ['agent_a', 'agent_b', 'agent_a']) {
       const handle = await ws.session(id)
       expect((await handle.shell('uname')).exitCode).toBe(0)
     }
-    expect((await ws.shell('uname')).exitCode).toBe(0)
-    expect(runtime.execTargets()).toEqual(['box-a', 'box-b', 'box-a', 'shared'])
-    expect(runtime.inspected()).toEqual(['box-a', 'box-b', 'shared'])
-  },
-)
-
-it.each(['agent_b', 'constructor', 'toString', '__proto__'])(
-  'uses the fallback for unmapped session %s',
-  async (sessionId) => {
-    const runtime = captured(
-      makeRuntime({ container: 'shared', containers: { agent_a: 'box-a' } }),
-      ['uname'],
-    )
-    const ws = new Workspace(
-      { '/d': new RAMVFS() },
-      { mode: MountMode.EXEC, ...on(runtime, 'workspace') },
-    )
-    const handle = await ws.session(sessionId)
-    expect((await handle.shell('uname')).exitCode).toBe(0)
-    expect(runtime.execTargets()).toEqual(['shared'])
-  },
-)
-
-it.each(['agent_b', 'constructor', 'toString', '__proto__'])(
-  'fails unmapped session %s loudly',
-  async (sessionId) => {
-    const runtime = captured(makeRuntime({ containers: { agent_a: 'box-a' } }), ['uname'])
-    const ws = new Workspace(
-      { '/d': new RAMVFS() },
-      { mode: MountMode.EXEC, ...on(runtime, 'workspace') },
-    )
-    const handle = await ws.session(sessionId)
-    const result = await handle.shell('uname')
-    expect(result.exitCode).toBe(1)
-    expect(DEC.decode(result.stderr)).toContain(`no container for session ${sessionId}`)
-    expect(runtime.calls).toHaveLength(0)
-  },
-)
+  } finally {
+    await ws.close()
+  }
+  expect(boxes.agent_a.execTargets()).toEqual(['box-agent_a', 'box-agent_a'])
+  expect(boxes.agent_b.execTargets()).toEqual(['box-agent_b'])
+  expect(boxes.agent_a.inspected()).toEqual(['box-agent_a'])
+})

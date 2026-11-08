@@ -12,44 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from mirage.machine.config import MachineConfig, nonblank
+from mirage.machine.config import MachineConfig, require_id
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AppleContainerConfig(MachineConfig):
-    """How to reach the user's running containers.
+    """How to reach the user's running container.
 
     Args:
-        container (str | None): id of the running container for a
-            session with none of its own in ``containers``.
-        containers (dict[str, str]): session id to container id, one
-            container per agent.
+        container (str): id of a running container. You start it
+            yourself; give each agent a container of its own as a
+            machine of its own.
     """
 
-    container: str | None = None
-    containers: dict[str, str] = field(default_factory=dict)
+    container: str
 
     def __post_init__(self) -> None:
-        if self.container is None and not self.containers:
-            raise ValueError(
-                "apple_container config needs container or containers"
-            )
-        if self.container is not None and not nonblank(self.container):
-            raise ValueError("apple_container container must be a nonblank id")
-        blank = sorted(
-            session
-            for session, container in self.containers.items()
-            if not nonblank(container)
-        )
-        if blank:
-            raise ValueError(
-                "apple_container containers must map each "
-                "session to a nonblank id: " + ", ".join(blank)
-            )
-        if self.mount_type is not None and self.containers:
-            raise ValueError(
-                "apple_container mount_type serves one session, "
-                "so it cannot be combined with containers"
-            )
+        require_id("apple_container", "container", self.container)

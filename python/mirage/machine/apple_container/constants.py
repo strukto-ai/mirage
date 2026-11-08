@@ -31,16 +31,3 @@ STATE_HINTS: dict[str, str] = {
         "`container start {name}`"
     ),
 }
-
-
-def no_container_hint(session_id: str | None) -> str:
-    """Why a line has nowhere to run: its session maps to no container.
-
-    Args:
-        session_id (str | None): the line's session, None outside one.
-    """
-    session = session_id if session_id is not None else "(none)"
-    return (
-        f"apple_container has no container for session {session}: "
-        "list it under containers or set container"
-    )

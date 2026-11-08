@@ -6,9 +6,7 @@ description: Run captured programs in containers under Apple's container tool on
 
 The `apple_container` machine provider reaches a running container under
 Apple's `container` tool, and the `machine` runtime runs captured programs in
-it. It can map each session to its own container, so
-every agent gets one. You start the containers; Mirage only runs programs
-in them. Needs Apple silicon and macOS 26 or later. Python SDK and Node.
+it. You start the containers; Mirage only runs programs in them. Needs Apple silicon and macOS 26 or later. Python SDK and Node.
 
 ## Installation
 
@@ -29,8 +27,9 @@ container run -d --cap-add SYS_ADMIN \
 
 `captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
 every program Mirage does not have itself. Name `@python` to run
-Python in the container too. Use `containers`, a
-map from session ID to container, for one container per agent.
+Python in the container too. For one container per agent, make each
+container a machine of its own and send each session to its machine with a
+[route](/home/policy/route-runtime#admit-then-route).
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -69,8 +68,6 @@ map from session ID to container, for one container per agent.
       box:
         provider: apple_container
         container: my-sandbox
-        containers:
-          agent-1: agent-1-box
     runtimes:
       - name: machine
         captures: ["@python", "@external"]
@@ -88,8 +85,7 @@ A program in the container opens workspace files at the same paths as in
 Mirage, so the container must see the mounts there. `mount_type` picks how, as
 for [Docker](/home/setup/machine/docker#connecting-the-workspace):
 `ssh` serves every mount over `container exec` (the image needs `sshfs`),
-`fuse` leaves them to a Mirage inside, and `both` mixes the two. `mount_type`
-serves one session, so it cannot be combined with `containers`.
+`fuse` leaves them to a Mirage inside, and `both` mixes the two.
 
 The default image lacks `sshfs`; add it with `apt-get install sshfs`.
 
@@ -135,10 +131,9 @@ container exec my-sandbox mirage workspace create /tmp/sandbox.yaml
   your Mac is not at `127.0.0.1` inside; Apple's
   [host integration guide](https://github.com/apple/container/blob/main/docs/host-integration.md)
   sets up `host.container.internal`.
-- `containers` maps session IDs to containers, one per agent; a session not
-  listed runs in `container`, and fails if there is none. Each container is
-  its own VM, so agents share no files, processes, CPU or memory. Give each
-  one that agent's rules: the `default` profile in its `sandbox.yaml`.
+- Each container is its own VM, so agents with one each share no files,
+  processes, CPU or memory. Give each one that agent's rules: the `default`
+  profile in its `sandbox.yaml`.
 - A [timeout](/home/setup/machine/overview#timeouts) does not kill the program: `container` 1.4.1 does
   not deliver signals into the guest
   ([apple/container#1941](https://github.com/apple/container/issues/1941)).

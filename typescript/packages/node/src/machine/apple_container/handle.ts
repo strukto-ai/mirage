@@ -12,27 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { abortable } from '@struktoai/mirage-core/utils/abort'
-import { getCurrentSession } from '@struktoai/mirage-core/context/session_context'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { MachineHandle } from '@struktoai/mirage-core/machine/handle'
 import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/machine/mixin'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
-import {
-  APPLE_CONTAINER_CONFIG_FIELDS,
-  type AppleContainerConfig,
-  validateAppleContainerConfig,
-} from './config.ts'
-import { APPLE_CONTAINER_HINT, RUNNING_STATE, STATE_HINTS, noContainerHint } from './constants.ts'
+import { requireId } from '@struktoai/mirage-core/machine/config'
+import { APPLE_CONTAINER_CONFIG_FIELDS, type AppleContainerConfig } from './config.ts'
+import { APPLE_CONTAINER_HINT, RUNNING_STATE, STATE_HINTS } from './constants.ts'
 import { notRunningHint } from '@struktoai/mirage-core/machine/constants'
 import { execArgs, openProgramPipe, reportedState, runProgram } from '../program.ts'
 
 /**
- * Containers under Apple's `container` tool as a whole-line runtime.
+ * A container under Apple's `container` tool.
  *
- * You start the containers yourself; mirage only connects to them and
+ * You start the container yourself; mirage only connects to it and
  * execs lines. The `container` program is the transport, so there is no
  * SDK dependency and no XPC wiring; each line is one `container exec`
  * with the merged environment, the session cwd, real stdin, and
@@ -45,9 +40,8 @@ import { execArgs, openProgramPipe, reportedState, runProgram } from '../program
  * prefixes, the same contract every provider in this family carries.
  * The image needs a POSIX /bin/sh, which every argv runs under (EXEC_PRELUDE).
  *
- * A line runs in its session's container (config `containers`, else
- * `container`), so one runtime can give every agent a VM of its own.
- * Each container is probed once, on its first line.
+ * One machine is one container, so an agent gets a VM of its own as a
+ * machine of its own, which a policy route sends its session to.
  */
 export class AppleContainerMachine
   extends MachineHandle<AppleContainerConfig>
@@ -56,11 +50,10 @@ export class AppleContainerMachine
   static override readonly configFields: ConfigFields = APPLE_CONTAINER_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
   static override readonly provider = 'apple_container'
-  private readonly probes = new Map<string, Promise<void>>()
 
   constructor(name: string, config?: AppleContainerConfig) {
     super(name, config, AppleContainerMachine.configFields)
-    validateAppleContainerConfig(this.config)
+    requireId('apple_container', 'container', this.config.container)
   }
 
   /** Run `container` once; the seam tests override. */
@@ -79,49 +72,13 @@ export class AppleContainerMachine
   }
 
   /**
-   * Attach nothing up front. Which container a line needs depends on its
-   * session, so `target` probes each container on its first line instead.
-   */
-  connect(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  /** The container this line's session runs in (config `containers`, else `container`). */
-  private containerName(): string {
-    const sessionId = getCurrentSession()?.sessionId ?? null
-    const { containers = {} } = this.config
-    const mapped =
-      sessionId !== null && Object.hasOwn(containers, sessionId) ? containers[sessionId] : undefined
-    const container = mapped ?? this.config.container
-    if (container === undefined) throw new Error(noContainerHint(sessionId))
-    return container
-  }
-
-  /**
-   * Select this session's container. Concurrent first lines share a probe;
-   * a failed probe clears its slot so the next line retries.
-   */
-  private async target(signal?: AbortSignal): Promise<string> {
-    const container = this.containerName()
-    let probe = this.probes.get(container)
-    if (probe === undefined) {
-      probe = this.probe(container).catch((err: unknown) => {
-        this.probes.delete(container)
-        throw err
-      })
-      this.probes.set(container, probe)
-    }
-    await abortable(probe, signal)
-    return container
-  }
-
-  /**
    * Refuse a container in any state that cannot take a line.
    *
    * `container exec` refuses a container that is not running as well;
    * probing up front names the state and how to recover.
    */
-  private async probe(container: string): Promise<void> {
+  async connect(): Promise<void> {
+    const container = this.config.container
     const status = await this.container(['inspect', container])
     const state = reportedState(status, 'container inspect', [0, 'status', 'state'])
     if (state !== RUNNING_STATE)
@@ -137,16 +94,14 @@ export class AppleContainerMachine
     errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const target = [await this.target(signal)]
-    const args = execArgs(['exec', '-i'], target, env, cwd, argv)
+    const args = execArgs(['exec', '-i'], [this.config.container], env, cwd, argv)
     return this.container(args, stdin, output, signal, errors)
   }
 
-  async openPipe(command: string): Promise<SandboxPipe> {
-    const target = [await this.target()]
+  openPipe(command: string): Promise<SandboxPipe> {
     return openProgramPipe(
       'container',
-      execArgs(['exec', '-i'], target, {}, null, ['/bin/sh', '-c', command]),
+      execArgs(['exec', '-i'], [this.config.container], {}, null, ['/bin/sh', '-c', command]),
     )
   }
 }

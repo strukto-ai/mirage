@@ -29,11 +29,3 @@ export const STATE_HINTS: Readonly<Record<string, string>> = {
   stopped: 'it is stopped; start it with `container start {name}`',
   stopping: 'it is shutting down; once it stops, start it again with `container start {name}`',
 }
-
-/** Why a line has nowhere to run: its session maps to no container. */
-export function noContainerHint(sessionId: string | null): string {
-  return (
-    `apple_container has no container for session ${sessionId ?? '(none)'}: ` +
-    'list it under containers or set container'
-  )
-}

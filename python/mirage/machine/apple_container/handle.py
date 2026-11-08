@@ -12,17 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from typing import Any
 
-from mirage.context import get_current_session
 from mirage.io.types import ByteSource
 from mirage.machine.apple_container.config import AppleContainerConfig
 from mirage.machine.apple_container.constants import (
     APPLE_CONTAINER_HINT,
     RUNNING_STATE,
     STATE_HINTS,
-    no_container_hint,
 )
 from mirage.machine.constants import not_running_hint
 from mirage.machine.handle import MachineHandle
@@ -37,9 +33,9 @@ from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
 
 class AppleContainerMachine(MachineHandle, PipeTransportMixin):
-    """Containers under Apple's `container` tool as a whole-line runtime.
+    """A container under Apple's `container` tool.
 
-    You start the containers yourself; mirage only connects to them and
+    You start the container yourself; mirage only connects to it and
     execs lines. The `container` program is the transport, so there is no
     SDK dependency and no XPC wiring; each line is one `container exec`
     with the merged environment, the session cwd, real stdin, and
@@ -53,9 +49,8 @@ class AppleContainerMachine(MachineHandle, PipeTransportMixin):
     The image needs a POSIX /bin/sh, which every argv runs under
     (EXEC_PRELUDE).
 
-    A line runs in its session's container (config ``containers``,
-    else ``container``), so one runtime can give every agent a VM of
-    its own. Each container is probed once, on its first line.
+    One machine is one container, so an agent gets a VM of its own as a
+    machine of its own, which a policy route sends its session to.
 
     Args:
         name (str): the machine's name, its key under ``machines:``.
@@ -66,15 +61,6 @@ class AppleContainerMachine(MachineHandle, PipeTransportMixin):
     provider = "apple_container"
     config_cls = AppleContainerConfig
     config: AppleContainerConfig
-
-    def __init__(
-        self,
-        name: str,
-        config: AppleContainerConfig | dict[str, Any] | None = None,
-    ) -> None:
-        super().__init__(name, config)
-        self._running: set[str] = set()
-        self._probe_lock = asyncio.Lock()
 
     async def _container(
         self,
@@ -99,46 +85,12 @@ class AppleContainerMachine(MachineHandle, PipeTransportMixin):
         )
 
     async def connect(self) -> None:
-        """Attach nothing up front.
-
-        Which container a line needs depends on its session, so _target
-        probes each container on its first line instead.
-        """
-
-    def _container_name(self) -> str:
-        """The container this line's session runs in (config
-        ``containers``, else ``container``)."""
-        session = get_current_session()
-        session_id = session.session_id if session is not None else None
-        container = (
-            self.config.containers.get(session_id)
-            if session_id is not None
-            else None
-        )
-        if container is None:
-            container = self.config.container
-        if container is None:
-            raise RuntimeError(no_container_hint(session_id))
-        return container
-
-    async def _target(self) -> str:
-        """The container this line's session runs in, probed once."""
-        container = self._container_name()
-        async with self._probe_lock:
-            if container not in self._running:
-                await self._probe(container)
-                self._running.add(container)
-        return container
-
-    async def _probe(self, container: str) -> None:
         """Refuse a container in any state that cannot take a line.
 
         `container exec` refuses a container that is not running as
         well; probing up front names the state and how to recover.
-
-        Args:
-            container (str): the container id to inspect.
         """
+        container = self.config.container
         status = await self._container(["inspect", container])
         state = reported_state(
             status, "container inspect", (0, "status", "state")
@@ -157,19 +109,23 @@ class AppleContainerMachine(MachineHandle, PipeTransportMixin):
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        target = (await self._target(),)
         return await self._container(
-            exec_args(("exec", "-i"), target, env, cwd, argv),
+            exec_args(
+                ("exec", "-i"), (self.config.container,), env, cwd, argv
+            ),
             stdin=stdin,
             output=output,
             errors=errors,
         )
 
     async def open_pipe(self, command: str) -> SandboxPipe:
-        target = (await self._target(),)
         return await open_program_pipe(
             "container",
             exec_args(
-                ("exec", "-i"), target, {}, None, ("/bin/sh", "-c", command)
+                ("exec", "-i"),
+                (self.config.container,),
+                {},
+                None,
+                ("/bin/sh", "-c", command),
             ),
         )
