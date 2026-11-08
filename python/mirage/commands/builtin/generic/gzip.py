@@ -55,6 +55,9 @@ from mirage.utils.path import gnu_basename
 
 # The level each digit option asks for, keyed as the spec names it.
 LEVELS = {"fast": 1, **{str(n): n for n in range(2, 9)}, "best": 9}
+# The last date a gzip header's four bytes hold; zero means no date.
+_LAST_STAMP = 0xFFFFFFFF
+_UNDATED = "warning: file timestamp out of range for gzip format"
 
 
 def extract_level(fl: FlagView) -> int:
@@ -239,6 +242,14 @@ async def gzip(
                     continue
                 info = await input_info(stat, p)
                 stamp = None if info is None else iso_timestamp(info.modified)
+                seconds = (
+                    None if stamp is None or named is False else int(stamp)
+                )
+                undated = seconds is not None and not (
+                    0 < seconds <= _LAST_STAMP
+                )
+                started = f"{p.raw_path}:\t" if verbose and undated else ""
+                warning = f"{started}gzip: {p.raw_path}: {_UNDATED}"
                 name = (
                     ""
                     if on_stdin or named is False
@@ -251,16 +262,14 @@ async def gzip(
                         _counted(input_source, read_in),
                         level=level,
                         name=name,
-                        mtime=(
-                            0
-                            if stamp is None or named is False
-                            else int(stamp)
-                        ),
+                        mtime=0 if seconds is None or undated else seconds,
                     ),
                     written,
                 )
                 header = 18 + (len(name.encode()) + 1 if name else 0)
                 if not in_place:
+                    if undated:
+                        report(warning, 2, warning=True)
                     try:
                         async for chunk in compressed:
                             yield chunk
@@ -274,7 +283,7 @@ async def gzip(
                             if on_stdin
                             else verbose_line(
                                 p.raw_path, ratio, keep, "stdout"
-                            )
+                            ).removeprefix(started)
                         )
                     continue
                 if write_bytes is None or unlink is None:
@@ -298,6 +307,8 @@ async def gzip(
                     if existed and not force:
                         report(exists_line(p.raw_path + suffix), 2)
                         continue
+                    if undated:
+                        report(warning, 2, warning=True)
                     try:
                         await replace_output(
                             out,
@@ -321,7 +332,7 @@ async def gzip(
                     note(
                         verbose_line(
                             p.raw_path, ratio, keep, p.raw_path + suffix
-                        )
+                        ).removeprefix(started)
                     )
                 if not keep:
                     await remove_input(p, link, unlink, resolver)

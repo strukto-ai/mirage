@@ -195,17 +195,22 @@ export async function linkModules(
   read: (path: PathSpec) => Promise<Uint8Array>,
 ): Promise<JsonValue> {
   if (!MODULE_WORDS.some((word) => expression.includes(word))) return null
+  const limit = memoryRoom()
   const stream = await openStream('jq_link', {
     program: expression,
     library_paths: options.library_paths ?? [],
     origin,
     cwd,
     home,
+    ...(limit === null ? {} : { memory: limit }),
   })
   const host = new ModuleFiles(read)
   try {
     const reply = await materialize(serveRequests(stream, host))
     return JSON.parse(DEC.decode(reply)) as JsonValue
+  } catch (error) {
+    if (!(error instanceof StreamRefusal) || error.message !== EXHAUSTED) throw error
+    throw new MemoryExhausted()
   } finally {
     await host.errors.close()
     await closeStream(stream)

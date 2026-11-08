@@ -38,7 +38,8 @@ import { StreamRefusal } from '../../../rs/errors.ts'
 import { refused, scan } from '../../../rs/scan.ts'
 import { lsModeString, styledTime } from '../utils/formatting.ts'
 import { sortByVersion } from './ls.ts'
-import { contentSize, mtimeMs, posixMode } from '../../../utils/stat_view.ts'
+import { isoTimestamp } from '../../../utils/dates.ts'
+import { contentSize, posixMode } from '../../../utils/stat_view.ts'
 
 const UNOPENABLE_MARK = '  [error opening dir]'
 const ENC = new TextEncoder()
@@ -213,15 +214,34 @@ function gitignoreLines(text: string, base: string): Ignore[] {
   return rules
 }
 
-function segmentsMatch(parts: readonly string[], pattern: readonly string[]): boolean {
-  const [head, ...rest] = pattern
-  if (head === undefined) return parts.length === 0
-  if (head === '**') {
-    for (let at = 0; at <= parts.length; at++) if (segmentsMatch(parts.slice(at), rest)) return true
-    return false
+// Whether a path fits a pattern, a `**` for any run of segments and, last in
+// the pattern, at least one. Only the latest `**` is ever retried, since it
+// can take whatever an earlier one would have, so the work stays the path's
+// length times the pattern's, however many `**` a .gitignore writes. Mirrors
+// Python's `_segments_match`.
+export function segmentsMatch(parts: readonly string[], pattern: readonly string[]): boolean {
+  let at = 0
+  let want = 0
+  let resume = 0
+  let star = -1
+  while (at < parts.length) {
+    const segment = pattern[want]
+    if (segment === '**') {
+      star = want
+      resume = at
+      want += 1
+    } else if (segment !== undefined && fnmatch(parts[at] ?? '', segment)) {
+      at += 1
+      want += 1
+    } else if (star >= 0) {
+      resume += 1
+      at = resume
+      want = star + 1
+    } else {
+      return false
+    }
   }
-  const [part, ...tail] = parts
-  return part !== undefined && fnmatch(part, head) && segmentsMatch(tail, rest)
+  return want === pattern.length
 }
 
 // Whether the last .gitignore pattern that matches an entry leaves it out.
@@ -243,12 +263,16 @@ function ignored(rules: readonly Ignore[], virtual: string, isDir: boolean): boo
 // A directory's entries in the order --sort (-t, -v, -U) asks for, reversed
 // under -r, directories first under --dirsfirst. Mirrors Python's `_sorted`.
 async function sorted(flags: TreeFlags, nodes: readonly TreeNode[]): Promise<TreeNode[]> {
+  const when = (node: TreeNode): number => {
+    const changed = flags.sort === 'ctime' ? node.stat.ctime : null
+    return isoTimestamp(changed ?? node.stat.modified) ?? 0
+  }
   const compare = (a: TreeNode, b: TreeNode): number => {
     if (flags.sort === 'size') {
       const by = contentSize(b.stat) - contentSize(a.stat)
       if (by !== 0) return by
     } else if (flags.sort === 'mtime' || flags.sort === 'ctime') {
-      const by = (mtimeMs(a.stat) ?? 0) - (mtimeMs(b.stat) ?? 0)
+      const by = when(a) - when(b)
       if (by !== 0) return by
     }
     return compareCodePoints(a.stat.name, b.stat.name)

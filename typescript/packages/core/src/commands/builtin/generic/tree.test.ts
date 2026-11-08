@@ -21,7 +21,7 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { Files } from '../../../workspace/files.ts'
-import { parseFlags, treeGeneric as generic, type TreeFlags } from './tree.ts'
+import { parseFlags, segmentsMatch, treeGeneric as generic, type TreeFlags } from './tree.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { parseFlags as parseLineFlags } from '../../../workspace/executor/command/flags.ts'
 import { readers } from '../../../test-utils.ts'
@@ -351,6 +351,63 @@ describe('tree sizes, orders and JSON', () => {
       readGitignore,
     )) as [Uint8Array, IOResult]
     expect([DEC.decode(out), io.exitCode]).toEqual([expected, 0])
+  })
+
+  it('sorts by status change where a backend keeps one', async () => {
+    const rootStat = new FileStat({ name: 'r', type: FileType.DIRECTORY })
+    const times = new Map([
+      ['/r', rootStat],
+      [
+        '/r/a',
+        new FileStat({
+          name: 'a',
+          type: FileType.FILE,
+          modified: '2001-01-01T00:00:00Z',
+          ctime: '2003-01-01T00:00:00Z',
+        }),
+      ],
+      ['/r/b', new FileStat({ name: 'b', type: FileType.FILE, modified: '2002-01-01T00:00:00Z' })],
+    ])
+    const root = new PathSpec({
+      virtual: '/r',
+      directory: '/r',
+      resolved: false,
+      vfsPath: 'r',
+      rawPath: '/r',
+    })
+    const last = async (sort: string): Promise<string | undefined> => {
+      const flags = lineFlags([`--sort=${sort}`, '--noreport']) as TreeFlags
+      const [out] = (await generic(
+        flags,
+        [root],
+        ctx({}),
+        (p: PathSpec) => Promise.resolve(p.virtual === '/r' ? ['/r/a', '/r/b'] : []),
+        (p: PathSpec) => Promise.resolve(times.get(p.virtual) ?? rootStat),
+      )) as [Uint8Array, IOResult]
+      return DEC.decode(out).trim().split(/\s+/).pop()
+    }
+    expect([await last('mtime'), await last('ctime')]).toEqual(['b', 'a'])
+  })
+
+  it.each([
+    ['a/b', 'a/b', true],
+    ['a/b', 'a/c', false],
+    ['a', 'a/**', false],
+    ['a/b/c', 'a/**', true],
+    ['a/b/c', '**/c', true],
+    ['c', '**/c', true],
+    ['a/x/b/y/c', 'a/**/b/**/c', true],
+    ['a/b', 'a/**/b/**/c', false],
+    ['b/a', 'a/**/b', false],
+    ['a/b/x', '**/b', false],
+    ['a/b', '**', true],
+  ])('fits %j to the ignore pattern %j: %j', (path, pattern, hit) => {
+    expect(segmentsMatch(path.split('/'), pattern.split('/'))).toBe(hit)
+  })
+
+  it('ends over many globstars and a deep path', () => {
+    const parts = Array.from({ length: 200 }, () => 'a')
+    expect(segmentsMatch(parts, [...Array.from({ length: 200 }, () => '**'), 'absent'])).toBe(false)
   })
 
   it.each([

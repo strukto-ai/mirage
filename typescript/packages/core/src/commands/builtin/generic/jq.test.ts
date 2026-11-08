@@ -15,6 +15,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as rs from '../../../rs/stream.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
+import { MemoryExhausted } from '../../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
 import { ByteSpool } from '../../../io/spool.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { materialize, type ByteSource, type IOResult } from '../../../io/types.ts'
@@ -157,6 +159,16 @@ describe('modules', () => {
     const read = vi.fn()
     await expect(linkModules('.a', {}, '/', '/', null, read)).resolves.toBeNull()
     expect(read).not.toHaveBeenCalled()
+  })
+
+  it('keeps what a program imports inside the memory room', async () => {
+    const read = (): Promise<Uint8Array> =>
+      Promise.resolve(new TextEncoder().encode(`def f: 1;${' '.repeat(4096)}`))
+    await expect(
+      runWithMemory(new MemoryBudget(1024, () => 0), () =>
+        linkModules('import "m" as m; m::f', {}, '/', '/', null, read),
+      ),
+    ).rejects.toBeInstanceOf(MemoryExhausted)
   })
 
   it('takes the color options and keeps the output plain', async () => {

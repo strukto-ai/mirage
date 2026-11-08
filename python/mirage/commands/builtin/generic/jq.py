@@ -241,9 +241,11 @@ async def link_modules(
 
     Raises:
         StreamRefusal: an import jq could not load, in jq's report.
+        MemoryExhausted: the files imported outgrew the workspace's room.
     """
     if not any(word in expression for word in MODULE_WORDS):
         return None
+    limit = memory_room()
     stream = open_stream(
         "jq_link",
         {
@@ -252,12 +254,17 @@ async def link_modules(
             "origin": origin,
             "cwd": cwd,
             "home": home,
+            **({} if limit is None else {"memory": limit}),
         },
     )
     host = ModuleFiles(read)
     try:
         async with aclosing(serve_requests(stream, host)) as output:
             reply = b"".join([chunk async for chunk in output])
+    except StreamRefusal as exc:
+        if exc.message != EXHAUSTED:
+            raise
+        raise MemoryExhausted() from exc
     finally:
         await host.errors.close()
         await close_stream(stream)

@@ -28,11 +28,11 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/pgz && printf 'roundtrip\\n' > /data/pgz/k.txt && gzip -k /data/pgz/k.txt && test -f /data/pgz/k.txt && echo kept && zcat /data/pgz/k.txt.gz && gzip -l /data/pgz/k.txt.gz && gzip -tv /data/pgz/k.txt.gz",
+      "command": "mkdir -p /data/pgz && printf 'roundtrip\\n' > /data/pgz/k.txt && gzip -k /data/pgz/k.txt && test -f /data/pgz/k.txt && echo kept && zcat /data/pgz/k.txt.gz && gzip -l /data/pgz/k.txt.gz && gzip -tv /data/pgz/k.txt.gz; printf 'x\\n' > /data/pgz/old && touch -d 1960-01-01T00:00:00Z /data/pgz/old && gzip -k /data/pgz/old; echo \"rc=$?\"; od -A n -j 4 -N 4 -t x1 /data/pgz/old.gz; gzip -q -f /data/pgz/old; echo \"rc=$?\"; rm -f /data/pgz/old.gz",
       "expect": {
         "exit": 0,
-        "stdout": "kept\nroundtrip\n         compressed        uncompressed  ratio uncompressed_name\n                 36                  10 -20.0% /data/pgz/k.txt\n",
-        "stderr": "/data/pgz/k.txt.gz:\t OK\n"
+        "stdout": "kept\nroundtrip\n         compressed        uncompressed  ratio uncompressed_name\n                 36                  10 -20.0% /data/pgz/k.txt\nrc=2\n 00 00 00 00\nrc=2\n",
+        "stderr": "/data/pgz/k.txt.gz:\t OK\ngzip: /data/pgz/old: warning: file timestamp out of range for gzip format\n"
       },
       "flags": [
         "k"

@@ -4,6 +4,7 @@ import pytest
 
 from mirage.commands.builtin.generic.tree import (
     TreeFlags,
+    _segments_match,
     parse_flags,
     tree,
 )
@@ -270,6 +271,63 @@ async def test_tree_lays_out_sizes_orders_and_json(
 def _line_flags(argv: list[str]) -> TreeFlags | IOResult:
     parsed = parse_line_flags(argv, SPECS["tree"], "tree", "/")
     return parse_flags(parsed.flag_kwargs)
+
+
+@pytest.mark.asyncio
+async def test_tree_sorts_by_status_change_where_a_backend_keeps_one():
+    tree_map = {
+        "/r": _dir("r"),
+        "/r/a": FileStat(
+            name="a",
+            size=0,
+            type=FileType.FILE,
+            modified="2001-01-01T00:00:00Z",
+            ctime="2003-01-01T00:00:00Z",
+        ),
+        "/r/b": FileStat(
+            name="b",
+            size=0,
+            type=FileType.FILE,
+            modified="2002-01-01T00:00:00Z",
+        ),
+    }
+    readdir, stat = _make_backend(tree_map)
+    orders = {}
+    for sort in ("mtime", "ctime"):
+        output, _ = await tree(
+            [_spec("/r")],
+            flags=TreeFlags(sort=sort, no_report=True),
+            readdir=readdir,
+            stat=stat,
+        )
+        orders[sort] = output.decode().split()[-1]
+    assert orders == {"mtime": "b", "ctime": "a"}
+
+
+@pytest.mark.parametrize(
+    "path,pattern,hit",
+    [
+        ("a/b", "a/b", True),
+        ("a/b", "a/c", False),
+        ("a", "a/**", False),
+        ("a/b/c", "a/**", True),
+        ("a/b/c", "**/c", True),
+        ("c", "**/c", True),
+        ("a/x/b/y/c", "a/**/b/**/c", True),
+        ("a/b", "a/**/b/**/c", False),
+        ("b/a", "a/**/b", False),
+        ("a/b/x", "**/b", False),
+        ("a/b", "**", True),
+    ],
+)
+def test_ignore_paths_fit_their_patterns(path, pattern, hit):
+    assert _segments_match(path.split("/"), pattern.split("/")) is hit
+
+
+def test_many_globstars_over_a_deep_path_end():
+    parts = ["a"] * 200
+    pattern = ["**"] * 200 + ["absent"]
+    assert not _segments_match(parts, pattern)
 
 
 @pytest.mark.parametrize(

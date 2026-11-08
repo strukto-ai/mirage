@@ -34,8 +34,9 @@ from mirage.types import (
     ReadStreamFn,
     StatFn,
 )
+from mirage.utils.dates import iso_timestamp
 from mirage.utils.fnmatch import fnmatch
-from mirage.utils.stat_view import content_size, mtime_ns, posix_mode
+from mirage.utils.stat_view import content_size, posix_mode
 from mirage.view.types import (
     LinkTargetStat,
     LinkView,
@@ -227,18 +228,32 @@ def _gitignore_lines(text: str, base: str) -> list[_Ignore]:
 
 
 def _segments_match(parts: list[str], pattern: list[str]) -> bool:
-    if not pattern:
-        return not parts
-    if pattern[0] == "**":
-        return any(
-            _segments_match(parts[at:], pattern[1:])
-            for at in range(len(parts) + 1)
-        )
-    return (
-        bool(parts)
-        and fnmatch(parts[0], pattern[0])
-        and _segments_match(parts[1:], pattern[1:])
-    )
+    """Whether a path fits a pattern, a ``**`` for any run of segments
+    and, last in the pattern, at least one.
+
+    Only the latest ``**`` is ever retried, since it can take whatever
+    an earlier one would have, so the work stays the path's length times
+    the pattern's, however many ``**`` a ``.gitignore`` writes.
+
+    Args:
+        parts (list[str]): the path's segments.
+        pattern (list[str]): the pattern's segments.
+    """
+    at = want = resume = 0
+    star = -1
+    while at < len(parts):
+        if want < len(pattern) and pattern[want] == "**":
+            star, resume = want, at
+            want += 1
+        elif want < len(pattern) and fnmatch(parts[at], pattern[want]):
+            at += 1
+            want += 1
+        elif star >= 0:
+            resume += 1
+            at, want = resume, star + 1
+        else:
+            return False
+    return want == len(pattern)
 
 
 def _ignored(rules: Sequence[_Ignore], virtual: str, is_dir: bool) -> bool:
@@ -274,12 +289,13 @@ def _sorted(flags: TreeFlags, nodes: list[_TreeNode]) -> list[_TreeNode]:
         nodes (list[_TreeNode]): the entries, in listing order.
     """
 
-    def key(node: _TreeNode) -> tuple[int | str, ...]:
+    def key(node: _TreeNode) -> tuple[float | str, ...]:
         name = node.stat.name
         if flags.sort == "size":
             return (-content_size(node.stat), name)
         if flags.sort in ("mtime", "ctime"):
-            return (mtime_ns(node.stat) or 0, name)
+            changed = node.stat.ctime if flags.sort == "ctime" else None
+            return (iso_timestamp(changed or node.stat.modified) or 0, name)
         return (name,)
 
     if flags.sort == "version":

@@ -39,8 +39,6 @@ enum Bind {
         bc: usize,
         target: Target,
     },
-    /// A data file an import binds.
-    Data { name: String, value: Value },
 }
 
 struct Scope {
@@ -75,19 +73,6 @@ fn find_var(env: &Env, wanted: &str) -> Option<(usize, usize)> {
         if let Bind::Var { name, bc, index } = &scope.bind {
             if name == wanted {
                 return Some((*bc, *index));
-            }
-        }
-        at = scope.next.as_deref();
-    }
-    None
-}
-
-fn find_data(env: &Env, wanted: &str) -> Option<Value> {
-    let mut at = env.as_deref();
-    while let Some(scope) = at {
-        if let Bind::Data { name, value } = &scope.bind {
-            if name == wanted {
-                return Some(value.clone());
             }
         }
         at = scope.next.as_deref();
@@ -252,35 +237,6 @@ struct Export {
     name: String,
     arity: usize,
     target: Target,
-}
-
-/// The names one file's imports bind, a later import over an earlier one.
-fn imports_env(units: &[Unit], exports: &[Vec<Export>], deps: &[Dep]) -> Env {
-    let mut env = None;
-    for dep in deps {
-        if let (Body::Data(value), Some(alias)) = (&units[dep.module].body, &dep.alias) {
-            for name in [format!("{alias}::{alias}"), alias.clone()] {
-                let value = value.clone();
-                env = with(&env, Bind::Data { name, value });
-            }
-        }
-        for export in &exports[dep.module] {
-            let name = match &dep.alias {
-                Some(alias) => format!("{alias}::{}", export.name),
-                None => export.name.clone(),
-            };
-            env = with(
-                &env,
-                Bind::Func {
-                    name,
-                    arity: export.arity,
-                    bc: 0,
-                    target: export.target,
-                },
-            );
-        }
-    }
-    env
 }
 
 fn constant(ast: &Ast) -> Option<Value> {
@@ -755,12 +711,11 @@ impl<'a> Compiler<'a> {
                     vec![Step::Emit(Op::LoadV(var))]
                 }
                 None => {
-                    let value = find_data(env, name).unwrap_or_else(|| {
-                        self.globals
-                            .get(name)
-                            .expect("checked: the variable is bound")
-                            .clone()
-                    });
+                    let value = self
+                        .globals
+                        .get(name)
+                        .expect("checked: the variable is bound")
+                        .clone();
                     vec![Step::Emit(Op::LoadK(value))]
                 }
             },
@@ -1078,12 +1033,47 @@ impl<'a> Compiler<'a> {
     /// Every module definition something calls, a subfunction of the top
     /// level with the scope its file gives it, as jq joins its libraries
     /// ahead of the program. Answers the scope the program's imports open.
+    /// The names one file's imports bind, a later import over an earlier
+    /// one. A data import is a variable of the top level, set before the
+    /// program starts, one to an import: `$$$$` empties it as it does any
+    /// other, for `$d` and `$d::d` alike.
+    fn imports_env(&mut self, units: &[Unit], exports: &[Vec<Export>], deps: &[Dep]) -> Env {
+        let mut env = None;
+        for dep in deps {
+            if let (Body::Data(value), Some(alias)) = (&units[dep.module].body, &dep.alias) {
+                let index = self.local(0);
+                self.emit(0, Op::Dup);
+                self.emit(0, Op::LoadK(value.clone()));
+                self.emit(0, Op::StoreV(Var { level: 0, index }));
+                for name in [format!("{alias}::{alias}"), alias.clone()] {
+                    env = with(&env, Bind::Var { name, bc: 0, index });
+                }
+            }
+            for export in &exports[dep.module] {
+                let name = match &dep.alias {
+                    Some(alias) => format!("{alias}::{}", export.name),
+                    None => export.name.clone(),
+                };
+                env = with(
+                    &env,
+                    Bind::Func {
+                        name,
+                        arity: export.arity,
+                        bc: 0,
+                        target: export.target,
+                    },
+                );
+            }
+        }
+        env
+    }
+
     fn link_units(&mut self, units: &'a [Unit<'a>], deps: &[Dep]) -> Env {
         let mut exports: Vec<Vec<Export>> = Vec::with_capacity(units.len());
         for unit in units {
             let mut out = Vec::new();
             if let Body::Code(defs) = &unit.body {
-                let mut env = imports_env(units, &exports, unit.deps);
+                let mut env = self.imports_env(units, &exports, unit.deps);
                 for def in defs {
                     if !self.referenced.contains(&check::id(def)) {
                         continue;
@@ -1104,7 +1094,7 @@ impl<'a> Compiler<'a> {
             }
             exports.push(out);
         }
-        imports_env(units, &exports, deps)
+        self.imports_env(units, &exports, deps)
     }
 
     fn define(&mut self, bc: usize, def: &'a Def, env: &Env) -> Env {

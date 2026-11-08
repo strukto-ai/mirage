@@ -16,6 +16,8 @@ from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.spool import ByteSpool
 from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult, materialize
@@ -166,6 +168,18 @@ async def test_a_program_that_imports_nothing_reads_no_module():
         raise AssertionError(f"{path.virtual} should not be read")
 
     assert await link_modules(".a", {}, "/", "/", None, read) is None
+
+
+@pytest.mark.asyncio
+async def test_what_a_program_imports_stays_inside_the_memory_room():
+    async def read(path: PathSpec) -> bytes:
+        return b"def f: 1;" + b" " * 4096
+
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(
+            MemoryBudget(1024, lambda: 0),
+            link_modules('import "m" as m; m::f', {}, "/", "/", None, read),
+        )
 
 
 @pytest.mark.asyncio

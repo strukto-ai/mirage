@@ -104,3 +104,73 @@ it('compression stores the input time and keeps its attributes', async () => {
   }
   expect(attrs[0]).toEqual(['/f.gz', { mode: 0o640, mtime: '2001-02-03T04:05:06Z' }])
 })
+
+const UNDATED = 'gzip: /f: warning: file timestamp out of range for gzip format\n'
+
+async function dated(
+  modified: string,
+  flags: Record<string, boolean> = {},
+  taken = false,
+): Promise<[Uint8Array | undefined, number, string]> {
+  const writes = new Map<string, Uint8Array>()
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async function* read(): AsyncIterable<Uint8Array> {
+    yield new TextEncoder().encode('hello\n')
+  }
+  const result = await gzipGeneric(
+    [PathSpec.fromStrPath('/f')],
+    { flags, stdin: null, cwd: PathSpec.fromStrPath('/') },
+    read,
+    async (path, data) => {
+      writes.set(path.virtual, await materialize(data))
+    },
+    () => Promise.resolve(),
+    (path) =>
+      path.virtual === '/f.gz' && !taken
+        ? Promise.reject(enoent(path))
+        : Promise.resolve(new FileStat({ name: 'f', type: FileType.FILE, modified })),
+  )
+  if (result === null) throw new Error('gzip returned no result')
+  const [body, io] = result
+  if (body !== null) writes.set('/f.gz', await materialize(body as AsyncIterable<Uint8Array>))
+  return [writes.get('/f.gz'), io.exitCode, await io.stderrStr()]
+}
+
+it.each([
+  ['1960-01-01T00:00:00Z', {}, [0, 0, 0, 0], 2, UNDATED],
+  ['2200-01-01T00:00:00Z', {}, [0, 0, 0, 0], 2, UNDATED],
+  ['1970-01-01T00:00:00Z', {}, [0, 0, 0, 0], 2, UNDATED],
+  ['1970-01-01T00:00:00.500Z', {}, [0, 0, 0, 0], 2, UNDATED],
+  ['1960-01-01T00:00:00Z', { quiet: true }, [0, 0, 0, 0], 2, ''],
+  ['1960-01-01T00:00:00Z', { stdout: true }, [0, 0, 0, 0], 2, UNDATED],
+  ['1960-01-01T00:00:00Z', { no_name: true }, [0, 0, 0, 0], 0, ''],
+  ['2106-02-07T06:28:15Z', {}, [255, 255, 255, 255], 0, ''],
+  ['1970-01-01T00:00:01Z', {}, [1, 0, 0, 0], 0, ''],
+])(
+  'keeps a date the header cannot hold out of it: %s %j',
+  async (when, flags, stamp, code, err) => {
+    const [written, status, said] = await dated(when, flags)
+    expect([[...(written ?? new Uint8Array()).subarray(4, 8)], status, said]).toEqual([
+      stamp,
+      code,
+      err,
+    ])
+  },
+)
+
+it('puts the date warning after the name -v started', async () => {
+  const [, status, said] = await dated('1960-01-01T00:00:00Z', { verbose: true })
+  const [first, second, end] = said.split('\n')
+  expect(first).toBe(`/f:\t${UNDATED.trimEnd()}`)
+  expect(second?.endsWith('-- replaced with /f.gz')).toBe(true)
+  expect([end, status]).toEqual(['', 2])
+})
+
+it('refuses an output already there before the date warning', async () => {
+  const [written, status, said] = await dated('1960-01-01T00:00:00Z', {}, true)
+  expect([written, status, said]).toEqual([
+    undefined,
+    2,
+    'gzip: /f.gz already exists;\tnot overwritten\n',
+  ])
+})

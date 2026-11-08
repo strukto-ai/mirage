@@ -64,6 +64,10 @@ export interface GzipFlags {
   readonly level: number | null
 }
 
+// The last date a gzip header's four bytes hold; zero means no date.
+const LAST_STAMP = 0xffffffff
+const UNDATED = 'warning: file timestamp out of range for gzip format'
+
 // -1..-9, the last one typed, as the reference's option loop keeps it; -1
 // and -9 are --fast and --best, keyed by those names. Read off the flag
 // tape: an object lists its integer-like keys first and in numeric order, so
@@ -213,6 +217,10 @@ export async function gzipGeneric(
         }
         const info = await inputInfo(stat, p)
         const stamp = info === null ? null : isoTimestamp(info.modified)
+        const seconds = stamp === null || named === false ? null : Math.trunc(stamp)
+        const undated = seconds !== null && !(seconds > 0 && seconds <= LAST_STAMP)
+        const started = verbose && undated ? `${p.rawPath}:\t` : ''
+        const warning = `${started}gzip: ${p.rawPath}: ${UNDATED}`
         const name = onStdin || named === false ? '' : gnuBasename(p.rawPath)
         const readIn = [0]
         const written = [0]
@@ -221,13 +229,14 @@ export async function gzipGeneric(
             counted(input, readIn),
             level,
             name,
-            stamp === null || named === false ? 0 : Math.trunc(stamp),
+            seconds === null || undated ? 0 : seconds,
           ),
           written,
         )
         const header = 18 + (name === '' ? 0 : new TextEncoder().encode(name).byteLength + 1)
         const ratio = (): string => gzipRatio(readIn[0] ?? 0, written[0] ?? 0, header)
         if (!inPlace) {
+          if (undated) report(warning, 2, true)
           try {
             yield* compressed
           } catch (error) {
@@ -235,7 +244,12 @@ export async function gzipGeneric(
             report(`\ngzip: ${p.rawPath}: ${String(fsStrerror(error))}`, 1, false)
             return
           }
-          if (verbose) note(onStdin ? ratio() : verboseLine(p.rawPath, ratio(), keep, 'stdout'))
+          if (verbose)
+            note(
+              onStdin
+                ? ratio()
+                : verboseLine(p.rawPath, ratio(), keep, 'stdout').slice(started.length),
+            )
           continue
         }
         if (write === undefined || unlink === undefined)
@@ -258,6 +272,7 @@ export async function gzipGeneric(
             report(existsLine(p.rawPath + suffix), 2, false)
             continue
           }
+          if (undated) report(warning, 2, true)
           try {
             await replaceOutput(out, spool.stream(), write, resolver, link !== null)
           } catch (error) {
@@ -274,7 +289,8 @@ export async function gzipGeneric(
           await spool.close()
         }
         await keepAttributes(setAttrs, out, info)
-        if (verbose) note(verboseLine(p.rawPath, ratio(), keep, p.rawPath + suffix))
+        if (verbose)
+          note(verboseLine(p.rawPath, ratio(), keep, p.rawPath + suffix).slice(started.length))
         if (!keep) await removeInput(p, link, unlink, resolver)
       } finally {
         await closeQuietly(input)

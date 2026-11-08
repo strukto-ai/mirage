@@ -9,11 +9,13 @@
 //! is the test of whether a file is there, so a file costs one request.
 
 use std::collections::{HashMap, VecDeque};
+use std::io::{self, Write};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::builtin::invalid_module_path;
+use super::main::EXHAUSTED;
 use super::parse::{Scanned, Scanner};
 use super::syntax::{self, Def, Import, Parsed};
 use super::unicode::WORK;
@@ -186,6 +188,8 @@ struct Config {
     cwd: Option<String>,
     #[serde(default)]
     home: Option<String>,
+    #[serde(default)]
+    memory: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -228,6 +232,30 @@ struct Link {
     errors: Vec<String>,
     /// A failure that ends the walk, as a module that cannot be found does.
     stopped: bool,
+    /// The bytes the run may hold, and those of the files kept so far.
+    memory: usize,
+    held: usize,
+}
+
+/// Takes the linker's answer while it fits the room left.
+struct Room<'a> {
+    out: &'a mut Vec<u8>,
+    left: usize,
+}
+
+impl Write for Room<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.left = self
+            .left
+            .checked_sub(bytes.len())
+            .ok_or(io::ErrorKind::OutOfMemory)?;
+        self.out.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
@@ -237,6 +265,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         origin,
         cwd,
         home,
+        memory,
     } = parse_config(config)?;
     let cwd = cwd.unwrap_or_else(|| "/".to_owned());
     let search = if library_paths.is_empty() {
@@ -272,6 +301,8 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         deps: Vec::new(),
         errors: Vec::new(),
         stopped: false,
+        memory: memory.unwrap_or(usize::MAX),
+        held: 0,
     };
     link.walk();
     Ok(Box::new(link))
@@ -466,10 +497,17 @@ impl Stream for Link {
             modules: std::mem::take(&mut self.modules),
             deps: std::mem::take(&mut self.deps),
         };
-        let text = serde_json::to_vec(&linked)
-            .map_err(|error| StreamError::new(format!("bad jq link: {error}")))?;
-        out.extend_from_slice(&text);
-        Ok(())
+        let room = Room {
+            out,
+            left: self.memory.saturating_sub(self.held),
+        };
+        serde_json::to_writer(room, &linked).map_err(|error| {
+            if error.is_io() {
+                StreamError::new(EXHAUSTED)
+            } else {
+                StreamError::new(format!("bad jq link: {error}"))
+            }
+        })
     }
 
     fn request(&mut self, _data: &mut Vec<u8>) -> Option<Vec<u8>> {
@@ -504,7 +542,13 @@ impl Stream for Link {
             .pop_front()
             .ok_or_else(|| StreamError::new("jq: the host answered no request"))?;
         match reply.kind.as_str() {
-            "data" => self.load(probe.import, path, data),
+            "data" => {
+                self.held = self.held.saturating_add(data.len());
+                if self.held > self.memory {
+                    return Err(StreamError::new(EXHAUSTED));
+                }
+                self.load(probe.import, path, data);
+            }
             "missing" => {
                 self.probe = Some(probe);
                 self.settle();
@@ -639,6 +683,75 @@ mod tests {
             run(r#"import "t" as $t {raw:true}; $t"#, &["lib"], &files),
             Ok("\"\\\"raw\\n\"\n".to_owned())
         );
+    }
+
+    #[test]
+    fn a_data_import_is_a_variable_loadvn_empties() {
+        let files = [
+            ("/w/lib/d.json", "[1]\n"),
+            ("/w/lib/n.jq", "import \"d\" as $d; def h: $$$$d;"),
+        ];
+        for (program, expected) in [
+            (
+                r#"import "d" as $d; [$d, $$$$d, $d]"#,
+                "[[[1]],[[1]],null]\n",
+            ),
+            (r#"import "d" as $d; $$$$d::d, $d"#, "[[1]]\nnull\n"),
+            (r#"import "d" as $d; def f: $$$$d; f, f"#, "[[1]]\nnull\n"),
+            (
+                r#"import "d" as $d; import "d" as $e; $$$$d, $e"#,
+                "[[1]]\n[[1]]\n",
+            ),
+            (
+                r#"import "n" as n; import "d" as $d; n::h, n::h, $d"#,
+                "[[1]]\nnull\n[[1]]\n",
+            ),
+        ] {
+            assert_eq!(run(program, &["lib"], &files), Ok(expected.to_owned()));
+        }
+    }
+
+    /// The linker over `files` with room for `memory` bytes.
+    fn within(memory: usize, program: &str, files: &[(&str, &str)]) -> Result<Vec<u8>, String> {
+        let message = |error: StreamError| String::from_utf8_lossy(&error.stderr()).into_owned();
+        let config = json!({
+            "program": program,
+            "library_paths": ["lib"],
+            "cwd": CWD,
+            "memory": memory,
+        });
+        let mut stream = open("jq_link", config.to_string().as_bytes()).expect("opens");
+        let mut out = Vec::new();
+        while let Some(header) = stream.request(&mut Vec::new()) {
+            let header: serde_json::Value = serde_json::from_slice(&header).expect("json");
+            let path = header["path"].as_str().expect("a path");
+            let (reply, data) = match files.iter().find(|(name, _)| *name == path) {
+                Some((_, text)) => (json!({"kind": "data"}), *text),
+                None => (json!({"kind": "missing"}), ""),
+            };
+            stream
+                .respond(reply.to_string().as_bytes(), data.as_bytes(), &mut out)
+                .map_err(message)?;
+        }
+        stream.finish(&mut out).map_err(message)?;
+        Ok(out)
+    }
+
+    #[test]
+    fn the_files_kept_and_the_answer_stay_inside_the_memory_room() {
+        let body = format!("def f: \"{}\";", "x".repeat(50));
+        let files = [
+            ("/w/lib/a.jq", body.as_str()),
+            ("/w/lib/b.jq", body.as_str()),
+        ];
+        let both = r#"import "a" as a; import "b" as b; a::f, b::f"#;
+        let exhausted = Err(EXHAUSTED.to_owned());
+        // Each file fits on its own, the two together do not.
+        assert_eq!(within(body.len() + 8, both, &files), exhausted);
+        // Both fit, but not a second copy of them as the answer.
+        assert_eq!(within(body.len() * 2 + 8, both, &files), exhausted);
+        let answer = within(10_000, both, &files).expect("links");
+        assert!(serde_json::from_slice::<Linked>(&answer).is_ok());
     }
 
     #[test]

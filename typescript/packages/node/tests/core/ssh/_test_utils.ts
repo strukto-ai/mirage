@@ -46,6 +46,9 @@ interface FakeHandle {
   position: number
 }
 
+// A file the fake made has a date, as one on a server does.
+const FAKE_MTIME = 1_750_000_000
+
 function noSuchFile(path: string): Error & { code: number } {
   const err = new Error(`No such file: ${path}`) as Error & { code: number }
   err.code = 2
@@ -65,8 +68,8 @@ function makeStats(attrs: Partial<Stats>, size: number, isDir: boolean): Stats {
     mode,
     uid: attrs.uid ?? 0,
     gid: attrs.gid ?? 0,
-    mtime: attrs.mtime ?? 0,
-    atime: attrs.atime ?? 0,
+    mtime: attrs.mtime ?? FAKE_MTIME,
+    atime: attrs.atime ?? FAKE_MTIME,
     isDirectory: () => (mode & 0o170000) === S_IFDIR,
     isFile: () => (mode & 0o170000) === S_IFREG,
     isBlockDevice: () => false,
