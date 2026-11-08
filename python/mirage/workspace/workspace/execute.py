@@ -577,16 +577,18 @@ async def execute_line(
     # A substitution's shell ends with it. A host task still bound to one
     # (started in it, run after it) runs as a process a substitution
     # leaves behind does: in a subshell of the session as it is now,
-    # beside the session's lines, and nothing it changes reaches them.
+    # beside the session's lines, and nothing it changes reaches them but
+    # what its jobs write, on the session's terminal.
     ambient = get_current_session_for(ws.sessions)
     if ambient is not None and session_id in (None, ambient.session_id):
         session = ambient
         session_id = ambient.session_id
         if ambient.vars.shell.closed:
-            session = ws.sessions.get(session_id).fork()
+            source = ws.sessions.get(session_id)
+            session = source.fork()
             session.process_id = None
             session.job_table = ws.job_table.child()
-            session.tty = Terminal()
+            session.tty = source.tty
     else:
         if session_id is None:
             session_id = ws.sessions.default_id

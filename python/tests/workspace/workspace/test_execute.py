@@ -542,9 +542,8 @@ async def test_a_task_a_substitution_left_runs_in_a_subshell():
 
     async def late() -> IOResult:
         await gate.wait()
-        return await ws.shell(
-            'echo "v=$V"; J=joined; echo "j=$J"', record=False
-        )
+        line = 'echo "v=$V"; J=joined; echo "j=$J"; echo late & wait'
+        return await ws.shell(line, record=False)
 
     async def spawn(config, paths, texts, ctx):
         later.append(asyncio.create_task(late()))
@@ -563,7 +562,7 @@ async def test_a_task_a_substitution_left_runs_in_a_subshell():
     await ws.shell("V=outer", session_id="s")
     line = 'echo $(spawn); await_late; echo "J=$J"'
     io = await asyncio.wait_for(ws.shell(line, session_id="s"), 5)
-    assert io.stdout == b"\nv=outer\nj=joined\nJ=\n"
+    assert io.stdout == b"\nv=outer\nj=joined\nlate\nJ=\n"
     await ws.close()
 
 

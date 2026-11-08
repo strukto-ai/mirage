@@ -330,7 +330,8 @@ async function runLine(
   // substitution's shell ends with it. A host task still bound to one
   // (started in it, run after it) runs as a process a substitution leaves
   // behind does: in a subshell of the session as it is now, beside the
-  // session's lines, and nothing it changes reaches them.
+  // session's lines, and nothing it changes reaches them but what its jobs
+  // write, on the session's terminal.
   const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(env.sessions) : null
   const inPlace =
     ambient !== null && (options.sessionId === undefined || options.sessionId === ambient.sessionId)
@@ -341,7 +342,6 @@ async function runLine(
     targetSession = env.sessions.get(ambient.sessionId).fork()
     targetSession.processId = null
     targetSession.jobTable = env.jobTable.child()
-    targetSession.tty = new Terminal()
   }
   frame.session = targetSession
   // Whole-invocation policies must approve the result before bytes escape.

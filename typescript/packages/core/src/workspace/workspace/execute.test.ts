@@ -456,7 +456,7 @@ describe('same-session lines run one at a time', () => {
     const later: Promise<{ stdout: Uint8Array }>[] = []
     const handlers: Record<string, CLIVerbFn> = {
       spawn: () => {
-        const line = 'echo "v=$V"; J=joined; echo "j=$J"'
+        const line = 'echo "v=$V"; J=joined; echo "j=$J"; echo late & wait'
         later.push(gate.then(() => ws.shell(line, { record: false })))
         return null
       },
@@ -474,7 +474,7 @@ describe('same-session lines run one at a time', () => {
     ws.createSession('s')
     await ws.shell('V=outer', { sessionId: 's' })
     const io = await ws.shell('echo $(spawn); await_late; echo "J=$J"', { sessionId: 's' })
-    expect(stdoutStr(io)).toBe('\nv=outer\nj=joined\nJ=\n')
+    expect(stdoutStr(io)).toBe('\nv=outer\nj=joined\nlate\nJ=\n')
   })
 
   it('a host callback re-entering its own session runs inline', async () => {
