@@ -435,6 +435,25 @@ describe('MachineTable scans', () => {
     }
   })
 
+  it('reaches a parent first with a forwarded group signal', async () => {
+    const box = new Sleeper('a')
+    const ws = sleepers({ a: box })
+    try {
+      await ws.shell('train 1 &')
+      await started(box)
+      await ws.processTable.scan()
+      const found = ws.processTable.records().find((record) => record.machinePid !== null)
+      await ws.processTable.sendGroup(found?.group ?? 0, 28)
+      expect(box.sent.map(([target, signum]) => [(target as MachinePid).pid, signum])).toEqual([
+        [412, 28],
+        [413, 28],
+      ])
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  })
+
   it('leaves what a scan no longer sees out of that ps', async () => {
     const box = new Sleeper('a')
     const ws = sleepers({ a: box })
