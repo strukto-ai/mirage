@@ -213,6 +213,9 @@ async def handle_unset(
             if view.is_readonly(name, False):
                 errors.append(_readonly(name, "variable"))
                 continue
+            if name == BASH_LINENO:
+                errors.append(f"{shell_voice()}unset: {name}: cannot unset\n")
+                continue
             try:
                 await view.unset(name, follow_ref=False)
             except PolicyDenied as exc:
@@ -235,7 +238,7 @@ async def handle_unset(
         if view.is_readonly(base):
             errors.append(_readonly(deref(session, base), "variable"))
             continue
-        if base == BASH_LINENO and not is_element:
+        if not is_element and deref(session, base) == BASH_LINENO:
             errors.append(f"{shell_voice()}unset: {name}: cannot unset\n")
             continue
         existed = (

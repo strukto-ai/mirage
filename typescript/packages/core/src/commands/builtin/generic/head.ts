@@ -156,7 +156,7 @@ async function* headMulti(
         continue
       }
       // A directory opened: its header prints, then its read fails.
-      const body = unread.has(p.virtual)
+      const body = unread.has(p.rawPath)
         ? null
         : headStream(stream(p), lines, bytesMode, zeroTerminated, signal)
       try {
@@ -169,7 +169,7 @@ async function* headMulti(
           printed = true
         }
         if (body === null) {
-          await say(io, unread.get(p.virtual) ?? '')
+          await say(io, unread.get(p.rawPath) ?? '')
           said.delete(i)
           continue
         }

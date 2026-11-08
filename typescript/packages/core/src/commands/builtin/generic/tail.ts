@@ -380,12 +380,12 @@ async function* tailMulti(
         continue
       }
       let pending = showHeaders ? operandHeader(p, printed > 0) : null
-      if (unread.has(p.virtual)) {
+      if (unread.has(p.rawPath)) {
         if (pending !== null) {
           yield pending
           printed++
         }
-        await say(io, unread.get(p.virtual) ?? '')
+        await say(io, unread.get(p.rawPath) ?? '')
         said.delete(i)
         continue
       }
@@ -495,7 +495,7 @@ async function* follow(
   try {
     for (const entry of [...active]) {
       const [slot, p] = entry
-      if (unread.has(p.virtual)) {
+      if (unread.has(p.rawPath)) {
         if (showHeaders) yield operandHeader(p, last !== null)
         last = slot
         active.splice(active.indexOf(entry), 1)
@@ -860,7 +860,7 @@ export async function tailGeneric(
         io,
       ]
     }
-    const readable = opened.filter((p) => !unread.has(p.virtual))
+    const readable = opened.filter((p) => !unread.has(p.rawPath))
     const pending = await unfollowable(
       paths,
       new Set(readable.map((p) => p.virtual)),

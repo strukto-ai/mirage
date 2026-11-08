@@ -394,9 +394,10 @@ impl Layout<'_> {
         if matches!(
             self.kind(after),
             "file_redirect" | "heredoc_redirect" | "herestring_redirect"
-        ) && let Some(&operator) = self.children(after).first()
-        {
-            after = operator;
+        ) {
+            if let Some(&operator) = self.children(after).first() {
+                after = operator;
+            }
         }
         self.ends[after]
     }

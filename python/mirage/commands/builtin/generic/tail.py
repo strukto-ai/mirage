@@ -317,7 +317,7 @@ async def tail_multi(
                 # a file after one that printed nothing starts without it.
                 header = operand_header(p, printed > 0)
             pending = header
-            if p.virtual in unread:
+            if p.raw_path in unread:
                 if pending:
                     yield pending
                     printed += 1
@@ -743,7 +743,7 @@ async def _follow(
     # the print ends, a reader that stops early included.
     try:
         for slot, p in list(active):
-            if p.virtual in unread:
+            if p.raw_path in unread:
                 if show_headers:
                     yield operand_header(p, last is not None)
                 last = slot
@@ -1059,7 +1059,7 @@ async def tail_generic(
                 io.stderr if isinstance(io.stderr, bytes) else b""
             )
         if parsed.follow:
-            readable = [p for p in opened if p.virtual not in unread]
+            readable = [p for p in opened if p.raw_path not in unread]
             pending = await _unfollowable(paths, readable, stat, parsed, io)
             if not readable and not pending and not (show_headers and opened):
                 _note(io, "tail: no files remaining\n")

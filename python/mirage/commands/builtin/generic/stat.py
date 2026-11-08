@@ -578,29 +578,35 @@ def _format(
             itself.
     """
     parts: list[str] = []
+    length = 0
+
+    def put(text: str) -> None:
+        nonlocal length
+        parts.append(text)
+        length += len(text)
+
     cursor = 0
     while cursor < len(fmt):
         start = fmt.find("%", cursor)
         if warnings is not None:
             slash = fmt.find("\\", cursor)
             if slash != -1 and (start == -1 or slash < start):
-                parts.append(fmt[cursor:slash])
+                put(fmt[cursor:slash])
                 said: list[str] = []
                 text, cursor = _escape(fmt, slash, said)
-                at = sum(len(part) for part in parts)
-                warnings.extend((at, line) for line in said)
-                parts.append(text)
+                warnings.extend((length, line) for line in said)
+                put(text)
                 continue
         if start == -1:
-            parts.append(fmt[cursor:])
+            put(fmt[cursor:])
             break
-        parts.append(fmt[cursor:start])
+        put(fmt[cursor:start])
         directive = _parse_format_directive(fmt, start, halves)
         if directive is None:
-            parts.append("%")
+            put("%")
             cursor = start + 1
             continue
-        parts.append(render(directive))
+        put(render(directive))
         cursor = directive.end
     return "".join(parts)
 

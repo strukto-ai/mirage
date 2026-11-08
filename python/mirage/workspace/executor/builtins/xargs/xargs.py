@@ -927,8 +927,9 @@ async def _unrunnable(
     dispatch: DispatchFn | None,
 ) -> tuple[str, int] | None:
     """What xargs says, and the status it stops with, when it cannot
-    exec its command: 127 for nothing to run, 126 for a directory, as
-    GNU's exec answers; None when the command runs.
+    exec its command: 127 for nothing to run, 126 for a directory or a
+    path exec refuses (``./file/child`` is not a directory), as GNU's
+    exec answers; None when the command runs.
 
     Args:
         name (str): the command word.
@@ -945,6 +946,11 @@ async def _unrunnable(
         row, _ = await dispatch("stat", spec)
     except FileNotFoundError:
         return xargs_missing(name), NOT_FOUND_STATUS
+    except FS_ERRORS as exc:
+        said = fs_strerror(exc)
+        if said is None:
+            raise
+        return f"xargs: {name}: {said}\n", CANNOT_EXECUTE_STATUS
     if getattr(row, "type", None) == FileType.DIRECTORY:
         return f"xargs: {name}: Permission denied\n", CANNOT_EXECUTE_STATUS
     return None

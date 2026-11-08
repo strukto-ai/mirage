@@ -34,7 +34,7 @@ from mirage.workspace.executor.builtins.shared import (
     written,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.lookup.constants import BASH_BUILTINS
+from mirage.workspace.lookup.constants import BASH_BUILTINS, SHELL_NAMES
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -152,7 +152,8 @@ async def _past_functions(
 
     The name is masked in the session tables for the inner run, so a
     shadowing function is skipped while builtins and mount commands
-    still resolve.
+    still resolve; a function never shadows a builtin, so one named like
+    a builtin stays.
 
     Args:
         cmd (str): the builtin that runs them, named on the node.
@@ -165,12 +166,18 @@ async def _past_functions(
     """
     inner_name = words[0]
     inner = shell_join(words)
-    # Function bodies are never None, so popping with a None default lets
-    # `is not None` mean "a shadowing function was masked" for restore.
-    # An alias is masked the same way: bash expands an alias only as a
-    # command's first word, which `command` is, so `command cat` runs
-    # the program past `alias cat=...` too.
-    saved_fn = session.functions.pop(inner_name, None)
+    # A function never shadows a shell builtin here, so one of a builtin's
+    # name stays for the builtin to read or remove (`builtin unset -f
+    # unset`). Function bodies are never None, so popping with a None
+    # default lets `is not None` mean "a shadowing function was masked"
+    # for restore. An alias is masked the same way: bash expands an alias
+    # only as a command's first word, which `command` is, so `command cat`
+    # runs the program past `alias cat=...` too.
+    saved_fn = (
+        None
+        if inner_name in SHELL_NAMES
+        else session.functions.pop(inner_name, None)
+    )
     saved_alias = session.aliases.pop(inner_name, None)
     try:
         io = await execute_fn(

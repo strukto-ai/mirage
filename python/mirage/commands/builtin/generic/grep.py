@@ -381,9 +381,18 @@ async def grep_generic(
     matched = False
     printed = False
 
+    pending: list[bytes] = []
+
     def note(line: bytes) -> None:
-        # Said as it happens, so it lands among the output it came with.
-        io.stderr = (io.stderr if isinstance(io.stderr, bytes) else b"") + line
+        pending.append(line)
+
+    def said() -> None:
+        # Said before the output that follows it, so it lands among the
+        # output it came with, each stretch joined once.
+        if pending:
+            held = io.stderr if isinstance(io.stderr, bytes) else b""
+            io.stderr = held + b"".join(pending)
+            pending.clear()
 
     def warn(message: str) -> None:
         nonlocal failed
@@ -508,15 +517,19 @@ async def grep_generic(
             warn(f"grep: {p.raw_path}: {_reason(exc)}")
 
     async def run() -> AsyncIterator[bytes]:
-        for path in paths:
-            try:
-                async with aclosing(scan(path)) as output:
-                    async for chunk in output:
-                        yield chunk
-            except WalkLimitError as exc:
-                warn(f"grep: {exc}")
-            if f.quiet and matched:
-                break
+        try:
+            for path in paths:
+                try:
+                    async with aclosing(scan(path)) as output:
+                        async for chunk in output:
+                            said()
+                            yield chunk
+                except WalkLimitError as exc:
+                    warn(f"grep: {exc}")
+                if f.quiet and matched:
+                    break
+        finally:
+            said()
 
     return run(), io
 

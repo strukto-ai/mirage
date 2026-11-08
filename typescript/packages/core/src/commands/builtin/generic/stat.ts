@@ -443,34 +443,38 @@ function format(
   warnings: [number, string][] | null = null,
 ): string {
   const parts: string[] = []
+  let length = 0
+  const put = (text: string): void => {
+    parts.push(text)
+    length += text.length
+  }
   let cursor = 0
   while (cursor < fmt.length) {
     const start = fmt.indexOf('%', cursor)
     if (warnings !== null) {
       const slash = fmt.indexOf('\\', cursor)
       if (slash !== -1 && (start === -1 || slash < start)) {
-        parts.push(fmt.slice(cursor, slash))
+        put(fmt.slice(cursor, slash))
         const said: string[] = []
         const [text, next] = escape(fmt, slash, said)
-        const at = parts.reduce((size, part) => size + part.length, 0)
-        for (const line of said) warnings.push([at, line])
-        parts.push(text)
+        for (const line of said) warnings.push([length, line])
+        put(text)
         cursor = next
         continue
       }
     }
     if (start === -1) {
-      parts.push(fmt.slice(cursor))
+      put(fmt.slice(cursor))
       break
     }
-    parts.push(fmt.slice(cursor, start))
+    put(fmt.slice(cursor, start))
     const directive = parseFormatDirective(fmt, start, halves)
     if (directive === null) {
-      parts.push('%')
+      put('%')
       cursor = start + 1
       continue
     }
-    parts.push(render(directive))
+    put(render(directive))
     cursor = directive.end
   }
   return parts.join('')

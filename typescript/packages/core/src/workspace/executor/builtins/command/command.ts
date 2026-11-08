@@ -29,7 +29,7 @@ import { lastOf, scanOptions } from '../getopt.ts'
 import { classify, describe, programFile } from '../lookup/index.ts'
 import { NameKind } from '../lookup/types.ts'
 import { builtinUsage, result, written } from '../shared.ts'
-import { BASH_BUILTINS } from '../../../lookup/constants.ts'
+import { BASH_BUILTINS, SHELL_NAMES } from '../../../lookup/constants.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 
 /**
@@ -138,11 +138,13 @@ async function pastFunctions(
 ): Promise<RedirectResult> {
   const innerName = words[0] ?? ''
   const inner = shellJoin(words)
-  // Function bodies are never undefined, so a defined captured value means
-  // a shadowing function was masked and must be restored after the run.
-  const savedFn = session.functions[innerName]
+  // A function never shadows a shell builtin here, so one of a builtin's name
+  // stays for the builtin to read or remove (`builtin unset -f unset`). Function
+  // bodies are never undefined, so a defined captured value means a shadowing
+  // function was masked and must be restored after the run.
+  const savedFn = SHELL_NAMES.has(innerName) ? undefined : session.functions[innerName]
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-  delete session.functions[innerName]
+  if (savedFn !== undefined) delete session.functions[innerName]
   // An alias is masked the same way: bash expands an alias only as a
   // command's first word, which `command` is, so `command cat` runs the
   // program past `alias cat=...` too.

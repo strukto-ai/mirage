@@ -266,14 +266,17 @@ impl<'a, G: Gate> Writer<'a, G> {
         }
         if value.is_array() && self.store.seeds_random(&name) {
             // An element written to RANDOM seeds it, which bash evaluates
-            // there: one that does not evaluate ends the line.
-            let mut seeding = Coercion::default();
-            if let Err(error) =
-                self.store
-                    .coerce(&mut seeding, value.clone(), INTEGER, None, assigned)
+            // there, landing what it assigns (`RANDOM[0]='x=5'`): one that
+            // does not evaluate ends the line.
+            match self
+                .store
+                .coerce(&mut coercion, value, INTEGER, None, assigned)
             {
-                self.land_coercion(&mut coercion).await?;
-                return Err(fatal(self.store.voice(), error));
+                Ok(shaped) => value = shaped,
+                Err(error) => {
+                    self.land_coercion(&mut coercion).await?;
+                    return Err(fatal(self.store.voice(), error));
+                }
             }
         }
         let rendering = value.rendering();
@@ -867,6 +870,16 @@ mod tests {
         let mut gate = Recorder::default();
         run(writer(&mut store, &mut gate).set(RANDOM, scalar("42"), true, None, None)).unwrap();
         assert_eq!(store.next_random().unwrap(), Some(17772));
+    }
+
+    #[test]
+    fn an_element_seeding_random_lands_what_it_assigns() {
+        let mut store = Store::new(Arc::new(|| 1));
+        let mut gate = Recorder::default();
+        let seeded = Value::Indexed(Indexed::dense([b"x=1+2".to_vec()]));
+        run(writer(&mut store, &mut gate).set(RANDOM, seeded, true, None, None)).unwrap();
+        assert_eq!(text(&store, "x").as_deref(), Some("3"));
+        assert_eq!(store.indexed(RANDOM).unwrap().get(0), Some(&b"3"[..]));
     }
 
     #[test]

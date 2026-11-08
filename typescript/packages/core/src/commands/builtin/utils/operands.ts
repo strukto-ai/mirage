@@ -229,7 +229,7 @@ export async function splitOpened(
         order.push(line)
         continue
       }
-      unread.set(p.virtual, line)
+      unread.set(p.rawPath, line)
     }
     order.push(p)
   }
@@ -247,7 +247,7 @@ export function operandLines(
 ): Map<number, string> {
   const lines = new Map<number, string>()
   order.forEach((p, i) => {
-    const line = typeof p === 'string' ? p : unread.get(p.virtual)
+    const line = typeof p === 'string' ? p : unread.get(p.rawPath)
     if (line !== undefined && line !== '') lines.set(i, line)
   })
   return lines

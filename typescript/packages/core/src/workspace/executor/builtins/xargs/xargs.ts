@@ -923,8 +923,9 @@ export function xargsMissing(name: string): string {
 
 /**
  * What xargs says, and the status it stops with, when it cannot exec its
- * command: 127 for nothing to run, 126 for a directory, as GNU's exec
- * answers; null when the command runs. Mirrors Python's _unrunnable.
+ * command: 127 for nothing to run, 126 for a directory or a path exec
+ * refuses (`./file/child` is not a directory), as GNU's exec answers; null
+ * when the command runs. Mirrors Python's _unrunnable.
  */
 async function unrunnable(
   name: string,
@@ -940,7 +941,9 @@ async function unrunnable(
     ;[row] = await dispatch('stat', PathSpec.fromStrPath(absPath(name, session.cwd)))
   } catch (err) {
     if (isMissingPath(err)) return [xargsMissing(name), NOT_FOUND_STATUS]
-    throw err
+    const said = fsStrerror(err)
+    if (said === null) throw err
+    return [`xargs: ${name}: ${said}\n`, CANNOT_EXECUTE_STATUS]
   }
   if ((row as { type?: string } | null)?.type === FileType.DIRECTORY) {
     return [`xargs: ${name}: Permission denied\n`, CANNOT_EXECUTE_STATUS]

@@ -182,6 +182,10 @@ export async function handleUnset(
         errors.push(readonly(name, 'variable'))
         continue
       }
+      if (name === BASH_LINENO) {
+        errors.push(`${shellVoice()}unset: ${name}: cannot unset\n`)
+        continue
+      }
       try {
         await view.unset(name, false)
       } catch (err) {
@@ -210,7 +214,7 @@ export async function handleUnset(
       errors.push(readonly(deref(session, base), 'variable'))
       continue
     }
-    if (base === BASH_LINENO && !isElement) {
+    if (!isElement && deref(session, base) === BASH_LINENO) {
       errors.push(`${shellVoice()}unset: ${name}: cannot unset\n`)
       continue
     }

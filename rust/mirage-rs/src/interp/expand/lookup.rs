@@ -94,14 +94,16 @@ impl<H: Host> Expander<'_, H> {
 
     /// A plain name's or a positional's value when it holds one: element
     /// 0 of an array, a map's key `0`, a positional the count reaches, a
-    /// special that is not empty.
+    /// special that is not empty. An array named `RANDOM` is read, not
+    /// drawn from.
     pub(super) fn held(&mut self, name: &[u8]) -> Result<Option<Vec<u8>>, Fault> {
         if !starts_name(name.first()) {
             let value = self.lookup(name, false)?;
             return Ok((!value.is_empty() || self.positional_set(name)).then_some(value));
         }
         let var = String::from_utf8_lossy(name).into_owned();
-        if var == RANDOM {
+        let array = self.shell.indexed(&var).is_some() || self.shell.vars.assoc(&var).is_some();
+        if var == RANDOM && !array {
             if let Some(drawn) = self.shell.vars.next_random().map_err(Fault::Arith)? {
                 return Ok(Some(drawn.to_string().into_bytes()));
             }

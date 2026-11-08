@@ -166,13 +166,18 @@ class Dereference {
     readonly home: string | null = null,
     // The walk's links into its tree, each with the path it resolves to.
     readonly waiting: [PathSpec, string][] = [],
+    // Under `-l`, each operand counts on its own, as GNU then counts a file
+    // each time the line names it; its walk still counts a file once, which
+    // keeps a loop from repeating.
+    readonly fresh = false,
   ) {}
 
   /** This invocation's state, walking one operand. */
   operand(path: PathSpec): Dereference {
     const tree = this.links.resolve(path.virtual)
     const home = this.mounts === null ? null : this.mounts.rootOf(tree)
-    return new Dereference(this.links, this.mounts, this.counted, tree, home)
+    const counted = this.fresh ? new Set<string>() : this.counted
+    return new Dereference(this.links, this.mounts, counted, tree, home, [], this.fresh)
   }
 
   /** The same walk, settling a link into its tree under the link's name. */
@@ -184,6 +189,7 @@ class Dereference {
       link.virtual,
       this.home,
       this.waiting,
+      this.fresh,
     )
   }
 
@@ -370,7 +376,15 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
     links !== undefined &&
     flags.typedOrder('dereference', 'no_dereference', 'dereference_args', 'H').at(-1) ===
       'dereference'
-      ? new Dereference(links, flags.asBool('one_file_system') ? (mountsOf(ctx) ?? null) : null)
+      ? new Dereference(
+          links,
+          flags.asBool('one_file_system') ? (mountsOf(ctx) ?? null) : null,
+          new Set(),
+          '/',
+          null,
+          [],
+          flags.asBool('count_links'),
+        )
       : null
   if (follow === null && !flags.asBool('count_links')) tally.counted = new Set()
   const computeSize: ComputeSize = (p) => walkSize(treeOf(files, listing), tally, follow, p)

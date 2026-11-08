@@ -277,7 +277,8 @@ async def split_opened(
     Returns:
         tuple[list[PathSpec | bytes], dict[str, bytes]]: the operands
         that open and the lines of those that do not, in order; and the
-        line of each opened one whose read fails, by virtual path.
+        line of each opened one whose read fails, by its spelling, so
+        ``head d d/`` names each.
     """
     order: list[PathSpec | bytes] = []
     unread: dict[str, bytes] = {}
@@ -289,10 +290,10 @@ async def split_opened(
             if not isinstance(exc, READ_FAILURES):
                 order.append(line)
                 continue
-            unread[p.virtual] = line
+            unread[p.raw_path] = line
         else:
             if getattr(st, "type", None) == FileType.DIRECTORY:
-                unread[p.virtual] = encode_text(
+                unread[p.raw_path] = encode_text(
                     fs_error_line(cmd_name, p, eisdir(p))
                 )
         order.append(p)
@@ -312,7 +313,7 @@ def operand_lines(
     """
     lines: dict[int, bytes] = {}
     for i, p in enumerate(order):
-        line = p if isinstance(p, bytes) else unread.get(p.virtual)
+        line = p if isinstance(p, bytes) else unread.get(p.raw_path)
         if line:
             lines[i] = line
     return lines

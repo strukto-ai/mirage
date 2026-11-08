@@ -32,6 +32,7 @@ import type { PathSpec } from '../../../types.ts'
 import { wordText } from '../../../types.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import { argsBytes, checkEnv, framesBytes } from '../../session/budget.ts'
+import { calledLines } from '../../session/functions.ts'
 import type { SessionState } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { bodyAliases } from '../builtins/alias/alias.ts'
@@ -142,7 +143,7 @@ export async function runShellFunction(
     ;[session.parseCurrent, session.parseRow] = site.mark
   }
   session.lineRow = site?.row ?? 0
-  session.lineRows = null
+  session.lineRows = site === undefined ? null : calledLines(site.lines, body)
   session.parseName = site?.name ?? 'environment'
   session.aliasView = site?.aliases ?? null
   // Its commands stand under the definition's place, on a hand-off of

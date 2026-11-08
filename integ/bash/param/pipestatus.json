@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "false | true; echo ${PIPESTATUS[@]}; false | true; declare -p PIPESTATUS; echo ${PIPESTATUS[@]@A}; zpf() { declare -p FUNCNAME; }; zpf; declare -p FUNCNAME LINENO; ( declare -p | grep -E '^declare -[-a-z]* (BASHPID|BASH_LINENO|FUNCNAME)\\b'; set | grep '^BASH_LINENO='; zpg(){ zph; }; zph(){ echo \"${BASH_LINENO[*]} ${FUNCNAME[*]}\"; set | grep -E '^(BASH_LINENO|FUNCNAME)='; }; zpg; unset BASH_LINENO 2>&1; echo rc=$?; declare -p RANDOM | sed 's/[0-9][0-9]*/N/'; declare -pa | grep -c ' BASH_LINENO' )",
+      "command": "false | true; echo ${PIPESTATUS[@]}; false | true; declare -p PIPESTATUS; echo ${PIPESTATUS[@]@A}; zpf() { declare -p FUNCNAME; }; zpf; declare -p FUNCNAME LINENO; ( declare -p | grep -E '^declare -[-a-z]* (BASHPID|BASH_LINENO|FUNCNAME)\\b'; set | grep '^BASH_LINENO='; zpg(){ zph; }; zph(){ echo \"${BASH_LINENO[*]} ${FUNCNAME[*]}\"; set | grep -E '^(BASH_LINENO|FUNCNAME)='; }; zpg; unset BASH_LINENO 2>&1; echo rc=$?; declare -p RANDOM | sed 's/[0-9][0-9]*/N/'; declare -pa | grep -c ' BASH_LINENO' ); ( unset -n BASH_LINENO 2>&1; echo rc=$?; declare -n zpr=BASH_LINENO; unset zpr 2>&1; echo rc=$? )",
       "expect": {
         "exit": 0,
-        "stdout": "1 0\ndeclare -a PIPESTATUS=([0]=\"1\" [1]=\"0\")\ndeclare -a PIPESTATUS=([0]=\"0\")\ndeclare -a FUNCNAME=([0]=\"zpf\")\ndeclare -a FUNCNAME\ndeclare -- LINENO=\"1\"\ndeclare -i BASHPID\ndeclare -a BASH_LINENO=()\ndeclare -a FUNCNAME\nBASH_LINENO=()\n1 1 zph zpg\nBASH_LINENO=([0]=\"1\" [1]=\"1\")\nFUNCNAME=([0]=\"zph\" [1]=\"zpg\")\nbash: line 1: unset: BASH_LINENO: cannot unset\nrc=1\ndeclare -i RANDOM=\"N\"\n1\n",
+        "stdout": "1 0\ndeclare -a PIPESTATUS=([0]=\"1\" [1]=\"0\")\ndeclare -a PIPESTATUS=([0]=\"0\")\ndeclare -a FUNCNAME=([0]=\"zpf\")\ndeclare -a FUNCNAME\ndeclare -- LINENO=\"1\"\ndeclare -i BASHPID\ndeclare -a BASH_LINENO=()\ndeclare -a FUNCNAME\nBASH_LINENO=()\n1 1 zph zpg\nBASH_LINENO=([0]=\"1\" [1]=\"1\")\nFUNCNAME=([0]=\"zph\" [1]=\"zpg\")\nbash: line 1: unset: BASH_LINENO: cannot unset\nrc=1\ndeclare -i RANDOM=\"N\"\n1\nbash: line 1: unset: BASH_LINENO: cannot unset\nrc=1\nbash: line 1: unset: zpr: cannot unset\nrc=1\n",
         "stderr": ""
       }
     },
@@ -763,10 +763,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( RANDOM=42; echo $((RANDOM+RANDOM)) $RANDOM ); ( RANDOM[0]=\"1/0\"; echo no ) 2>&1; echo rc=$?",
+      "command": "( RANDOM=42; echo $((RANDOM+RANDOM)) $RANDOM ); ( RANDOM[0]=\"1/0\"; echo no ) 2>&1; echo rc=$?; ( RANDOM[0]='zrx=5'; echo \"zrx=$zrx\" )",
       "expect": {
         "exit": 0,
-        "stdout": "44566 1435\nbash: line 1: 1/0: division by 0 (error token is \"0\")\nrc=1\n",
+        "stdout": "44566 1435\nbash: line 1: 1/0: division by 0 (error token is \"0\")\nrc=1\nzrx=5\n",
         "stderr": ""
       }
     },

@@ -171,6 +171,9 @@ class Dereference:
         home (str | None): under ``-x``, the mount that operand lies on.
         waiting (list[tuple[PathSpec, str]]): the walk's links into its
             tree, each with the path it resolves to.
+        fresh (bool): under ``-l``, each operand counts on its own, as
+            GNU then counts a file each time the line names it; its walk
+            still counts a file once, which keeps a loop from repeating.
     """
 
     links: LinkView
@@ -179,6 +182,7 @@ class Dereference:
     tree: str = "/"
     home: str | None = None
     waiting: list[tuple[PathSpec, str]] = field(default_factory=list)
+    fresh: bool = False
 
     def operand(self, path: PathSpec) -> "Dereference":
         """This invocation's state, walking one operand.
@@ -188,7 +192,8 @@ class Dereference:
         """
         tree = self.links.resolve(path.virtual)
         home = self.mounts.root_of(tree) if self.mounts is not None else None
-        return replace(self, tree=tree, home=home, waiting=[])
+        counted = set() if self.fresh else self.counted
+        return replace(self, counted=counted, tree=tree, home=home, waiting=[])
 
     def repeated(self, path: PathSpec) -> bool:
         """Whether an earlier operand's walk already counted this one.
@@ -437,7 +442,11 @@ async def du(
 
     links = links_of(ctx)
     follow = (
-        Dereference(links, mounts if fl.as_bool("one_file_system") else None)
+        Dereference(
+            links,
+            mounts if fl.as_bool("one_file_system") else None,
+            fresh=fl.as_bool("count_links"),
+        )
         if links is not None
         and fl.typed_order(
             "dereference", "no_dereference", "dereference_args", "H"

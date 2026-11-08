@@ -338,9 +338,19 @@ export async function grepGeneric(
   let matched = false
   let printed = false
 
-  // Said as it happens, so it lands among the output it came with.
+  const pending: Uint8Array[] = []
+
   function note(line: Uint8Array): void {
-    io.stderr = concat([io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array(), line])
+    pending.push(line)
+  }
+
+  // Said before the output that follows it, so it lands among the output it
+  // came with, each stretch joined once.
+  function said(): void {
+    if (pending.length === 0) return
+    const held = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
+    io.stderr = concat([held, ...pending])
+    pending.length = 0
   }
 
   function warn(message: string): void {
@@ -455,14 +465,21 @@ export async function grepGeneric(
   }
 
   async function* run(): AsyncIterable<Uint8Array> {
-    for (const path of paths) {
-      try {
-        yield* scan(path)
-      } catch (err) {
-        if (!(err instanceof WalkLimitError)) throw err
-        warn(`grep: ${err.message}`)
+    try {
+      for (const path of paths) {
+        try {
+          for await (const chunk of scan(path)) {
+            said()
+            yield chunk
+          }
+        } catch (err) {
+          if (!(err instanceof WalkLimitError)) throw err
+          warn(`grep: ${err.message}`)
+        }
+        if (f.quiet && matched) break
       }
-      if (f.quiet && matched) break
+    } finally {
+      said()
     }
   }
 

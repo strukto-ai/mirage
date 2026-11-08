@@ -46,6 +46,7 @@ from mirage.workspace.executor.traps import (
 )
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.budget import args_bytes, check_env, frames_bytes
+from mirage.workspace.session.functions import called_lines
 from mirage.workspace.types import ExecutionNode
 
 
@@ -183,7 +184,9 @@ async def run_shell_function(
         mark = site.mark
     session._parse_current, session._parse_row = mark
     session._line_row = 0 if site is None else site.row
-    session._line_rows = None
+    session._line_rows = (
+        None if site is None else called_lines(site.lines, func_body)
+    )
     session._parse_name = "environment" if site is None else site.name
     session._alias_view = (
         dict(site.aliases)

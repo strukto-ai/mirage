@@ -47,6 +47,7 @@ import {
   getCforParts,
   getForParts,
   getFunctionName,
+  getFunctionBody,
   getFunctionSource,
   getIfBranches,
   getListParts,
@@ -124,6 +125,7 @@ import { expandDoubleBracket } from './test_expr.ts'
 import { timedBy, timingReport } from './timing.ts'
 import type { ExpandedWords } from './types.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
+import { siteLines } from '../session/functions.ts'
 
 const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
   NodeKind.PROGRAM,
@@ -1551,13 +1553,18 @@ async function executeNodeBody(
     const held = sessionEntry(session.functions, name)
     checkEnv(session, held === undefined ? 0 : entryBytes(name, held), entryBytes(name, source))
     session.functions[name] = source
+    const row = session.lineNumber - 1
     session.functionSites.set(name, {
       source,
       mark: aliasMark(session, node.startPosition?.row ?? 0),
       origin: definedAt(node, deps.handed ?? null),
       aliases: aliasView(session, node, aliasMark(session, readRow(node))),
       name: session.parseName ?? 'environment',
-      row: session.lineNumber - 1,
+      row,
+      lines:
+        session.lineRows === null
+          ? null
+          : siteLines(session.lineRows, row - session.lineRow, getFunctionBody(node) ?? []),
     })
     return result(`function ${name}`)
   }

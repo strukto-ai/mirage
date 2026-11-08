@@ -190,7 +190,7 @@ async def head_multi(
                 continue
             body: AsyncIterator[bytes] | None = None
             first: bytes | None = None
-            if p.virtual not in unread:
+            if p.raw_path not in unread:
                 source = read(p)
                 if inspect.isawaitable(source):
                     source = await source

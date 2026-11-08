@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "fny(){ echo G; }; fny=val; unset -v fny; fny; echo rc=$?; ( builtin echo hi; builtin fny 2>&1; echo rc=$?; builtin -x 2>&1 | head -1; builtin; echo rc=$?; unset -v 1x 2>&1; echo rc=$?; unset -fv fny 2>&1; echo rc=$? )",
+      "command": "fny(){ echo G; }; fny=val; unset -v fny; fny; echo rc=$?; ( builtin echo hi; builtin fny 2>&1; echo rc=$?; builtin -x 2>&1 | head -1; builtin; echo rc=$?; unset -v 1x 2>&1; echo rc=$?; unset -fv fny 2>&1; echo rc=$? ); ( unset(){ :; }; builtin unset -f unset; declare -F unset; echo rc=$? )",
       "expect": {
         "exit": 0,
-        "stdout": "G\nrc=0\nhi\nbash: line 1: builtin: fny: not a shell builtin\nrc=1\nbash: line 1: builtin: -x: invalid option\nrc=0\nbash: line 1: unset: `1x': not a valid identifier\nrc=1\nbash: line 1: unset: cannot simultaneously unset a function and a variable\nrc=1\n",
+        "stdout": "G\nrc=0\nhi\nbash: line 1: builtin: fny: not a shell builtin\nrc=1\nbash: line 1: builtin: -x: invalid option\nrc=0\nbash: line 1: unset: `1x': not a valid identifier\nrc=1\nbash: line 1: unset: cannot simultaneously unset a function and a variable\nrc=1\nrc=1\n",
         "stderr": ""
       }
     },
