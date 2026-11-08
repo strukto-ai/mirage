@@ -208,7 +208,19 @@ async def test_df_no_args_lists_all_mounts():
 async def test_df_invalid_option():
     ws = _ws()
     code, _ = await _run(ws, "df -z /mem")
-    assert code == 2
+    assert code == 1
+
+
+@pytest.mark.asyncio
+async def test_df_long_options_and_spelled_refusal():
+    ws = _ws()
+    code, out = await _run(ws, "df --print-type --human-readable /mem")
+    assert code == 0
+    assert out.split("\n")[0].split()[:3] == ["Filesystem", "Type", "Size"]
+    code, _ = await _run(ws, "df --bogus /mem")
+    assert code == 1
+    io = await ws.shell("df --block-size=x /mem")
+    assert (await io.stderr_str()) == "df: invalid --block-size argument 'x'\n"
 
 
 @pytest.mark.asyncio

@@ -317,7 +317,9 @@ async def strip_link_operands(
     force = False
     if name == "rm":
         force = bool(
-            parse_command(SPECS["rm"], list(args), cwd, "rm").flags.get("-f")
+            parse_command(SPECS["rm"], list(args), cwd, "rm").flags.get(
+                "--force"
+            )
         )
     verb = "remove" if name == "rm" else "unlink"
     handled = 0

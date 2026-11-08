@@ -28,7 +28,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import byte_char, encode_text
 from mirage.types import (
     DEVICE_NUMBERS_KEY,
     LINK_TARGET_KEY,
@@ -81,6 +81,27 @@ _FORMAT_FLAGS = frozenset("'-+ #0I")
 _DEVICE_HALVES = "dr"
 
 # GNU's file-system report (coreutils 9.7 stat -f), in its directives.
+# What -t prints, as stat's own --help states it: one line of the fields
+# a script splits on blanks.
+_TERSE = "%n %s %b %f %u %g %D %i %h %t %T %X %Y %Z %W %o"
+_TERSE_FS = "%n %i %l %t %s %S %b %f %a %c %d"
+
+# The escapes --printf reads, each the byte it stands for.
+_ESCAPES = {
+    "a": 7,
+    "b": 8,
+    "e": 27,
+    "f": 12,
+    "n": 10,
+    "r": 13,
+    "t": 9,
+    "v": 11,
+    '"': 34,
+    "\\": 92,
+}
+_HEX = "0123456789abcdefABCDEF"
+_OCTAL = "01234567"
+
 _FS_LAYOUT = (
     '  File: "%n"\n'
     "    ID: %-8i Namelen: %-7l Type: %T\n"
@@ -503,8 +524,47 @@ def _parse_format_directive(
     )
 
 
+def _escape(fmt: str, start: int, warnings: list[str]) -> tuple[str, int]:
+    """The text one ``--printf`` backslash escape stands for.
+
+    Up to three octal digits or two hex digits after ``x`` give a byte;
+    the named escapes give theirs; any other character is printed as it
+    is, with a warning, as is a backslash that ends the format.
+
+    Args:
+        fmt (str): the format string.
+        start (int): the index of the backslash.
+        warnings (list[str]): where a warning line is added.
+
+    Returns:
+        tuple[str, int]: the text, and the index after the escape.
+    """
+    cursor = start + 1
+    if cursor == len(fmt):
+        warnings.append("stat: warning: backslash at end of format\n")
+        return "\\", cursor
+    char = fmt[cursor]
+    if char in _OCTAL:
+        end = cursor
+        while end < len(fmt) and end - cursor < 3 and fmt[end] in _OCTAL:
+            end += 1
+        return byte_char(int(fmt[cursor:end], 8)), end
+    if char == "x" and cursor + 1 < len(fmt) and fmt[cursor + 1] in _HEX:
+        end = cursor + 1
+        while end < len(fmt) and end - cursor < 3 and fmt[end] in _HEX:
+            end += 1
+        return byte_char(int(fmt[cursor + 1 : end], 16)), end
+    if char in _ESCAPES:
+        return chr(_ESCAPES[char]), cursor + 1
+    warnings.append(f"stat: warning: unrecognized escape '\\{char}'\n")
+    return char, cursor + 1
+
+
 def _format(
-    fmt: str, halves: str, render: Callable[[_FormatDirective], str]
+    fmt: str,
+    halves: str,
+    render: Callable[[_FormatDirective], str],
+    warnings: list[str] | None = None,
 ) -> str:
     """Expand a format string, each directive through ``render``.
 
@@ -512,11 +572,21 @@ def _format(
         fmt (str): the format string.
         halves (str): the conversions an ``H`` or ``L`` prefix takes.
         render (Callable[[_FormatDirective], str]): one directive's text.
+        warnings (list[str] | None): ``--printf``'s, which reads the
+            backslash escapes and adds its warnings here; None reads a
+            backslash as itself.
     """
     parts: list[str] = []
     cursor = 0
     while cursor < len(fmt):
         start = fmt.find("%", cursor)
+        if warnings is not None:
+            slash = fmt.find("\\", cursor)
+            if slash != -1 and (start == -1 or slash < start):
+                parts.append(fmt[cursor:slash])
+                text, cursor = _escape(fmt, slash, warnings)
+                parts.append(text)
+                continue
         if start == -1:
             parts.append(fmt[cursor:])
             break
@@ -532,12 +602,17 @@ def _format(
 
 
 def _format_stat(
-    fmt: str, s: FileStat, name: str, identity: Identity | None
+    fmt: str,
+    s: FileStat,
+    name: str,
+    identity: Identity | None,
+    warnings: list[str] | None = None,
 ) -> str:
     return _format(
         fmt,
         _DEVICE_HALVES,
         partial(_render_directive, s=s, name=name, identity=identity),
+        warnings,
     )
 
 
@@ -593,7 +668,11 @@ def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
 
 
 def _render_one(
-    s: FileStat, name: str, fmt: str | None, identity: Identity | None
+    s: FileStat,
+    name: str,
+    fmt: str | None,
+    identity: Identity | None,
+    warnings: list[str] | None = None,
 ) -> str:
     """One operand's report: the ``-c`` format when given, else GNU's
     default layout.
@@ -603,10 +682,36 @@ def _render_one(
         name (str): operand spelling.
         fmt (str | None): the ``-c`` format, or None for the default.
         identity (Identity | None): session owner and group defaults.
+        warnings (list[str] | None): ``--printf``'s escape warnings.
     """
     if fmt is not None:
-        return _format_stat(fmt, s, name, identity)
+        return _format_stat(fmt, s, name, identity, warnings)
     return _render_stat(s, name, identity)
+
+
+def _records(lines: list[str], printf: bool) -> bytes:
+    """The reports as output: one per line, or as ``--printf`` wrote them.
+
+    Args:
+        lines (list[str]): one report per operand.
+        printf (bool): ``--printf``, which adds no newline of its own.
+    """
+    if printf:
+        return encode_text("".join(lines))
+    return format_records(lines)
+
+
+def _drained(warnings: list[str] | None) -> bytes:
+    """The warnings one report raised, as stderr, leaving the list empty.
+
+    Args:
+        warnings (list[str] | None): ``--printf``'s escape warnings.
+    """
+    if not warnings:
+        return b""
+    text = encode_text("".join(warnings))
+    warnings.clear()
+    return text
 
 
 async def _dispatched_statfs(
@@ -627,6 +732,7 @@ async def _file_systems(
     fmt: str,
     probe: Callable[[PathSpec], Awaitable[FileStat]],
     statfs: StatfsFn | None,
+    warnings: list[str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Report the file system each operand is on, GNU ``stat -f``.
 
@@ -640,12 +746,16 @@ async def _file_systems(
             stat.
         statfs (StatfsFn | None): the type name and capacity of a path's
             mount; None outside a workspace.
+        warnings (list[str] | None): ``--printf``'s escape warnings,
+            or None for ``-c``.
     """
     lines: list[str] = []
     err = ""
+    failed = False
     for p in paths:
         if p.raw_path == "-":
             err += f"stat: {_FS_STDIN}\n"
+            failed = True
             continue
         try:
             await probe(p)
@@ -659,15 +769,21 @@ async def _file_systems(
                 f"{shell_quote_always(p.raw_path)}"
                 f"{f': {strerror}' if strerror is not None else ''}\n"
             )
+            failed = True
             continue
         render = partial(
             _render_fs_directive, kind=kind, cap=cap, name=p.raw_path
         )
-        lines.append(_format(fmt, "", render))
-    io = IOResult(exit_code=1 if err else 0, stderr=encode_text(err) or None)
+        lines.append(_format(fmt, "", render, warnings))
+        if warnings:
+            err += "".join(warnings)
+            warnings.clear()
+    io = IOResult(
+        exit_code=1 if failed else 0, stderr=encode_text(err) or None
+    )
     if not lines:
         return None, io
-    return format_records(lines), io
+    return _records(lines, warnings is not None), io
 
 
 async def stat(
@@ -677,6 +793,8 @@ async def stat(
     c: str | None = None,
     f: bool = False,
     L: bool = False,
+    printf: bool = False,
+    terse: bool = False,
     links: LinkView | None = None,
     stat_path: StatPath | None = None,
     mounts: MountView | None = None,
@@ -691,6 +809,10 @@ async def stat(
         c (str | None): output format string.
         f (bool): report the file system each operand is on instead.
         L (bool): dereference symlinks instead of reporting the link.
+        printf (bool): ``c`` came from ``--printf``: its backslash
+            escapes are read and no newline follows a report.
+        terse (bool): ``-t``, the one-line layout, when no format is
+            given.
         links (LinkView | None): the namespace's symlink facts;
             absent when the workspace holds no links.
         stat_path (StatPath | None): dispatcher-backed stat of one path,
@@ -707,6 +829,9 @@ async def stat(
     """
     if not paths:
         raise missing_operand_error("stat", None)
+    if c is None and terse:
+        c = _TERSE_FS if f else _TERSE
+    warnings: list[str] | None = [] if printf else None
     if f:
         probe = partial(
             operand_stat,
@@ -716,17 +841,21 @@ async def stat(
             links=links,
         )
         return await _file_systems(
-            paths, _FS_LAYOUT if c is None else c, probe, statfs
+            paths, _FS_LAYOUT if c is None else c, probe, statfs, warnings
         )
     lines: list[str] = []
     err = b""
+    failed = False
     for p in paths:
         # GNU stat lstats: a symlink operand reports the link itself,
         # not its target, unless -L asks to dereference. A link has no
         # backend inode, so the namespace is the only authority for it.
         linked = None if L or links is None else links.stat_at(p.virtual)
         if linked is not None:
-            lines.append(_render_one(linked, p.raw_path, c, identity))
+            lines.append(
+                _render_one(linked, p.raw_path, c, identity, warnings)
+            )
+            err += _drained(warnings)
             continue
         try:
             s = await operand_stat(
@@ -739,12 +868,14 @@ async def stat(
         except FS_ERRORS as exc:
             # GNU stat keeps reporting the remaining operands, exit 1.
             err += encode_text(fs_error_line("stat", p, exc))
+            failed = True
             continue
-        lines.append(_render_one(s, p.raw_path, c, identity))
-    io = IOResult(exit_code=1 if err else 0, stderr=err or None)
+        lines.append(_render_one(s, p.raw_path, c, identity, warnings))
+        err += _drained(warnings)
+    io = IOResult(exit_code=1 if failed else 0, stderr=err or None)
     if not lines:
         return None, io
-    return format_records(lines), io
+    return _records(lines, printf), io
 
 
 def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
@@ -767,14 +898,22 @@ class StatFlags:
     format: str | None = None
     file_system: bool = False
     deref: bool = False
+    printf: bool = False
+    terse: bool = False
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> StatFlags:
     fl = FlagView(flags, spec=SPECS["stat"])
+    # The later of -c and --printf sets the format, and either one
+    # overrides -t.
+    formats = fl.typed_order("format", "printf")
+    last = formats[-1] if formats else None
     return StatFlags(
-        format=fl.as_str("format"),
+        format=None if last is None else fl.as_str(last),
         file_system=fl.as_bool("file_system"),
         deref=fl.as_bool("dereference"),
+        printf=last == "printf",
+        terse=fl.as_bool("terse"),
     )
 
 
@@ -796,6 +935,8 @@ async def stat_generic(
         c=parsed.format,
         f=parsed.file_system,
         L=parsed.deref,
+        printf=parsed.printf,
+        terse=parsed.terse,
         links=links_of(ctx),
         stat_path=vfs_stat_path(ctx.vfs),
         mounts=mounts_of(ctx),

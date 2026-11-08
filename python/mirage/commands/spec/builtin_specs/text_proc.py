@@ -31,6 +31,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-m", "--chars", action="store_true"),
             Argument("-L", "--max-line-length", action="store_true"),
             Argument("--total"),
+            Argument("--files0-from", type="path"),
             PATHS_OPERAND,
         )
     ),
@@ -56,6 +57,9 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-M", "--month-sort", action="store_true"),
             Argument("-o", "--output", type="path", action="append"),
             Argument("-z", "--zero-terminated", action="store_true"),
+            Argument("-R", "--random-sort", action="store_true"),
+            Argument("--random-source", type="path", action="append"),
+            Argument("--files0-from", type="path"),
             PATHS_OPERAND,
         )
     ),
@@ -182,7 +186,11 @@ SPECS: dict[str, CommandSpec] = {
             # apart, so both refuse without it.
             Argument("-l", "--lines", numeric_shorthand=True),
             Argument("-b", "--bytes"),
+            Argument("-C", "--line-bytes"),
             Argument("-n", "--number"),
+            Argument("-e", "--elide-empty-files", action="store_true"),
+            Argument("-u", "--unbuffered", action="store_true"),
+            Argument("--verbose", action="store_true"),
             # GNU: -d/-x never take an argument; only --numeric-suffixes=
             # and --hex-suffixes= carry one, so `-d10` is -d and ten lines.
             Argument(
@@ -214,6 +222,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-r", "--repeat", action="store_true"),
             Argument("-i", "--input-range", action="append"),
             Argument("-o", "--output", type="path", action="append"),
+            Argument("--random-source", type="path", action="append"),
             PATHS_OPERAND,
         )
     ),

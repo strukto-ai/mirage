@@ -219,18 +219,20 @@ export async function subscriptIndex(
 
 /**
  * Evaluate an arithmetic command, a `let` operand or a test's integer
- * operand against the session, its writes landed through the gate in order.
- * Mirrors Python's session_arith.
+ * operand against the session, its writes landed through the gate in order;
+ * `expand` for a `let` operand, whose subscripts expand first. Mirrors
+ * Python's session_arith.
  */
 export async function sessionArith(
   session: SessionState,
   text: string,
   policies: Policies | null = null,
   callStack: CallStack | null = null,
+  expand = false,
 ): Promise<bigint> {
   const shell = session.vars.shell
   frame(session, callStack)
-  const task = shell.arith(text, { listens: listens(policies) })
+  const task = shell.arith(text, expand, { listens: listens(policies) })
   return (await drive(task, new SessionGate(session, policies), [])) as bigint
 }
 
@@ -350,7 +352,8 @@ export async function elementIsSet(
  * as one gated write of the whole value it makes, so a `pre_session` rule
  * sees `m[k]=v` as a write to `m`. The subscript arrives already expanded: an
  * associative name takes it as the key verbatim, an indexed one evaluates it
- * as arithmetic. Mirrors Python's assign_element.
+ * as arithmetic. Without a `diagnostics` sink, a seed's arithmetic error
+ * propagates. Mirrors Python's assign_element.
  */
 export async function assignElement(
   session: SessionState,
@@ -359,11 +362,16 @@ export async function assignElement(
   subscript: string | null,
   value: string,
   append = false,
+  diagnostics: (string | Uint8Array)[] | null = null,
 ): Promise<(typeof ELEMENT_STATUS)[number]> {
   const shell = session.vars.shell
+  const warns = diagnostics !== null
   const write = (): Promise<bigint> =>
-    runWrite(session, policies, (heard) =>
-      shell.element(name, subscript, value, { append, listens: heard, warns: false }),
+    runWrite(
+      session,
+      policies,
+      (heard) => shell.element(name, subscript, value, { append, listens: heard, warns }),
+      diagnostics,
     )
   let code = 0n
   if (policies === null || !asyncContextIsolatesTasks) code = await write()
@@ -478,6 +486,15 @@ export function outliveCall(session: SessionState, name: string): void {
 /** Whether the running function's call assigned `name` in front. Mirrors Python's in_call_env. */
 export function inCallEnv(session: SessionState, name: string): boolean {
   return session.vars.shell.inCallEnv(name)
+}
+
+/**
+ * The names a running builtin's or program's prefix assignments set for it,
+ * which no listing shows (`QX=1 export -p` lists no QX); a function's are
+ * its own scope's, and list.
+ */
+export function prefixTemporaries(session: SessionState): string[] {
+  return session.prefixSaves.flatMap((saved) => [...saved.keys()])
 }
 
 /**

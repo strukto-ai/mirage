@@ -28,14 +28,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "stat -c \"%s\" /data/a.txt",
+      "command": "stat -c \"%s\" /data/a.txt; stat --printf '%n %s\\n' /data/a.txt; stat --printf '%n\\t\\x41\\101\\c' /data/a.txt; echo; stat -c '%n' --printf '%s\\n' /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "24\n",
-        "stderr": ""
+        "stdout": "24\n/data/a.txt 24\n/data/a.txt\tAAc\n24\n",
+        "stderr": "stat: warning: unrecognized escape '\\c'\n"
       },
       "flags": [
-        "c"
+        "c",
+        "printf"
       ]
     },
     {

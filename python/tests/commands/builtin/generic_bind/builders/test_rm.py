@@ -86,7 +86,7 @@ async def test_rm_stats_its_operand_through_the_dispatcher():
 async def test_rm_v_walks_the_tree_through_the_dispatcher():
     removed: list[str] = []
     listing = "removed '/m/d/x.txt'\nremoved directory '/m/d'\n"
-    result = await _rm(_mount(removed), "/m/d", r=True, v=True)
+    result = await _rm(_mount(removed), "/m/d", recursive=True, verbose=True)
     assert result == (0, listing, "")
     assert removed == ["/m/d"]
 
@@ -96,7 +96,7 @@ async def test_rm_f_reports_an_existing_file_it_cannot_remove():
     # GNU's `ignorable_missing` spares ENOENT and ENOTDIR alone: a file
     # that exists on a filesystem refusing the unlink fails under -f too.
     refusal = "rm: cannot remove '/m/a.txt': Operation not supported\n"
-    result = await _rm(_mount(), "/m/a.txt", "/m/nope", f=True)
+    result = await _rm(_mount(), "/m/a.txt", "/m/nope", force=True)
     assert result == (1, "", refusal)
 
 
@@ -104,7 +104,9 @@ async def test_rm_f_reports_an_existing_file_it_cannot_remove():
 async def test_rm_reports_a_refused_stat_and_removes_the_rest():
     removed: list[str] = []
     refusal = "rm: cannot remove '/m/locked/f.txt': Permission denied\n"
-    result = await _rm(_mount(removed), "/m/locked/f.txt", "/m/a.txt", f=True)
+    result = await _rm(
+        _mount(removed), "/m/locked/f.txt", "/m/a.txt", force=True
+    )
     assert result == (1, "", refusal)
     assert removed == ["/m/a.txt"]
 
@@ -144,7 +146,7 @@ async def test_rm_refused_operand_keeps_spelling_and_continues(
         PathSpec.from_str_path("/data"), raw_path=raw, walk_error=refusal
     )
     valid = PathSpec.from_str_path("/data/ok")
-    _, result = await run_generic("rm", mount, [refused, valid], f=force)
+    _, result = await run_generic("rm", mount, [refused, valid], force=force)
     assert (result.exit_code, result.stderr) == (code, stderr)
     assert len(stats) == 2
     assert unlinked == [valid]
@@ -183,7 +185,7 @@ async def test_rm_r_names_a_mount_below_and_fails():
         rm_r=_declined_rm_r,
     )
     _, result = await run_generic(
-        "rm", mount, [PathSpec.from_str_path("/data")], r=True
+        "rm", mount, [PathSpec.from_str_path("/data")], recursive=True
     )
     assert result.exit_code == 1
     assert result.stderr == (

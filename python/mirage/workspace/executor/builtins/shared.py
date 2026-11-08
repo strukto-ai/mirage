@@ -25,14 +25,13 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.errors import TooManyMatches
 from mirage.shell.voice import shell_voice
-from mirage.types import PathSpec, word_text
+from mirage.types import PathSpec
 from mirage.utils.path import resolve_path
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import (
     COUNT_WORD_RE,
     IDENTIFIER_RE,
 )
-from mirage.workspace.executor.builtins.scope import _scope_path
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.types import ParsedCommand
@@ -130,65 +129,6 @@ def parse_line(
     return parsed, FlagView(parsed.flag_kwargs, spec=spec), None
 
 
-def split_value_flags(
-    args: list[str | PathSpec],
-    boolean: str,
-    valued: str,
-) -> tuple[set[str], dict[str, str], list[str | PathSpec], str | None]:
-    """Split leading flags where some take a value (``-t STAMP``),
-    strictly: an unknown letter is reported instead of tolerated.
-
-    Args:
-        args (list[str | PathSpec]): args after the command name.
-        boolean (str): single-letter flags with no value.
-        valued (str): single-letter flags that consume the next arg.
-
-    Returns:
-        tuple: (bool flags, valued flags, operands, bad option or None).
-    """
-    flags: set[str] = set()
-    values: dict[str, str] = {}
-    operands: list[str | PathSpec] = []
-    parsing = True
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        s = _scope_path(arg)
-        if parsing and s == "--":
-            parsing = False
-            i += 1
-            continue
-        if (
-            parsing
-            and s != "-"
-            and len(s) >= 2
-            and s.startswith("-")
-            and not s.startswith("--")
-        ):
-            body = s[1:]
-            for j, c in enumerate(body):
-                if c in boolean:
-                    flags.add(c)
-                    continue
-                if c not in valued:
-                    return flags, values, operands, c
-                # A valued flag consumes the rest of the token (-tSTAMP)
-                # or the next argument (-t STAMP).
-                rest = body[j + 1 :]
-                if rest:
-                    values[c] = rest
-                elif i + 1 < len(args):
-                    i += 1
-                    values[c] = word_text(args[i])
-                break
-            i += 1
-            continue
-        parsing = False
-        operands.append(arg)
-        i += 1
-    return flags, values, operands, None
-
-
 async def expand_operands(
     namespace: Namespace,
     dispatch: DispatchFn,
@@ -275,6 +215,17 @@ def readonly_line(cmd: str, name: str) -> str:
     """
     voice = f"{cmd}: " if cmd in ("declare", "local", "typeset") else ""
     return f"{shell_voice()}{voice}{name}: readonly variable"
+
+
+def identifier_line(cmd: str, name: str) -> str:
+    """A builtin's refusal of a word that names no variable
+    (``bash: read: `1x': not a valid identifier``).
+
+    Args:
+        cmd (str): the builtin's name.
+        name (str): the word as given.
+    """
+    return f"{shell_voice()}{cmd}: `{name}': not a valid identifier"
 
 
 def readonly_refusal(cmd: str, name: str) -> Result:

@@ -136,7 +136,7 @@ async def bc(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, spec=SPECS["bc"])
     config: dict[str, JsonValue] = {
-        "math_mode": fl.as_bool("args_l"),
+        "math_mode": fl.as_bool("mathlib"),
         "line_length": ctx.env.get("BC_LINE_LENGTH") if ctx.env else None,
     }
     source = ctx.stdin if ctx.stdin is not None else b""

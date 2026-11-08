@@ -7,6 +7,8 @@ from mirage.commands.builtin.utils.operands import (
 )
 from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
 from mirage.commands.config import Context
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.stream import run_stream
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
@@ -36,7 +38,8 @@ async def rev_generic(
         return None, IOResult(exit_code=1, stderr=err)
     io = IOResult()
     read = stdin_stream(stream, ctx.stdin, dash=False)
-    each = partial(run_stream, "rev", {})
+    zero = FlagView(ctx.flags, spec=SPECS["rev"]).as_bool("zero")
+    each = partial(run_stream, "rev", {"zero": True} if zero else {})
     output = per_operand(readable, read, ctx.stdin, io, "rev", each)
     return await merge_split_errors((output, io), err)
 

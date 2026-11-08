@@ -14,10 +14,12 @@
 
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.runtime.types import DispatchFn
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.workspace.executor.builtins.metadata.metadata import (
     change_owner,
     parse_owner,
+    reference_operands,
+    reference_stat,
 )
 from mirage.workspace.executor.builtins.shared import fail, parse_line
 from mirage.workspace.executor.builtins.types import Result
@@ -37,7 +39,10 @@ async def handle_chown(
     are kept verbatim, numeric ids become ints. ``-R`` walks the
     operand's subtree; POSIX gives it an implicit ``-P``, so a symlink
     is changed itself rather than followed, whether it is the operand
-    or reached during the walk.
+    or reached during the walk, unless ``-H`` follows the operand or
+    ``-L`` every link. ``--reference`` copies a file's owner and group,
+    and ``--from`` changes only a file that has the owner and group it
+    names.
 
     Args:
         namespace (Namespace): addressing authority.
@@ -48,6 +53,30 @@ async def handle_chown(
     parsed, fl, refused = parse_line("chown", args, session.cwd)
     if refused is not None:
         return refused
+    from_text = fl.as_str("from")
+    current = None if from_text is None else parse_owner(from_text)
+    reference = fl.as_path("reference")
+    if reference is not None:
+        operands = reference_operands(parsed.texts, parsed.paths, session.cwd)
+        if not operands:
+            error = missing_operand_error("chown", None)
+            return fail("chown", f"{error}\n", error.exit_code)
+        found = await reference_stat(
+            namespace.session_links(session), dispatch, "chown", reference
+        )
+        if not isinstance(found, FileStat):
+            return found
+        return await change_owner(
+            namespace,
+            dispatch,
+            session,
+            "chown",
+            fl,
+            operands,
+            found.uid,
+            found.gid,
+            current,
+        )
     if not parsed.texts or not parsed.paths:
         last = parsed.texts[0] if parsed.texts else None
         error = missing_operand_error("chown", last)
@@ -57,5 +86,13 @@ async def handle_chown(
     if uid is None and gid is None:
         return fail("chown", f"chown: invalid spec: '{owner_text}'\n", 1)
     return await change_owner(
-        namespace, dispatch, session, "chown", fl, parsed.paths, uid, gid
+        namespace,
+        dispatch,
+        session,
+        "chown",
+        fl,
+        parsed.paths,
+        uid,
+        gid,
+        current,
     )

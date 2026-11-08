@@ -126,6 +126,107 @@ _PULL_LIST = (
 )
 
 
+_PULL_FOR_BRANCH = (
+    "query PullRequestForBranch($owner: String!, $repo: String!, "
+    "$headRefName: String!, $states: [PullRequestState!]) {\n"
+    "  repository(owner: $owner, name: $repo) {\n"
+    "    pullRequests(headRefName: $headRefName, states: $states, "
+    "first: 30, orderBy: {field: CREATED_AT, direction: DESC}) {\n"
+    "      nodes {number url state baseRefName headRefName "
+    "isCrossRepository headRepositoryOwner {login}}\n"
+    "    }\n    defaultBranchRef {name}\n  }\n}"
+)
+
+
+def head_branch(head: str) -> str:
+    """The branch name of a head, which is a branch or ``owner:branch``
+    for a fork's, refused the way gh's ParseQualifiedHeadRef refuses any
+    other.
+    """
+    parts = head.split(":")
+    if len(parts) > 2:
+        raise ValueError(f"invalid qualified head ref format '{head}'")
+    return parts[-1]
+
+
+@dataclass(frozen=True, slots=True)
+class BranchFilter:
+    """What gh's finder narrows a branch's pull requests by.
+
+    Args:
+        states (tuple[str, ...] | None): the states asked for; every
+            state when None.
+        base (str | None): the base branch a match must merge into; any
+            when None.
+    """
+
+    states: tuple[str, ...] | None = None
+    base: str | None = None
+
+
+async def pull_for_branch(
+    account: GitHubAccount,
+    ref: RepoRef,
+    head: str,
+    filter_: BranchFilter = BranchFilter(),
+) -> dict[str, Any] | None:
+    """The pull request a branch heads, picked as gh's finder picks it:
+    of the newest 30 whose head ref is the branch's name, open ones
+    first, the first whose head is exactly ``head`` (``owner:branch`` for
+    a fork's) and whose base is the filter's, passing over a closed or
+    merged one when ``head`` is the default branch. None when none is.
+
+    Args:
+        account (GitHubAccount): the API client.
+        ref (RepoRef): the base repository.
+        head (str): the branch, or ``owner:branch``.
+        filter_ (BranchFilter): the states and the base to narrow by.
+    """
+    data = await graphql_data(
+        account,
+        _PULL_FOR_BRANCH,
+        {
+            "owner": ref.owner,
+            "repo": ref.repo,
+            "headRefName": head_branch(head),
+            "states": (
+                list(filter_.states) if filter_.states is not None else None
+            ),
+        },
+    )
+    repository = data.get("repository")
+    repository = repository if isinstance(repository, dict) else {}
+    connection = repository.get("pullRequests")
+    nodes = connection.get("nodes") if isinstance(connection, dict) else None
+    rows = [node for node in nodes or [] if isinstance(node, dict)]
+    rows.sort(key=lambda node: node.get("state") != "OPEN")
+    default = repository.get("defaultBranchRef")
+    default_branch = default.get("name") if isinstance(default, dict) else None
+    for node in rows:
+        owner = node.get("headRepositoryOwner")
+        login = owner.get("login") if isinstance(owner, dict) else None
+        login = login if isinstance(login, str) else ""
+        name = node.get("headRefName")
+        name = name if isinstance(name, str) else ""
+        label = (
+            f"{login}:{name}"
+            if node.get("isCrossRepository") is True
+            else name
+        )
+        if label != head:
+            continue
+        if (
+            filter_.base is not None
+            and node.get("baseRefName") != filter_.base
+        ):
+            continue
+        if node.get("state") != "OPEN" and default_branch == head:
+            continue
+        if isinstance(node.get("number"), int):
+            return node
+    return None
+
+
 async def list_pull_request_fields(
     account: GitHubAccount,
     ref: RepoRef,

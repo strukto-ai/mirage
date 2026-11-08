@@ -27,7 +27,7 @@ export function winningPad(flags: string): string | null {
 
 /** date's C-locale directives. The host supplies one timezone reading;
  * Rust owns the calendar, directives and padding. */
-export function gnuStrftime(dt: Date, fmt: string, zone: Zone): string {
+export function gnuStrftime(dt: Date, fmt: string, zone: Zone, nanosecond?: number): string {
   const parts = zone.parts(dt)
   const stream = openStreamSync('strftime', {
     year: parts.year,
@@ -36,7 +36,7 @@ export function gnuStrftime(dt: Date, fmt: string, zone: Zone): string {
     hour: parts.hour,
     minute: parts.minute,
     second: parts.second,
-    nanosecond: parts.ms * 1_000_000,
+    nanosecond: nanosecond ?? parts.ms * 1_000_000,
     epoch: Math.floor(dt.getTime() / 1000),
     offset: parts.offsetSec,
     zone: parts.abbrev,

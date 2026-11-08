@@ -24,12 +24,6 @@ COUNT_WORD_RE = re.compile(r"[ \t\n\v\f\r]*[+-]?[0-9]+[ \t]*")
 # identifier, while `a[ ]` is a valid arithmetic 0.
 TARGET_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\[(.+)\])?\Z")
 
-# What makes bash's bare `set` single-quote a value: IFS whitespace,
-# quoting and control characters, reserved-word and glob characters, and
-# the expansion introducers (`$` and a backquote). A `~` counts at
-# the start or after `=` or `:`, and a `#` only at the start.
-SET_QUOTED_CHARS = frozenset(" \t\n'\"\\|&;()<>!{}*[?]^$`")
-
 # The largest PID operand kill and ps read as a number: the bound both hosts
 # hold exactly (bash's own is intmax_t).
 MAX_PID_OPERAND = 2**53 - 1

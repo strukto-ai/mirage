@@ -94,7 +94,7 @@ describe('rm builder', () => {
 
   it('-v walks the tree through the dispatcher', async () => {
     const removed: string[] = []
-    expect(await rm(files(removed), ['/m/d'], { r: true, v: true })).toEqual([
+    expect(await rm(files(removed), ['/m/d'], { recursive: true, verbose: true })).toEqual([
       0,
       "removed '/m/d/x.txt'\nremoved directory '/m/d'\n",
       '',
@@ -105,7 +105,7 @@ describe('rm builder', () => {
   it('-f reports an existing file it cannot remove', async () => {
     // GNU rm -f spares ENOENT and ENOTDIR alone: a file
     // that exists on a filesystem refusing the unlink fails under -f too.
-    expect(await rm(files(), ['/m/a.txt', '/m/nope'], { f: true })).toEqual([
+    expect(await rm(files(), ['/m/a.txt', '/m/nope'], { force: true })).toEqual([
       1,
       '',
       "rm: cannot remove '/m/a.txt': Operation not supported\n",
@@ -114,7 +114,7 @@ describe('rm builder', () => {
 
   it('reports a refused stat in its own words and removes the rest', async () => {
     const removed: string[] = []
-    expect(await rm(files(removed), ['/m/locked/f.txt', '/m/a.txt'], { f: true })).toEqual([
+    expect(await rm(files(removed), ['/m/locked/f.txt', '/m/a.txt'], { force: true })).toEqual([
       1,
       '',
       "rm: cannot remove '/m/locked/f.txt': Permission denied\n",
@@ -159,7 +159,7 @@ it.each([
     const valid = PathSpec.fromStrPath('/data/ok')
     const result = await runWithMountGate('/', MountMode.WRITE, async () =>
       command.fn({} as Accessor, [refused, valid], [], {
-        flags: { f: force },
+        flags: { force },
         stdin: null,
         cwd: PathSpec.fromStrPath('/'),
         vfs,
@@ -198,7 +198,7 @@ it('rm -r names a mount below and fails', async () => {
   const command = generic('rm')
   const result = await runWithMountGate('/data/', MountMode.WRITE, async () =>
     command.fn({} as Accessor, [PathSpec.fromStrPath('/data')], [], {
-      flags: { r: true },
+      flags: { recursive: true },
       stdin: null,
       cwd: PathSpec.fromStrPath('/'),
       vfs,

@@ -19,7 +19,6 @@ from mirage.utils.loader import lazy_exports
 if TYPE_CHECKING:
     from mirage.shell.constants import (
         BUILTIN_GROUP,
-        GRAMMAR_BUILTINS,
         GROUP_TIER,
     )
     from mirage.shell.types import (
@@ -33,7 +32,6 @@ if TYPE_CHECKING:
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.shell.constants": (
         "BUILTIN_GROUP",
-        "GRAMMAR_BUILTINS",
         "GROUP_TIER",
     ),
     "mirage.shell.types": (
@@ -49,7 +47,6 @@ __all__ = [
     "BUILTIN_GROUP",
     "BuiltinGroup",
     "BuiltinTier",
-    "GRAMMAR_BUILTINS",
     "GROUP_TIER",
     "NodeType",
     "RedirectKind",

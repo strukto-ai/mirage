@@ -77,15 +77,27 @@ SPECS: dict[str, CommandSpec] = {
     "sha256sum": CHECKSUM,
     "sha384sum": CHECKSUM,
     "sha512sum": CHECKSUM,
+    # xxd spells its long names with one dash, each beside its letter.
     "xxd": CommandSpec(
         arguments=(
-            Argument("-r", action="store_true"),
-            Argument("-p", action="store_true"),
-            Argument("-l"),
-            Argument("-c"),
-            Argument("-s"),
-            Argument("-g"),
-            Argument("-u", action="store_true"),
+            Argument("-r", "-revert", action="store_true"),
+            Argument(
+                "-p", "-ps", "-postscript", "-plain", action="store_true"
+            ),
+            Argument("-l", "-len"),
+            Argument("-c", "-cols"),
+            Argument("-s", "-seek"),
+            Argument("-g", "-groupsize"),
+            Argument("-u", "-uppercase", action="store_true"),
+            Argument("-a", "-autoskip", action="store_true"),
+            Argument("-b", "-bits", action="store_true"),
+            Argument("-C", action="store_true"),
+            Argument("-d", "-decimal", action="store_true"),
+            Argument("-E", "-EBCDIC", action="store_true"),
+            Argument("-e", action="store_true"),
+            Argument("-i", "-include", action="store_true"),
+            Argument("-n", "-name"),
+            Argument("-o", "-offset"),
             PATH_OPERAND,
             PATH2_OPERAND,
         )

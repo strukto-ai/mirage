@@ -98,10 +98,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/qlook && printf '\\n' > /data/qlook/nl && look '' /data/qlook/nl",
+      "command": "mkdir -p /data/qlook && printf '\\n' > /data/qlook/nl && look '' /data/qlook/nl; printf 'a-b\\nab\\nabc\\n' > /data/qlook/fl1; look -d a-b /data/qlook/fl1; printf 'abc\\nabd\\nabx\\n' > /data/qlook/fl1; look -t c abc /data/qlook/fl1; look --terminate=b abx /data/qlook/fl1; printf 'Abc\\nabd\\n' > /data/qlook/fl1; look --ignore-case ab /data/qlook/fl1; look -f -d --alphanum AB /data/qlook/fl1; rm /data/qlook/fl1",
       "expect": {
         "exit": 0,
-        "stdout": "\n",
+        "stdout": "\na-b\nab\nabc\nabc\nabc\nabd\nabx\nAbc\nabd\nAbc\nabd\n",
         "stderr": ""
       },
       "note": "The look twin of comm_one_empty_line_is_a_line, pinned on util-linux look in debian:stable-slim."

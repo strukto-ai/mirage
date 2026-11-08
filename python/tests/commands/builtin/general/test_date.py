@@ -18,6 +18,10 @@ import time
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.commands.builtin.general.date import _each_line
+from mirage.commands.config import Context
+from mirage.io.stream import close_quietly
+from mirage.types import PathSpec
 
 
 async def _run(ws: Workspace, line: str) -> tuple[str, str, int]:
@@ -173,3 +177,27 @@ async def test_date_output_format_refusals(line, stderr):
         assert await _run(ws, line) == ("", stderr, 1)
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pulls", [0, 1])
+async def test_date_f_closed_early_closes_its_input(pulls):
+    closed: list[bool] = []
+
+    async def lines():
+        try:
+            yield b"@0\n@1\n"
+            yield b"@2\n"
+        finally:
+            closed.append(True)
+
+    class Files:
+        async def read(self, path, *, stream):
+            return lines()
+
+    ctx = Context(flags={"u": True}, vfs=Files())
+    out, _ = await _each_line(ctx, PathSpec.from_str_path("/l"), None, "%s")
+    for _ in range(pulls):
+        assert await anext(out) == b"0\n"
+    await close_quietly(out)
+    assert closed == [True]

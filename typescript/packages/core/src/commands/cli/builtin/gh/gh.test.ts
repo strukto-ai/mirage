@@ -26,7 +26,7 @@ import { Files } from '../../../../workspace/files.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { cliSpecFor } from '../../specs.ts'
-import { bodyValue, readCliFile, repoNumber } from './accessor.ts'
+import { bodyValue, numberedSubject, readCliFile, repoNumber } from './accessor.ts'
 import { api } from './api.ts'
 import { GH } from './index.ts'
 import { commentsFor, commentsText } from './issue.ts'
@@ -471,16 +471,23 @@ describe('gh issue and pull request subjects', () => {
     expect({ ...ref, number }).toEqual({ owner: 'acme', repo: 'tools', number: 42 })
   })
 
-  it('requires the URL kind to match the verb', () => {
-    expect(() =>
-      repoNumber(
-        account(),
-        new FlagView({}),
-        'https://github.com/acme/tools/issues/42',
-        'pull request',
-        'pull',
-      ),
-    ).toThrow(/pull request number/)
+  // gh reads the URL's path alone, and an issue verb takes a pull
+  // request's URL; a pull request verb reads an issue's URL as a branch.
+  it.each([
+    ['#42', 'issues', ['o', 'r', 42]],
+    ['https://github.com/acme/tools/pull/42', 'issues', ['acme', 'tools', 42]],
+    ['https://github.com/acme/tools/pull/42/files#diff', 'pull', ['acme', 'tools', 42]],
+    ['https://github.com/acme/tools/issues/42', 'pull', null],
+    ['dev', 'pull', null],
+  ] as const)('reads %s as gh does for %s', (raw, kind, want) => {
+    const found = numberedSubject(account({ token: 't', repo: 'o/r' }), new FlagView({}), raw, kind)
+    expect(found === null ? null : [found[0].owner, found[0].repo, found[1]]).toEqual(want)
+  })
+
+  it('names an issue selector that is no number or URL as gh does', () => {
+    expect(() => repoNumber(account(), new FlagView({}), 'dev', 'issue', 'issues')).toThrow(
+      'invalid issue format: "dev"',
+    )
   })
 })
 

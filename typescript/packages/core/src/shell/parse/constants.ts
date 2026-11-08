@@ -55,11 +55,6 @@ export const PARSED_WORDS: ReadonlySet<string> = new Set([
 // The characters that end an unquoted word.
 export const WORD_BREAKS: ReadonlySet<string> = new Set(' \t\n;&|()<>')
 
-// How deep the syntax reader nests compound commands, substitutions and
-// `[[ ]]` groups before it refuses a line at the next opener, as bash
-// refuses a line nested past its own reader (thousands deep there).
-export const MAX_NESTING = 64
-
 // Where a `variable_name` node is a write target rather than a read:
 // the assignment's name and the for loop's variable. Everything else --
 // expansions, arithmetic, subscripts -- reads the name.

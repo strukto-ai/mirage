@@ -116,6 +116,11 @@ describe('getfattr', () => {
     expect((await run(ws, 'getfattr -n user.a --absolute-names /r/d/f'))[1]).toMatch(
       /^# file: \/r\/d\/f\n/,
     )
+    expect(await run(ws, 'getfattr -n user.a --only-values /r/d/f')).toEqual([
+      0,
+      'one',
+      "getfattr: Removing leading '/' from absolute path names\n",
+    ])
     expect(await run(ws, 'getfattr -n user.zz /r/d/f')).toEqual([
       1,
       '',
@@ -127,6 +132,41 @@ describe('getfattr', () => {
     expect((await run(await seeded(), 'getfattr -R -n user.b d'))[1]).toBe(
       '# file: d/f\nuser.b="two"\n\n# file: d/l\nuser.b="two"\n\n',
     )
+  })
+
+  it('stays off a nested mount under --one-file-system', async () => {
+    const ws = new Workspace(
+      { '/r': new RAMVFS(), '/r/in': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    await ws.shell('echo a > /r/f && echo b > /r/in/g')
+    for (const path of ['/r/f', '/r/in', '/r/in/g']) {
+      await ws.vfs.setxattr(path, 'user.a', ENC.encode('1'))
+    }
+    const block = 'user.a="1"\n\n'
+    expect((await run(ws, 'getfattr -R -d .'))[1]).toBe(
+      `# file: ./f\n${block}# file: ./in\n${block}# file: ./in/g\n${block}`,
+    )
+    expect((await run(ws, 'getfattr -R --one-file-system -d .'))[1]).toBe(`# file: ./f\n${block}`)
+    expect((await run(ws, 'getfattr -R --one-file-system -d in'))[1]).toBe(
+      `# file: in\n${block}# file: in/g\n${block}`,
+    )
+    await ws.shell('ln -s /r/in /r/lk')
+    expect((await run(ws, 'getfattr -R -L --one-file-system -d .'))[1]).toBe(
+      `# file: ./f\n${block}# file: ./lk\n${block}`,
+    )
+  })
+
+  it('escapes a name in a dump, so restore reads it back', async () => {
+    const ws = new Workspace({ '/r': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell("cd /r && printf x > 'a\\155b' && printf y > amb")
+    await ws.vfs.setxattr('/r/a\\155b', 'user.k', ENC.encode('1'))
+    const block = '# file: a\\134155b\nuser.k="1"\n\n'
+    expect((await run(ws, "getfattr -d 'a\\155b'"))[1]).toBe(block)
+    const line =
+      "getfattr -d 'a\\155b' > dump; setfattr -x user.k 'a\\155b'; " +
+      "setfattr --restore=dump; getfattr -d 'a\\155b' amb"
+    expect(await run(ws, line)).toEqual([0, block, ''])
   })
 
   it.each([

@@ -302,7 +302,8 @@ Inspect active and recently completed work with [List lines](/api/server/operati
 [List jobs](/api/server/operations/jobs/list-jobs), and
 [List processes](/api/server/operations/processes/list-processes). A shell result's
 `line_id` identifies its [line record](/api/server/operations/lines/get-a-line).
-See those endpoint pages for retention, filters, and response fields.
+Servers using the same workspace store share these records, and snapshots keep
+ended records. See those endpoint pages for retention, filters, and response fields.
 
 ## Streaming and stdin
 

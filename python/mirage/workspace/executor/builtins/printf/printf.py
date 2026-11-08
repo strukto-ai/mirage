@@ -33,6 +33,8 @@ from mirage.workspace.executor.builtins.printf.format import (
 from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
     fail,
+    identifier_line,
+    readonly_line,
     result,
     subscript_expansion,
 )
@@ -51,6 +53,7 @@ async def handle_printf(
     session: SessionState,
     policies: Policies | None = None,
     subscripts: SubscriptFn | None = None,
+    diagnostics: list[str | bytes] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Print formatted output, honoring GNU printf's format-reuse rules.
 
@@ -86,6 +89,8 @@ async def handle_printf(
             words.
         subscripts (SubscriptFn | None): expands the ``-v`` target's
             subscript given as text; None keeps it as typed.
+        diagnostics (list[str | bytes] | None): where the ``-v`` write's
+            warnings go (a ``RANDOM`` seed that does not evaluate).
     """
     program = program_invocation(session)
     target: str | None = None
@@ -97,11 +102,7 @@ async def handle_printf(
         if parsed is None:
             # bash validates the name before formatting, so a bad name
             # suppresses the conversion errors the format would report.
-            return fail(
-                "printf",
-                f"{shell_voice()}printf: `{target}': not a valid identifier\n",
-                2,
-            )
+            return fail("printf", identifier_line("printf", target) + "\n", 2)
     if args and not program:
         first = args[0]
         if first == "--":
@@ -155,7 +156,9 @@ async def handle_printf(
         subscript = await subscripts(subscript)
     text = decode_text(output).partition("\0")[0]
     try:
-        status = await assign_element(session, policies, base, subscript, text)
+        status = await assign_element(
+            session, policies, base, subscript, text, diagnostics=diagnostics
+        )
     except PolicyDenied as exc:
         return fail("printf", errors + f"{shell_voice()}{exc.strerror}\n")
     except ArithError as exc:
@@ -165,9 +168,7 @@ async def handle_printf(
         signal.stderr = encode_text(errors) + signal.stderr
         raise signal from exc
     if status == "readonly":
-        return fail(
-            "printf", errors + f"{shell_voice()}{base}: readonly variable\n"
-        )
+        return fail("printf", errors + readonly_line("printf", base) + "\n")
     if status == "denied":
         return fail(
             "printf", errors + f"{shell_voice()}{base}: permission denied\n"
@@ -222,4 +223,5 @@ async def printf_builtin(call: BuiltinCall) -> Result:
         call.context.session,
         call.namespace.registry.policies,
         subscript_expansion(call),
+        call.context.frame.diagnostics,
     )

@@ -82,7 +82,7 @@ import { RouteError } from '../../runtime/routing/errors.ts'
 import type { Deny, HandOff, Pending } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { inputSubstitutionRedirect } from '../../shell/helpers.ts'
+import { getText, inputSubstitutionRedirect } from '../../shell/helpers.ts'
 import { LineHistory } from '../history/line.ts'
 import {
   recordStatus,
@@ -700,8 +700,25 @@ async function runPreparedLine(
           } catch (err) {
             await sweep()
             // Invalid routing stays the caller's error; anything else a
-            // policy raised fails the line, as Python folds it.
-            if (err instanceof RouteError || isControlFlowError(err)) throw err
+            // policy raised fails the line, as Python folds it. A refused
+            // route still ends the line's entry, as Python's does.
+            if (err instanceof RouteError) {
+              if (recorded) {
+                const failed = failureResult(err)
+                const io = new IOResult({ exitCode: failed.exitCode, stderr: failed.stderr })
+                await (history !== null
+                  ? history.end(io, [])
+                  : env.observer.logResult(
+                      io,
+                      [],
+                      targetSession.sessionId,
+                      effectiveSession.cwd,
+                      options.lineHandle?.id.value,
+                    ))
+              }
+              throw err
+            }
+            if (isControlFlowError(err)) throw err
             const failed = failureResult(err)
             return await answerLine(
               env,
@@ -846,6 +863,12 @@ async function runPreparedLine(
               // the substitution, as bash's does; a `$( )` was read with its
               // line.
               session.parseHead = `${voiceName(session)}: command substitution: `
+              // A `$( )` or `<( )` body is read again as bash prints it, a
+              // backtick's as typed (`rereadRows`).
+              session.reread =
+                opts.node !== undefined &&
+                opts.span === undefined &&
+                !getText(opts.node).startsWith('`')
               innerOpts.session = session
               innerOpts.evaluation = innerContext
             }

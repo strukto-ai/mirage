@@ -132,11 +132,6 @@ impl Matcher {
     }
 }
 
-/// Whether `pattern` matches the whole of `subject`.
-pub fn matches(pattern: &Pattern, subject: &[u8], extglob: bool, utf8: bool) -> bool {
-    Matcher::new(pattern, extglob).matches(&units(subject, utf8).0)
-}
-
 /// `${v#p}`, `${v##p}`, `${v%p}`, `${v%%p}`: the value less the shortest or
 /// longest prefix or suffix the pattern matches, the value itself when it
 /// matches none.

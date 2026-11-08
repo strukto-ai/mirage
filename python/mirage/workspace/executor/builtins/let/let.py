@@ -55,7 +55,7 @@ async def handle_let(
     value = 0
     for expr in args:
         try:
-            value = await session_arith(session, expr, policies)
+            value = await session_arith(session, expr, policies, expand=True)
         except PolicyDenied as exc:
             return refusal("let", exc)
         except (ArithError, ReadonlyVariableError) as exc:

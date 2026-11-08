@@ -32,6 +32,7 @@ from mirage.workspace.executor.builtins.read.constants import (
 from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
     count_operand,
+    identifier_line,
     is_valid_name,
     readonly_refusal,
     record_delimiter,
@@ -124,9 +125,7 @@ def _invalid_name(
     Args:
         name (str): the operand as spelled.
     """
-    return _read_refusal(
-        f"{shell_voice()}read: `{name}': not a valid identifier\n"
-    )
+    return _read_refusal(identifier_line("read", name) + "\n")
 
 
 def _read_refusal(
@@ -292,8 +291,9 @@ async def _read_raw(
 ) -> tuple[str, bool]:
     """Pull one `read`'s worth of input off the buffer.
 
-    Without `-r`, a backslash-newline pair continues the line, so the
-    delimiter read is retried while the text ends in an odd backslash.
+    Without `-r` a backslash quotes the delimiter after it, which the
+    text keeps (a newline one continues the line), so the delimiter read
+    is retried while the text ends in an odd backslash.
 
     Args:
         buffer (AsyncLineIterator): the input's line reader.
@@ -307,30 +307,82 @@ async def _read_raw(
         tuple[str, bool]: the text (delimiter excluded) and whether the
         read ended on its own terms rather than at end of input.
     """
-    if exact is not None:
-        data, complete = await buffer.read_chars(exact, None)
+    count = exact if exact is not None else nchars
+    stop = None if exact is not None else delim
+    if count is not None and raw:
+        data, complete = await buffer.read_chars(count, stop)
         return decode_text(data), complete
-    if nchars is not None:
-        data, complete = await buffer.read_chars(nchars, delim)
-        held = len(data)
-        text = decode_text(data)
-        while (
-            not raw and complete and ends_escaped(text) and len(text) < nchars
-        ):
-            more, complete = await buffer.read_chars(nchars - len(text), delim)
-            held += len(more)
-            check_memory(held)
-            text += decode_text(more)
-        return text, complete
+    if count is not None:
+        return await _read_counted(buffer, count, stop)
     data, complete = await buffer.read_until(delim)
     held = len(data)
     text = decode_text(data)
-    while not raw and complete and delim == b"\n" and ends_escaped(text):
+    while not raw and complete and ends_escaped(text):
         more, complete = await buffer.read_until(delim)
         held += len(more) + 1
         check_memory(held)
-        text += "\n" + decode_text(more)
+        text += decode_text(delim) + decode_text(more)
     return text, complete
+
+
+async def _read_counted(
+    buffer: AsyncLineIterator,
+    count: int,
+    delim: bytes | None,
+) -> tuple[str, bool]:
+    """Read `count` characters as `-n` and `-N` count them without `-r`:
+    once backslashes are processed, so `\\x` is one and a backslash-newline
+    none. The character after a backslash is always read, and a quoted
+    delimiter kept.
+
+    Args:
+        buffer (AsyncLineIterator): the input's line reader.
+        count (int): how many characters to read.
+        delim (bytes | None): the stop, or None to read through
+            delimiters.
+    """
+    text = ""
+    got = held = 0
+    escaped = False
+    while got < count:
+        want = 1 if escaped else count - got
+        data, complete = await buffer.read_chars(want, delim)
+        held += len(data)
+        check_memory(held)
+        piece = decode_text(data)
+        n, escaped = _counted(piece, escaped)
+        text += piece
+        got += n
+        if not complete:
+            return text, False
+        if len(piece) < want:
+            if not escaped or delim is None:
+                return text, True
+            text += decode_text(delim)
+            got += delim != b"\n"
+            escaped = False
+    return text, True
+
+
+def _counted(piece: str, escaped: bool) -> tuple[int, bool]:
+    """How many characters `piece` leaves once backslashes are processed,
+    and whether a backslash ends it, quoting what follows.
+
+    Args:
+        piece (str): text read after `escaped`'s state.
+        escaped (bool): a backslash before `piece` quotes its first
+            character.
+    """
+    n = 0
+    for ch in piece:
+        if escaped:
+            n += ch != "\n"
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        else:
+            n += 1
+    return n, escaped
 
 
 async def read_reply(buffer: AsyncLineIterator) -> str | None:
@@ -441,9 +493,7 @@ async def handle_read(
         stdin = descriptor.source
     array_name = str(flags["a"]) if "a" in flags else None
     if array_name is not None and not is_valid_name(array_name):
-        return _read_refusal(
-            f"{shell_voice()}read: `{array_name}': not a valid identifier\n"
-        )
+        return _invalid_name(array_name)
     variables = parse.operands or ["REPLY"]
     if TARGET_RE.match(variables[0]) is None:
         # A first name it cannot assign refuses before anything is read.

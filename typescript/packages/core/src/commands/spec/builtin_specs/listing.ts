@@ -17,14 +17,14 @@ import { PATHS_OPERAND, TEXTS_OPERAND } from '../constants.ts'
 export const SPECS: Record<string, CommandSpec> = {
   df: new CommandSpec({
     arguments: [
-      new Argument('-h', { action: 'store_true' }),
-      new Argument('-H', { action: 'store_true' }),
+      new Argument(['-h', '--human-readable'], { action: 'store_true' }),
+      new Argument(['-H', '--si'], { action: 'store_true' }),
       new Argument('-k', { action: 'store_true' }),
-      new Argument('-i', { action: 'store_true' }),
-      new Argument('-a', { action: 'store_true' }),
-      new Argument('-T', { action: 'store_true' }),
-      new Argument('-P', { action: 'store_true' }),
-      new Argument('-B'),
+      new Argument(['-i', '--inodes'], { action: 'store_true' }),
+      new Argument(['-a', '--all'], { action: 'store_true' }),
+      new Argument(['-T', '--print-type'], { action: 'store_true' }),
+      new Argument(['-P', '--portability'], { action: 'store_true' }),
+      new Argument(['-B', '--block-size']),
       PATHS_OPERAND,
     ],
   }),
@@ -185,8 +185,10 @@ export const SPECS: Record<string, CommandSpec> = {
   stat: new CommandSpec({
     arguments: [
       new Argument(['-c', '--format']),
+      new Argument('--printf'),
       new Argument(['-f', '--file-system'], { action: 'store_true' }),
       new Argument(['-L', '--dereference'], { action: 'store_true' }),
+      new Argument(['-t', '--terse'], { action: 'store_true' }),
       PATHS_OPERAND,
     ],
   }),

@@ -19,11 +19,13 @@ import { SessionProfile } from '../../policy/profile.ts'
 import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { RAMExecutionStore } from '../../execution/ram.ts'
-import { MachineId } from '../../execution/types.ts'
-import { MountMode } from '../../types.ts'
+import type { Process } from '../../execution/process/types.ts'
+import { LineId, MachineId, ProcessId } from '../../execution/types.ts'
+import { MountMode, PathSpec } from '../../types.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { SeededIdSource, SystemIdSource } from '../../utils/ids.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { RAMWorkspaceStateStore } from '../store/ram.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
 import type { ExecuteOptions, SessionExecuteOptions } from './types.ts'
@@ -483,25 +485,131 @@ it('lists its lines, jobs and processes', async () => {
   const ws = new Workspace({ '/data': new RAMVFS() })
   try {
     const pid = Number(stdoutStr(await ws.shell('sleep 30 & echo $!')))
-    const [line] = ws.lines()
+    const [line] = await ws.lines()
     expect([line?.command, line?.state, line?.exit]).toEqual(['sleep 30 & echo $!', 'exited', 0])
     if (line === undefined) throw new Error('no line')
-    expect(ws.line(line.id)).toEqual(line)
-    expect(ws.lines({ sessionId: 'other' })).toEqual([])
-    expect(ws.lines({ state: 'running' })).toEqual([])
-    const [job] = ws.jobs({ state: 'running' })
+    expect(await ws.line(line.id)).toEqual(line)
+    expect(await ws.lines({ sessionId: 'other' })).toEqual([])
+    expect(await ws.lines({ state: 'running' })).toEqual([])
+    const [job] = await ws.jobs({ state: 'running' })
     expect([job?.command, job?.line?.value]).toEqual(['sleep 30', line.id.value])
     if (job === undefined) throw new Error('no job')
-    expect(ws.job(job.id)).toEqual(job)
-    const running = ws.processes({ state: 'running' })
+    expect(await ws.job(job.id)).toEqual(job)
+    const running = await ws.processes({ state: 'running' })
     expect(running.map((p) => p.id.pid)).toEqual([pid])
     const [held] = running
     if (held === undefined) throw new Error('no process')
-    expect(ws.process(held.id)).toEqual(held)
-    expect(ws.processes({ lineId: line.id }).map((p) => p.id.pid)).toContain(pid)
+    expect(await ws.process(held.id)).toEqual(held)
+    expect((await ws.processes({ lineId: line.id })).map((p) => p.id.pid)).toContain(pid)
     await ws.shell('kill %1; wait')
-    const ended = ws.process(held.id)
+    const ended = await ws.process(held.id)
     expect([ended?.state, ended?.signal]).toEqual(['exited', 15])
+  } finally {
+    await ws.close()
+  }
+})
+
+// A daemon that does not hold the workspace's lease lists the lines, jobs and
+// processes the holder runs, as their store keeps them.
+it('lists what the holder runs from another daemon', async () => {
+  const store = new RAMWorkspaceStateStore()
+  const [a, b] = [0, 1].map(
+    () =>
+      new Workspace(
+        { '/m': [new RAMVFS(), MountMode.WRITE] },
+        { mode: MountMode.WRITE, workspaceId: 'shared', sessionId: 's', store },
+      ),
+  )
+  if (a === undefined || b === undefined) throw new Error('no workspace')
+  try {
+    const pid = Number(stdoutStr(await a.shell('sleep 30 & echo $!', { sessionId: 's' })))
+    const [line] = await b.lines()
+    expect([line?.command, line?.state, line?.exit]).toEqual(['sleep 30 & echo $!', 'exited', 0])
+    if (line === undefined) throw new Error('no line')
+    expect(await b.line(line.id)).toEqual(line)
+    const [running] = await b.processes({ state: 'running' })
+    expect([running?.id.pid, running?.line?.value]).toEqual([pid, line.id.value])
+    if (running === undefined) throw new Error('no process')
+    expect(await b.process(running.id)).toEqual(running)
+    const [job] = await b.jobs()
+    expect([job?.command, job?.state]).toEqual(['sleep 30', 'running'])
+    await a.shell('kill %1; wait', { sessionId: 's' })
+    const ended = await b.process(running.id)
+    expect([ended?.state, ended?.signal]).toEqual(['exited', 15])
+  } finally {
+    await a.close()
+    await b.close()
+  }
+})
+
+// A daemon that does not hold the lease stops listing the jobs of a session
+// the holder closed.
+it('drops the jobs of a session the holder closed', async () => {
+  const store = new RAMWorkspaceStateStore()
+  const [a, b] = [0, 1].map(
+    () =>
+      new Workspace(
+        { '/m': [new RAMVFS(), MountMode.WRITE] },
+        { mode: MountMode.WRITE, workspaceId: 'shared', sessionId: 's', store },
+      ),
+  )
+  if (a === undefined || b === undefined) throw new Error('no workspace')
+  try {
+    a.createSession('t')
+    await a.shell('sleep 30 &', { sessionId: 't' })
+    expect((await b.jobs()).map((job) => job.sessionId)).toEqual(['t'])
+    await a.closeSession('t')
+    expect(await b.jobs()).toEqual([])
+  } finally {
+    await a.close()
+    await b.close()
+  }
+})
+
+// The line and process records a daemon left running when it went end as
+// hung up once the next one takes the workspace's lease, and a process id of
+// another workspace names none here.
+it('ends the records a lost daemon left running as hung up', async () => {
+  const store = new RAMWorkspaceStateStore()
+  const ws = new Workspace({ '/m': new RAMVFS() }, { workspaceId: 'w', store })
+  try {
+    const left: Process = {
+      id: new ProcessId('w', 99),
+      sessionId: 's',
+      line: new LineId('lost'),
+      parent: null,
+      group: 99,
+      command: 'sleep 30',
+      cwd: PathSpec.fromStrPath('/'),
+      machine: new MachineId('host', 'gone'),
+      startedAt: 1,
+      runtime: null,
+      machinePid: null,
+      state: 'running',
+      endedAt: null,
+      exit: null,
+      signal: null,
+      error: null,
+      ancestors: [],
+    }
+    ws.jobTable.store.note(left)
+    ws.jobTable.store.note({
+      id: new LineId('lost'),
+      sessionId: 's',
+      command: 'sleep 30 &',
+      startedAt: 1,
+      state: 'running',
+      endedAt: null,
+      exit: null,
+      signal: null,
+      error: null,
+    })
+    await ws.shell('true')
+    const process = await ws.process(left.id)
+    expect([process?.state, process?.exit, process?.signal]).toEqual(['exited', 129, 1])
+    const line = await ws.line(new LineId('lost'))
+    expect([line?.state, line?.exit]).toEqual(['exited', 129])
+    expect(await ws.process(new ProcessId('other', 99))).toBeNull()
   } finally {
     await ws.close()
   }
@@ -514,20 +622,20 @@ it('lists a queued line as waiting until it is aborted', async () => {
   const stopFirst = new AbortController()
   const first = ws.shell('sleep 30', { signal: stopFirst.signal }).catch(() => undefined)
   try {
-    await vi.waitFor(() => {
-      expect(ws.lines({ state: 'running' })).toHaveLength(1)
+    await vi.waitFor(async () => {
+      expect(await ws.lines({ state: 'running' })).toHaveLength(1)
     })
     const stopSecond = new AbortController()
     const second = ws.shell('echo next', { signal: stopSecond.signal })
-    await vi.waitFor(() => {
-      expect(ws.lines({ state: 'waiting' })).toHaveLength(1)
+    await vi.waitFor(async () => {
+      expect(await ws.lines({ state: 'waiting' })).toHaveLength(1)
     })
-    const [waiting] = ws.lines({ state: 'waiting' })
+    const [waiting] = await ws.lines({ state: 'waiting' })
     expect(waiting?.command).toBe('echo next')
     stopSecond.abort()
     await expect(second).rejects.toThrow()
     if (waiting === undefined) throw new Error('no line')
-    const ended = ws.line(waiting.id)
+    const ended = await ws.line(waiting.id)
     expect([ended?.state, ended?.signal]).toEqual(['exited', 2])
   } finally {
     stopFirst.abort()

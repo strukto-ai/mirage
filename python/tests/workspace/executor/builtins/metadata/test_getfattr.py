@@ -117,6 +117,11 @@ async def test_an_absolute_path_loses_its_leading_slash_in_the_header():
     assert err == "getfattr: Removing leading '/' from absolute path names\n"
     _, kept, _ = await _run(ws, "getfattr -n user.a --absolute-names /r/d/f")
     assert kept.startswith(b"# file: /r/d/f\n")
+    assert await _run(ws, "getfattr -n user.a --only-values /r/d/f") == (
+        0,
+        b"one",
+        "getfattr: Removing leading '/' from absolute path names\n",
+    )
 
 
 @pytest.mark.asyncio
@@ -150,6 +155,26 @@ async def test_recursive_walk_reports_links_without_descending():
 
 
 @pytest.mark.asyncio
+async def test_one_file_system_stays_off_a_nested_mount():
+    ws = Workspace({"/r/": RAMVFS(), "/r/in/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo a > /r/f && echo b > /r/in/g")
+    for path in ("/r/f", "/r/in", "/r/in/g"):
+        await ws.vfs.setxattr(path, "user.a", b"1")
+    _, crossed, _ = await _run(ws, "getfattr -R -d .")
+    _, stayed, _ = await _run(ws, "getfattr -R --one-file-system -d .")
+    _, inside, _ = await _run(ws, "getfattr -R --one-file-system -d in")
+    block = b'user.a="1"\n\n'
+    assert crossed == (
+        b"# file: ./f\n" + block + b"# file: ./in\n" + block
+    ) + (b"# file: ./in/g\n" + block)
+    assert stayed == b"# file: ./f\n" + block
+    assert inside == b"# file: in\n" + block + b"# file: in/g\n" + block
+    await ws.shell("ln -s /r/in /r/lk")
+    _, linked, _ = await _run(ws, "getfattr -R -L --one-file-system -d .")
+    assert linked == b"# file: ./f\n" + block + b"# file: ./lk\n" + block
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line, first",
     [
@@ -170,3 +195,18 @@ async def test_a_bad_match_pattern():
         b"",
         'getfattr: invalid regular expression "["\n',
     )
+
+
+@pytest.mark.asyncio
+async def test_a_dump_escapes_a_name_so_restore_reads_it_back():
+    ws = Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("cd /r && printf x > 'a\\155b' && printf y > amb")
+    await ws.vfs.setxattr("/r/a\\155b", "user.k", b"1")
+    block = b'# file: a\\134155b\nuser.k="1"\n\n'
+    _, dump, _ = await _run(ws, "getfattr -d 'a\\155b'")
+    assert dump == block
+    line = (
+        "getfattr -d 'a\\155b' > dump; setfattr -x user.k 'a\\155b'; "
+        "setfattr --restore=dump; getfattr -d 'a\\155b' amb"
+    )
+    assert await _run(ws, line) == (0, block, "")

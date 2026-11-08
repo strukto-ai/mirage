@@ -26,6 +26,7 @@ import {
   isEacces,
   isEnoent,
   isEnotdir,
+  isFsError,
   isRefusal,
   walkRefusal,
 } from '../../../../errors/fs.ts'
@@ -270,38 +271,62 @@ export async function beforeRecursiveChange(
   }
 }
 
-// One entry of a walked subtree: its path, its stat, and the refusal its
-// listing met (null for a file, or a directory that listed).
+// One entry of a walked subtree: its path, its stat, and the refusal it met:
+// a directory's listing's, or under -L a link's that could not be followed
+// (null for an entry that read).
 export type WalkEntry = [PathSpec, FileStat, unknown]
 
 // A subtree as [path, stat, unread] triples, in fts's pre-order, each stat
 // read off the mount's `readTree` where one answers for the subtree. `links`
-// is the session's link table (`Namespace.sessionLinks`). `unread` is the
-// refusal a directory's listing met (a rule that denies the directory lets
-// its stat through): fts's unreadable directory, which the caller reports
-// after the directory's own change, and whose subtree is not walked.
-// Mirrors Python's walk_stats.
+// is the session's link table (`Namespace.sessionLinks`). A traversed link is
+// an entry of its own, with its own stat, and is neither changed nor
+// descended: GNU chmod -R changes neither a traversed link nor its referent,
+// and chown -R changes the link itself. Under -L (`follow`) the link is
+// followed instead: its referent is the entry, named by the link, and a
+// directory it names is walked unless the branch already holds it, as fts
+// refuses a cycle. A link -L cannot follow (dangling, or a loop) is an entry
+// of its own, with its own stat and the error as its `unread`, and so is one
+// that leads to `/` under --preserve-root (`preserveRoot`), with no error, for
+// the caller to refuse. `unread` is the refusal a directory's listing met (a rule
+// that denies the directory lets its stat through): fts's unreadable
+// directory, which the caller reports after the directory's own change, and
+// whose subtree is not walked. Mirrors Python's walk_stats.
 export async function walkStats(
   links: NamespaceReader,
   dispatch: DispatchFn,
   root: PathSpec,
   rootStat: FileStat,
+  follow = false,
+  preserveRoot = false,
 ): Promise<WalkEntry[]> {
-  const [readdir, statOf] = treeWalk<string[], FileStat>(
-    dispatchedReadTree(dispatch, links.mounts(false), null, true),
-    readdirOp(dispatch),
-    async (path) => (await dispatch('stat', path))[0] as FileStat,
-    true,
-    callerSignal(),
-  )
+  const plainStat = async (path: PathSpec): Promise<FileStat> =>
+    (await dispatch('stat', path))[0] as FileStat
+  const [readdir, statOf] = follow
+    ? [readdirOp(dispatch), plainStat]
+    : treeWalk<string[], FileStat>(
+        dispatchedReadTree(dispatch, links.mounts(false), null, true),
+        readdirOp(dispatch),
+        plainStat,
+        true,
+        callerSignal(),
+      )
   const entries: WalkEntry[] = []
   // An explicit stack, so a deep tree costs no recursion: a directory's
-  // children go on in reverse and come off in listing order.
-  const stack: [PathSpec, FileStat][] = [[root, rootStat]]
+  // children go on in reverse and come off in listing order, after the mark
+  // that leaves it. `branch` holds the directories entered and not yet left,
+  // which -L will not enter again.
+  const branch = new Set<string>()
+  const stack: [PathSpec, FileStat, string, boolean, unknown][] = [
+    [root, rootStat, root.virtual, false, null],
+  ]
   for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
-    const [path, stat] = top
-    if (stat.type !== FileType.DIRECTORY) {
-      entries.push([path, stat, null])
+    const [path, stat, entered, leaving, refused] = top
+    if (leaving) {
+      branch.delete(entered)
+      continue
+    }
+    if (refused !== null || stat.type !== FileType.DIRECTORY) {
+      entries.push([path, stat, refused])
       continue
     }
     let children: string[]
@@ -313,13 +338,41 @@ export async function walkStats(
       continue
     }
     entries.push([path, stat, null])
-    const found: [PathSpec, FileStat][] = []
+    branch.add(entered)
+    stack.push([path, stat, entered, true, null])
+    const found: [PathSpec, FileStat, string, boolean, unknown][] = []
     for (const listed of children) {
-      // A folder-backed readdir spells a directory child with its slash.
-      const childVirtual = rstripSlash(listed)
-      if (links.isLink(childVirtual)) continue
-      const child = PathSpec.fromStrPath(childVirtual)
-      found.push([child, await statOf(child)])
+      // A folder-backed readdir spells a directory child with its slash; a
+      // child is named below the path walked, which under -L may be a link's
+      // name.
+      const bare = rstripSlash(listed)
+      const name = bare.slice(bare.lastIndexOf('/') + 1)
+      const child = PathSpec.fromStrPath(`${rstripSlash(path.virtual)}/${name}`)
+      if (!links.isLink(bare) && !(follow && links.isLink(child.virtual))) {
+        const real = follow ? links.follow(child.virtual) : child.virtual
+        found.push([child, await statOf(child), real, false, null])
+        continue
+      }
+      const linkStat = async (): Promise<FileStat> =>
+        ((await dispatch('stat', child, [], { nofollow: true })) as [FileStat, unknown])[0]
+      if (!follow) {
+        found.push([child, await linkStat(), child.virtual, false, null])
+        continue
+      }
+      let real: string
+      let target: FileStat
+      try {
+        real = links.follow(child.virtual)
+        target = await statOf(child)
+      } catch (err) {
+        const loop = (err as { code?: string }).code === 'ELOOP'
+        if (!loop && !isEnoent(err) && !isEnotdir(err)) throw err
+        found.push([child, await linkStat(), child.virtual, false, err])
+        continue
+      }
+      if (preserveRoot && real.replace(/\//g, '') === '') {
+        found.push([child, await linkStat(), child.virtual, false, null])
+      } else if (!branch.has(real)) found.push([child, target, real, false, null])
     }
     for (const entry of found.reverse()) stack.push(entry)
   }
@@ -338,7 +391,9 @@ export async function walkOwned(
   root: PathSpec,
   rootStat: FileStat,
 ): Promise<{ walked: WalkEntry[]; owned: string[] }> {
-  const walked = await walkStats(links, dispatch, root, rootStat)
+  const walked = (await walkStats(links, dispatch, root, rootStat)).filter(
+    ([, stat]) => stat.type !== FileType.SYMLINK,
+  )
   const unread = new Set(walked.filter(([, , err]) => err !== null).map(([p]) => p.virtual))
   // The root as well, which `ancestors` leaves out: a refused listing of `/`
   // keeps every link below it unwalked.
@@ -347,6 +402,24 @@ export async function walkOwned(
     .map(([path]) => path)
     .filter((path) => !['/', ...ancestors(path)].some((dir) => unread.has(dir)))
   return { walked, owned }
+}
+
+// The report for a link -L could not follow, worded as GNU words it: a loop
+// cannot be accessed, and a dangling link is one chmod cannot operate on and
+// chown and chgrp cannot dereference. Mirrors Python's unfollowed_error.
+export function unfollowedError(cmd: string, name: string, err: unknown): string {
+  const shown = shellQuoteAlways(name)
+  // The namespace's CycleError and the dispatcher's loop both carry ELOOP.
+  if ((err as { code?: string }).code === 'ELOOP')
+    return `${cmd}: cannot access ${shown}: ${fsStrerror(err) ?? ''}\n`
+  if (cmd === 'chmod') return `chmod: cannot operate on dangling symlink ${shown}\n`
+  return `${cmd}: cannot dereference ${shown}: ${fsStrerror(err) ?? ''}\n`
+}
+
+// Whether --preserve-root is on: the last of it and --no-preserve-root wins,
+// and neither is off. Mirrors Python's preserves_root.
+export function preservesRoot(fl: FlagView): boolean {
+  return fl.typedOrder('preserve_root', 'no_preserve_root').at(-1) === 'preserve_root'
 }
 
 // Which files chmod, chown and chgrp report: 'verbose' (every one),
@@ -363,17 +436,73 @@ export function walkedName(typed: string, root: PathSpec, path: PathSpec): strin
   return typed + below
 }
 
-// Whether chown or chgrp changes a link's referent, or GNU's refusal. The
-// last of -h and --dereference wins; -R implies -h, and refuses an explicit
-// --dereference, which needs the -H or -L walk mirage does not offer.
+// How -R treats links, the last of -H (follow an operand), -L (follow every
+// one) and -P (follow none); `fallback` is the walk with none of them: H for
+// chmod, P for chown and chgrp. Mirrors Python's traversal.
+export function traversal(fl: FlagView, fallback: string): string {
+  return fl.typedOrder('H', 'L', 'P').at(-1) ?? fallback
+}
+
+// Whether chown or chgrp changes an operand link's referent, or GNU's
+// refusal. The last of -h and --dereference wins. -R walks under -P unless -H
+// or -L says otherwise: -P changes an operand link itself and refuses an
+// explicit --dereference, and -H and -L follow it. Mirrors Python's
+// follows_links.
 export function followsLinks(cmd: string, fl: FlagView): [boolean, RedirectResult | null] {
   const last = fl.typedOrder('no_dereference', 'dereference').at(-1)
   if (!fl.asBool('recursive')) return [last !== 'no_dereference', null]
+  if (traversal(fl, 'P') !== 'P') return [true, null]
   if (last === 'dereference') {
     const stderr = `${cmd}: -R --dereference requires either -H or -L\n`
     return [false, result(cmd, { exitCode: 1, stderr })]
   }
   return [false, null]
+}
+
+// --preserve-root's refusal of a -R walk from `/`, or null. The last of
+// --preserve-root and --no-preserve-root wins, and none walks. Mirrors
+// Python's root_refusal.
+export function rootRefusal(
+  cmd: string,
+  fl: FlagView,
+  typed: string,
+  resolved: PathSpec,
+): string | null {
+  if (!preservesRoot(fl) || resolved.virtual.replace(/\//g, '') !== '') return null
+  const same = typed === '/' ? '' : " (same as '/')"
+  return (
+    `${cmd}: it is dangerous to operate recursively on ${shellQuoteAlways(typed)}${same}\n` +
+    `${cmd}: use --no-preserve-root to override this failsafe\n`
+  )
+}
+
+// The stat --reference copies from, link-followed, or GNU's refusal, exit 1.
+// Mirrors Python's reference_stat.
+export async function referenceStat(
+  links: NamespaceLinks,
+  dispatch: DispatchFn,
+  cmd: string,
+  reference: PathSpec,
+): Promise<FileStat | RedirectResult> {
+  try {
+    const [stat] = await dispatch('stat', PathSpec.fromStrPath(links.follow(reference.virtual)))
+    return stat as FileStat
+  } catch (err) {
+    if (!(err instanceof CycleError) && !isFsError(err)) throw err
+    const named = shellQuoteAlways(reference.rawPath)
+    const stderr = `${cmd}: failed to get attributes of ${named}: ${fsStrerror(err) ?? ''}\n`
+    return result(cmd, { exitCode: 1, stderr })
+  }
+}
+
+// The files a --reference line changes: the word a mode or an owner would
+// take is a file too. Mirrors Python's reference_operands.
+export function referenceOperands(
+  texts: readonly string[],
+  paths: readonly PathSpec[],
+  cwd: string,
+): PathSpec[] {
+  return [...texts.map((text) => PathSpec.fromStrPath(text, undefined, cwd)), ...paths]
 }
 
 // `USER:GROUP`, or the one of them given, as GNU's -v names it.
@@ -417,6 +546,7 @@ export async function changeOwner(
   operands: readonly PathSpec[],
   uid: number | string | null,
   gid: number | string | null,
+  current: [number | string | null, number | string | null] | null = null,
 ): Promise<RedirectResult> {
   const [follow, refused] = followsLinks(cmd, fl)
   if (refused !== null) return refused
@@ -431,9 +561,18 @@ export async function changeOwner(
   const action = cmd === 'chown' ? 'changing ownership of' : 'changing group of'
   const errors: string[] = []
   const out: string[] = []
+  const matches = (stat: FileStat | null): boolean =>
+    current === null ||
+    stat === null ||
+    ((current[0] === null || String(current[0]) === String(stat.uid)) &&
+      (current[1] === null || String(current[1]) === String(stat.gid)))
   const describe = (name: string, stat: FileStat | null, failed: boolean): void => {
     let old: [string, string] | null = null
     let same = false
+    if (stat !== null && !matches(stat)) {
+      if (report === 'verbose') out.push(ownerLine(name, 'retained', null, user, group))
+      return
+    }
     if (stat !== null) {
       old = [ownerName(stat.uid, identity), groupName(stat.gid, identity)]
       same = (uid === null || uid === stat.uid) && (gid === null || gid === stat.gid)
@@ -461,12 +600,32 @@ export async function changeOwner(
     } catch (err) {
       if (!isEnoent(err) && !isEnotdir(err)) throw err
     }
-    describe(name, stat, !(await own(link, name, true)))
+    describe(name, stat, matches(stat) && !(await own(link, name, true)))
   }
+  const ownReferent = async (link: PathSpec, name: string): Promise<void> => {
+    let stat: FileStat
+    try {
+      ;[stat] = (await dispatch('stat', link)) as [FileStat, unknown]
+    } catch (err) {
+      const loop = (err as { code?: string }).code === 'ELOOP'
+      if (!loop && !isEnoent(err) && !isEnotdir(err)) throw err
+      errors.push(
+        `${cmd}: cannot dereference ${shellQuoteAlways(name)}: ${fsStrerror(err) ?? ''}\n`,
+      )
+      return
+    }
+    describe(name, stat, matches(stat) && !(await own(link, name, false)))
+  }
+  // Under -H or -L a link the walk meets is changed through, unless -h asks
+  // for the link itself; the walk goes on through it either way.
+  const itself = fl.typedOrder('no_dereference', 'dereference').at(-1) === 'no_dereference'
+  const through = traversal(fl, 'P') !== 'P' && !itself
+  const recursive = fl.asBool('recursive')
   const links = namespace.sessionLinks(session)
   for (const target of await expandOperands(namespace, dispatch, operands)) {
     const typed = target.rawPath
-    if (!follow && links.isLink(target.virtual)) {
+    const operandLink = links.isLink(target.virtual)
+    if (!follow && operandLink) {
       await ownLink(target, typed)
       continue
     }
@@ -476,7 +635,12 @@ export async function changeOwner(
       continue
     }
     const [resolved, stat] = found
-    if (fl.asBool('recursive')) {
+    if (recursive) {
+      const refusal = rootRefusal(cmd, fl, typed, resolved)
+      if (refusal !== null) {
+        errors.push(refusal)
+        continue
+      }
       try {
         await beforeRecursiveChange(links.mounts(false), dispatch, resolved, cmd)
       } catch (err) {
@@ -485,17 +649,39 @@ export async function changeOwner(
         continue
       }
     }
-    const { walked, owned } = fl.asBool('recursive')
-      ? await walkOwned(links, dispatch, resolved, stat)
-      : { walked: [[resolved, stat, null]] as WalkEntry[], owned: [] as string[] }
+    const { walked, owned } = !recursive
+      ? { walked: [[resolved, stat, null]] as WalkEntry[], owned: [] as string[] }
+      : traversal(fl, 'P') === 'L'
+        ? {
+            walked: await walkStats(links, dispatch, resolved, stat, true, preservesRoot(fl)),
+            owned: [] as string[],
+          }
+        : await walkOwned(links, dispatch, resolved, stat)
+    // -h under -H or -L changes the operand link, not what it names.
+    const skip = itself && operandLink ? resolved.virtual : null
+    if (skip !== null) await ownLink(target, typed)
     for (const [path, pathStat, unread] of walked) {
       const name = walkedName(typed, resolved, path)
-      describe(name, pathStat, !(await own(path, name, false)))
+      if (pathStat.type === FileType.SYMLINK) {
+        if (unread === null) {
+          errors.push(rootRefusal(cmd, fl, name, PathSpec.fromStrPath('/')) ?? '')
+        } else if (itself) await ownLink(path, name)
+        else errors.push(unfollowedError(cmd, name, unread))
+        continue
+      }
+      if (path.virtual === skip) {
+        // The operand link itself changed above.
+      } else if (itself && links.isLink(path.virtual)) await ownLink(path, name)
+      else describe(name, pathStat, matches(pathStat) && !(await own(path, name, false)))
+      // A directory whose listing was refused is reported however its own
+      // change went, link or not.
       if (unread !== null) errors.push(unreadError(cmd, name, unread))
     }
     for (const link of owned) {
       const linkSpec = PathSpec.fromStrPath(link)
-      await ownLink(linkSpec, walkedName(typed, resolved, linkSpec))
+      const name = walkedName(typed, resolved, linkSpec)
+      if (through) await ownReferent(linkSpec, name)
+      else await ownLink(linkSpec, name)
     }
   }
   const quiet = fl.asBool('silent') || fl.asBool('quiet')

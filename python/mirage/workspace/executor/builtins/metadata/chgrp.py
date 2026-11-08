@@ -14,10 +14,12 @@
 
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.runtime.types import DispatchFn
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.workspace.executor.builtins.metadata.metadata import (
     change_owner,
     parse_group,
+    reference_operands,
+    reference_stat,
 )
 from mirage.workspace.executor.builtins.shared import fail, parse_line
 from mirage.workspace.executor.builtins.types import Result
@@ -37,7 +39,8 @@ async def handle_chgrp(
     stored, not enforced (mirage has no group model); a name is kept
     verbatim, a numeric id becomes an int. ``-h`` writes the link node's
     own group, and ``-R`` walks the subtree under the same implicit
-    ``-P`` as chown.
+    ``-P`` as chown, or ``-H`` or ``-L``. ``--reference`` copies a
+    file's group.
 
     Args:
         namespace (Namespace): addressing authority.
@@ -48,6 +51,27 @@ async def handle_chgrp(
     parsed, fl, refused = parse_line("chgrp", args, session.cwd)
     if refused is not None:
         return refused
+    reference = fl.as_path("reference")
+    if reference is not None:
+        operands = reference_operands(parsed.texts, parsed.paths, session.cwd)
+        if not operands:
+            error = missing_operand_error("chgrp", None)
+            return fail("chgrp", f"{error}\n", error.exit_code)
+        found = await reference_stat(
+            namespace.session_links(session), dispatch, "chgrp", reference
+        )
+        if not isinstance(found, FileStat):
+            return found
+        return await change_owner(
+            namespace,
+            dispatch,
+            session,
+            "chgrp",
+            fl,
+            operands,
+            None,
+            found.gid,
+        )
     if not parsed.texts or not parsed.paths:
         last = parsed.texts[0] if parsed.texts else None
         error = missing_operand_error("chgrp", last)

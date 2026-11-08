@@ -17,22 +17,33 @@ def _session() -> SessionState:
 
 @pytest.mark.asyncio
 async def test_printenv_prints_one_exported_name():
-    out, io, node = await handle_printenv("SHOWN", _session())
+    out, io, node = await handle_printenv(["SHOWN"], _session())
     assert await materialize(out) == b"yes\n"
     assert io.exit_code == 0 and node.command == "printenv"
 
 
 @pytest.mark.asyncio
 async def test_printenv_cannot_see_a_plain_shell_variable():
-    out, io, _ = await handle_printenv("PLAIN", _session())
+    out, io, _ = await handle_printenv(["PLAIN"], _session())
     assert out is None and io.exit_code == 1
 
 
 @pytest.mark.asyncio
 async def test_printenv_lists_the_exported_set_sorted():
-    out, io, _ = await handle_printenv(None, _session())
+    out, io, _ = await handle_printenv([], _session())
     text = (await materialize(out)).decode()
     assert io.exit_code == 0
     assert "SHOWN=yes" in text.splitlines()
     assert "PLAIN=no" not in text
-    assert text.splitlines() == sorted(text.splitlines())
+    *lines, last = text.splitlines()
+    assert lines == sorted(lines)
+    assert last == "_=/usr/bin/printenv"
+
+
+@pytest.mark.asyncio
+async def test_printenv_prints_each_found_name_and_fails_on_a_missing_one():
+    out, io, _ = await handle_printenv(
+        ["-0", "PLAIN", "SHOWN", "--", "SHOWN"], _session()
+    )
+    assert await materialize(out) == b"yes\0yes\0"
+    assert io.exit_code == 1

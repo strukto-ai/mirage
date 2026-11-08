@@ -11,7 +11,7 @@ use crate::interp::escapes::decode_ansi_c;
 use crate::interp::parameter::{bad_substitution, scan_parameter};
 use crate::interp::pattern::{Case, Pattern};
 use crate::interp::write::{Denied, Fault, element_reference};
-use crate::interp::{Diagnostic, Signal, pattern, quote};
+use crate::interp::{Diagnostic, Signal, listing, pattern, quote};
 use crate::vars::{Indexed, RANDOM};
 
 /// The letters `${v@x}` knows.
@@ -309,7 +309,8 @@ impl<H: Host> Expander<'_, H> {
     ) -> Option<Vec<u8>> {
         let utf8 = self.shell.utf8();
         let name = self.shell.vars.deref(name);
-        let record = self.shell.vars.visible(&name);
+        let computed = listing::computed(&self.shell.vars, &name);
+        let record = computed.as_ref().or(self.shell.vars.visible(&name));
         if letter == b'a' {
             return record.map(|var| var.cluster().into_bytes());
         }

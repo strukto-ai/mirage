@@ -555,7 +555,9 @@ export async function workflowRunCmd(
   if (id === '') throw new Error('a workflow ID, name, or filename is required')
   const transport = accessor.transport
   const ref = repoFor(accessor, fl)
-  let branch = fl.asNonEmpty('ref') ?? accessor.config.branch
+  // gh dispatches on --ref, else on the repository's default branch; the
+  // install's `branch` stands in for a checkout, which gh does not read here.
+  let branch = fl.asNonEmpty('ref')
   if (branch === undefined || branch === '') {
     const repository = (await viewRepo(transport, ref)) as { default_branch?: unknown }
     branch = typeof repository.default_branch === 'string' ? repository.default_branch : undefined

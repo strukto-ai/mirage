@@ -70,10 +70,25 @@ export function encodeValue(value: Uint8Array, encoding: string | null): Uint8Ar
  * A subtree in pre-order, the way nftw hands it to getfattr -R. Every
  * entry is reported, links included. A link to a directory is descended
  * only when `deref` says so: for every entry under `-L`, and for an
- * operand itself unless `-P`. `calls` are the walk's readdir and lstat,
- * answered from a mount's `readTree` where one answers; `dispatch` follows a
- * link. Mirrors Python's `_walk`.
+ * operand itself unless `-P`. Under `--one-file-system` a mount nested below
+ * is neither reported nor descended, as nftw skips another device: `home` is
+ * the operand's mount root, or null to cross into any mount. `calls` are the
+ * walk's readdir and lstat, answered from a mount's `readTree` where one
+ * answers; `dispatch` follows a link. Mirrors Python's `_walk`.
  */
+// A `# file:` name as attr writes it, for `setfattr --restore` to read back: a
+// backslash, a newline and a carriage return as `\ooo`, every other byte as
+// it is. Mirrors Python's _escaped.
+function escaped(name: string): number[] {
+  const out: number[] = []
+  for (const byte of encodeText(name)) {
+    if (byte === 0x5c || byte === 0x0a || byte === 0x0d) {
+      out.push(...encodeText(`\\${byte.toString(8).padStart(3, '0')}`))
+    } else out.push(byte)
+  }
+  return out
+}
+
 async function walk(
   dispatch: DispatchFn,
   calls: [WalkCall<string[]>, WalkCall<FileStat>],
@@ -83,6 +98,7 @@ async function walk(
   logical: boolean,
   deref: boolean,
   budget: WalkBudget,
+  home: string | null = null,
 ): Promise<[PathSpec, string][]> {
   const [readdir, lstat] = calls
   const entries: [PathSpec, string][] = [[path, shown]]
@@ -99,6 +115,9 @@ async function walk(
   }
   if (!(stat instanceof FileStat) || stat.type !== FileType.DIRECTORY) return entries
   const here = links.follow(path.virtual)
+  // A directory a link leads onto another mount is reported, not listed, as
+  // nftw stays on the operand's device.
+  if (home !== null && budget.mounts?.rootOf(here) !== home) return entries
   if (!budget.opens(here)) return entries
   const limit = budget.listingLimit(here)
   const children = await (limit === null ? readdir(path) : readdir(path, false, limit))
@@ -106,6 +125,7 @@ async function walk(
     if (!budget.spend(here)) break
     const bare = rstripSlash(child)
     const name = bare.slice(bare.lastIndexOf('/') + 1)
+    if (home !== null && budget.mounts?.rootOf(`${rstripSlash(here)}/${name}`) !== home) continue
     const below = `${rstripSlash(shown)}/${name}`
     entries.push(
       ...(await walk(
@@ -117,6 +137,7 @@ async function walk(
         logical,
         logical,
         budget,
+        home,
       )),
     )
   }
@@ -179,7 +200,8 @@ async function fileBlock(
     if (want.onlyValues) for (const item of value) out.push(item)
     else block.push(...encodeText(`${attr}=`), ...encodeValue(value, want.encoding), 0x0a)
   }
-  if (block.length > 0) out.push(...encodeText(`# file: ${header}\n`), ...block, 0x0a)
+  if (block.length > 0)
+    out.push(...encodeText('# file: '), ...escaped(header), 0x0a, ...block, 0x0a)
   return [Uint8Array.from(out), missing]
 }
 
@@ -268,6 +290,7 @@ export async function handleGetfattr(
           fl.asBool('logical'),
           !fl.asBool('physical'),
           budget,
+          fl.asBool('one_file_system') ? mounts.rootOf(links.follow(target.virtual)) : null,
         )
       : ([[target, typed]] as [PathSpec, string][])
     for (const [path, label] of entries) {
@@ -281,7 +304,7 @@ export async function handleGetfattr(
         failed = true
         continue
       }
-      if (block.length > 0 && header !== label && !want.onlyValues && !warned) {
+      if (block.length > 0 && header !== label && !warned) {
         errors.push("getfattr: Removing leading '/' from absolute path names\n")
         warned = true
       }

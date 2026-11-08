@@ -98,10 +98,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'wxyz' | { read -n 2 rfc; echo \"[$rfc]\"; }; printf 'a b\\ncd' | { read -N 4 rfd; echo \"[$rfd]\"; }",
+      "command": "printf 'wxyz' | { read -n 2 rfc; echo \"[$rfc]\"; }; printf 'a b\\ncd' | { read -N 4 rfd; echo \"[$rfd]\"; }; read -N 3 zrn_b <<< 'a\\bcd'; echo \"[$zrn_b]\"; printf 'a\\\\\\nbc' | { read -n 3 zrn_b; echo \"[$zrn_b]\"; }; IFS=: read -N 4 zrn_b <<< 'a:b\\:c'; echo \"[$zrn_b]\"; read -d : zrn_b <<< 'a\\:b:c'; echo \"[$zrn_b]\"; printf 'ab\\\\' | { read -N 3 zrn_b; echo \"[$zrn_b] $?\"; }",
       "expect": {
         "exit": 0,
-        "stdout": "[wx]\n[a b\n]\n",
+        "stdout": "[wx]\n[a b\n]\n[abc]\n[abc]\n[a:b:]\n[a:b]\n[ab] 1\n",
         "stderr": ""
       }
     },

@@ -15,10 +15,15 @@
 from collections.abc import Callable
 from typing import Any
 
-from mirage.context import reset_program_invocation, set_program_invocation
+from mirage.context import (
+    program_invocation,
+    reset_program_invocation,
+    set_program_invocation,
+)
 from mirage.io.types import ByteSource
 from mirage.rs.session import ShellVars
 from mirage.shell.bytes import encode_text
+from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.join import shell_join
 from mirage.shell.variable import ShellVar
 from mirage.workspace.executor.builtins.env.constants import ENV_HELP_HINT
@@ -39,9 +44,10 @@ def env_child(
 ) -> tuple[list[str], dict[str, str], bool, bool] | str:
     """What ``env`` runs and the environment it runs it in, read off its
     words: the command's words, the environment (the session's sorted by
-    name, each ``NAME=VALUE`` replacing its name in place or adding it
-    last), whether ``-i`` cleared it and whether ``-0`` was given; or the
-    message for words env refuses.
+    name, then ``_`` as env's path when the shell runs it, as bash hands
+    every program it runs; each ``NAME=VALUE`` replacing its name in place
+    or adding it last), whether ``-i`` cleared it and whether ``-0`` was
+    given; or the message for words env refuses.
 
     Args:
         args (list[str]): words after the ``env`` name.
@@ -108,6 +114,9 @@ def env_child(
         break
 
     base = {} if ignore_env else env_snapshot(session)
+    if not ignore_env and not program_invocation(session):
+        base.pop("_", None)
+        base["_"] = f"{BIN_PREFIX}/env"
     for name in unset:
         base.pop(name, None)
     while i < len(args) and "=" in args[i] and not args[i].startswith("="):

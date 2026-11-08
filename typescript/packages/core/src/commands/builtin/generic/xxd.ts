@@ -28,12 +28,14 @@ import { fsErrorLine } from '../../../errors/render.ts'
 import { isEnoent, isFsError } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
 import { isStdin, resolveSource, stdinStream, streamOutput } from '../utils/stream.ts'
+import type { util } from 'zod'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { refused, scan } from '../../../rs/scan.ts'
 import { openStream, runStream, streamOutputChunks } from '../../../rs/stream.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { extraOperandError, readFailExitCode } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
+import { byteView } from '../../../shell/bytes.ts'
 
 const ENC = new TextEncoder()
 
@@ -45,26 +47,19 @@ const CANNOT_SEEK_EXIT = 4
 const SEEK_BACK_EXIT = 5
 const CANNOT_SEEK = 'xxd: Sorry, cannot seek.\n'
 
-function dumpStream(
+/** A dump of `source` as the scan's `render` describes it, its offsets from
+ * `base` past `-o` and a `-i` array named `name`. Mirrors Python's
+ * _forward_stream. */
+async function forwardStream(
   source: AsyncIterable<Uint8Array>,
-  cols: number,
-  group: number,
-  uppercase: boolean,
+  render: Readonly<Record<string, util.JSONType>>,
   base: number,
+  name: string | null,
 ): Promise<AsyncIterable<Uint8Array>> {
-  return openStream('xxd', { mode: 'dump', cols, group, uppercase, base }).then((stream) =>
-    streamOutput(stream, source),
-  )
-}
-
-function plainStream(
-  source: AsyncIterable<Uint8Array>,
-  uppercase: boolean,
-  cols: number,
-): Promise<AsyncIterable<Uint8Array>> {
-  return openStream('xxd', { mode: 'plain', uppercase, cols }).then((stream) =>
-    streamOutput(stream, source),
-  )
+  const config = { ...render }
+  if (config.mode === 'dump') config.base = base
+  if (config.mode === 'include') config.name = name === null ? null : byteView(name)
+  return streamOutput(await openStream('xxd', config), source)
 }
 
 /**
@@ -354,11 +349,10 @@ async function writeOutput(
 export interface XxdFlags {
   readonly reverse: boolean
   readonly plain: boolean
-  readonly uppercase: boolean
-  readonly cols: number
-  readonly group: number
+  readonly render: Readonly<Record<string, util.JSONType>>
   readonly seek: XxdSeek
   readonly limit: number | null
+  readonly name: string | null
 }
 
 /**
@@ -369,23 +363,22 @@ export function parseFlags(bag: Record<string, FlagValue>): XxdFlags | IOResult 
   const fl = new FlagView(bag, specOf('xxd'))
   let values
   try {
-    values = scan('xxd', fl.texts('p', 'c', 'g', 's', 'args_l'))
+    values = scan(
+      'xxd',
+      fl.texts('p', 'c', 'g', 's', 'args_l', 'b', 'e', 'i', 'u', 'a', 'd', 'E', 'C', 'n', 'o'),
+    )
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
     return refused(err)
   }
-  const { cols, group, seek, limit } = values as unknown as Pick<
-    XxdFlags,
-    'cols' | 'group' | 'seek' | 'limit'
-  >
+  const { render, seek, limit } = values as unknown as Pick<XxdFlags, 'render' | 'seek' | 'limit'>
   return {
     reverse: fl.asBool('r'),
     plain: fl.asBool('p'),
-    uppercase: fl.asBool('u'),
-    cols,
-    group,
+    render,
     seek,
     limit,
+    name: fl.asText('n') ?? null,
   }
 }
 
@@ -409,7 +402,9 @@ export async function xxdGeneric(
 ): Promise<[ByteSource | null, IOResult]> {
   const read = stdinStream(stream, ctx.stdin, true)
   if (paths.length > 2) throw extraOperandError(CommandName.XXD, paths[2]?.rawPath ?? '')
-  const { seek, limit, uppercase, plain } = parsed
+  const { seek, limit, plain } = parsed
+  const first = paths[0]
+  const name = parsed.name ?? (first !== undefined && !isStdin(first) ? first.rawPath : null)
   let source: AsyncIterable<Uint8Array>
   let base = 0
   if (parsed.reverse) {
@@ -427,8 +422,7 @@ export async function xxdGeneric(
   }
   const render = async (): Promise<AsyncIterable<Uint8Array> | null> => {
     if (parsed.reverse) return null
-    if (parsed.plain) return plainStream(source, uppercase, parsed.cols)
-    return dumpStream(source, parsed.cols, parsed.group, uppercase, base)
+    return forwardStream(source, parsed.render, base, name)
   }
   const target = paths[1]
   if (target !== undefined && !isStdin(target)) {

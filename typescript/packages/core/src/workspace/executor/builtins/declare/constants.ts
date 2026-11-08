@@ -30,24 +30,10 @@ export const LISTED_ATTRIBUTES: ReadonlySet<string> = new Set('ilnrtux')
  */
 export const VISIBLE_SCOPE_BUILTINS: ReadonlySet<string> = new Set(['export', 'readonly'])
 
-export const ANSI_C_ESCAPES: Record<string, string> = {
-  '\\': '\\\\',
-  "'": "\\'",
-  '\x07': '\\a',
-  '\b': '\\b',
-  '\t': '\\t',
-  '\n': '\\n',
-  '\v': '\\v',
-  '\f': '\\f',
-  '\r': '\\r',
-  '\x1b': '\\E',
-}
-
-export const BARE_KEY_RE = /^[A-Za-z0-9_%+,./:=@~-]+$/
-
-// eslint-disable-next-line no-control-regex
-export const CONTROL_RE = /[\x00-\x1f\x7f]/
-
 // `arr[0]` and friends: a target that parses as an assignment but is
 // not a plain name, which the declaration builtins quote on its own.
 export const SUBSCRIPT_RE = /^[A-Za-z_][A-Za-z0-9_]*\[.*\]$/
+
+// The head of an element operand, `NAME[`, whose subscript runs to the
+// matching `]` (`operandParts`).
+export const NAME_BRACKET_RE = /^[A-Za-z_][A-Za-z0-9_]*\[/

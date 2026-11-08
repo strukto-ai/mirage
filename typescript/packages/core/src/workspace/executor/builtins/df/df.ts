@@ -33,7 +33,7 @@ import type { MountEntry } from '../../../mount/mount.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { scopePath } from '../scope.ts'
-import { fail, ok, result, splitValueFlags } from '../shared.ts'
+import { fail, ok, parseLine, result } from '../shared.ts'
 import { BLOCK_SUFFIX, SI_UNITS } from './constants.ts'
 
 // Parse a -B/--block-size argument into [bytes, header-label]; a plain byte
@@ -57,30 +57,23 @@ function parseBlock(text: string): [number, string] | null {
   return [value, t]
 }
 
-// The last size-format flag (-h/-H/-k/-B) in the leading option run. GNU df
-// lets a later size flag override the earlier ones (`df -h -B1M` prints a
-// block header, `df -B1M -h` prints `Size`), so the display format is
-// whichever appears last. Returns the flag letter, or null when none appear.
-function lastFormat(args: (string | PathSpec)[]): string | null {
-  let last: string | null = null
-  let i = 0
-  while (i < args.length) {
-    const arg = args[i]
-    if (arg === undefined) break
-    const s = scopePath(arg)
-    if (s === '--' || !(s.length >= 2 && s.startsWith('-') && s[1] !== '-')) break
-    const body = s.slice(1)
-    for (let j = 0; j < body.length; j++) {
-      const c = body[j]
-      if (c === 'h' || c === 'H' || c === 'k' || c === 'B') last = c
-      if (c === 'B') {
-        if (body.slice(j + 1).length === 0) i += 1
-        break
-      }
+// How the last block-size option was typed, for its refusal: GNU names the
+// option as the line spelled it, `-B x` an invalid `-B` argument and
+// `--block-size=x` an invalid `--block-size` one. Mirrors Python's
+// _block_spelling.
+function blockSpelling(args: readonly (string | PathSpec)[]): string {
+  let spelled = '-B'
+  for (const arg of args) {
+    const word = scopePath(arg)
+    if (word === '--') break
+    if (word.startsWith('--')) {
+      const name = word.slice(2).split('=', 1)[0] ?? ''
+      if (name.length > 1 && 'block-size'.startsWith(name)) spelled = '--block-size'
+    } else if (word.startsWith('-') && word.slice(1).includes('B')) {
+      spelled = '-B'
     }
-    i += 1
   }
-  return last
+  return spelled
 }
 
 // What stat-ing one FILE operand answers, null when it is there. GNU df
@@ -257,31 +250,34 @@ export async function handleDf(
   dispatch: DispatchFn,
   args: (string | PathSpec)[],
 ): Promise<RedirectResult> {
-  const { flags, values, operands, bad } = splitValueFlags(args, 'hHkiaTP', 'B')
-  if (bad !== null) return fail('df', `df: invalid option -- '${bad}'\n`, 2)
+  const [parsed, fl, refused] = parseLine('df', args, session.cwd)
+  if (refused !== null) return refused
+  const operands: (string | PathSpec)[] = [...parsed.paths]
 
-  const posix = flags.has('P')
-  const bArg = values.get('B')
+  const posix = fl.asBool('portability')
+  const bArg = fl.asStr('block_size')
   let bParsed: [number, string] | null = null
   if (bArg !== undefined) {
     bParsed = parseBlock(bArg)
-    if (bParsed === null) return fail('df', `df: invalid -B argument '${bArg}'\n`, 1)
+    if (bParsed === null) {
+      return fail('df', `df: invalid ${blockSpelling(args)} argument '${bArg}'\n`, 1)
+    }
   }
 
   // GNU resolves the mutually overriding size flags last-wins, so -h/-H
   // (human) or -k/-B (block) is chosen by whichever appears last.
-  const lf = lastFormat(args)
-  const si = lf === 'H'
-  const human = lf === 'h' || lf === 'H'
+  const lf = fl.typedOrder('human_readable', 'si', 'k', 'block_size').at(-1)
+  const si = lf === 'si'
+  const human = lf === 'human_readable' || lf === 'si'
   let block = 1024
   let blockLabel = posix ? '1024-blocks' : '1K-blocks'
-  if (lf === 'B' && bParsed !== null) {
+  if (lf === 'block_size' && bParsed !== null) {
     block = bParsed[0]
     blockLabel = `${bParsed[1]}-blocks`
   }
 
-  const inodes = flags.has('i')
-  const showType = flags.has('T')
+  const inodes = fl.asBool('inodes')
+  const showType = fl.asBool('print_type')
 
   const [mounts, errors] = await targetMounts(registry, dispatch, session, operands)
 

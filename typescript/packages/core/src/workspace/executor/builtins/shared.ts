@@ -23,7 +23,7 @@ import type { PolicyDenied } from '../../../policy/errors.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
 import { TooManyMatches } from '../../../shell/errors.ts'
-import { PathSpec, wordText } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import type { SessionView } from '../../../view/types.ts'
 import { expandGlob } from '../../expand/globs.ts'
@@ -34,7 +34,6 @@ import { ExecutionNode } from '../../types.ts'
 import { optionError, parseFlags } from '../command/flags.ts'
 import type { ParsedCommand } from '../command/types.ts'
 import { COUNT_WORD_RE, IDENTIFIER_RE } from './constants.ts'
-import { scopePath } from './scope.ts'
 import type { BuiltinCall } from './types.ts'
 
 /**
@@ -124,74 +123,6 @@ export function absPath(arg: string | PathSpec, cwd: string): string {
   return resolvePath(arg, cwd)
 }
 
-export interface SplitValueFlags {
-  flags: Set<string>
-  values: Map<string, string>
-  operands: (string | PathSpec)[]
-  bad: string | null
-}
-
-/**
- * Split leading flags where some take a value (`-t STAMP`), strictly: an
- * unknown letter is reported instead of tolerated.
- *
- * @param args - args after the command name.
- * @param boolean - single-letter flags with no value.
- * @param valued - single-letter flags that consume the next arg.
- */
-export function splitValueFlags(
-  args: readonly (string | PathSpec)[],
-  boolean: string,
-  valued: string,
-): SplitValueFlags {
-  const flags = new Set<string>()
-  const values = new Map<string, string>()
-  const operands: (string | PathSpec)[] = []
-  let parsing = true
-  let i = 0
-  while (i < args.length) {
-    const arg = args[i]
-    if (arg === undefined) break
-    const s = scopePath(arg)
-    if (parsing && s === '--') {
-      parsing = false
-      i += 1
-      continue
-    }
-    if (parsing && s !== '-' && s.length >= 2 && s.startsWith('-') && !s.startsWith('--')) {
-      const body = s.slice(1)
-      for (let j = 0; j < body.length; j++) {
-        const c = body.charAt(j)
-        if (boolean.includes(c)) {
-          flags.add(c)
-          continue
-        }
-        // A valued flag consumes the rest of the token (-tSTAMP) or the next
-        // argument (-t STAMP); those trailing chars are its value, not flags,
-        // so validation must stop here rather than pre-scanning the token.
-        if (!valued.includes(c)) {
-          return { flags, values, operands, bad: c }
-        }
-        const rest = body.slice(j + 1)
-        if (rest.length > 0) {
-          values.set(c, rest)
-        } else if (i + 1 < args.length) {
-          i += 1
-          const nxt = args[i]
-          if (nxt !== undefined) values.set(c, wordText(nxt))
-        }
-        break
-      }
-      i += 1
-      continue
-    }
-    parsing = false
-    operands.push(arg)
-    i += 1
-  }
-  return { flags, values, operands, bad: null }
-}
-
 /**
  * Coerce operands to PathSpec and expand glob patterns per mount, through the
  * dispatcher's listings.
@@ -266,6 +197,14 @@ export function refusal(cmd: string, err: PolicyDenied): RedirectResult {
 export function readonlyLine(cmd: string, name: string): string {
   const voice = cmd === 'declare' || cmd === 'local' || cmd === 'typeset' ? `${cmd}: ` : ''
   return `${shellVoice()}${voice}${name}: readonly variable`
+}
+
+/**
+ * A builtin's refusal of a word that names no variable (`bash: read: \`1x':
+ * not a valid identifier`). Mirrors Python's identifier_line.
+ */
+export function identifierLine(cmd: string, name: string): string {
+  return `${shellVoice()}${cmd}: \`${name}': not a valid identifier`
 }
 
 /** Render the readonly refusal (`readonlyLine`) as the result. */

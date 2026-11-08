@@ -203,7 +203,7 @@ describe('bc', () => {
     }
     // A one the math library produced still pads, so it is `sqrt`'s
     // rule and not a rule about the value one.
-    expect((await runBc('scale=5; c(0)\n', { args_l: true })).out).toBe('1.00000\n')
+    expect((await runBc('scale=5; c(0)\n', { mathlib: true })).out).toBe('1.00000\n')
   })
 
   // The short-circuit gives the result a real scale of 0, which is
@@ -386,7 +386,7 @@ describe('bc', () => {
   })
 
   it('an unknown function under -l is a runtime error', async () => {
-    expect(await runBc('zz(1)\n', { args_l: true })).toEqual({
+    expect(await runBc('zz(1)\n', { mathlib: true })).toEqual({
       out: '',
       err: 'Runtime error (func=(main), adr=3): Function zz not defined.\n',
       exitCode: 0,
@@ -394,11 +394,11 @@ describe('bc', () => {
   })
 
   it('-l raises scale to 20', async () => {
-    expect(await runBc('scale\n', { args_l: true })).toEqual({ out: '20\n', err: '', exitCode: 0 })
+    expect(await runBc('scale\n', { mathlib: true })).toEqual({ out: '20\n', err: '', exitCode: 0 })
   })
 
   it('-l stops division truncating', async () => {
-    expect(await runBc('7/2\n', { args_l: true })).toEqual({
+    expect(await runBc('7/2\n', { mathlib: true })).toEqual({
       out: '3.50000000000000000000\n',
       err: '',
       exitCode: 0,
@@ -406,7 +406,7 @@ describe('bc', () => {
   })
 
   it('-l sqrt', async () => {
-    expect(await runBc('sqrt(2)\n', { args_l: true })).toEqual({
+    expect(await runBc('sqrt(2)\n', { mathlib: true })).toEqual({
       out: '1.41421356237309504880\n',
       err: '',
       exitCode: 0,
@@ -414,11 +414,11 @@ describe('bc', () => {
   })
 
   it('-l sine of zero is a bare zero', async () => {
-    expect(await runBc('s(0)\n', { args_l: true })).toEqual({ out: '0\n', err: '', exitCode: 0 })
+    expect(await runBc('s(0)\n', { mathlib: true })).toEqual({ out: '0\n', err: '', exitCode: 0 })
   })
 
   it('-l cosine of zero is padded', async () => {
-    expect(await runBc('c(0)\n', { args_l: true })).toEqual({
+    expect(await runBc('c(0)\n', { mathlib: true })).toEqual({
       out: '1.00000000000000000000\n',
       err: '',
       exitCode: 0,
@@ -426,7 +426,7 @@ describe('bc', () => {
   })
 
   it('-l arctangent of one', async () => {
-    expect(await runBc('a(1)\n', { args_l: true })).toEqual({
+    expect(await runBc('a(1)\n', { mathlib: true })).toEqual({
       out: '.78539816339744830961\n',
       err: '',
       exitCode: 0,
@@ -434,12 +434,12 @@ describe('bc', () => {
   })
 
   it('-l log of one is a bare zero', async () => {
-    expect(await runBc('l(1)\n', { args_l: true })).toEqual({ out: '0\n', err: '', exitCode: 0 })
+    expect(await runBc('l(1)\n', { mathlib: true })).toEqual({ out: '0\n', err: '', exitCode: 0 })
   })
 
   it('-l exponential of one', async () => {
     // GNU: 2.71828182845904523536.
-    expect(await runBc('e(1)\n', { args_l: true })).toEqual({
+    expect(await runBc('e(1)\n', { mathlib: true })).toEqual({
       out: '2.71828182845904523536\n',
       err: '',
       exitCode: 0,
@@ -447,12 +447,12 @@ describe('bc', () => {
   })
 
   it('-l cosine and log are computed from series, not from a libm', async () => {
-    expect(await runBc('c(.1)\n', { args_l: true })).toEqual({
+    expect(await runBc('c(.1)\n', { mathlib: true })).toEqual({
       out: '.99500416527802576609\n',
       err: '',
       exitCode: 0,
     })
-    expect(await runBc('l(3)\n', { args_l: true })).toEqual({
+    expect(await runBc('l(3)\n', { mathlib: true })).toEqual({
       out: '1.09861228866810969139\n',
       err: '',
       exitCode: 0,
@@ -472,7 +472,7 @@ describe('bc', () => {
       ['scale=10; e(2)', '7.3890560989'],
     ]
     for (const [line, out] of want) {
-      expect(await runBc(line + '\n', { args_l: true })).toEqual({
+      expect(await runBc(line + '\n', { mathlib: true })).toEqual({
         out: out + '\n',
         err: '',
         exitCode: 0,
@@ -488,7 +488,7 @@ describe('bc', () => {
       ['e(2^10000-2^10000)', '1.00000000000000000000'],
     ]
     for (const [line, out] of want) {
-      expect(await runBc(line + '\n', { args_l: true })).toEqual({
+      expect(await runBc(line + '\n', { mathlib: true })).toEqual({
         out: out + '\n',
         err: '',
         exitCode: 0,
@@ -497,12 +497,12 @@ describe('bc', () => {
   })
 
   it('-l log of a non-positive argument answers from scale', async () => {
-    expect(await runBc('scale=5; l(0)\n', { args_l: true })).toEqual({
+    expect(await runBc('scale=5; l(0)\n', { mathlib: true })).toEqual({
       out: '-99999.00000\n',
       err: '',
       exitCode: 0,
     })
-    expect(await runBc('scale=5; l(-1)\n', { args_l: true })).toEqual({
+    expect(await runBc('scale=5; l(-1)\n', { mathlib: true })).toEqual({
       out: '-99999.00000\n',
       err: '',
       exitCode: 0,
@@ -577,12 +577,12 @@ describe('bc', () => {
     expect(await runBc('scale=1; 1.05^3\n')).toEqual({ out: '1.15\n', err: '', exitCode: 0 })
     expect(await runBc('scale=1; 1.5^2\n')).toEqual({ out: '2.2\n', err: '', exitCode: 0 })
     expect(await runBc('scale=2; sqrt(0.5)\n')).toEqual({ out: '.70\n', err: '', exitCode: 0 })
-    expect(await runBc('scale=5; l(2)\n', { args_l: true })).toEqual({
+    expect(await runBc('scale=5; l(2)\n', { mathlib: true })).toEqual({
       out: '.69314\n',
       err: '',
       exitCode: 0,
     })
-    expect(await runBc('scale=5; a(1)\n', { args_l: true })).toEqual({
+    expect(await runBc('scale=5; a(1)\n', { mathlib: true })).toEqual({
       out: '.78539\n',
       err: '',
       exitCode: 0,
@@ -744,7 +744,7 @@ describe('bc', () => {
 
   it('variable and function namespaces are separate', async () => {
     // `s` the variable does not shadow `s` the sine under -l.
-    expect(await runBc('s=5; s; s(0)\n', { args_l: true })).toEqual({
+    expect(await runBc('s=5; s; s(0)\n', { mathlib: true })).toEqual({
       out: '5\n0\n',
       err: '',
       exitCode: 0,
@@ -1071,22 +1071,22 @@ describe('bc', () => {
       exitCode: 0,
     })
     // `-l` only moves the initial scale, which both builtins then see.
-    expect(await runBc('length(1/3)\n', { args_l: true })).toEqual({
+    expect(await runBc('length(1/3)\n', { mathlib: true })).toEqual({
       out: '20\n',
       err: '',
       exitCode: 0,
     })
-    expect(await runBc('scale(1/3)\n', { args_l: true })).toEqual({
+    expect(await runBc('scale(1/3)\n', { mathlib: true })).toEqual({
       out: '20\n',
       err: '',
       exitCode: 0,
     })
-    expect(await runBc('length(0)\n', { args_l: true })).toEqual({
+    expect(await runBc('length(0)\n', { mathlib: true })).toEqual({
       out: '1\n',
       err: '',
       exitCode: 0,
     })
-    expect(await runBc('scale(0)\n', { args_l: true })).toEqual({
+    expect(await runBc('scale(0)\n', { mathlib: true })).toEqual({
       out: '0\n',
       err: '',
       exitCode: 0,
@@ -1773,7 +1773,7 @@ describe('bc', () => {
 
   it('the issue 1156 program', async () => {
     const program = 'scale=15\na=7*7.172100067138672\nprint "a="; a; print "\\n"\n'
-    expect((await runBc(program, { args_l: true })).out).toBe('a=50.204700469970704\n\n')
+    expect((await runBc(program, { mathlib: true })).out).toBe('a=50.204700469970704\n\n')
   })
 })
 
@@ -1784,7 +1784,7 @@ describe('bc decimal precision', () => {
   })
 
   it('preserves twenty decimal places in the math library', async () => {
-    expect((await runBc('s(1)\n', { args_l: true })).out).toBe('.84147098480789650665\n')
+    expect((await runBc('s(1)\n', { mathlib: true })).out).toBe('.84147098480789650665\n')
   })
 })
 

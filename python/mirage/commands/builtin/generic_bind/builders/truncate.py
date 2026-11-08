@@ -7,7 +7,7 @@ from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def truncate(
@@ -22,11 +22,17 @@ async def truncate(
     files = command_files(ctx, paths)
     truncate_fn = files.truncate
     paths = await files.resolve_glob(paths)
+    vfs = ctx.vfs
+
+    async def followed(path: PathSpec) -> FileStat:
+        return await (files.stat(path) if vfs is None else vfs.stat(path))
+
     return await generic_truncate(
         paths,
         flags=flags,
         stat=files.stat,
         truncate_fn=truncate_fn,
+        reference_stat=followed,
     )
 
 

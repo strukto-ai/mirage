@@ -95,6 +95,7 @@ async def _shuf(
         write_bytes=(files.write if files.answers("write") else None),
         root=mount_root(ctx),
         ids=ctx.ids,
+        random_source=parsed.random_source,
     )
 
 

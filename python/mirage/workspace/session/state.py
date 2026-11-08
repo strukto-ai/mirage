@@ -317,6 +317,7 @@ async def session_arith(
     text: str,
     policies: Policies | None = None,
     call_stack: CallStack | None = None,
+    expand: bool = False,
 ) -> int:
     """Evaluate an arithmetic command, a ``let`` operand or a test's
     integer operand against the session, its writes landed through the
@@ -327,10 +328,11 @@ async def session_arith(
         text (str): the expression, already expanded.
         policies (Policies | None): the policies its writes clear.
         call_stack (CallStack | None): function-call scope, if any.
+        expand (bool): a ``let`` operand, whose subscripts expand first.
     """
     shell = session.vars.shell
     frame(session, call_stack)
-    task = shell.arith(text, listens=listens(policies))
+    task = shell.arith(text, listens=listens(policies), expand=expand)
     return int(await drive(task, SessionGate(session, policies), []))
 
 
@@ -486,6 +488,8 @@ async def assign_element(
     subscript: str | None,
     value: str,
     append: bool = False,
+    *,
+    diagnostics: list[str | bytes] | None = None,
 ) -> str:
     """Assign one element (or a bare name resolved as element 0) a
     builtin names, as one gated write of the whole value it makes, so a
@@ -502,6 +506,8 @@ async def assign_element(
             target.
         value (str): the text to store.
         append (bool): concatenate onto the existing element.
+        diagnostics (list[str | bytes] | None): evaluation-owned warnings;
+            without a sink, a seed's arithmetic error propagates.
 
     Returns:
         str: ``"ok"``, ``"denied"``, ``"readonly"``, or ``"subscript"``.
@@ -523,8 +529,9 @@ async def assign_element(
                 value,
                 append=append,
                 listens=heard,
-                warns=False,
+                warns=diagnostics is not None,
             ),
+            diagnostics,
         )
 
     if policies is None:
@@ -693,6 +700,17 @@ def in_call_env(session: SessionState, name: str) -> bool:
         name (str): variable name.
     """
     return session.vars.shell.in_call_env(name)
+
+
+def prefix_temporaries(session: SessionState) -> list[str]:
+    """The names a running builtin's or program's prefix assignments set
+    for it, which no listing shows (``QX=1 export -p`` lists no QX); a
+    function's are its own scope's, and list.
+
+    Args:
+        session (SessionState): the session.
+    """
+    return [name for saved in session._prefix_saves for name in saved]
 
 
 def positional_params(

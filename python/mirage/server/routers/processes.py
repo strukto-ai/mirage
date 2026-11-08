@@ -99,7 +99,7 @@ async def list_processes(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     async def read() -> list[ProcessResponse]:
-        records = runner.ws.processes(
+        records = await runner.ws.processes(
             session_id or None, state, line, job, where
         )
         return [_to_response(r) for r in records]
@@ -115,7 +115,7 @@ async def get_process(
     runner = require_entry(request, workspace_id).runner
 
     async def read() -> Process | None:
-        return runner.ws.process(ProcessId(runner.ws.workspace_id, pid))
+        return await runner.ws.process(ProcessId(runner.ws.workspace_id, pid))
 
     record = await runner.call(read())
     if record is None:

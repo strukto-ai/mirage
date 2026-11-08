@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from typing import Any, cast
 
 from mirage.accessor.github import GitHubAccount
@@ -24,6 +25,7 @@ from mirage.commands.cli.builtin.gh.accessor import (
     list_limit,
     repo_for,
     repo_number,
+    subject_number,
     text_out,
     typed_out,
 )
@@ -38,6 +40,7 @@ from mirage.commands.cli.builtin.gh.fields import (
     selection,
 )
 from mirage.commands.config import Context
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.issue import (
     IssueListFilter,
@@ -50,6 +53,7 @@ from mirage.core.github.issue import (
     issue_fields,
     list_issue_fields,
     list_issues,
+    update_issue,
 )
 from mirage.core.github.repo import RepoRef
 from mirage.io.types import ByteSource, IOResult
@@ -162,12 +166,46 @@ def _view_text(row: dict[str, Any]) -> str:
     )
 
 
+def _targets(
+    accessor: GitHubAccount, texts: list[str], fl: FlagView
+) -> tuple[RepoRef, list[int]]:
+    """The issues ``gh issue edit`` names, read as gh's
+    ParseIssuesFromArgs reads them: at least one, each parsed before
+    anything is asked, and the repository a URL names the one every
+    issue is in.
+    """
+    if not texts:
+        raise ValueError("requires at least 1 arg(s), only received 0")
+    named: RepoRef | None = None
+    numbers: list[int] = []
+    for text in texts:
+        number = subject_number(text)
+        if number is not None:
+            numbers.append(number)
+            continue
+        ref, found = repo_number(accessor, fl, text, "issue", "issues")
+        name = f"{ref.owner}/{ref.repo}"
+        if named is not None:
+            expected = f"{named.owner}/{named.repo}"
+            if name.lower() != expected.lower():
+                raise ValueError(
+                    "multiple issues must be in same repo: found "
+                    f"{json.dumps(name)}, expected {json.dumps(expected)}"
+                )
+        named = named or ref
+        numbers.append(found)
+    return named or repo_for(accessor, fl), numbers
+
+
 def _target(
     accessor: GitHubAccount, texts: list[str], fl: FlagView
 ) -> tuple[RepoRef, int]:
-    return repo_number(
-        accessor, fl, texts[0] if texts else None, "issue", "issues"
-    )
+    """The issue a line names: one, as cobra's ExactArgs(1) holds gh's
+    verbs to.
+    """
+    if len(texts) != 1:
+        raise ValueError(f"accepts 1 arg(s), received {len(texts)}")
+    return repo_number(accessor, fl, texts[0], "issue", "issues")
 
 
 async def list_cmd(
@@ -313,21 +351,37 @@ async def edit_cmd(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    """``gh issue edit``: every issue named, as gh edits them. Each is
+    read first, which ends the line at the first one missing; each is
+    then edited, the URLs of those edited printed in order, and any that
+    failed named on standard error with the count.
+    """
     fl = FlagView(ctx.flags)
-    ref, number = _target(accessor, texts, fl)
-    body: dict[str, JsonValue] = {}
-    if fl.as_str("title") is not None:
-        body["title"] = fl.as_str("title") or ""
+    ref, numbers = _targets(accessor, texts, fl)
+    title = fl.as_str("title")
     body_text = await body_value(ctx, fl)
-    if body_text is not None:
-        body["body"] = body_text
     additions = csv_values(fl.as_list("add_label"))
     removals = set(csv_values(fl.as_list("remove_label")))
     add_assignees = csv_values(fl.as_list("add_assignee"))
     remove_assignees = set(csv_values(fl.as_list("remove_assignee")))
-    if additions or removals or add_assignees or remove_assignees:
-        current = _issue(await get_issue(accessor, ref, number))
-        if additions or removals:
+    relabel = bool(additions or removals)
+    reassign = bool(add_assignees or remove_assignees)
+    if title is None and body_text is None and not relabel and not reassign:
+        raise UsageError(
+            "field to edit flag required when not running interactively", 1
+        )
+    rows = [
+        _issue(await get_issue(accessor, ref, number)) for number in numbers
+    ]
+    edited: list[str] = []
+    failed: list[str] = []
+    for number, current in zip(numbers, rows, strict=True):
+        body: dict[str, JsonValue] = {}
+        if title is not None:
+            body["title"] = title
+        if body_text is not None:
+            body["body"] = body_text
+        if relabel:
             names = _names(current.get("labels"))
             body["labels"] = list(
                 dict.fromkeys(
@@ -335,7 +389,7 @@ async def edit_cmd(
                     + additions
                 )
             )
-        if add_assignees or remove_assignees:
+        if reassign:
             names = _names(current.get("assignees"))
             body["assignees"] = list(
                 dict.fromkeys(
@@ -343,10 +397,20 @@ async def edit_cmd(
                     + add_assignees
                 )
             )
-    if not body:
-        raise ValueError("no issue fields to edit")
-    edited = _issue(await edit_issue(accessor, ref, number, body))
-    return text_out(f"{edited.get('url', '')}\n")
+        try:
+            row = _issue(await update_issue(accessor, ref, number, body))
+        except Exception as exc:
+            failed.append(f"failed to update {current.get('url', '')}: {exc}")
+            continue
+        edited.append(str(row.get("url", "")))
+    out, io = text_out("".join(f"{url}\n" for url in sorted(edited)))
+    if not failed:
+        return out, io
+    count = "1 issue" if len(failed) == 1 else f"{len(failed)} issues"
+    lines = [*sorted(failed), f"gh issue edit: failed to update {count}"]
+    return out, IOResult(
+        exit_code=1, stderr="".join(f"{line}\n" for line in lines).encode()
+    )
 
 
 async def close_cmd(
@@ -394,8 +458,8 @@ async def comment_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    body = await body_value(ctx, fl, required=True)
     ref, number = _target(accessor, texts, fl)
+    body = await body_value(ctx, fl, required=True)
     comment = _issue(await comment_issue(accessor, ref, number, body or ""))
     return text_out(f"{comment.get('url', '')}\n")
 

@@ -93,6 +93,16 @@ impl Line {
         })
         .await
     }
+
+    /// A gate question's answer: the policy's refusal as a denial, a host
+    /// that failed answering as its own fault.
+    async fn gated(&self, ask: Ask) -> Result<(), Fault> {
+        match self.ask(ask).await {
+            Answer::Gate(answer) => answer.map_err(Fault::Denied),
+            Answer::Failed(fault) => Err(fault),
+            _ => Err(Fault::Host("an answer that is no gate")),
+        }
+    }
 }
 
 impl Gate for Line {
@@ -106,7 +116,7 @@ impl Gate for Line {
         key: &str,
         value: Option<&[u8]>,
         store: &Store,
-    ) -> Result<(), Denied> {
+    ) -> Result<(), Fault> {
         let ask = Ask::Gate {
             post: false,
             verb,
@@ -115,13 +125,7 @@ impl Gate for Line {
             old: None,
             view: store.fork(),
         };
-        match self.ask(ask).await {
-            Answer::Gate(answer) => answer,
-            _ => Err(Denied {
-                name: key.to_owned(),
-                record: 0,
-            }),
-        }
+        self.gated(ask).await
     }
 
     async fn post(
@@ -131,7 +135,7 @@ impl Gate for Line {
         value: Option<&[u8]>,
         old: Option<&[u8]>,
         store: &Store,
-    ) -> Result<(), Denied> {
+    ) -> Result<(), Fault> {
         let ask = Ask::Gate {
             post: true,
             verb,
@@ -140,13 +144,7 @@ impl Gate for Line {
             old: old.map(<[u8]>::to_vec),
             view: store.fork(),
         };
-        match self.ask(ask).await {
-            Answer::Gate(answer) => answer,
-            _ => Err(Denied {
-                name: key.to_owned(),
-                record: 0,
-            }),
-        }
+        self.gated(ask).await
     }
 }
 
@@ -169,7 +167,7 @@ impl Host for Line {
         match self.ask(ask).await {
             Answer::Substituted(ran) => Ok(ran),
             Answer::Failed(fault) => Err(fault),
-            _ => Err(Fault::Unsupported("an answer that is no substitution")),
+            _ => Err(Fault::Host("an answer that is no substitution")),
         }
     }
 
@@ -187,7 +185,7 @@ impl Host for Line {
         {
             Answer::Path(path) => Ok(path),
             Answer::Failed(fault) => Err(fault),
-            _ => Err(Fault::Unsupported("an answer that is no path")),
+            _ => Err(Fault::Host("an answer that is no path")),
         }
     }
 
@@ -208,7 +206,7 @@ impl Host for Line {
         {
             Answer::Resumed => Ok(()),
             Answer::Failed(fault) => Err(fault),
-            _ => Err(Fault::Unsupported("an answer that is no resumption")),
+            _ => Err(Fault::Host("an answer that is no resumption")),
         }
     }
 }
@@ -287,6 +285,25 @@ pub enum Mode {
     /// The subscript of a `${x[...]}`, its key or index text, as a
     /// builtin's subscript given as text expands.
     Subscript,
+}
+
+impl std::str::FromStr for Mode {
+    type Err = String;
+
+    /// A mode as a host names it: `fields`, `text`, `assignment`,
+    /// `pattern`, `regex`, `arith` or `subscript`.
+    fn from_str(name: &str) -> Result<Self, String> {
+        Ok(match name {
+            "fields" => Mode::Fields,
+            "text" => Mode::Text,
+            "assignment" => Mode::Assignment,
+            "pattern" => Mode::Pattern,
+            "regex" => Mode::Regex,
+            "arith" => Mode::Arith,
+            "subscript" => Mode::Subscript,
+            other => return Err(format!("no expansion mode {other}")),
+        })
+    }
 }
 
 /// What an expansion produced.
@@ -379,9 +396,11 @@ pub enum Write {
         subscript: Vec<u8>,
     },
     /// An arithmetic command or `let` operand, its writes landed; the
-    /// result is its value.
+    /// result is its value. `expand` for a `let` operand, whose subscripts
+    /// expand as a value's do.
     Arith {
         text: Vec<u8>,
+        expand: bool,
     },
     /// A value evaluated as an `-i` write coerces it (`declare -ni r=M`),
     /// `added` an integer `+=`'s text; the result is its value.
@@ -456,7 +475,7 @@ pub fn write(shell: Shell, write: Write, listens: bool, warns: bool) -> Task<End
                     follow_ref,
                 } => writer.mark(&name, attr, on, follow_ref).await.map(|()| 0),
                 Write::Index { subscript } => writer.subscript_index(&subscript).await,
-                Write::Arith { text } => writer.arith(&text).await,
+                Write::Arith { text, expand } => writer.arith(&text, expand).await,
                 Write::IsSet {
                     reference,
                     expanded,
@@ -573,11 +592,31 @@ mod tests {
     }
 
     #[test]
+    fn a_host_failing_at_the_gate_stops_with_its_own_fault() {
+        let mut task = write(
+            shell(),
+            Write::Unset {
+                name: "x".to_owned(),
+                follow_ref: true,
+            },
+            true,
+            true,
+        );
+        assert!(matches!(task.step(), Some(Ask::Gate { post: false, .. })));
+        task.answer(Answer::Failed(Fault::Host("the host failed")));
+        assert!(task.step().is_none());
+        let ended = task.output().unwrap();
+        assert!(matches!(ended.result, Err(Fault::Host(_))));
+        assert_eq!(ended.shell.vars.scalar("x"), Some(&b"a b"[..]));
+    }
+
+    #[test]
     fn an_unheard_write_runs_in_one_step() {
         let mut task = write(
             shell(),
             Write::Arith {
                 text: b"y = 6 * 7".to_vec(),
+                expand: false,
             },
             false,
             true,

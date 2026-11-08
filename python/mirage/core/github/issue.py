@@ -65,6 +65,17 @@ async def edit_issue(
     body: dict[str, JsonValue],
 ) -> JsonValue:
     await get_issue(account, ref, number)
+    return await update_issue(account, ref, number, body)
+
+
+async def update_issue(
+    account: GitHubAccount,
+    ref: RepoRef,
+    number: int,
+    body: dict[str, JsonValue],
+) -> JsonValue:
+    """Patch an issue the caller has already read, as ``gh issue edit``
+    reads every one first."""
     return await github_request(
         account, "PATCH", _path(ref, f"/{number}"), body
     )

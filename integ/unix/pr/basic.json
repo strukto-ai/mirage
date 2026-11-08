@@ -487,7 +487,7 @@
       "expect": {
         "exit": 1,
         "stdout": "hello\n",
-        "stderr": "strings: /data/pr/missing.txt: No such file or directory\n"
+        "stderr": "strings: '/data/pr/missing.txt': No such file\n"
       }
     },
     {

@@ -25,7 +25,7 @@ import type { SessionView } from '../../../../view/types.ts'
 import { EvaluationContext } from '../../../evaluation.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { builtinUsage } from '../shared.ts'
+import { builtinUsage, identifierLine } from '../shared.ts'
 import { reportJobs } from '../../background.ts'
 import { IDENTIFIER_RE } from '../constants.ts'
 import { jobResult, resolveSpec, sessionOf } from '../jobspec.ts'
@@ -140,7 +140,7 @@ export async function handleWait(
   }
   if (varName !== null) {
     if (!IDENTIFIER_RE.test(varName)) {
-      return jobResult(cmdStr, `${shellVoice()}wait: \`${varName}': not a valid identifier\n`, 1)
+      return jobResult(cmdStr, `${identifierLine('wait', varName)}\n`, 1)
     }
     if (view?.isReadonly(varName) === true) {
       return jobResult(

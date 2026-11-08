@@ -18,6 +18,8 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
 import { runStream } from '../../../rs/stream.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/flag_view.ts'
 
 export function revGeneric(
   paths: PathSpec[],
@@ -26,6 +28,8 @@ export function revGeneric(
 ): CommandFnResult {
   stream = stdinStream(stream, ctx.stdin, false, false)
   const io = new IOResult()
-  const each = (source: ByteSource) => runStream('rev', {}, source, ctx.signal)
+  const zero = new FlagView(ctx.flags, specOf('rev')).asBool('zero')
+  const config = zero ? { zero: true } : {}
+  const each = (source: ByteSource) => runStream('rev', config, source, ctx.signal)
   return [perOperand(paths, stream, ctx.stdin, io, 'rev', each), io]
 }

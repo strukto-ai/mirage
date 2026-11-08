@@ -21,8 +21,13 @@ from mirage.commands.cli.builtin.gh.pull import (
     PR_FIELDS,
     _check,
     checks_cmd,
+    close_cmd,
+    comment_cmd,
+    create_cmd,
     diff_cmd,
+    edit_cmd,
     list_cmd,
+    merge_cmd,
     reopen_cmd,
     view_cmd,
 )
@@ -588,3 +593,236 @@ async def test_reopen_refuses_a_merged_pull_request(monkeypatch):
         b"already merged\n"
     )
     assert calls == [("get", 5)]
+
+
+BRANCHED = GitHubAccount(GhConfig(token="t", branch="dev"))
+
+
+def _selector_calls(monkeypatch, found=None) -> list[tuple]:
+    calls: list[tuple] = []
+
+    async def for_branch(config, ref, head, filter_=None):
+        calls.append(("branch", head))
+        return {"number": 7} if found is None else found or None
+
+    async def get(config, ref, number):
+        calls.append(("get", number))
+        return {"number": number, "title": "t"}
+
+    monkeypatch.setitem(view_cmd.__globals__, "pull_for_branch", for_branch)
+    monkeypatch.setitem(view_cmd.__globals__, "get_pull", get)
+    return calls
+
+
+# gh's finder: a number (``#`` optional) or a URL names one, any other word
+# is a branch, and none is the current branch, which the install's
+# ``branch`` stands in for.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "texts,want",
+    [
+        ([], [("branch", "dev"), ("get", 7)]),
+        (["feature"], [("branch", "feature"), ("get", 7)]),
+        (["#5"], [("get", 5)]),
+    ],
+)
+async def test_pr_selectors_resolve_as_gh_does(monkeypatch, texts, want):
+    calls = _selector_calls(monkeypatch)
+    await view_cmd(
+        BRANCHED, [], texts, Context(argv=(), flags={"repo": "o/r"})
+    )
+    assert calls == want
+
+
+@pytest.mark.asyncio
+async def test_no_selector_needs_the_install_branch(monkeypatch):
+    _selector_calls(monkeypatch)
+    with pytest.raises(
+        ValueError,
+        match="could not determine current branch: no `branch` on the install",
+    ):
+        await view_cmd(*_args(flags={"repo": "o/r"}))
+
+
+@pytest.mark.asyncio
+async def test_a_branch_heading_no_pull_request_is_refused(monkeypatch):
+    _selector_calls(monkeypatch, found={})
+    with pytest.raises(
+        ValueError, match='no pull requests found for branch "nope"'
+    ):
+        await view_cmd(
+            BRANCHED, [], ["nope"], Context(argv=(), flags={"repo": "o/r"})
+        )
+
+
+# cobra's argument counts: at most one selector for most verbs, exactly
+# one for close and reopen.
+@pytest.mark.asyncio
+async def test_a_second_selector_is_refused_as_gh_does(monkeypatch):
+    calls = _selector_calls(monkeypatch)
+    ctx = Context(argv=(), flags={"repo": "o/r"})
+    with pytest.raises(
+        ValueError, match=r"accepts at most 1 arg\(s\), received 2"
+    ):
+        await view_cmd(BRANCHED, [], ["1", "2"], ctx)
+    with pytest.raises(UsageError, match="too many arguments"):
+        await close_cmd(BRANCHED, [], ["1", "2"], ctx)
+    with pytest.raises(ValueError, match=r"accepts 1 arg\(s\), received 2"):
+        await reopen_cmd(BRANCHED, [], ["1", "2"], ctx)
+    assert calls == []
+
+
+# gh counts the selectors before it reads a body or a message.
+@pytest.mark.asyncio
+async def test_comment_and_merge_count_before_reading_anything(monkeypatch):
+    calls = _selector_calls(monkeypatch)
+    ctx = Context(argv=(), flags={"repo": "o/r"})
+    for cmd in (comment_cmd, merge_cmd):
+        with pytest.raises(
+            ValueError, match=r"accepts at most 1 arg\(s\), received 2"
+        ):
+            await cmd(BRANCHED, [], ["1", "2"], ctx)
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_an_edit_with_no_field_is_refused_before_any_lookup(
+    monkeypatch,
+):
+    calls = _selector_calls(monkeypatch)
+    with pytest.raises(
+        UsageError,
+        match="--title, --body, --reviewer, --assignee, --label, --project, "
+        "or --milestone required when not running interactively",
+    ):
+        await edit_cmd(BRANCHED, [], [], Context(argv=(), flags={}))
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_close_and_reopen_take_no_current_branch(monkeypatch):
+    calls = _selector_calls(monkeypatch)
+    ctx = Context(argv=(), flags={"repo": "o/r"})
+    with pytest.raises(
+        UsageError,
+        match="cannot close pull request: number, url, or branch required",
+    ):
+        await close_cmd(BRANCHED, [], [], ctx)
+    with pytest.raises(ValueError, match=r"accepts 1 arg\(s\), received 0"):
+        await reopen_cmd(BRANCHED, [], [], ctx)
+    assert calls == []
+
+
+def _create_calls(monkeypatch, existing=None) -> list[tuple]:
+    calls: list[tuple] = []
+
+    async def for_branch(config, ref, head, filter_=None):
+        calls.append(("branch", head, filter_.states, filter_.base))
+        return existing
+
+    async def view(config, ref):
+        calls.append(("view", ref.owner, ref.repo))
+        return {"default_branch": "trunk"}
+
+    async def create(config, ref, body):
+        calls.append(("create", body))
+        return {"html_url": "https://github.com/o/r/pull/9"}
+
+    monkeypatch.setitem(create_cmd.__globals__, "view_repo", view)
+    monkeypatch.setitem(create_cmd.__globals__, "create_pull", create)
+    monkeypatch.setitem(create_cmd.__globals__, "pull_for_branch", for_branch)
+    return calls
+
+
+# gh opens it from the current branch unless --head names one, into the
+# repository's default branch unless --base names one.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,head,base,asked",
+    [
+        ({}, "dev", "trunk", 3),
+        ({"head": "feature", "base": "release"}, "feature", "release", 2),
+    ],
+)
+async def test_pr_create_defaults_head_and_base_as_gh_does(
+    monkeypatch, flags, head, base, asked
+):
+    calls = _create_calls(monkeypatch)
+    account = GitHubAccount(GhConfig(token="t", repo="o/r", branch="dev"))
+    await create_cmd(
+        account,
+        [],
+        [],
+        Context(argv=(), flags={"title": "t", "body": "b", **flags}),
+    )
+    assert len(calls) == asked
+    assert calls[-2] == ("branch", head, ("OPEN",), base)
+    assert calls[-1] == (
+        "create",
+        {
+            "title": "t",
+            "head": head,
+            "base": base,
+            "body": "b",
+            "draft": False,
+            "maintainer_can_modify": True,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_pr_create_refuses_a_second_open_pull_request(monkeypatch):
+    calls = _create_calls(
+        monkeypatch, existing={"url": "https://github.com/o/r/pull/4"}
+    )
+    account = GitHubAccount(GhConfig(token="t", repo="o/r", branch="dev"))
+    with pytest.raises(
+        ValueError,
+        match='a pull request for branch "dev" into branch "main" already '
+        "exists:\nhttps://github.com/o/r/pull/4",
+    ):
+        await create_cmd(
+            account,
+            [],
+            [],
+            Context(
+                argv=(), flags={"title": "t", "body": "b", "base": "main"}
+            ),
+        )
+    assert calls == [("branch", "dev", ("OPEN",), "main")]
+
+
+@pytest.mark.asyncio
+async def test_pr_create_refuses_a_head_with_two_owners(monkeypatch):
+    calls = _create_calls(monkeypatch)
+    account = GitHubAccount(GhConfig(token="t", repo="o/r"))
+    with pytest.raises(
+        ValueError, match="invalid qualified head ref format 'a:b:c'"
+    ):
+        await create_cmd(
+            account,
+            [],
+            [],
+            Context(
+                argv=(), flags={"title": "t", "body": "b", "head": "a:b:c"}
+            ),
+        )
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_pr_create_needs_head_or_the_install_branch(monkeypatch):
+    calls = _create_calls(monkeypatch)
+    account = GitHubAccount(GhConfig(token="t", repo="o/r"))
+    with pytest.raises(
+        ValueError,
+        match="could not determine the current branch: no `branch` on the "
+        "install",
+    ):
+        await create_cmd(
+            account,
+            [],
+            [],
+            Context(argv=(), flags={"title": "t", "body": "b"}),
+        )
+    assert calls == []

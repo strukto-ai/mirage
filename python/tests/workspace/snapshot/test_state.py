@@ -1688,6 +1688,35 @@ async def test_a_snapshot_takes_the_finished_jobs_another_workspace_ran():
         await b.close()
 
 
+# A snapshot keeps the finished lines and processes, with each finished
+# job's line, and a workspace loaded from it lists them under its own id,
+# numbering new processes past them.
+@pytest.mark.asyncio
+async def test_a_snapshot_keeps_the_finished_lines_and_processes(track):
+    src = track(Workspace({"/": RAMVFS()}, mode=MountMode.WRITE))
+    await src.shell("true &")
+    await src.job_table.wait(1, src.default_session_id)
+    state = await to_state_dict(src)
+    [line] = state[StateKey.LINES]
+    assert (line["command"], line["state"]) == ("true &", "exited")
+    [job] = state[StateKey.JOBS]
+    assert job[JobKey.LINE] == line["id"]
+    saved = sorted(
+        int(p["id"].rsplit(":", 1)[1]) for p in state[StateKey.PROCESS_RECORDS]
+    )
+    assert saved
+    restored = track(await Workspace.from_state(state))
+    [kept] = await restored.lines()
+    assert (kept.id.value, kept.command) == (line["id"], "true &")
+    processes = await restored.processes()
+    assert [p.pid for p in processes] == saved
+    assert {p.id.workspace_id for p in processes} == {restored.workspace_id}
+    [restored_job] = await restored.jobs()
+    assert restored_job.line == kept.id
+    pid = int((await restored.shell("true & echo $!")).stdout)
+    assert pid > saved[-1]
+
+
 @pytest.mark.asyncio
 async def test_a_snapshot_leaves_out_a_killed_job_still_stopping():
     ws = Workspace({"/m": RAMVFS()})

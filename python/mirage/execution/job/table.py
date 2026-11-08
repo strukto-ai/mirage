@@ -213,6 +213,10 @@ class JobTable:
         # Told each job this table's jobs run as it ends; the workspace
         # sets it, to trace the job.
         self.ended: Callable[[Job], None] | None = None
+        # Run once this table's daemon takes the workspace's lease; the
+        # workspace sets it, to end the line and process records the
+        # daemon before it left running.
+        self.taken: Callable[[], Awaitable[None]] | None = None
         # The bounds on killed jobs' stops (``_end_killed``), each with
         # its job.
         self._stopping: dict[asyncio.Task[None], JobHandle] = {}
@@ -280,6 +284,11 @@ class JobTable:
             self._claimed = True
             self._renewed = time.monotonic()
             self._keep_lease()
+            if self.taken is not None:
+                try:
+                    await self.taken()
+                except Exception as exc:
+                    logger.debug("lost records not ended: %s", exc)
             if earlier and not self._reaping_stopped:
                 task = asyncio.ensure_future(self._reap_earlier(earlier))
                 self._reaping.add(task)

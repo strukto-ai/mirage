@@ -15,12 +15,14 @@
 import base64
 import binascii
 
+from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_to_kwargs
 from mirage.core.api.errors import ApiError
+from mirage.io.types import ByteSource, materialize
 from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import PathSpec, word_text
 from mirage.workspace.executor.builtins.metadata.xattr import (
     SETFATTR_USAGE,
@@ -75,10 +77,116 @@ def decode_value(text: str) -> bytes | None:
     return bytes(out)
 
 
+def _unescaped(name: str) -> str:
+    """A ``# file:`` name as getfattr escaped it: ``\\ooo`` is that byte
+    and ``\\\\`` a backslash.
+
+    Args:
+        name (str): the name as the dump spells it.
+    """
+    raw = encode_text(name)
+    out = bytearray()
+    i = 0
+    while i < len(raw):
+        digits = raw[i + 1 : i + 4]
+        if (
+            raw[i] == 0x5C
+            and len(digits) == 3
+            and all(0x30 <= b <= 0x37 for b in digits)
+        ):
+            out.append(int(digits, 8) & 0xFF)
+            i += 4
+        elif raw[i : i + 2] == b"\\\\":
+            out.append(0x5C)
+            i += 2
+        else:
+            out.append(raw[i])
+            i += 1
+    return decode_text(bytes(out))
+
+
+async def _restore(
+    dispatch: DispatchFn,
+    session: SessionState,
+    typed: str,
+    stdin: ByteSource | None,
+    *,
+    raw: bool,
+    nofollow: bool,
+) -> Result:
+    """``--restore``: set what a ``getfattr --dump`` listing names.
+
+    Each ``# file:`` line names the file the attribute lines after it
+    are set on, ``NAME=VALUE`` decoded as ``-v`` decodes it (``--raw``
+    leaves it) and a bare ``NAME`` the empty value; blank lines and
+    other comments are skipped. A listing that cannot be opened is
+    reported with exit 0, as attr 2.5.2 does. Divergence: a failed
+    attribute is reported once and the rest of the listing still
+    restores, where attr repeats the failure and stops.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        session (SessionState): session whose cwd resolves names.
+        typed (str): the listing as typed, ``-`` for stdin.
+        stdin (ByteSource | None): the line's input.
+        raw (bool): ``--raw``.
+        nofollow (bool): ``-h``.
+    """
+    try:
+        if typed == "-":
+            data = await read_stdin_async(stdin) or b""
+        else:
+            found, _ = await dispatch(
+                "read", PathSpec.from_str_path(typed, cwd=session.cwd)
+            )
+            data = b"" if found is None else await materialize(found)
+    except IsADirectoryError as exc:
+        return result(
+            "setfattr",
+            exit_code=1,
+            stderr=f"setfattr: {typed}: {attr_error(exc)}\n",
+        )
+    except (OSError, ApiError) as exc:
+        return result(
+            "setfattr",
+            exit_code=0,
+            stderr=f"setfattr: {typed}: {attr_error(exc)}\n",
+        )
+    errors: list[str] = []
+    target: PathSpec | None = None
+    for line in decode_text(data).split("\n"):
+        if line.startswith("# file: "):
+            target = PathSpec.from_str_path(
+                _unescaped(line[len("# file: ") :]), cwd=session.cwd
+            )
+            continue
+        if not line or line.startswith("#"):
+            continue
+        if target is None:
+            errors.append(
+                f"setfattr: {typed}: No filename found in line 0, aborting\n"
+            )
+            break
+        name, _, text = line.partition("=")
+        value = encode_text(text) if raw else decode_value(text)
+        if value is None:
+            errors.append("bad input encoding\n")
+            continue
+        try:
+            await dispatch(
+                "setxattr", target, name=name, value=value, nofollow=nofollow
+            )
+        except (OSError, ApiError) as exc:
+            shown = target.raw_path or target.virtual
+            errors.append(f"setfattr: {shown}: {attr_error(exc)}\n")
+    return finish("setfattr", errors)
+
+
 async def handle_setfattr(
     dispatch: DispatchFn,
     session: SessionState,
     args: list[str | PathSpec],
+    stdin: ByteSource | None = None,
 ) -> Result:
     """setfattr: set or remove one extended attribute on each path.
 
@@ -96,6 +204,8 @@ async def handle_setfattr(
         dispatch (DispatchFn): op dispatcher.
         session (SessionState): session whose cwd resolves operands.
         args (list[str | PathSpec]): the words after the command name.
+        stdin (ByteSource | None): the line's input, which
+            ``--restore=-`` reads.
     """
     spec = SPECS["setfattr"]
     parsed = parse_command(
@@ -105,6 +215,13 @@ async def handle_setfattr(
     if refused is not None:
         return refused
     fl = FlagView(parse_to_kwargs(parsed), spec=spec)
+    raw = fl.as_bool("raw")
+    nofollow = fl.as_bool("no_dereference")
+    restore = fl.as_str("restore")
+    if restore is not None:
+        return await _restore(
+            dispatch, session, restore, stdin, raw=raw, nofollow=nofollow
+        )
     name = fl.as_str("name")
     remove = fl.as_str("remove")
     typed = fl.as_str("value")
@@ -115,10 +232,15 @@ async def handle_setfattr(
         or not targets
     ):
         return result("setfattr", exit_code=2, stderr=SETFATTR_USAGE)
-    value = decode_value(typed) if typed is not None else b""
+    value = (
+        b""
+        if typed is None
+        else encode_text(typed)
+        if raw
+        else decode_value(typed)
+    )
     if value is None:
         return result("setfattr", exit_code=1, stderr="bad input encoding\n")
-    nofollow = fl.as_bool("no_dereference")
     errors: list[str] = []
     for target in targets:
         try:

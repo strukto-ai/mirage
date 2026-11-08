@@ -2,23 +2,33 @@ from collections.abc import (
     AsyncIterator,
     Awaitable,
     Callable,
+    Iterator,
     Mapping,
     Sequence,
 )
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
+from mirage.commands.builtin.utils.files0 import listed_names
 from mirage.commands.builtin.utils.lines import record_separator
+from mirage.commands.builtin.utils.random_source import (
+    RandomSource,
+    RandomSourceError,
+)
 from mirage.commands.builtin.utils.stream import (
+    is_stdin,
     stdin_stream,
 )
+from mirage.commands.constants import ROOT_CWD
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.constants import OPERAND
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.usage import usage_hint
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
+from mirage.errors.render import ZERO_LENGTH_NAME
 from mirage.errors.types import BadDescriptorError, FileTooLargeError
 from mirage.io.cooperative import chunks
 from mirage.io.spool import IO_BUFFER_SIZE, ByteSpool
@@ -27,8 +37,10 @@ from mirage.io.yield_budget import YieldBudget
 from mirage.rs import StreamRefusal, open_stream, run_stream
 from mirage.rs.scan import refused, scan
 from mirage.rs.stream import OpenStream, chain_output, close_stream
+from mirage.shell.bytes import encode_text
 from mirage.types import JsonValue, LineFacts, PathSpec, PolymorphicReadFn
-from mirage.utils.quote import shell_quote
+from mirage.utils.ids import IdSource, SystemIdSource
+from mirage.utils.quote import shell_quote, shell_quote_always
 
 # The options sort's grammar in mirage-rs reads.
 GRAMMAR = (
@@ -51,7 +63,12 @@ GRAMMAR = (
     "c",
     "C",
     "check",
+    "random_sort",
+    "random_source",
 )
+
+# The options naming a file whose word the scan compares as typed.
+_WORDS = ("output", "random_source")
 
 # The steps GNU sort names when a file fails it. GNU checks that every
 # input is readable before it reads any (`cannot read`), opens the
@@ -139,6 +156,7 @@ class SortFlags:
     merge: bool = False
     output: PathSpec | None = None
     zero_terminated: bool = False
+    random: bool = False
 
 
 def _typed_options(
@@ -146,30 +164,36 @@ def _typed_options(
 ) -> list[tuple[str, str]]:
     """sort's options in the order typed, then its operands.
 
-    An output is the word typed, which GNU compares (STREQ), so
-    ``-o ./out -o out`` names two outputs though they are one file, and
-    a bare ``--check`` is ``-c``, apart from ``--check=``'s empty word.
-    The tape holds each ``-o`` resolved, so its word comes from the path
-    the line typed in the same place.
+    An output or a random source is the word typed, which GNU compares
+    (STREQ), so ``-o ./out -o out`` names two outputs though they are
+    one file, and a bare ``--check`` is ``-c``, apart from
+    ``--check=``'s empty word. The tape holds each such file resolved,
+    so its word comes from the path the line typed in the same place.
 
     Args:
         fl (FlagView): sort's flags.
         paths (list[PathSpec]): the operands.
 
     Raises:
-        ValueError: the tape holds other ``-o`` words than the paths.
+        ValueError: the tape holds other words than the paths.
     """
     tape = fl.occurrences(*GRAMMAR)
-    outputs = fl.as_paths("output")
-    if sum(name == "output" for name, _ in tape) != len(outputs):
-        raise ValueError(
-            f"sort's tape holds other -o words than its {len(outputs)} paths"
+    words: dict[str, Iterator[str]] = {}
+    for option in _WORDS:
+        named = fl.as_paths(option)
+        if sum(name == option for name, _ in tape) != len(named):
+            raise ValueError(
+                f"sort's tape holds other {option} words than its "
+                f"{len(named)} paths"
+            )
+        words[option] = iter(
+            path.raw_path if path.raw_path is not None else path.virtual
+            for path in named
         )
-    words = iter(path.raw_path for path in outputs)
     typed: list[tuple[str, str]] = []
     for name, value in tape:
-        if name == "output":
-            typed.append((name, next(words)))
+        if name in words:
+            typed.append((name, next(words[name])))
         elif value is True:
             typed.append(("c" if name == "check" else name, ""))
         elif isinstance(value, str):
@@ -229,7 +253,92 @@ def parse_flags(
         merge=fl.as_bool("merge"),
         output=outputs[-1] if outputs else None,
         zero_terminated=config["zero_terminated"] is True,
+        random=values.get("random") is True,
     )
+
+
+def _refusal(line: str) -> IOResult:
+    return IOResult(exit_code=2, stderr=encode_text(line + "\n"))
+
+
+async def _listed(
+    source: PathSpec,
+    paths: list[PathSpec],
+    stream: Callable[[PathSpec], AsyncIterator[bytes]],
+    cwd: PathSpec,
+) -> list[PathSpec] | IOResult:
+    """The inputs a ``--files0-from`` list names, every one vetted before
+    any is read, or what GNU sort refuses first.
+
+    Args:
+        source (PathSpec): the list, ``-`` for stdin.
+        paths (list[PathSpec]): the operands, which the list excludes.
+        stream (Callable[[PathSpec], AsyncIterator[bytes]]): the reader.
+        cwd (PathSpec): where a relative name is resolved.
+    """
+    label = source.raw_path if source.raw_path is not None else source.virtual
+    if paths:
+        word = paths[0].raw_path or paths[0].virtual
+        return _refusal(
+            f"sort: extra operand {shell_quote_always(word)}\n"
+            "file operands cannot be combined with --files0-from\n"
+            + usage_hint("sort")
+        )
+    try:
+        names = await listed_names(source, stream)
+    except IsADirectoryError:
+        return _refusal(
+            f"sort: cannot read file names from {shell_quote_always(label)}"
+        )
+    except FS_ERRORS as exc:
+        strerror = fs_strerror(exc) or str(exc)
+        return IOResult(
+            exit_code=2, stderr=step_failure(OPEN_FAILED, label, strerror)
+        )
+    if not names:
+        return _refusal(f"sort: no input from {shell_quote_always(label)}")
+    for run, name in enumerate(names):
+        if name == "":
+            return _refusal(
+                f"sort: {shell_quote(label)}:{run + 1}: {ZERO_LENGTH_NAME}"
+            )
+        if name == "-" and is_stdin(source):
+            return _refusal(
+                "sort: when reading file names from stdin, "
+                "no file name of '-' allowed"
+            )
+    return [PathSpec.from_str_path(name, cwd=cwd) for name in names]
+
+
+async def _salted(
+    config: dict[str, JsonValue],
+    source: PathSpec | None,
+    stream: Callable[[PathSpec], AsyncIterator[bytes]],
+    ids: IdSource,
+) -> dict[str, JsonValue] | IOResult:
+    """The configuration with the salt ``-R`` hashes keys under: the
+    first 16 bytes of ``--random-source``, or 16 random ones.
+
+    Args:
+        config (dict[str, JsonValue]): the engine's, as mirage-rs read it.
+        source (PathSpec | None): the ``--random-source`` file.
+        stream (Callable[[PathSpec], AsyncIterator[bytes]]): its reader.
+        ids (IdSource): the randomness without one.
+    """
+    if source is None:
+        salt = ids.random_words(4)[:16]
+    else:
+        random = RandomSource("sort", source, stream, opening=OPEN_FAILED)
+        try:
+            salt = await random.take(16)
+        except RandomSourceError as exc:
+            return _refusal(str(exc))
+        finally:
+            await random.close()
+    compare = config["compare"]
+    if not isinstance(compare, dict):
+        raise ValueError(f"sort's scan read no compare: {config!r}")
+    return {**config, "compare": {**compare, "salt": list(salt)}}
 
 
 def _label(path: PathSpec | None) -> str:
@@ -488,6 +597,8 @@ async def sort_generic(
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     stdin: ByteSource | None = None,
     flags: Mapping[str, FlagValue],
+    cwd: PathSpec = ROOT_CWD,
+    ids: IdSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """GNU sort over the given inputs.
 
@@ -507,10 +618,34 @@ async def sort_generic(
             the backend cannot write.
         stdin (ByteSource | None): standard input.
         flags (Mapping[str, FlagValue]): the dispatcher's flag bag.
+        cwd (PathSpec): where a ``--files0-from`` name is resolved.
+        ids (IdSource | None): the randomness ``-R`` salts keys with
+            when no ``--random-source`` names a file.
     """
     parsed = parse_flags(flags, paths)
     if isinstance(parsed, IOResult):
         return b"", parsed
+    fl = FlagView(flags, spec=SPECS["sort"])
+    listed = fl.as_path("files0_from")
+    if listed is not None:
+        named = await _listed(listed, paths, stdin_stream(read, stdin), cwd)
+        if isinstance(named, IOResult):
+            return b"", named
+        paths = named
+        parsed = parse_flags(flags, paths)
+        if isinstance(parsed, IOResult):
+            return b"", parsed
+    if parsed.random:
+        sources = fl.as_paths("random_source")
+        salted = await _salted(
+            parsed.config,
+            sources[-1] if sources else None,
+            stdin_stream(read, stdin),
+            ids if ids is not None else SystemIdSource(),
+        )
+        if isinstance(salted, IOResult):
+            return b"", salted
+        parsed = replace(parsed, config=salted)
     if parsed.check:
         path = paths[0] if paths else None
         source = (

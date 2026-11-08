@@ -57,6 +57,8 @@ export interface TailCounts {
   readonly fromLine: number | null
   readonly byteCount: number | null
   readonly fromByte: number | null
+  /** The byte that ends a line, NUL under `-z`; 10 when left off. */
+  readonly terminator?: number
 }
 
 /**
@@ -75,6 +77,7 @@ export function normalizeCounts(counts: TailCounts): TailCounts {
     fromLine: counts.fromLine ?? null,
     byteCount: counts.byteCount ?? null,
     fromByte: counts.fromByte ?? null,
+    terminator: counts.terminator ?? 10,
   }
 }
 
@@ -237,7 +240,7 @@ async function* tailFile(
   const n = counts.lines ?? 10
   const fromEnd = counts.fromLine === null && counts.fromByte === null
   if (!isStdin(path) && fromEnd) {
-    if (counts.byteCount === null && lastLines !== undefined) {
+    if (counts.byteCount === null && (counts.terminator ?? 10) === 10 && lastLines !== undefined) {
       const answer = await lastLines(path, Math.abs(n))
       if (answer !== null) {
         yield* chunks(answer)
@@ -261,7 +264,7 @@ async function* tailFile(
           mode: 'reverse',
           unit: 'records',
           count: String(Math.abs(n)),
-          terminator: 10,
+          terminator: counts.terminator ?? 10,
         })
         try {
           while (end > 0) {
@@ -318,7 +321,7 @@ async function* tail(source: ByteSource, rawCounts: TailCounts): AsyncIterable<U
     mode: forward ? 'skip' : 'last',
     unit: byteMode ? 'bytes' : 'records',
     count: String(count),
-    terminator: 10,
+    terminator: counts.terminator ?? 10,
   })
   const budget = new YieldBudget()
   const input = chunks(source)
@@ -678,7 +681,7 @@ export interface TailFlags {
 export function parseFlags(bag: Record<string, FlagValue>): TailFlags | IOResult {
   const fl = new FlagView(bag, specOf('tail'))
   const raw = fl.raw('follow')
-  const typed = fl.texts('n', 'c', 'sleep_interval')
+  const typed = fl.texts('lines', 'bytes', 'sleep_interval')
   if (typeof raw === 'string') typed.push(['follow', raw])
   let values
   try {
@@ -694,10 +697,10 @@ export function parseFlags(bag: Record<string, FlagValue>): TailFlags | IOResult
   const [follow, byName, retry] = followFlags(fl, how)
   // The last of -q and -v decides, as in GNU tail, and so does the last of
   // -n and -c.
-  const headers = fl.typedOrder('q', 'v').at(-1)
-  const unit = fl.typedOrder('n', 'c').at(-1)
-  const [lines, fromLine] = countsOf(unit === 'c' ? null : values.lines)
-  const [byteCount, fromByte] = countsOf(unit === 'n' ? null : values.bytes)
+  const headers = fl.typedOrder('quiet', 'silent', 'verbose').at(-1)
+  const unit = fl.typedOrder('lines', 'bytes').at(-1)
+  const [lines, fromLine] = countsOf(unit === 'bytes' ? null : values.lines)
+  const [byteCount, fromByte] = countsOf(unit === 'lines' ? null : values.bytes)
   // mirage-rs answers -s, typed or GNU's default of 1, as null when it is
   // infinite.
   const interval = values.sleep_interval
@@ -705,9 +708,15 @@ export function parseFlags(bag: Record<string, FlagValue>): TailFlags | IOResult
     throw new Error(`tail: mirage-rs read -s as ${JSON.stringify(interval)}`)
   }
   return {
-    counts: { lines, fromLine, byteCount, fromByte },
-    quiet: headers === 'q',
-    verbose: headers === 'v',
+    counts: {
+      lines,
+      fromLine,
+      byteCount,
+      fromByte,
+      terminator: fl.asBool('zero_terminated') ? 0 : 10,
+    },
+    quiet: headers === 'quiet' || headers === 'silent',
+    verbose: headers === 'verbose',
     following: {
       follow,
       byName,
@@ -745,7 +754,11 @@ export async function tailGeneric(
   stream = stdinStream(stream, ctx.stdin)
   const { counts, quiet: qFlag, verbose: vFlag, following } = parsed
   const n = counts.lines ?? 10
-  const fromEnd = counts.byteCount === null && counts.fromLine === null && counts.fromByte === null
+  const fromEnd =
+    counts.byteCount === null &&
+    counts.fromLine === null &&
+    counts.fromByte === null &&
+    (counts.terminator ?? 10) === 10
   if (
     following.follow &&
     following.byName &&

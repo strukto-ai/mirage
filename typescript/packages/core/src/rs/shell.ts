@@ -808,11 +808,6 @@ export class Shell {
     return this.call('is_readonly', name, followRef) as boolean
   }
 
-  /** The readonly variable a write to `name` reaches, if any. */
-  frozen(name: string): string | null {
-    return this.call('frozen', name) as string | null
-  }
-
   /** The exported scalars a child process inherits, hidden names left out. */
   exported(): (readonly [string, string])[] {
     return this.call('exported') as unknown as (readonly [string, string])[]
@@ -826,6 +821,35 @@ export class Shell {
   /** Set or clear one attribute (its `declare` letter) with no gate. */
   setAttr(name: string, letter: string | null, on: boolean): void {
     this.call('set_attr', name, letter, on)
+  }
+
+  /**
+   * Mark an array `declare -a` / `-A` just made as never assigned, which its
+   * first write clears: bookkeeping, not a write.
+   */
+  unassigned(name: string): void {
+    this.call('unassigned', name)
+  }
+
+  /**
+   * Whether `name`'s record is one declared and never assigned, which a host
+   * putting the record back marks again (`unassigned`).
+   */
+  isUnassigned(name: string): boolean {
+    return this.call('is_unassigned', name) as boolean
+  }
+
+  /** The line `declare -p` prints for a name; null for one unset or hidden. */
+  declaration(name: string): string | null {
+    return this.call('declaration', name) as string | null
+  }
+
+  /**
+   * The variable lines a bare `set` prints, sorted by name, the running
+   * command's temporaries in `skip` left out.
+   */
+  assignments(skip: readonly string[]): string[] {
+    return texts(this.call('assignments', skip))
   }
 
   /** Open a function call's scope; the token closes it. */
@@ -889,15 +913,6 @@ export class Shell {
     this.call('unreach')
   }
 
-  /** Step out to the caller's scope until `stepForward`. */
-  stepBack(): void {
-    this.call('step_back')
-  }
-
-  stepForward(): void {
-    this.call('step_forward')
-  }
-
   /** One `$RANDOM` read: the draw, null once RANDOM is not special, or a seed's error. */
   nextRandom(): number | null | readonly Item[] {
     return this.call('next_random') as number | null | readonly Item[]
@@ -941,15 +956,6 @@ export class Shell {
   }
 
   /** `$?` as the last operation left it. */
-  get status(): number {
-    return this.call('status') as number
-  }
-
-  /** The status of the last command substitution since the last take. */
-  takeSubstituted(): number | null {
-    return this.call('take_substituted') as number | null
-  }
-
   /** A copy for a fork of the session: the same records, a fresh generator. */
   fork(): Shell {
     return new Shell(this.call('fork') as number)
@@ -1042,9 +1048,12 @@ export class Shell {
     )
   }
 
-  /** Evaluate an arithmetic command or `let` operand, its writes landed. */
-  arith(text: string, options: Heard = {}): ShellTask {
-    return this.task('arith', null, text, options.listens ?? false)
+  /**
+   * Evaluate an arithmetic command or `let` operand, its writes landed;
+   * `expand` for a `let` operand, whose subscripts expand first.
+   */
+  arith(text: string, expand = false, options: Heard = {}): ShellTask {
+    return this.task('arith', null, text, options.listens ?? false, expand)
   }
 
   /** Evaluate a value as an `-i` write coerces it; `added` is an integer `+=`'s text. */

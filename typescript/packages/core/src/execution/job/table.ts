@@ -185,6 +185,10 @@ export class JobTable {
   // Told each job this table's jobs run as it ends; the workspace sets it,
   // to trace the job.
   ended: ((record: Job) => void) | null = null
+  // Run once this table's daemon takes the workspace's lease; the workspace
+  // sets it, to end the line and process records the daemon before it left
+  // running.
+  taken: (() => Promise<void>) | null = null
 
   /**
    * @param store the job plane holding each session's list and each job's
@@ -268,6 +272,13 @@ export class JobTable {
     this.held = true
     this.renewedAt = performance.now()
     this.keepLease()
+    if (this.taken !== null) {
+      try {
+        await this.taken()
+      } catch (err) {
+        console.debug('lost records not ended:', err)
+      }
+    }
     if (Object.keys(earlier).length > 0 && !this.reapingStopped) {
       const reaping = this.reapEarlier(earlier).finally(() => {
         this.reaping.delete(reaping)

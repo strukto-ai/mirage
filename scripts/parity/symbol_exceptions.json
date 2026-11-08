@@ -1329,9 +1329,6 @@
    }
   },
   "workspace/session/session": {
-   "python_only": {
-    "_Readonly": "Python's live Set of the readonly names (session.readonly_vars); TypeScript's getter builds the set each call."
-   },
    "typescript_only": {
     "drawFrom": "A closure over the session's id source for the shell to draw seeds from; Python hands the shell the source's bound method."
    }
@@ -1567,6 +1564,22 @@
     "WsIdParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
     "WsProcessParams": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",
     "registerProcessesRoutes": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerProcessesRoutes."
+   }
+  },
+  "shell/console/sql": {
+   "python_only": {
+    "_resolve": "Python wakes a waiter parked on its own loop through call_soon_threadsafe, so it resolves the waiter's future in a module function; TypeScript runs on one loop and resolves its promise directly."
+   }
+  },
+  "vfs/sql/postgres": {
+   "python_only": {
+    "_serve": "asyncpg is async-only and SqlDriver is synchronous, so Python keeps the pool on an event loop of its own, on a thread _serve runs; pg's pool is already awaited in TypeScript."
+   },
+   "typescript_only": {
+    "PgClientLike": "pg loads as node's optional peer, so TypeScript types the pool, its clients and the module structurally; Python imports asyncpg and uses its own types.",
+    "PgModule": "pg loads as node's optional peer, so TypeScript types the pool, its clients and the module structurally; Python imports asyncpg and uses its own types.",
+    "PgPoolLike": "pg loads as node's optional peer, so TypeScript types the pool, its clients and the module structurally; Python imports asyncpg and uses its own types.",
+    "bind": "pg binds a Buffer as BYTEA and would stringify a bare Uint8Array, so TypeScript turns each byte parameter into one; asyncpg binds Python bytes itself."
    }
   }
  }

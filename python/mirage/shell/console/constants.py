@@ -22,3 +22,8 @@ KILLED_OUTCOME = "killed"
 # A cursor past any console's end: reading from it returns no chunks and
 # the console's length as the next cursor. Exact on both hosts.
 END_OF_CONSOLE = 2**53 - 1
+
+# How often a reader waiting on a console in a SQL database looks again: a
+# database has no blocking read, and an append through the same store wakes
+# its readers at once.
+SQL_POLL_SECONDS = 0.25
