@@ -49,7 +49,8 @@ def read_template(path: Path) -> dict[str, Any]:
     and ``config`` are read; the fields a server fills in are dropped.
     Saved as written, with no ``${NAME}`` read from the environment; a
     relative ``script`` or code path is rebased onto the file's folder,
-    as ``workspace create`` does.
+    as ``workspace create`` does, except a profile's policy ``script``,
+    which names a saved policy.
 
     Args:
         path (Path): the YAML or JSON file.
@@ -76,7 +77,9 @@ def read_template(path: Path) -> dict[str, Any]:
         fail(f"{path}: description must be a string", 2)
     if not isinstance(config, dict):
         fail(f"{path}: config must hold a mapping", 2)
-    _absolutize_scripts(config, path.resolve().parent)
+    # A profile's ``script: guard.py`` names a saved policy, so profiles
+    # stay as written; the rebase changes the copy's nested entries in place.
+    _absolutize_scripts({**config, "profiles": None}, path.resolve().parent)
     return {"description": description, "config": config}
 
 

@@ -138,17 +138,25 @@ def test_a_file_that_is_not_a_mapping_is_refused(client, tmp_path):
     assert client.calls == []
 
 
-def test_create_rebases_a_relative_script_onto_the_files_folder(
+def test_create_rebases_a_relative_script_but_keeps_policy_names(
     client, tmp_path
 ):
     folder = tmp_path / "deploy"
     folder.mkdir()
     path = folder / "ws.yaml"
-    path.write_text("clis:\n  tally:\n    script: ./tally.py\n")
+    path.write_text(
+        "clis:\n  tally:\n    script: ./tally.py\n"
+        "profiles:\n  reviewer:\n    policy:\n"
+        "      pre_command:\n        - script: guard.py\n"
+    )
     done = _invoke("create", "tally", "-f", str(path))
     assert done.exit_code == 0, done.output
-    sent = client.calls[0][2]["config"]["clis"]["tally"]["script"]
-    assert sent == str(folder.resolve() / "tally.py")
+    config = client.calls[0][2]["config"]
+    assert config["clis"]["tally"]["script"] == str(
+        folder.resolve() / "tally.py"
+    )
+    reviewer = config["profiles"]["reviewer"]
+    assert reviewer["policy"]["pre_command"] == [{"script": "guard.py"}]
 
 
 def test_a_description_that_is_no_string_is_refused(client, tmp_path):

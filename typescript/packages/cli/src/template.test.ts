@@ -120,4 +120,27 @@ describe('mirage template', () => {
     expect((await template(url, 'create', 'copy', '-f', file)).code).toBe(0)
     expect(posted).toEqual([{ ...SAVED, name: 'copy' }])
   })
+
+  it('rebases a relative script next to the file, and keeps a policy name', async () => {
+    const { url, posted } = await fakeServer()
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-template-file-'))
+    tempDirs.push(dir)
+    const file = join(dir, 't.yaml')
+    writeFileSync(
+      file,
+      'clis:\n  tally:\n    script: ./tally.py\n' +
+        'profiles:\n  reviewer:\n    policy:\n      pre_command:\n        - script: guard.py\n',
+    )
+    expect((await template(url, 'create', 't', '-f', file)).code).toBe(0)
+    expect(posted).toEqual([
+      {
+        name: 't',
+        description: null,
+        config: {
+          clis: { tally: { script: join(dir, 'tally.py') } },
+          profiles: { reviewer: { policy: { pre_command: [{ script: 'guard.py' }] } } },
+        },
+      },
+    ])
+  })
 })

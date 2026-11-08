@@ -15,15 +15,13 @@ import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
 import type { Policy } from '@struktoai/mirage-core/resources/types'
 import type { WorkspaceRegistry } from '../registry.ts'
+import { POLICY_NAME } from '../resources/policies.ts'
 import type { RouteApp, RouteReply } from '../routes.ts'
 import { storeRefusal } from './templates.ts'
 
 interface RefParams {
   ref: string
 }
-
-/** A policy's name: a file name mirage reads as Python. */
-const POLICY_NAME = /^[a-z0-9][a-z0-9._-]{0,59}\.py$/
 
 /** A policy is a script, not a project, so its source is at most 64 KiB. */
 const MAX_SOURCE = 64 * 1024

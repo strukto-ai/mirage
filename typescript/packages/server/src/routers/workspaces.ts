@@ -60,6 +60,7 @@ import {
   type CreateWorkspaceRequest,
   type LoadWorkspaceRequest,
 } from '../schemas.ts'
+import { withPolicies } from '../resources/policies.ts'
 import { withEntries } from '../resources/strukto.ts'
 import { makeBrief, makeDetail } from '../summary.ts'
 import { NO_WORKSPACE_ID, requireOneAccount, storeRefusal } from './templates.ts'
@@ -382,10 +383,11 @@ function configDigest(config: unknown): string {
 
 /**
  * The config a create builds, with the saved entries its pointers name
- * filled in: after the digest and the policies, which judge the config as
- * written and never see a sealed value. Answers 501 on a server of many
- * accounts, and 400 for a name that is not saved or a saved value its field
- * cannot take.
+ * filled in and each policy script that names a saved policy given its
+ * source: after the digest and the policies, which judge the config as
+ * written and never see a sealed value. Answers 501 for pointers on a server
+ * of many accounts, and 400 for a name that is not saved or a saved value its
+ * field cannot take.
  */
 async function withSaved(
   deps: WorkspaceRoutesDeps,
@@ -393,14 +395,18 @@ async function withSaved(
   cfg: WorkspaceConfigRaw,
 ): Promise<{ cfg: WorkspaceConfigRaw } | { status: number; detail: string }> {
   const refs = secretRefs(written)
-  if (refs.length === 0) return { cfg }
   const refused = requireOneAccount(deps.registry)
-  if (refused !== null) return refused
-  if (deps.resources === undefined) {
-    return { status: 400, detail: 'this server keeps no saved connections' }
-  }
   try {
-    return { cfg: await withEntries(deps.resources, written, refs) }
+    const named =
+      deps.resources !== undefined && refused === null
+        ? await withPolicies(deps.resources, written)
+        : written
+    if (refs.length === 0) return named === written ? { cfg } : { cfg: checkConfig(named) }
+    if (refused !== null) return refused
+    if (deps.resources === undefined) {
+      return { status: 400, detail: 'this server keeps no saved connections' }
+    }
+    return { cfg: await withEntries(deps.resources, named, refs) }
   } catch (e) {
     if (!(e instanceof ResourceError)) throw e
     return storeRefusal(e)
