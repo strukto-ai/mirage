@@ -390,8 +390,13 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "unset_element" => {
             let name = args.string()?;
             let subscript = args.bytes()?;
+            let every = args.flag()?;
             let listens = args.flag()?;
-            let write = Write::UnsetElement { name, subscript };
+            let write = Write::UnsetElement {
+                name,
+                subscript,
+                every,
+            };
             return engine.write(handle, write, listens, true);
         }
         "arith" => {

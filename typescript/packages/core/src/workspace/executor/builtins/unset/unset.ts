@@ -17,6 +17,7 @@ import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import type { Policies } from '../../../../policy/index.ts'
 import { BASH_LINENO, FUNCNAME } from '../../../../shell/constants.ts'
+import { ArithError } from '../../../../shell/errors.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { deref, sessionView, unsetElement } from '../../../session/state.ts'
@@ -62,9 +63,10 @@ async function unsetOne(
   base: string,
   subscript: string,
   policies: Policies | null = null,
+  every = false,
 ): Promise<string> {
   try {
-    return await unsetElement(session, policies, base, subscript)
+    return await unsetElement(session, policies, base, subscript, every)
   } catch (err) {
     if (err instanceof ArithError) throw err.signal('', true)
     throw err
@@ -185,8 +187,11 @@ export async function handleUnset(
     let status: string
     try {
       if (subscript !== undefined) {
+        // `@` and `*` name every element as typed, never once a subscript
+        // expands to them (`i=@; unset 'a[$i]'`).
+        const every = subscript === '@' || subscript === '*'
         if (subscripts !== null) subscript = await subscripts(subscript)
-        status = await unsetOne(session, base, subscript, policies)
+        status = await unsetOne(session, base, subscript, policies, every)
       } else {
         await view.unset(name)
         unsetVariable(session, deref(session, name) || name)

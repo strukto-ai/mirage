@@ -551,6 +551,7 @@ async def unset_element(
     policies: Policies | None,
     name: str,
     subscript: str,
+    every: bool = False,
 ) -> str:
     """Clear one element (``unset 'a[i]'``) as one gated write, keeping
     the indexes after it: an associative subscript is the key verbatim, an
@@ -563,6 +564,8 @@ async def unset_element(
             subscript's assignments clear.
         name (str): the base variable name.
         subscript (str): the subscript, already expanded.
+        every (bool): the subscript was typed as ``@`` or ``*``, which
+            empties an indexed array and refuses on a scalar.
 
     Returns:
         str: ``"ok"``, ``"subscript"`` for a negative subscript before an
@@ -577,7 +580,9 @@ async def unset_element(
     return await _element_write(
         session,
         policies,
-        lambda heard: shell.unset_element(name, subscript, listens=heard),
+        lambda heard: shell.unset_element(
+            name, subscript, every=every, listens=heard
+        ),
     )
 
 

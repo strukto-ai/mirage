@@ -1113,9 +1113,12 @@ export class Shell {
     return this.task('push', null, name, words, options.listens ?? false)
   }
 
-  /** Clear one element (`unset 'a[i]'`): 0 cleared, 3 no element, 4 not an array. */
-  unsetElement(name: string, subscript: string, options: Heard = {}): ShellTask {
-    return this.task('unset_element', null, name, subscript, options.listens ?? false)
+  /**
+   * Clear one element (`unset 'a[i]'`), or every one when `every`, a subscript
+   * typed as `@` or `*`: 0 cleared, 3 no element, 4 not an array.
+   */
+  unsetElement(name: string, subscript: string, every = false, options: Heard = {}): ShellTask {
+    return this.task('unset_element', null, name, subscript, every, options.listens ?? false)
   }
 
   /**

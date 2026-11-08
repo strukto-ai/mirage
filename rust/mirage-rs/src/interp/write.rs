@@ -8,6 +8,7 @@
 
 use std::collections::HashSet;
 use std::future::Future;
+use std::sync::Arc;
 
 use super::shell::Shell;
 use super::{Diagnostic, Signal};
@@ -454,6 +455,7 @@ impl<'a, G: Gate> Writer<'a, G> {
             return Err(Fault::Host("no array to append to"));
         };
         let integer = var.has(INTEGER);
+        let marks = (var.attrs, var.managed.clone());
         let Some(Value::Indexed(array)) = &var.value else {
             return Err(Fault::Host("no array to append to"));
         };
@@ -487,6 +489,16 @@ impl<'a, G: Gate> Writer<'a, G> {
                     for slot in filled.into_iter().rev() {
                         self.store.put_element(&name, &slot, None, false);
                     }
+                    let (attrs, managed) = marks;
+                    let changed = self
+                        .store
+                        .record(&name)
+                        .filter(|var| var.attrs != attrs || var.managed != managed);
+                    if let Some(var) = changed {
+                        let mut var = var.clone();
+                        (var.attrs, var.managed) = (attrs, managed);
+                        self.store.place(&name, Some(Arc::new(var)));
+                    }
                 }
                 return Err(fault);
             }
@@ -503,15 +515,21 @@ impl<'a, G: Gate> Writer<'a, G> {
     /// array the shell computes (`PIPESTATUS`, `FUNCNAME`) clears nothing
     /// whatever a write left on its name, as a read answers from it, but
     /// its subscript is still read, so its writes land and an index before
-    /// the first refuses. `@` and `*` name every element: an indexed array
-    /// is emptied, a scalar refuses as `x[1]` does, and an associative one
-    /// clears nothing, as bash's `unset 'm[@]'` keeps the keys.
-    pub async fn unset_element(&mut self, name: &str, subscript: &[u8]) -> Result<Element, Fault> {
+    /// the first refuses. `every` for a subscript typed as `@` or `*`,
+    /// which names every element, never one only expanding to it: an
+    /// indexed array is emptied, its marks kept, a scalar refuses as `x[1]`
+    /// does, and an associative one takes it as the key it spells, as
+    /// bash's does.
+    pub async fn unset_element(
+        &mut self,
+        name: &str,
+        subscript: &[u8],
+        every: bool,
+    ) -> Result<Element, Fault> {
         let name = self.store.target(name);
         if self.store.hidden(&name) {
             return Ok(Element::Landed);
         }
-        let every = matches!(subscript, b"@" | b"*");
         if let Some(array) = self.store.special(&name) {
             if every {
                 return Ok(Element::Landed);
@@ -523,17 +541,22 @@ impl<'a, G: Gate> Writer<'a, G> {
                 Element::Landed
             });
         }
-        if every {
-            return match self.store.record(&name).and_then(|var| var.value.as_ref()) {
-                Some(Value::Indexed(_)) => {
+        match self.store.record(&name).and_then(|var| var.value.as_ref()) {
+            Some(Value::Indexed(array)) if every => {
+                // An empty array stays as it was declared, and clearing one
+                // marks nothing for export under `set -a`.
+                if !array.is_empty() {
                     let empty = Value::Indexed(Indexed::default());
                     let assigned = Assigned::Indexes(HashSet::new());
-                    self.set(&name, empty, false, Some(&assigned), None).await?;
-                    Ok(Element::Landed)
+                    let allexport = std::mem::replace(&mut self.allexport, false);
+                    let cleared = self.set(&name, empty, false, Some(&assigned), None).await;
+                    self.allexport = allexport;
+                    cleared?;
                 }
-                Some(Value::Scalar(_)) => Ok(Element::NotArray),
-                _ => Ok(Element::Landed),
-            };
+                return Ok(Element::Landed);
+            }
+            Some(Value::Scalar(_)) if every => return Ok(Element::NotArray),
+            _ => {}
         }
         let slot = match self.store.record(&name).and_then(|var| var.value.as_ref()) {
             Some(Value::Assoc(map)) if map.get(subscript).is_none() => {
@@ -955,7 +978,7 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use super::*;
-    use crate::vars::{RANDOM, READONLY};
+    use crate::vars::{EXPORT, RANDOM, READONLY, UNASSIGNED};
 
     #[derive(Default)]
     struct Recorder {
@@ -1277,11 +1300,11 @@ mod tests {
         let landed = run(writer.element("a", Some(b"x=1"), b"!", true)).unwrap();
         assert_eq!(landed, Element::Landed);
         assert_eq!(
-            run(writer.unset_element("a", b"0")).unwrap(),
+            run(writer.unset_element("a", b"0", false)).unwrap(),
             Element::Landed
         );
         assert_eq!(
-            run(writer.unset_element("a", b"-9")).unwrap(),
+            run(writer.unset_element("a", b"-9", false)).unwrap(),
             Element::Subscript
         );
         let array: Vec<_> = writer.store.indexed("a").unwrap().iter().collect();
@@ -1292,19 +1315,37 @@ mod tests {
         let refused = run(writer.element("i", Some(b"y=2"), b"0", false)).unwrap();
         assert_eq!(refused, Element::Readonly);
         assert_eq!(
-            run(writer.unset_element("s", b"1")).unwrap(),
+            run(writer.unset_element("s", b"1", false)).unwrap(),
             Element::NotArray
         );
         assert_eq!(
-            run(writer.unset_element("s", b"*")).unwrap(),
+            run(writer.unset_element("s", b"*", true)).unwrap(),
             Element::NotArray
         );
         let pair = Indexed::dense([b"x".to_vec(), b"y".to_vec()]);
         writer.store.seed("e", Value::Indexed(pair));
-        run(writer.unset_element("e", b"@")).unwrap();
+        let expanded = run(writer.unset_element("e", b"@", false));
+        assert!(matches!(expanded, Err(Fault::Arith(_))));
+        run(writer.unset_element("e", b"@", true)).unwrap();
         assert_eq!(writer.store.indexed("e").map(Indexed::count), Some(0));
+        let keyed = [
+            (b"@".to_vec(), b"v".to_vec()),
+            (b"k".to_vec(), b"w".to_vec()),
+        ];
+        writer
+            .store
+            .seed("q", Value::Assoc(Box::new(keyed.into_iter().collect())));
+        run(writer.unset_element("q", b"@", true)).unwrap();
+        let left: Vec<_> = writer
+            .store
+            .assoc("q")
+            .unwrap()
+            .iter()
+            .map(|(k, _)| k.to_vec())
+            .collect();
+        assert_eq!(left, [b"k".to_vec()]);
         assert_eq!(
-            run(writer.unset_element("s", b"0")).unwrap(),
+            run(writer.unset_element("s", b"0", false)).unwrap(),
             Element::Landed
         );
         assert_eq!(text(writer.store, "s"), None);
@@ -1312,16 +1353,16 @@ mod tests {
         assert_eq!(text(writer.store, "y").as_deref(), Some("2"));
         writer
             .store
-            .set_specials(vec![1], None, 1, 1, b"bash: ".to_vec());
-        let read = run(writer.unset_element("PIPESTATUS", b"z=4")).unwrap();
+            .set_specials(vec![1], None, Vec::new(), 1, 1, b"bash: ".to_vec());
+        let read = run(writer.unset_element("PIPESTATUS", b"z=4", false)).unwrap();
         assert_eq!(read, Element::Landed);
         assert_eq!(text(writer.store, "z").as_deref(), Some("4"));
-        let before = run(writer.unset_element("PIPESTATUS", b"-5")).unwrap();
+        let before = run(writer.unset_element("PIPESTATUS", b"-5", false)).unwrap();
         assert_eq!(before, Element::Subscript);
-        let every = run(writer.unset_element("PIPESTATUS", b"@")).unwrap();
+        let every = run(writer.unset_element("PIPESTATUS", b"@", true)).unwrap();
         assert_eq!(every, Element::Landed);
         writer.store.seed("PIPESTATUS", scalar("left"));
-        let shadowed = run(writer.unset_element("PIPESTATUS", b"*")).unwrap();
+        let shadowed = run(writer.unset_element("PIPESTATUS", b"*", true)).unwrap();
         assert_eq!(shadowed, Element::Landed);
         let special = run(writer.element("PIPESTATUS", Some(b"-1"), b"0", false)).unwrap();
         assert_eq!(special, Element::Landed);
@@ -1332,6 +1373,14 @@ mod tests {
             Err(Fault::Signal(Signal::Exit { status: 2, .. }))
         ));
         assert_eq!(writer.store.indexed("a").unwrap().count(), 2);
+        writer.store.seed("g", Value::Indexed(Indexed::default()));
+        writer.store.set_attr("g", Some(UNASSIGNED), true);
+        writer.allexport = true;
+        let fresh = run(writer.push("g", vec![b"1".to_vec(), b"far too long".to_vec()]));
+        assert!(fresh.is_err());
+        let g = writer.store.record("g").unwrap();
+        assert!(g.has(UNASSIGNED) && !g.has(EXPORT));
+        writer.allexport = false;
         writer.limit = None;
         writer
             .store

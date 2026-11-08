@@ -442,11 +442,12 @@ pub enum Write {
         name: String,
         words: Vec<Vec<u8>>,
     },
-    /// One element cleared (`unset 'a[i]'`); the result is the
-    /// [`Element`] it came to.
+    /// One element cleared (`unset 'a[i]'`), or every one when `every`
+    /// (`a[@]` as typed); the result is the [`Element`] it came to.
     UnsetElement {
         name: String,
         subscript: Vec<u8>,
+        every: bool,
     },
 }
 
@@ -509,8 +510,12 @@ pub fn write(shell: Shell, write: Write, listens: bool, warns: bool) -> Task<End
                     .await
                     .map(|element| element as i64),
                 Write::Push { name, words } => writer.push(&name, words).await.map(|()| 0),
-                Write::UnsetElement { name, subscript } => writer
-                    .unset_element(&name, &subscript)
+                Write::UnsetElement {
+                    name,
+                    subscript,
+                    every,
+                } => writer
+                    .unset_element(&name, &subscript, every)
                     .await
                     .map(|element| element as i64),
                 Write::Integer { text, added } => writer

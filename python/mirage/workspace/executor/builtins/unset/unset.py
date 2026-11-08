@@ -60,6 +60,7 @@ async def _unset_one(
     base: str,
     subscript: str,
     policies: Policies | None = None,
+    every: bool = False,
 ) -> str:
     """Clear one array element, or a scalar addressed as ``base[0]``, as
     one gated write, so a denial leaves the array untouched.
@@ -78,6 +79,8 @@ async def _unset_one(
         subscript (str): the subscript text between the brackets.
         policies (Policies | None): the policies the write and the
             subscript's assignments clear.
+        every (bool): the subscript was typed as ``@`` or ``*``, which
+            names every element.
 
     Returns:
         str: ``"ok"``, ``"notarray"`` when a non-zero subscript was
@@ -88,7 +91,7 @@ async def _unset_one(
         PolicyDenied: a pre_session policy refused the write.
     """
     try:
-        return await unset_element(session, policies, base, subscript)
+        return await unset_element(session, policies, base, subscript, every)
     except ArithError as exc:
         raise exc.signal(fatal=True) from exc
 
@@ -214,9 +217,14 @@ async def handle_unset(
         # sidestep a policy that vetoes `unset X`.
         try:
             if subscript is not None:
+                # `@` and `*` name every element as typed, never once a
+                # subscript expands to them (`i=@; unset 'a[$i]'`).
+                every = subscript in ("@", "*")
                 if subscripts is not None:
                     subscript = await subscripts(subscript)
-                status = await _unset_one(session, base, subscript, policies)
+                status = await _unset_one(
+                    session, base, subscript, policies, every
+                )
             else:
                 await view.unset(name)
                 _unset_variable(session, deref(session, name))

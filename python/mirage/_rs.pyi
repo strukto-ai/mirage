@@ -256,7 +256,12 @@ class Shell:
         self, name: str, words: Sequence[Text], *, listens: bool = False
     ) -> ShellTask: ...
     def unset_element(
-        self, name: str, subscript: Text, *, listens: bool = False
+        self,
+        name: str,
+        subscript: Text,
+        *,
+        every: bool = False,
+        listens: bool = False,
     ) -> ShellTask: ...
     def arith(
         self, text: Text, *, listens: bool = False, expand: bool = False

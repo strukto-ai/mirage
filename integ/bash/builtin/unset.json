@@ -98,11 +98,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "unset UA; declare -a UA=(1 2 3); unset 'UA[1]'; echo [${UA[0]}][${UA[1]}][${UA[2]}]; UA=(0 1 2 3); ui=1; unset 'UA[$ui + 1]'; declare -A UM=([a]=1 [b]=2); uk=a; unset 'UM[$uk]'; declare -p UA UM; UW=(1 2); unset 'UW[@]'; declare -p UW; false; unset 'PIPESTATUS[@]' 'FUNCNAME[*]'; echo \"rc=$?\"",
+      "command": "unset UA; declare -a UA=(1 2 3); unset 'UA[1]'; echo [${UA[0]}][${UA[1]}][${UA[2]}]; UA=(0 1 2 3); ui=1; unset 'UA[$ui + 1]'; declare -A UM=([a]=1 [b]=2); uk=a; unset 'UM[$uk]'; declare -p UA UM; UW=(1 2); unset 'UW[@]'; declare -p UW; false; unset 'PIPESTATUS[@]' 'FUNCNAME[*]'; echo \"rc=$?\"; declare -A UK=([@]=v [keep]=ok); unset 'UK[@]'; declare -p UK; declare -a UD; unset 'UD[@]'; declare -p UD; UX=(1 2); ux=@; unset 'UX[$ux]'; echo no",
       "expect": {
-        "exit": 0,
-        "stdout": "[1][][3]\ndeclare -a UA=([0]=\"0\" [1]=\"1\" [3]=\"3\")\ndeclare -A UM=([b]=\"2\" )\ndeclare -a UW=()\nrc=0\n",
-        "stderr": ""
+        "exit": 1,
+        "stdout": "[1][][3]\ndeclare -a UA=([0]=\"0\" [1]=\"1\" [3]=\"3\")\ndeclare -A UM=([b]=\"2\" )\ndeclare -a UW=()\nrc=0\ndeclare -A UK=([keep]=\"ok\" )\ndeclare -a UD\n",
+        "stderr": "bash: line 1: @: syntax error: operand expected (error token is \"@\")\n"
       }
     },
     {

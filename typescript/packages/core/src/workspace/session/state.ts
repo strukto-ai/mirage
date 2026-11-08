@@ -421,7 +421,8 @@ export async function pushWords(
  * Clear one element (`unset 'a[i]'`) as one gated write, keeping the indexes
  * after it: an associative subscript is the key verbatim, an indexed one
  * arithmetic whose writes land first, and a scalar's element 0 the whole
- * scalar. A hidden or unset name clears nothing. Mirrors Python's
+ * scalar. `every` for a subscript typed as `@` or `*`, which empties an
+ * indexed array. A hidden or unset name clears nothing. Mirrors Python's
  * unset_element.
  */
 export async function unsetElement(
@@ -429,10 +430,11 @@ export async function unsetElement(
   policies: Policies | null,
   name: string,
   subscript: string,
+  every = false,
 ): Promise<(typeof ELEMENT_STATUS)[number]> {
   const shell = session.vars.shell
   return elementWrite(session, policies, (heard) =>
-    shell.unsetElement(name, subscript, { listens: heard }),
+    shell.unsetElement(name, subscript, every, { listens: heard }),
   )
 }
 

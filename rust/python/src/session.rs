@@ -756,17 +756,24 @@ impl Shell {
         Self::write_task(slf, Write::Push { name, words }, listens, true)
     }
 
-    /// Clear one element (`unset 'a[i]'`); the result is 0 cleared, 3 a
+    /// Clear one element (`unset 'a[i]'`), or every one when `every`, a
+    /// subscript typed as `@` or `*`; the result is 0 cleared, 3 a
     /// subscript that names no element or 4 one other than 0 on a scalar.
-    #[pyo3(signature = (name, subscript, *, listens = false))]
+    #[pyo3(signature = (name, subscript, *, every = false, listens = false))]
     fn unset_element(
         slf: &Bound<'_, Self>,
         name: String,
         subscript: Bound<'_, PyAny>,
+        every: bool,
         listens: bool,
     ) -> PyResult<ShellTask> {
         let subscript = bytes_of(&subscript)?;
-        Self::write_task(slf, Write::UnsetElement { name, subscript }, listens, true)
+        let write = Write::UnsetElement {
+            name,
+            subscript,
+            every,
+        };
+        Self::write_task(slf, write, listens, true)
     }
 
     /// Evaluate an arithmetic command or `let` operand, its writes landed;
