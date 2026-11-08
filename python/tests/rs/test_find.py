@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -12,23 +13,34 @@ from mirage.commands.builtin.types import (
 from mirage.commands.errors import UsageError
 from mirage.core.generic.find_eval import evaluate
 from mirage.core.generic.types import (
+    Access,
     Action,
     And,
+    Count,
     Effects,
     Empty,
     FindEntry,
+    Lname,
     Mtime,
     Name,
+    NoOwner,
     Not,
     Or,
+    Owner,
     Path,
+    Perm,
     Prune,
+    Quit,
+    Regex,
     TrueNode,
     Type,
+    XType,
 )
 from mirage.rs.find import (
+    age_bounds,
     find_layout,
     mtime_bounds,
+    next_midnight,
     parse_find,
     parse_find_expression,
     strictly_after,
@@ -235,7 +247,7 @@ def test_unknown_predicate_raises():
     with pytest.raises(UsageError):
         parse_find_expression(["-bogus"])
     with pytest.raises(UsageError):
-        parse_find_expression(["-regex", ".*"])
+        parse_find_expression(["-ok", "echo", ";"])
 
 
 def test_unbalanced_paren_raises():
@@ -270,8 +282,8 @@ def _ent(name="a", kind="f"):
     "tokens",
     [
         ["-boguspredicate"],
-        ["-regex", ".*deep.*"],
-        ["-perm", "644"],
+        ["-ok", "echo", ";"],
+        ["-okdir", "echo", ";"],
         ["-nam", "*.txt"],
     ],
 )
@@ -736,3 +748,96 @@ def test_a_mtime_counts_days_from_the_clock_bound_with_it():
 def test_a_newermt_that_is_no_date_is_refused_in_gnus_words():
     with pytest.raises(UsageError, match="^find: I cannot figure out"):
         parse_find(["-newermt", "nope"]).bind()
+
+
+def test_the_new_tests_bind_to_their_nodes():
+    expr = parse_find(
+        [
+            "-regex",
+            "a.*",
+            "-ilname",
+            "x",
+            "-xtype",
+            "l",
+            "-perm",
+            "/u=x",
+            "-links",
+            "+1",
+            "-user",
+            "bob",
+            "-nogroup",
+            "-writable",
+            "-ipath",
+            "D*",
+            "-quit",
+        ]
+    ).bind(env={"LC_ALL": "C.UTF-8"}, profile="me")
+    assert isinstance(expr.tree, And)
+    assert expr.tree.kids == [
+        Regex("a.*", utf8=True),
+        Lname("x", icase=True),
+        XType("l"),
+        Perm(0o100, "any"),
+        Count("links", "+", 1),
+        Owner("bob", profile="me"),
+        NoOwner(group=True),
+        Access("w"),
+        Path("D*", icase=True),
+        Quit(),
+    ]
+    assert expr.actions == []
+
+
+def test_the_new_actions_carry_their_file_and_directory():
+    expr = parse_find_expression(
+        [
+            "-execdir",
+            "echo",
+            "{}",
+            "+",
+            "-fprintf",
+            "out",
+            "%p",
+            "-fprint",
+            "out",
+        ]
+    )
+    assert expr.actions[0] == ExecAction(
+        ("echo", "{}"), batch=True, in_dir=True
+    )
+    assert isinstance(expr.actions[1], PrintfAction)
+    assert expr.actions[1].file == "out"
+    assert expr.files == ["out"]
+    listed = parse_find_expression(["-follow", "-files0-from", "list"])
+    assert (listed.follow, listed.files0_from) == (True, "list")
+
+
+def test_a_minute_count_rounds_the_age_up():
+    now = 10_000.0
+    lo, hi = age_bounds("=", 2, True, now)
+    assert lo == now - 120 and hi is not None and now - 61 < hi < now - 60
+    lo, hi = age_bounds("+", 2, True, now)
+    assert lo is None and hi is not None and now - 121 < hi < now - 120
+    lo, hi = age_bounds("-", 1.5, True, now)
+    assert hi is None and lo is not None and now - 90 < lo < now - 89
+    assert age_bounds("=", 1, False, now) == mtime_bounds("=", 1, now)
+
+
+def test_only_a_modification_time_narrows_the_window():
+    expr = parse_find_expression(["-amin", "-5", "-mmin", "-10"])
+    assert isinstance(expr.tree, And)
+    fields = [kid.field for kid in expr.tree.kids if isinstance(kid, Mtime)]
+    assert fields == ["a", "m"]
+    assert expr.mtime_min is not None
+    only_access = parse_find_expression(["-atime", "1"])
+    assert (only_access.mtime_min, only_access.mtime_max) == (None, None)
+
+
+def test_daystart_measures_from_the_midnight_ending_today():
+    now = datetime(2024, 3, 9, 15, 30, tzinfo=timezone.utc).timestamp()
+    midnight = datetime(2024, 3, 10, tzinfo=timezone.utc).timestamp()
+    assert next_midnight(now, timezone.utc) == midnight
+    expr = parse_find(["-daystart", "-mtime", "0"]).bind(
+        now=now, env={"TZ": "UTC"}
+    )
+    assert expr.mtime_max == midnight

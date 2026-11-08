@@ -46,8 +46,8 @@ export function findWalk(
   const flags = new FlagView(ctx.flags, specOf('find'))
   const bounded = flags.asBool('xdev') || flags.asBool('mount')
   // The last of -H, -L and -P decides, as in GNU; only -L follows the links
-  // the walk meets.
-  const follow = flags.typedOrder('H', 'L', 'P').at(-1) === 'L'
+  // the walk meets, and -follow is -L wherever it is.
+  const follow = flags.typedOrder('H', 'L', 'P').at(-1) === 'L' || flags.asBool('follow')
   const loops: [string, string][] = []
   const mounts = mountsOf(ctx)
   const links = linksOf(ctx) ?? null
@@ -57,6 +57,8 @@ export function findWalk(
   const closed: string[] = []
   const unstatted = new Map<string, unknown>()
   const stopped: string[] = []
+  // The entry a -quit was reached on, which ends the line.
+  const quit: string[] = []
   return findGeneric(
     resolved,
     texts,
@@ -84,6 +86,8 @@ export function findWalk(
             : {}),
           stat,
           follow: follow ? links : null,
+          links,
+          stopped: quit,
           loops,
           listing: (p) => budget.listing(readdir, p),
         },
@@ -103,5 +107,6 @@ export function findWalk(
     files.stat,
     () => loops.splice(0),
     () => stopped.splice(0),
+    () => quit.length > 0,
   )
 }

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from dataclasses import replace
 
 from mirage.commands.builtin.constants import EXEC_PLACEHOLDER
@@ -22,6 +23,7 @@ from mirage.commands.builtin.types import (
     PrintfAction,
     RowAction,
 )
+from mirage.commands.builtin.utils.files0 import listed_names
 from mirage.commands.builtin.utils.formatting import format_find_ls
 from mirage.commands.builtin.utils.identity import Identity
 from mirage.commands.builtin.utils.links import link_view
@@ -36,8 +38,8 @@ from mirage.errors.classify import is_entry_error
 from mirage.errors.fs import enoent, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.io.stream import SharedStdin, materialize
-from mirage.io.types import ByteSource, PathRecord
+from mirage.io.stream import SharedStdin, ensure_stream, materialize
+from mirage.io.types import ByteSource, IOResult, PathRecord
 from mirage.rs.find import FindExpr
 from mirage.rs.stream import OpenStream, close_stream
 from mirage.runtime.types import DispatchFn
@@ -45,6 +47,7 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import resolve_path
+from mirage.utils.quote import shell_quote_always
 from mirage.view.types import StatPath
 from mirage.workspace.files import Files
 from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
@@ -62,6 +65,7 @@ def exec_words(action: ExecAction, paths: list[str]) -> list[str]:
     is ``xd/a.txty``); a batched run replaces its one bare ``{}`` with
     the matches, one word each. The head is substituted like any other
     word, which is what lets ``-exec {} \\;`` run each match itself.
+    ``-execdir`` hands its matches in already spelled ``./name``.
 
     Args:
         action (ExecAction): the action.
@@ -133,6 +137,22 @@ async def program_head(
     return not program, shadowed
 
 
+def exec_dir(path: str) -> tuple[str, str]:
+    """Where ``-execdir`` runs for one row and what ``{}`` becomes: the
+    directory the row is printed under and ``./`` plus its last name, so
+    ``d/a.txt`` runs in ``d`` as ``./a.txt`` and a start point ``.`` in
+    ``.`` as ``./.``.
+
+    Args:
+        path (str): the row as find printed it.
+    """
+    trimmed = path.rstrip("/") or "/"
+    head, slash, name = trimmed.rpartition("/")
+    if not slash:
+        return ".", "./" + name
+    return head or "/", "./" + name
+
+
 async def _run_exec(
     execute_fn: ExecuteLine,
     session_id: str,
@@ -144,6 +164,7 @@ async def _run_exec(
     out: list[bytes],
     errors: list[bytes],
     stdin: SharedStdin | None,
+    where: str | None = None,
 ) -> bool:
     """Run one ``-exec`` invocation, collecting its streams.
 
@@ -167,14 +188,17 @@ async def _run_exec(
         errors (list[bytes]): where its stderr is appended.
         stdin (SharedStdin | None): find's own input, one cursor shared
             by every child; None keeps the ambient stdin.
+        where (str | None): ``-execdir``'s directory as printed, which the
+            run enters first; None runs where find does.
     """
     # GNU substitutes the matches into the words and only then hands
     # them to execvp, so the head looked up is the substituted one:
     # `-exec {} \;` runs each match itself.
     words = exec_words(action, paths)
     head = words[0] if words else action.argv[0]
+    here = cwd if where is None else resolve_path(where, cwd)
     missing, shadowed = await program_head(
-        head, get_current_session(), registry, cwd, stat_path
+        head, get_current_session(), registry, here, stat_path
     )
     if missing:
         errors.append(
@@ -186,6 +210,8 @@ async def _run_exec(
     # marked a program run for the session, so a builtin that doubles
     # as a program answers as the program (`printf -v` is a format).
     line = ("command " if shadowed else "") + shell_join(words)
+    if where is not None:
+        line = f"cd -- {shell_join([where])} && {line}"
     # find stays its process and forks each program as a child of it.
     process = current_caller().process
     if process is not None:
@@ -403,9 +429,151 @@ def _has_actions(expr: FindExpr) -> bool:
         expr (FindExpr): the parsed expression.
     """
     return len(expr.actions) > 1 or any(
-        not (isinstance(a, RowAction) and a.kind == "print")
+        not (isinstance(a, RowAction) and a.kind == "print" and a.file is None)
         for a in expr.actions
     )
+
+
+# The files -fprint names that are find's own streams, not files.
+_STDOUT = "/dev/stdout"
+_STDERR = "/dev/stderr"
+_NULL = "/dev/null"
+_STREAMS = (_STDOUT, _STDERR, _NULL)
+
+
+def _file_spec(file: str, cwd: str) -> PathSpec:
+    return replace(
+        PathSpec.from_str_path(resolve_path(file, cwd)), raw_path=file
+    )
+
+
+async def open_find_files(
+    expr: FindExpr, cwd: str, dispatch: DispatchFn | None
+) -> bytes | None:
+    """Create every file ``-fprint``, ``-fprint0`` and ``-fprintf`` name,
+    empty, before the walk, as the reference opens them while it parses: a file
+    no row reaches still exists, and one that cannot be created ends
+    find before it walks.
+
+    Args:
+        expr (FindExpr): the parsed expression.
+        cwd (str): where a relative file is resolved.
+        dispatch (DispatchFn | None): the workspace dispatcher.
+
+    Returns:
+        The reference's line for the first file that cannot be created, None when
+        every one was.
+    """
+    if dispatch is None:
+        return None
+    for file in expr.files:
+        if resolve_path(file, cwd) in _STREAMS:
+            continue
+        try:
+            await dispatch("write", _file_spec(file, cwd), data=b"")
+        except (OSError, ValueError) as exc:
+            return encode_text(f"find: '{file}': {strerror_of(exc)}\n")
+    return None
+
+
+# The words before find's start points that are not start points.
+_LINK_OPTIONS = ("-P", "-H", "-L")
+# Start point names find's grammar would read as the expression.
+_GRAMMAR = ("!", "(", ")")
+
+
+async def run_listed_find(
+    expr: FindExpr,
+    words: list[str],
+    cwd: str,
+    dispatch: DispatchFn | None,
+    execute_fn: ExecuteLine | None,
+    session_id: str,
+    stdin: ByteSource | None,
+) -> IOResult:
+    """``find -files0-from LIST``: find over the start points a list of
+    NUL-terminated names holds, ``-`` reading the list from stdin.
+
+    The names become the line's start points, run as the line again, so
+    each one routes to its mount as a typed operand does. A start point
+    typed beside the list is refused, an empty name is refused by its
+    place in the list while the others run, and an empty list walks
+    nothing. A name the grammar would read as a test (``-x``, ``!``)
+    is handed on as ``./-x``, which is the same file.
+
+    Args:
+        expr (FindExpr): the parsed expression.
+        words (list[str]): the words after ``find``.
+        cwd (str): where the list and the names are resolved.
+        dispatch (DispatchFn | None): reads the list.
+        execute_fn (ExecuteLine | None): runs the find over the names.
+        session_id (str): the session the find runs under.
+        stdin (ByteSource | None): find's input, the list under ``-``.
+    """
+    source = expr.files0_from or "-"
+    typed = [w for w in words[: expr.start] if w not in _LINK_OPTIONS]
+    if typed:
+        return IOResult(
+            exit_code=1,
+            stderr=encode_text(
+                f"find: extra operand {shell_quote_always(typed[0])}\n"
+                "find: file operands cannot be combined with -files0-from\n"
+            ),
+        )
+
+    async def stream(_: PathSpec) -> AsyncIterator[bytes]:
+        if source == "-":
+            data: ByteSource = stdin if stdin is not None else b""
+        elif dispatch is None:
+            raise enoent(_file_spec(source, cwd))
+        else:
+            data, _io = await dispatch(
+                "read", _file_spec(source, cwd), stream=True
+            )
+        async for chunk in ensure_stream(data):
+            yield chunk
+
+    try:
+        names = await listed_names(_file_spec(source, cwd), stream)
+    except (OSError, ValueError) as exc:
+        return IOResult(
+            exit_code=1,
+            stderr=encode_text(
+                f"find: cannot open {shell_quote_always(source)} for "
+                f"reading: {strerror_of(exc)}\n"
+            ),
+        )
+    refused = "".join(
+        f"find: {shell_quote_always(source)}:{at + 1}: "
+        "invalid zero-length file name\n"
+        for at, name in enumerate(names)
+        if not name
+    )
+    starts = [
+        "./" + name if name.startswith("-") or name in _GRAMMAR else name
+        for name in names
+        if name
+    ]
+    if not starts or execute_fn is None:
+        opened = await open_find_files(expr, cwd, dispatch)
+        return IOResult(
+            exit_code=1 if refused or opened else 0,
+            stderr=encode_text(refused) + (opened or b""),
+        )
+    rest = list(words[expr.start :])
+    at = rest.index("-files0-from")
+    del rest[at : at + 2]
+    line = shell_join(["find", *words[: expr.start], *starts, *rest])
+    io = await execute_fn(
+        line,
+        session_id=session_id,
+        stdin=None if source == "-" else stdin,
+    )
+    if refused:
+        existing = await materialize(io.stderr) if io.stderr else b""
+        io.stderr = encode_text(refused) + existing
+        io.exit_code = max(io.exit_code, 1)
+    return io
 
 
 def depth_first_key(path: str) -> tuple[tuple[str, int], ...]:
@@ -577,7 +745,19 @@ async def _apply_find_actions(
     actions = expr.actions or [RowAction("print")]
     errors: list[bytes] = []
     out: list[bytes] = []
-    batches: dict[int, list[str]] = {}
+    batches: dict[int, list[tuple[str | None, list[str]]]] = {}
+    sinks: dict[str, list[bytes]] = {file: [] for file in expr.files}
+
+    def sink(file: str | None) -> list[bytes]:
+        if file is None:
+            return out
+        where = resolve_path(file, cwd)
+        if where == _STDOUT:
+            return out
+        if where == _STDERR:
+            return errors
+        return sinks[file]
+
     exit_code = 0
     stats = any(_reads_stat(a) for a in actions)
     statted = _tests_stat(expr)
@@ -601,8 +781,18 @@ async def _apply_find_actions(
             )
             for position, action in enumerate(actions):
                 if isinstance(action, ExecAction):
+                    where, arg = (
+                        exec_dir(path) if action.in_dir else (None, path)
+                    )
                     if action.batch:
-                        batches.setdefault(position, []).append(path)
+                        # -execdir batches the rows of one directory that
+                        # arrive together, as the reference's runs end where its walk
+                        # leaves a directory.
+                        groups = batches.setdefault(position, [])
+                        if groups and groups[-1][0] == where:
+                            groups[-1][1].append(arg)
+                        else:
+                            groups.append((where, [arg]))
                         continue
                     assert execute_fn is not None
                     if not await _run_exec(
@@ -612,10 +802,11 @@ async def _apply_find_actions(
                         cwd,
                         stat_path,
                         action,
-                        [path],
+                        [arg],
                         out,
                         errors,
                         once,
+                        where,
                     ):
                         break
                 elif _reads_stat(action):
@@ -626,7 +817,7 @@ async def _apply_find_actions(
                         # chain ends for it, as GNU's does.
                         exit_code = 1
                         break
-                    out.append(
+                    rendered = (
                         await _printf_row(
                             formatters[position],
                             match,
@@ -638,8 +829,13 @@ async def _apply_find_actions(
                         if isinstance(action, PrintfAction)
                         else _ls_row(match, held, identity)
                     )
+                    sink(
+                        action.file
+                        if isinstance(action, PrintfAction)
+                        else None
+                    ).append(rendered)
                 elif isinstance(action, PrintfAction):
-                    out.append(
+                    sink(action.file).append(
                         await _printf_row(
                             formatters[position],
                             match,
@@ -660,27 +856,40 @@ async def _apply_find_actions(
                         exit_code = 1
                         break
                 else:
-                    out.append(
+                    sink(action.file).append(
                         encode_text(path)
                         + (b"\x00" if action.kind == "print0" else b"\n")
                     )
         for position, action in enumerate(actions):
-            paths = batches.get(position)
-            if not isinstance(action, ExecAction) or not paths:
+            if not isinstance(action, ExecAction):
                 continue
-            assert execute_fn is not None
-            if not await _run_exec(
-                execute_fn,
-                session_id,
-                registry,
-                cwd,
-                stat_path,
-                action,
-                paths,
-                out,
-                errors,
-                once,
-            ):
+            for where, paths in batches.get(position, []):
+                assert execute_fn is not None
+                if not await _run_exec(
+                    execute_fn,
+                    session_id,
+                    registry,
+                    cwd,
+                    stat_path,
+                    action,
+                    paths,
+                    out,
+                    errors,
+                    once,
+                    where,
+                ):
+                    exit_code = 1
+        for file, chunks in sinks.items():
+            if resolve_path(file, cwd) in _STREAMS or dispatch is None:
+                continue
+            try:
+                await dispatch(
+                    "write", _file_spec(file, cwd), data=b"".join(chunks)
+                )
+            except (OSError, ValueError) as exc:
+                errors.append(
+                    encode_text(f"find: '{file}': {strerror_of(exc)}\n")
+                )
                 exit_code = 1
         body = b"".join(out)
         return (body if body else None), b"".join(errors), exit_code

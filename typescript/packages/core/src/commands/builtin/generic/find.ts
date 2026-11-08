@@ -18,10 +18,13 @@ import {
   dropPruned,
   emitStartPath,
   argsToTree,
+  primeRegexes,
   printfKind,
+  quitFired,
   settlePendingPrunes,
   startBasename,
   timeTestsFailing,
+  treeHas,
   treeHasTime,
   unrespellRaw,
 } from '../../../core/generic/find_eval.ts'
@@ -157,6 +160,7 @@ function startPointResults(
     minSize: options.minSize ?? null,
     maxSize: options.maxSize ?? null,
     mtime: ts,
+    stat: start,
   })
   return results
 }
@@ -173,13 +177,14 @@ function startPointResults(
 // filters every row against namespace-aware times afterwards, or pushed the
 // window into the backend, and re-testing it against the probe's own stat
 // would drop rows a touch had just matched. `mtime` answers the tree's own
-// time tests.
+// time tests, `stat` the tests that read one.
 function rootDirResults(
   root: PathSpec,
   options: FindOptions,
   tree: PredNode,
   isEmpty: boolean | null,
   mtime: number | null = null,
+  stat: FileStat | null = null,
 ): string[] {
   const results: string[] = []
   emitStartPath(results, rstripSlash(root.virtual) || '/', startBasename(root.virtual), {
@@ -192,6 +197,7 @@ function rootDirResults(
     minSize: options.minSize ?? null,
     maxSize: options.maxSize ?? null,
     mtime,
+    stat,
   })
   return results
 }
@@ -279,6 +285,8 @@ export function findGeneric(
   // Where a walk ran past walkLimit, each line without the command's
   // name.
   stopped?: () => string[],
+  // Whether the walk reached a -quit, which ends the line.
+  quitted?: () => boolean,
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(ctx.flags)
   const nameFlag = parsed.name
@@ -375,6 +383,8 @@ export function findGeneric(
       // shared by every one of them and must stay unbound.
       const tree = bindTree(argsToTree(options), '', root.virtual, root.rawPath)
       const rootOptions: FindOptions = { ...options, tree }
+      const rootKey = rstripSlash(root.virtual) || '/'
+      await primeRegexes(tree, [rootKey])
       // A start point that is itself a symlink is the walk's to report: the
       // table it walks answers the link's own row, and GNU's default -P
       // reports the link and stops there. The dispatcher's stat would follow
@@ -459,6 +469,8 @@ export function findGeneric(
             yield ENC.encode(added.join('\n') + '\n')
             for (const r of added) records.push({ path: matchedPath(r, root), run })
           }
+          // A -quit reached on the start point itself ends the line.
+          if (quitFired(tree)) break
           continue
         }
         startIsDir = true
@@ -479,9 +491,19 @@ export function findGeneric(
             : modifiedTs(startFile?.modified ?? null)
           : null
       let first: string[] = []
-      if (startIsDir && !usesEmptyEarly && !mtimePushed && !(timed && rootMtime === null)) {
+      // A -quit on the root ends the walk before it begins, which only the
+      // walk can tell; -xtype reads past a link it may be.
+      const early = !treeHas(tree, ['quit', 'xtype'])
+      if (
+        early &&
+        startIsDir &&
+        !usesEmptyEarly &&
+        !mtimePushed &&
+        !(timed && rootMtime === null)
+      ) {
         const rootRows =
-          rootDirResults(root, rootOptions, argsToTree(rootOptions), null, rootMtime).length > 0
+          rootDirResults(root, rootOptions, argsToTree(rootOptions), null, rootMtime, startFile)
+            .length > 0
             ? [rstripSlash(root.virtual) || '/']
             : []
         const checked =
@@ -520,7 +542,6 @@ export function findGeneric(
         )
       }
       for (const line of stopped?.() ?? []) missing.push(`find: ${line}`)
-      const rootKey = rstripSlash(root.virtual) || '/'
       const rootMatches: string[] = []
       for (const key of keys) {
         const displayPath =
@@ -554,6 +575,7 @@ export function findGeneric(
             timed && rootMtime === null ? timeTestsFailing(tree) : argsToTree(rootOptions),
             rootEmpty,
             rootMtime,
+            startFile,
           ),
         )
       }
@@ -576,6 +598,7 @@ export function findGeneric(
       const added = respellRaw(visibleRows, root.virtual, root.rawPath)
       for (const row of added) if (!first.includes(row)) yield ENC.encode(row + '\n')
       for (const r of added) records.push({ path: matchedPath(r, root), run })
+      if (quitted?.() === true) break
     }
     if (missing.length > 0) {
       io.stderr = ENC.encode(missing.join('\n') + '\n')
@@ -597,5 +620,6 @@ export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): 
     if (name === OPERAND) break
     follows = name === 'P' ? Follow.NONE : Follow.LAST
   }
+  if (fl.asBool('follow')) follows = Follow.LAST
   return new LineFacts({ follows, walks: true, readsSubtree: true })
 }

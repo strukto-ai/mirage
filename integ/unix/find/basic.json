@@ -63,12 +63,20 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "find /data/f4/sub1 \\( -name inner.txt -o -name deep.txt \\)",
+      "command": "find /data/f4/sub1 \\( -name inner.txt -o -name deep.txt \\); find /data/f4/sub1 -iwholename '*/SUB1/*.TXT' | sort; find /data/f4 -ipath '*SKIPME' ; find /data/f4/sub1 -wholename '*/inner.txt'; find /data/f4/sub1 -name '*.txt' -print -quit | wc -l; find /data/f4/sub1 -quit; find /data/f4/sub1 -quit -print; find /data/f4/sub1 /data/f4/sub1 -name inner.txt -print -quit; find /data/f4/sub1 -true -name inner.txt; find /data/f4/sub1 -false; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "/data/f4/sub1/inner.txt\n/data/f4/sub1/skipme/deep.txt\n",
+        "stdout": "/data/f4/sub1/inner.txt\n/data/f4/sub1/skipme/deep.txt\n/data/f4/sub1/inner.txt\n/data/f4/sub1/skipme/deep.txt\n/data/f4/sub1/skipme\n/data/f4/sub1/inner.txt\n1\n/data/f4/sub1/inner.txt\n/data/f4/sub1/inner.txt\nrc=0\n",
         "stderr": ""
-      }
+      },
+      "flags": [
+        "iwholename",
+        "ipath",
+        "wholename",
+        "quit",
+        "true",
+        "false"
+      ]
     }
   ]
 }

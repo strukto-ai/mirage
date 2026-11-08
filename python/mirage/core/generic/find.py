@@ -183,6 +183,8 @@ async def walk_find(
     loops: list[tuple[str, str]] | None = None,
     enters: Callable[[str], bool] | None = None,
     listing: Callable[[PathSpec], Awaitable[list[str]]] | None = None,
+    links: LinkView | None = None,
+    stopped: list[str] | None = None,
 ) -> list[str]:
     """Walk readdir/stat under one start point and match every entry.
 
@@ -221,6 +223,10 @@ async def walk_find(
             ``-empty`` still reads it, but the walk does not descend.
         listing (Callable | None): the walk's own listing of a directory,
             where the caller bounds it; None lists with ``readdir``.
+        links (LinkView | None): the namespace's links whether or not the
+            walk follows them, which ``-xtype`` reads past.
+        stopped (list[str] | None): receives the entry a ``-quit`` was
+            reached on; the walk evaluates nothing after it.
     """
     stat = partial(followed_stat, stat, follow)
     collected: list[tuple[str, str]] = []
@@ -235,13 +241,17 @@ async def walk_find(
         search_path.raw_path,
     )
     prunes = find_eval.tree_has_prune(prune_tree)
+    quits = find_eval.tree_has(prune_tree, (find_types.Quit,))
     need_empty = find_eval.tree_has_empty(prune_tree)
     acts = find_eval.tree_has_action(prune_tree)
+    reads_stat = find_eval.tree_reads_stat(prune_tree)
 
     async def read_directory(spec: PathSpec) -> list[str]:
         if enters is not None and not enters(spec.virtual):
             return []
-        if prunes:
+        if quits and find_eval.quit_fired(prune_tree):
+            return []
+        if prunes or quits:
             key = spec.virtual.rstrip("/") or "/"
             depth = len(spec.virtual.rstrip("/").split("/")) - len(
                 root_path.rstrip("/").split("/")
@@ -259,6 +269,7 @@ async def walk_find(
                 if need_empty
                 else None
             )
+            await find_eval.prime_regexes(prune_tree, [key])
             find_eval.keep(
                 find_types.FindEntry(
                     key=key,
@@ -267,12 +278,17 @@ async def walk_find(
                     depth=depth,
                     is_empty=empty,
                     mtime=modified_ts(info.modified) if info else None,
+                    stat=info if reads_stat else None,
                 ),
                 prune_tree,
                 args.mindepth,
                 acts,
             )
-            if key in find_eval.pruned_keys(prune_tree):
+            # A directory that reached -quit is the walk's last: what it
+            # holds is never read.
+            if key in find_eval.pruned_keys(prune_tree) or (
+                quits and find_eval.quit_fired(prune_tree)
+            ):
                 return []
         return await (listing or readdir)(spec)
 
@@ -309,11 +325,16 @@ async def walk_find(
     need_size = args.min_size is not None or args.max_size is not None
     windowed = args.mtime_min is not None or args.mtime_max is not None
     need_mtime = windowed or find_eval.tree_has_time(tree)
+    need_stat = need_mtime or reads_stat
+    need_link = find_eval.tree_reads_link(tree)
     failing = find_eval.time_tests_failing(tree)
     learned: dict[str, float | None] = {}
+    statted: dict[str, FileStat | None] = {}
     results: list[str] = []
     vis = session_visibility()
-    for p, kind in sorted(collected):
+    collected.sort()
+    await find_eval.prime_regexes(tree, (p for p, _ in collected))
+    for p, kind in collected:
         if not path_visible(vis, p):
             continue
         is_dir = kind == "d"
@@ -343,13 +364,14 @@ async def walk_find(
         # GNU's would; the stat that -size alone needs waits for the rows
         # the tree kept.
         st = None
-        if need_mtime:
+        if need_stat:
             st = await _stat_entry(stat, p, unstatted)
             if st is None and windowed:
                 continue
             # A failed stat leaves the time unknown, which fails every time
             # test, so another -o arm (-name) can still match the entry.
             learned[key] = modified_ts(st.modified) if st is not None else None
+            statted[key] = st
         entry = find_types.FindEntry(
             key=key,
             name=entry_name,
@@ -357,9 +379,22 @@ async def walk_find(
             depth=depth,
             is_empty=is_empty,
             mtime=learned.get(key),
+            stat=st,
+            xkind=(
+                await _other_kind(follow, links, p, kind)
+                if need_link
+                else None
+            ),
         )
         judged = failing if need_mtime and entry.mtime is None else tree
-        if not find_eval.keep(entry, judged, args.mindepth, acts):
+        kept = find_eval.keep(entry, judged, args.mindepth, acts)
+        if find_eval.quit_fired(judged):
+            if kept:
+                results.append(p)
+            if stopped is not None:
+                stopped.append(p)
+            break
+        if not kept:
             continue
         if need_size and not is_dir and st is None:
             st = await _stat_entry(stat, p, unstatted)
@@ -382,5 +417,35 @@ async def walk_find(
             if args.mtime_max is not None and ts > args.mtime_max:
                 continue
         results.append(p)
-    find_eval.settle_prunes(tree, learned)
+    find_eval.settle_prunes(tree, learned, statted)
     return sorted(find_eval.drop_pruned(results, tree, ""))
+
+
+async def _other_kind(
+    follow: LinkView | None,
+    links: LinkView | None,
+    path: str,
+    kind: str,
+) -> str:
+    """``-xtype``'s kind for one entry: a link the walk keeps is what it
+    leads to (``l`` when it leads nowhere), a link the walk followed is
+    ``l``, and anything else is its own kind.
+
+    Args:
+        follow (LinkView | None): the links the walk follows, under -L.
+        links (LinkView | None): the namespace's links.
+        path (str): the entry's virtual path.
+        kind (str): the kind the walk gave it.
+    """
+    view = follow or links
+    if view is None:
+        return kind
+    if follow is not None:
+        return "l" if view.stat_at(path) is not None else kind
+    if kind != "l":
+        return kind
+    try:
+        target = await view.target_stat(path)
+    except OSError:
+        return "l"
+    return printf_kind(target) if target is not None else "l"

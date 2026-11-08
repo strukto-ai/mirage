@@ -22,7 +22,7 @@ import { MovableStream } from './stream.ts'
 
 export type Span = [number, number]
 export type Groups = (Span | null)[]
-export type PosixDialect = 'sed' | 'posix'
+export type PosixDialect = 'sed' | 'posix' | 'emacs'
 export type LineSyntax = 'basic' | 'extended' | 'fixed' | 'perl'
 
 const UNSET = 0xffffffff
@@ -186,7 +186,8 @@ class StreamPool {
  * matching that text puts them, trying a repetition's longer counts and an
  * alternation's earlier branches first. Offsets count elements of the byte
  * view the subject arrives as. `dialect` `sed` reads the expression as GNU
- * sed does, `posix` as regcomp does for expr, nl, bash and git; `multiline`
+ * sed does, `posix` as regcomp does for expr, nl, bash and git, `emacs` in
+ * the syntax find's `-regex` defaults to; `multiline`
  * is sed's `M`, and `word` git grep's -w. A long search yields to the loop
  * between its bounded calls. A refused expression throws
  * RegexError in regerror's wording. Mirrors Python's PosixRegex.

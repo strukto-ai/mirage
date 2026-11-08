@@ -26,13 +26,18 @@ import {
   dropPruned,
   keep,
   argsToTree,
+  primeRegexes,
   printfKind,
   prunedKeys,
+  quitFired,
   settlePrunes,
+  treeHas,
   treeHasAction,
   treeHasEmpty,
   treeHasPrune,
   treeHasTime,
+  treeReadsLink,
+  treeReadsStat,
   timeTestsFailing,
 } from './find_eval.ts'
 import { type FindEntry, type PredNode, type PrintfKind } from './types.ts'
@@ -86,6 +91,12 @@ export interface WalkFindDeps {
   // The walk's own listing of a directory, where the caller bounds it;
   // absent lists with `readdir`, which -empty still reads.
   listing?: (spec: PathSpec) => Promise<string[]>
+  // The namespace's links whether or not the walk follows them, which
+  // -xtype reads past.
+  links?: LinkView | null
+  // Receives the entry a -quit was reached on; the walk evaluates nothing
+  // after it.
+  stopped?: string[]
 }
 
 interface WalkEntry {
@@ -229,16 +240,20 @@ export async function walkFind(
   const rootPath = path.virtual !== '/' ? rstripSlash(path.virtual) : '/'
   const pruneTree = bindTree(argsToTree(options), '', path.virtual, path.rawPath)
   const prunes = treeHasPrune(pruneTree)
+  const quits = treeHas(pruneTree, ['quit'])
   const needEmpty = treeHasEmpty(pruneTree)
   const acts = treeHasAction(pruneTree)
+  const readsStat = treeReadsStat(pruneTree)
   const readDirectory = async (spec: PathSpec): Promise<string[]> => {
     if (deps.enters !== undefined && !deps.enters(spec.virtual)) return []
-    if (prunes) {
+    if (quits && quitFired(pruneTree)) return []
+    if (prunes || quits) {
       const key = rstripSlash(spec.virtual) || '/'
       const depth =
         rstripSlash(spec.virtual).split('/').length - rstripSlash(rootPath).split('/').length
       const info = await statEntry(deps, spec.virtual)
       const isEmpty = needEmpty ? await isEmptyEntry(deps, spec.virtual, true) : null
+      await primeRegexes(pruneTree, [key])
       keep(
         {
           key,
@@ -247,12 +262,15 @@ export async function walkFind(
           depth,
           isEmpty,
           mtime: info === null ? null : modifiedTs(info.modified),
+          stat: readsStat ? info : null,
         },
         pruneTree,
         options.minDepth,
         acts,
       )
-      if (prunedKeys(pruneTree).includes(key)) return []
+      // A directory that reached -quit is the walk's last: what it holds
+      // is never read.
+      if (prunedKeys(pruneTree).includes(key) || (quits && quitFired(pruneTree))) return []
     }
     return (deps.listing ?? deps.readdir)(spec)
   }
@@ -290,9 +308,16 @@ export async function walkFind(
   const needSize = options.minSize != null || options.maxSize != null
   const windowed = options.mtimeMin != null || options.mtimeMax != null
   const needMtime = windowed || treeHasTime(tree)
+  const needStat = needMtime || readsStat
+  const needLink = treeReadsLink(tree)
   const failing = timeTestsFailing(tree)
   const learned = new Map<string, number | null>()
+  const statted = new Map<string, FileStat | null>()
   collected.sort((a, b) => compareCodePoints(a.path, b.path))
+  await primeRegexes(
+    tree,
+    collected.map((entry) => (entry.path === '' ? '/' : entry.path)),
+  )
   for (const entry of collected) {
     const name = entry.path.split('/').pop() ?? ''
     const key = entry.path === '' ? '/' : entry.path
@@ -305,12 +330,13 @@ export async function walkFind(
     // would; the stat that -size alone needs waits for the rows the tree
     // kept.
     let st: FileStat | null = null
-    if (needMtime) {
+    if (needStat) {
       st = await statEntry(deps, entry.path)
       if (st === null && windowed) continue
       // A failed stat leaves the time unknown, which fails every time test,
       // so another -o arm (-name) can still match the entry.
       learned.set(key, st !== null ? modifiedTs(st.modified) : null)
+      statted.set(key, st)
     }
     const findEntry: FindEntry = {
       key,
@@ -319,9 +345,19 @@ export async function walkFind(
       depth: entry.depth,
       isEmpty,
       mtime: learned.get(key) ?? null,
+      stat: st,
+      xkind: needLink
+        ? await otherKind(links ?? null, found.links ?? null, entry.path, entry.kind)
+        : null,
     }
     const judged = needMtime && findEntry.mtime === null ? failing : tree
-    if (!keep(findEntry, judged, options.minDepth, acts)) continue
+    const kept = keep(findEntry, judged, options.minDepth, acts)
+    if (quitFired(judged)) {
+      if (kept) results.push(key)
+      found.stopped?.push(key)
+      break
+    }
+    if (!kept) continue
     if (needSize && entry.file && st === null) {
       st = await statEntry(deps, entry.path)
       if (st === null) continue
@@ -339,6 +375,30 @@ export async function walkFind(
     }
     results.push(key)
   }
-  settlePrunes(tree, learned)
+  settlePrunes(tree, learned, statted)
   return dropPruned(results, tree)
+}
+
+// -xtype's kind for one entry: a link the walk keeps is what it leads to
+// (`l` when it leads nowhere), a link the walk followed is `l`, and anything
+// else is its own kind.
+async function otherKind(
+  follow: LinkView | null,
+  links: LinkView | null,
+  path: string,
+  kind: string,
+): Promise<string> {
+  const view = follow ?? links
+  if (view === null) return kind
+  if (follow !== null) return view.statAt(path) !== null ? 'l' : kind
+  if (kind !== 'l') return kind
+  let target: FileStat | null
+  try {
+    target = await view.targetStat(path)
+  } catch (err) {
+    // A link whose chain fails to resolve leads nowhere.
+    if (!isEntryError(err)) throw err
+    return 'l'
+  }
+  return target !== null ? printfKind(target) : 'l'
 }

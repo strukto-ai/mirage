@@ -1113,3 +1113,73 @@ async def test_delete_keeps_a_directory_with_an_unmatched_link():
             == "find: cannot delete '/data/d': Directory not empty\n"
         )
         assert ws.namespace.is_link("/data/d/link")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,stdout,stderr,code",
+    [
+        (
+            r'find d -name "*.txt" -execdir echo {} \;',
+            "./a.txt\n./b.txt\n./c.txt\n",
+            "",
+            0,
+        ),
+        (
+            'find d -name "*.txt" -execdir echo {} +',
+            "./a.txt ./b.txt\n./c.txt\n",
+            "",
+            0,
+        ),
+        (r"find d/sub -execdir pwd \;", "/w/d\n/w/d/sub\n", "", 0),
+        ("find d -name a.txt -fprint out; cat out", "d/a.txt\n", "", 0),
+        ("find d -name zz -fprint out; cat out; echo rc=$?", "rc=0\n", "", 0),
+        (
+            "find d -fprint nodir/out",
+            "",
+            "find: 'nodir/out': No such file or directory\n",
+            1,
+        ),
+        (
+            "find d -name a.txt -fprintf out '%f %s\\n'; cat out",
+            "a.txt 2\n",
+            "",
+            0,
+        ),
+        ("find d -name a.txt -fprint /dev/stdout", "d/a.txt\n", "", 0),
+        ("find d -name '*.txt' -print -quit", "d/a.txt\n", "", 0),
+        ("find d d -name b.txt -print -quit", "d/b.txt\n", "", 0),
+        ("find d -quit -print", "", "", 0),
+        (
+            "printf 'd/a.txt\\0d/sub\\0' | find -files0-from - -maxdepth 0",
+            "d/a.txt\nd/sub\n",
+            "",
+            0,
+        ),
+        (
+            "printf 'd/a.txt\\0\\0' > list; find -files0-from list",
+            "d/a.txt\n",
+            "find: 'list':2: invalid zero-length file name\n",
+            1,
+        ),
+        (
+            "find d -files0-from list",
+            "",
+            "find: extra operand 'd'\n"
+            "find: file operands cannot be combined with -files0-from\n",
+            1,
+        ),
+        (
+            "find -files0-from nolist",
+            "",
+            "find: cannot open 'nolist' for reading: "
+            "No such file or directory\n",
+            1,
+        ),
+    ],
+)
+async def test_execdir_fprint_quit_and_files0_from(line, stdout, stderr, code):
+    # Pinned against findutils 4.10 on debian:stable-slim; the reference orders the
+    # rows by directory reads, mirage by name.
+    ws = await _exec_ws()
+    assert await _run_line(ws, line) == (stdout, stderr, code)

@@ -31,11 +31,11 @@ def test_unknown_predicate_exits_1_and_prints_nothing() -> None:
     _run(_go())
 
 
-def test_unsupported_regex_exits_1() -> None:
+def test_unsupported_ok_exits_1() -> None:
     async def _go():
         ws = _ws()
         await _setup(ws)
-        r = await ws.shell("find /data -regex '.*'", session_id="s")
+        r = await ws.shell("find /data -ok echo {} ';'", session_id="s")
         assert r.exit_code == 1
 
     _run(_go())

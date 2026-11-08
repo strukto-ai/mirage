@@ -45,9 +45,9 @@ describe('find unknown predicate', () => {
     await ws.close()
   })
 
-  it('errors exit 1 on unsupported -regex', async () => {
+  it('errors exit 1 on unsupported -ok', async () => {
     const ws = await buildWs()
-    const { code } = await run(ws, "find /data -regex '.*'")
+    const { code } = await run(ws, "find /data -ok echo {} ';'")
     expect(code).toBe(1)
     await ws.close()
   })

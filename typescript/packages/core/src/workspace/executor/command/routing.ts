@@ -89,7 +89,10 @@ export function defaultCwdOperand(
   if (cmdName === 'find') {
     // Only the words before the expression can be start points: an
     // `-exec` command word or a `-newer` reference is the parser's.
-    argv = argv.slice(0, findLayout(argv).start)
+    // -files0-from names the start points in their place.
+    const start = findLayout(argv).start
+    if (argv.slice(start).includes('-files0-from')) return null
+    argv = argv.slice(0, start)
   }
   const parsed = parseCommand(spec, argv, cwd, cmdName)
   if (parsed.paths().length > 0) return null

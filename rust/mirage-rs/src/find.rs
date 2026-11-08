@@ -5,9 +5,10 @@
 //! actions, with every argument typed and checked where it was written, so
 //! the first bad one names the refusal and its exit status. `-printf` is
 //! compiled once into literal runs and directives the host renders per
-//! entry, its warnings kept in the order GNU prints them. A time test comes
-//! back as its operands (`-mtime +N` as a sign and a day count, `-newermt`
-//! as the date text, `-newer` as an index into the reference list) with the
+//! entry, its warnings kept in the order the reference prints them, and a `-regex`
+//! is compiled once to be refused where it was typed. A time test comes
+//! back as its operands (`-mtime +N` as a sign and a count, `-newermt` as
+//! the date text, `-newer` as an index into the reference list) with the
 //! way it folds into the expression's flat window, since only the host has
 //! a clock, a date library and the dispatcher that stats a reference.
 //!
@@ -17,33 +18,124 @@
 
 use serde_json::{Value as Json, json};
 
+use crate::regex::parse::{Dialect, parse as compile_regex};
 use crate::scan::{OPERAND, Typed, Values, unknown};
+use crate::sort::number::strtod_prefix;
 use crate::{StreamError, byte_text};
 
 const VALUE_PREDICATES: &[&[u8]] = &[
     b"-name",
     b"-iname",
     b"-path",
+    b"-ipath",
+    b"-wholename",
+    b"-iwholename",
+    b"-regex",
+    b"-iregex",
+    b"-regextype",
+    b"-lname",
+    b"-ilname",
     b"-type",
+    b"-xtype",
     b"-size",
+    b"-perm",
+    b"-links",
     b"-mtime",
+    b"-atime",
+    b"-ctime",
+    b"-mmin",
+    b"-amin",
+    b"-cmin",
+    b"-user",
+    b"-group",
+    b"-uid",
+    b"-gid",
     b"-maxdepth",
     b"-mindepth",
     b"-printf",
+    b"-fprint",
+    b"-fprint0",
+    b"-fprintf",
     b"-newer",
     b"-newermt",
+    b"-files0-from",
 ];
 const BARE_PREDICATES: &[&[u8]] = &[
-    b"-empty", b"-print", b"-print0", b"-delete", b"-ls", b"-depth", b"-xdev", b"-mount", b"-prune",
+    b"-empty",
+    b"-print",
+    b"-print0",
+    b"-delete",
+    b"-ls",
+    b"-depth",
+    b"-xdev",
+    b"-mount",
+    b"-prune",
+    b"-quit",
+    b"-true",
+    b"-false",
+    b"-readable",
+    b"-writable",
+    b"-executable",
+    b"-nouser",
+    b"-nogroup",
+    b"-daystart",
+    b"-follow",
+];
+/// The words that test an entry, which a top-level `-a` chain may not
+/// hold after an action: the host applies every action to the rows the
+/// tests kept, so a later test could not undo one.
+const TESTS: &[&[u8]] = &[
+    b"-name",
+    b"-iname",
+    b"-path",
+    b"-ipath",
+    b"-wholename",
+    b"-iwholename",
+    b"-regex",
+    b"-iregex",
+    b"-lname",
+    b"-ilname",
+    b"-type",
+    b"-xtype",
+    b"-size",
+    b"-perm",
+    b"-links",
+    b"-mtime",
+    b"-atime",
+    b"-ctime",
+    b"-mmin",
+    b"-amin",
+    b"-cmin",
+    b"-user",
+    b"-group",
+    b"-uid",
+    b"-gid",
+    b"-newer",
+    b"-newermt",
+    b"-empty",
+    b"-prune",
+    b"-true",
+    b"-false",
+    b"-readable",
+    b"-writable",
+    b"-executable",
+    b"-nouser",
+    b"-nogroup",
 ];
 const OPERATORS: &[&[u8]] = &[b"-not", b"!", b"-o", b"-or", b"-a", b"-and", b"(", b")"];
 const EXEC: &[u8] = b"-exec";
+const EXECDIR: &[u8] = b"-execdir";
 const LINK_OPTIONS: &[&[u8]] = &[b"-P", b"-H", b"-L"];
 const ROW_ACTIONS: &[(&[u8], &str)] = &[
     (b"-print", "print"),
     (b"-print0", "print0"),
     (b"-ls", "ls"),
     (b"-delete", "delete"),
+];
+const ACCESS: &[(&[u8], u8)] = &[
+    (b"-readable", b'r'),
+    (b"-writable", b'w'),
+    (b"-executable", b'x'),
 ];
 const TYPES: &[u8] = b"bcdpfls";
 const TIME_LETTERS: &[u8] = b"@+aAbBcCdDeFgGhHIjklmMnpPrRsStTuUVwWxXyYzZ";
@@ -54,6 +146,24 @@ const POSITIONAL: &str = "under -o, ! or parentheses";
 const DELETE_PRUNE: &str = "find: The -delete action automatically turns on -depth, but -prune \
      does nothing when -depth is in effect.  If you want to carry on anyway, just explicitly \
      use the -depth option.";
+/// `-regextype`'s names in the order the reference lists them, each with the
+/// syntax mirage-rs reads it in: the default is Emacs's, the rest a basic
+/// or an extended POSIX expression.
+const REGEX_TYPES: &[(&[u8], Dialect, bool)] = &[
+    (b"findutils-default", Dialect::Emacs, false),
+    (b"ed", Dialect::Posix, false),
+    (b"emacs", Dialect::Emacs, false),
+    (b"gnu-awk", Dialect::Posix, true),
+    (b"grep", Dialect::Posix, false),
+    (b"posix-awk", Dialect::Posix, true),
+    (b"awk", Dialect::Posix, true),
+    (b"posix-basic", Dialect::Posix, false),
+    (b"posix-egrep", Dialect::Posix, true),
+    (b"egrep", Dialect::Posix, true),
+    (b"posix-extended", Dialect::Posix, true),
+    (b"posix-minimal-basic", Dialect::Posix, false),
+    (b"sed", Dialect::Posix, false),
+];
 
 type Fail = Vec<u8>;
 
@@ -65,12 +175,15 @@ fn text(message: &str) -> Fail {
     message.as_bytes().to_vec()
 }
 
+fn is_exec(word: &[u8]) -> bool {
+    word == EXEC || word == EXECDIR
+}
+
 fn is_expression_token(word: &[u8]) -> bool {
     (word.starts_with(b"-") && word.len() > 1)
         || [VALUE_PREDICATES, BARE_PREDICATES, OPERATORS]
             .iter()
             .any(|list| list.contains(&word))
-        || word == EXEC
 }
 
 fn start_of(argv: &[Vec<u8>]) -> usize {
@@ -88,7 +201,7 @@ fn exec_spans(argv: &[Vec<u8>]) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
     let mut at = 0;
     while at < argv.len() {
-        if argv[at] != EXEC {
+        if !is_exec(&argv[at]) {
             at += 1;
             continue;
         }
@@ -154,29 +267,52 @@ enum Part {
 
 #[derive(PartialEq)]
 enum Action {
-    Exec { argv: Vec<Vec<u8>>, batch: bool },
-    Row(&'static str),
-    Printf { format: Vec<u8>, parts: Vec<Part> },
+    Exec {
+        argv: Vec<Vec<u8>>,
+        batch: bool,
+        dir: bool,
+    },
+    Row {
+        kind: &'static str,
+        file: Option<Vec<u8>>,
+    },
+    Printf {
+        format: Vec<u8>,
+        parts: Vec<Part>,
+        file: Option<Vec<u8>>,
+    },
 }
 
 impl Action {
     fn word(&self) -> String {
         match self {
-            Action::Exec { .. } => "-exec".to_owned(),
-            Action::Printf { .. } => "-printf".to_owned(),
-            Action::Row(kind) => format!("-{kind}"),
+            Action::Exec { dir: false, .. } => "-exec".to_owned(),
+            Action::Exec { dir: true, .. } => "-execdir".to_owned(),
+            Action::Printf { file: None, .. } => "-printf".to_owned(),
+            Action::Printf { file: Some(_), .. } => "-fprintf".to_owned(),
+            Action::Row { kind, file: None } => format!("-{kind}"),
+            Action::Row {
+                kind,
+                file: Some(_),
+            } => format!("-f{kind}"),
         }
     }
 
     fn json(&self) -> Json {
+        let file = |file: &Option<Vec<u8>>| file.as_deref().map(byte_text);
         match self {
-            Action::Exec { argv, batch } => json!({
+            Action::Exec { argv, batch, dir } => json!({
                 "kind": "exec",
                 "argv": argv.iter().map(|w| byte_text(w)).collect::<Vec<_>>(),
                 "batch": batch,
+                "dir": dir,
             }),
-            Action::Row(kind) => json!({"kind": kind}),
-            Action::Printf { format, parts } => json!({
+            Action::Row { kind, file: path } => json!({"kind": kind, "file": file(path)}),
+            Action::Printf {
+                format,
+                parts,
+                file: path,
+            } => json!({
                 "kind": "printf",
                 "format": byte_text(format),
                 "parts": parts.iter().map(part_json).collect::<Vec<_>>(),
@@ -185,8 +321,21 @@ impl Action {
                     Part::Time(_) => true,
                     Part::Lit(_) => false,
                 }),
+                "file": file(path),
             }),
         }
+    }
+}
+
+/// A count as JSON: a number, or JavaScript's spelling of an infinity,
+/// which JSON has no number for and both hosts read back.
+fn number(amount: f64) -> Json {
+    if amount.is_finite() {
+        json!(amount)
+    } else if amount > 0.0 {
+        json!("Infinity")
+    } else {
+        json!("-Infinity")
     }
 }
 
@@ -205,23 +354,83 @@ enum Fold {
 }
 
 enum Time {
-    Mtime { cmp: u8, days: f64 },
+    /// `-mtime`, `-atime`, `-ctime` and their `-Xmin` twins: which stamp
+    /// (`m`, `a`, `c`), counted in days or minutes, measured from the
+    /// next midnight under `-daystart`.
+    Age {
+        field: u8,
+        minutes: bool,
+        cmp: u8,
+        amount: f64,
+        daystart: bool,
+    },
     Newermt(Vec<u8>),
     Newer(usize),
 }
 
+/// How `-perm` compares: the mode exactly, every bit of it, or any.
+#[derive(Clone, Copy)]
+enum Bits {
+    Exact,
+    All,
+    Any,
+}
+
 enum Node {
-    Name { pattern: Vec<u8>, icase: bool },
-    Path(Vec<u8>),
+    Name {
+        pattern: Vec<u8>,
+        icase: bool,
+    },
+    Path {
+        pattern: Vec<u8>,
+        icase: bool,
+    },
+    Regex {
+        pattern: Vec<u8>,
+        icase: bool,
+        dialect: &'static str,
+        extended: bool,
+    },
+    Lname {
+        pattern: Vec<u8>,
+        icase: bool,
+    },
     Type(u8),
+    XType(u8),
+    Perm {
+        mode: u32,
+        bits: Bits,
+    },
+    Count {
+        field: &'static str,
+        cmp: u8,
+        count: u64,
+    },
+    Owner {
+        group: bool,
+        name: Vec<u8>,
+    },
+    /// `-nouser` and `-nogroup`: an owner known only by number.
+    NoOwner {
+        group: bool,
+    },
+    Access(u8),
     Empty,
     True,
     Prune,
+    Quit,
     Not(Box<Node>),
     And(Vec<Node>),
     Or(Vec<Node>),
-    Act { kind: &'static str, batch: bool },
+    Act {
+        kind: &'static str,
+        batch: bool,
+    },
     Time(Time, Fold),
+}
+
+fn is_quit(node: &Node) -> bool {
+    matches!(node, Node::Quit)
 }
 
 impl Node {
@@ -279,11 +488,50 @@ impl Node {
             Node::Name { pattern, icase } => {
                 json!({"op": "name", "pattern": byte_text(pattern), "icase": icase})
             }
-            Node::Path(pattern) => json!({"op": "path", "pattern": byte_text(pattern)}),
+            Node::Path { pattern, icase } => {
+                json!({"op": "path", "pattern": byte_text(pattern), "icase": icase})
+            }
+            Node::Regex {
+                pattern,
+                icase,
+                dialect,
+                extended,
+            } => json!({
+                "op": "regex",
+                "pattern": byte_text(pattern),
+                "icase": icase,
+                "dialect": dialect,
+                "extended": extended,
+            }),
+            Node::Lname { pattern, icase } => {
+                json!({"op": "lname", "pattern": byte_text(pattern), "icase": icase})
+            }
             Node::Type(kind) => json!({"op": "type", "kind": char::from(*kind).to_string()}),
+            Node::XType(kind) => json!({"op": "xtype", "kind": char::from(*kind).to_string()}),
+            Node::Perm { mode, bits } => json!({
+                "op": "perm",
+                "mode": mode,
+                "bits": match bits {
+                    Bits::Exact => "exact",
+                    Bits::All => "all",
+                    Bits::Any => "any",
+                },
+            }),
+            Node::Count { field, cmp, count } => json!({
+                "op": "count",
+                "field": field,
+                "cmp": char::from(*cmp).to_string(),
+                "count": count,
+            }),
+            Node::Owner { group, name } => {
+                json!({"op": "owner", "group": group, "name": byte_text(name)})
+            }
+            Node::NoOwner { group } => json!({"op": "nouser", "group": group}),
+            Node::Access(mode) => json!({"op": "access", "mode": char::from(*mode).to_string()}),
             Node::Empty => json!({"op": "empty"}),
             Node::True => json!({"op": "true"}),
             Node::Prune => json!({"op": "prune"}),
+            Node::Quit => json!({"op": "quit"}),
             Node::Not(kid) => json!({"op": "not", "kid": kid.json()}),
             Node::And(kids) => {
                 json!({"op": "and", "kids": kids.iter().map(Node::json).collect::<Vec<_>>()})
@@ -298,10 +546,19 @@ impl Node {
                     Fold::Any => "any",
                 };
                 match test {
-                    Time::Mtime { cmp, days } => json!({
-                        "op": "mtime",
+                    Time::Age {
+                        field,
+                        minutes,
+                        cmp,
+                        amount,
+                        daystart,
+                    } => json!({
+                        "op": "age",
+                        "field": char::from(*field).to_string(),
+                        "minutes": minutes,
                         "cmp": char::from(*cmp).to_string(),
-                        "days": days,
+                        "amount": number(*amount),
+                        "daystart": daystart,
                         "fold": fold,
                     }),
                     Time::Newermt(date) => {
@@ -324,6 +581,8 @@ struct Parsed {
     newer: Vec<Vec<u8>>,
     dates: Vec<(Vec<u8>, usize)>,
     depth_first: bool,
+    follow: bool,
+    files0_from: Option<Vec<u8>>,
     predicates: Vec<Vec<u8>>,
     warnings: Vec<Vec<u8>>,
 }
@@ -365,6 +624,11 @@ impl Parsed {
             ),
         );
         values.insert("depth_first".to_owned(), json!(self.depth_first));
+        values.insert("follow".to_owned(), json!(self.follow));
+        values.insert(
+            "files0_from".to_owned(),
+            json!(self.files0_from.as_deref().map(byte_text)),
+        );
         values.insert(
             "predicates".to_owned(),
             Json::Array(
@@ -392,6 +656,8 @@ struct Parser<'a> {
     positional: bool,
     depth_option: bool,
     newer_token: Option<&'a [u8]>,
+    regex_type: (Dialect, bool),
+    daystart: bool,
     maxdepth: Option<u64>,
     mindepth: Option<u64>,
     size: (Option<i128>, Option<i128>),
@@ -400,6 +666,8 @@ struct Parser<'a> {
     newer: Vec<Vec<u8>>,
     dates: Vec<(Vec<u8>, usize)>,
     depth_first: bool,
+    follow: bool,
+    files0_from: Option<Vec<u8>>,
     predicates: Vec<Vec<u8>>,
     warnings: Vec<Vec<u8>>,
 }
@@ -416,6 +684,8 @@ impl<'a> Parser<'a> {
             positional: false,
             depth_option: false,
             newer_token: None,
+            regex_type: (Dialect::Emacs, false),
+            daystart: false,
             maxdepth: None,
             mindepth: None,
             size: (None, None),
@@ -424,6 +694,8 @@ impl<'a> Parser<'a> {
             newer: Vec::new(),
             dates: Vec::new(),
             depth_first: false,
+            follow: false,
+            files0_from: None,
             predicates: Vec::new(),
             warnings: Vec::new(),
         }
@@ -441,6 +713,8 @@ impl<'a> Parser<'a> {
                 newer: self.newer,
                 dates: self.dates,
                 depth_first: self.depth_first,
+                follow: self.follow,
+                files0_from: self.files0_from,
                 predicates: self.predicates,
                 warnings: self.warnings,
             }),
@@ -625,12 +899,7 @@ impl<'a> Parser<'a> {
     }
 
     fn is_test_after_action(&self, tok: &[u8]) -> bool {
-        tok == b"-empty"
-            || tok == b"-prune"
-            || (VALUE_PREDICATES.contains(&tok)
-                && tok != b"-printf"
-                && tok != b"-maxdepth"
-                && tok != b"-mindepth")
+        TESTS.contains(&tok)
     }
 
     fn primary(&mut self) -> Result<Node, Fail> {
@@ -658,9 +927,9 @@ impl<'a> Parser<'a> {
             };
             return self.value_predicate(tok, value);
         }
-        if tok == EXEC {
+        if is_exec(tok) {
             self.predicates.push(tok.to_vec());
-            let action = self.exec()?;
+            let action = self.exec(tok)?;
             let batch = matches!(action, Action::Exec { batch: true, .. });
             self.actions.push(action);
             return Ok(self.action_node("exec", batch));
@@ -672,25 +941,19 @@ impl<'a> Parser<'a> {
         }
         if let Some((_, kind)) = ROW_ACTIONS.iter().find(|(word, _)| *word == tok) {
             self.predicates.push(tok.to_vec());
-            self.actions.push(Action::Row(kind));
+            self.actions.push(Action::Row { kind, file: None });
             if tok == b"-delete" {
                 self.depth_first = true;
             }
             return Ok(self.action_node(kind, false));
         }
-        if tok == b"-prune" {
+        if let Some((_, mode)) = ACCESS.iter().find(|(word, _)| *word == tok) {
             self.predicates.push(tok.to_vec());
-            return Ok(Node::Prune);
-        }
-        if tok == b"-depth" {
-            self.predicates.push(tok.to_vec());
-            self.depth_first = true;
-            self.depth_option = true;
-            return Ok(Node::True);
+            return Ok(Node::Access(*mode));
         }
         if BARE_PREDICATES.contains(&tok) {
             self.predicates.push(tok.to_vec());
-            return Ok(Node::True);
+            return Ok(self.bare_predicate(tok));
         }
         if [&b"-a"[..], b"-and", b"-o", b"-or"].contains(&tok) {
             return Err(say(&[
@@ -708,25 +971,133 @@ impl<'a> Parser<'a> {
         Err(say(&[b"find: paths must precede expression: `", tok, b"'"]))
     }
 
+    /// A word that takes no argument and is neither an action nor an
+    /// access test: a constant, `-prune`, `-quit`, or an option the walk
+    /// reads (`-depth`, `-daystart`, `-follow`, `-xdev`).
+    fn bare_predicate(&mut self, tok: &[u8]) -> Node {
+        match tok {
+            b"-prune" => Node::Prune,
+            b"-quit" => Node::Quit,
+            b"-false" => Node::Not(Box::new(Node::True)),
+            b"-nouser" | b"-nogroup" => Node::NoOwner {
+                group: tok == b"-nogroup",
+            },
+            b"-depth" => {
+                self.depth_first = true;
+                self.depth_option = true;
+                Node::True
+            }
+            b"-daystart" => {
+                self.daystart = true;
+                Node::True
+            }
+            b"-follow" => {
+                self.follow = true;
+                Node::True
+            }
+            _ => Node::True,
+        }
+    }
+
     fn value_predicate(&mut self, tok: &'a [u8], value: &'a [u8]) -> Result<Node, Fail> {
         match tok {
-            b"-name" => Ok(Node::Name {
+            b"-name" | b"-iname" => Ok(Node::Name {
                 pattern: value.to_vec(),
-                icase: false,
+                icase: tok == b"-iname",
             }),
-            b"-iname" => Ok(Node::Name {
+            b"-path" | b"-wholename" | b"-ipath" | b"-iwholename" => Ok(Node::Path {
                 pattern: value.to_vec(),
-                icase: true,
+                icase: tok.starts_with(b"-i"),
             }),
-            b"-path" => Ok(Node::Path(value.to_vec())),
-            b"-type" => type_node(value),
-            b"-printf" => {
-                let parts = compile(value, &mut self.warnings)?;
-                self.actions.push(Action::Printf {
-                    format: value.to_vec(),
-                    parts,
+            b"-lname" | b"-ilname" => Ok(Node::Lname {
+                pattern: value.to_vec(),
+                icase: tok == b"-ilname",
+            }),
+            b"-regex" | b"-iregex" => self.regex(value, tok == b"-iregex"),
+            b"-regextype" => {
+                let Some((_, dialect, extended)) =
+                    REGEX_TYPES.iter().find(|(name, _, _)| *name == value)
+                else {
+                    let listed: Vec<String> = REGEX_TYPES
+                        .iter()
+                        .map(|(name, _, _)| format!("'{}'", byte_text(name)))
+                        .collect();
+                    return Err(say(&[
+                        b"find: Unknown regular expression type '",
+                        value,
+                        b"'; valid types are ",
+                        listed.join(", ").as_bytes(),
+                        b".",
+                    ]));
+                };
+                self.regex_type = (*dialect, *extended);
+                Ok(Node::True)
+            }
+            b"-type" => type_node(tok, value, Node::Type),
+            b"-xtype" => type_node(tok, value, Node::XType),
+            b"-perm" => {
+                let (mode, bits) = perm(value, &mut self.warnings)?;
+                Ok(Node::Perm { mode, bits })
+            }
+            b"-links" | b"-uid" | b"-gid" => {
+                let (cmp, count) = count(tok, value)?;
+                Ok(Node::Count {
+                    field: match tok {
+                        b"-links" => "links",
+                        b"-uid" => "uid",
+                        _ => "gid",
+                    },
+                    cmp,
+                    count,
+                })
+            }
+            b"-user" | b"-group" => {
+                let group = tok == b"-group";
+                if value.is_empty() {
+                    let (what, id) = if group {
+                        (&b"group"[..], &b"GID"[..])
+                    } else {
+                        (&b"user"[..], &b"UID"[..])
+                    };
+                    return Err(say(&[
+                        b"find: invalid ",
+                        what,
+                        b" name or ",
+                        id,
+                        b" argument to ",
+                        tok,
+                        b": ''",
+                    ]));
+                }
+                Ok(Node::Owner {
+                    group,
+                    name: value.to_vec(),
+                })
+            }
+            b"-printf" => self.printf(value, None),
+            b"-fprintf" => {
+                let Some(format) = self.advance() else {
+                    return Err(say(&[
+                        b"find: invalid argument `",
+                        value,
+                        b"' to `",
+                        tok,
+                        b"'",
+                    ]));
+                };
+                self.printf(format, Some(value.to_vec()))
+            }
+            b"-fprint" | b"-fprint0" => {
+                let kind = if tok == b"-fprint" { "print" } else { "print0" };
+                self.actions.push(Action::Row {
+                    kind,
+                    file: Some(value.to_vec()),
                 });
-                Ok(self.action_node("printf", false))
+                Ok(self.action_node(kind, false))
+            }
+            b"-files0-from" => {
+                self.files0_from = Some(value.to_vec());
+                Ok(Node::True)
             }
             b"-maxdepth" => {
                 self.maxdepth = Some(depth(tok, value)?);
@@ -753,21 +1124,65 @@ impl<'a> Parser<'a> {
                 Ok(Node::Time(Time::Newermt(value.to_vec()), self.fold()))
             }
             _ => {
-                let (cmp, days) = mtime(value)?;
-                Ok(Node::Time(Time::Mtime { cmp, days }, self.fold()))
+                let (cmp, amount) = age(tok, value)?;
+                Ok(Node::Time(
+                    Time::Age {
+                        field: tok[1],
+                        minutes: tok.ends_with(b"min"),
+                        cmp,
+                        amount,
+                        daystart: self.daystart,
+                    },
+                    self.fold(),
+                ))
             }
         }
     }
 
-    fn exec(&mut self) -> Result<Action, Fail> {
-        let missing = || text("find: missing argument to `-exec'");
+    /// `-regex`: compiled here in the syntax the last `-regextype` before
+    /// it named, so a pattern that cannot compile is refused where it
+    /// was typed.
+    fn regex(&mut self, pattern: &[u8], icase: bool) -> Result<Node, Fail> {
+        let (dialect, extended) = self.regex_type;
+        if let Err(why) = compile_regex(pattern, extended, false, dialect) {
+            return Err(say(&[
+                b"find: failed to compile regular expression '",
+                pattern,
+                b"': ",
+                why.as_bytes(),
+            ]));
+        }
+        Ok(Node::Regex {
+            pattern: pattern.to_vec(),
+            icase,
+            dialect: if dialect == Dialect::Emacs {
+                "emacs"
+            } else {
+                "posix"
+            },
+            extended,
+        })
+    }
+
+    fn printf(&mut self, format: &[u8], file: Option<Vec<u8>>) -> Result<Node, Fail> {
+        let parts = compile(format, &mut self.warnings)?;
+        self.actions.push(Action::Printf {
+            format: format.to_vec(),
+            parts,
+            file,
+        });
+        Ok(self.action_node("printf", false))
+    }
+
+    fn exec(&mut self, word: &[u8]) -> Result<Action, Fail> {
+        let missing = || say(&[b"find: missing argument to `", word, b"'"]);
         let mut argv: Vec<Vec<u8>> = Vec::new();
         let mut batch = false;
         loop {
             let tok = self.advance().ok_or_else(missing)?;
             if tok == b";" {
                 if argv.is_empty() {
-                    return Err(text("find: invalid argument `;' to `-exec'"));
+                    return Err(say(&[b"find: invalid argument `;' to `", word, b"'"]));
                 }
                 break;
             }
@@ -778,23 +1193,30 @@ impl<'a> Parser<'a> {
             argv.push(tok.to_vec());
         }
         if batch {
-            for word in &argv {
-                if contains(word, PLACEHOLDER) && word != PLACEHOLDER {
+            for arg in &argv {
+                if contains(arg, PLACEHOLDER) && arg != PLACEHOLDER {
                     return Err(say(&[
-                        b"find: In '-exec ... {} +' the '{}' must appear by itself, but you \
-                          specified '",
+                        b"find: In '",
                         word,
+                        b" ... {} +' the '{}' must appear by itself, but you specified '",
+                        arg,
                         b"'",
                     ]));
                 }
             }
-            if argv.iter().filter(|word| *word == PLACEHOLDER).count() > 1 {
-                return Err(text(
-                    "find: Only one instance of {} is supported with -exec ... +",
-                ));
+            if argv.iter().filter(|arg| *arg == PLACEHOLDER).count() > 1 {
+                return Err(say(&[
+                    b"find: Only one instance of {} is supported with ",
+                    word,
+                    b" ... +",
+                ]));
             }
         }
-        Ok(Action::Exec { argv, batch })
+        Ok(Action::Exec {
+            argv,
+            batch,
+            dir: word == EXECDIR,
+        })
     }
 
     fn settle_actions(&mut self, tree: &Node) -> Result<(), Fail> {
@@ -839,8 +1261,9 @@ fn check_positional(node: &Node) -> Result<(), Fail> {
             check_positional(kid)
         }
         Node::And(kids) => {
-            for kid in &kids[..kids.len() - 1] {
-                if kid.has_action() {
+            // An action may end its chain, or be followed by -quit alone.
+            for (at, kid) in kids.iter().enumerate() {
+                if kid.has_action() && !kids[at + 1..].iter().all(is_quit) {
                     return Err(text(&format!(
                         "find: {} must end its -a chain {POSITIONAL}",
                         kid.first_action()
@@ -872,35 +1295,41 @@ fn check_exec_result(node: &Node) -> Result<(), Fail> {
     }
 }
 
-/// `-type` as GNU reads it: one or more letters from `bcdpfls` separated
-/// by commas, a list holding any of them.
-fn type_node(value: &[u8]) -> Result<Node, Fail> {
+/// `-type` and `-xtype` as the reference reads them: one or more letters from
+/// `bcdpfls` separated by commas, a list holding any of them.
+fn type_node(flag: &[u8], value: &[u8], node: fn(u8) -> Node) -> Result<Node, Fail> {
     if value.is_empty() {
-        return Err(text(
-            "find: Arguments to -type should contain at least one letter",
-        ));
+        return Err(say(&[
+            b"find: Arguments to ",
+            flag,
+            b" should contain at least one letter",
+        ]));
     }
     let ending = || {
-        text(
-            "find: Last file type in list argument to -type is missing, i.e., list is ending on: ','",
-        )
+        say(&[
+            b"find: Last file type in list argument to ",
+            flag,
+            b" is missing, i.e., list is ending on: ','",
+        ])
     };
     let mut kinds = Vec::new();
     let mut at = 0;
     loop {
         let kind = *value.get(at).ok_or_else(ending)?;
         if !TYPES.contains(&kind) {
-            return Err(say(&[b"find: Unknown argument to -type: ", &[kind]]));
+            return Err(say(&[b"find: Unknown argument to ", flag, b": ", &[kind]]));
         }
-        kinds.push(Node::Type(kind));
+        kinds.push(node(kind));
         at += 1;
         if at == value.len() {
             break;
         }
         if value[at] != b',' {
-            return Err(text(
-                "find: Must separate multiple arguments to -type using: ','",
-            ));
+            return Err(say(&[
+                b"find: Must separate multiple arguments to ",
+                flag,
+                b" using: ','",
+            ]));
         }
         at += 1;
     }
@@ -979,37 +1408,190 @@ fn size(spec: &[u8]) -> Result<(Option<i128>, Option<i128>), Fail> {
     })
 }
 
-/// `-mtime`: an optional sign and a count of days. The sign is `+`, `-` or
-/// none; every leading sign is dropped before the digits are read, as the
-/// hosts always did.
-fn mtime(spec: &[u8]) -> Result<(u8, f64), Fail> {
-    let cmp = match spec.first() {
-        Some(b'+') => b'+',
-        Some(b'-') => b'-',
-        _ => b'=',
+/// A comparison's sign: `+N` is more than N, `-N` less, and a bare N
+/// exactly N.
+fn signed(spec: &[u8]) -> (u8, &[u8]) {
+    match spec.first() {
+        Some(b'+') => (b'+', &spec[1..]),
+        Some(b'-') => (b'-', &spec[1..]),
+        _ => (b'=', spec),
+    }
+}
+
+/// `-mtime` and the other age tests: a sign, then what C's strtod reads
+/// to the end of the word, so a fraction, an exponent or a hex float
+/// counts, leading blanks are skipped and nothing may trail. NaN is
+/// refused in words of its own, as is a count too large for a double.
+fn age(flag: &[u8], spec: &[u8]) -> Result<(u8, f64), Fail> {
+    let invalid = || say(&[b"find: invalid argument `", spec, b"' to `", flag, b"'"]);
+    let (cmp, body) = signed(spec);
+    let Some((amount, end)) = strtod_prefix(body) else {
+        return Err(invalid());
     };
-    let start = spec
-        .iter()
-        .take_while(|b| **b == b'+' || **b == b'-')
-        .count();
-    let body = &spec[start..];
-    let is_blank = |b: &u8| crate::number::BLANKS.contains(b);
-    let from = body.iter().position(|b| !is_blank(b)).unwrap_or(body.len());
-    let to = body
-        .iter()
-        .rposition(|b| !is_blank(b))
-        .map_or(from, |at| at + 1);
-    let digits = &body[from..to];
-    let invalid = || say(&[b"find: invalid argument `", spec, b"' to `-mtime'"]);
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+    if end != body.len() {
         return Err(invalid());
     }
-    let days = byte_text(digits)
-        .parse::<f64>()
-        .ok()
-        .filter(|days| days.is_finite())
-        .ok_or_else(invalid)?;
-    Ok((cmp, days))
+    if amount.is_nan() {
+        return Err(say(&[
+            b"find: invalid not-a-number argument: `",
+            body,
+            b"'",
+        ]));
+    }
+    let digits = body.trim_ascii_start();
+    let digits = digits
+        .strip_prefix(b"+")
+        .or_else(|| digits.strip_prefix(b"-"))
+        .unwrap_or(digits);
+    let spelled = digits.len() >= 3 && digits[..3].eq_ignore_ascii_case(b"inf");
+    if amount.is_infinite() && !spelled {
+        return Err(invalid());
+    }
+    Ok((cmp, amount))
+}
+
+/// `-links`, `-uid` and `-gid`: a sign, then a whole number C's
+/// strtoumax reads to the end of the word, blanks before it allowed but
+/// a second sign that is a minus refused.
+fn count(flag: &[u8], spec: &[u8]) -> Result<(u8, u64), Fail> {
+    let refused = || say(&[b"find: non-numeric argument to ", flag, b": '", spec, b"'"]);
+    let (cmp, body) = signed(spec);
+    let digits = body.trim_ascii_start();
+    let digits = digits.strip_prefix(b"+").unwrap_or(digits);
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+        return Err(refused());
+    }
+    let count = byte_text(digits).parse::<u64>().map_err(|_| refused())?;
+    Ok((cmp, count))
+}
+
+const SPECIAL_SETUID: u32 = 0o4000;
+const SPECIAL_SETGID: u32 = 0o2000;
+const SPECIAL_STICKY: u32 = 0o1000;
+
+/// The permission bits a class letter names in the low nine bits.
+fn class_bits(who: u8) -> u32 {
+    match who {
+        b'u' => 0o700,
+        b'g' => 0o070,
+        b'o' => 0o007,
+        _ => 0o777,
+    }
+}
+
+/// `-perm`: an octal mode up to 07777 or a symbolic one applied to no
+/// bits at all, either after a `-` (every bit set) or a `/` (any bit
+/// set), or alone (exactly these bits). A symbolic mode is chmod's
+/// grammar: clauses joined by commas, each a run of `ugoa` and one or
+/// more operations, each `+`, `-` or `=` with letters from `rwxXst` or
+/// one class to copy. Nothing is masked: no umask applies to a mode
+/// that only compares.
+fn perm(spec: &[u8], warnings: &mut Vec<Vec<u8>>) -> Result<(u32, Bits), Fail> {
+    let invalid = || say(&[b"find: invalid mode '", spec, b"'"]);
+    let (bits, body) = match spec.first() {
+        Some(b'-') => (Bits::All, &spec[1..]),
+        Some(b'/') => (Bits::Any, &spec[1..]),
+        _ => (Bits::Exact, spec),
+    };
+    if body.is_empty() {
+        return Err(invalid());
+    }
+    let mode = if body.iter().all(|b| (b'0'..=b'7').contains(b)) {
+        u32::from_str_radix(&byte_text(body), 8)
+            .ok()
+            .filter(|mode| *mode <= 0o7777)
+            .ok_or_else(invalid)?
+    } else {
+        symbolic(body).ok_or_else(invalid)?
+    };
+    if matches!(bits, Bits::Any) && mode == 0 {
+        warn_line(
+            warnings,
+            &[
+                b"you have specified a mode pattern ",
+                spec,
+                b" (which is equivalent to /000). The meaning of -perm /000 has now been \
+                  changed to be consistent with -perm -000; that is, while it used to match no \
+                  files, it now matches all files.",
+            ],
+        );
+    }
+    Ok((mode, bits))
+}
+
+fn symbolic(body: &[u8]) -> Option<u32> {
+    let mut mode = 0u32;
+    for clause in body.split(|b| *b == b',') {
+        let who_end = clause
+            .iter()
+            .position(|b| !b"ugoa".contains(b))
+            .unwrap_or(clause.len());
+        let who = &clause[..who_end];
+        let mask = if who.is_empty() {
+            0o777
+        } else {
+            who.iter().fold(0, |mask, w| mask | class_bits(*w))
+        };
+        let special = |letters: &[u8]| -> u32 {
+            let mut bits = 0;
+            if letters.contains(&b's') {
+                if who.is_empty() || who.iter().any(|w| b"ua".contains(w)) {
+                    bits |= SPECIAL_SETUID;
+                }
+                if who.is_empty() || who.iter().any(|w| b"ga".contains(w)) {
+                    bits |= SPECIAL_SETGID;
+                }
+            }
+            if letters.contains(&b't') && (who.is_empty() || who.iter().any(|w| b"oa".contains(w)))
+            {
+                bits |= SPECIAL_STICKY;
+            }
+            bits
+        };
+        let mut at = who_end;
+        if at == clause.len() {
+            return None;
+        }
+        while at < clause.len() {
+            let op = clause[at];
+            if !b"+-=".contains(&op) {
+                return None;
+            }
+            at += 1;
+            let start = at;
+            let add = if clause.get(at).is_some_and(|b| b"ugo".contains(b)) {
+                let shift = match clause[at] {
+                    b'u' => 6,
+                    b'g' => 3,
+                    _ => 0,
+                };
+                at += 1;
+                let rwx = (mode >> shift) & 0o7;
+                (rwx * 0o111) & mask
+            } else {
+                while clause.get(at).is_some_and(|b| b"rwxXst".contains(b)) {
+                    at += 1;
+                }
+                let letters = &clause[start..at];
+                let mut rwx = 0;
+                for (letter, bit) in [(b'r', 0o4), (b'w', 0o2), (b'x', 0o1)] {
+                    if letters.contains(&letter) {
+                        rwx |= bit;
+                    }
+                }
+                if letters.contains(&b'X') && mode & 0o111 != 0 {
+                    rwx |= 0o1;
+                }
+                ((rwx * 0o111) & mask) | special(letters)
+            };
+            match op {
+                b'+' => mode |= add,
+                b'-' => mode &= !add,
+                _ => mode = (mode & !(mask | special(b"st"))) | add,
+            }
+        }
+    }
+    Some(mode)
 }
 
 fn warn_line(warnings: &mut Vec<Vec<u8>>, parts: &[&[u8]]) {
@@ -1149,6 +1731,18 @@ mod tests {
         json!({"op": "name", "pattern": pattern, "icase": false})
     }
 
+    fn age(cmp: &str, amount: f64, fold: &str) -> Json {
+        json!({
+            "op": "age",
+            "field": "m",
+            "minutes": false,
+            "cmp": cmp,
+            "amount": amount,
+            "daystart": false,
+            "fold": fold,
+        })
+    }
+
     #[test]
     fn an_expression_is_a_tree_of_tests_and_connectives() {
         assert_eq!(parse(&[])["tree"], json!({"op": "true"}));
@@ -1270,11 +1864,8 @@ mod tests {
         assert_eq!(
             read["tree"],
             json!({"op": "or", "kids": [
-                {"op": "and", "kids": [
-                    {"op": "mtime", "cmp": "+", "days": 3.0, "fold": "all"},
-                    {"op": "mtime", "cmp": "-", "days": 1.0, "fold": "all"},
-                ]},
-                {"op": "mtime", "cmp": "=", "days": 2.0, "fold": "any"},
+                {"op": "and", "kids": [age("+", 3.0, "all"), age("-", 1.0, "all")]},
+                age("=", 2.0, "any"),
             ]})
         );
         let read = parse(&["-newermt", "2020-01-01", "-newer", "r"]);
@@ -1290,7 +1881,7 @@ mod tests {
         let read = parse(&["-newer", "r", "-newermt", "nope"]);
         assert_eq!(read["dates"], json!([["nope", 1]]));
         assert_eq!(parse(&["-mtime", "2"])["tree"]["cmp"], json!("="));
-        assert_eq!(parse(&["-mtime", " 2 "])["tree"]["days"], json!(2.0));
+        assert_eq!(parse(&["-mtime", " 2"])["tree"]["amount"], json!(2.0));
         assert_eq!(
             parse(&["(", "-mtime", "1", ")"])["tree"]["fold"],
             json!("any")
@@ -1300,14 +1891,14 @@ mod tests {
     #[test]
     fn a_time_refusal_is_gnus() {
         let past_a_double = "9".repeat(400);
-        for spec in ["abc", "", "+", "1_0", "2x", "1,5", &past_a_double] {
+        for spec in ["abc", "", "+", "1_0", "2x", "1,5", "2 ", &past_a_double] {
             assert_eq!(
                 refuse(&["-mtime", spec]),
                 format!("find: invalid argument `{spec}' to `-mtime'")
             );
         }
         assert_eq!(
-            parse(&["-mtime", "99999999999999999999"])["tree"]["days"],
+            parse(&["-mtime", "99999999999999999999"])["tree"]["amount"],
             json!(1e20)
         );
         assert_eq!(
@@ -1358,7 +1949,7 @@ mod tests {
     #[test]
     fn a_word_the_grammar_lacks_is_refused_in_gnus_words() {
         assert_eq!(refuse(&["-bogus"]), "find: unknown predicate `-bogus'");
-        assert_eq!(refuse(&["-regex", "x"]), "find: unknown predicate `-regex'");
+        assert_eq!(refuse(&["-ok", "x"]), "find: unknown predicate `-ok'");
         assert_eq!(
             refuse(&["-name", "a", "b"]),
             "find: paths must precede expression: `b'"
@@ -1417,7 +2008,7 @@ mod tests {
         let read = parse(&["-name", "*.txt", "-exec", "echo", "got", "{}", ";"]);
         assert_eq!(
             read["actions"],
-            json!([{"kind": "exec", "argv": ["echo", "got", "{}"], "batch": false}])
+            json!([{"kind": "exec", "argv": ["echo", "got", "{}"], "batch": false, "dir": false}])
         );
         assert_eq!(
             read["tree"],
@@ -1505,7 +2096,7 @@ mod tests {
     #[test]
     fn an_action_under_a_connective_must_be_the_one_the_tree_reaches() {
         let one = parse(&["-name", "a", "-print", "-o", "-name", "b", "-print"]);
-        assert_eq!(one["actions"], json!([{"kind": "print"}]));
+        assert_eq!(one["actions"], json!([{"kind": "print", "file": null}]));
         for (tokens, shown) in [
             (
                 vec!["-name", "a", "-print", "-o", "-name", "b", "-print0"],
@@ -1628,6 +2219,372 @@ mod tests {
         assert_eq!(
             (shown.as_str(), status),
             ("scan: find reads no option name", 1)
+        );
+    }
+
+    #[test]
+    fn an_age_reads_a_sign_then_what_strtod_reads() {
+        for (spec, cmp, amount) in [
+            ("1.5", "=", 1.5),
+            (".5", "=", 0.5),
+            ("1e1", "=", 10.0),
+            ("0x10", "=", 16.0),
+            (" 1", "=", 1.0),
+            ("+-1", "+", -1.0),
+            ("-1.5", "-", 1.5),
+        ] {
+            let read = parse(&["-mmin", spec]);
+            assert_eq!(read["tree"]["cmp"], json!(cmp), "{spec}");
+            assert_eq!(read["tree"]["amount"], json!(amount), "{spec}");
+            assert_eq!(read["tree"]["minutes"], json!(true), "{spec}");
+        }
+        assert_eq!(
+            parse(&["-mmin", "inf"])["tree"]["amount"],
+            json!("Infinity")
+        );
+        assert_eq!(
+            parse(&["-mmin", "--inf"])["tree"]["amount"],
+            json!("-Infinity")
+        );
+        for (flag, field, minutes) in [
+            ("-atime", "a", false),
+            ("-ctime", "c", false),
+            ("-amin", "a", true),
+            ("-cmin", "c", true),
+        ] {
+            let read = parse(&[flag, "1"]);
+            assert_eq!(read["tree"]["field"], json!(field), "{flag}");
+            assert_eq!(read["tree"]["minutes"], json!(minutes), "{flag}");
+        }
+        for (spec, shown) in [
+            ("1 ", "find: invalid argument `1 ' to `-mmin'"),
+            ("1e400", "find: invalid argument `1e400' to `-mmin'"),
+            ("x", "find: invalid argument `x' to `-mmin'"),
+            ("nan", "find: invalid not-a-number argument: `nan'"),
+            ("+nan", "find: invalid not-a-number argument: `nan'"),
+        ] {
+            assert_eq!(refuse(&["-mmin", spec]), shown, "{spec:?}");
+        }
+        assert_eq!(
+            refuse(&["-ctime", ""]),
+            "find: invalid argument `' to `-ctime'"
+        );
+    }
+
+    #[test]
+    fn daystart_marks_the_time_tests_after_it() {
+        let read = parse(&["-mtime", "0", "-daystart", "-mmin", "-5"]);
+        assert_eq!(read["tree"]["kids"][0]["daystart"], json!(false));
+        assert_eq!(read["tree"]["kids"][1], json!({"op": "true"}));
+        assert_eq!(read["tree"]["kids"][2]["daystart"], json!(true));
+    }
+
+    #[test]
+    fn a_count_is_a_sign_and_a_whole_number() {
+        assert_eq!(
+            parse(&["-links", "+1"])["tree"],
+            json!({"op": "count", "field": "links", "cmp": "+", "count": 1})
+        );
+        assert_eq!(parse(&["-uid", " 0"])["tree"]["count"], json!(0));
+        assert_eq!(parse(&["-gid", "-1"])["tree"]["cmp"], json!("-"));
+        for (flag, spec) in [
+            ("-links", "x"),
+            ("-links", "1 "),
+            ("-links", "+-1"),
+            ("-links", ""),
+            ("-uid", "99999999999999999999"),
+            ("-gid", "x"),
+        ] {
+            assert_eq!(
+                refuse(&[flag, spec]),
+                format!("find: non-numeric argument to {flag}: '{spec}'")
+            );
+        }
+    }
+
+    #[test]
+    fn an_owner_is_any_name_but_the_empty_one() {
+        assert_eq!(
+            parse(&["-user", "alice"])["tree"],
+            json!({"op": "owner", "group": false, "name": "alice"})
+        );
+        assert_eq!(
+            refuse(&["-user", ""]),
+            "find: invalid user name or UID argument to -user: ''"
+        );
+        assert_eq!(
+            refuse(&["-group", ""]),
+            "find: invalid group name or GID argument to -group: ''"
+        );
+        assert_eq!(
+            parse(&["-false"])["tree"],
+            json!({"op": "not", "kid": {"op": "true"}})
+        );
+        assert_eq!(
+            parse(&["-nouser"])["tree"],
+            json!({"op": "nouser", "group": false})
+        );
+        assert_eq!(
+            parse(&["-nogroup"])["tree"],
+            json!({"op": "nouser", "group": true})
+        );
+    }
+
+    #[test]
+    fn a_perm_is_octal_or_symbolic_over_no_bits() {
+        for (spec, mode, bits) in [
+            ("644", 0o644, "exact"),
+            ("-644", 0o644, "all"),
+            ("/111", 0o111, "any"),
+            ("07777", 0o7777, "exact"),
+            ("u=rwx,go=rx", 0o755, "exact"),
+            ("-u=x", 0o100, "all"),
+            ("/u=x,g=w", 0o120, "any"),
+            ("a+x", 0o111, "exact"),
+            ("+x", 0o111, "exact"),
+            ("=w", 0o222, "exact"),
+            ("u+", 0, "exact"),
+            ("g=u", 0, "exact"),
+            ("u=rwx,g=u-w,o=g", 0o755, "exact"),
+            ("a=rX", 0o444, "exact"),
+            ("u+x,a+X", 0o111, "exact"),
+            ("-u=s", 0o4000, "all"),
+            ("+t", 0o1000, "exact"),
+            ("u=rw,u+x-w", 0o500, "exact"),
+        ] {
+            let read = parse(&["-perm", spec]);
+            assert_eq!(
+                read["tree"],
+                json!({"op": "perm", "mode": mode, "bits": bits}),
+                "{spec}"
+            );
+        }
+        for spec in [
+            "bogus", "9", "+111", "17777", "", "-", "/", "x=r", "u=rq", "u", "u+x,",
+        ] {
+            assert_eq!(
+                refuse(&["-perm", spec]),
+                format!("find: invalid mode '{spec}'")
+            );
+        }
+        assert_eq!(
+            parse(&["-perm", "/0"])["warnings"],
+            json!([
+                "find: warning: you have specified a mode pattern /0 (which is equivalent \
+                    to /000). The meaning of -perm /000 has now been changed to be consistent \
+                    with -perm -000; that is, while it used to match no files, it now matches \
+                    all files."
+            ])
+        );
+    }
+
+    #[test]
+    fn an_xtype_is_a_type_list_in_its_own_words() {
+        assert_eq!(
+            parse(&["-xtype", "f,d"])["tree"],
+            json!({"op": "or", "kids": [{"op": "xtype", "kind": "f"}, {"op": "xtype", "kind": "d"}]})
+        );
+        for (value, shown) in [
+            ("q", "find: Unknown argument to -xtype: q"),
+            (
+                "",
+                "find: Arguments to -xtype should contain at least one letter",
+            ),
+            (
+                "ff",
+                "find: Must separate multiple arguments to -xtype using: ','",
+            ),
+            (
+                "f,",
+                "find: Last file type in list argument to -xtype is missing, i.e., list is ending on: ','",
+            ),
+        ] {
+            assert_eq!(refuse(&["-xtype", value]), shown, "{value:?}");
+        }
+    }
+
+    #[test]
+    fn a_path_a_link_name_and_a_regex_carry_their_case() {
+        assert_eq!(
+            parse(&["-iwholename", "D/*"])["tree"],
+            json!({"op": "path", "pattern": "D/*", "icase": true})
+        );
+        assert_eq!(parse(&["-wholename", "d"])["tree"]["icase"], json!(false));
+        assert_eq!(parse(&["-ipath", "d"])["tree"]["icase"], json!(true));
+        assert_eq!(
+            parse(&["-ilname", "A*"])["tree"],
+            json!({"op": "lname", "pattern": "A*", "icase": true})
+        );
+        assert_eq!(
+            parse(&["-regex", ".*\\.txt"])["tree"],
+            json!({
+                "op": "regex",
+                "pattern": ".*\\.txt",
+                "icase": false,
+                "dialect": "emacs",
+                "extended": false,
+            })
+        );
+    }
+
+    #[test]
+    fn regextype_sets_the_syntax_of_the_regexes_after_it() {
+        let read = parse(&[
+            "-regex",
+            "a",
+            "-regextype",
+            "posix-extended",
+            "-iregex",
+            "(a|b)",
+            "-regextype",
+            "sed",
+            "-regex",
+            "a\\{1\\}",
+        ]);
+        let kids = &read["tree"]["kids"];
+        assert_eq!(
+            (kids[0]["dialect"].clone(), kids[0]["extended"].clone()),
+            (json!("emacs"), json!(false))
+        );
+        assert_eq!(
+            (kids[2]["dialect"].clone(), kids[2]["extended"].clone()),
+            (json!("posix"), json!(true))
+        );
+        assert_eq!(kids[2]["icase"], json!(true));
+        assert_eq!(
+            (kids[4]["dialect"].clone(), kids[4]["extended"].clone()),
+            (json!("posix"), json!(false))
+        );
+        assert_eq!(
+            refuse(&["-regextype", "bogus"]),
+            "find: Unknown regular expression type 'bogus'; valid types are 'findutils-default', \
+             'ed', 'emacs', 'gnu-awk', 'grep', 'posix-awk', 'awk', 'posix-basic', 'posix-egrep', \
+             'egrep', 'posix-extended', 'posix-minimal-basic', 'sed'."
+        );
+        assert_eq!(
+            refuse(&["-regex", "\\("]),
+            "find: failed to compile regular expression '\\(': Unmatched ( or \\("
+        );
+        assert_eq!(
+            refuse(&["-regextype", "egrep", "-regex", "("]),
+            "find: failed to compile regular expression '(': Unmatched ( or \\("
+        );
+        assert!(run("find", &["-regex", "("]).is_ok());
+        assert_eq!(refuse(&["-regex"]), "find: missing argument to `-regex'");
+        assert_eq!(
+            refuse(&["-regextype"]),
+            "find: missing argument to `-regextype'"
+        );
+    }
+
+    #[test]
+    fn the_new_tests_are_refused_after_an_action() {
+        for tokens in [
+            vec!["-print", "-regex", "x"],
+            vec!["-print", "-perm", "644"],
+            vec!["-print", "-true"],
+            vec!["-print", "-readable"],
+        ] {
+            assert_eq!(
+                refuse(&tokens),
+                format!("find: {}: tests after actions are not supported", tokens[1])
+            );
+        }
+        assert!(run("find", &["-print", "-quit"]).is_ok());
+        assert!(run("find", &["-print", "-regextype", "sed"]).is_ok());
+    }
+
+    #[test]
+    fn quit_is_a_node_and_may_follow_an_action_under_a_connective() {
+        assert_eq!(
+            parse(&["-print", "-quit"])["tree"],
+            json!({"op": "and", "kids": [{"op": "action", "kind": "print", "batch": false}, {"op": "quit"}]})
+        );
+        assert_eq!(parse(&["-quit"])["actions"], json!([]));
+        assert!(run("find", &["-name", "a", "-print", "-quit", "-o", "-print"]).is_ok());
+        assert_eq!(
+            refuse(&["(", "-print", "-name", "a", ")", "-o", "-print"]),
+            "find: -print must end its -a chain under -o, ! or parentheses"
+        );
+        let access = parse(&["-readable", "-writable", "-executable"]);
+        assert_eq!(
+            access["tree"]["kids"],
+            json!([
+                {"op": "access", "mode": "r"},
+                {"op": "access", "mode": "w"},
+                {"op": "access", "mode": "x"},
+            ])
+        );
+    }
+
+    #[test]
+    fn execdir_runs_like_exec_and_words_its_refusals_as_its_own() {
+        let read = parse(&["-execdir", "echo", "{}", "+"]);
+        assert_eq!(
+            read["actions"],
+            json!([{"kind": "exec", "argv": ["echo", "{}"], "batch": true, "dir": true}])
+        );
+        for (tokens, shown) in [
+            (vec!["-execdir"], "find: missing argument to `-execdir'"),
+            (
+                vec!["-execdir", ";"],
+                "find: invalid argument `;' to `-execdir'",
+            ),
+            (
+                vec!["-execdir", "echo", "{}", "{}", "+"],
+                "find: Only one instance of {} is supported with -execdir ... +",
+            ),
+            (
+                vec!["-execdir", "echo", "x{}", "+"],
+                "find: In '-execdir ... {} +' the '{}' must appear by itself, but you specified 'x{}'",
+            ),
+        ] {
+            assert_eq!(refuse(&tokens), shown, "{tokens:?}");
+        }
+        let laid = run(
+            "find_layout",
+            &["d", "-execdir", "echo", "{}", ";", "-print"],
+        )
+        .expect("laid");
+        assert_eq!(laid["spans"], json!([[1, 4]]));
+    }
+
+    #[test]
+    fn an_fprint_writes_its_rows_to_a_file() {
+        let read = parse(&[
+            "-fprint", "out", "-fprint0", "zero", "-fprintf", "f", "%p\\n",
+        ]);
+        assert_eq!(read["actions"][0], json!({"kind": "print", "file": "out"}));
+        assert_eq!(
+            read["actions"][1],
+            json!({"kind": "print0", "file": "zero"})
+        );
+        assert_eq!(read["actions"][2]["file"], json!("f"));
+        assert_eq!(
+            read["actions"][2]["parts"],
+            json!([{"dir": "p"}, {"lit": "\n"}])
+        );
+        assert_eq!(refuse(&["-fprint"]), "find: missing argument to `-fprint'");
+        assert_eq!(
+            refuse(&["-fprintf", "x"]),
+            "find: invalid argument `x' to `-fprintf'"
+        );
+        assert_eq!(
+            refuse(&["-name", "a", "-fprint", "x", "-o", "-print"]),
+            "find: -fprint and -print cannot be combined under -o, ! or parentheses"
+        );
+    }
+
+    #[test]
+    fn follow_and_files0_from_are_options_the_host_reads() {
+        let read = parse(&["-follow", "-files0-from", "list", "-name", "a"]);
+        assert_eq!(read["follow"], json!(true));
+        assert_eq!(read["files0_from"], json!("list"));
+        assert_eq!(parse(&["-print"])["follow"], json!(false));
+        assert_eq!(parse(&["-print"])["files0_from"], Json::Null);
+        assert_eq!(
+            refuse(&["-files0-from"]),
+            "find: missing argument to `-files0-from'"
         );
     }
 }

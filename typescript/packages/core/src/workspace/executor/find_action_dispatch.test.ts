@@ -314,3 +314,52 @@ it('keeps a directory with an unmatched link', async () => {
     await ws.close()
   }
 })
+
+describe('find -execdir, -fprint, -quit and -files0-from', () => {
+  // Pinned against findutils 4.10 on debian:stable-slim; the reference orders the rows
+  // by directory reads, mirage by name.
+  const setup =
+    "mkdir -p /w/d/sub; printf 'a\\n' > /w/d/a.txt; printf 'bb\\n' > /w/d/b.txt; " +
+    'printf x > /w/d/sub/c.txt; cd /w'
+  it.each([
+    ['find d -name "*.txt" -execdir echo {} \\;', './a.txt\n./b.txt\n./c.txt\n', '', 0],
+    ['find d -name "*.txt" -execdir echo {} +', './a.txt ./b.txt\n./c.txt\n', '', 0],
+    ['find d/sub -execdir pwd \\;', '/w/d\n/w/d/sub\n', '', 0],
+    ['find d -name a.txt -fprint out; cat out', 'd/a.txt\n', '', 0],
+    ['find d -name zz -fprint out; cat out; echo rc=$?', 'rc=0\n', '', 0],
+    ['find d -fprint nodir/out', '', "find: 'nodir/out': No such file or directory\n", 1],
+    ["find d -name a.txt -fprintf out '%f %s\\n'; cat out", 'a.txt 2\n', '', 0],
+    ['find d -name a.txt -fprint /dev/stdout', 'd/a.txt\n', '', 0],
+    ["find d -name '*.txt' -print -quit", 'd/a.txt\n', '', 0],
+    ['find d d -name b.txt -print -quit', 'd/b.txt\n', '', 0],
+    ['find d -quit -print', '', '', 0],
+    ["printf 'd/a.txt\\0d/sub\\0' | find -files0-from - -maxdepth 0", 'd/a.txt\nd/sub\n', '', 0],
+    [
+      "printf 'd/a.txt\\0\\0' > list; find -files0-from list",
+      'd/a.txt\n',
+      "find: 'list':2: invalid zero-length file name\n",
+      1,
+    ],
+    [
+      'find d -files0-from list',
+      '',
+      "find: extra operand 'd'\nfind: file operands cannot be combined with -files0-from\n",
+      1,
+    ],
+    [
+      'find -files0-from nolist',
+      '',
+      "find: cannot open 'nolist' for reading: No such file or directory\n",
+      1,
+    ],
+  ])('%s', async (line, stdout, stderr, code) => {
+    const ws = shellWs()
+    try {
+      await ws.shell(setup, { sessionId: 's' })
+      const r = await ws.shell(line, { sessionId: 's' })
+      expect([r.stdoutText, r.stderrText, r.exitCode]).toEqual([stdout, stderr, code])
+    } finally {
+      await ws.close()
+    }
+  })
+})
