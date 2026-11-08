@@ -46,6 +46,16 @@ def _workspace(*policies: Policy) -> Workspace:
     )
 
 
+def _whole(*policies: Policy) -> Workspace:
+    return Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _Box("a"), "b": _Box("b")},
+        runtimes=[MachineRuntime(["@line"], machine="a")],
+        policies=list(policies),
+    )
+
+
 class _OnB(Policy):
     def pre_execute(self, ctx):
         return Route(machine="b", reason="the other box")
@@ -59,6 +69,11 @@ class _ShortOnB(Policy):
 class _OnA(Policy):
     def pre_command(self, ctx):
         return Route(machine="a")
+
+
+class _EvalOnB(Policy):
+    def pre_command(self, ctx):
+        return Route(machine="b") if ctx.command == "eval" else None
 
 
 @pytest.mark.asyncio
@@ -88,6 +103,40 @@ async def test_a_command_route_places_that_command_alone():
     try:
         said = await ws.shell("hostname; hostname -s; hostname")
         assert said.stdout == b"a\nb\na\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_the_lines_a_routed_command_runs_keep_its_machine():
+    ws = _workspace(_EvalOnB())
+    try:
+        said = await ws.shell("hostname; eval hostname; hostname")
+        assert said.stdout == b"a\nb\na\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_line_run_whole_refuses_a_command_routed_off_it():
+    ws = _whole(_ShortOnB())
+    try:
+        assert (await ws.shell("hostname; hostname")).stdout == b"a\n"
+        said = await ws.shell("hostname; hostname -s")
+        assert (said.exit_code, said.stdout) == (126, b"")
+        assert said.refusal is not None
+        assert said.refusal.reason.startswith(
+            "_ShortOnB routes hostname elsewhere"
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_line_run_whole_keeps_a_route_to_where_it_runs():
+    ws = _whole(_OnA())
+    try:
+        assert (await ws.shell("hostname -s")).stdout == b"a\n"
     finally:
         await ws.close()
 

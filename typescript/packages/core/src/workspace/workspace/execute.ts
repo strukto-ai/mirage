@@ -773,7 +773,8 @@ async function runPreparedLine(
             // raises is the typed line's agent's, not the workspace default's.
             // Nested lines never re-route: the evaluator's inner lines keep
             // the typed line's decision (runtime argument, policy, or bindings),
-            // or the narrower one `builtin` hands its target.
+            // the narrower one `builtin` hands its target, or the one a
+            // preCommand route gave the command running them.
             innerOpts.routingDecision = opts.routingDecision ?? routingDecision
             // Under the hand-off the walker bound, standing at the node whose
             // text this is; outside a walk (no hand-off bound) the inner line
@@ -1240,6 +1241,7 @@ async function runParsedLine(
         reparse,
         killed,
         handed,
+        decision,
       )
       if (refused !== null) {
         held = isPending(refused.refusal)

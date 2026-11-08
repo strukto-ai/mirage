@@ -956,9 +956,11 @@ async def _run_argv(
             )
         )
         # A pre_command route places this command, and what it runs, over
-        # the line's placement for its run alone.
+        # the line's placement for its run alone: the lines it runs
+        # (`eval`) keep the command's placement, not the line's.
         line_routing = context.frame.routing
         route = admitted.route if admitted is not None else None
+        nested = execute_fn
         if route is not None and line_routing is not None:
             try:
                 context.frame.routing = routed(
@@ -970,6 +972,9 @@ async def _run_argv(
             except ValueError as exc:
                 reset_caller(token)
                 raise RouteError(str(exc)) from exc
+            nested = partial(
+                execute_fn, routing_decision=context.frame.routing
+            )
         try:
             with command_records(own=True) as mine:
                 result = await _route_argv(
@@ -977,7 +982,7 @@ async def _run_argv(
                     dispatch,
                     registry,
                     namespace,
-                    execute_fn,
+                    nested,
                     argv,
                     context,
                     given,

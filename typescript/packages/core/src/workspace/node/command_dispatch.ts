@@ -48,7 +48,8 @@ import {
 import type { EntryGate } from '../../policy/types.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import { routed } from '../../runtime/table.ts'
-import type { DispatchFn, OutputFn, RunResult } from '../../runtime/types.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { DispatchFn, OutputFn, RouteDecision, RunResult } from '../../runtime/types.ts'
 import { decodeText, encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
@@ -817,13 +818,13 @@ async function runArgv(
     // policies bind in the same window, whether or not a gate judged the
     // line, so the command tier's policy guard can fire preVfs for the
     // backend I/O a handler performs.
-    const run = () =>
+    const run = (nested: ExecuteFn = executeFn) =>
       routeArgv(
         recurse,
         dispatch,
         registry,
         namespace,
-        executeFn,
+        nested,
         argv,
         context,
         given,
@@ -837,13 +838,15 @@ async function runArgv(
         admitted,
       )
     // A preCommand route places this command, and what it runs, over the
-    // line's placement for its run alone.
+    // line's placement for its run alone: the lines it runs (`eval`) keep
+    // the command's placement, not the line's.
     const route = async (): Promise<RedirectResult> => {
       const line = context.frame.routing
       const placed = admitted?.route ?? null
       if (placed === null || line === undefined) return run()
+      let routing: RouteDecision<Runtime>
       try {
-        context.frame.routing = routed(
+        routing = routed(
           registry.runtimeEntries,
           line.bindings,
           placed.runtime,
@@ -854,8 +857,9 @@ async function runArgv(
           cause: caught,
         })
       }
+      context.frame.routing = routing
       try {
-        return await run()
+        return await run((cmd, opts) => executeFn(cmd, { ...opts, routingDecision: routing }))
       } finally {
         context.frame.routing = line
       }

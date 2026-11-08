@@ -50,6 +50,18 @@ function workspace(...policies: Policy[]): Workspace {
   )
 }
 
+function whole(...policies: Policy[]): Workspace {
+  return new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      machines: { a: new Box('a'), b: new Box('b') },
+      runtimes: [new MachineRuntime({ captures: ['@line'], machine: 'a' })],
+      policies,
+    },
+  )
+}
+
 class OnB implements Policy {
   preExecute(): Route {
     return { kind: 'route', machine: 'b', reason: 'the other box' }
@@ -65,6 +77,12 @@ class ShortOnB implements Policy {
 class OnA implements Policy {
   preCommand(): Route {
     return { kind: 'route', machine: 'a' }
+  }
+}
+
+class EvalOnB implements Policy {
+  preCommand(ctx: CommandContext): Route | null {
+    return ctx.command === 'eval' ? { kind: 'route', machine: 'b' } : null
   }
 }
 
@@ -102,6 +120,37 @@ describe('routing on machines', () => {
     try {
       const said = await ws.shell('hostname; hostname -s; hostname')
       expect(DEC.decode(said.stdout)).toBe('a\nb\na\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps the machine a command route names for the lines it runs', async () => {
+    const ws = workspace(new EvalOnB())
+    try {
+      const said = await ws.shell('hostname; eval hostname; hostname')
+      expect(DEC.decode(said.stdout)).toBe('a\nb\na\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('refuses a line run whole when a route places a command off it', async () => {
+    const ws = whole(new ShortOnB())
+    try {
+      expect(DEC.decode((await ws.shell('hostname; hostname')).stdout)).toBe('a\n')
+      const said = await ws.shell('hostname; hostname -s')
+      expect([said.exitCode, DEC.decode(said.stdout)]).toEqual([126, ''])
+      expect(said.refusal?.reason.startsWith('ShortOnB routes hostname elsewhere')).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps a route to where a line run whole runs', async () => {
+    const ws = whole(new OnA())
+    try {
+      expect(DEC.decode((await ws.shell('hostname -s')).stdout)).toBe('a\n')
     } finally {
       await ws.close()
     }

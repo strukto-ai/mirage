@@ -219,7 +219,8 @@ async def recurse(
     Never a typed line, so it must not record a history entry or open
     its own recording context (GNU: history is appended by the line
     reader, the evaluator can't touch it). It inherits the typed
-    line's routing decision: nested lines never re-route. It runs on
+    line's routing decision, or the one a ``pre_command`` route gave
+    the command running it: nested lines never re-route. It runs on
     a hand-off of its own under the one the node that runs it runs on,
     standing at that node: the outer pass reads into the words a
     command runs and claims for them at that place, so the grants are
@@ -1075,6 +1076,7 @@ async def run_prepared_line(
                     ws.namespace,
                     cancel,
                     handed,
+                    decision,
                 )
                 if refused is not None:
                     held = is_pending(refused.refusal)
