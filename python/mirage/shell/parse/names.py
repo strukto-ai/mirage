@@ -120,14 +120,28 @@ def command_words(
     out: set[str] = set()
     for n in walk_named_outside_defs(node, skip):
         if n.type == "command_name":
-            text = n.text
-            if text:
-                out.add(decode_text(text))
+            head = command_head(n)
+            if head:
+                out.add(head)
         elif n.type in constants.DECLARING_NODES and n.children:
             text = n.children[0].text
             if text:
                 out.add(decode_text(text))
     return frozenset(out)
+
+
+def command_head(name: TSNodeLike) -> str:
+    """A command name's word as it runs when the parser fixed it
+    (``'printenv'`` is printenv), else its text as typed.
+
+    Args:
+        name (TSNodeLike): a ``command_name`` node.
+    """
+    inner = name.named_children
+    literal = literal_text(inner[0]) if len(inner) == 1 else None
+    if literal is not None:
+        return literal
+    return decode_text(name.text) if name.text else ""
 
 
 def literal_text(node: TSNodeLike) -> str | None:
@@ -316,8 +330,8 @@ def arith_reads(node: TSNodeLike) -> frozenset[str]:
             _test_arith_names(n, out)
         elif n.type == "command":
             name_node = n.child_by_field_name("name")
-            head = name_node.text if name_node is not None else None
-            if head == b"let":
+            head = command_head(name_node) if name_node is not None else None
+            if head == "let":
                 for arg in command_args(n):
                     _arith_region_names(arg, out)
                     literal = literal_text(arg)

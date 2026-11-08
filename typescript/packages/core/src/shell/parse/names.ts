@@ -115,13 +115,23 @@ export function commandWords(
   const out = new Set<string>()
   for (const current of walkNamedOutsideDefs(node, skip)) {
     if (current.type === 'command_name') {
-      if (current.text !== '') out.add(current.text)
+      const head = commandHead(current)
+      if (head !== '') out.add(head)
     } else if (constants.DECLARING_NODES.has(current.type)) {
       const head = current.children[0]
       if (head !== undefined && head.text !== '') out.add(head.text)
     }
   }
   return out
+}
+
+/**
+ * A command name's word as it runs when the parser fixed it (`'printenv'` is
+ * printenv), else its text as typed. Mirrors Python's command_head.
+ */
+export function commandHead(name: TSNodeLike): string {
+  const only = name.namedChildren.length === 1 ? name.namedChildren[0] : undefined
+  return (only !== undefined ? literalText(only) : null) ?? name.text
 }
 
 /**
@@ -278,7 +288,7 @@ export function arithReads(node: TSNodeLike): ReadonlySet<string> {
       testArithNames(current, out)
     } else if (current.type === 'command') {
       const nameNode = current.childForFieldName?.('name') ?? null
-      if (nameNode?.text !== 'let') continue
+      if (nameNode === null || commandHead(nameNode) !== 'let') continue
       for (const arg of commandArgs(current)) {
         arithRegionNames(arg, out)
         const literal = literalText(arg)

@@ -20,6 +20,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.join import shell_join
 from mirage.shell.voice import shell_voice
 from mirage.utils.quote import single_quote
+from mirage.workspace.executor.builtins.alias.alias import aliases_on
 from mirage.workspace.executor.builtins.getopt import last_of, scan_options
 from mirage.workspace.executor.builtins.lookup import (
     classify,
@@ -150,13 +151,12 @@ async def _past_functions(
 ) -> Result:
     """Run ``words`` past a shell function or alias of their head's name.
 
-    The line's head is single-quoted, which bash never expands as an
-    alias or reads as a keyword, so the alias table stays whole for the
-    builtin to read (``builtin alias alias``), and still reads as the
-    literal word it is (``command bash -c`` is a nested shell). A shadowing function is
-    masked in the session for the inner run while builtins and mount
-    commands still resolve; a function never shadows a builtin, so one
-    named like a builtin stays.
+    A head an alias would expand is single-quoted, which bash never
+    expands as an alias, so the alias table stays whole for the builtin
+    to read (``builtin alias alias``); any other head goes as typed. A
+    shadowing function is masked in the session for the inner run while
+    builtins and mount commands still resolve; a function never shadows
+    a builtin, so one named like a builtin stays.
 
     Args:
         cmd (str): the builtin that runs them, named on the node.
@@ -168,8 +168,10 @@ async def _past_functions(
             the target as a line of its own.
     """
     inner_name = words[0]
-    rest = shell_join(words[1:])
-    inner = single_quote(inner_name) + (f" {rest}" if rest else "")
+    inner = shell_join(words)
+    if aliases_on(session) and inner_name in session.aliases:
+        rest = shell_join(words[1:])
+        inner = single_quote(inner_name) + (f" {rest}" if rest else "")
     # A function never shadows a bash builtin mirage runs, so one of such
     # a name stays for the builtin to read or remove (`builtin unset -f
     # unset`); an interpreter's (`python3`) is still masked. Function

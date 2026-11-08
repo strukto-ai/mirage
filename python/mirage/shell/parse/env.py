@@ -21,6 +21,7 @@ from mirage.shell.parse.constants import (
 )
 from mirage.shell.parse.names import (
     command_args,
+    command_head,
     command_invocations,
     literal_text,
     walk_named_outside_defs,
@@ -216,8 +217,7 @@ def env_reads(node: TSNodeLike) -> tuple[bool, frozenset[str], frozenset[str]]:
     for n in walk_named_outside_defs(node):
         if n.type == "command":
             name_node = n.child_by_field_name("name")
-            text = name_node.text if name_node is not None else None
-            head = decode_text(text) if text else ""
+            head = command_head(name_node) if name_node is not None else ""
             prefix = _prefix_assignment_names(n)
             skipped: frozenset[str] | None = None
             if head == "env":

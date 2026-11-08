@@ -25,6 +25,7 @@ import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { sessionEntry } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
+import { aliasesOn } from '../alias/alias.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
 import { classify, describe, programFile } from '../lookup/index.ts'
 import { NameKind } from '../lookup/types.ts'
@@ -123,11 +124,10 @@ export async function handleCommandBuiltin(
 }
 
 /**
- * Run `words` past a shell function or alias of their head's name. The line's
- * head is single-quoted, which bash never expands as an alias or reads as a
- * keyword, so the alias table stays whole for the builtin to read (`builtin
- * alias alias`), and still reads as the literal word it is (`command bash -c`
- * is a nested shell). A shadowing function is masked in the session for the inner
+ * Run `words` past a shell function or alias of their head's name. A head an
+ * alias would expand is single-quoted, which bash never expands as an alias,
+ * so the alias table stays whole for the builtin to read (`builtin alias
+ * alias`); any other head goes as typed. A shadowing function is masked in the session for the inner
  * run while builtins and mount commands still resolve. `cmd` is the builtin
  * that runs them, named on the node. Mirrors Python's _past_functions.
  */
@@ -141,7 +141,10 @@ async function pastFunctions(
 ): Promise<RedirectResult> {
   const innerName = words[0] ?? ''
   const rest = shellJoin(words.slice(1))
-  const inner = singleQuote(innerName) + (rest === '' ? '' : ` ${rest}`)
+  const aliased = aliasesOn(session) && sessionEntry(session.aliases, innerName) !== undefined
+  const inner = aliased
+    ? singleQuote(innerName) + (rest === '' ? '' : ` ${rest}`)
+    : shellJoin(words)
   // A function never shadows a bash builtin mirage runs, so one of such a name
   // stays for the builtin to read or remove (`builtin unset -f unset`); an
   // interpreter's (`python3`) is still masked. Function bodies are never
