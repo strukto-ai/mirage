@@ -39,6 +39,46 @@
         "f",
         "s"
       ]
+    },
+    {
+      "id": "cut_s_long_first_field",
+      "seq": 20070204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '%9000s\\n' | tr ' ' z | cut -s -f1 | wc -c; { printf '%9000s' | tr ' ' z; printf ',y\\n'; } | cut -s -d, -f1 | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n9001\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s",
+        "f",
+        "d"
+      ]
     }
   ]
 }

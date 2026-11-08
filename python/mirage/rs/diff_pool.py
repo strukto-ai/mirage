@@ -1,8 +1,7 @@
 import asyncio
 import logging
 from collections import deque
-from collections.abc import Callable
-from contextlib import aclosing
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, TypeVar, cast
 
@@ -193,6 +192,12 @@ class DiffPool:
             self._retire(entry)
 
     @staticmethod
+    def _wants(index: int | None) -> int | None:
+        if index not in (0, 1, None):
+            raise RuntimeError("invalid diff worker input request")
+        return index
+
+    @staticmethod
     def _append(parts: list[bytes], chunk: bytes) -> int:
         if not isinstance(chunk, bytes) or len(chunk) > CHUNK_SIZE:
             raise RuntimeError("invalid diff worker output chunk")
@@ -207,18 +212,38 @@ class DiffPool:
         size = 0
         output: list[bytes] = []
         try:
-            await lease.call(diff_worker.open_pair, asdict(options))
-            for index, factory in enumerate((old, new)):
-                async with aclosing(chunks(await factory())) as source:
-                    async for chunk in source:
+            wants = self._wants(
+                await lease.call(diff_worker.open_pair, asdict(options))
+            )
+            sources: list[AsyncGenerator[bytes, None] | None] = [None, None]
+            try:
+                # The engine names the input it reads next: one after the
+                # other for a whole diff, both in step for -q, which stops
+                # reading once it knows.
+                while wants is not None:
+                    source = sources[wants]
+                    if source is None:
+                        source = chunks(await (old, new)[wants]())
+                        sources[wants] = source
+                    chunk = await anext(source, None)
+                    if chunk is None:
+                        reply = await lease.call(diff_worker.end, wants)
+                    else:
                         size += len(chunk)
                         reply = await lease.call(
-                            diff_worker.feed, index, chunk
+                            diff_worker.feed, wants, chunk
                         )
-                        size += self._append(output, reply)
-                size += self._append(
-                    output, await lease.call(diff_worker.end, index)
-                )
+                    if not isinstance(reply, tuple) or len(reply) != 2:
+                        raise RuntimeError("invalid diff worker feed reply")
+                    size += self._append(output, reply[0])
+                    wants = self._wants(reply[1])
+            finally:
+                try:
+                    if sources[0] is not None:
+                        await sources[0].aclose()
+                finally:
+                    if sources[1] is not None:
+                        await sources[1].aclose()
             busy = True
             while busy:
                 drain_reply = await lease.call(diff_worker.drain)

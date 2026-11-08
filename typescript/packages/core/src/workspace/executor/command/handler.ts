@@ -115,11 +115,13 @@ export function argumentListTooLong(command: string, reason: string): Uint8Array
 
 /**
  * A mount command's failure, worded like GNU (`prog: message`), a file
- * error with the path as typed. Mirrors Python's `_mount_failure`.
+ * error with the path as typed; an engine's refusal keeps what it wrote
+ * before it and its own exit status. Mirrors Python's `_mount_failure`.
  */
 function mountFailure(name: string, paths: readonly PathSpec[], err: unknown): Failure {
   if (err instanceof GlobLimitError)
     return [null, argumentListTooLong(name, err.message), CANNOT_EXECUTE_STATUS]
+  if (err instanceof StreamRefusal) return [err.output, formatFsError(name, err, paths), err.status]
   const code = err instanceof UsageError ? err.exitCode : readFailExitCode(name, err)
   return [null, formatFsError(name, err, paths), code]
 }

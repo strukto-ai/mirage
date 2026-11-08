@@ -122,19 +122,26 @@ async def test_a_write_drops_once_answered_and_again_once_its_stream_ends(
 
 
 @pytest.mark.parametrize(
-    "voice,error,stdout,stderr",
+    "voice,error,stdout,stderr,code",
     [
-        (MOUNT, RuntimeError("lost"), b"a\n", b"cat: lost\n"),
-        (LEAF, StreamRefusal("cut", b"b\n"), b"a\nb\n", b"gh: cut\n"),
+        (MOUNT, RuntimeError("lost"), b"a\n", b"cat: lost\n", 1),
+        (
+            MOUNT,
+            StreamRefusal("cat: memory exhausted", b"b\n", 2),
+            b"a\nb\n",
+            b"cat: memory exhausted\n",
+            2,
+        ),
+        (LEAF, StreamRefusal("cut", b"b\n"), b"a\nb\n", b"gh: cut\n", 1),
     ],
 )
 async def test_an_answer_carries_the_producer_and_words_a_deferred_failure(
-    voice, error, stdout, stderr
+    voice, error, stdout, stderr, code
 ):
     out, io = await _run(_answer(_stream(b"a\n", error=error)), voice)
     assert io.producer is PRODUCER
     assert await materialize(out) == stdout
-    assert (io.exit_code, io.stderr) == (1, stderr)
+    assert (io.exit_code, io.stderr) == (code, stderr)
 
 
 @dataclass(frozen=True)

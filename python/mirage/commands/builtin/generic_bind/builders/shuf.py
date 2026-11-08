@@ -36,12 +36,12 @@ async def shuf(
     """Run shuf over resolved operands; mirrors shufGeneric.
 
     The flags are read before any operand is resolved, and a refusal
-    from them is returned as it is. The later ones (an operand beside
-    ``-i``, more lines than shuf will hold) are caught here rather than
-    left to the executor's catch-all, which is what the TypeScript twin
-    does: `shufGeneric` returns an `IOResult` for them, so a direct call
-    (a unit test, an embedder) got a raised exception on this host and a
-    value on that one. The bytes and the exit code are identical either
+    from them is returned as it is. A later one (an operand beside
+    ``-i``) is caught here rather than left to the executor's
+    catch-all, which is what the TypeScript twin does: `shufGeneric`
+    returns an `IOResult` for it, so a direct call (a unit test, an
+    embedder) got a raised exception on this host and a value on that
+    one. The bytes and the exit code are identical either
     way inside a workspace -- `format_fs_error` emits an
     already-prefixed message verbatim -- so this moves nothing a shell
     line can see. `shuf` has no `shuf_generic` wrapper of its own, so

@@ -297,6 +297,38 @@
         "stdout": " 00 6f 6e 65 0a 74 77 6f 00 74 68 72 65 65 00\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "shuf_has_no_million_line_ceiling",
+      "seq": 14102508,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "seq 1100000 | shuf | wc -l; shuf -i 1-1100000 | wc -l; shuf -r -n 1100000 -i 1-3 | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "1100000\n1100000\n1100000\n",
+        "stderr": ""
+      }
     }
   ]
 }

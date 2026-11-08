@@ -440,7 +440,9 @@ impl Stream for Nl {
     }
 
     fn feed_input(&mut self, _: usize, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.records.push(input);
+        self.records
+            .push(input)
+            .map_err(|_| StreamError::refusal(b"nl: memory exhausted", 1))?;
         self.step(out);
         Ok(())
     }

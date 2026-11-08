@@ -29,7 +29,12 @@ export type DiffRequest = z.infer<typeof DiffRequest>
 
 export const DiffOutcome = z.object({ outcome: z.enum(['equal', 'different']) })
 export const DiffReply = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('output'), output: Bytes }),
+  // `wants`: the input the stream reads next, null once it reads neither.
+  z.object({
+    kind: z.literal('output'),
+    output: Bytes,
+    wants: z.union([z.literal(0), z.literal(1)]).nullable(),
+  }),
   z.object({
     kind: z.literal('state'),
     busy: z.boolean(),
@@ -59,22 +64,24 @@ export function diffDispatcher(): ((raw: unknown) => Promise<DiffReply>) & { clo
   const dispatch = async (raw: unknown): Promise<DiffReply> => {
     const request = DiffRequest.parse(raw)
     try {
+      const output = (bytes: Uint8Array): DiffReply =>
+        DiffReply.parse({ kind: 'output', output: bytes, wants: stream?.wants() ?? null })
       if (request.kind === 'close' || request.kind === 'open') {
         stream?.close()
         stream = undefined
         if (request.kind === 'open') {
           stream = await openStream('diff', { ...request.options })
         }
-        return { kind: 'output', output: new Uint8Array() }
+        return output(new Uint8Array())
       }
       if (stream === undefined) throw new Error('diff stream is not open')
       switch (request.kind) {
         case 'feed':
-          return { kind: 'output', output: stream.feedInput(request.index, request.chunk) }
+          return output(stream.feedInput(request.index, request.chunk))
         case 'end':
-          return { kind: 'output', output: stream.endInput(request.index) }
+          return output(stream.endInput(request.index))
         case 'drain':
-          return { kind: 'output', output: stream.drain() }
+          return output(stream.drain())
         case 'inspect': {
           const metadata = DiffOutcome.parse(JSON.parse(DEC.decode(stream.metadata())))
           const reply = {

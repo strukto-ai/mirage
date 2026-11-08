@@ -62,6 +62,10 @@ async function forwardStream(
   return streamOutput(await openStream('xxd', config), source)
 }
 
+function backwards(refusal: StreamRefusal): IOResult {
+  return new IOResult({ exitCode: SEEK_BACK_EXIT, stderr: ENC.encode(`${refusal.message}\n`) })
+}
+
 /**
  * Revert a hexdump onto a stream, which can only move forward. Deliberate
  * divergence: stdout is a stream here even when the line redirects it to a
@@ -71,16 +75,17 @@ async function forwardStream(
 async function* xxdReverseStream(
   source: AsyncIterable<Uint8Array>,
   io: IOResult,
-  plain: boolean,
+  revert: Readonly<Record<string, util.JSONType>>,
 ): AsyncIterable<Uint8Array> {
-  const stream = await openStream('xxd', { mode: 'reverse', plain, segments: false })
+  const stream = await openStream('xxd', { ...revert, segments: false })
   try {
     yield* streamOutputChunks(stream, source)
   } catch (error) {
     if (!(error instanceof StreamRefusal)) throw error
     if (error.output.byteLength > 0) yield error.output
-    io.exitCode = SEEK_BACK_EXIT
-    io.stderr = ENC.encode(`${error.message}\n`)
+    const refused = backwards(error)
+    io.exitCode = refused.exitCode
+    io.stderr = refused.stderr
   }
 }
 
@@ -260,7 +265,7 @@ async function writeOutput(
   writeBytes: ((p: PathSpec, data: ByteSource) => Promise<void>) | null,
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null,
   render: () => Promise<AsyncIterable<Uint8Array> | null>,
-  plain: boolean,
+  revert: Readonly<Record<string, util.JSONType>>,
 ): Promise<[ByteSource | null, IOResult]> {
   const [input, target] = paths
   if (input === undefined || target === undefined) return [null, new IOResult()]
@@ -271,12 +276,19 @@ async function writeOutput(
   const dump = await render()
   let segments: ByteSource = new Uint8Array()
   let data: ByteSource = new Uint8Array(0)
+  let done = new IOResult()
   const reading = { failed: false }
   try {
     if (dump === null) {
       const stored = new ByteSpool()
       try {
-        await stored.fill(runStream('xxd', { mode: 'reverse', plain, segments: true }, source))
+        try {
+          await stored.fill(runStream('xxd', { ...revert, segments: true }, source))
+        } catch (err) {
+          if (!(err instanceof StreamRefusal)) throw err
+          await stored.append(err.output)
+          done = backwards(err)
+        }
         segments = await stored.output()
       } catch (err) {
         await stored.close()
@@ -309,7 +321,7 @@ async function writeOutput(
     } finally {
       await closeQuietly(segments)
     }
-    return [null, new IOResult()]
+    return [null, done]
   }
   if (dump === null) {
     try {
@@ -343,7 +355,7 @@ async function writeOutput(
   } finally {
     await closeQuietly(data)
   }
-  return [null, new IOResult()]
+  return [null, done]
 }
 
 export interface XxdFlags {
@@ -405,14 +417,16 @@ export async function xxdGeneric(
   const { seek, limit, plain } = parsed
   const first = paths[0]
   const name = parsed.name ?? (first !== undefined && !isStdin(first) ? first.rawPath : null)
+  const revert: Readonly<Record<string, util.JSONType>> = {
+    mode: 'reverse',
+    plain,
+    cols: parsed.render.cols ?? null,
+    base: seek.back ? -seek.offset : seek.offset,
+  }
   let source: AsyncIterable<Uint8Array>
   let base = 0
   if (parsed.reverse) {
     source = paths[0] !== undefined ? read(paths[0]) : resolveSource(ctx.stdin)
-    if (seek.offset !== 0 || (limit ?? 0) > 0) {
-      const after = await past(source, Math.max(seek.offset, 0))
-      source = limited(after ?? singleChunk(new Uint8Array()), limit !== 0 ? limit : null)
-    }
   } else {
     const found = await seeked(paths[0] ?? null, read, ctx.stdin, seek, limit)
     if (found === null) {
@@ -426,10 +440,10 @@ export async function xxdGeneric(
   }
   const target = paths[1]
   if (target !== undefined && !isStdin(target)) {
-    return writeOutput(paths, source, stream, writeBytes, pwriteBytes, render, plain)
+    return writeOutput(paths, source, stream, writeBytes, pwriteBytes, render, revert)
   }
   const io = new IOResult()
-  return [(await render()) ?? xxdReverseStream(source, io, plain), io]
+  return [(await render()) ?? xxdReverseStream(source, io, revert), io]
 }
 
 function namesOutput(operands: readonly (string | PathSpec)[]): boolean {

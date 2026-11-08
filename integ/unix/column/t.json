@@ -151,6 +151,44 @@
       "flags": [
         "t"
       ]
+    },
+    {
+      "id": "column_t_a_cell_wider_than_a_window",
+      "seq": 3330001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "{ printf '%*s' 5000 '' | tr ' ' a; printf ' b\\nc d\\n'; } | column -t | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "10008\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
     }
   ]
 }

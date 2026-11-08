@@ -848,7 +848,10 @@ impl Stream for Join {
         input: &[u8],
         out: &mut Vec<u8>,
     ) -> Result<(), StreamError> {
-        self.sides[side.min(1)].input.push(input);
+        self.sides[side.min(1)]
+            .input
+            .push(input)
+            .map_err(|_| StreamError::refusal(b"join: memory exhausted", 1))?;
         self.pump(out);
         Ok(())
     }

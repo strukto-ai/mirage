@@ -3083,8 +3083,8 @@ authorization of the copyright holder.
 
 ------------------------------------------------------------------------
 
-The plain (-p) hexdump reader in rust/mirage-rs/src/xxd.rs (Pairs) follows
-xxd 2024-12-07 (src/xxd/xxd.c of vim 9.1.1230, https://github.com/vim/vim).
+The reverse (-r) hexdump reader in rust/mirage-rs/src/xxd.rs follows xxd
+2024-12-07 (src/xxd/xxd.c of vim 9.1.1230, https://github.com/vim/vim).
 xxd.c carries this notice:
 
 (c) 1990-1998 by Juergen Weigert (jnweiger@gmail.com)

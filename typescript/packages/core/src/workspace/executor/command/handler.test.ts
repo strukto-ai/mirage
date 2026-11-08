@@ -110,16 +110,24 @@ describe('runHandler', () => {
   })
 
   it.each([
-    ['as a mount', MOUNT, new Error('lost'), 'a\n', 'cat: lost\n'],
-    ['as a leaf', LEAF, new StreamRefusal('cut', ENC.encode('b\n')), 'a\nb\n', 'gh: cut\n'],
+    ['as a mount', MOUNT, new Error('lost'), 'a\n', 'cat: lost\n', 1],
+    [
+      'as a mount engine',
+      MOUNT,
+      new StreamRefusal('cat: memory exhausted', ENC.encode('b\n'), 2),
+      'a\nb\n',
+      'cat: memory exhausted\n',
+      2,
+    ],
+    ['as a leaf', LEAF, new StreamRefusal('cut', ENC.encode('b\n')), 'a\nb\n', 'gh: cut\n', 1],
   ])(
     'stamps the producer on an answer and words a deferred failure %s',
-    async (_, voice, error, stdout, stderr) => {
+    async (_, voice, error, stdout, stderr, code) => {
       const out = await run(answer(stream(['a\n'], error)), voice)
       expect(out?.[1].producer).toBe(PRODUCER)
       expect(await text(out?.[0])).toBe(stdout)
       expect(await text(out?.[1].stderr)).toBe(stderr)
-      expect(out?.[1].exitCode).toBe(1)
+      expect(out?.[1].exitCode).toBe(code)
     },
   )
 })
