@@ -562,10 +562,10 @@
         "hf",
         "hf-prefix"
       ],
-      "command": "find /data/prune -path /data/prune/skip -prune -o -type f -exec echo X {} \\;",
+      "command": "find /data/prune -path /data/prune/skip -prune -o -type f -exec echo X {} \\;; find /data/prune/keep -type f -execdir echo X {} \\;; find /data/prune -name '*.txt' -execdir pwd \\; | sort; find /data/prune/skip -type f -execdir echo {} + | sort; (cd /data/prune && find . -maxdepth 0 -execdir echo {} \\;)",
       "expect": {
         "exit": 0,
-        "stdout": "X /data/prune/keep/file.txt\n",
+        "stdout": "X /data/prune/keep/file.txt\nX ./file.txt\n/data/prune/keep\n/data/prune/skip\n/data/prune/skip/inner\n./cache.txt\n./deep.txt\n./.\n",
         "stderr": ""
       },
       "flags": [
@@ -573,7 +573,8 @@
         "prune",
         "o",
         "type",
-        "exec"
+        "exec",
+        "execdir"
       ]
     },
     {
@@ -865,7 +866,7 @@
       ]
     },
     {
-      "id": "find_prune_unknown_predicate_still_refused",
+      "id": "find_prune_perm_reads_the_mode",
       "seq": 790,
       "targets": [
         "ram",
@@ -892,16 +893,24 @@
         "hf",
         "hf-prefix"
       ],
-      "command": "find /data/prune -path /data/prune/skip -prune -o -perm 644 -print",
+      "command": "find /data/prune -path /data/prune/skip -prune -o -perm 644 -print; find /data/prune -type f -perm -u=r | sort; find /data/prune -type d -perm /111 | sort; find /data/prune -type f -perm /111; find /data/prune -perm u=rwx,go=rx -name keep; find /data/prune/keep -type f -links 1; find /data/prune -nouser; find /data/prune -nogroup; find /data/prune/keep -type f -readable -writable; find /data/prune -type f -executable; find /data/prune -follow -name file.txt; find /data/prune -perm bogus; echo rc=$?",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: unknown predicate `-perm'\n"
+        "exit": 0,
+        "stdout": "/data/prune/keep/file.txt\n/data/prune/keep/file.txt\n/data/prune/skip/cache.txt\n/data/prune/skip/inner/deep.txt\n/data/prune\n/data/prune/keep\n/data/prune/skip\n/data/prune/skip/inner\n/data/prune/keep\n/data/prune/keep/file.txt\n/data/prune/keep/file.txt\n/data/prune/keep/file.txt\nrc=1\n",
+        "stderr": "find: invalid mode 'bogus'\n"
       },
       "flags": [
         "path",
         "prune",
-        "o"
+        "o",
+        "perm",
+        "links",
+        "nouser",
+        "nogroup",
+        "readable",
+        "writable",
+        "executable",
+        "follow"
       ]
     }
   ]

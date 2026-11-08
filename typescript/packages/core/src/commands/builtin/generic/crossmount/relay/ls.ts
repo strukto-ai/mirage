@@ -64,13 +64,14 @@ export async function runLs(
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   vfs?: Files,
-  // The session view, for the profile the group column renders.
+  // The session view, for the profile the group column renders and the
+  // environment ls reads.
   sessionView?: SessionView,
 ): Promise<CrossResult> {
   const ctx: Context = {
     ...crossOpts(flagKwargs),
     ...(vfs !== undefined ? { vfs } : {}),
-    ...(sessionView !== undefined ? { session: sessionView } : {}),
+    ...(sessionView !== undefined ? { session: sessionView, env: sessionView.snapshot() } : {}),
   }
   // The dispatcher's listing names the links among the entries. Mirrors
   // Python's relayed_readdir. Only -R walks; a plain listing reads one

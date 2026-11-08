@@ -20,17 +20,21 @@ from mirage.core.generic.types import RowActionKind
 
 @dataclass(frozen=True, slots=True)
 class ExecAction:
-    """One ``-exec`` action: the command words and how it is run.
+    """One ``-exec`` or ``-execdir`` action: the command words and how
+    it is run.
 
     Args:
         argv (tuple[str, ...]): the words between ``-exec`` and its
             terminator, ``{}`` still in place.
         batch (bool): ``{} +`` (one run over every match) rather than
             ``;`` (one run per match).
+        in_dir (bool): ``-execdir``: the command runs in the match's
+            directory and ``{}`` is ``./`` and the match's name.
     """
 
     argv: tuple[str, ...]
     batch: bool = False
+    in_dir: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,9 +44,12 @@ class RowAction:
     Args:
         kind (RowActionKind): ``-print``, ``-print0``, ``-ls`` or
             ``-delete``.
+        file (str | None): ``-fprint`` and ``-fprint0``'s file as typed,
+            None for a row printed to the output.
     """
 
     kind: RowActionKind
+    file: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,11 +99,14 @@ class PrintfAction:
         parts (tuple[PrintfPart, ...]): the format as literal runs and
             directives.
         needs_stat (bool): a directive reads the row's stat.
+        file (str | None): ``-fprintf``'s file as typed, None for a row
+            printed to the output.
     """
 
     format: str
     parts: tuple[PrintfPart, ...] = ()
     needs_stat: bool = False
+    file: str | None = None
 
 
 FindAction = ExecAction | RowAction | PrintfAction

@@ -18,7 +18,11 @@
       "display": "simple"
     },
     "examples": {
-      "languages": ["curl", "python", "javascript"],
+      "languages": [
+        "curl",
+        "python",
+        "javascript"
+      ],
       "defaults": "all",
       "prefill": true
     }
@@ -731,15 +735,216 @@
               "api/overview",
               "api/quickstart",
               "api/authentication",
+              "api/streaming",
               "api/errors",
               "api/reference"
             ]
           },
           {
-            "group": "Resources",
+            "group": "Workspaces",
             "openapi": {
               "source": "openapi.yaml",
-              "overlays": ["api-display.overlay.json"],
+              "overlays": [
+                "api-display.overlay.json"
+              ],
+              "directory": "api/operations"
+            },
+            "pages": [
+              {
+                "group": "Lifecycle",
+                "pages": [
+                  "POST /v1/workspaces",
+                  "GET /v1/workspaces",
+                  "GET /v1/workspaces/{workspace_id}",
+                  "DELETE /v1/workspaces/{workspace_id}",
+                  "GET /v1/workspaces/{workspace_id}/logs",
+                  "POST /v1/workspaces/{workspace_id}/stop",
+                  "POST /v1/workspaces/{workspace_id}/start",
+                  "POST /v1/workspaces/{workspace_id}/cancel",
+                  "POST /v1/workspaces/{workspace_id}/kill",
+                  "PUT /v1/workspaces/{workspace_id}/profiles/{name}",
+                  "PUT /v1/workspaces/{workspace_id}/clis/{name}",
+                  "DELETE /v1/workspaces/{workspace_id}/clis/{name}"
+                ]
+              },
+              {
+                "group": "Shell",
+                "pages": [
+                  "POST /v1/workspaces/{workspace_id}/shell",
+                  "POST /v1/workspaces/{workspace_id}/glob"
+                ]
+              },
+              {
+                "group": "VFS",
+                "pages": [
+                  "POST /v1/workspaces/{workspace_id}/vfs/read",
+                  "POST /v1/workspaces/{workspace_id}/vfs/write",
+                  "POST /v1/workspaces/{workspace_id}/vfs/append",
+                  "POST /v1/workspaces/{workspace_id}/vfs/pwrite",
+                  "POST /v1/workspaces/{workspace_id}/vfs/stat",
+                  "POST /v1/workspaces/{workspace_id}/vfs/readdir",
+                  "POST /v1/workspaces/{workspace_id}/vfs/exists",
+                  "POST /v1/workspaces/{workspace_id}/vfs/is_dir",
+                  "POST /v1/workspaces/{workspace_id}/vfs/is_file",
+                  "POST /v1/workspaces/{workspace_id}/vfs/list_files",
+                  "POST /v1/workspaces/{workspace_id}/vfs/mkdir",
+                  "POST /v1/workspaces/{workspace_id}/vfs/rmdir",
+                  "POST /v1/workspaces/{workspace_id}/vfs/unlink",
+                  "POST /v1/workspaces/{workspace_id}/vfs/create",
+                  "POST /v1/workspaces/{workspace_id}/vfs/rename",
+                  "POST /v1/workspaces/{workspace_id}/vfs/symlink",
+                  "POST /v1/workspaces/{workspace_id}/vfs/readlink",
+                  "POST /v1/workspaces/{workspace_id}/vfs/setattr",
+                  "POST /v1/workspaces/{workspace_id}/vfs/getxattr",
+                  "POST /v1/workspaces/{workspace_id}/vfs/listxattr",
+                  "POST /v1/workspaces/{workspace_id}/vfs/setxattr",
+                  "POST /v1/workspaces/{workspace_id}/vfs/removexattr",
+                  "POST /v1/workspaces/{workspace_id}/vfs/truncate",
+                  "POST /v1/workspaces/{workspace_id}/vfs/{name}"
+                ]
+              },
+              {
+                "group": "Documents",
+                "pages": [
+                  "GET /v1/workspaces/{workspace_id}/vfs-md",
+                  "PUT /v1/workspaces/{workspace_id}/vfs-md",
+                  "GET /v1/workspaces/{workspace_id}/skill-md",
+                  "PUT /v1/workspaces/{workspace_id}/skill-md"
+                ]
+              },
+              {
+                "group": "Asks",
+                "pages": [
+                  "GET /v1/workspaces/{workspace_id}/asks",
+                  "POST /v1/workspaces/{workspace_id}/asks/{ask_id}"
+                ]
+              },
+              {
+                "group": "Lines",
+                "pages": [
+                  "GET /v1/workspaces/{workspace_id}/lines",
+                  "GET /v1/workspaces/{workspace_id}/lines/{line_id}"
+                ]
+              },
+              {
+                "group": "Jobs",
+                "pages": [
+                  "GET /v1/workspaces/{workspace_id}/jobs",
+                  "GET /v1/workspaces/{workspace_id}/jobs/{job_id}"
+                ]
+              },
+              {
+                "group": "Processes",
+                "pages": [
+                  "GET /v1/workspaces/{workspace_id}/processes",
+                  "GET /v1/workspaces/{workspace_id}/processes/{pid}"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Templates",
+            "pages": [
+              "GET /v1/templates",
+              "POST /v1/templates",
+              "GET /v1/templates/{ref}",
+              "DELETE /v1/templates/{ref}",
+              "POST /v1/templates/{ref}/restore"
+            ],
+            "openapi": {
+              "source": "openapi.yaml",
+              "overlays": [
+                "api-display.overlay.json"
+              ],
+              "directory": "api/operations"
+            }
+          },
+          {
+            "group": "Policies",
+            "pages": [
+              "GET /v1/policies",
+              "POST /v1/policies",
+              "GET /v1/policies/{ref}",
+              "PUT /v1/policies/{ref}",
+              "DELETE /v1/policies/{ref}"
+            ],
+            "openapi": {
+              "source": "openapi.yaml",
+              "overlays": [
+                "api-display.overlay.json"
+              ],
+              "directory": "api/operations"
+            }
+          },
+          {
+            "group": "Saved configurations",
+            "openapi": {
+              "source": "openapi.yaml",
+              "overlays": [
+                "api-display.overlay.json"
+              ],
+              "directory": "api/operations"
+            },
+            "pages": [
+              {
+                "group": "VFS",
+                "pages": [
+                  "GET /v1/vfs",
+                  "POST /v1/vfs",
+                  "GET /v1/vfs/types",
+                  "GET /v1/vfs/{ref}",
+                  "PUT /v1/vfs/{ref}",
+                  "DELETE /v1/vfs/{ref}"
+                ]
+              },
+              {
+                "group": "CLIs",
+                "pages": [
+                  "GET /v1/clis",
+                  "POST /v1/clis",
+                  "GET /v1/clis/types",
+                  "GET /v1/clis/{ref}",
+                  "PUT /v1/clis/{ref}",
+                  "DELETE /v1/clis/{ref}"
+                ]
+              },
+              {
+                "group": "Runtimes",
+                "pages": [
+                  "GET /v1/runtimes",
+                  "POST /v1/runtimes",
+                  "GET /v1/runtimes/types",
+                  "GET /v1/runtimes/{ref}",
+                  "PUT /v1/runtimes/{ref}",
+                  "DELETE /v1/runtimes/{ref}"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Service",
+            "pages": [
+              "GET /v1/health"
+            ],
+            "openapi": {
+              "source": "openapi.yaml",
+              "overlays": [
+                "api-display.overlay.json"
+              ],
+              "directory": "api/operations"
+            }
+          },
+          {
+            "group": "Daemon",
+            "pages": [
+              "GET /v1/daemon/ready",
+              "POST /v1/daemon/shutdown"
+            ],
+            "openapi": {
+              "source": "openapi.yaml",
+              "overlays": [
+                "api-display.overlay.json"
+              ],
               "directory": "api/operations"
             }
           }

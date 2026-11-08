@@ -112,5 +112,7 @@ export async function runCp(
         },
     stdin,
     dispatch,
+    undefined,
+    cwd,
   )
 }

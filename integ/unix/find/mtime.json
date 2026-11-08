@@ -86,12 +86,20 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf hi > /data/mtprobe.txt; find /data -name mtprobe.txt -mtime -1",
+      "command": "printf hi > /data/mtprobe.txt; find /data -name mtprobe.txt -mtime -1; find /data -name mtprobe.txt -mmin -60; find /data -name mtprobe.txt -mmin +60; find /data -name mtprobe.txt -amin -60; find /data -name mtprobe.txt -cmin -60; find /data -name mtprobe.txt -atime -1; find /data -name mtprobe.txt -ctime -1; find /data -name mtprobe.txt -daystart -mtime -2; find /data -name mtprobe.txt -mmin 1.5x; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "/data/mtprobe.txt\n",
-        "stderr": ""
-      }
+        "stdout": "/data/mtprobe.txt\n/data/mtprobe.txt\n/data/mtprobe.txt\n/data/mtprobe.txt\n/data/mtprobe.txt\n/data/mtprobe.txt\n/data/mtprobe.txt\nrc=1\n",
+        "stderr": "find: invalid argument `1.5x' to `-mmin'\n"
+      },
+      "flags": [
+        "mmin",
+        "amin",
+        "cmin",
+        "atime",
+        "ctime",
+        "daystart"
+      ]
     },
     {
       "id": "find_mtime_excludes_old_window",

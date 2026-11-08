@@ -12,20 +12,30 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.du import DuEntries, du_generic, facts
+from mirage.commands.builtin.generic.du import (
+    DuEntries,
+    du_generic,
+    excluded,
+    facts,
+    read_flags,
+)
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     CommandFiles,
     command_files,
 )
+from mirage.commands.builtin.utils.formatting import time_of
 from mirage.commands.builtin.utils.links import (
     links_of,
     mount_view,
     mounts_of,
 )
+from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.builtin.utils.tree import WalkBudget, WalkCall, tree_walk
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -33,9 +43,9 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileStat, FileType, PathSpec, ReaddirFn
+from mirage.types import FileStat, FileType, LsTimeKind, PathSpec, ReaddirFn
 from mirage.utils.key_prefix import under_path
-from mirage.utils.path import CycleError
+from mirage.utils.path import CycleError, respell_one
 from mirage.view.types import LinkView, MountView
 
 
@@ -68,6 +78,12 @@ class DuTally:
         inaccessible (list[tuple[str, str | None]]): under ``-L``, each
             link that leads nowhere, with the strerror GNU adds for a
             chain that loops.
+        excludes (tuple[str, ...]): the ``--exclude`` and ``-X``
+            patterns; an entry one matches is neither stat'ed nor walked.
+        clock (LsTimeKind | None): under ``--time``, the clock each
+            entry's time is read from.
+        times (dict[str, str]): each entry's time by virtual path, under
+            ``--time``; like ``directories``, one operand's walk.
     """
 
     mounts: MountView | None = None
@@ -75,6 +91,9 @@ class DuTally:
     unreadable: list[str] = field(default_factory=list)
     directories: list[str] = field(default_factory=list)
     inaccessible: list[tuple[str, str | None]] = field(default_factory=list)
+    excludes: tuple[str, ...] = ()
+    clock: LsTimeKind | None = None
+    times: dict[str, str] = field(default_factory=dict)
 
 
 def _account_for_walk_error(
@@ -225,6 +244,7 @@ async def _du_walk(
     scan: WalkBudget,
     entries: list[tuple[str, int]] | None,
     follow: Dereference | None = None,
+    skip: Callable[[str], bool] | None = None,
 ) -> int:
     try:
         info = await walk.stat(path)
@@ -236,6 +256,10 @@ async def _du_walk(
         if counted is None:
             return 0
         info = counted
+    if tally.clock is not None:
+        stamp = time_of(info, tally.clock)
+        if stamp is not None:
+            tally.times[path.virtual] = stamp
     if info.type != FileType.DIRECTORY:
         size = info.size or 0
         if entries is not None:
@@ -258,14 +282,34 @@ async def _du_walk(
     for child in children:
         if not scan.spend(path.virtual):
             break
+        if skip is not None and skip(child):
+            continue
         child_spec = PathSpec(
             virtual=child,
             directory=child,
             resolved=False,
             vfs_path=child.strip("/"),
         )
-        total += await _du_walk(walk, child_spec, tally, scan, entries, follow)
+        total += await _du_walk(
+            walk, child_spec, tally, scan, entries, follow, skip
+        )
     return total
+
+
+def _skipped(
+    patterns: tuple[str, ...], operand: PathSpec, virtual: str
+) -> bool:
+    """Whether a walked path is one ``--exclude`` or ``-X`` leaves out,
+    matched as du prints it, under the operand as typed.
+
+    Args:
+        patterns (tuple[str, ...]): the patterns.
+        operand (PathSpec): the operand the walk started from.
+        virtual (str): the walked path.
+    """
+    return excluded(
+        patterns, respell_one(virtual, operand.virtual, operand.raw_path)
+    )
 
 
 def _tree_of(files: CommandFiles, listing: ReaddirFn) -> Walk:
@@ -301,9 +345,11 @@ async def _walk_operand(
             size under its name; None for a total alone.
     """
     tally.directories.clear()
+    tally.times.clear()
     scan = WalkBudget(path, tally.mounts)
     state = follow.operand(path) if follow is not None else None
-    total = await _du_walk(walk, path, tally, scan, entries, state)
+    skip = partial(_skipped, tally.excludes, path) if tally.excludes else None
+    total = await _du_walk(walk, path, tally, scan, entries, state, skip)
     if state is not None:
         for link, real in state.waiting:
             if real not in state.counted:
@@ -314,6 +360,7 @@ async def _walk_operand(
                     scan,
                     entries,
                     replace(state, tree=link.virtual),
+                    skip,
                 )
     tally.stopped.extend(
         line for line in scan.stopped if line not in tally.stopped
@@ -349,9 +396,12 @@ async def du(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
+    flags = await read_flags(ctx, stdin_stream(files.read, ctx.stdin))
+    if isinstance(flags, IOResult):
+        return b"", flags
     fl = FlagView(ctx.flags, spec=SPECS["du"])
     mounts = mounts_of(ctx)
-    tally = DuTally(mounts=mounts)
+    tally = DuTally(mounts=mounts, excludes=flags.excludes, clock=flags.time)
     # Kept on one filesystem, a listing leaves out the roots
     # of the mounts below it, which the walk must neither list nor stat.
     # Those names would count toward a cut listing the walk then finds
@@ -369,7 +419,9 @@ async def du(
     follow = (
         Dereference(links, mounts if fl.as_bool("one_file_system") else None)
         if links is not None
-        and fl.typed_order("dereference", "no_dereference")[-1:]
+        and fl.typed_order(
+            "dereference", "no_dereference", "dereference_args", "H"
+        )[-1:]
         == ["dereference"]
         else None
     )
@@ -383,6 +435,7 @@ async def du(
         )
 
     return await du_generic(
+        flags,
         paths,
         list(texts),
         ctx,
@@ -395,6 +448,7 @@ async def du(
         directories=lambda: tally.directories,
         inaccessible=lambda: tally.inaccessible,
         repeated=follow.repeated if follow is not None else None,
+        times=lambda: tally.times,
     )
 
 

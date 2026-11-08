@@ -697,6 +697,7 @@ async def mv_generic(
                 target,
                 errors,
                 copies,
+                src,
             )
             if ok:
                 errors.append(
@@ -751,6 +752,7 @@ async def mv_generic(
             target,
             errors,
             copies,
+            src,
         )
         if not ok:
             continue

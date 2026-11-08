@@ -31,7 +31,7 @@ async def ls(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    options = ls_options(ctx.flags)
+    options = ls_options(ctx.flags, ctx.env)
     files = command_files(ctx, paths)
     if not paths:
         paths = [

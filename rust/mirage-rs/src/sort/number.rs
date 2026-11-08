@@ -141,6 +141,12 @@ fn ascii_prefix(field: &[u8], at: usize, word: &[u8]) -> bool {
 /// hex float, a decimal float, inf or infinity, or nan with an optional
 /// `(chars)` tag.
 pub(crate) fn strtod(field: &[u8]) -> Option<f64> {
+    strtod_prefix(field).map(|(value, _)| value)
+}
+
+/// `strtod` with where its number ends, which is where C's strtod leaves
+/// its end pointer.
+pub(crate) fn strtod_prefix(field: &[u8]) -> Option<(f64, usize)> {
     let mut at = field
         .iter()
         .position(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r'))
@@ -156,21 +162,40 @@ pub(crate) fn strtod(field: &[u8]) -> Option<f64> {
         }
         _ => false,
     };
-    let value = hex_float(field, at)
+    let (value, end) = hex_float(field, at)
         .or_else(|| decimal_float(field, at))
         .or_else(|| {
-            if ascii_prefix(field, at, b"inf") {
-                Some(f64::INFINITY)
+            if ascii_prefix(field, at, b"infinity") {
+                Some((f64::INFINITY, at + 8))
+            } else if ascii_prefix(field, at, b"inf") {
+                Some((f64::INFINITY, at + 3))
             } else if ascii_prefix(field, at, b"nan") {
-                Some(f64::NAN)
+                Some((f64::NAN, nan_tag(field, at + 3)))
             } else {
                 None
             }
         })?;
-    Some(if negative { -value } else { value })
+    Some((if negative { -value } else { value }, end))
 }
 
-fn decimal_float(field: &[u8], at: usize) -> Option<f64> {
+/// Past a nan's `(chars)` tag, letters, digits and underscores in
+/// parentheses, or `at` when none follows.
+fn nan_tag(field: &[u8], at: usize) -> usize {
+    if field.get(at) != Some(&b'(') {
+        return at;
+    }
+    let close = field[at + 1..]
+        .iter()
+        .position(|byte| !(byte.is_ascii_alphanumeric() || *byte == b'_'))
+        .map_or(field.len(), |gap| at + 1 + gap);
+    if field.get(close) == Some(&b')') {
+        close + 1
+    } else {
+        at
+    }
+}
+
+fn decimal_float(field: &[u8], at: usize) -> Option<(f64, usize)> {
     let whole_end = digit_run(field, at);
     let mut end = whole_end;
     if field.get(end) == Some(&b'.') {
@@ -190,10 +215,11 @@ fn decimal_float(field: &[u8], at: usize) -> Option<f64> {
             end = stop;
         }
     }
-    std::str::from_utf8(&field[at..end])
+    let value = std::str::from_utf8(&field[at..end])
         .ok()?
         .parse::<f64>()
-        .ok()
+        .ok()?;
+    Some((value, end))
 }
 
 fn hex_digit(byte: u8) -> Option<u64> {
@@ -202,7 +228,7 @@ fn hex_digit(byte: u8) -> Option<u64> {
 
 /// `0x` hex digits with an optional fraction and `p` exponent, rounded once
 /// to the nearest double, ties to even.
-fn hex_float(field: &[u8], at: usize) -> Option<f64> {
+fn hex_float(field: &[u8], at: usize) -> Option<(f64, usize)> {
     if !(field.get(at) == Some(&b'0') && matches!(field.get(at + 1), Some(b'x' | b'X'))) {
         return None;
     }
@@ -250,9 +276,10 @@ fn hex_float(field: &[u8], at: usize) -> Option<f64> {
                 power = (power * 10 + i64::from(d - b'0')).min(1 << 40);
             }
             exponent += if negative { -power } else { power };
+            i = stop;
         }
     }
-    Some(scale(mantissa, sticky, exponent))
+    Some((scale(mantissa, sticky, exponent), i))
 }
 
 /// `mantissa * 2^exponent` (plus a sticky bit below it) as the nearest

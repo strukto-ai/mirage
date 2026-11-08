@@ -12,32 +12,53 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 
 from mirage.core.generic.types import (
+    Access,
     Action,
     And,
+    Count,
     Effects,
     Empty,
     FindArgs,
     FindEntry,
+    Lname,
     Mtime,
     Name,
+    NoOwner,
     Not,
     Or,
+    Owner,
     Path,
     PendingPrune,
+    Perm,
     PredNode,
     Prune,
+    Quit,
+    Regex,
+    Size,
     TrueNode,
     Type,
+    XType,
 )
-from mirage.types import FileStat, FileType, FindType, PathSpec
-from mirage.utils.dates import in_mtime_window
+from mirage.rs.regex import posix_regex
+from mirage.shell.bytes import byte_view
+from mirage.types import (
+    LINK_TARGET_KEY,
+    FileStat,
+    FileType,
+    FindType,
+    PathSpec,
+)
+from mirage.utils.dates import in_mtime_window, iso_timestamp
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.path import respell_one
-from mirage.utils.stat_view import DIR_SIZE
+from mirage.utils.stat_view import DIR_SIZE, posix_mode
+
+_ACCESS_BITS = {"r": 0o400, "w": 0o200, "x": 0o100}
+_PERMISSION_BITS = 0o7777
 
 _TYPE_LETTER = {
     FileType.DIRECTORY: "d",
@@ -101,9 +122,13 @@ def bind_tree(
         raw (str): the start point as typed.
     """
     if isinstance(node, Path):
-        return Path(node.pattern, prefix=prefix, root=root, raw=raw)
+        return replace(node, prefix=prefix, root=root, raw=raw)
+    if isinstance(node, Regex):
+        return replace(node, prefix=prefix, root=root, raw=raw, hits={})
     if isinstance(node, Prune):
         return Prune()
+    if isinstance(node, Quit):
+        return Quit()
     if isinstance(node, Not):
         return Not(bind_tree(node.kid, prefix, root, raw))
     if isinstance(node, And):
@@ -113,30 +138,158 @@ def bind_tree(
     return node
 
 
+def shown_path(node: Path | Regex, key: str) -> str:
+    """The path ``-path`` and ``-regex`` read: the entry as ``find``
+    prints it under the start point the node was bound to.
+
+    Args:
+        node (Path | Regex): the bound node.
+        key (str): the entry's mount-relative key.
+    """
+    shown = display_path(node.prefix, key)
+    return respell_one(shown, node.root, node.raw) if node.root else shown
+
+
+def _glob(text: str, pattern: str, icase: bool) -> bool:
+    if icase:
+        return fnmatch(text.lower(), pattern.lower())
+    return fnmatch(text, pattern)
+
+
+def _link_target(st: FileStat | None) -> str | None:
+    if st is None or st.type is not FileType.SYMLINK:
+        return None
+    target = st.extra.get(LINK_TARGET_KEY)
+    return target if isinstance(target, str) else None
+
+
+def _stamp(entry: FindEntry, field: str) -> float | None:
+    """The time one test reads: the walk's mtime, or the access or
+    change time the entry's stat holds, which falls back to the mtime
+    as ``stat``'s does for a backend that keeps only that one.
+
+    Args:
+        entry (FindEntry): the entry under test.
+        field (str): ``m``, ``a`` or ``c``.
+    """
+    if field == "m":
+        return entry.mtime
+    if entry.stat is None:
+        return None
+    other = entry.stat.atime if field == "a" else entry.stat.ctime
+    return iso_timestamp(other) if other else entry.mtime
+
+
+def _count(st: FileStat, field: str) -> int | None:
+    if field == "links":
+        # One name per entry, as ls -l counts it: mirage has no hard
+        # links, and a directory's own entries are not counted.
+        return 1
+    value = st.uid if field == "uid" else st.gid
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def _owns(node: Owner, st: FileStat) -> bool:
+    value = st.gid if node.group else st.uid
+    if value is None:
+        return node.profile is not None and node.name == node.profile
+    if str(value) == node.name:
+        return True
+    return (
+        node.name.isdigit()
+        and isinstance(value, int)
+        and value == int(node.name)
+    )
+
+
+def _test(node: PredNode, entry: FindEntry) -> bool | None:
+    """The answer of a test that reads only the entry, None for a node
+    that is not one."""
+    if isinstance(node, Name):
+        return _glob(entry.name, node.pattern, node.icase)
+    if isinstance(node, Path):
+        return _glob(shown_path(node, entry.key), node.pattern, node.icase)
+    if isinstance(node, Regex):
+        return node.hits.get(entry.key, False)
+    if isinstance(node, Type):
+        return entry.kind == node.kind
+    if isinstance(node, XType):
+        return (entry.xkind or entry.kind) == node.kind
+    if isinstance(node, Lname):
+        target = _link_target(entry.stat)
+        return target is not None and _glob(target, node.pattern, node.icase)
+    st = entry.stat
+    if isinstance(node, Perm):
+        if st is None:
+            return False
+        mode = posix_mode(st) & _PERMISSION_BITS
+        if node.bits == "exact":
+            return mode == node.mode
+        if node.bits == "all":
+            return mode & node.mode == node.mode
+        return node.mode == 0 or mode & node.mode != 0
+    if isinstance(node, Count):
+        value = _count(st, node.field) if st is not None else None
+        if value is None:
+            return False
+        if node.cmp == "+":
+            return value > node.count
+        if node.cmp == "-":
+            return value < node.count
+        return value == node.count
+    if isinstance(node, Owner):
+        return st is not None and _owns(node, st)
+    if isinstance(node, NoOwner):
+        owner = None if st is None else st.gid if node.group else st.uid
+        return isinstance(owner, int) or (
+            isinstance(owner, str) and owner.isdigit()
+        )
+    if isinstance(node, Access):
+        # access(2) follows a link: a live one answers with what it
+        # leads to, which the walk read as the entry's target.
+        held = (
+            entry.target
+            if st is not None and st.type is FileType.SYMLINK
+            else st
+        )
+        if held is None:
+            return False
+        return posix_mode(held) & _ACCESS_BITS[node.mode] != 0
+    if isinstance(node, Size):
+        # An entry the walk could not stat has no size to compare.
+        if entry.kind != "d" and st is None:
+            return False
+        size = DIR_SIZE if entry.kind == "d" or st is None else st.size or 0
+        return not (
+            (node.min is not None and size < node.min)
+            or (node.max is not None and size > node.max)
+        )
+    if isinstance(node, Empty):
+        return entry.is_empty is True
+    return None
+
+
 def evaluate(node: PredNode, entry: FindEntry, effects: Effects) -> bool:
     """Whether the expression holds for one entry, recording what it did.
 
     Evaluation short-circuits the way GNU's does (``-a`` stops at the
     first false, ``-o`` at the first true), so an action or a prune is
-    reached exactly when GNU would reach it. The tests and connectives
-    every entry meets are told apart first.
+    reached exactly when the reference would reach it, and nothing runs after a
+    ``-quit``. The tests and connectives every entry meets are told
+    apart first.
 
     Args:
         node (PredNode): the predicate tree.
         entry (FindEntry): the entry under test.
         effects (Effects): filled in as actions are reached.
     """
-    if isinstance(node, Name):
-        if node.icase:
-            return fnmatch(entry.name.lower(), node.pattern.lower())
-        return fnmatch(entry.name, node.pattern)
-    if isinstance(node, Path):
-        shown = display_path(node.prefix, entry.key)
-        if node.root:
-            shown = respell_one(shown, node.root, node.raw)
-        return fnmatch(shown, node.pattern)
-    if isinstance(node, Type):
-        return entry.kind == node.kind
+    answer = _test(node, entry)
+    if answer is not None:
+        return answer
     if isinstance(node, Not):
         return not evaluate(node.kid, entry, effects)
     if isinstance(node, And):
@@ -150,6 +303,8 @@ def evaluate(node: PredNode, entry: FindEntry, effects: Effects) -> bool:
                 # may (`! -mtime 1` flips with its mtime).
                 del effects.deferred[mark:before]
                 return False
+            if effects.quit:
+                return True
         return True
     if isinstance(node, Or):
         mark = len(effects.deferred)
@@ -158,7 +313,13 @@ def evaluate(node: PredNode, entry: FindEntry, effects: Effects) -> bool:
             if evaluate(kid, entry, effects):
                 del effects.deferred[mark:before]
                 return True
+            if effects.quit:
+                return False
         return False
+    if isinstance(node, Quit):
+        node.fired.append(entry.key)
+        effects.quit = True
+        return True
     if isinstance(node, TrueNode):
         return True
     if isinstance(node, Action):
@@ -178,33 +339,111 @@ def evaluate(node: PredNode, entry: FindEntry, effects: Effects) -> bool:
         # An entry the walk fetched no time for passes here and meets
         # the expression's flat window afterwards; the test is recorded
         # so a -prune reached past it is only pending.
-        if entry.mtime is None:
+        stamp = _stamp(entry, node.field)
+        if stamp is None:
             effects.deferred.append(node)
             return True
-        return in_mtime_window(entry.mtime, node.lo, node.hi)
-    if isinstance(node, Empty):
-        return entry.is_empty is True
+        return in_mtime_window(stamp, node.lo, node.hi)
     raise TypeError(f"unknown predicate node: {node!r}")
 
 
-def tree_has_action(node: PredNode) -> bool:
-    if isinstance(node, Action):
-        return True
+def _nodes(node: PredNode) -> list[PredNode]:
     if isinstance(node, Not):
-        return tree_has_action(node.kid)
+        return [node, *_nodes(node.kid)]
     if isinstance(node, (And, Or)):
-        return any(tree_has_action(kid) for kid in node.kids)
-    return False
+        return [node, *(n for kid in node.kids for n in _nodes(kid))]
+    return [node]
+
+
+def tree_has(node: PredNode, kinds: tuple[type, ...]) -> bool:
+    """Whether the tree holds a node of one of ``kinds``.
+
+    Args:
+        node (PredNode): the predicate tree.
+        kinds (tuple[type, ...]): the node classes looked for.
+    """
+    return any(isinstance(n, kinds) for n in _nodes(node))
+
+
+def tree_has_action(node: PredNode) -> bool:
+    """Whether the tree holds an action, ``-quit`` among them: the reference prints
+    no row of its own for an expression that has one.
+
+    Args:
+        node (PredNode): the predicate tree.
+    """
+    return tree_has(node, (Action, Quit))
 
 
 def tree_has_time(node: PredNode) -> bool:
-    if isinstance(node, Mtime):
-        return True
-    if isinstance(node, Not):
-        return tree_has_time(node.kid)
-    if isinstance(node, (And, Or)):
-        return any(tree_has_time(kid) for kid in node.kids)
-    return False
+    return tree_has(node, (Mtime,))
+
+
+def tree_reads_stat(node: PredNode) -> bool:
+    """Whether a test reads the entry's stat: a time, its size, mode,
+    links, owner or a link's target.
+
+    Args:
+        node (PredNode): the predicate tree.
+    """
+    return tree_has(
+        node, (Mtime, Size, Perm, Count, Owner, NoOwner, Access, Lname)
+    )
+
+
+def tree_reads_link(node: PredNode) -> bool:
+    """Whether a test reads what is on the other side of a link
+    (``-xtype``, and the access tests a live link answers through).
+
+    Args:
+        node (PredNode): the predicate tree.
+    """
+    return tree_has(node, (XType, Access))
+
+
+def quit_fired(node: PredNode) -> bool:
+    """Whether a ``-quit`` in the evaluated tree was reached.
+
+    Args:
+        node (PredNode): the predicate tree, after evaluation.
+    """
+    return any(isinstance(n, Quit) and n.fired for n in _nodes(node))
+
+
+async def prime_regexes(node: PredNode, keys: Iterable[str]) -> None:
+    """Answer every ``-regex`` in the tree for the entries named, ahead of
+    the evaluation that reads them.
+
+    Each node's expression is compiled once (``posix_regex`` caches it)
+    and must match the whole printed path: the leftmost-longest match
+    from its first byte reaches its last. An entry already answered is
+    not searched again.
+
+    Args:
+        node (PredNode): the bound predicate tree.
+        keys (Iterable[str]): the entries' mount-relative keys.
+    """
+    regexes = [n for n in _nodes(node) if isinstance(n, Regex)]
+    if not regexes:
+        return
+    wanted = list(keys)
+    for rx in regexes:
+        compiled = posix_regex(
+            byte_view(rx.pattern, rx.utf8),
+            rx.extended,
+            rx.dialect,
+            rx.icase,
+            rx.utf8,
+        )
+        for key in wanted:
+            if key in rx.hits:
+                continue
+            subject = byte_view(shown_path(rx, key), rx.utf8)
+            groups = await compiled.search(subject)
+            rx.hits[key] = groups is not None and groups[0] == (
+                0,
+                len(subject),
+            )
 
 
 def tree_has_prune(node: PredNode) -> bool:
@@ -301,7 +540,11 @@ def time_tests_failing(node: PredNode) -> PredNode:
     return node
 
 
-def settle_prunes(node: PredNode, mtimes: Mapping[str, float | None]) -> None:
+def settle_prunes(
+    node: PredNode,
+    mtimes: Mapping[str, float | None],
+    stats: Mapping[str, FileStat | None] | None = None,
+) -> None:
     """Decide the pending prunes whose directory mtime is now known.
 
     Each decided directory leaves the pending ledgers and is evaluated
@@ -315,6 +558,8 @@ def settle_prunes(node: PredNode, mtimes: Mapping[str, float | None]) -> None:
         node (PredNode): the predicate tree, after evaluation.
         mtimes (Mapping[str, float | None]): epoch-second mtime per
             directory key, None for a directory that reports none.
+        stats (Mapping[str, FileStat | None] | None): the stat taken of
+            each, for a time test that reads another stamp.
     """
     decided: dict[str, FindEntry] = {}
     for prune in _prune_nodes(node):
@@ -328,7 +573,8 @@ def settle_prunes(node: PredNode, mtimes: Mapping[str, float | None]) -> None:
     for key, entry in decided.items():
         mtime = mtimes[key]
         tree = node if mtime is not None else time_tests_failing(node)
-        evaluate(tree, replace(entry, mtime=mtime), Effects())
+        stat = entry.stat if stats is None else stats.get(key, entry.stat)
+        evaluate(tree, replace(entry, mtime=mtime, stat=stat), Effects())
 
 
 def drop_pruned(
@@ -420,6 +666,7 @@ def emit_start_path(
     min_size: int | None = None,
     max_size: int | None = None,
     mtime: float | None = None,
+    stat: FileStat | None = None,
 ) -> None:
     """Append the search start path to results when it matches.
 
@@ -451,6 +698,8 @@ def emit_start_path(
         max_size (int | None): ``-size -`` upper bound in bytes.
         mtime (float | None): Start path epoch-second mtime for the
             tree's time tests; None if unknown.
+        stat (FileStat | None): the start path's stat, for the tests that
+            read one.
     """
     if not exists:
         return
@@ -463,6 +712,7 @@ def emit_start_path(
         depth=0,
         is_empty=is_empty,
         mtime=mtime,
+        stat=stat,
     )
     if not keep(entry, tree, mindepth):
         return

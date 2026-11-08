@@ -37,11 +37,12 @@ tags:
     parent: Workspace operations
   - name: Processes
     parent: Workspace operations
-  - name: Server
+  - name: Service
+  - name: Daemon
   - name: Auth
 servers:
-  - url: https://api.strukto.ai
-    description: The hosted API
+  - url: http://127.0.0.1:8765
+    description: A local server on its default port
 security:
   - bearerAuth: []
 paths:
@@ -144,7 +145,6 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-        - hosted
     get:
       summary: List workspaces
       operationId: list_workspaces_v1_workspaces_get
@@ -172,7 +172,6 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-        - hosted
   /v1/workspaces/{workspace_id}:
     get:
       summary: Get a workspace
@@ -208,7 +207,6 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-        - hosted
     delete:
       summary: Delete a workspace
       operationId: delete_workspace_v1_workspaces__workspace_id__delete
@@ -233,14 +231,15 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '500':
+          $ref: '#/components/responses/500'
       tags:
         - Workspaces
       x-hosts:
         - daemon
-        - hosted
   /v1/workspaces/{workspace_id}/logs:
     get:
-      summary: Read a workspace's logs
+      summary: List workspace logs
       operationId: workspace_logs_v1_workspaces__workspace_id__logs_get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -284,8 +283,9 @@ paths:
                     started_at: 1700000000000
                     duration_ms: 8
                     exit_code: 0
-                    stdout: |
-                      hi
+                    stdout: 'hi
+
+                      '
                     stderr: ''
                     user_id: null
                     api_key_id: null
@@ -294,9 +294,12 @@ paths:
             application/x-ndjson:
               schema:
                 type: string
-              example: |
-                {"type":"command","session":"s1","timestamp":1700000000000,"id":"c1","command":"echo hi"}
+              example: '{"type":"command","session":"s1","timestamp":1700000000000,"id":"c1","command":"echo
+                hi"}
+
                 {"type":"result","session":"s1","timestamp":1700000000008,"parent":"c1","duration_ms":8,"exit_code":0,"stdout":"hi\n","stderr":""}
+
+                '
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -313,22 +316,16 @@ paths:
           $ref: '#/components/responses/429'
         '403':
           $ref: '#/components/responses/403'
-      description: 'Return completed commands newest first by start time and ID, with their
-        mount calls. JSON started_at values and durations are milliseconds. JSONL
-        exports all retained matching commands oldest first as command, vfs and result records,
-        linked by parent, with timestamp in Unix milliseconds. JSONL ignores limit and after.
-        Empty JSON is {items: [], next: null}; empty JSONL has an empty body. Retention is server-specific.
-        Cursors are opaque and server-specific; pagination is not a snapshot.'
+      description: 'Return completed commands newest first by start time and ID, with their mount
+        calls. JSON started_at values and durations are milliseconds. JSONL exports all retained
+        matching commands oldest first as command, vfs and result records, linked by parent, with
+        timestamp in Unix milliseconds. JSONL ignores limit and after. Empty JSON is {items: [],
+        next: null}; empty JSONL has an empty body. Retention is server-specific. Cursors are
+        opaque and server-specific; pagination is not a snapshot.'
       tags:
         - Workspaces
       x-hosts:
         - daemon
-        - hosted
-      servers:
-        - url: https://api.strukto.ai
-          description: Cloud API
-        - url: http://127.0.0.1:8765
-          description: Local daemon
   /v1/workspaces/{workspace_id}/stop:
     post:
       summary: Stop a workspace
@@ -354,15 +351,16 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'Stop the workspace and keep its state and config for start.
-        A stopped workspace answers as it is, so a stop can be repeated.'
+      description: 'Stop the workspace and keep its state and config for start. A stopped workspace
+        answers as it is, so a stop can be repeated.
+
+
+        RAM file contents do not survive stopping and starting. Save files to persistent storage
+        before stopping the workspace.'
       tags:
         - Workspaces
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/start:
     post:
       summary: Start a workspace
@@ -396,20 +394,20 @@ paths:
           $ref: '#/components/responses/429'
         '503':
           $ref: '#/components/responses/503'
-      description: 'Start a stopped workspace from the config it was created
-        with, over the state it kept; a running one answers as it is.
+      description: 'Start a stopped workspace from the config it was created with, over the state
+        it kept; a running one answers as it is.
 
 
-        The server''s policies judge the config again, and the secrets and
-        saved entries it names are read again, so a rotated secret is picked
-        up.'
+        The server''s policies judge the config again, and the secrets and saved entries it names
+        are read again, so a rotated secret is picked up.
+
+
+        RAM file contents do not survive stopping and starting. Save files to persistent storage
+        before stopping the workspace.'
       tags:
         - Workspaces
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/cancel:
     post:
       summary: Cancel a workspace's lines
@@ -440,7 +438,6 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-        - hosted
   /v1/workspaces/{workspace_id}/kill:
     post:
       summary: Kill a workspace's jobs
@@ -471,9 +468,6 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/profiles/{name}:
     put:
       summary: Set a profile
@@ -527,9 +521,6 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/clis/{name}:
     put:
       summary: Install an MCP CLI
@@ -587,9 +578,6 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
     delete:
       summary: Remove an MCP CLI
       operationId: delete_cli_v1_workspaces__workspace_id__clis__name__delete
@@ -629,9 +617,6 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/clone:
     post:
       summary: Clone a workspace
@@ -670,9 +655,7 @@ paths:
       x-hidden: true
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/{workspace_id}/snapshot:
     get:
       summary: Download a snapshot
@@ -706,9 +689,7 @@ paths:
       x-hidden: true
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
     post:
       summary: Snapshot a workspace
       operationId: snapshot_workspace_v1_workspaces__workspace_id__snapshot_post
@@ -746,9 +727,7 @@ paths:
       x-hidden: true
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/load:
     post:
       summary: Load a snapshot
@@ -766,6 +745,8 @@ paths:
           $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
       tags:
         - Snapshots
       x-hidden: true
@@ -792,9 +773,7 @@ paths:
                   description: The tar archive, up to 1 GiB.
               required:
                 - snapshot
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/templates:
     get:
       summary: List templates
@@ -817,7 +796,6 @@ paths:
         - Templates
       x-hosts:
         - daemon
-        - hosted
     post:
       summary: Create a template
       operationId: create_template_v1_templates_post
@@ -860,7 +838,6 @@ paths:
         - Templates
       x-hosts:
         - daemon
-        - hosted
   /v1/templates/{ref}:
     get:
       summary: Get a template
@@ -896,7 +873,6 @@ paths:
         - Templates
       x-hosts:
         - daemon
-        - hosted
     delete:
       summary: Delete a template
       operationId: delete_template_v1_templates__ref__delete
@@ -928,7 +904,6 @@ paths:
         - Templates
       x-hosts:
         - daemon
-        - hosted
   /v1/templates/{ref}/restore:
     post:
       summary: Restore a template
@@ -964,7 +939,6 @@ paths:
         - Templates
       x-hosts:
         - daemon
-        - hosted
   /v1/workspaces/{workspace_id}/vfs-md:
     get:
       summary: Read the workspace's VFS.md
@@ -998,9 +972,6 @@ paths:
         - Documents
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
     put:
       summary: Write the workspace's VFS.md
       operationId: put_v1_workspaces__workspace_id__vfs_md_put
@@ -1041,9 +1012,6 @@ paths:
         - Documents
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/sessions/{session_id}/vfs-md:
     get:
       summary: Read a session's VFS.md
@@ -1083,9 +1051,7 @@ paths:
         - Documents
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
     put:
       summary: Write a session's VFS.md
       operationId: put_v1_workspaces__workspace_id__sessions__session_id__vfs_md_put
@@ -1132,9 +1098,7 @@ paths:
         - Documents
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/{workspace_id}/skill-md:
     get:
       summary: Read the workspace's SKILL.md
@@ -1168,9 +1132,6 @@ paths:
         - Documents
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
     put:
       summary: Write the workspace's SKILL.md
       operationId: put_v1_workspaces__workspace_id__skill_md_put
@@ -1211,9 +1172,6 @@ paths:
         - Documents
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/sessions/{session_id}/skill-md:
     get:
       summary: Read a session's SKILL.md
@@ -1253,9 +1211,7 @@ paths:
         - Documents
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
     put:
       summary: Write a session's SKILL.md
       operationId: put_v1_workspaces__workspace_id__sessions__session_id__skill_md_put
@@ -1302,9 +1258,7 @@ paths:
         - Documents
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/{workspace_id}/sessions:
     post:
       summary: Create a session
@@ -1343,7 +1297,7 @@ paths:
       x-hidden: true
       x-hosts:
         - daemon
-        - hosted
+      x-excluded: true
     get:
       summary: List sessions
       operationId: list_sessions_v1_workspaces__workspace_id__sessions_get
@@ -1376,7 +1330,7 @@ paths:
       x-hidden: true
       x-hosts:
         - daemon
-        - hosted
+      x-excluded: true
   /v1/workspaces/{workspace_id}/sessions/{session_id}:
     delete:
       summary: Delete a session
@@ -1412,9 +1366,7 @@ paths:
       x-hidden: true
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
     patch:
       summary: Change a session's profile
       operationId: update_session_v1_workspaces__workspace_id__sessions__session_id__patch
@@ -1459,9 +1411,7 @@ paths:
       x-hidden: true
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/{workspace_id}/sessions/{session_id}/cancel:
     post:
       summary: Cancel a session's lines
@@ -1501,9 +1451,7 @@ paths:
       x-hidden: true
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/{workspace_id}/sessions/{session_id}/kill:
     post:
       summary: Kill a session's jobs
@@ -1540,9 +1488,7 @@ paths:
       x-hidden: true
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/{workspace_id}/asks:
     get:
       summary: List asks
@@ -1592,9 +1538,6 @@ paths:
         - Asks
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/asks/{ask_id}:
     post:
       summary: Answer an ask
@@ -1645,9 +1588,6 @@ paths:
         - Asks
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/lines:
     get:
       summary: List lines
@@ -1676,6 +1616,16 @@ paths:
                 items:
                   $ref: '#/components/schemas/LineResponse'
                 title: Response List Lines V1 Workspaces  Workspace Id  Lines Get
+              example:
+                - id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                  session_id: default
+                  command: sleep 30 & wait
+                  state: running
+                  started_at: 1794009600
+                  ended_at: null
+                  exit: null
+                  signal: null
+                  error: null
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1692,14 +1642,18 @@ paths:
 
         yet and the newest ended ones, a session''s or those in a state when
 
-        named.'
+        named.
+
+
+        Lines and processes remain available while running. After completion, the newest 1,024
+        records are kept for up to an hour. Servers using the same workspace store share these
+        records, and snapshots keep ended records. Jobs are listed only while the session retains
+        them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix
+        epoch seconds.'
       tags:
         - Lines
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/lines/{line_id}:
     get:
       summary: Get a line
@@ -1719,6 +1673,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LineDetailResponse'
+              example:
+                id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                session_id: default
+                command: sleep 30 & wait
+                state: running
+                started_at: 1794009600
+                ended_at: null
+                exit: null
+                signal: null
+                error: null
+                jobs:
+                  - job_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38
+                processes:
+                  - 42
+                machines:
+                  - host:my-laptop
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1735,14 +1705,18 @@ paths:
 
         processes it ran that the workspace still keeps and the machines
 
-        those ran on.'
+        those ran on.
+
+
+        Lines and processes remain available while running. After completion, the newest 1,024
+        records are kept for up to an hour. Servers using the same workspace store share these
+        records, and snapshots keep ended records. Jobs are listed only while the session retains
+        them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix
+        epoch seconds.'
       tags:
         - Lines
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/jobs:
     get:
       summary: List jobs
@@ -1777,6 +1751,20 @@ paths:
                 items:
                   $ref: '#/components/schemas/JobResponse'
                 title: Response List Jobs V1 Workspaces  Workspace Id  Jobs Get
+              example:
+                - id: job_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38
+                  number: 1
+                  session_id: default
+                  command: sleep 30
+                  cwd: /
+                  line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                  group: 42
+                  pid: 42
+                  state: running
+                  started_at: 1794009600
+                  ended_at: null
+                  exit: null
+                  signal: null
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1791,14 +1779,18 @@ paths:
           $ref: '#/components/responses/429'
       description: 'The jobs the workspace''s sessions list, as ``jobs`` does, a
 
-        session''s, those in a state or those a line started when named.'
+        session''s, those in a state or those a line started when named.
+
+
+        Lines and processes remain available while running. After completion, the newest 1,024
+        records are kept for up to an hour. Servers using the same workspace store share these
+        records, and snapshots keep ended records. Jobs are listed only while the session retains
+        them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix
+        epoch seconds.'
       tags:
         - Jobs
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/jobs/{job_id}:
     get:
       summary: Get a job
@@ -1818,6 +1810,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JobDetailResponse'
+              example:
+                id: job_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38
+                number: 1
+                session_id: default
+                command: sleep 30
+                cwd: /
+                line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                group: 42
+                pid: 42
+                state: running
+                started_at: 1794009600
+                ended_at: null
+                exit: null
+                signal: null
+                processes:
+                  - 42
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1834,14 +1842,18 @@ paths:
 
         processes it ran that the workspace still keeps: its own and every
 
-        one under it.'
+        one under it.
+
+
+        Lines and processes remain available while running. After completion, the newest 1,024
+        records are kept for up to an hour. Servers using the same workspace store share these
+        records, and snapshots keep ended records. Jobs are listed only while the session retains
+        them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix
+        epoch seconds.'
       tags:
         - Jobs
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/processes:
     get:
       summary: List processes
@@ -1888,6 +1900,26 @@ paths:
                 items:
                   $ref: '#/components/schemas/ProcessResponse'
                 title: Response List Processes V1 Workspaces  Workspace Id  Processes Get
+              example:
+                - pid: 42
+                  session_id: default
+                  line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                  parent: null
+                  group: 42
+                  command: sleep 30
+                  cwd: /
+                  machine: host:my-laptop
+                  runtime: process
+                  machine_pid:
+                    pid: 12345
+                    started: 1794009600
+                    exited: null
+                  state: running
+                  started_at: 1794009600
+                  ended_at: null
+                  exit: null
+                  signal: null
+                  error: null
         '400':
           $ref: '#/components/responses/400'
         '401':
@@ -1908,14 +1940,18 @@ paths:
 
         those a job ran or those run on a machine (``provider:name``) when
 
-        named.'
+        named.
+
+
+        Lines and processes remain available while running. After completion, the newest 1,024
+        records are kept for up to an hour. Servers using the same workspace store share these
+        records, and snapshots keep ended records. Jobs are listed only while the session retains
+        them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix
+        epoch seconds.'
       tags:
         - Processes
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/processes/{pid}:
     get:
       summary: Get a process
@@ -1935,6 +1971,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProcessResponse'
+              example:
+                pid: 42
+                session_id: default
+                line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
+                parent: null
+                group: 42
+                command: sleep 30
+                cwd: /
+                machine: host:my-laptop
+                runtime: process
+                machine_pid:
+                  pid: 12345
+                  started: 1794009600
+                  exited: null
+                state: running
+                started_at: 1794009600
+                ended_at: null
+                exit: null
+                signal: null
+                error: null
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1947,14 +2003,18 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: One process, by its pid.
+      description: 'One process, by its pid.
+
+
+        Lines and processes remain available while running. After completion, the newest 1,024
+        records are kept for up to an hour. Servers using the same workspace store share these
+        records, and snapshots keep ended records. Jobs are listed only while the session retains
+        them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix
+        epoch seconds.'
       tags:
         - Processes
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/shell:
     post:
       summary: Run a shell line
@@ -1990,7 +2050,9 @@ paths:
               example:
                 kind: io
                 exit_code: 0
-                stdout: "hello\n"
+                stdout: 'hello
+
+                  '
                 stderr: ''
                 refusal: null
                 line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
@@ -2004,8 +2066,8 @@ paths:
         '404':
           $ref: '#/components/responses/404'
         '409':
-          description: Another daemon holds the workspace's lease and runs its lines; the
-            detail names it
+          description: Another daemon holds the workspace's lease and runs its lines; the detail
+            names it
           content:
             application/json:
               schema:
@@ -2018,11 +2080,16 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '499':
+          $ref: '#/components/responses/499'
+        '500':
+          $ref: '#/components/responses/500'
       tags:
         - Shell
       x-hosts:
         - daemon
-        - hosted
       requestBody:
         required: true
         content:
@@ -2043,9 +2110,10 @@ paths:
                   description: Up to 64 MiB, read as it arrives.
               required:
                 - request
-      description: Run a shell line in a workspace. HTTP 200 means the request completed. Check exit_code
-        to determine whether the command succeeded. Set stream=true for NDJSON output records. See
-        [Streaming](/home/access/http#run-a-shell-line) for the record format.
+      description: Run a shell line in a workspace. HTTP 200 means the request completed. Check
+        exit_code to determine whether the command succeeded. Set stream=true for NDJSON output
+        records. See [Streaming and stdin](/api/streaming#stream-command-output) for the record
+        format.
   /v1/workspaces/{workspace_id}/tools/shell:
     post:
       summary: Shell tool
@@ -2093,9 +2161,7 @@ paths:
                 - command
             example:
               command: echo hello
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/{workspace_id}/tools/read:
     post:
       summary: Read tool
@@ -2151,9 +2217,7 @@ paths:
                 - path
             example:
               path: /hello.txt
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/{workspace_id}/tools/write:
     post:
       summary: Write tool
@@ -2205,10 +2269,10 @@ paths:
                 - content
             example:
               path: /hello.txt
-              content: "hello\n"
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+              content: 'hello
+
+                '
+      x-excluded: true
   /v1/workspaces/{workspace_id}/tools/edit:
     post:
       summary: Edit tool
@@ -2269,9 +2333,7 @@ paths:
               path: /hello.txt
               old_string: hello
               new_string: goodbye
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/{workspace_id}/tools/ls:
     post:
       summary: Ls tool
@@ -2319,9 +2381,7 @@ paths:
                 - path
             example:
               path: /
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/{workspace_id}/tools/grep:
     post:
       summary: Grep tool
@@ -2376,8 +2436,7 @@ paths:
                   description: Read pattern as a literal string, not a regex (-F).
                 include:
                   type: string
-                  description: Search only files whose name matches this glob, such as *.py
-                    (--include).
+                  description: Search only files whose name matches this glob, such as *.py (--include).
                 context:
                   type: integer
                   minimum: 0
@@ -2398,9 +2457,7 @@ paths:
             example:
               pattern: hello
               path: /
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/{workspace_id}/tools/glob:
     post:
       summary: Glob tool
@@ -2443,20 +2500,18 @@ paths:
               properties:
                 pattern:
                   type: string
-                  description: Pathname pattern such as **/*.py or src/*.ts; a relative one
-                    is matched under path.
+                  description: Pathname pattern such as **/*.py or src/*.ts; a relative one is
+                    matched under path.
                 path:
                   type: string
-                  description: Absolute path of the directory a relative pattern is matched
-                    under (default /).
+                  description: Absolute path of the directory a relative pattern is matched under
+                    (default /).
               required:
                 - pattern
             example:
               pattern: '**/*.txt'
               path: /
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/workspaces/{workspace_id}/vfs/read:
     post:
       summary: VFS read
@@ -2500,6 +2555,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2529,9 +2590,6 @@ paths:
             example:
               path: /hello.txt
       description: Read a file's bytes, from an offset.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/write:
     post:
       summary: VFS write
@@ -2569,6 +2627,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2593,9 +2657,6 @@ paths:
               path: /hello.txt
               data: aGVsbG8K
       description: Write a file's bytes, replacing what it held.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/append:
     post:
       summary: VFS append
@@ -2633,6 +2694,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2657,9 +2724,6 @@ paths:
               path: /hello.txt
               data: aGVsbG8K
       description: Append bytes to a file.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/pwrite:
     post:
       summary: VFS pwrite
@@ -2697,6 +2761,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2725,9 +2795,6 @@ paths:
               data: aGVsbG8K
               offset: 0
       description: Write bytes into a file at an offset.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/stat:
     post:
       summary: VFS stat
@@ -2766,6 +2833,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2786,9 +2859,6 @@ paths:
             example:
               path: /hello.txt
       description: A path's metadata.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/readdir:
     post:
       summary: VFS readdir
@@ -2829,6 +2899,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2847,9 +2923,6 @@ paths:
             example:
               path: /
       description: A directory's entries.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/exists:
     post:
       summary: VFS exists
@@ -2887,6 +2960,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2905,9 +2984,6 @@ paths:
             example:
               path: /hello.txt
       description: Whether a path exists.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/is_dir:
     post:
       summary: VFS is_dir
@@ -2945,6 +3021,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2963,9 +3045,6 @@ paths:
             example:
               path: /
       description: Whether a path is a directory.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/is_file:
     post:
       summary: VFS is_file
@@ -3003,6 +3082,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3021,9 +3106,6 @@ paths:
             example:
               path: /hello.txt
       description: Whether a path is a file.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/list_files:
     post:
       summary: VFS list_files
@@ -3064,6 +3146,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3082,9 +3170,6 @@ paths:
             example:
               path: /
       description: The names of a directory's files.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/mkdir:
     post:
       summary: VFS mkdir
@@ -3122,6 +3207,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3140,9 +3231,6 @@ paths:
             example:
               path: /notes
       description: Make a directory.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/rmdir:
     post:
       summary: VFS rmdir
@@ -3180,6 +3268,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3198,9 +3292,6 @@ paths:
             example:
               path: /notes
       description: Remove an empty directory.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/unlink:
     post:
       summary: VFS unlink
@@ -3238,6 +3329,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3256,9 +3353,6 @@ paths:
             example:
               path: /hello.txt
       description: Remove a file.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/create:
     post:
       summary: VFS create
@@ -3296,6 +3390,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3314,9 +3414,6 @@ paths:
             example:
               path: /hello.txt
       description: Create an empty file.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/rename:
     post:
       summary: VFS rename
@@ -3354,6 +3451,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3376,9 +3479,6 @@ paths:
               src: /hello.txt
               dst: /goodbye.txt
       description: Rename a path within its mount.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/symlink:
     post:
       summary: VFS symlink
@@ -3416,6 +3516,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3438,9 +3544,6 @@ paths:
               path: /hello-link.txt
               target: /hello.txt
       description: Make a symbolic link at a path.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/readlink:
     post:
       summary: VFS readlink
@@ -3479,6 +3582,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3497,9 +3606,6 @@ paths:
             example:
               path: /hello-link.txt
       description: Where a symbolic link points.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/setattr:
     post:
       summary: VFS setattr
@@ -3522,8 +3628,7 @@ paths:
               schema:
                 anyOf:
                   - type: object
-                    description: The fields the backend could not keep, which Mirage stores
-                      instead.
+                    description: The fields the backend could not keep, which Mirage stores instead.
                   - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
@@ -3539,6 +3644,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3572,9 +3683,6 @@ paths:
               path: /hello.txt
               mode: 420
       description: Change a path's mode, owner or times.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/getxattr:
     post:
       summary: VFS getxattr
@@ -3613,6 +3721,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3637,9 +3751,6 @@ paths:
               path: /hello.txt
               name: user.note
       description: One extended attribute's value.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/listxattr:
     post:
       summary: VFS listxattr
@@ -3679,6 +3790,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3699,9 +3816,6 @@ paths:
             example:
               path: /hello.txt
       description: A path's extended attribute names.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/setxattr:
     post:
       summary: VFS setxattr
@@ -3739,6 +3853,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3773,9 +3893,6 @@ paths:
               name: user.note
               value: aGVsbG8K
       description: Set an extended attribute.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/removexattr:
     post:
       summary: VFS removexattr
@@ -3813,6 +3930,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3837,9 +3960,6 @@ paths:
               path: /hello.txt
               name: user.note
       description: Remove an extended attribute.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/truncate:
     post:
       summary: VFS truncate
@@ -3877,6 +3997,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3899,9 +4025,6 @@ paths:
               path: /hello.txt
               length: 0
       description: Cut or extend a file to a length.
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/glob:
     post:
       summary: Match paths
@@ -3939,7 +4062,6 @@ paths:
         - Shell
       x-hosts:
         - daemon
-        - hosted
       requestBody:
         required: true
         content:
@@ -3988,10 +4110,15 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: >-
-        Call a declared VFS function using the ordinary session and policy gate.
-        The selected function defines the returned JSON value; there is no shared
-        response shape. The example shows response headers only.
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
+      description: Call a declared VFS function using the ordinary session and policy gate. The
+        selected function defines the returned JSON value; there is no shared response shape.
+        The example shows response headers only.
       tags:
         - VFS
       x-hosts:
@@ -4014,9 +4141,6 @@ paths:
             example:
               path: /hello.txt
               kwargs: {}
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/health:
     get:
       summary: Check health
@@ -4029,13 +4153,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
       tags:
-        - Server
+        - Service
       x-hosts:
         - daemon
       security: []
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/daemon/ready:
     get:
       summary: Check readiness
@@ -4047,7 +4168,15 @@ paths:
             application/json:
               example:
                 status: ready
-              schema: {}
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - ready
         '503':
           description: The server is full or shutting down and cannot accept new workspaces.
           content:
@@ -4057,8 +4186,11 @@ paths:
                 properties:
                   status:
                     type: string
-                    enum: [full, shutting_down]
-                required: [status]
+                    enum:
+                      - full
+                      - shutting_down
+                required:
+                  - status
               example:
                 status: full
       description: 'Whether the server takes new workspaces: 503 while it drains for
@@ -4067,14 +4199,10 @@ paths:
 
         work elsewhere. `/v1/health` only says the process is up.'
       tags:
-        - Server
-      x-excluded: true
+        - Daemon
       x-hosts:
         - daemon
       security: []
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /v1/daemon/shutdown:
     post:
       summary: Shut down the server
@@ -4101,13 +4229,9 @@ paths:
 
         every account, so an account may not stop it.'
       tags:
-        - Server
-      x-excluded: true
+        - Daemon
       x-hosts:
         - daemon
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
   /.well-known/oauth-protected-resource:
     get:
       summary: Read OAuth protected-resource metadata
@@ -4133,9 +4257,7 @@ paths:
       x-hosts:
         - daemon
       security: []
-      servers:
-        - url: http://127.0.0.1:8765
-          description: A local daemon on its default port
+      x-excluded: true
   /v1/vfs:
     get:
       operationId: list_entries_v1_vfs_get
@@ -4182,7 +4304,6 @@ paths:
         - Saved VFS
       x-hosts: &id002
         - daemon
-        - hosted
     post:
       operationId: create_entry_v1_vfs_post
       responses:
@@ -7785,6 +7906,63 @@ components:
       description: The server's token (MIRAGE_AUTH_TOKEN) or a JWT. A daemon in the default
         local mode with no token accepts requests without one.
   responses:
+    '413':
+      description: The request body, multipart part, or stdin exceeds its size limit.
+      content:
+        application/json:
+          schema:
+            anyOf:
+              - $ref: '#/components/schemas/Error'
+              - title: TypeScript JSON body limit
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    const: 413
+                  code:
+                    type: string
+                  error:
+                    type: string
+                  message:
+                    type: string
+                required:
+                  - statusCode
+                  - code
+                  - error
+                  - message
+          examples:
+            request_part:
+              summary: Python or multipart request limit
+              value:
+                detail: request body too large
+            typescript_json:
+              summary: TypeScript JSON body limit
+              value:
+                statusCode: 413
+                code: FST_ERR_CTP_BODY_TOO_LARGE
+                error: Payload Too Large
+                message: Request body is too large
+    '499':
+      description: The running shell job was canceled.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            detail: job canceled
+    '500':
+      description: The job or server operation failed internally. Inspect detail and server logs
+        before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    '507':
+      description: The filesystem operation exceeds its storage capacity or quota.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     '400':
       description: 'Bad request: malformed, a host not allowed, or a browser page from another
         origin'

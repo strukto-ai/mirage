@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runWithMountGate } from '../../../context/session_context.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { SessionProfile } from '../../../policy/profile.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { readers } from '../../../test-utils.ts'
@@ -33,6 +33,8 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import {
   exitStatusFor,
+  ignored,
+  laidOut,
   linkMode,
   LS_FAILURE,
   LS_MINOR_PROBLEM,
@@ -682,5 +684,158 @@ describe('a directory a rule refuses to list', () => {
     } finally {
       await ws.close()
     }
+  })
+})
+
+// Mirrors the Python tests of the format, quoting, width and ignore options;
+// each expectation measured on coreutils 9.7.
+describe('ls formats, quoting and ignore patterns', () => {
+  const view = (flags: Record<string, FlagValue>): FlagView => new FlagView(flags, specOf('ls'))
+  const read = (
+    flags: Record<string, FlagValue>,
+    env?: Record<string, string>,
+  ): ReturnType<typeof parseFlags> => parseFlags(view(flags), env)
+
+  it('reads the last format, quoting and width', () => {
+    expect(read({ C: true }).layout).toBe('vertical')
+    expect(read({ args_l: true, args_1: true }).layout).toBe('verbose')
+    expect(read({ args_l: true, m: true }).layout).toBe('commas')
+    expect(read({ full_time: true }).layout).toBe('verbose')
+    expect(read({ format: 'across' }).layout).toBe('horizontal')
+    expect(read({ f: true }).sortBy).toBe('none')
+    expect(read({ f: true }).showDotEntries).toBe(true)
+    expect(read({ no_group: true }).columns.group).toBe(false)
+    expect(read({ size: true }).columns.blocks).toBe(true)
+    expect(read({ quote_name: true }).quoting).toBe('c')
+    expect(read({ quote_name: true, literal: true }).quoting).toBe('literal')
+    expect(read({}, { QUOTING_STYLE: 'shell-a' }).quoting).toBe('shell-always')
+    expect(read({ escape: true }, { QUOTING_STYLE: 'c' }).quoting).toBe('escape')
+    expect(read({ hide_control_chars: true }).hideControl).toBe(true)
+    expect(read({ width: '0x10' }).width).toBe(16)
+    expect(read({ width: '0' }).width).toBe(null)
+    expect(read({ C: true }, { COLUMNS: '30' }).width).toBe(30)
+    expect(read({}, { COLUMNS: '30' }).width).toBe(80)
+    expect(read({ tabsize: '0' }).tabsize).toBe(0)
+  })
+
+  it('lets the last of -a, -A and -f say which dot entries show', () => {
+    expect(read({ all: true, f: true }).showDotEntries).toBe(true)
+    const almost = view({ f: true, almost_all: true })
+    expect(parseFlags(almost).showDotEntries).toBe(false)
+    expect(parseFlags(almost).all).toBe(true)
+  })
+
+  it('gathers -I, -B and a --hide that -a overrides', () => {
+    const flags = { ignore: ['v'], ignore_backups: true, hide: ['d'] }
+    expect(read(flags).ignore).toEqual(['v', '*~', '.*~', 'd'])
+    expect(read({ ...flags, all: true }).ignore).toEqual(['v', '*~', '.*~'])
+  })
+
+  it('makes a bad environment value a notice, not a refusal', () => {
+    expect(read({ C: true }, { QUOTING_STYLE: 'x', COLUMNS: '-5' }).notices).toEqual([
+      "ls: ignoring invalid value of environment variable QUOTING_STYLE: 'x'",
+      "ls: ignoring invalid width in environment variable COLUMNS: '-5'",
+    ])
+  })
+
+  it('skips a leading dot only where a pattern spells one', () => {
+    expect(ignored(['*'], 'v')).toBe(true)
+    expect(ignored(['*'], '.h')).toBe(false)
+    expect(ignored(['.*'], '.')).toBe(true)
+    expect(ignored(['.*~'], '.y~')).toBe(true)
+    expect(ignored(['*~'], '.y~')).toBe(false)
+  })
+
+  it('lays rows out in columns, across or with commas', async () => {
+    const rows = ['aaaa', 'bbbb', 'cccc', 'dddd']
+    expect(await laidOut(rows, 'vertical', 22, 8)).toEqual(['aaaa  cccc', 'bbbb  dddd'])
+    expect(await laidOut(rows, 'horizontal', 22, 8)).toEqual(['aaaa  bbbb  cccc', 'dddd'])
+    expect(await laidOut(rows, 'commas', 17, 8)).toEqual(['aaaa, bbbb, cccc,', 'dddd'])
+    expect(await laidOut(rows, 'single-column', 22, 8)).toEqual(rows)
+    expect(await laidOut(['a\udcffb'], 'vertical', null, 8)).toEqual(['a\udcffb'])
+  })
+
+  const listing = (...names: string[]): [typeof readdir, typeof stat] => [
+    (p: PathSpec) => Promise.resolve(key(p) === '/q' ? names.map((n) => `/q/${n}`) : []),
+    (p: PathSpec) =>
+      Promise.resolve(
+        new FileStat({
+          name: key(p).split('/').pop() ?? '',
+          type: key(p) === '/q' ? FileType.DIRECTORY : FileType.FILE,
+          modified: '2025-01-15T10:30:00Z',
+        }),
+      ),
+  ]
+  const lines = async (
+    names: string[],
+    flags: Record<string, FlagValue>,
+    env?: Record<string, string>,
+  ): Promise<string> => {
+    const [dir, entry] = listing(...names)
+    const context = { ...ctx({}), ...(env !== undefined ? { env } : {}) }
+    const result = await lsGeneric([spec('/q')], context, dir, entry, null, read(flags, env))
+    expect(result?.[1].exitCode).toBe(0)
+    return DEC.decode((result?.[0] ?? new Uint8Array()) as Uint8Array)
+  }
+
+  it('lines a bare name up with quoted ones in columns and long rows', async () => {
+    const names = ['a b', 'c', "it's", 'x~']
+    expect(await lines(names, { C: true, quoting_style: 'shell' })).toBe(
+      "'a b'   c  \"it's\"   x~\n",
+    )
+    expect(await lines(names, { args_1: true, quoting_style: 'shell' })).toBe(
+      "'a b'\nc\n\"it's\"\nx~\n",
+    )
+    expect(await lines(names, { m: true, quoting_style: 'shell' })).toBe("'a b', c, \"it's\", x~\n")
+    const long = await lines(names, {
+      args_l: true,
+      g: true,
+      o: true,
+      time_style: '+T',
+      quoting_style: 'shell',
+    })
+    expect(
+      long
+        .split('\n')
+        .slice(1, -1)
+        .map((row) => row.split(' T ')[1]),
+    ).toEqual(["'a b'", ' c', '"it\'s"', ' x~'])
+    expect(await lines(names, { C: true, quoting_style: 'c-maybe' })).toBe("a b  c\tit's  x~\n")
+  })
+
+  it('leaves ignored names and dot entries out', async () => {
+    const names = ['.h', '.y~', 'v', 'w~']
+    expect(await lines(names, { almost_all: true, ignore_backups: true })).toBe('.h\nv\n')
+    expect(await lines(names, { all: true, ignore: ['.*'] })).toBe('v\nw~\n')
+    expect(await lines(names, { hide: ['v'] })).toBe('w~\n')
+    expect(await lines(names, { all: true, hide: ['v'] })).toBe('.\n..\n.h\n.y~\nv\nw~\n')
+  })
+
+  it('leads each row of -s with an unknown block count and a total', async () => {
+    expect(await lines(['a', 'b'], { size: true })).toBe('total ?\n? a\n? b\n')
+    expect(await lines(['a', 'b'], { size: true, inode: true })).toBe('total ?\n? ? a\n? ? b\n')
+    const long = await lines(['a', 'b'], { size: true, args_l: true, g: true, o: true })
+    expect(long.split('\n')[1]?.startsWith('? -rw')).toBe(true)
+  })
+
+  it('takes COLUMNS from the environment and leads stderr with its notices', async () => {
+    expect(await lines(['aaaa', 'bbbb', 'cccc', 'dddd'], { C: true }, { COLUMNS: '22' })).toBe(
+      'aaaa  cccc\nbbbb  dddd\n',
+    )
+    const [dir, entry] = listing('a')
+    const env = { QUOTING_STYLE: 'bogus' }
+    const result = await lsGeneric(
+      [spec('/q'), spec('/nope')],
+      { ...ctx({}), env },
+      (p: PathSpec) => (key(p) === '/nope' ? enoent() : dir(p)),
+      (p: PathSpec) => (key(p) === '/nope' ? enoent() : entry(p)),
+      null,
+      read({}, env),
+    )
+    expect(result?.[1].exitCode).toBe(LS_FAILURE)
+    expect(DEC.decode(await materialize(result?.[1].stderr ?? null))).toBe(
+      "ls: ignoring invalid value of environment variable QUOTING_STYLE: 'bogus'\n" +
+        "ls: cannot access '/nope': No such file or directory\n",
+    )
   })
 })

@@ -50,7 +50,7 @@ Answers come back as calls finish, so match them by `id`.
 
 ## Auth
 
-RPC uses the same bearer token as [HTTP](/home/access/http#auth). `mirage rpc`
+RPC uses the same bearer token as [HTTP](/home/access/http#configure-authentication). `mirage rpc`
 sends the CLI's token for you: a saved [login](/home/access/cli#log-in),
 `MIRAGE_TOKEN`, or the local token file. A client that posts to the URL sends
 the header itself.
@@ -70,13 +70,13 @@ the header itself.
 - `?` marks an optional param.
 - `initialize` is optional and creates nothing: it reports the server, and the
   workspace and session the connection uses.
-- `vfs/<call>` is each of the 23 [VFS calls](/home/access/http#call-the-vfs),
+- `vfs/<call>` is each of the 23 [VFS calls](/api/reference),
   with the same arguments and results as HTTP. The [tools](/home/access/mcp#tools)
   take the inputs listed on the MCP page.
 - `explain: true` on `shell` or `vfs/<call>` says what it would do and runs
   nothing; see [Explain](/home/policy/explain).
 - Bytes, `stdin` included, are base64 strings. A message is at most 4 MiB, so
-  send larger stdin over [HTTP](/home/access/http#run-a-shell-line) or SSH.
+  send larger stdin over [HTTP](/api/streaming#send-stdin) or SSH.
 - A line that exits non-zero is a result, not an error.
 - A `glob` that matches more files than a mount's
   [`walk_limit`](/home/integration/search#walk_limit) is the error

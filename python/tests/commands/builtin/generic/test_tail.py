@@ -28,6 +28,7 @@ from mirage.types import (
     ReadSpec,
 )
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from tests.e2e.s3_mock import patch_s3_multi
@@ -230,6 +231,46 @@ def test_follow_accepts_an_unambiguous_prefix():
     assert _refusal({"follow": "nn"})[0].startswith(
         "tail: invalid argument 'nn' for '--follow'\n"
     )
+
+
+# `--pid` is a decimal with an optional plus, after blanks, that fits a
+# pid_t; `--max-unchanged-stats` the same count, unbounded, and only
+# checked (pinned on debian:stable-slim). Mirrored in tail.test.ts.
+def test_a_pid_and_an_unchanged_stats_count_are_plain_decimals():
+    assert _flags({"pid": " +5"}).pid == 5
+    assert _flags({}).pid is None
+    assert _refusal({"pid": "-1"}) == ("tail: invalid PID: '-1'\n", 1)
+    assert _refusal({"pid": "2147483648"}) == (
+        "tail: invalid PID: '2147483648': "
+        "Value too large for defined data type\n",
+        1,
+    )
+    assert _flags({"max_unchanged_stats": "18446744073709551616"}).pid is None
+    assert _refusal({"max_unchanged_stats": "3k"}) == (
+        "tail: invalid maximum number of unchanged stats between opens: "
+        "'3k'\n",
+        1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_follow_ends_once_its_pid_is_gone():
+    ws = Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await (await ws.shell("printf 'a\\n' > /r/f")).stdout_str()
+        io = await ws.shell(
+            "(sleep 0.2; echo b >> /r/f) & "
+            "tail -f -s 0.05 --pid=$! /r/f; echo rc=$?"
+        )
+        assert await io.stdout_str() == "a\nb\nrc=0\n"
+        io = await ws.shell("tail --pid=1 /r/f")
+        assert await io.stdout_str() == "a\nb\n"
+        assert await io.stderr_str() == (
+            "tail: warning: PID ignored; --pid=PID is useful only when "
+            "following\n"
+        )
+    finally:
+        await ws.close()
 
 
 async def _bytes_read(p):

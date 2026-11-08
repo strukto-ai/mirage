@@ -62,11 +62,11 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "(cd /data && mkdir -p r10cps/d && echo x > r10cps/d/f && cp -v a.txt r10cpv.txt && cp -rv r10cps r10cpvd; rc=$?; exit $rc)",
+      "command": "(cd /data && mkdir -p r10cps/d && echo x > r10cps/d/f && cp -v a.txt r10cpv.txt && cp -rv r10cps r10cpvd; rc=$?; exit $rc); (cd /data && mkdir -p r10par/a/b r10pd && echo x > r10par/a/b/f && cp --parents -v r10par/a/b/f r10pd && find r10pd | sort; cp --parents r10par/a/b/f r10nofile; echo rc=$?)",
       "expect": {
         "exit": 0,
-        "stdout": "'a.txt' -> 'r10cpv.txt'\n'r10cps' -> 'r10cpvd'\n'r10cps/d' -> 'r10cpvd/d'\n'r10cps/d/f' -> 'r10cpvd/d/f'\n",
-        "stderr": ""
+        "stdout": "'a.txt' -> 'r10cpv.txt'\n'r10cps' -> 'r10cpvd'\n'r10cps/d' -> 'r10cpvd/d'\n'r10cps/d/f' -> 'r10cpvd/d/f'\nr10par -> r10pd/r10par\nr10par/a -> r10pd/r10par/a\nr10par/a/b -> r10pd/r10par/a/b\n'r10par/a/b/f' -> 'r10pd/r10par/a/b/f'\nr10pd\nr10pd/r10par\nr10pd/r10par/a\nr10pd/r10par/a/b\nr10pd/r10par/a/b/f\nrc=1\n",
+        "stderr": "cp: with --parents, the destination must be a directory\nTry 'cp --help' for more information.\n"
       }
     },
     {

@@ -151,6 +151,8 @@ export interface PathRecord {
   readonly run: number
   readonly size?: number
   readonly values?: readonly number[]
+  /** du's time for the entry under --time, as its walk read it. */
+  readonly modified?: string
 }
 
 /** The live pipe a `PipeStream` reads, for a descriptor reading on after it. Mirrors Python's PipeEnd. */

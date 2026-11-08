@@ -100,7 +100,11 @@ from mirage.workspace.executor.fanout import (
     _should_fan_out,
     run_with_fanout,
 )
-from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
+from mirage.workspace.executor.find_action_dispatch import (
+    _apply_find_actions,
+    open_find_files,
+    run_listed_find,
+)
 from mirage.workspace.executor.find_refs import resolve_newer_refs
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.files import Files
@@ -122,7 +126,7 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import path_stat
 from mirage.workspace.mount.storage import make_check_unlink, make_storage_key
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.state import session_view
+from mirage.workspace.session.state import env_snapshot, session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
 
 # One handler per JOB_BUILTINS member but ps, which also takes the
@@ -726,7 +730,17 @@ async def handle_command(
                     )
             if bad_date is not None:
                 raise bad_date[1]
-            find_expr = parsed.bind(newer_times)
+            find_expr = parsed.bind(
+                newer_times,
+                env=env_snapshot(session),
+                profile=identity_from(
+                    session_view(
+                        session,
+                        registry.policies,
+                        diagnostics=context.frame.diagnostics,
+                    )
+                ).profile,
+            )
         except UsageError as exc:
             msg = f"{exc}\n"
             return (
@@ -737,6 +751,30 @@ async def handle_command(
                     exit_code=exc.exit_code,
                     stderr=encode_text(msg),
                 ),
+            )
+        if find_expr.files0_from is not None:
+            listed = await run_listed_find(
+                find_expr,
+                list(spelled_words(parts[1:])),
+                session.cwd,
+                dispatch,
+                execute_fn,
+                session.session_id,
+                stdin,
+            )
+            return (
+                listed.stdout,
+                listed,
+                await exec_node(cmd_str, listed, []),
+            )
+        # The reference opens every file -fprint names while it parses, so one it
+        # cannot create ends the line before any walk.
+        unopened = await open_find_files(find_expr, session.cwd, dispatch)
+        if unopened is not None:
+            return (
+                None,
+                IOResult(exit_code=1, stderr=unopened),
+                ExecutionNode(command=cmd_str, exit_code=1, stderr=unopened),
             )
 
     # Path-valued flags count: `cp -t /other/mount/dir src` spans mounts

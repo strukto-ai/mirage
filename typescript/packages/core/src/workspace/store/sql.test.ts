@@ -15,7 +15,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { fileDriver } from '../../../tests/workspace/fixtures/sqlite_driver.ts'
 import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { MountMode } from '../../types.ts'
@@ -25,8 +25,9 @@ import { SqlWorkspaceStateStore } from './sql.ts'
 
 // Two daemons on one database share a workspace's execution plane: the one
 // that does not hold the lease lists the lines, jobs and processes the holder
-// runs and kills its job, and a workspace opened on the database later lists
-// the lines that ended.
+// runs, once the holder has written them a moment after the line returns, and
+// kills its job; a workspace opened on the database later lists the lines that
+// ended.
 it('keeps the execution plane in the database', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'mirage-state-'))
   const open = (): Workspace =>
@@ -47,8 +48,10 @@ it('keeps the execution plane in the database', async () => {
     const b = open()
     try {
       const pid = Number(stdoutStr(await a.shell('sleep 30 & echo $!', { sessionId: 's' })))
-      const [line] = await b.lines()
-      expect([line?.command, line?.state]).toEqual(['sleep 30 & echo $!', 'exited'])
+      await vi.waitFor(async () => {
+        const lines = (await b.lines()).map((line) => [line.command, line.state])
+        expect(lines).toEqual([['sleep 30 & echo $!', 'exited']])
+      })
       const [running] = await b.processes({ state: 'running' })
       expect(running?.id.pid).toBe(pid)
       const [job] = await b.jobs()

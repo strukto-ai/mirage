@@ -104,7 +104,11 @@ def default_cwd_operand(
     if cmd_name == "find":
         # Only the words before the expression can be start points: an
         # `-exec` command word or a `-newer` reference is the parser's.
-        argv = argv[: find_layout(argv).start]
+        # -files0-from names the start points in their place.
+        start = find_layout(argv).start
+        if "-files0-from" in argv[start:]:
+            return None
+        argv = argv[:start]
     parsed = parse_command(spec, argv, cwd, cmd_name)
     if parsed.paths():
         return None

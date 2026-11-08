@@ -60,7 +60,8 @@ export async function* callerStream(
  * inside the running command: a `fresh` mount trusts only the listings that
  * command made, so a lazy stream read after it ends would be served the
  * previous command's. A builder that `streams` only reads, and each read opens
- * as this command (`callerStream`), so its output is handed on live. */
+ * as this command (`callerStream`), so its output is handed on live. `env`
+ * is the command's environment. */
 export async function runDispatch(
   builder: GenericCommand,
   paths: readonly PathSpec[],
@@ -76,6 +77,7 @@ export async function runDispatch(
   diff?: DiffComputer,
   ids?: IdSource,
   find?: FindExpr,
+  env?: Record<string, string>,
 ): Promise<[ByteSource | null, IOResult]> {
   return runWithCaller({ ...currentCaller(), mount: null }, async () => {
     const result = await builder.fn(new NOOPAccessor(), paths.map(virtualKey), [...texts], {
@@ -90,6 +92,7 @@ export async function runDispatch(
       ...(ids === undefined ? {} : { ids }),
       ...(find === undefined ? {} : { find }),
       ...(signal === undefined ? {} : { signal }),
+      ...(env === undefined ? {} : { env }),
     })
     if (result === null) return [null, new IOResult()]
     if (builder.streams === true) return result

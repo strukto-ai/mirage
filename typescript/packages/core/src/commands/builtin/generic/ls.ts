@@ -23,6 +23,7 @@ import {
   Follow,
   LineFacts,
   PathSpec,
+  type LsFormat,
   type LsIndicator,
   type LsLinkMode,
   type LsSortBy,
@@ -62,7 +63,8 @@ import { respellOne, posixNormpath } from '../../../utils/path.ts'
 import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { contentSize } from '../../../utils/stat_view.ts'
-import { escapeName } from '../../../utils/quote.ts'
+import { quoteName } from '../../../utils/quote.ts'
+import { fnmatch } from '../../../utils/fnmatch.ts'
 import { textWidth } from '../../../utils/width.ts'
 import { linksOf, mountsOf, owedNames } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
@@ -70,12 +72,18 @@ import { WalkBudget } from '../utils/tree.ts'
 import { openStream } from '../../../rs/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { scan, scanned } from '../../../rs/scan.ts'
-import { textView } from '../../../shell/bytes.ts'
+import { decodeText, encodeText, textView } from '../../../shell/bytes.ts'
 import { engineConfig } from './sort.ts'
 
 export const LS_OK = 0
 export const LS_MINOR_PROBLEM = 1
 export const LS_FAILURE = 2
+// The width and tab stops a listing in columns takes when nothing names them.
+export const LINE_WIDTH = 80
+export const TAB_SIZE = 8
+
+// How a name prints under the line's quoting style.
+type Quote = (name: string) => string
 
 // One diagnostic plus how serious GNU ls considers it: `serious` marks a
 // failure on a command-line operand (exit 2); everything met while listing
@@ -86,7 +94,11 @@ interface LsWarning {
 }
 
 interface WalkOpts {
-  escape: boolean
+  // How a name prints, whose width --sort=width compares; null for as it is.
+  quote: Quote | null
+  // The patterns of -I, -B and --hide; a name one matches is left out
+  // unstatted.
+  ignore: readonly string[]
   all: boolean
   sortBy: LsSortBy
   reverse: boolean
@@ -262,40 +274,93 @@ export function uriEscape(path: string): string {
 }
 
 interface RenderOpts {
-  escape: boolean
+  quote: Quote | null
+  // The quoting style and format line bare names up with quoted ones.
+  align: boolean
+  layout: LsFormat
   long: boolean
+  width: number | null
+  tabsize: number
   human: boolean
   indicator: LsIndicator
   identity: Identity
   columns: LsColumns
 }
 
-// The name column with escapes and hyperlinks, null when undecorated.
+// What a quoted name opens with.
+const QUOTES = ["'", '"', '\u2018']
+
+// The name column quoted, lined up and hyperlinked, null when every name
+// prints as it is. Where `align` asks and a name of the group is quoted,
+// every bare one takes a space before it, so the names line up past the
+// opening quotes. A lined-up name keeps its quotes outside its hyperlink; any
+// other name is linked whole, quotes and all. Mirrors Python's
+// _decorated_names.
 function decoratedNames(
   stats: readonly FileStat[],
   hrefs: readonly string[] | null,
   long: boolean,
-  escape: boolean,
+  quote: Quote | null,
+  align: boolean,
 ): string[] | null {
-  if (hrefs === null && !escape) return null
+  if (hrefs === null && quote === null) return null
+  const quoted = stats.map((s) => (quote === null ? s.name : quote(s.name)))
+  const opened = quoted.map((q) => quote !== null && QUOTES.some((mark) => q.startsWith(mark)))
+  const spaced = align && opened.some(Boolean)
   return stats.map((s, i) => {
-    let name = escape ? escapeName(s.name) : s.name
-    if (hrefs !== null) name = hyperlinked(name, hrefs[i] ?? '')
+    let name = quoted[i] ?? s.name
+    if (hrefs !== null) {
+      const href = hrefs[i] ?? ''
+      name =
+        spaced && opened[i] === true
+          ? name.slice(0, 1) + hyperlinked(name.slice(1, -1), href) + name.slice(-1)
+          : hyperlinked(name, href)
+    }
+    if (spaced && opened[i] !== true) name = ' ' + name
     const target = s.extra[LINK_TARGET_KEY]
     if (long && s.type === FileType.SYMLINK && typeof target === 'string')
-      name += ' -> ' + (escape ? escapeName(target) : target)
+      name += ' -> ' + (quote === null ? target : quote(target))
     return name
   })
 }
 
-function renderGroup(
+/** Whether -I, -B or --hide leaves a listed name out: a pattern matches it
+ * whole, a leading dot only where the pattern spells one. Mirrors Python's
+ * ignored. */
+export function ignored(patterns: readonly string[], name: string): boolean {
+  return patterns.some((pattern) => fnmatch(name, pattern, false, true))
+}
+
+/** Short rows as their format lays them out: in -C or -x columns or -m's
+ * comma list by mirage-rs, else one to a line. `width` null is no limit and
+ * `tabsize` 0 pads with spaces only. Mirrors Python's laid_out. */
+export async function laidOut(
+  rows: string[],
+  layout: LsFormat,
+  width: number | null,
+  tabsize: number,
+): Promise<string[]> {
+  if (layout === 'single-column' || layout === 'verbose' || rows.length === 0) return rows
+  const stream = await openStream('ls_columns', { format: layout, width, tabsize })
+  const out: Uint8Array[] = []
+  try {
+    out.push(stream.feed(concat(rows.map((row) => encodeText(`${row}\0`)))), stream.finish())
+  } finally {
+    stream.close()
+  }
+  const lines = decodeText(concat(out)).split('\n')
+  lines.pop()
+  return lines
+}
+
+async function renderGroup(
   stats: readonly FileStat[],
   render: RenderOpts,
   lines: string[],
   hrefs: readonly string[] | null = null,
   targets: readonly (FileStat | null)[] = [],
-): void {
-  const names = decoratedNames(stats, hrefs, render.long, render.escape)
+): Promise<void> {
+  const names = decoratedNames(stats, hrefs, render.long, render.quote, render.align)
   if (render.long) {
     const marked = longNames(stats, names, render.indicator, targets)
     const ctx = {
@@ -307,7 +372,10 @@ function renderGroup(
     for (const line of formatLsLong(stats, ctx)) lines.push(line)
     return
   }
-  stats.forEach((s, i) => lines.push(formatSimple(s, render.indicator, render.columns, names?.[i])))
+  const rows = stats.map((s, i) => formatSimple(s, render.indicator, render.columns, names?.[i]))
+  for (const line of await laidOut(rows, render.layout, render.width, render.tabsize)) {
+    lines.push(line)
+  }
 }
 
 const ENC = new TextEncoder()
@@ -419,7 +487,7 @@ export async function sortStats(
   reverse: boolean,
   timeKind: LsTimeKind = 'mtime',
   groupDirsFirst = false,
-  escape = false,
+  quote: Quote | null = null,
 ): Promise<FileStat[]> {
   let ordered: FileStat[]
   if (sortBy === 'none') {
@@ -432,7 +500,7 @@ export async function sortStats(
     const sign = reverse ? -1 : 1
     const widths = new Map(
       sortBy === 'width'
-        ? stats.map((s) => [s.name, textWidth(escape ? escapeName(s.name) : s.name)] as const)
+        ? stats.map((s) => [s.name, textWidth(quote === null ? s.name : quote(s.name))] as const)
         : [],
     )
     ordered = [...stats].sort((a, b) => sign * compareStats(a, b, sortBy, timeKind, widths))
@@ -566,6 +634,10 @@ async function statEntries(
   const prefix = mountPrefixOf(dir.virtual, dir.vfsPath)
   const stats: FileStat[] = []
   for (const entry of entries) {
+    if (ctx.ignore.length > 0) {
+      const trimmed = rstripSlash(entry)
+      if (ignored(ctx.ignore, trimmed.slice(trimmed.lastIndexOf('/') + 1))) continue
+    }
     let s: FileStat
     try {
       s = await entryStat(childSpec(entry, prefix))
@@ -600,7 +672,7 @@ async function statEntries(
   }
   const seen = new Set(stats.map((s) => s.name))
   for (const name of childMounts?.(dir.virtual) ?? []) {
-    if (seen.has(name)) continue
+    if (seen.has(name) || ignored(ctx.ignore, name)) continue
     seen.add(name)
     stats.push(await mountRow(dir, name, ctx.statPath))
   }
@@ -725,7 +797,7 @@ async function probeOperand(
     ctx.reverse,
     ctx.timeKind,
     ctx.groupDirsFirst,
-    ctx.escape,
+    ctx.quote,
   )
   const groups: [PathSpec, FileStat[]][] = [[path, entries]]
   if (ctx.recursive) {
@@ -797,7 +869,7 @@ async function sortOperands(
   reverse: boolean,
   stat: StatFn,
   timeKind: LsTimeKind,
-  escape: boolean,
+  quote: Quote | null,
 ): Promise<Operand[]> {
   const keyed: { key: FileStat; operand: Operand }[] = []
   for (const operand of operands) {
@@ -813,7 +885,7 @@ async function sortOperands(
   const widths = new Map(
     sortBy === 'width'
       ? keyed.map(
-          ({ key }) => [key.name, textWidth(escape ? escapeName(key.name) : key.name)] as const,
+          ({ key }) => [key.name, textWidth(quote === null ? key.name : quote(key.name))] as const,
         )
       : [],
   )
@@ -823,7 +895,7 @@ async function sortOperands(
 
 /** The ls flag bag, parsed once. */
 export interface LsFlags {
-  readonly long: boolean
+  readonly layout: LsFormat
   readonly all: boolean
   readonly showDotEntries: boolean
   readonly human: boolean
@@ -837,8 +909,17 @@ export interface LsFlags {
   readonly timeKind: LsTimeKind
   readonly groupDirsFirst: boolean
   readonly columns: LsColumns
-  readonly escape: boolean
+  // The --quoting-style word, and -q.
+  readonly quoting: string
+  readonly hideControl: boolean
   readonly hyperlink: boolean
+  // The line width, null for no limit, and the tab stops, 0 for spaces only.
+  readonly width: number | null
+  readonly tabsize: number
+  // The patterns of -I, -B and --hide.
+  readonly ignore: readonly string[]
+  // An environment value ls ignored, each in its words.
+  readonly notices: readonly string[]
 }
 
 // The three spellings of a command-line link policy; the last one wins.
@@ -855,6 +936,20 @@ const DEREF_DESTS = [
 ] as const
 // The four spellings of an indicator style; the last one typed wins.
 const INDICATOR_DESTS = ['classify', 'file_type', 'p', 'indicator_style'] as const
+// The spellings of a format; the last one typed wins, but -1 leaves a long
+// format long.
+const FORMAT_DESTS = [
+  'args_l',
+  'g',
+  'o',
+  'numeric_uid_gid',
+  'full_time',
+  'args_1',
+  'C',
+  'x',
+  'm',
+  'format',
+] as const
 // What mirage-rs reads: every option that carries a word, a size or a style,
 // in the order typed.
 const SCANNED = [
@@ -875,16 +970,41 @@ const SCANNED = [
   'file_type',
   'block_size',
   'human_readable',
+  'si',
   'time_style',
+  'f',
+  ...FORMAT_DESTS,
+  'quoting_style',
+  'escape',
+  'literal',
+  'quote_name',
+  'hide_control_chars',
+  'show_control_chars',
+  'width',
+  'tabsize',
 ] as const
 // GNU reads a bare --classify, --hyperlink or --color as `always`.
 const BARE_ALWAYS: ReadonlySet<string> = new Set(['classify', 'hyperlink', 'color'])
+// The environment ls reads where no option gives the value, and the name
+// the scan reads each one under.
+const ENVIRONMENT = [
+  ['QUOTING_STYLE', 'quoting_env'],
+  ['COLUMNS', 'columns_env'],
+] as const
+// The quoting styles that leave some names bare, under which a bare name in
+// columns or a long listing takes a space to line up with quoted ones.
+const ALIGNED_STYLES: ReadonlySet<string> = new Set(['shell', 'shell-escape', 'c-maybe'])
+const ALIGNED_LAYOUTS: ReadonlySet<LsFormat> = new Set(['verbose', 'vertical', 'horizontal'])
+// What -B leaves out.
+const BACKUPS = ['*~', '.*~']
 
 /** What mirage-rs read out of ls's typed options: the last sort spelling (null
  * when the line typed none), the timestamp shown and sorted by, the mark
  * appended to a name, whether `--hyperlink` asked for OSC 8 links,
- * `--block-size` (null for bytes or when `-h` came after it) and the time
- * style (`locale`, `full-iso`, `long-iso`, `iso` or `+FORMAT`). */
+ * `--block-size` (null for bytes or when `-h` came after it), the time
+ * style (`locale`, `full-iso`, `long-iso`, `iso` or `+FORMAT`), the format,
+ * the quoting style and `-q`, the line width (null for no limit), the tab
+ * stops, and each environment value ls ignored, in its words. */
 interface LsValues {
   readonly sortBy: LsSortBy | null
   readonly timeKind: LsTimeKind
@@ -892,6 +1012,12 @@ interface LsValues {
   readonly hyperlink: boolean
   readonly blockSize: BlockSize | null
   readonly timeStyle: string
+  readonly layout: LsFormat
+  readonly quoting: string
+  readonly hideControl: boolean
+  readonly width: number | null
+  readonly tabsize: number
+  readonly warnings: readonly string[]
 }
 
 function oneOf<T extends string>(
@@ -921,15 +1047,35 @@ function tape(fl: FlagView, names: readonly string[]): [string, string][] {
 
 /**
  * ls's option values, read by mirage-rs in one pass over the line; `names`
- * picks which options to read, the others keeping their defaults. Throws
- * UsageError for the first value ls refuses, in its words and with its exit
- * status. Mirrors Python's `scan_values`.
+ * picks which options to read, the others keeping their defaults, and the
+ * environment's `QUOTING_STYLE` and `COLUMNS` stand in for an option the
+ * line did not type. Throws UsageError for the first value ls refuses, in
+ * its words and with its exit status. Mirrors Python's `scan_values`.
  */
-function scanValues(fl: FlagView, names: readonly string[] = SCANNED): LsValues {
-  const values = scanned('ls', tape(fl, names))
-  const { sort, hyperlink } = values
+function scanValues(
+  fl: FlagView,
+  names: readonly string[] = SCANNED,
+  env?: Readonly<Record<string, string>>,
+): LsValues {
+  const typed = tape(fl, names)
+  for (const [variable, dest] of ENVIRONMENT) {
+    const value = env?.[variable]
+    if (value !== undefined) typed.push([dest, value])
+  }
+  const values = scanned('ls', typed)
+  const { sort, hyperlink, quoting, width, tabsize, warnings } = values
   const style = values.time_style
-  if (typeof hyperlink !== 'boolean' || typeof style !== 'string') {
+  const hideControl = values.hide_control
+  if (
+    typeof hyperlink !== 'boolean' ||
+    typeof style !== 'string' ||
+    typeof quoting !== 'string' ||
+    typeof hideControl !== 'boolean' ||
+    (width !== null && typeof width !== 'number') ||
+    typeof tabsize !== 'number' ||
+    !Array.isArray(warnings) ||
+    !warnings.every((w) => typeof w === 'string')
+  ) {
     throw new Error(`ls: mirage-rs read the options as ${JSON.stringify(values)}`)
   }
   return {
@@ -950,6 +1096,16 @@ function scanValues(fl: FlagView, names: readonly string[] = SCANNED): LsValues 
     hyperlink,
     blockSize: blockSizeOf(values.block_size),
     timeStyle: textView(style),
+    layout: oneOf<LsFormat>(
+      ['verbose', 'commas', 'horizontal', 'vertical', 'single-column'],
+      values.format,
+      '--format',
+    ),
+    quoting,
+    hideControl,
+    width,
+    tabsize,
+    warnings: warnings.map((w) => textView(w)),
   }
 }
 
@@ -964,25 +1120,27 @@ export function indicatorFlag(fl: FlagView): LsIndicator {
 }
 
 /**
- * Which command-line links GNU ls resolves before it lists them. GNU settles
- * it once: the last of -L, -H and --dereference-command-line-symlink-to-dir
+ * Which command-line links ls resolves before it lists them. It is settled
+ * once: the last of -L, -H and --dereference-command-line-symlink-to-dir
  * wins, and with none of them -d, a long format or the classify style resolve
  * no link while anything else resolves one that leads to a directory
- * (coreutils 9.7). A value the command refuses leaves the style unclassified,
- * since that line fails before it lists anything. `indicator` is the style a
- * scan of the whole line already read; without it the indicator options are
- * read here. Mirrors Python's link_mode.
+ * (coreutils 9.7). A value the command refuses leaves the line neither long
+ * nor classified, since that line fails before it lists anything. `values`
+ * is a scan of the whole line already read; without it the format and
+ * indicator options are read here. Mirrors Python's link_mode.
  */
-export function linkMode(fl: FlagView, indicator?: LsIndicator): LsLinkMode {
+export function linkMode(fl: FlagView, values?: LsValues): LsLinkMode {
   const typed = fl.typedOrder(...DEREF_DESTS)
   const last = typed.at(-1)
   if (last !== undefined) {
     return last === 'dereference_command_line_symlink_to_dir' ? 'directory' : 'all'
   }
-  const long = ['args_l', 'g', 'o', 'numeric_uid_gid'].some((dest) => fl.asBool(dest))
+  let long = false
   let classify = false
   try {
-    classify = (indicator ?? indicatorFlag(fl)) === 'classify'
+    const read = values ?? scanValues(fl, [...INDICATOR_DESTS, ...FORMAT_DESTS])
+    long = read.layout === 'verbose'
+    classify = read.indicator === 'classify'
   } catch (err) {
     // The command refuses this line itself, before it lists anything.
     if (!(err instanceof UsageError)) throw err
@@ -1003,38 +1161,44 @@ export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): 
   })
 }
 
-// Parse the ls flag bag once into a frozen struct. GNU's rules that are
-// easy to get wrong: -g, -o and -n imply the long format, and -1 never
-// undoes it in either order (GNU ignores -1 beside -l, and with no
-// terminal there are never columns, so -1 has nothing else to do); -n prints the
-// same columns as -l, because a mirage owner is already the id (an agent,
-// a profile) and never a name looked up from one; and -c or -u with neither
-// -l nor a sort sorts by that time. The words, sizes and styles (the last
-// sort, time and indicator spelling, the later of -h and --block-size) are
-// mirage-rs's, read in one pass. Throws UsageError for a value GNU refuses,
-// with GNU's exit status for that option.
-export function parseFlags(fl: FlagView): LsFlags {
-  const values = scanValues(fl)
-  const noOwner = fl.asBool('g')
-  const noGroup = fl.asBool('o')
-  const long = fl.asBool('args_l') || noOwner || noGroup || fl.asBool('numeric_uid_gid')
+// Parse the ls flag bag once into a frozen struct. The rules that are easy to
+// get wrong: -g, -o, -n and --full-time imply the long format, and -1 never
+// undoes it in either order; -n prints the same columns as -l, because a
+// mirage owner is already the id (an agent, a profile) and never a name
+// looked up from one; -c or -u with no sort sorts by that time unless the
+// format is long; -f lists every entry unsorted, and the last of -a, -A and
+// -f says which dot entries show; --hide leaves names out only where none of
+// those three asked for them. The words, sizes and styles (the last sort,
+// time, format, quoting and indicator spelling, the later of -h, --si and
+// --block-size) are mirage-rs's, read in one pass. `env` is the environment,
+// for QUOTING_STYLE and COLUMNS. Throws UsageError for a value ls refuses,
+// with its exit status for that option. Mirrors Python's parse_flags.
+export function parseFlags(fl: FlagView, env?: Readonly<Record<string, string>>): LsFlags {
+  const values = scanValues(fl, SCANNED, env)
+  const long = values.layout === 'verbose'
   const sortBy: LsSortBy =
     values.sortBy === null && values.timeKind !== 'mtime' && !long
       ? 'time'
       : (values.sortBy ?? 'name')
   const columns: LsColumns = Object.freeze({
-    owner: !noOwner,
-    group: !noGroup,
+    owner: !fl.asBool('g'),
+    group: !(fl.asBool('o') || fl.asBool('no_group')),
     inode: fl.asBool('inode'),
+    blocks: fl.asBool('size'),
     context: fl.asBool('context'),
     timeKind: values.timeKind,
     timeStyle: values.timeStyle,
     blockSize: values.blockSize,
   })
+  const shown = fl.typedOrder('all', 'almost_all', 'f').at(-1)
+  const all = shown !== undefined
+  const ignore = [...fl.asList('ignore')]
+  if (fl.asBool('ignore_backups')) ignore.push(...BACKUPS)
+  if (!all) ignore.push(...fl.asList('hide'))
   return Object.freeze({
-    long,
-    all: fl.asBool('all') || fl.asBool('almost_all'),
-    showDotEntries: fl.asBool('all'),
+    layout: values.layout,
+    all,
+    showDotEntries: all && shown !== 'almost_all',
     human: fl.asBool('human_readable'),
     reverse: fl.asBool('reverse'),
     indicator: values.indicator,
@@ -1043,28 +1207,34 @@ export function parseFlags(fl: FlagView): LsFlags {
     // -L alone dereferences what a listing finds; -H and its sibling stop at
     // the command line, and the last of the three wins.
     deref: fl.typedOrder(...DEREF_DESTS).at(-1) === 'dereference',
-    followArgs: linkMode(fl, values.indicator) === 'all',
+    followArgs: linkMode(fl, values) === 'all',
     sortBy,
     timeKind: values.timeKind,
     groupDirsFirst: fl.asBool('group_directories_first'),
     columns,
+    quoting: values.quoting,
+    hideControl: values.hideControl,
     hyperlink: values.hyperlink,
-    escape: fl.asBool('escape'),
+    width: values.width,
+    tabsize: values.tabsize,
+    ignore: Object.freeze(ignore),
+    notices: values.warnings,
   })
 }
 
 // Whether GNU's ls would stat a listed entry to print this listing, which
 // is when a failed stat reaches stderr: the long format, a time or size
-// sort, -i, -Z and --hyperlink read the stat, and -R, -F and
+// sort, -i, -s, -Z and --hyperlink read the stat, and -R, -F and
 // --group-directories-first read the type, which a mirage listing never
 // carries, as a readdir without d_type does not. A plain listing prints the
 // names readdir gave and nothing else.
 function statNeeded(flags: LsFlags): boolean {
   return (
-    flags.long ||
+    flags.layout === 'verbose' ||
     flags.sortBy === 'time' ||
     flags.sortBy === 'size' ||
     flags.columns.inode ||
+    flags.columns.blocks ||
     flags.columns.context ||
     flags.hyperlink ||
     flags.recursive ||
@@ -1073,11 +1243,15 @@ function statNeeded(flags: LsFlags): boolean {
   )
 }
 
-function finish(lines: string[], warnings: readonly LsWarning[]): CommandFnResult {
+function finish(
+  lines: string[],
+  warnings: readonly LsWarning[],
+  notices: readonly string[],
+): CommandFnResult {
   const out: ByteSource = formatRecords(lines)
   const exitCode = exitStatusFor(warnings)
-  if (warnings.length > 0) {
-    const stderr = formatRecords(warnings.map((w) => w.message))
+  if (warnings.length > 0 || notices.length > 0) {
+    const stderr = formatRecords([...notices, ...warnings.map((w) => w.message)])
     return [out, new IOResult({ stderr, exitCode })]
   }
   return [out, new IOResult({ exitCode })]
@@ -1090,7 +1264,7 @@ export async function lsGeneric(
   readdir: ReaddirFn<[path: PathSpec, nofollow?: boolean, limit?: number]>,
   stat: StatFn,
   statPath: StatPath | null = vfsStatPath(ctx.vfs) ?? null,
-  flags: LsFlags = parseFlags(new FlagView(ctx.flags, specOf('ls'))),
+  flags: LsFlags = parseFlags(new FlagView(ctx.flags, specOf('ls')), ctx.env),
 ): Promise<CommandFnResult> {
   const targets: PathSpec[] =
     paths.length > 0
@@ -1104,7 +1278,7 @@ export async function lsGeneric(
           }),
         ]
   const {
-    long,
+    layout,
     all,
     human,
     reverse,
@@ -1119,13 +1293,21 @@ export async function lsGeneric(
   const listDirItself = flags.listDir
   const links = linksOf(ctx) ?? null
   const identity = identityOf(ctx)
+  const long = layout === 'verbose'
+  const { quoting, hideControl, notices } = flags
+  const quote: Quote | null =
+    quoting === 'literal' && !hideControl ? null : (name) => quoteName(name, quoting, hideControl)
   const render: RenderOpts = {
+    quote,
+    align: ALIGNED_STYLES.has(quoting) && ALIGNED_LAYOUTS.has(layout),
+    layout,
     long,
+    width: flags.width,
+    tabsize: flags.tabsize,
     human,
     indicator,
     identity,
     columns: flags.columns,
-    escape: flags.escape,
   }
   const warnings: LsWarning[] = []
   const lines: string[] = []
@@ -1150,22 +1332,23 @@ export async function lsGeneric(
             reverse,
             timeKind,
             groupDirsFirst,
-            flags.escape,
+            quote,
           )
         : collected.map((c) => c.row)
     const rowPaths = rows.map((r) => byRow.get(r) ?? '')
-    renderGroup(
+    await renderGroup(
       rows,
       render,
       lines,
       flags.hyperlink ? rowPaths : null,
       await linkTargets(rows, rowPaths, links, render),
     )
-    return finish(lines, warnings)
+    return finish(lines, warnings, notices)
   }
 
   const walkOpts: WalkOpts = {
-    escape: flags.escape,
+    quote,
+    ignore: flags.ignore,
     all,
     sortBy,
     reverse,
@@ -1190,9 +1373,7 @@ export async function lsGeneric(
     }
   }
   const operands =
-    probed.length > 1
-      ? await sortOperands(probed, sortBy, reverse, stat, timeKind, flags.escape)
-      : probed
+    probed.length > 1 ? await sortOperands(probed, sortBy, reverse, stat, timeKind, quote) : probed
 
   // GNU names every listed directory once there is more than one operand
   // (or under -R); a lone directory operand is listed bare.
@@ -1200,7 +1381,7 @@ export async function lsGeneric(
   const rowed = operands.filter((o) => o.row !== null)
   const rows = rowed.flatMap((o) => (o.row !== null ? [o.row] : []))
   const rowPaths = rowed.map((o) => o.path.virtual)
-  renderGroup(
+  await renderGroup(
     rows,
     render,
     lines,
@@ -1215,6 +1396,7 @@ export async function lsGeneric(
         const dots: FileStat[] = []
         const prefix = mountPrefixOf(dirSpec.virtual, dirSpec.vfsPath)
         for (const name of ['.', '..']) {
+          if (ignored(flags.ignore, name)) continue
           const target = posixNormpath(`${dirSpec.virtual}/${name}`)
           let row = new FileStat({ name, type: FileType.DIRECTORY })
           // Only the namespace can stat a parent outside this mount.
@@ -1241,18 +1423,18 @@ export async function lsGeneric(
           reverse,
           timeKind,
           groupDirsFirst,
-          flags.escape,
+          quote,
         )
       }
       if (headed) {
         if (printed) lines.push('')
         const header = respellOne(dirSpec.virtual, operand.path.virtual, operand.path.rawPath)
-        lines.push(`${flags.escape ? escapeName(header) : header}:`)
+        lines.push(`${quote === null ? header : quote(header)}:`)
       }
-      // GNU 9.7 prints allocated blocks; VFS has no allocation metadata.
-      if (long) lines.push(entries.length > 0 ? 'total ?' : 'total 0')
+      // ls prints allocated blocks; VFS has no allocation metadata.
+      if (long || flags.columns.blocks) lines.push(entries.length > 0 ? 'total ?' : 'total 0')
       const entryPaths = entries.map((e) => `${rstripSlash(dirSpec.virtual)}/${e.name}`)
-      renderGroup(
+      await renderGroup(
         entries,
         render,
         lines,
@@ -1263,5 +1445,5 @@ export async function lsGeneric(
     }
   }
 
-  return finish(lines, warnings)
+  return finish(lines, warnings, notices)
 }

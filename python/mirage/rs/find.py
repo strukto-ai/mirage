@@ -13,9 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import timezone
+from datetime import datetime, time, timedelta, timezone, tzinfo
+from typing import Literal
 
 from mirage.commands.builtin.types import (
     ExecAction,
@@ -29,29 +30,41 @@ from mirage.commands.builtin.types import (
 )
 from mirage.commands.errors import UsageError
 from mirage.core.generic.types import (
+    Access,
     Action,
     ActionKind,
     And,
+    Count,
     Empty,
+    Lname,
     Mtime,
     Name,
+    NoOwner,
     Not,
     Or,
+    Owner,
     Path,
+    Perm,
     PredNode,
     Prune,
+    Quit,
+    Regex,
     RowActionKind,
+    Size,
     TrueNode,
     Type,
+    XType,
 )
 from mirage.rs.scan import scanned
-from mirage.shell.bytes import text_view
+from mirage.shell.bytes import text_view, utf8_locale
 from mirage.types import JsonValue
 from mirage.utils.clock import system_now
 from mirage.utils.dates import parse_date_expr
+from mirage.utils.timezone import zone_from_env
 
 OPERAND = ""
 DAY = 86400
+MINUTE = 60
 
 
 @dataclass
@@ -82,6 +95,13 @@ class FindExpr:
             actions per position.
         newer (list[str]): the ``-newer`` references as typed.
         depth_first (bool): GNU's ``-depth``, which ``-delete`` turns on.
+        follow (bool): ``-follow``, which follows links as ``-L`` does.
+        files0_from (str | None): ``-files0-from``'s file as typed, which
+            names the start points in place of the operands.
+        files0_at (list[int]): where each ``-files0-from`` stands among
+            the expression's words.
+        reached (int | None): how many of the actions, in order, a row can
+            reach: those before a top-level ``-quit``; None for all.
         predicates (list[str]): every predicate word typed, in order.
         warnings (list[str]): the warning lines GNU prints while it
             parses, in order.
@@ -99,6 +119,10 @@ class FindExpr:
     actions: list[FindAction] = field(default_factory=list)
     newer: list[str] = field(default_factory=list)
     depth_first: bool = False
+    follow: bool = False
+    files0_from: str | None = None
+    files0_at: list[int] = field(default_factory=list)
+    reached: int | None = None
     predicates: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     start: int = 0
@@ -107,6 +131,17 @@ class FindExpr:
     def execs(self) -> list[ExecAction]:
         """The ``-exec`` actions, in order."""
         return [a for a in self.actions if isinstance(a, ExecAction)]
+
+    @property
+    def files(self) -> list[str]:
+        """Every file ``-fprint``, ``-fprint0`` and ``-fprintf`` write,
+        as typed, each once, in the order first named."""
+        named = [
+            a.file
+            for a in self.actions
+            if isinstance(a, (RowAction, PrintfAction)) and a.file is not None
+        ]
+        return list(dict.fromkeys(named))
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +184,8 @@ def _int(value: JsonValue) -> int:
 
 
 def _float(value: JsonValue) -> float:
+    if value in ("Infinity", "-Infinity"):
+        return float(value)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"find: mirage-rs answered {value!r}, not a number")
     return float(value)
@@ -162,6 +199,10 @@ def _flag(value: JsonValue) -> bool:
 
 def _opt_int(value: JsonValue) -> int | None:
     return None if value is None else _int(value)
+
+
+def _opt_text(value: JsonValue) -> str | None:
+    return None if value is None else text_view(_str(value))
 
 
 def _opt_bound(value: JsonValue) -> int | None:
@@ -208,6 +249,10 @@ def strictly_after(timestamp: float) -> float:
     return math.nextafter(timestamp, math.inf)
 
 
+def _before(timestamp: float) -> float:
+    return math.nextafter(timestamp, -math.inf)
+
+
 def parse_newermt(value: str) -> float:
     """One ``-newermt`` argument as the reference epoch time.
 
@@ -250,6 +295,50 @@ def mtime_bounds(
     return now - (days + 1) * DAY, now - days * DAY
 
 
+def age_bounds(
+    cmp: str, amount: float, minutes: bool, origin: float
+) -> tuple[float | None, float | None]:
+    """One age test (``-mtime``, ``-amin``...) as inclusive epoch-second
+    bounds.
+
+    A day count drops the fraction of the age (``mtime_bounds``); a
+    minute count rounds it up, measured on findutils 4.10: ``-mmin N``
+    holds for an age above N-1 minutes and at most N, ``+N`` for one
+    above N and ``-N`` for one below.
+
+    Args:
+        cmp (str): ``+``, ``-`` or ``=``.
+        amount (float): the count of days or minutes.
+        minutes (bool): the count is minutes.
+        origin (float): the time ages are measured back from.
+    """
+    if not minutes:
+        return mtime_bounds(cmp, amount, origin)
+    edge = origin - amount * MINUTE
+    if cmp == "+":
+        return None, _before(edge)
+    if cmp == "-":
+        return strictly_after(edge), None
+    return edge, _before(edge + MINUTE)
+
+
+def next_midnight(now: float, zone: tzinfo | None) -> float:
+    """``-daystart``'s origin: the midnight that ends today.
+
+    Args:
+        now (float): the clock, epoch seconds.
+        zone (tzinfo | None): the session's ``TZ``, None for the host's
+            local zone.
+    """
+    here = (
+        datetime.fromtimestamp(now, zone)
+        if zone is not None
+        else datetime.fromtimestamp(now).astimezone()
+    )
+    tomorrow = here.date() + timedelta(days=1)
+    return datetime.combine(tomorrow, time(0), tzinfo=here.tzinfo).timestamp()
+
+
 def _merge(
     window: tuple[float | None, float | None] | None,
     bounds: tuple[float | None, float | None],
@@ -282,6 +371,7 @@ def _action(raw: dict[str, JsonValue]) -> FindAction:
         return ExecAction(
             argv=tuple(text_view(_str(w)) for w in _array(raw["argv"])),
             batch=_flag(raw["batch"]),
+            in_dir=_flag(raw["dir"]),
         )
     if kind == "printf":
         parts: list[PrintfPart] = []
@@ -297,9 +387,10 @@ def _action(raw: dict[str, JsonValue]) -> FindAction:
             format=text_view(_str(raw["format"])),
             parts=tuple(parts),
             needs_stat=_flag(raw["stat"]),
+            file=_opt_text(raw["file"]),
         )
     row: RowActionKind = _row_kind(kind)
-    return RowAction(row)
+    return RowAction(row, file=_opt_text(raw["file"]))
 
 
 def _row_kind(kind: str) -> RowActionKind:
@@ -326,6 +417,9 @@ def _action_kind(kind: str) -> ActionKind:
 class _Binding:
     refs: Sequence[float]
     now: float
+    zone: tzinfo | None = None
+    utf8: bool = False
+    profile: str | None = None
     window: tuple[float | None, float | None] | None = None
 
 
@@ -336,15 +430,49 @@ def _node(
     if op == "name":
         return Name(text_view(_str(raw["pattern"])), _flag(raw["icase"]))
     if op == "path":
-        return Path(text_view(_str(raw["pattern"])))
+        return Path(text_view(_str(raw["pattern"])), icase=_flag(raw["icase"]))
+    if op == "regex":
+        return Regex(
+            text_view(_str(raw["pattern"])),
+            icase=_flag(raw["icase"]),
+            dialect=_dialect(_str(raw["dialect"])),
+            extended=_flag(raw["extended"]),
+            utf8=binding.utf8,
+        )
+    if op == "lname":
+        return Lname(text_view(_str(raw["pattern"])), _flag(raw["icase"]))
     if op == "type":
         return Type(_str(raw["kind"]))
+    if op == "xtype":
+        return XType(_str(raw["kind"]))
+    if op == "perm":
+        return Perm(_int(raw["mode"]), _perm_bits(_str(raw["bits"])))
+    if op == "count":
+        return Count(
+            _count_field(_str(raw["field"])),
+            _cmp(_str(raw["cmp"])),
+            _int(raw["count"]),
+        )
+    if op == "owner":
+        return Owner(
+            text_view(_str(raw["name"])),
+            group=_flag(raw["group"]),
+            profile=binding.profile,
+        )
+    if op == "nouser":
+        return NoOwner(group=_flag(raw["group"]))
+    if op == "access":
+        return Access(_access_mode(_str(raw["mode"])))
+    if op == "size":
+        return Size(_opt_bound(raw["min"]), _opt_bound(raw["max"]))
     if op == "empty":
         return Empty()
     if op == "true":
         return TrueNode()
     if op == "prune":
         return Prune()
+    if op == "quit":
+        return Quit()
     if op == "not":
         return Not(_node(_object(raw["kid"]), binding, False))
     if op in ("and", "or"):
@@ -359,12 +487,80 @@ def _node(
     return _time_node(op, raw, binding, top)
 
 
+def _perm_bits(bits: str) -> Literal["exact", "all", "any"]:
+    if bits == "exact":
+        return "exact"
+    if bits == "all":
+        return "all"
+    if bits == "any":
+        return "any"
+    raise TypeError(f"find: mirage-rs answered the -perm kind {bits!r}")
+
+
+def _count_field(name: str) -> Literal["links", "uid", "gid"]:
+    if name == "links":
+        return "links"
+    if name == "uid":
+        return "uid"
+    if name == "gid":
+        return "gid"
+    raise TypeError(f"find: mirage-rs answered the count {name!r}")
+
+
+def _cmp(cmp: str) -> Literal["+", "-", "="]:
+    if cmp == "+":
+        return "+"
+    if cmp == "-":
+        return "-"
+    if cmp == "=":
+        return "="
+    raise TypeError(f"find: mirage-rs answered the comparison {cmp!r}")
+
+
+def _access_mode(mode: str) -> Literal["r", "w", "x"]:
+    if mode == "r":
+        return "r"
+    if mode == "w":
+        return "w"
+    if mode == "x":
+        return "x"
+    raise TypeError(f"find: mirage-rs answered the access {mode!r}")
+
+
+def _dialect(name: str) -> Literal["emacs", "posix"]:
+    if name == "emacs":
+        return "emacs"
+    if name == "posix":
+        return "posix"
+    raise TypeError(f"find: mirage-rs answered the dialect {name!r}")
+
+
+def _stamp(field: str) -> Literal["m", "a", "c"]:
+    if field == "m":
+        return "m"
+    if field == "a":
+        return "a"
+    if field == "c":
+        return "c"
+    raise TypeError(f"find: mirage-rs answered the stamp {field!r}")
+
+
 def _time_node(
     op: str, raw: dict[str, JsonValue], binding: _Binding, top: bool
 ) -> PredNode:
-    if op == "mtime":
-        bounds = mtime_bounds(
-            _str(raw["cmp"]), _float(raw["days"]), binding.now
+    stamp: Literal["m", "a", "c"] = "m"
+    if op == "age":
+        stamp = _stamp(_str(raw["field"]))
+        origin = (
+            next_midnight(binding.now, binding.zone)
+            if _flag(raw["daystart"])
+            else binding.now
+        )
+        bounds = age_bounds(
+            _str(raw["cmp"]),
+            _float(raw["amount"]),
+            _flag(raw["minutes"]),
+            origin,
         )
     elif op == "newermt":
         bounds = (
@@ -376,9 +572,10 @@ def _time_node(
         if index >= len(binding.refs):
             return TrueNode()
         bounds = (strictly_after(binding.refs[index]), None)
-    if top:
+    # The flat window is the modification time's alone.
+    if top and stamp == "m":
         binding.window = _merge(binding.window, bounds)
-    return Mtime(*bounds)
+    return Mtime(*bounds, field=stamp)
 
 
 @dataclass(frozen=True, slots=True)
@@ -422,7 +619,11 @@ class FindParse:
         return None
 
     def bind(
-        self, newer_times: Sequence[float] = (), now: float | None = None
+        self,
+        newer_times: Sequence[float] = (),
+        now: float | None = None,
+        env: Mapping[str, str] | None = None,
+        profile: str | None = None,
     ) -> FindExpr:
         """The expression with its time tests resolved.
 
@@ -433,11 +634,22 @@ class FindParse:
                 could not resolve.
             now (float | None): the clock ``-mtime`` counts from, the
                 current time by default.
+            env (Mapping[str, str] | None): the command's environment,
+                whose ``TZ`` places ``-daystart``'s midnight and whose
+                locale reads a ``-regex`` subject.
+            profile (str | None): the session's name, the owner
+                ``-user`` sees on an entry that reports none.
 
         Raises:
             UsageError: a ``-newermt`` text that is no date.
         """
-        binding = _Binding(newer_times, system_now() if now is None else now)
+        binding = _Binding(
+            newer_times,
+            system_now() if now is None else now,
+            zone=zone_from_env(env),
+            utf8=utf8_locale(env),
+            profile=profile,
+        )
         tree = _node(_object(self.values["tree"]), binding)
         window = binding.window or (None, None)
         return FindExpr(
@@ -454,6 +666,10 @@ class FindParse:
             ],
             newer=self.newer,
             depth_first=_flag(self.values["depth_first"]),
+            follow=_flag(self.values["follow"]),
+            files0_from=_opt_text(self.values["files0_from"]),
+            files0_at=[_int(at) for at in _array(self.values["files0_at"])],
+            reached=_int(self.values["reached"]),
             predicates=[
                 text_view(_str(w)) for w in _array(self.values["predicates"])
             ],
@@ -492,8 +708,10 @@ __all__ = [
     "FindExpr",
     "FindLayout",
     "FindParse",
+    "age_bounds",
     "find_layout",
     "mtime_bounds",
+    "next_midnight",
     "parse_find",
     "parse_find_expression",
     "parse_newermt",

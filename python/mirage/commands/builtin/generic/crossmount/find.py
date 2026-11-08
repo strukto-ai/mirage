@@ -45,7 +45,10 @@ from mirage.workspace.files import Files
 # The tests whose verdict on one entry decides what the walk reads below
 # it, or that read a listing a mount boundary splits: no mount's own find
 # can answer them for the whole tree, so such a line keeps the one walk.
-WALK_WIDE = frozenset({"-prune", "-empty", "-xdev", "-mount"})
+# -quit ends the whole walk at one entry, and -follow is -L.
+WALK_WIDE = frozenset(
+    {"-prune", "-empty", "-xdev", "-mount", "-quit", "-follow"}
+)
 
 
 def shifted(

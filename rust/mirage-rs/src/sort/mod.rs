@@ -1,5 +1,5 @@
 mod key;
-mod number;
+pub(crate) mod number;
 pub(crate) mod options;
 mod version;
 

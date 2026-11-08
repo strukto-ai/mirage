@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  escapeName,
+  quoteName,
   quotesOperands,
   SHELL_QUOTED_COMMANDS,
   shellQuote,
@@ -174,8 +174,28 @@ it.each([
   ['\u00e9\ud83c\udf0d\u00a0', '\u00e9\ud83c\udf0d\u00a0'],
   ['quote\'"', 'quote\'"'],
   ['\udcff', '\\377'],
-])('GNU ls escape names: %s', (name, expected) => {
-  expect(escapeName(name)).toBe(expected)
+])('ls escape names: %s', (name, expected) => {
+  expect(quoteName(name, 'escape')).toBe(expected)
+})
+
+// ls --quoting-style over one name, measured on debian:stable-slim under
+// C.UTF-8: a `:` stays bare, unlike a diagnostic's quoting.
+it.each([
+  ['literal', false, 'a:b\tc'],
+  ['literal', true, 'a:b?c'],
+  ['shell', false, "'a:b\tc'"],
+  ['shell', true, "'a:b?c'"],
+  ['shell-always', false, "'a:b\tc'"],
+  ['shell-escape', false, "'a:b'$'\\t''c'"],
+  ['shell-escape-always', false, "'a:b'$'\\t''c'"],
+  ['c', false, '"a:b\\tc"'],
+  ['c-maybe', false, '"a:b\\tc"'],
+  ['escape', false, 'a:b\\tc'],
+  ['locale', false, '\u2018a:b\\tc\u2019'],
+  ['clocale', false, '\u2018a:b\\tc\u2019'],
+] as const)('ls quoting style %s (hide %s)', (style, hide, expected) => {
+  expect(quoteName('a:b\tc', style, hide)).toBe(expected)
+  expect(['a:b', "'a:b'", '"a:b"', '\u2018a:b\u2019']).toContain(quoteName('a:b', style, hide))
 })
 
 it('preserves raw bytes and a leading BOM', () => {
@@ -189,5 +209,5 @@ it('quotes a word larger than the wasm input window', () => {
   const prefix = 'a'.repeat(96 * 1024 - 1)
   const name = prefix + '\u0085\udcff'
   expect(shellQuote(name)).toBe(`'${prefix}'$'\\302\\205''\udcff'`)
-  expect(escapeName(name)).toBe(prefix + '\\302\\205\\377')
+  expect(quoteName(name, 'escape')).toBe(prefix + '\\302\\205\\377')
 })

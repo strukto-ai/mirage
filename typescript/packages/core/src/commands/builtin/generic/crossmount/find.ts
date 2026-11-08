@@ -33,8 +33,16 @@ import { mountView } from '../../utils/links.ts'
 
 // The tests whose verdict on one entry decides what the walk reads below it,
 // or that read a listing a mount boundary splits: no mount's own find can
-// answer them for the whole tree, so such a line keeps the one walk.
-export const WALK_WIDE: ReadonlySet<string> = new Set(['-prune', '-empty', '-xdev', '-mount'])
+// answer them for the whole tree, so such a line keeps the one walk. -quit
+// ends the whole walk at one entry, and -follow is -L.
+export const WALK_WIDE: ReadonlySet<string> = new Set([
+  '-prune',
+  '-empty',
+  '-xdev',
+  '-mount',
+  '-quit',
+  '-follow',
+])
 
 /**
  * The expression for a start point `depth` levels below the operand.

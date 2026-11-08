@@ -159,6 +159,7 @@ async def handle_cross_mount(
                 vfs,
                 input_source,
                 follow=follow,
+                env=None if session_view is None else session_view.snapshot(),
             )
         strategy = strategy_for(cmd_name)
         if strategy is Strategy.RELAY:

@@ -1,3 +1,5 @@
+import type { FileStat } from '../../types.ts'
+
 /** find's row actions: -print, -print0, -ls and -delete. */
 export type RowActionKind = 'print' | 'print0' | 'ls' | 'delete'
 
@@ -13,6 +15,15 @@ export interface FindEntry {
   depth: number
   isEmpty?: boolean | null
   mtime?: number | null
+  // The stat the walk took when a test reads one (-perm, -user, -lname,
+  // -atime...), the link itself unless the walk follows links.
+  stat?: FileStat | null
+  // -xtype's kind: what a link leads to when the walk keeps links, 'l'
+  // for a link the walk followed, the kind itself for anything else.
+  xkind?: string | null
+  // The stat of what a live link the walk keeps leads to, which the access
+  // tests answer through.
+  target?: FileStat | null
 }
 
 export type ActionKind = RowActionKind | 'exec' | 'printf'
@@ -28,10 +39,17 @@ export type ActionKind = RowActionKind | 'exec' | 'printf'
 // regardless, as GNU orders them. A prune reached past an undecided test is
 // recorded as pending for the caller to settle once it has statted the
 // directory.
+/**
+ * `-mtime`, `-newermt` and a resolved `-newer`: an inclusive epoch-second
+ * window over the entry's modification time, or over its access or
+ * change time for `-atime`, `-ctime` and their minute twins (`field` `a`
+ * or `c`, read from the entry's stat).
+ */
 export interface Mtime {
   op: 'mtime'
   lo: number | null
   hi: number | null
+  field?: 'm' | 'a' | 'c'
 }
 
 // A directory whose `-prune` decision waited on time tests the walk could
@@ -55,7 +73,8 @@ export interface Name {
  * entry's key, respelled under the operand as typed (`find . -path
  * ./skip` prints and matches `./skip`), so `bindTree` stamps all three
  * onto the node before evaluation and entry keys stay mount-relative
- * (#396). An empty `root` leaves the row as the display path.
+ * (#396). An empty `root` leaves the row as the display path. `icase` is
+ * `-ipath`.
  */
 export interface Path {
   op: 'path'
@@ -63,11 +82,115 @@ export interface Path {
   prefix?: string
   root?: string
   raw?: string
+  icase?: boolean
+}
+
+/**
+ * `-regex` and `-iregex`: an expression that must match the whole path
+ * as `find` prints it, spelled as `Path` spells it from the same three
+ * fields `bindTree` stamps. Evaluation is synchronous and a search is
+ * not, so the walk asks every entry's answer before it evaluates
+ * (`primeRegexes`) and the node keeps them by entry key.
+ */
+export interface Regex {
+  op: 'regex'
+  pattern: string
+  icase: boolean
+  dialect: 'emacs' | 'posix'
+  extended: boolean
+  utf8: boolean
+  prefix?: string
+  root?: string
+  raw?: string
+  hits: Map<string, boolean>
+}
+
+/** `-lname` and `-ilname`: a glob over a link's target text. */
+export interface Lname {
+  op: 'lname'
+  pattern: string
+  icase: boolean
 }
 
 export interface Type {
   op: 'type'
   kind: string
+}
+
+/** `-xtype`: the entry's kind on the other side of a link. */
+export interface XType {
+  op: 'xtype'
+  kind: string
+}
+
+/**
+ * `-perm`: the entry's permission bits against `mode`, exactly, with
+ * every bit of it set (`all`) or with any (`any`, which an empty mode
+ * always holds for).
+ */
+export interface Perm {
+  op: 'perm'
+  mode: number
+  bits: 'exact' | 'all' | 'any'
+}
+
+/** `-links`, `-uid` and `-gid`: a number compared with `count`. */
+export interface Count {
+  op: 'count'
+  field: 'links' | 'uid' | 'gid'
+  cmp: '+' | '-' | '='
+  count: number
+}
+
+/**
+ * `-user` and `-group`: the owner or group as `ls -l` names it. mirage
+ * keeps any name `chown` was given, so every name is a user and none is
+ * refused; a number also matches the id it spells. `profile` is the
+ * session's own name, which owns an entry that reports none.
+ */
+export interface Owner {
+  op: 'owner'
+  name: string
+  group: boolean
+  profile: string | null
+}
+
+/**
+ * `-nouser` and `-nogroup`: an owner or group known only by its number.
+ * mirage keeps no user database, so a number names no one, as `ls -l`
+ * shows it; a name `chown` stored, or the session owning an entry that
+ * reports none, is someone.
+ */
+export interface NoOwner {
+  op: 'nouser'
+  group: boolean
+}
+
+/**
+ * `-readable`, `-writable` and `-executable`: the owner's bits of the
+ * entry's mode, the session owning what it sees.
+ */
+export interface Access {
+  op: 'access'
+  mode: 'r' | 'w' | 'x'
+}
+
+/**
+ * `-quit`: true, and nothing after it runs, for this entry or any other.
+ * The walk reads `fired` after each entry to stop.
+ */
+export interface Quit {
+  op: 'quit'
+  fired: string[]
+}
+
+// -size as the inclusive byte bounds it rounds to; a directory weighs
+// DIR_SIZE, a stat of unknown size nothing, and an entry with no stat matches
+// no bound.
+export interface Size {
+  op: 'size'
+  min: number | null
+  max: number | null
 }
 
 export interface Empty {
@@ -132,7 +255,16 @@ export interface Prune {
 export type PredNode =
   | Name
   | Path
+  | Regex
+  | Lname
   | Type
+  | XType
+  | Perm
+  | Count
+  | Owner
+  | NoOwner
+  | Access
+  | Size
   | Empty
   | Not
   | And
@@ -140,16 +272,18 @@ export type PredNode =
   | TrueNode
   | Action
   | Prune
+  | Quit
   | Mtime
 
 // What evaluating an expression on one entry did besides answer: whether an
 // action was reached, whether a prune node recorded the entry (firm or
-// pending), and the time tests the entry carried no mtime for on the path
-// that decided the answer so far; a branch whose outcome they could not
-// have changed drops them again.
+// pending), whether a -quit ended the evaluation, and the time tests the
+// entry carried no mtime for on the path that decided the answer so far; a
+// branch whose outcome they could not have changed drops them again.
 export interface Effects {
   acted: boolean
   pruned: boolean
+  quit?: boolean
   deferred: Mtime[]
 }
 
@@ -165,6 +299,8 @@ export interface EmitStartPathOptions {
   maxSize?: number | null | undefined
   // Epoch-second mtime for the tree's time tests; null when unknown.
   mtime?: number | null | undefined
+  // The start path's stat, for the tests that read one.
+  stat?: FileStat | null | undefined
 }
 
 export interface BuildTreeOptions {

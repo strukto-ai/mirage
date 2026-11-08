@@ -216,6 +216,7 @@ async def _fan_out_traversal(
                 stdin,
                 nested=True,
                 follow=follow,
+                env=None if session_view is None else session_view.snapshot(),
             )
         else:
             stdout, io = await handle_cross_mount(

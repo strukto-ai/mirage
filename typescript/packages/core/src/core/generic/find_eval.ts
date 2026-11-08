@@ -12,43 +12,149 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType, type FileStat } from '../../types.ts'
-import { inMtimeWindow } from '../../utils/dates.ts'
+import { posixRegex } from '../../rs/regex.ts'
+import { byteView } from '../../shell/bytes.ts'
+import { FileType, LINK_TARGET_KEY, type FileStat } from '../../types.ts'
+import { inMtimeWindow, isoTimestamp } from '../../utils/dates.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { DIR_SIZE } from '../../utils/stat_view.ts'
+import { DIR_SIZE, posixMode } from '../../utils/stat_view.ts'
 import type {
   BuildTreeOptions,
   Effects,
   EmitStartPathOptions,
   FindEntry,
+  Owner,
+  Path,
   PendingPrune,
   PredNode,
   PrintfKind,
+  Regex,
 } from './types.ts'
+
+const ACCESS_BITS = { r: 0o400, w: 0o200, x: 0o100 } as const
+const PERMISSION_BITS = 0o7777
 
 function freshEffects(): Effects {
   return { acted: false, pruned: false, deferred: [] }
 }
 
+/**
+ * The path `-path` and `-regex` read: the entry as `find` prints it under
+ * the start point the node was bound to.
+ */
+export function shownPath(node: Path | Regex, key: string): string {
+  const shown = displayPath(node.prefix ?? '', key)
+  return node.root ? respellOne(shown, node.root, node.raw ?? '') : shown
+}
+
+function glob(text: string, pattern: string, icase: boolean): boolean {
+  return icase ? fnmatch(text.toLowerCase(), pattern.toLowerCase()) : fnmatch(text, pattern)
+}
+
+function linkTarget(st: FileStat | null | undefined): string | null {
+  if (st?.type !== FileType.SYMLINK) return null
+  const target = st.extra[LINK_TARGET_KEY]
+  return typeof target === 'string' ? target : null
+}
+
+// The time one test reads: the walk's mtime, or the access or change time
+// the entry's stat holds, which falls back to the mtime as `stat`'s does for
+// a backend that keeps only that one.
+function stamp(entry: FindEntry, field: 'm' | 'a' | 'c'): number | null {
+  if (field === 'm') return entry.mtime ?? null
+  const st = entry.stat
+  if (st === null || st === undefined) return null
+  const other = field === 'a' ? st.atime : st.ctime
+  return other ? isoTimestamp(other) : (entry.mtime ?? null)
+}
+
+function count(st: FileStat, field: 'links' | 'uid' | 'gid'): number | null {
+  // One name per entry, as ls -l counts it: mirage has no hard links, and a
+  // directory's own entries are not counted.
+  if (field === 'links') return 1
+  const value = field === 'uid' ? st.uid : st.gid
+  if (typeof value === 'number') return value
+  if (typeof value === 'string' && /^[0-9]+$/.test(value)) return Number(value)
+  return null
+}
+
+function owns(node: Owner, st: FileStat): boolean {
+  const value = node.group ? st.gid : st.uid
+  if (value === null) return node.profile !== null && node.name === node.profile
+  if (String(value) === node.name) return true
+  return /^[0-9]+$/.test(node.name) && typeof value === 'number' && value === Number(node.name)
+}
+
+// The answer of a test that reads only the entry, null for a node that is
+// not one.
+function test(node: PredNode, entry: FindEntry): boolean | null {
+  const st = entry.stat ?? null
+  switch (node.op) {
+    case 'name':
+      return glob(entry.name, node.pattern, node.icase)
+    case 'path':
+      return glob(shownPath(node, entry.key), node.pattern, node.icase === true)
+    case 'regex':
+      return node.hits.get(entry.key) ?? false
+    case 'type':
+      return entry.kind === node.kind
+    case 'xtype':
+      return (entry.xkind ?? entry.kind) === node.kind
+    case 'lname': {
+      const target = linkTarget(st)
+      return target !== null && glob(target, node.pattern, node.icase)
+    }
+    case 'perm': {
+      if (st === null) return false
+      const mode = posixMode(st) & PERMISSION_BITS
+      if (node.bits === 'exact') return mode === node.mode
+      if (node.bits === 'all') return (mode & node.mode) === node.mode
+      return node.mode === 0 || (mode & node.mode) !== 0
+    }
+    case 'count': {
+      const value = st === null ? null : count(st, node.field)
+      if (value === null) return false
+      if (node.cmp === '+') return value > node.count
+      if (node.cmp === '-') return value < node.count
+      return value === node.count
+    }
+    case 'owner':
+      return st !== null && owns(node, st)
+    case 'nouser': {
+      const owner = st === null ? null : node.group ? st.gid : st.uid
+      return typeof owner === 'number' || (typeof owner === 'string' && /^[0-9]+$/.test(owner))
+    }
+    case 'access': {
+      // access(2) follows a link: a live one answers with what it leads to,
+      // which the walk read as the entry's target.
+      const held = st !== null && st.type === FileType.SYMLINK ? (entry.target ?? null) : st
+      if (held === null) return false
+      return (posixMode(held) & ACCESS_BITS[node.mode]) !== 0
+    }
+    case 'size': {
+      // An entry the walk could not stat has no size to compare.
+      if (entry.kind !== 'd' && st === null) return false
+      const size = entry.kind === 'd' || st === null ? DIR_SIZE : (st.size ?? 0)
+      return !((node.min !== null && size < node.min) || (node.max !== null && size > node.max))
+    }
+    case 'empty':
+      return entry.isEmpty === true
+    default:
+      return null
+  }
+}
+
 // Whether the expression holds for one entry, recording what it did.
 // Evaluation short-circuits the way GNU's does (`-a` stops at the first
 // false, `-o` at the first true), so an action or a prune is reached
-// exactly when GNU would reach it. The tests and connectives every entry
-// meets are told apart first.
+// exactly when the reference would reach it, and nothing runs after a `-quit`. The
+// tests and connectives every entry meets are told apart first.
 export function evaluate(node: PredNode, entry: FindEntry, effects: Effects): boolean {
+  const answer = test(node, entry)
+  if (answer !== null) return answer
   switch (node.op) {
-    case 'name':
-      return node.icase
-        ? fnmatch(entry.name.toLowerCase(), node.pattern.toLowerCase())
-        : fnmatch(entry.name, node.pattern)
-    case 'path': {
-      const shown = displayPath(node.prefix ?? '', entry.key)
-      return fnmatch(node.root ? respellOne(shown, node.root, node.raw ?? '') : shown, node.pattern)
-    }
-    case 'type':
-      return entry.kind === node.kind
     case 'not':
       return !evaluate(node.kid, entry, effects)
     case 'and': {
@@ -63,6 +169,7 @@ export function evaluate(node: PredNode, entry: FindEntry, effects: Effects): bo
           effects.deferred.splice(mark, before - mark)
           return false
         }
+        if (effects.quit === true) return true
       }
       return true
     }
@@ -74,9 +181,14 @@ export function evaluate(node: PredNode, entry: FindEntry, effects: Effects): bo
           effects.deferred.splice(mark, before - mark)
           return true
         }
+        if (effects.quit === true) return false
       }
       return false
     }
+    case 'quit':
+      node.fired.push(entry.key)
+      effects.quit = true
+      return true
     case 'true':
       return true
     case 'action':
@@ -93,17 +205,19 @@ export function evaluate(node: PredNode, entry: FindEntry, effects: Effects): bo
       }
       effects.pruned = effects.pruned || entry.kind === 'd'
       return true
-    case 'mtime':
+    case 'mtime': {
       // An entry the walk fetched no time for passes here and meets the
       // expression's flat window afterwards; the test is recorded so a
       // `-prune` reached past it is only pending.
-      if (entry.mtime === null || entry.mtime === undefined) {
+      const at = stamp(entry, node.field ?? 'm')
+      if (at === null) {
         effects.deferred.push(node)
         return true
       }
-      return inMtimeWindow(entry.mtime, node.lo, node.hi)
-    case 'empty':
-      return entry.isEmpty === true
+      return inMtimeWindow(at, node.lo, node.hi)
+    }
+    default:
+      throw new TypeError(`unknown predicate node: ${JSON.stringify(node)}`)
   }
 }
 
@@ -125,9 +239,13 @@ export function displayPath(prefix: string, key: string): string {
 export function bindTree(node: PredNode, prefix: string, root = '', raw = ''): PredNode {
   switch (node.op) {
     case 'path':
-      return { op: 'path', pattern: node.pattern, prefix, root, raw }
+      return { ...node, prefix, root, raw }
+    case 'regex':
+      return { ...node, prefix, root, raw, hits: new Map() }
     case 'prune':
       return { op: 'prune', pruned: [], pending: [] }
+    case 'quit':
+      return { op: 'quit', fired: [] }
     case 'not':
       return { op: 'not', kid: bindTree(node.kid, prefix, root, raw) }
     case 'and':
@@ -139,18 +257,77 @@ export function bindTree(node: PredNode, prefix: string, root = '', raw = ''): P
   }
 }
 
+function nodes(node: PredNode): PredNode[] {
+  if (node.op === 'not') return [node, ...nodes(node.kid)]
+  if (node.op === 'and' || node.op === 'or') return [node, ...node.kids.flatMap(nodes)]
+  return [node]
+}
+
+/** Whether the tree holds a node of one of `ops`. */
+export function treeHas(node: PredNode, ops: readonly PredNode['op'][]): boolean {
+  return nodes(node).some((n) => ops.includes(n.op))
+}
+
+/**
+ * Whether the tree holds an action, `-quit` among them: the reference prints no row
+ * of its own for an expression that has one.
+ */
 export function treeHasAction(node: PredNode): boolean {
-  if (node.op === 'action') return true
-  if (node.op === 'not') return treeHasAction(node.kid)
-  if (node.op === 'and' || node.op === 'or') return node.kids.some(treeHasAction)
-  return false
+  return treeHas(node, ['action', 'quit'])
 }
 
 export function treeHasTime(node: PredNode): boolean {
-  if (node.op === 'mtime') return true
-  if (node.op === 'not') return treeHasTime(node.kid)
-  if (node.op === 'and' || node.op === 'or') return node.kids.some(treeHasTime)
-  return false
+  return treeHas(node, ['mtime'])
+}
+
+/**
+ * Whether a test reads the entry's stat: a time, its mode, links, owner or
+ * a link's target.
+ */
+export function treeReadsStat(node: PredNode): boolean {
+  return treeHas(node, ['mtime', 'size', 'perm', 'count', 'owner', 'nouser', 'access', 'lname'])
+}
+
+/**
+ * Whether a test reads what is on the other side of a link (`-xtype`, and
+ * the access tests a live link answers through).
+ */
+export function treeReadsLink(node: PredNode): boolean {
+  return treeHas(node, ['xtype', 'access'])
+}
+
+/** Whether a `-quit` in the evaluated tree was reached. */
+export function quitFired(node: PredNode): boolean {
+  return nodes(node).some((n) => n.op === 'quit' && n.fired.length > 0)
+}
+
+/**
+ * Answer every `-regex` in the tree for the entries named, ahead of the
+ * evaluation that reads them. Each node's expression is compiled once
+ * (`posixRegex` caches it) and must match the whole printed path: the
+ * leftmost-longest match from its first byte reaches its last. An entry
+ * already answered is not searched again.
+ */
+export async function primeRegexes(node: PredNode, keys: Iterable<string>): Promise<void> {
+  const regexes = nodes(node).filter((n): n is Regex => n.op === 'regex')
+  if (regexes.length === 0) return
+  const wanted = [...keys]
+  for (const rx of regexes) {
+    const compiled = posixRegex(
+      byteView(rx.pattern, rx.utf8),
+      rx.extended,
+      rx.dialect,
+      rx.icase,
+      rx.utf8,
+    )
+    for (const key of wanted) {
+      if (rx.hits.has(key)) continue
+      const subject = byteView(shownPath(rx, key), rx.utf8)
+      const groups = await compiled.search(subject)
+      const whole = groups?.[0]
+      rx.hits.set(key, whole?.[0] === 0 && whole[1] === subject.length)
+    }
+  }
 }
 
 export function treeHasPrune(node: PredNode): boolean {
@@ -228,7 +405,11 @@ export function timeTestsFailing(node: PredNode): PredNode {
 // send it down: `find d -newermt X -prune` skips only the contents of
 // directories newer than X, and `( -mtime 1 -o -type d ) -prune` skips every
 // directory's. A key `mtimes` does not name stays pending.
-export function settlePrunes(node: PredNode, mtimes: ReadonlyMap<string, number | null>): void {
+export function settlePrunes(
+  node: PredNode,
+  mtimes: ReadonlyMap<string, number | null>,
+  stats: ReadonlyMap<string, FileStat | null> | null = null,
+): void {
   const decided = new Map<string, FindEntry>()
   for (const prune of pruneNodes(node)) {
     const still: PendingPrune[] = []
@@ -241,7 +422,8 @@ export function settlePrunes(node: PredNode, mtimes: ReadonlyMap<string, number 
   for (const [key, entry] of decided) {
     const mtime = mtimes.get(key) ?? null
     const tree = mtime === null ? timeTestsFailing(node) : node
-    evaluate(tree, { ...entry, mtime }, freshEffects())
+    const stat = stats === null ? entry.stat : stats.has(key) ? stats.get(key) : entry.stat
+    evaluate(tree, { ...entry, mtime, stat: stat ?? null }, freshEffects())
   }
 }
 
@@ -337,6 +519,7 @@ export function emitStartPath(
     depth: 0,
     isEmpty: opts.isEmpty ?? null,
     mtime: opts.mtime ?? null,
+    stat: opts.stat ?? null,
   }
   if (!keep(entry, opts.tree, opts.minDepth)) return
   if (

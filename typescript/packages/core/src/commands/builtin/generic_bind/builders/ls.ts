@@ -23,7 +23,7 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 
 const ls: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const fl = new FlagView(ctx.flags, specOf('ls'))
-  const flags = parseFlags(fl)
+  const flags = parseFlags(fl, ctx.env)
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
   // Only -R reads whole subtrees; a plain listing reads one level.

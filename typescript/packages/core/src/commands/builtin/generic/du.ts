@@ -14,17 +14,30 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { Follow, LineFacts, PathSpec } from '../../../types.ts'
+import { Follow, LineFacts, PathSpec, type LsTimeKind } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { IOResult, type PathRecord } from '../../../io/types.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
 import { ZERO_LENGTH_NAME } from '../../../errors/render.ts'
 import { fsStrerror, isDotWalkError, isMissingPath } from '../../../errors/fs.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { respellRaw } from '../../../utils/path.ts'
+import { respellOne, respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
-import { scaledSize, blockSizeOf, type BlockSize } from '../utils/formatting.ts'
+import {
+  fullIsoTime,
+  nanosecondsOf,
+  scaledSize,
+  blockSizeOf,
+  type BlockSize,
+} from '../utils/formatting.ts'
+import { gnuStrftime } from '../utils/strftime.ts'
+import { isoTimestamp } from '../../../utils/dates.ts'
+import { fnmatch } from '../../../utils/fnmatch.ts'
+import { UTC_ZONE } from '../../../utils/timezone.ts'
+import { decodeText, encodeText } from '../../../shell/bytes.ts'
+import { isFsError } from '../../../errors/fs.ts'
+import { concat } from '../../../utils/bytes.ts'
 import type { MountView, StatPath } from '../../../view/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
@@ -36,6 +49,11 @@ import { refused, scan } from '../../../rs/scan.ts'
 export type ComputeSize = (p: PathSpec) => Promise<number>
 export type DuEntries = [entries: [string, number][], total: number]
 export type ComputeEntries = (p: PathSpec) => Promise<DuEntries>
+/** A time as an ordering key and the stamp it was read from. */
+type Newest = [key: number, stamp: string]
+
+const HINT = "Try 'du --help' for more information.\n"
+const TIMES: Record<string, LsTimeKind> = { atime: 'atime', ctime: 'ctime' }
 
 /** The parsed `du` command line. */
 export interface DuFlags {
@@ -55,6 +73,28 @@ export interface DuFlags {
   maxDepth: number | null
   /** A non-fatal diagnostic GNU prints before the output. */
   warning?: string
+  /**
+   * --inodes, count entries rather than bytes: a file is one, a directory one
+   * plus what it holds; only -h and --si scale the count.
+   */
+  inodes?: boolean
+  /**
+   * -t/--threshold, print a row only at or above this size, or at or below its
+   * magnitude when negative; the `total` row always prints. A bigint, so a
+   * limit past 2^53 compares exactly.
+   */
+  threshold?: bigint | null
+  /** --time, the clock of the time column; each row shows its tree's newest. */
+  time?: LsTimeKind | null
+  /** --time-style or TIME_STYLE: full-iso, long-iso, iso or +FORMAT. */
+  timeStyle?: string
+  /** -0/--null, end each row with NUL. */
+  null?: boolean
+  /**
+   * --exclude and -X patterns; an entry whose path, as du prints it, or the
+   * part after any slash in it matches one is neither walked nor counted.
+   */
+  excludes?: readonly string[]
 }
 
 /** What `du` produced for one invocation. */
@@ -74,33 +114,163 @@ export interface DuOutput {
   records: PathRecord[] | null
 }
 
-function line(size: number, flags: DuFlags, label: string): string {
-  return `${scaledSize(size, flags.blockSize, flags.h)}\t${label}`
+function line(size: number, flags: DuFlags, label: string, newest?: Newest): string {
+  let block = flags.blockSize
+  if (flags.inodes === true && block !== null && block.humanBase === null) block = null
+  let shown = scaledSize(size, block, flags.h)
+  if (flags.time != null) shown += `\t${stamp(newest?.[1] ?? null, flags.timeStyle ?? 'long-iso')}`
+  return `${shown}\t${label}`
+}
+
+// A row's time under du's --time-style: full-iso as ls spells it, long-iso,
+// iso (a date alone, whatever its age) or a +FORMAT; an unknown time is the
+// epoch.
+function stamp(modified: string | null, style: string): string {
+  if (style === 'full-iso') return fullIsoTime(modified)
+  const seconds = isoTimestamp(modified)
+  const when = new Date(Math.floor(seconds ?? 0) * 1000)
+  const fmt =
+    style === 'long-iso' ? '%Y-%m-%d %H:%M' : style === 'iso' ? '%Y-%m-%d' : style.slice(1)
+  return gnuStrftime(when, fmt, UTC_ZONE, seconds === null ? 0 : nanosecondsOf(modified))
+}
+
+// Whether -t lets a row print; `size` is its bytes, or its count under
+// --inodes.
+function kept(size: number, flags: DuFlags): boolean {
+  const limit = flags.threshold ?? null
+  if (limit === null) return true
+  return limit >= 0n ? BigInt(size) >= limit : BigInt(size) <= -limit
+}
+
+// One row as -t lets it print: the line, or none.
+function row(size: number, flags: DuFlags, label: string, newest?: Newest): string[] {
+  return kept(size, flags) ? [line(size, flags, label, newest)] : []
+}
+
+/**
+ * The newest time in each directory's tree under `root`, for --time: each
+ * entry's time is carried up to the root, stopping at an ancestor that already
+ * holds a newer one, since every ancestor of that one does too. Mirrors
+ * Python's `newest_under`.
+ */
+export function newestUnder(times: ReadonlyMap<string, string>, root: string): Map<string, Newest> {
+  const rootKey = norm(root)
+  const prefix = rootKey.endsWith('/') ? rootKey : `${rootKey}/`
+  const best = new Map<string, Newest>()
+  for (const [virtual, stamped] of times) {
+    let node = norm(virtual)
+    const key = isoTimestamp(stamped)
+    if (key === null || (node !== rootKey && !node.startsWith(prefix))) continue
+    for (;;) {
+      const held = best.get(node)
+      if (held !== undefined && held[0] >= key) break
+      best.set(node, [key, stamped])
+      if (node === rootKey) break
+      node = parentOf(node)
+    }
+  }
+  return best
+}
+
+/**
+ * The entries --inodes counts in an operand: every file and directory under
+ * it, and the operand itself. Mirrors Python's `inode_count`.
+ */
+export function inodeCount(
+  entries: readonly [string, number][],
+  root: string,
+  dirs: readonly string[] = [],
+): number {
+  const rootKey = norm(root)
+  const prefix = rootKey.endsWith('/') ? rootKey : `${rootKey}/`
+  const nodes = new Set<string>()
+  for (const path of [...entries.map(([leaf]) => leaf), ...dirs]) {
+    let node = norm(path)
+    while (node !== rootKey && node.startsWith(prefix) && !nodes.has(node)) {
+      nodes.add(node)
+      node = parentOf(node)
+    }
+  }
+  return nodes.size + 1
+}
+
+/**
+ * Whether --exclude or -X leaves a path out: a pattern that matches it whole,
+ * or the part after any slash in it. `shown` is the path as du prints it.
+ */
+export function excluded(patterns: readonly string[], shown: string): boolean {
+  if (patterns.length === 0) return false
+  const tails = [shown]
+  for (let at = 0; at < shown.length; at++) if (shown[at] === '/') tails.push(shown.slice(at + 1))
+  return patterns.some((pattern) => tails.some((tail) => fnmatch(tail, pattern)))
+}
+
+/**
+ * Whether a mount root below an operand is, or lies under, a path --exclude
+ * or -X leaves out: the walk never reaches it, so it is not measured.
+ * Mirrors Python's `excluded_start`.
+ */
+export function excludedStart(
+  patterns: readonly string[],
+  operand: PathSpec,
+  start: PathSpec,
+): boolean {
+  const base = rstripSlash(operand.virtual)
+  const rest = stripSlash(start.virtual.slice(base.length))
+  if (patterns.length === 0 || rest === '') return false
+  const steps = rest.split('/')
+  return steps.some((_, n) =>
+    excluded(
+      patterns,
+      respellOne([base, ...steps.slice(0, n + 1)].join('/'), operand.virtual, operand.rawPath),
+    ),
+  )
 }
 
 /**
  * du's options, `--max-depth` and its conflicts with `-s` and `-a` read by
- * mirage-rs before any operand is resolved: the flags, or du's refusal.
- * Mirrors Python's `parse_flags`.
+ * mirage-rs before any operand is resolved: the flags, or du's refusal. The
+ * time style is read only under --time, from --time-style or
+ * else the TIME_STYLE variable. Mirrors Python's `parse_flags`.
  */
 export function parseFlags(ctx: Context): DuFlags | IOResult {
   const fl = new FlagView(ctx.flags, specOf('du'))
+  const typed = fl.texts(
+    'max_depth',
+    'summarize',
+    'all',
+    'human_readable',
+    'si',
+    'bytes',
+    'apparent_size',
+    'k',
+    'm',
+    'block_size',
+    'inodes',
+    't',
+    'threshold',
+  )
+  const when = fl.raw('time')
+  const timed = when !== undefined && when !== false
+  if (typeof when === 'string') typed.push(['time', when])
+  const style = fl.asStr('time_style') ?? ctx.env?.TIME_STYLE
+  if (timed && style !== undefined) typed.push(['time_style', style])
   let values
   try {
-    values = scan(
-      'du',
-      fl.texts('max_depth', 'summarize', 'all', 'human_readable', 'bytes', 'k', 'm', 'block_size'),
-    )
+    values = scan('du', typed)
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
     return refused(err)
   }
-  const { max_depth: depth, warning } = values
+  const { max_depth: depth, warning, threshold, time, time_style: shape } = values
   if (
     (depth !== null && typeof depth !== 'number') ||
-    (warning !== null && typeof warning !== 'string')
+    (warning !== null && typeof warning !== 'string') ||
+    (threshold !== null && typeof threshold !== 'string') ||
+    (time !== null && typeof time !== 'string') ||
+    (shape !== null && typeof shape !== 'string')
   ) {
-    throw new Error(`du: mirage-rs read --max-depth as ${JSON.stringify(values)}`)
+    throw new Error(`du: mirage-rs read the options as ${JSON.stringify(values)}`)
   }
   return {
     s: fl.asBool('summarize'),
@@ -111,7 +281,42 @@ export function parseFlags(ctx: Context): DuFlags | IOResult {
     S: fl.asBool('separate_dirs'),
     maxDepth: depth,
     ...(warning === null ? {} : { warning }),
+    inodes: fl.asBool('inodes'),
+    threshold: threshold === null ? null : BigInt(threshold),
+    time: !timed ? null : time !== null ? (TIMES[time] ?? 'mtime') : 'mtime',
+    timeStyle: shape ?? 'long-iso',
+    null: fl.asBool('null'),
+    excludes: fl.asList('exclude'),
   }
+}
+
+/**
+ * du's options with every -X file read into its patterns, one a line; a file
+ * that cannot be read is refused, exit 1. `stream` reads a pattern file,
+ * `-` from stdin. Mirrors Python's `read_flags`.
+ */
+export async function readFlags(
+  ctx: Context,
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+): Promise<DuFlags | IOResult> {
+  const flags = parseFlags(ctx)
+  if (flags instanceof IOResult) return flags
+  const patterns = [...(flags.excludes ?? [])]
+  for (const source of new FlagView(ctx.flags, specOf('du')).asPaths('exclude_from')) {
+    const held: Uint8Array[] = []
+    try {
+      for await (const chunk of stream(source)) held.push(chunk)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      const detail = fsStrerror(err) ?? posixPhrase('ENOENT')
+      return new IOResult({
+        exitCode: 1,
+        stderr: encodeText(`du: ${source.rawPath}: ${detail}\n${HINT}`),
+      })
+    }
+    for (const line of decodeText(concat(held)).split('\n')) if (line !== '') patterns.push(line)
+  }
+  return { ...flags, excludes: patterns }
 }
 
 /** The operand GNU `du` assumes when the line names none. Mirrors Python's
@@ -197,6 +402,9 @@ async function duOperands(
   stat: (p: PathSpec) => Promise<unknown>,
   hasContent?: (p: PathSpec) => Promise<boolean>,
   statPath: StatPath | null = null,
+  // An operand an --exclude pattern matches is dropped before it is stat'ed,
+  // so a missing one is not reported either.
+  excludes: readonly string[] = [],
 ): Promise<{ present: PathSpec[]; missing: [string, string][] }> {
   const targets = paths.length > 0 ? paths : [cwdSpec(cwd)]
   const resolved = await resolveGlob(targets)
@@ -205,10 +413,12 @@ async function duOperands(
   // An unmatched glob reaches GNU as the literal pattern, which it then
   // reports as unreadable.
   if (resolved.length === 0) {
-    for (const item of targets.map((p): [string, string] => [p.rawPath, posixPhrase('ENOENT')]))
-      missing.push(item)
+    for (const p of targets) {
+      if (!excluded(excludes, p.rawPath)) missing.push([p.rawPath, posixPhrase('ENOENT')])
+    }
   }
   for (const path of resolved) {
+    if (excluded(excludes, path.rawPath)) continue
     // A missing path is the diagnostic, not an error to propagate. Any
     // other backend failure (403, a driver fault) is real and must surface
     // rather than being renamed "No such file or directory".
@@ -315,11 +525,14 @@ export function rollup(
   // `dirs`: paths that are directories even though no leaf may point at
   // them: the directories a walk met (an empty one, or one it could not
   // open) and the roots of descendant mounts, which still get GNU's `0` row.
+  // `inodes`: each directory counts itself too, and under -S itself alone of
+  // the directories in it; the leaves come in as one each.
   ctx: {
     all: boolean
     maxDepth: number | null
     dirs?: readonly string[]
     separateDirs?: boolean
+    inodes?: boolean
   },
 ): [string, number][] {
   const rootKey = norm(root)
@@ -355,6 +568,20 @@ export function rollup(
       if (!sizes.has(node)) sizes.set(node, 0)
       node = parentOf(node)
     }
+  }
+  if (ctx.inodes === true) {
+    // Deepest first, so each directory's count of the directories in its
+    // tree is complete before it is added to its parent's.
+    const own = new Map<string, number>([...sizes.keys()].map((node) => [node, 1]))
+    const deepest = [...sizes.keys()].sort(
+      (x, y) => (y.match(/\//g) ?? []).length - (x.match(/\//g) ?? []).length,
+    )
+    for (const node of deepest) {
+      const parent = parentOf(node)
+      const above = own.get(parent)
+      if (!separateDirs && above !== undefined) own.set(parent, above + (own.get(node) ?? 1))
+    }
+    for (const [node, count] of own) sizes.set(node, (sizes.get(node) ?? 0) + count)
   }
 
   // Keyed backends (S3, GridFS) carry a zero-byte marker object for a
@@ -422,44 +649,58 @@ async function duOne(
   flags: DuFlags,
   mounts: MountView | null,
   directories?: () => readonly string[],
-): Promise<[string[], number, PathRecord[] | null]> {
+  times?: () => ReadonlyMap<string, string>,
+): Promise<[string[], number, PathRecord[] | null, Newest | undefined]> {
   const label = path.rawPath
+  const rootKey = norm(path.virtual)
   const roots = mounts?.descendants(path.virtual) ?? []
+  const timed = times !== undefined && flags.time != null
+  const inodes = flags.inodes === true
 
-  if (flags.s && !flags.S && roots.length === 0 && !pathsScoped([path])) {
+  if (flags.s && !flags.S && !inodes && roots.length === 0 && !pathsScoped([path])) {
     // The one-total fast path trusts the backend's own sum, which a
     // session hiding paths cannot: hidden leaves would be counted into
     // a total their names never justify, so that session takes the
     // entries walk below instead.
     const total = await computeSize(path)
-    return [[line(total, flags, label)], total, null]
+    const newest = timed ? newestUnder(times(), path.virtual).get(rootKey) : undefined
+    return [row(total, flags, label, newest), total, null, newest]
   }
 
-  const [raw, rawTotal] = await computeEntries(path)
+  const [found, rawTotal] = await computeEntries(path)
   let total = rawTotal
-  const rootKey = norm(path.virtual)
+  const stamped: ReadonlyMap<string, string> = timed ? times() : new Map()
+  const stamps = timed ? newestUnder(stamped, path.virtual) : new Map<string, Newest>()
+  const newest = stamps.get(rootKey)
   const under = rootKey.replace(/\/$/, '') + '/'
+  const timeOfPath = (virtual: string): { modified?: string } => {
+    const at = stamped.get(virtual)
+    return at === undefined ? {} : { modified: at }
+  }
   const met = dropShadowed(
     (directories?.() ?? [])
       .filter((d) => norm(d).startsWith(under))
-      .map((d): PathRecord => ({ path: PathSpec.fromStrPath(d), run })),
+      .map((d): PathRecord => ({ path: PathSpec.fromStrPath(d), run, ...timeOfPath(d) })),
     roots,
   )
   const walked = (directories?.() ?? []).some((d) => norm(d) === rootKey)
-  if (raw.length === 0 && met.length === 0 && !walked) {
+  const ownRecord: PathRecord = { path, run, ...timeOfPath(path.virtual) }
+  if (found.length === 0 && met.length === 0 && !walked) {
     // A backend that can only produce a size degrades to one total; it
     // cannot enumerate, so shadowed keys cannot be excluded either. A
     // walk that opened the operand already said all it can: an empty
     // directory, or one a rule refused, which a second walk would
     // report twice.
     const fallback = await computeSize(path)
-    return [[line(fallback, flags, label)], fallback, fallback === 0 ? [{ path, run }] : null]
+    const count = inodes ? 1 : fallback
+    return [row(count, flags, label, newest), count, fallback === 0 ? [ownRecord] : null, newest]
   }
 
-  const counted = toVirtual(raw, path).map(([leaf, size]): PathRecord => ({
+  const counted = toVirtual(found, path).map(([leaf, size]): PathRecord => ({
     path: PathSpec.fromStrPath(leaf),
     run,
     size,
+    ...timeOfPath(leaf),
   }))
   // Shadowed leaves drop: the total is the sum of what survived, never the
   // backend's own number.
@@ -469,36 +710,41 @@ async function duOne(
     total = entries.reduce((acc, [, size]) => acc + size, 0)
   }
   const dirs = met.map((r) => r.path.virtual)
-  const records: PathRecord[] = [{ path, run }, ...kept, ...met]
+  const records: PathRecord[] = [ownRecord, ...kept, ...met]
+  if (inodes) total = inodeCount(entries, path.virtual, dirs)
   // A file operand walks to itself. GNU prints it once, with or without -a,
   // never as a leaf line plus a roll-up line. GNU scopes -S to directories, so
   // a file operand keeps its own size in both its row and the grand total.
   const first = entries[0]
   if (entries.length === 1 && first !== undefined && norm(first[0]) === rootKey) {
-    return [[line(first[1], flags, label)], total, records]
+    return [row(inodes ? total : first[1], flags, label, newest), total, records, newest]
   }
+  const counts: [string, number][] = inodes ? entries.map(([leaf]) => [leaf, 1]) : entries
   // -S changes what the operand's own row counts, not what the operand
   // contributes to -c: GNU's grand total stays recursive (coreutils 9.7,
   // `du -bSc dir` prints `3 dir` then `6 total`).
-  const own = flags.S ? separateTotal(entries, path.virtual) : total
+  const own = flags.S ? separateTotal(counts, path.virtual) + (inodes ? 1 : 0) : total
   if (flags.s) {
-    return [[line(own, flags, label)], total, records]
+    return [row(own, flags, label, newest), total, records, newest]
   }
 
-  const rows = rollup(entries, path.virtual, {
+  const rows = rollup(counts, path.virtual, {
     all: flags.a,
     maxDepth: flags.maxDepth,
     dirs,
     separateDirs: flags.S,
+    inodes,
   })
   const shown = respellRaw(
     rows.map(([p]) => p),
     path.virtual,
     label,
   )
-  const lines = rows.map(([, size], i) => line(size, flags, shown[i] ?? ''))
-  lines.push(line(own, flags, label))
-  return [lines, total, records]
+  const lines = rows.flatMap(([node, size], i) =>
+    row(size, flags, shown[i] ?? '', stamps.get(node)),
+  )
+  lines.push(...row(own, flags, label, newest))
+  return [lines, total, records, newest]
 }
 
 /**
@@ -534,13 +780,17 @@ export async function du(
   // Asked before each operand's walk whether an earlier one already counted
   // it, which GNU then skips without a row.
   repeated?: (p: PathSpec) => boolean,
+  // Read after each operand's walk for the time of every entry it met, by
+  // virtual path, under --time.
+  times?: () => ReadonlyMap<string, string>,
 ): Promise<DuOutput> {
   const lines: string[] = []
   let grand = 0
+  let latest: Newest | undefined
   let records: PathRecord[] | null = []
   for (const [run, root] of paths.entries()) {
     if (repeated?.(root) === true) continue
-    const [block, total, measured] = await duOne(
+    const [block, total, measured, newest] = await duOne(
       root,
       run,
       computeSize,
@@ -548,15 +798,17 @@ export async function du(
       flags,
       mounts,
       directories,
+      times,
     )
     for (const item of block) lines.push(item)
     grand += total
+    if (newest !== undefined && (latest === undefined || newest[0] > latest[0])) latest = newest
     if (measured === null) records = null
     else if (records !== null) for (const record of measured) records.push(record)
   }
   // GNU still prints the grand total when every operand failed ("0 total"), so
   // this stays outside the loop guard.
-  if (flags.c) lines.push(line(grand, flags, 'total'))
+  if (flags.c) lines.push(line(grand, flags, 'total', latest))
 
   const notes = flags.warning === undefined ? [] : [flags.warning]
   notes.push(
@@ -582,23 +834,24 @@ export async function du(
   }
   const stderr =
     notes.length > 0 ? new TextEncoder().encode(`${notes.join('\n')}\n`) : new Uint8Array(0)
-  return { stdout: formatRecords(lines), stderr, exitCode, records }
+  const stdout =
+    flags.null === true ? concat(lines.map((one) => encodeText(`${one}\0`))) : formatRecords(lines)
+  return { stdout, stderr, exitCode, records }
 }
 
 /**
- * Run one whole `du` invocation, from raw flags to rendered bytes.
+ * Run one whole `du` invocation over flags already read (`readFlags`), to
+ * rendered bytes.
  *
- * Deliberate divergence: --exclude remains refused. GNU 9.7 prunes matched
- * operands before stat and directories before traversal. Backend size
- * shortcuts and separately scheduled descendant mounts do not share a
- * pruning contract, so filtering measured rows would still read excluded
- * paths and report their failures. --apparent-size preserves the existing
- * apparent-byte measurement; only explicit unit options change its scale.
+ * --apparent-size preserves the existing apparent-byte measurement; only
+ * explicit unit options change its scale. -l counts a file once per hard
+ * link to it, and no backend here has hard links, so it changes nothing.
  *
- * Every caller needs the same three steps in the same order: validate the
- * flags before touching I/O, split the operands into readable and unreadable,
- * then render. Keeping them here means a backend wrapper is wiring only, and
- * the three steps cannot drift apart per backend.
+ * Every caller needs the same steps in the same order: split the operands
+ * into readable and unreadable, then render. Keeping them here means a backend
+ * wrapper is wiring only, and the steps cannot drift apart per backend. The
+ * wrapper reads the flags first, since its walk leaves out what --exclude and
+ * -X match.
  *
  * The walks meet links as entries of their own; under -L they follow them
  * instead, which the operand's own was already, at dispatch. Deliberate
@@ -607,6 +860,7 @@ export async function du(
  * enough to live in the inode); mirage counts bytes throughout.
  */
 export async function duGeneric(
+  flags: DuFlags,
   paths: PathSpec[],
   ctx: Context,
   resolveGlob: (targets: PathSpec[]) => Promise<PathSpec[]>,
@@ -618,9 +872,8 @@ export async function duGeneric(
   directories?: () => readonly string[],
   inaccessible?: () => readonly (readonly [string, string | null])[],
   repeated?: (p: PathSpec) => boolean,
+  times?: () => ReadonlyMap<string, string>,
 ): Promise<[Uint8Array, IOResult]> {
-  const flags = parseFlags(ctx)
-  if (flags instanceof IOResult) return [new Uint8Array(), flags]
   const { present, missing } = await duOperands(
     paths,
     ctx.cwd,
@@ -628,6 +881,7 @@ export async function duGeneric(
     stat,
     (p) => duHasContent(computeEntries, p),
     vfsStatPath(ctx.vfs) ?? null,
+    flags.excludes ?? [],
   )
   const out = await du(
     present,
@@ -641,6 +895,7 @@ export async function duGeneric(
     directories,
     inaccessible,
     repeated,
+    times,
   )
   return [
     out.stdout,
@@ -661,15 +916,13 @@ function respellUnder(virtual: string, paths: readonly PathSpec[]): string {
 
 /**
  * A du line reads below every path it names, walks into the mounts below
- * unless `-x`, and follows a link operand when the last of `-L` and `-P` is
- * `-L`. Mirrors Python's `facts`.
+ * unless `-x`, and follows a link operand when the last of `-L`, `-P`, `-D`
+ * and `-H` is not `-P`. Mirrors Python's `facts`.
  */
 export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  const last = fl.typedOrder('dereference', 'no_dereference', 'dereference_args', 'H').at(-1)
   return new LineFacts({
-    follows:
-      fl.typedOrder('dereference', 'no_dereference').at(-1) === 'dereference'
-        ? Follow.LAST
-        : Follow.NONE,
+    follows: last === undefined || last === 'no_dereference' ? Follow.NONE : Follow.LAST,
     walks: !fl.asBool('one_file_system'),
     readsSubtree: true,
   })

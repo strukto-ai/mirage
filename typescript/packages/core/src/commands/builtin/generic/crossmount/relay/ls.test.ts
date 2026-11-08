@@ -132,7 +132,10 @@ describe('runLs — cross-mount ls', () => {
   // group, the same whether the line spans one mount or several. Mirrors
   // test_ls.py.
   it("names the session's profile in a long listing", async () => {
-    const view = { profile: () => 'reviewer' } as unknown as SessionView
+    const view = {
+      profile: () => 'reviewer',
+      snapshot: () => ({ COLUMNS: '30' }),
+    } as unknown as SessionView
     const calls: Calls = { readdir: [], stat: [] }
     const [out] = await runLs(
       ['/a/z.txt', '/b/two/y.txt'].map(spec),
@@ -144,5 +147,23 @@ describe('runLs — cross-mount ls', () => {
     expect(new TextDecoder().decode(await materialize(out))).toBe(
       '-rw-r--r-- 1 reviewer reviewer 3 - /a/z.txt\n-rw-r--r-- 1 reviewer reviewer 3 - /b/two/y.txt\n',
     )
+  })
+
+  // COLUMNS=30 holds both operands on one line of -C, the session's
+  // environment read as a single-mount line reads it. Mirrors test_ls.py.
+  it("reads the session's COLUMNS", async () => {
+    const view = { profile: () => 'reviewer', snapshot: () => ({ COLUMNS: '30' }) }
+    const listed = async (flags: Record<string, FlagValue>): Promise<string> => {
+      const [out] = await runLs(
+        ['/a/z.txt', '/b/two/y.txt'].map(spec),
+        flags,
+        makeDispatch({ readdir: [], stat: [] }, new Set()),
+        undefined,
+        view as unknown as SessionView,
+      )
+      return new TextDecoder().decode(await materialize(out))
+    }
+    expect(await listed({ C: true })).toBe('/a/z.txt  /b/two/y.txt\n')
+    expect(await listed({ C: true, width: '20' })).toBe('/a/z.txt\n/b/two/y.txt\n')
   })
 })

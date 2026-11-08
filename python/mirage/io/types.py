@@ -152,12 +152,15 @@ class PathRecord:
             a directory its walk met, the operand's own included.
         values (tuple[int, ...]): wc's counts for the row, in GNU's
             column order.
+        modified (str | None): du's time for the entry under ``--time``,
+            as its walk read it.
     """
 
     path: PathSpec
     run: int = 0
     size: int | None = None
     values: tuple[int, ...] = ()
+    modified: str | None = None
 
 
 class PathRow(Protocol):

@@ -16,7 +16,9 @@ import { OPERAND_CONCURRENCY } from '../../constants.ts'
 import { DISPATCH_BUILDERS } from './constants.ts'
 import { mountStarts, reached } from './scopes.ts'
 import type { CrossResult, RunSingle } from './types.ts'
-import { du, leavesOf, parseFlags } from '../du.ts'
+import { du, excludedStart, leavesOf, readFlags } from '../du.ts'
+import { fileStreamOp } from './utils.ts'
+import { stdinStream } from '../../utils/stream.ts'
 import { runDispatch } from '../../generic_bind/dispatch.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -47,7 +49,11 @@ export const RENDERING: ReadonlySet<string> = new Set(['summarize', 'max_depth']
  * (a du not built on `duGeneric`) leaves the line to the one dispatcher walk.
  * With `nested`, `runSingle` answers only its own mount's part, so the mounts
  * below each operand are measured here unless `-x` keeps the walk on one
- * filesystem; otherwise each operand's run composes its own.
+ * filesystem; otherwise each operand's run composes its own. The -X files are
+ * read here, once, and every mount is handed their patterns as --exclude, so
+ * a list read from stdin reaches them all, and a mount below a path they
+ * leave out is never measured. `env` is the command's environment, which
+ * TIME_STYLE is read from.
  */
 export async function runDu(
   paths: readonly PathSpec[],
@@ -62,20 +68,35 @@ export async function runDu(
   nested = false,
   // The line's operand resolution, which the one walk's globs take.
   follow?: FollowOperands,
+  env?: Record<string, string>,
 ): Promise<CrossResult> {
-  const rendering = parseFlags({ stdin: null, flags: bag, cwd: PathSpec.fromStrPath(cwd) })
+  const rendering = await readFlags(
+    {
+      stdin: null,
+      flags: bag,
+      cwd: PathSpec.fromStrPath(cwd),
+      ...(env === undefined ? {} : { env }),
+    },
+    stdinStream(fileStreamOp(dispatch), stdin),
+  )
   if (rendering instanceof IOResult) return [null, rendering]
   const bounded = new FlagView(bag, specOf('du')).asBool('one_file_system')
-  const measuring = Object.fromEntries(Object.entries(bag).filter(([k]) => !RENDERING.has(k)))
+  const excludes = rendering.excludes ?? []
+  const resolved: Record<string, FlagValue> = Object.fromEntries(
+    Object.entries(bag).filter(([k]) => k !== 'exclude_from'),
+  )
+  if (excludes.length > 0) resolved.exclude = [...excludes]
+  const measuring: Record<string, FlagValue> = Object.fromEntries(
+    Object.entries(resolved).filter(([k]) => !RENDERING.has(k)),
+  )
   // Each start is then one mount's own part, and keeps only what that mount
   // owns: a part walked through the dispatcher reaches the mounts below it
   // too, which measure themselves.
   const mounts = nested && !bounded ? mountView(vfs) : undefined
   const plan: [number, PathSpec][] = paths.flatMap((path, index) =>
-    (mounts !== undefined ? mountStarts(path, vfs) : [path]).map((start): [number, PathSpec] => [
-      index,
-      start,
-    ]),
+    (mounts !== undefined ? mountStarts(path, vfs) : [path])
+      .filter((start) => start === path || !excludedStart(excludes, path, start))
+      .map((start): [number, PathSpec] => [index, start]),
   )
   const ios = await boundedMap(
     plan,
@@ -97,7 +118,23 @@ export async function runDu(
   if (ios.some((io) => io.records === null && io.exitCode === 0)) {
     const builder = DISPATCH_BUILDERS.get('du')
     if (builder === undefined) throw new Error('No dispatch builder for du')
-    return runDispatch(builder, paths, texts, bag, dispatch, cwd, vfs, stdin, signal, [], follow)
+    return runDispatch(
+      builder,
+      paths,
+      texts,
+      resolved,
+      dispatch,
+      cwd,
+      vfs,
+      stdin,
+      signal,
+      [],
+      follow,
+      undefined,
+      undefined,
+      undefined,
+      env,
+    )
   }
   const kept = await reached(
     paths,
@@ -148,6 +185,11 @@ export async function runDu(
     const counted = leavesOf(measured.get(path) ?? [])
     return Promise.resolve([counted, counted.reduce((acc, [, size]) => acc + size, 0)])
   }
+  const stamped = new Map<string, string>()
+  for (const { io } of done) {
+    for (const r of io.records ?? [])
+      if (r.modified !== undefined) stamped.set(r.path.virtual, r.modified)
+  }
   const out = await du(
     [...measured.keys()],
     rendering,
@@ -161,6 +203,9 @@ export async function runDu(
       [...measured.values()].flatMap((rows) =>
         rows.flatMap((r) => (r.size === undefined ? [r.path.virtual] : [])),
       ),
+    undefined,
+    undefined,
+    () => stamped,
   )
   merged.stderr = new Uint8Array([...out.stderr, ...(await materialize(merged.stderr))])
   merged.exitCode = Math.max(out.exitCode, ...done.map(({ io }) => io.exitCode))
