@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 
 use super::builtin::{self, Cfunc, Fault};
 use super::check;
+use super::link::{self, Body, Dep, Linked, Unit};
 use super::syntax::{self, Ast, BinOp, Def, Parsed, Pattern, PatternKey, Update};
 use super::value::{Object, Value};
 use super::vm::{Bytecode, ClosureRef, Limits, Op, Program, Target, Var};
@@ -175,30 +176,43 @@ fn builtin_globals() -> [(&'static str, Value); 3] {
     ]
 }
 
-/// jq's linker reads a program's imports last first and stops at the
-/// first it cannot load. mirage's jq has no `-L` and reads no files, so
-/// no module is ever found: an import refuses the program with jq's
-/// report unless its metadata marks it optional, which lets jq go on
-/// without the module.
-/// Compile `source` against jq's builtin library. `globals` are the
-/// `$name` bindings jq's command line makes (`--arg`, `--argjson`,
-/// `$ARGS`, `$ENV`); the ones jq's main binds by itself default. A
-/// program jq refuses is refused with jq's report.
+/// Compile `source` with no linker's answer in hand: an import finds no
+/// module.
+#[cfg(test)]
 pub(crate) fn compile(source: &str, globals: &HashMap<String, Value>) -> Result<Program, String> {
+    compile_linked(source, globals, None)
+}
+
+/// Compile `source` against jq's builtin library and what the linker found
+/// for its imports. `globals` are the `$name` bindings jq's command line
+/// makes (`--arg`, `--argjson`, `$ARGS`, `$ENV`); the ones jq's main binds
+/// by itself default. A program jq refuses is refused with jq's report.
+/// Without a linker's answer no module is found: an import refuses the
+/// program with jq's report unless its metadata marks it optional.
+pub(crate) fn compile_linked(
+    source: &str,
+    globals: &HashMap<String, Value>,
+    linked: Option<&Linked>,
+) -> Result<Program, String> {
     let (ast, imports) = match syntax::parse(source) {
         Parsed::Program(ast, imports) => (ast, imports),
         Parsed::Invalid(messages) => return Err(syntax::report(&messages)),
     };
-    if let Some(import) = imports.iter().rev().find(|import| !import.optional) {
-        let message = builtin::module_error(&import.path);
-        return Err(syntax::report(&[format!("jq: error: {message}\n")]));
+    if linked.is_none() {
+        if let Some(import) = imports.iter().rev().find(|import| !import.optional) {
+            let message = builtin::module_error(&import.path);
+            return Err(syntax::report(&[format!("jq: error: {message}\n")]));
+        }
     }
+    let no_modules = Linked::default();
+    let linked = linked.unwrap_or(&no_modules);
+    let units = link::units(linked)?;
     let mut globals = globals.clone();
     for (name, value) in builtin_globals() {
         globals.entry(name.to_string()).or_insert(value);
     }
-    let referenced =
-        check::check(&ast, &globals, source).map_err(|errors| syntax::report(&errors))?;
+    let referenced = check::check(&ast, &globals, source, &units, &linked.deps)
+        .map_err(|errors| syntax::report(&errors))?;
     let mut compiler = Compiler {
         bcs: vec![Builder::default()],
         globals: &globals,
@@ -211,10 +225,18 @@ pub(crate) fn compile(source: &str, globals: &HashMap<String, Value>) -> Result<
         envs: Vec::new(),
         saved: Vec::new(),
     };
-    compiler.seq(0, vec![Step::Code(Node::Ast(&ast), None)]);
+    let main = compiler.link_units(&units, &linked.deps);
+    compiler.seq(0, vec![Step::Code(Node::Ast(&ast), main)]);
     compiler.run();
     compiler.emit(0, Op::Ret);
     Ok(compiler.finish())
+}
+
+/// A compiled module function a file's imports can bind.
+struct Export {
+    name: String,
+    arity: usize,
+    target: Target,
 }
 
 fn constant(ast: &Ast) -> Option<Value> {
@@ -1006,6 +1028,73 @@ impl<'a> Compiler<'a> {
             fbc,
             vec![Step::Code(Node::Ast(&def.body), inner), Step::Emit(Op::Ret)],
         );
+    }
+
+    /// Every module definition something calls, a subfunction of the top
+    /// level with the scope its file gives it, as jq joins its libraries
+    /// ahead of the program. Answers the scope the program's imports open.
+    /// The names one file's imports bind, a later import over an earlier
+    /// one. A data import is a variable of the top level, set before the
+    /// program starts, one to an import: `$$$$` empties it as it does any
+    /// other, for `$d` and `$d::d` alike.
+    fn imports_env(&mut self, units: &[Unit], exports: &[Vec<Export>], deps: &[Dep]) -> Env {
+        let mut env = None;
+        for dep in deps {
+            if let (Body::Data(value), Some(alias)) = (&units[dep.module].body, &dep.alias) {
+                let index = self.local(0);
+                self.emit(0, Op::Dup);
+                self.emit(0, Op::LoadK(value.clone()));
+                self.emit(0, Op::StoreV(Var { level: 0, index }));
+                for name in [format!("{alias}::{alias}"), alias.clone()] {
+                    env = with(&env, Bind::Var { name, bc: 0, index });
+                }
+            }
+            for export in &exports[dep.module] {
+                let name = match &dep.alias {
+                    Some(alias) => format!("{alias}::{}", export.name),
+                    None => export.name.clone(),
+                };
+                env = with(
+                    &env,
+                    Bind::Func {
+                        name,
+                        arity: export.arity,
+                        bc: 0,
+                        target: export.target,
+                    },
+                );
+            }
+        }
+        env
+    }
+
+    fn link_units(&mut self, units: &'a [Unit<'a>], deps: &[Dep]) -> Env {
+        let mut exports: Vec<Vec<Export>> = Vec::with_capacity(units.len());
+        for unit in units {
+            let mut out = Vec::new();
+            if let Body::Code(defs) = &unit.body {
+                let mut env = self.imports_env(units, &exports, unit.deps);
+                for def in defs {
+                    if !self.referenced.contains(&check::id(def)) {
+                        continue;
+                    }
+                    env = self.define(0, def, &env);
+                    if let Some(Scope {
+                        bind: Bind::Func { target, .. },
+                        ..
+                    }) = env.as_deref()
+                    {
+                        out.push(Export {
+                            name: def.name.clone(),
+                            arity: def.params.len(),
+                            target: *target,
+                        });
+                    }
+                }
+            }
+            exports.push(out);
+        }
+        self.imports_env(units, &exports, deps)
     }
 
     fn define(&mut self, bc: usize, def: &'a Def, env: &Env) -> Env {

@@ -333,6 +333,10 @@ describe('walkers and subtree readers', () => {
     [['rg', '--one-file-system', 'x', '/data'], true],
     [['find', '/data'], true],
     [['ls', '-l', '/data'], false],
+    [['gzip', '-r', '/data'], true],
+    [['gunzip', '-r', '/data'], true],
+    [['zcat', '-r', '/data'], true],
+    [['gzip', '/data/a'], false],
   ] as const)('reads %j as reading below: %s', (words, reads) => {
     expect(lineFacts(words[0], words, '/').readsSubtree).toBe(reads)
   })

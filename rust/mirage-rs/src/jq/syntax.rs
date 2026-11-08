@@ -138,6 +138,8 @@ const FIELD_NAME: &str = "try .[\"field\"] instead of .field for unusually named
 const UNTERMINATED_IF: &str = "Possibly unterminated 'if' statement";
 const UNTERMINATED_TRY: &str = "Possibly unterminated 'try' statement";
 const PARENS: &str = "May need parentheses around object key expression";
+/// What jq's reports and `$__loc__` call a program's own text.
+const TOP_LEVEL: &str = "<top-level>";
 
 #[derive(Clone, Copy)]
 enum Act {
@@ -147,6 +149,7 @@ enum Act {
     Module,
     ImportMeta,
     ImportFrom,
+    ImportAs(bool),
     Empty,
     One,
     Append,
@@ -275,11 +278,11 @@ const RULES: &[(&str, Act)] = &[
     ("Import: ImportWhat Query ';'", Act::ImportMeta),
     (
         "ImportWhat: \"import\" ImportFrom \"as\" BINDING",
-        Act::Nothing,
+        Act::ImportAs(true),
     ),
     (
         "ImportWhat: \"import\" ImportFrom \"as\" IDENT",
-        Act::Nothing,
+        Act::ImportAs(false),
     ),
     ("ImportWhat: \"include\" ImportFrom", Act::Nothing),
     ("ImportFrom: String", Act::ImportFrom),
@@ -709,12 +712,18 @@ impl Drop for Pattern {
     }
 }
 
-/// An `import` or `include` directive: the module path it names, and
-/// whether its metadata marks it optional, which lets jq go on without
-/// the module.
+/// An `import` or `include` directive: the module path it names, the name
+/// `as` gives it (none for `include`), whether that name is a `$` data
+/// binding, and what its metadata says: `optional` lets jq go on without
+/// the module, `raw` binds a data file's text, and `search` says where to
+/// look.
 pub(crate) struct Import {
     pub(crate) path: String,
     pub(crate) optional: bool,
+    pub(crate) alias: Option<String>,
+    pub(crate) data: bool,
+    pub(crate) raw: bool,
+    pub(crate) search: Option<Value>,
 }
 
 /// What jq's parser makes of a program.
@@ -737,6 +746,34 @@ pub(crate) fn parse(source: &str) -> Parsed {
         _ => Parsed::Invalid(vec![
             "jq: error: Top-level program not given (try \".\")".into(),
         ]),
+    }
+}
+
+/// Parse a module's file, as jq_parse_library does: its definitions and
+/// its imports, or each message jq reports for it. `main_message` is what
+/// jq says of a file that holds a main expression.
+pub(crate) fn parse_library(
+    source: &str,
+    file: &str,
+    main_message: &str,
+) -> Result<(Vec<Def>, Vec<Import>), Vec<String>> {
+    let mut parser = Parser::new(source);
+    parser.file = file;
+    let top = parser.run();
+    if !parser.errors.is_empty() {
+        return Err(parser.errors);
+    }
+    match top {
+        Some(Sem::List(defs)) => Ok((
+            defs.into_iter()
+                .filter_map(|d| match d {
+                    Sem::Def(def) => Some(def),
+                    _ => None,
+                })
+                .collect(),
+            parser.imports,
+        )),
+        _ => Err(vec![main_message.to_owned()]),
     }
 }
 
@@ -768,7 +805,7 @@ pub(crate) fn report(messages: &[String]) -> String {
 
 /// locfile_locate: `jq: error: message`, where in the program, the line it
 /// starts on, and a caret under the span as far as that line goes.
-pub(crate) fn locate(source: &str, loc: Loc, message: &str) -> String {
+pub(crate) fn locate(source: &str, file: &str, loc: Loc, message: &str) -> String {
     let src = source.as_bytes();
     let start = loc.start.min(src.len().saturating_sub(1));
     let offset = src[..start]
@@ -782,7 +819,7 @@ pub(crate) fn locate(source: &str, loc: Loc, message: &str) -> String {
         .map_or(src.len(), |at| start + at);
     let end = loc.end.min(line_end.max(start + 1)).max(start);
     format!(
-        "jq: error: {message} at <top-level>, line {line}, column {}:\n    {}\n    {}{}",
+        "jq: error: {message} at {file}, line {line}, column {}:\n    {}\n    {}{}",
         start - offset + 1,
         String::from_utf8_lossy(&src[offset..line_end]),
         " ".repeat(start - offset),
@@ -1218,6 +1255,8 @@ fn boxed(sem: Sem) -> Box<Ast> {
 
 struct Parser<'a> {
     source: &'a str,
+    /// The name jq's reports and `$__loc__` give the text.
+    file: &'a str,
     lexer: Lexer<'a>,
     errors: Vec<String>,
     imports: Vec<Import>,
@@ -1227,6 +1266,7 @@ impl<'a> Parser<'a> {
     fn new(source: &'a str) -> Self {
         Self {
             source,
+            file: TOP_LEVEL,
             lexer: Lexer {
                 src: source.as_bytes(),
                 at: 0,
@@ -1240,7 +1280,7 @@ impl<'a> Parser<'a> {
     }
 
     fn fail(&mut self, loc: Loc, message: &str) {
-        let text = locate(self.source, loc, message);
+        let text = locate(self.source, self.file, loc, message);
         self.errors.push(text);
     }
 
@@ -1437,14 +1477,20 @@ impl<'a> Parser<'a> {
             Act::ImportMeta => {
                 let meta = take(1).ast();
                 let meta = self.metadata(&meta, locs[1]);
-                let optional = match &meta {
-                    Some(Value::Object(fields)) => {
-                        matches!(fields.get("optional"), Some(Value::True))
-                    }
-                    _ => false,
-                };
+                if let (Some(Value::Object(fields)), Some(import)) =
+                    (&meta, self.imports.last_mut())
+                {
+                    import.optional = matches!(fields.get("optional"), Some(Value::True));
+                    import.raw = matches!(fields.get("raw"), Some(Value::True));
+                    import.search = fields.get("search").cloned();
+                }
+                return Sem::None;
+            }
+            Act::ImportAs(data) => {
+                let alias = take(3).text();
                 if let Some(import) = self.imports.last_mut() {
-                    import.optional = optional;
+                    import.alias = Some(alias);
+                    import.data = data;
                 }
                 return Sem::None;
             }
@@ -1453,6 +1499,10 @@ impl<'a> Parser<'a> {
                     Ast::Literal(Value::String(path)) => self.imports.push(Import {
                         path: path.to_string(),
                         optional: false,
+                        alias: None,
+                        data: false,
+                        raw: false,
+                        search: None,
                     }),
                     Ast::Literal(_) => {}
                     _ => self.fail(locs[0], "Import path must be constant"),
@@ -1618,7 +1668,7 @@ impl<'a> Parser<'a> {
             Act::Try => Ast::Try(boxed(take(1)), None),
             Act::LoadVn => Ast::LoadVn(take(3).text(), all),
             Act::Var => Ast::Var(take(0).text(), all),
-            Act::Loc => loc_object(self.source, all),
+            Act::Loc => loc_object(self.source, self.file, all),
             Act::Ident => {
                 let name = take(0).text();
                 match name.as_str() {
@@ -1689,7 +1739,7 @@ impl<'a> Parser<'a> {
             Act::PairLoc => {
                 return Sem::Pair(
                     literal_string("__loc__".into()),
-                    loc_object(self.source, all),
+                    loc_object(self.source, self.file, all),
                 );
             }
             Act::PairExpr => {
@@ -1709,7 +1759,7 @@ fn literal_string(text: String) -> Ast {
     Ast::Literal(Value::string(text))
 }
 
-fn loc_object(source: &str, loc: Loc) -> Ast {
+fn loc_object(source: &str, file: &str, loc: Loc) -> Ast {
     let start = loc.start.min(source.len());
     let line = source.as_bytes()[..start]
         .iter()
@@ -1717,7 +1767,7 @@ fn loc_object(source: &str, loc: Loc) -> Ast {
         .count()
         + 1;
     let mut object = Object::default();
-    object.insert("file".into(), Value::string("<top-level>"));
+    object.insert("file".into(), Value::string(file));
     object.insert("line".into(), Value::number(line as f64));
     Ast::Literal(Value::object(object))
 }

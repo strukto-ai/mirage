@@ -125,8 +125,9 @@ _S3 = [
     ("write", C),
 ]
 
-# ssh records cat's read; gzip's and split's are served from cache, and cp,
-# mv, rm, rmdir and rm -r record nothing.
+# ssh records cat's read; gzip's is served from cache, the date gzip and
+# gunzip restore on an output drops its cached copy, so the reads after them
+# reach the server again, and cp, mv, rm, rmdir and rm -r record nothing.
 _SSH = [
     ("write", K),
     ("append", K),
@@ -136,7 +137,7 @@ _SSH = [
     ("truncate", NEW),
     ("read", K),
     ("write", DF),
-    *_WARM_OUT,
+    *_GENERIC_OUT[1:],
     ("create", C),
     ("append", C),
 ]

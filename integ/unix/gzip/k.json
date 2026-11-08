@@ -28,11 +28,11 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/pgz && printf 'roundtrip\\n' > /data/pgz/k.txt && gzip -k /data/pgz/k.txt && test -f /data/pgz/k.txt && echo kept && zcat /data/pgz/k.txt.gz",
+      "command": "mkdir -p /data/pgz && printf 'roundtrip\\n' > /data/pgz/k.txt && gzip -k /data/pgz/k.txt && test -f /data/pgz/k.txt && echo kept && zcat /data/pgz/k.txt.gz && gzip -l /data/pgz/k.txt.gz && gzip -tv /data/pgz/k.txt.gz; printf 'x\\n' > /data/pgz/old && touch -d 1970-01-01T00:00:00Z /data/pgz/old && gzip -k /data/pgz/old; echo \"rc=$?\"; od -A n -j 4 -N 4 -t x1 /data/pgz/old.gz; gzip -q -f /data/pgz/old; echo \"rc=$?\"; rm -f /data/pgz/old.gz; mkdir -p /data/pgz/r && printf 'k\\n' > /data/pgz/r/a && printf 's\\n' > /data/pgz/sec && chmod 600 /data/pgz/sec && ln -s ../sec /data/pgz/r/l && gzip -rf /data/pgz/r; stat -c '%a' /data/pgz/r/l.gz; rm -f /data/pgz/r/a.gz /data/pgz/r/l.gz /data/pgz/sec; printf 'plain\\n' > /data/pgz/orig && touch -d 2001-02-03T04:05:06Z /data/pgz/orig && gzip -N -c /data/pgz/orig > /data/pgz/j.gz && printf 'junkjunk' >> /data/pgz/j.gz && rm /data/pgz/orig; gunzip -N /data/pgz/j.gz; echo \"rc=$?\"; cat /data/pgz/orig; rm -f /data/pgz/orig",
       "expect": {
         "exit": 0,
-        "stdout": "kept\nroundtrip\n",
-        "stderr": ""
+        "stdout": "kept\nroundtrip\n         compressed        uncompressed  ratio uncompressed_name\n                 36                  10 -20.0% /data/pgz/k.txt\nrc=2\n 00 00 00 00\nrc=2\n600\nrc=2\nplain\n",
+        "stderr": "/data/pgz/k.txt.gz:\t OK\ngzip: /data/pgz/old: warning: file timestamp out of range for gzip format\n\ngzip: /data/pgz/j.gz: decompression OK, trailing garbage ignored\n"
       },
       "flags": [
         "k"

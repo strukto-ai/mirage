@@ -28,10 +28,10 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/qdiff && printf 'a b\\n' > /data/qdiff/w1 && printf 'a   b\\n' > /data/qdiff/w2 && diff -w /data/qdiff/w1 /data/qdiff/w2; echo rc=$?",
+      "command": "mkdir -p /data/qdiff && printf 'a b\\n' > /data/qdiff/w1 && printf 'a   b\\n' > /data/qdiff/w2 && diff -w /data/qdiff/w1 /data/qdiff/w2; echo rc=$?; printf 'a\\tb\\n' > /data/qdiff/e1; printf 'a       b\\n' > /data/qdiff/e2; diff -E /data/qdiff/e1 /data/qdiff/e2; echo rc=$?; printf 'a  \\nb\\n' > /data/qdiff/z1; printf 'a\\nb \\t\\n' > /data/qdiff/z2; diff -Z /data/qdiff/z1 /data/qdiff/z2; echo rc=$?; printf 'a\\n\\nb\\nc\\n' > /data/qdiff/b1; printf 'a\\nb\\nc\\n\\n' > /data/qdiff/b2; diff -B /data/qdiff/b1 /data/qdiff/b2; echo rc=$?; printf 'a\\r\\nb\\r\\n' > /data/qdiff/c1; printf 'a\\nB\\n' > /data/qdiff/c2; diff --strip-trailing-cr /data/qdiff/c1 /data/qdiff/c2; echo rc=$?; printf 'x 1\\nkeep\\nx 2\\n' > /data/qdiff/i1; printf 'x 9\\nkeep\\nx 8\\nnew\\n' > /data/qdiff/i2; diff -I '^x' /data/qdiff/i1 /data/qdiff/i2; echo rc=$?; diff -q -I '^x' -I '^new' /data/qdiff/i1 /data/qdiff/i2; echo rc=$?; rm /data/qdiff/e1 /data/qdiff/e2 /data/qdiff/z1 /data/qdiff/z2 /data/qdiff/b1 /data/qdiff/b2 /data/qdiff/c1 /data/qdiff/c2 /data/qdiff/i1 /data/qdiff/i2",
       "expect": {
         "exit": 0,
-        "stdout": "rc=0\n",
+        "stdout": "rc=0\nrc=0\nrc=0\nrc=0\n2c2\n< b\n---\n> B\nrc=1\n3c3,4\n< x 2\n---\n> x 8\n> new\nrc=1\nrc=0\n",
         "stderr": ""
       },
       "flags": [

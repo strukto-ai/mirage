@@ -12,7 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Mapping
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Callable,
+    Iterator,
+    Mapping,
+)
 from contextlib import aclosing
 
 from pydantic import BaseModel, ConfigDict
@@ -92,6 +98,30 @@ class GzipFailure(BaseModel):
     first_header: bool
 
 
+class GzipFacts(BaseModel):
+    """What ``gzip -l`` and ``-v`` read off an input besides its data.
+
+    Attributes:
+        name (str | None): the first member's stored name, None when it
+            stores none.
+        mtime (int): the first member's stored time, 0 for none.
+        header (int): the bytes the first member's header and trailer
+            take, none once a second member follows, as the reference
+            counts them.
+        compressed (int): the bytes read.
+        crc (int): the CRC the input's last eight bytes claim.
+        size (int): the length, modulo 2**32, they claim.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+    name: str | None = None
+    mtime: int = 0
+    header: int = 0
+    compressed: int = 0
+    crc: int = 0
+    size: int = 0
+
+
 def _failure(stream: OpenStream) -> GzipDataError | None:
     if not stream.status():
         return None
@@ -105,16 +135,47 @@ def _failure(stream: OpenStream) -> GzipDataError | None:
     )
 
 
-def _output(stream: OpenStream, data: bytes) -> Iterator[bytes]:
+def _facts(
+    stream: OpenStream, on_facts: Callable[[GzipFacts], None] | None
+) -> None:
+    if on_facts is not None:
+        on_facts(GzipFacts.model_validate_json(stream.metadata()))
+
+
+def _raised(
+    stream: OpenStream,
+    failure: GzipDataError,
+    on_facts: Callable[[GzipFacts], None] | None,
+) -> GzipDataError:
+    """``failure``, the facts told first when the output is kept, since
+    gunzip -N still names and dates it from the header.
+
+    Args:
+        stream (OpenStream): the decoder.
+        failure (GzipDataError): what it reported.
+        on_facts (Callable | None): hears the input's facts.
+    """
+    if failure.keeps_output:
+        _facts(stream, on_facts)
+    return failure
+
+
+def _output(
+    stream: OpenStream,
+    data: bytes,
+    on_facts: Callable[[GzipFacts], None] | None,
+) -> Iterator[bytes]:
     failure = _failure(stream)
     if data:
         yield data
     if failure is not None:
-        raise failure
+        raise _raised(stream, failure, on_facts)
 
 
 async def _codec_stream(
-    source: AsyncIterator[bytes], config: Mapping[str, JsonValue]
+    source: AsyncIterator[bytes],
+    config: Mapping[str, JsonValue],
+    on_facts: Callable[[GzipFacts], None] | None = None,
 ) -> AsyncGenerator[bytes, None]:
     stream = open_stream("compress", config)
 
@@ -127,10 +188,11 @@ async def _codec_stream(
             stream_output_chunks(stream, input_chunks(), owns_stream=False)
         ) as parts:
             async for data in parts:
-                for part in _output(stream, data):
+                for part in _output(stream, data, on_facts):
                     yield part
         if failure := _failure(stream):
-            raise failure
+            raise _raised(stream, failure, on_facts)
+        _facts(stream, on_facts)
     except StreamRefusal as exc:
         if exc.output:
             yield exc.output
@@ -141,7 +203,7 @@ async def _codec_stream(
 
 
 async def gzip_compress_stream(
-    source: AsyncIterator[bytes], level: int, name: str = ""
+    source: AsyncIterator[bytes], level: int, name: str = "", mtime: int = 0
 ) -> AsyncIterator[bytes]:
     """Encode a gzip stream, preserving source ownership in the host.
 
@@ -149,6 +211,7 @@ async def gzip_compress_stream(
         source (AsyncIterator[bytes]): uncompressed chunks.
         level (int): compression level.
         name (str): original basename.
+        mtime (int): the time stored in the header, 0 for none.
     """
     result = _codec_stream(
         source,
@@ -157,6 +220,7 @@ async def gzip_compress_stream(
             "format": "gzip",
             "level": level,
             "name": name,
+            "mtime": mtime,
         },
     )
     async with aclosing(result):
@@ -165,7 +229,10 @@ async def gzip_compress_stream(
 
 
 async def gunzip_stream(
-    source: AsyncIterator[bytes], test: bool = False, passthrough: bool = False
+    source: AsyncIterator[bytes],
+    test: bool = False,
+    passthrough: bool = False,
+    on_facts: Callable[[GzipFacts], None] | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Decode concatenated members and close the source before reporting failure.
 
@@ -173,6 +240,8 @@ async def gunzip_stream(
         source (AsyncIterator[bytes]): compressed chunks.
         test (bool): whether trailer failures only skip the input.
         passthrough (bool): whether non-gzip boundary bytes are copied.
+        on_facts (Callable | None): called with the input's facts once
+            it decodes whole.
     """
     result = _codec_stream(
         source,
@@ -182,7 +251,30 @@ async def gunzip_stream(
             "test": test,
             "passthrough": passthrough,
         },
+        on_facts,
     )
     async with aclosing(result):
         async for part in result:
             yield part
+
+
+async def read_gzip_facts(source: AsyncIterator[bytes]) -> GzipFacts:
+    """Read an input's facts the way ``gzip -l`` does: checked whole, as
+    ``-t`` checks it, with nothing written.
+
+    Args:
+        source (AsyncIterator[bytes]): compressed chunks.
+
+    Raises:
+        GzipDataError: the input does not open as gzip.
+    """
+    found: list[GzipFacts] = []
+    result = _codec_stream(
+        source,
+        {"operation": "decode", "format": "gzip", "list": True},
+        found.append,
+    )
+    async with aclosing(result):
+        async for _ in result:
+            pass
+    return found[0]

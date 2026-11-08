@@ -176,6 +176,7 @@ fn join_and_nul_output_imply_raw() {
     }
     let config = config(&[
         ("null_input", ""),
+        ("color_output", ""),
         ("monochrome_output", ""),
         ("unbuffered", ""),
     ]);
@@ -187,7 +188,24 @@ fn join_and_nul_output_imply_raw() {
         ),
         (&json!(true), &json!(false), &json!(false))
     );
+    assert!(config.get("color_output").is_none());
     assert!(config.get("monochrome_output").is_none());
+}
+
+#[test]
+fn library_paths_add_up_in_the_order_typed() {
+    let (plan, _) = walk(&[("library_path", "a"), ("", "."), ("library_path", "/b")]);
+    assert_eq!(plan.unwrap()["config"]["library_paths"], json!(["a", "/b"]));
+}
+
+#[test]
+fn a_library_path_with_no_value_is_refused_without_jqs_name() {
+    for word in ["-L", "--library-path"] {
+        let (plan, _) = walk(&[("?", word)]);
+        let want =
+            format!("-L takes a parameter: (e.g. -L /search/path or -L/search/path)\n{HINT}");
+        assert_eq!(plan.unwrap_err(), (want, 2), "{word}");
+    }
 }
 
 #[test]

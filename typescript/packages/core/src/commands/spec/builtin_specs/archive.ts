@@ -14,33 +14,34 @@
 import { CommandSpec, Argument } from '../types.ts'
 import { PATHS_OPERAND, PATH_OPERAND, TEXTS_OPERAND } from '../constants.ts'
 
+// gunzip is `gzip -d` and zcat `gzip -cd`, and each takes all of gzip's
+// options: -l lists, -t tests, -N restores and -n drops the stored name and
+// time, -r walks directories, and the digits are no-ops past gzip.
+const GZIP_ARGUMENTS = [
+  new Argument(['-c', '--stdout', '--to-stdout'], { action: 'store_true' }),
+  new Argument(['-d', '--decompress', '--uncompress'], { action: 'store_true' }),
+  new Argument(['-f', '--force'], { action: 'store_true' }),
+  new Argument(['-k', '--keep'], { action: 'store_true' }),
+  new Argument(['-l', '--list'], { action: 'store_true' }),
+  new Argument(['-n', '--no-name'], { action: 'store_true' }),
+  new Argument(['-N', '--name'], { action: 'store_true' }),
+  new Argument(['-q', '--quiet'], { action: 'store_true' }),
+  new Argument(['-r', '--recursive'], { action: 'store_true' }),
+  new Argument(['-S', '--suffix']),
+  new Argument(['-t', '--test'], { action: 'store_true' }),
+  new Argument(['-v', '--verbose'], { action: 'store_true' }),
+  new Argument(['-1', '--fast'], { action: 'store_true' }),
+  ...Array.from(
+    { length: 7 },
+    (_, i) => new Argument(`-${String(i + 2)}`, { action: 'store_true' }),
+  ),
+  new Argument(['-9', '--best'], { action: 'store_true' }),
+  PATHS_OPERAND,
+]
+
 export const SPECS: Record<string, CommandSpec> = {
-  gunzip: new CommandSpec({
-    arguments: [
-      new Argument('-k', { action: 'store_true' }),
-      new Argument('-f', { action: 'store_true' }),
-      new Argument('-c', { action: 'store_true' }),
-      new Argument('-t', { action: 'store_true' }),
-      new Argument('-q', { action: 'store_true' }),
-      new Argument('-S'),
-      PATHS_OPERAND,
-    ],
-  }),
-  gzip: new CommandSpec({
-    arguments: [
-      new Argument('-d', { action: 'store_true' }),
-      new Argument('-k', { action: 'store_true' }),
-      new Argument('-f', { action: 'store_true' }),
-      new Argument('-c', { action: 'store_true' }),
-      new Argument('-q', { action: 'store_true' }),
-      new Argument('-S'),
-      ...Array.from(
-        { length: 9 },
-        (_, i) => new Argument(`-${String(i + 1)}`, { action: 'store_true' }),
-      ),
-      PATHS_OPERAND,
-    ],
-  }),
+  gunzip: new CommandSpec({ arguments: GZIP_ARGUMENTS }),
+  gzip: new CommandSpec({ arguments: GZIP_ARGUMENTS }),
   tar: new CommandSpec({
     arguments: [
       new Argument(['-c', '--create'], { action: 'store_true' }),
@@ -83,16 +84,7 @@ export const SPECS: Record<string, CommandSpec> = {
       TEXTS_OPERAND,
     ],
   }),
-  // zcat is `gzip -cd`: -f copies input that is not gzip, -q drops the
-  // warnings, and -S names the suffix a missing name is retried with.
-  zcat: new CommandSpec({
-    arguments: [
-      new Argument('-f', { action: 'store_true' }),
-      new Argument('-q', { action: 'store_true' }),
-      new Argument('-S'),
-      PATHS_OPERAND,
-    ],
-  }),
+  zcat: new CommandSpec({ arguments: GZIP_ARGUMENTS }),
   zip: new CommandSpec({
     arguments: [
       new Argument('-r', { action: 'store_true' }),

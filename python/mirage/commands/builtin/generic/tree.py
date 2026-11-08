@@ -1,9 +1,16 @@
+import json
 import logging
 import posixpath
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
+from typing import Literal
 
+from mirage.commands.builtin.generic.ls import sort_by_version
+from mirage.commands.builtin.utils.formatting import (
+    ls_mode_string,
+    styled_time,
+)
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import vfs_readdir_path, vfs_stat_path
@@ -14,9 +21,10 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import MISS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import enoent
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused, scan
+from mirage.shell.bytes import encode_text
 from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
@@ -24,9 +32,12 @@ from mirage.types import (
     LineFacts,
     PathSpec,
     ReaddirFn,
+    ReadStreamFn,
     StatFn,
 )
+from mirage.utils.dates import iso_timestamp
 from mirage.utils.fnmatch import fnmatch
+from mirage.utils.stat_view import content_size, posix_mode
 from mirage.view.types import (
     LinkTargetStat,
     LinkView,
@@ -45,6 +56,48 @@ _VERTICAL = "|   "
 _INDENT = "    "
 
 UNOPENABLE_MARK = "  [error opening dir]"
+
+
+TreeSort = Literal["name", "version", "size", "mtime", "ctime", "none"]
+
+# The orders --sort names, and the one each shorthand asks for.
+_SORTS: tuple[TreeSort, ...] = (
+    "name",
+    "version",
+    "size",
+    "mtime",
+    "ctime",
+    "none",
+)
+_SHORTHANDS: dict[str, TreeSort] = {"t": "mtime", "v": "version", "U": "none"}
+
+
+@dataclass(frozen=True, slots=True)
+class TreeFlags:
+    """tree's line, parsed: what the walk draws, in what order, and what
+    each line shows."""
+
+    max_depth: int | None = None
+    show_hidden: bool = False
+    ignore_pattern: str | None = None
+    dirs_only: bool = False
+    match_pattern: str | None = None
+    one_file_system: bool = False
+    full_path: bool = False
+    no_indent: bool = False
+    sizes: bool = False
+    dates: bool = False
+    perms: bool = False
+    classify: bool = False
+    sort: TreeSort = "name"
+    reverse: bool = False
+    dirs_first: bool = False
+    no_report: bool = False
+    du: bool = False
+    prune: bool = False
+    gitignore: bool = False
+    file_limit: int | None = None
+    json: bool = False
 
 
 async def _cross_readdir(
@@ -86,6 +139,31 @@ async def _cross_stat(stat_path: StatPath, path: PathSpec) -> FileStat:
     return stat
 
 
+async def _mount_row(
+    flags: TreeFlags, cross_stat: StatFn | None, spec: PathSpec
+) -> FileStat:
+    """A mount root's row. The mount table already says it is a directory,
+    and the backend serving it may not stat its own root (an empty mount,
+    or a prefix store with no marker object), so only -p and -D, which
+    print from the row, ask for the real one.
+
+    Args:
+        flags (TreeFlags): the options.
+        cross_stat (StatFn | None): stat through the dispatcher.
+        spec (PathSpec): the mount root.
+    """
+    name = posixpath.basename(spec.virtual.rstrip("/"))
+    row = FileStat(name=name, type=FileType.DIRECTORY)
+    if cross_stat is None or not (flags.perms or flags.dates):
+        return row
+    try:
+        found = await cross_stat(spec)
+    except WALK_ERRORS as exc:
+        logger.debug("tree: no row for mount %s: %s", spec.virtual, exc)
+        return row
+    return replace(found, name=name, type=FileType.DIRECTORY)
+
+
 def _child_mounts(mounts: MountView | None, directory: str) -> list[str]:
     """The mount roots mounted directly on this directory.
 
@@ -115,26 +193,202 @@ def _child_mounts(mounts: MountView | None, directory: str) -> list[str]:
     ]
 
 
+@dataclass(slots=True)
+class _TreeNode:
+    """One drawn entry: its row, what it counts as, and below it, for a
+    directory the walk opened, the entries drawn under it."""
+
+    spec: PathSpec
+    stat: FileStat
+    is_dir: bool
+    leads: FileStat | None = None
+    children: list["_TreeNode"] | None = None
+    note: str = ""
+    unopened: int = 0
+    du: int = 0
+    missing: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _Ignore:
+    """One .gitignore line: the pattern, where it was read, and whether it
+    re-includes, names only directories, or is anchored to its file's
+    directory."""
+
+    pattern: str
+    base: str
+    negated: bool
+    directory: bool
+    anchored: bool
+
+
+def _gitignore_lines(text: str, base: str) -> list[_Ignore]:
+    """A .gitignore's patterns, in order: blank lines and ``#`` comments
+    are skipped, trailing blanks dropped, ``!`` re-includes, a trailing
+    ``/`` names only a directory, and any other ``/`` anchors the pattern
+    to ``base``.
+
+    Args:
+        text (str): the file.
+        base (str): the virtual directory it was read in.
+    """
+    rules: list[_Ignore] = []
+    for raw in text.splitlines():
+        line = raw.rstrip(" ")
+        if not line or line.startswith("#"):
+            continue
+        negated = line.startswith("!")
+        if negated:
+            line = line[1:]
+        if line.startswith("\\"):
+            line = line[1:]
+        directory = line.endswith("/")
+        line = line.rstrip("/")
+        if not line:
+            continue
+        anchored = "/" in line
+        rules.append(
+            _Ignore(line.lstrip("/"), base, negated, directory, anchored)
+        )
+    return rules
+
+
+def _segments_match(parts: list[str], pattern: list[str]) -> bool:
+    """Whether a path fits a pattern, a ``**`` for any run of segments
+    and, last in the pattern, at least one.
+
+    Only the latest ``**`` is ever retried, since it can take whatever
+    an earlier one would have, so the work stays the path's length times
+    the pattern's, however many ``**`` a ``.gitignore`` writes.
+
+    Args:
+        parts (list[str]): the path's segments.
+        pattern (list[str]): the pattern's segments.
+    """
+    at = want = resume = 0
+    star = -1
+    while at < len(parts):
+        if want < len(pattern) and pattern[want] == "**":
+            star, resume = want, at
+            want += 1
+        elif want < len(pattern) and fnmatch(parts[at], pattern[want]):
+            at += 1
+            want += 1
+        elif star >= 0:
+            resume += 1
+            at, want = resume, star + 1
+        else:
+            return False
+    return want == len(pattern)
+
+
+def _ignored(rules: Sequence[_Ignore], virtual: str, is_dir: bool) -> bool:
+    """Whether the last .gitignore pattern that matches an entry leaves it
+    out.
+
+    Args:
+        rules (Sequence[_Ignore]): the patterns in force, outermost first.
+        virtual (str): the entry's virtual path.
+        is_dir (bool): whether it is a directory.
+    """
+    out = False
+    for rule in rules:
+        if rule.directory and not is_dir:
+            continue
+        relative = posixpath.relpath(virtual, rule.base)
+        if rule.anchored:
+            hit = _segments_match(relative.split("/"), rule.pattern.split("/"))
+        else:
+            hit = fnmatch(posixpath.basename(virtual), rule.pattern)
+        if hit:
+            out = not rule.negated
+    return out
+
+
+def _sorted(flags: TreeFlags, nodes: list[_TreeNode]) -> list[_TreeNode]:
+    """A directory's entries in the order ``--sort`` (``-t``, ``-v``,
+    ``-U``) asks for, reversed under ``-r``, directories first under
+    ``--dirsfirst``.
+
+    Args:
+        flags (TreeFlags): the options.
+        nodes (list[_TreeNode]): the entries, in listing order.
+    """
+
+    def key(node: _TreeNode) -> tuple[float | str, ...]:
+        name = node.stat.name
+        if flags.sort == "size":
+            return (-content_size(node.stat), name)
+        if flags.sort in ("mtime", "ctime"):
+            changed = node.stat.ctime if flags.sort == "ctime" else None
+            return (iso_timestamp(changed or node.stat.modified) or 0, name)
+        return (name,)
+
+    if flags.sort == "version":
+        order = [
+            nodes[i] for i in sort_by_version([n.stat.name for n in nodes])
+        ]
+    elif flags.sort == "none":
+        order = list(nodes)
+    else:
+        order = sorted(nodes, key=key)
+    if flags.reverse and flags.sort != "none":
+        order.reverse()
+    if flags.dirs_first:
+        order = [n for n in order if n.is_dir] + [
+            n for n in order if not n.is_dir
+        ]
+    return order
+
+
+async def _gitignore(
+    read: ReadStreamFn | None, directory: PathSpec, names: Sequence[str]
+) -> list[_Ignore]:
+    """The patterns a directory's own .gitignore adds, none when it has
+    none or it cannot be read.
+
+    Args:
+        read (ReadStreamFn | None): the mount's reader.
+        directory (PathSpec): the directory.
+        names (Sequence[str]): its listing.
+    """
+    if read is None or not any(
+        posixpath.basename(name) == ".gitignore" for name in names
+    ):
+        return []
+    virtual = f"{directory.virtual.rstrip('/')}/.gitignore"
+    path = PathSpec(
+        virtual=virtual,
+        directory=virtual,
+        resolved=False,
+        vfs_path=virtual.strip("/"),
+    )
+    try:
+        text = (await materialize(read(path))).decode(errors="replace")
+    except WALK_ERRORS as exc:
+        logger.debug("tree: cannot read %s: %s", path.virtual, exc)
+        return []
+    return _gitignore_lines(text, directory.virtual)
+
+
 async def _walk_tree(
     path: PathSpec,
     readdir: ReaddirFn,
     stat: StatFn,
+    flags: TreeFlags,
     *,
-    prefix: str,
     depth: int,
-    max_depth: int | None,
-    show_hidden: bool,
-    ignore_pattern: str | None,
-    dirs_only: bool,
-    match_pattern: str | None,
+    rules: Sequence[_Ignore] = (),
+    read: ReadStreamFn | None = None,
     mounts: MountView | None = None,
     cross_readdir: ReaddirFn | None = None,
     cross_stat: StatFn | None = None,
     target_stat: LinkTargetStat | None = None,
     budget: WalkBudget | None = None,
-) -> tuple[list[str], int, int, int]:
-    """One directory's lines, its counts, and how many directories in
-    its subtree (itself included) could not be opened.
+) -> tuple[list[_TreeNode] | None, str, int]:
+    """One directory's drawn entries, the note its own line carries, and
+    how many directories in its subtree (itself included) could not be
+    opened.
 
     A link is drawn as ``name -> target`` and never walked; one leading
     to a directory counts, and filters, as a directory, and one whose
@@ -142,14 +396,11 @@ async def _walk_tree(
     2.2.1).
 
     A directory the walk could not open (a rule refused it below the
-    operand) contributes no lines and counts itself, so the caller
-    marks its own line the way GNU does and the run exits 2. A
-    directory past ``budget`` is drawn but not opened.
+    operand) has no entries and counts itself, so the caller marks its
+    own line the way tree does and the run exits 2. A directory past
+    ``budget`` is drawn but not opened, and one holding more entries than
+    ``--filelimit`` is drawn with a note instead.
     """
-    lines: list[str] = []
-    dirs = 0
-    files = 0
-    unopened = 0
     # The mount table is read before the backend, not merged after it. A
     # directory that exists only because mounts sit under it (`/repos`
     # when `/repos/alpha` is mounted) has no backend to list it, so the
@@ -158,10 +409,8 @@ async def _walk_tree(
     child_mounts = _child_mounts(mounts, path.virtual)
     limit = None if budget is None else budget.listing_limit(path.virtual)
     try:
-        entries = sorted(
-            await (
-                readdir(path) if limit is None else readdir(path, limit=limit)
-            )
+        entries = await (
+            readdir(path) if limit is None else readdir(path, limit=limit)
         )
     except WALK_ERRORS as exc:
         # An absence only. A directory the backend refused (EACCES,
@@ -170,112 +419,240 @@ async def _walk_tree(
         # draw the children would report a readable tree that is not.
         if not (child_mounts and isinstance(exc, MISS_ERRORS)):
             logger.debug("tree: cannot open %s: %s", path.raw_path, exc)
-            return lines, dirs, files, 1
+            return None, UNOPENABLE_MARK, 1
         entries = []
     if child_mounts:
-        entries = sorted(set(entries) | set(child_mounts))
+        entries = [*entries, *(m for m in child_mounts if m not in entries)]
+    if flags.sort != "none":
+        entries = sorted(entries)
     if budget is not None:
         entries = [e for e in entries if budget.spend(path.virtual)]
+    if flags.gitignore:
+        rules = [*rules, *await _gitignore(read, path, entries)]
 
-    filtered: list[tuple[PathSpec, FileStat, bool, bool]] = []
+    kept: list[tuple[_TreeNode, bool]] = []
     for entry in entries:
         entry_spec = PathSpec(
             virtual=entry,
             directory=entry,
             resolved=False,
             vfs_path=entry.strip("/"),
+            raw_path=f"{path.raw_path.rstrip('/')}/{posixpath.basename(entry)}",
         )
         crossing = entry in child_mounts and cross_readdir is not None
         if crossing:
-            # The mount table already says this is a directory, and the
-            # backend serving it may not stat its own root (an empty
-            # mount, or a prefix store with no marker object).
-            s = FileStat(
-                name=posixpath.basename(entry.rstrip("/")),
-                type=FileType.DIRECTORY,
-            )
+            s = await _mount_row(flags, cross_stat, entry_spec)
         else:
             try:
                 s = await stat(entry_spec)
             except WALK_ERRORS as exc:
                 logger.debug("tree: cannot stat %s: %s", entry, exc)
                 continue
-        if not show_hidden and s.name.startswith("."):
+        if not flags.show_hidden and s.name.startswith("."):
             continue
-        if ignore_pattern and fnmatch(s.name, ignore_pattern):
+        if flags.ignore_pattern and fnmatch(s.name, flags.ignore_pattern):
             continue
         is_dir = s.type == FileType.DIRECTORY
+        leads: FileStat | None = None
         if s.type == FileType.SYMLINK and target_stat is not None:
             try:
                 leads = await target_stat(entry)
             except WALK_ERRORS as exc:
                 logger.debug("tree: cannot stat through %s: %s", entry, exc)
-                leads = None
             is_dir = leads is not None and leads.type == FileType.DIRECTORY
-        if dirs_only and not is_dir:
+        if flags.dirs_only and not is_dir:
             continue
         # -P spares only a real directory, a link to one included in its
         # test (tree 2.2.1).
         if (
-            match_pattern
+            flags.match_pattern
             and s.type != FileType.DIRECTORY
-            and not fnmatch(s.name, match_pattern)
+            and not fnmatch(s.name, flags.match_pattern)
         ):
             continue
-        filtered.append((entry_spec, s, crossing, is_dir))
-
-    for i, (entry_spec, s, crossing, is_dir) in enumerate(filtered):
-        is_last = i == len(filtered) - 1
-        connector = _LAST if is_last else _BRANCH
-        shown = s.name
-        if s.type == FileType.SYMLINK:
-            shown += f" -> {s.extra.get(LINK_TARGET_KEY, '')}"
-        lines.append(prefix + connector + shown)
-        if not is_dir:
-            files += 1
+        if rules and _ignored(rules, entry, is_dir):
             continue
-        dirs += 1
-        if s.type != FileType.DIRECTORY:
+        kept.append(
+            (
+                _TreeNode(entry_spec, s, is_dir, leads, du=content_size(s)),
+                crossing,
+            )
+        )
+    if flags.file_limit is not None and len(kept) > flags.file_limit:
+        return (
+            None,
+            f"  [{len(kept)} entries exceeds filelimit, not opening dir]",
+            0,
+        )
+    crossed = {id(node) for node, crossing in kept if crossing}
+    nodes: list[_TreeNode] = []
+    unopened = 0
+    for node in _sorted(flags, [node for node, _ in kept]):
+        nodes.append(node)
+        if node.stat.type != FileType.DIRECTORY:
             continue
-        if max_depth is not None and depth + 1 >= max_depth:
+        if flags.max_depth is not None and depth + 1 >= flags.max_depth:
             continue
-        if budget is not None and not budget.opens(entry_spec.virtual):
+        if budget is not None and not budget.opens(node.spec.virtual):
             continue
-        extension = _INDENT if is_last else _VERTICAL
         # Past a mount root the subtree belongs to another VFS, so
         # the rest of this branch reads through the dispatcher. Deeper
         # mounts under it need no second switch: the dispatcher already
         # routes every path to its owner.
+        crossing = id(node) in crossed
         sub_readdir = cross_readdir if crossing and cross_readdir else readdir
         sub_stat = cross_stat if crossing and cross_stat else stat
-        sub, sub_dirs, sub_files, sub_unopened = await _walk_tree(
-            entry_spec,
+        node.children, node.note, node.unopened = await _walk_tree(
+            node.spec,
             sub_readdir,
             sub_stat,
-            prefix=prefix + extension,
+            flags,
             depth=depth + 1,
-            max_depth=max_depth,
-            show_hidden=show_hidden,
-            ignore_pattern=ignore_pattern,
-            dirs_only=dirs_only,
-            match_pattern=match_pattern,
+            rules=rules,
+            read=read,
             mounts=mounts,
             cross_readdir=cross_readdir,
             cross_stat=cross_stat,
             target_stat=target_stat,
             budget=budget,
         )
-        if sub_unopened and not sub:
-            # The child itself could not be opened (one that opened but
-            # holds an unopenable grandchild lists at least that line):
-            # GNU marks it inline, on the directory's own line, and
-            # still counts it.
-            lines[-1] += UNOPENABLE_MARK
-        lines.extend(sub)
+        if node.children is not None:
+            node.du += sum(child.du for child in node.children)
+        unopened += node.unopened
+    if flags.prune and not flags.dirs_only:
+        nodes = [
+            n
+            for n in nodes
+            if n.stat.type != FileType.DIRECTORY or n.children or n.note
+        ]
+    return nodes, "", unopened
+
+
+def _counts(nodes: Sequence[_TreeNode]) -> tuple[int, int]:
+    dirs = files = 0
+    for node in nodes:
+        if not node.is_dir:
+            files += 1
+            continue
+        dirs += 1
+        sub_dirs, sub_files = _counts(node.children or ())
         dirs += sub_dirs
         files += sub_files
-        unopened += sub_unopened
-    return lines, dirs, files, unopened
+    return dirs, files
+
+
+def _classify(s: FileStat | None) -> str:
+    """The mark ``-F`` puts after a name: ``/`` a directory, ``*`` an
+    executable, ``|`` a FIFO, none for anything else or nothing at all.
+
+    Args:
+        s (FileStat | None): what the name is, or leads to.
+    """
+    if s is None:
+        return ""
+    if s.type == FileType.DIRECTORY:
+        return "/"
+    if s.type == FileType.FIFO:
+        return "|"
+    if s.type == FileType.FILE and posix_mode(s) & 0o111:
+        return "*"
+    return ""
+
+
+def _size(flags: TreeFlags, node: _TreeNode) -> int:
+    return node.du if flags.du else content_size(node.stat)
+
+
+def _meta(flags: TreeFlags, node: _TreeNode) -> str:
+    """The bracket ``-p``, ``-s`` (or ``--du``) and ``-D`` open a line with,
+    empty without them.
+
+    Args:
+        flags (TreeFlags): the options.
+        node (_TreeNode): the entry.
+    """
+    fields = []
+    if flags.perms:
+        fields.append(ls_mode_string(node.stat))
+    if flags.sizes or flags.du:
+        fields.append(f"{_size(flags, node):>11}")
+    if flags.dates:
+        fields.append(styled_time(node.stat.modified, "locale"))
+    return f"[{' '.join(fields)}]  " if fields else ""
+
+
+def _shown(flags: TreeFlags, node: _TreeNode, root: bool = False) -> str:
+    shown = node.spec.raw_path if flags.full_path or root else node.stat.name
+    if node.stat.type == FileType.SYMLINK:
+        target = node.stat.extra.get(LINK_TARGET_KEY, "")
+        tail = _classify(node.leads) if flags.classify else ""
+        return f"{shown} -> {target}{tail}"
+    return shown + (_classify(node.stat) if flags.classify else "")
+
+
+def _text_lines(
+    flags: TreeFlags, nodes: Sequence[_TreeNode], prefix: str
+) -> list[str]:
+    lines: list[str] = []
+    for i, node in enumerate(nodes):
+        last = i == len(nodes) - 1
+        lead = "" if flags.no_indent else prefix + (_LAST if last else _BRANCH)
+        lines.append(
+            lead + _meta(flags, node) + _shown(flags, node) + node.note
+        )
+        if node.children:
+            extension = _INDENT if last else _VERTICAL
+            lines.extend(_text_lines(flags, node.children, prefix + extension))
+    return lines
+
+
+_JSON_TYPES = {
+    FileType.DIRECTORY: "directory",
+    FileType.SYMLINK: "link",
+    FileType.FIFO: "fifo",
+}
+
+
+def _json_entry(
+    flags: TreeFlags, node: _TreeNode, level: int, root: bool = False
+) -> str:
+    """One entry as ``-J`` writes it: its fields on one line, a directory's
+    contents below it one level in, all on one line under ``-i``.
+
+    Args:
+        flags (TreeFlags): the options.
+        node (_TreeNode): the entry.
+        level (int): how deep it is, the operand at 1.
+    """
+    name = node.spec.raw_path if flags.full_path or root else node.stat.name
+    kind = _JSON_TYPES.get(node.stat.type, "file")
+    text = f'{{"type":"{kind}","name":{json.dumps(name, ensure_ascii=False)}'
+    if node.stat.type == FileType.SYMLINK:
+        target = node.stat.extra.get(LINK_TARGET_KEY, "")
+        text += f',"target":{json.dumps(target, ensure_ascii=False)}'
+    if flags.perms:
+        mode = posix_mode(node.stat) & 0o7777
+        text += f',"mode":"{mode:04o}","prot":"{ls_mode_string(node.stat)}"'
+    if flags.sizes or flags.du:
+        text += f',"size":{_size(flags, node)}'
+    if flags.dates:
+        text += f',"time":"{styled_time(node.stat.modified, "locale")}"'
+    if node.note:
+        error = node.note.strip().removeprefix("[").removesuffix("]")
+        newline, indent = ("", "") if flags.no_indent else ("\n", "  " * level)
+        return f'{text},"contents":[{{"error": "{error}"}}{newline}{indent}]}}'
+    if not node.children:
+        return text + "}"
+    if flags.no_indent:
+        inner = ",".join(
+            _json_entry(flags, child, level + 1) for child in node.children
+        )
+        return f'{text},"contents":[{inner}]}}'
+    pad = "  " * (level + 1)
+    inner = ",\n".join(
+        pad + _json_entry(flags, child, level + 1) for child in node.children
+    )
+    return f'{text},"contents":[\n{inner}\n{"  " * level}]}}'
 
 
 def _summary(dirs: int, files: int, dirs_only: bool) -> str:
@@ -286,23 +663,30 @@ def _summary(dirs: int, files: int, dirs_only: bool) -> str:
     return f"{dirs} {dir_word}, {files} {file_word}"
 
 
+def _json_report(flags: TreeFlags, dirs: int, files: int, du: int) -> str:
+    text = '{"type":"report"'
+    if flags.du:
+        text += f',"size":{du}'
+    text += f',"directories":{dirs}'
+    if not flags.dirs_only:
+        text += f',"files":{files}'
+    return text + "}"
+
+
 async def tree(
     paths: list[PathSpec],
     *,
     readdir: ReaddirFn,
     stat: StatFn,
-    max_depth: int | None = None,
-    show_hidden: bool = False,
-    ignore_pattern: str | None = None,
-    dirs_only: bool = False,
-    match_pattern: str | None = None,
+    flags: TreeFlags = TreeFlags(),
+    read: ReadStreamFn | None = None,
     stat_path: StatPath | None = None,
     readdir_path: ReaddirPath | None = None,
     mounts: MountView | None = None,
-    one_file_system: bool = False,
     links: LinkView | None = None,
 ) -> tuple[bytes, IOResult]:
-    """Render each operand's tree, GNU ``tree``'s drawing, under one summary.
+    """Render each operand's tree, tree's drawing or its ``-J`` JSON, under
+    one summary.
 
     Unlike find and du, tree's output is a single document: each root
     line and its drawing in operand order, then one count. Concatenating
@@ -316,17 +700,14 @@ async def tree(
         paths (list[PathSpec]): the operands to draw, in order.
         readdir (ReaddirFn): this mount's directory listing.
         stat (StatFn): this mount's stat.
-        max_depth (int | None): -L, deepest level to draw.
-        show_hidden (bool): -a.
-        ignore_pattern (str | None): -I.
-        dirs_only (bool): -d.
-        match_pattern (str | None): -P.
+        flags (TreeFlags): the options.
+        read (ReadStreamFn | None): this mount's reader, for the
+            .gitignore files ``--gitignore`` reads.
         stat_path (StatPath | None): dispatcher-backed stat, used for the
             operand itself and for entries past a mount boundary.
         readdir_path (ReaddirPath | None): dispatcher-backed readdir,
             which is how a subtree on another mount is read at all.
         mounts (MountView | None): where the mount boundaries are.
-        one_file_system (bool): -x, draw a mount point but nothing in it.
         links (LinkView | None): the namespace's symlink facts, which say
             what a drawn link leads to.
     """
@@ -335,18 +716,29 @@ async def tree(
         if readdir_path is not None
         else None
     )
-    if cross_readdir is not None and one_file_system:
+    if cross_readdir is not None and flags.one_file_system:
         cross_readdir = _not_crossed
     cross_stat = (
         partial(_cross_stat, stat_path) if stat_path is not None else None
     )
-    body: list[str] = []
+    roots: list[_TreeNode] = []
     stopped: list[str] = []
     total_dirs = 0
     total_files = 0
     failed = False
     for path in paths:
         root_label = path.raw_path or path.virtual
+        # -f names every entry from the operand, which drops the operand's
+        # trailing slashes first (tree 2.2.1).
+        if flags.full_path:
+            root_label = root_label.rstrip("/") or "/"
+        spec = PathSpec(
+            virtual=path.virtual,
+            directory=path.directory,
+            resolved=path.resolved,
+            vfs_path=path.vfs_path,
+            raw_path=root_label,
+        )
         # What the operand is decides its result, so it is resolved before
         # the walk rather than inferred from how a backend answered readdir
         # on it: an object store lists a file key as an empty prefix, lists
@@ -355,32 +747,35 @@ async def tree(
         # answer on, so a directory that exists only as its children still
         # reports as one and None means nothing is there.
         #
-        # GNU prints the same inline marker either way and nothing on
+        # tree prints the same inline marker either way and nothing on
         # stderr; what differs is the count and the status. A
         # non-directory exists, so it is counted and the exit stays 0; a
         # path that is not there is not counted and exits 2.
-        if stat_path is not None:
-            start = await stat_path(path)
-            if start is None:
-                body.append(root_label + UNOPENABLE_MARK)
-                failed = True
-                continue
-            if start.type != FileType.DIRECTORY:
-                body.append(root_label + UNOPENABLE_MARK)
-                total_files += 1
-                continue
+        start = await stat_path(path) if stat_path is not None else None
+        row = start or FileStat(
+            name=posixpath.basename(root_label), type=FileType.DIRECTORY
+        )
+        root = _TreeNode(spec, row, True, du=content_size(row))
+        roots.append(root)
+        if stat_path is not None and start is None:
+            root.note = UNOPENABLE_MARK
+            root.missing = True
+            root.du = 0
+            failed = True
+            continue
+        if start is not None and start.type != FileType.DIRECTORY:
+            root.is_dir = False
+            root.note = UNOPENABLE_MARK
+            total_files += 1
+            continue
         budget = WalkBudget(path, mounts)
-        lines, dirs, files, unopened = await _walk_tree(
-            path,
+        root.children, root.note, root.unopened = await _walk_tree(
+            spec,
             readdir,
             stat,
-            prefix="",
+            flags,
             depth=0,
-            max_depth=max_depth,
-            show_hidden=show_hidden,
-            ignore_pattern=ignore_pattern,
-            dirs_only=dirs_only,
-            match_pattern=match_pattern,
+            read=read,
             mounts=mounts,
             cross_readdir=cross_readdir,
             cross_stat=cross_stat,
@@ -388,30 +783,61 @@ async def tree(
             budget=budget,
         )
         stopped.extend(f"tree: {line}" for line in budget.stopped)
+        if root.children is not None:
+            root.du += sum(child.du for child in root.children)
         # With stat_path wired the two clear cases are already answered
         # above, so this covers a directory that exists but could not be
         # read (a permission error). A root that lists entries none of
         # which stat draws plainly and exits 0, as tree 2.2.1 does.
-        if unopened and not lines:
-            body.append(root_label + UNOPENABLE_MARK)
+        if root.unopened and root.children is None:
             failed = True
             continue
-        body.append(root_label)
-        body.extend(lines)
-        # GNU counts the root as a directory once it has any listed entry
-        # (an empty root reports 0).
-        if lines:
+        # tree counts the root as a directory once it has any listed
+        # entry (an empty root reports 0), or a note in place of them.
+        if root.children or root.note:
+            dirs, files = _counts(root.children or ())
             total_dirs += dirs + 1
             total_files += files
         # A directory below the root it could not open is marked inline
-        # and makes the run exit 2, as GNU does, with nothing on stderr.
-        failed = failed or unopened > 0
-    # A blank line and the one summary close the run (the file count is
-    # omitted under -d).
-    body += ["", _summary(total_dirs, total_files, dirs_only)]
+        # and makes the run exit 2, as tree does, with nothing on stderr.
+        failed = failed or root.unopened > 0
+    du = sum(root.du for root in roots)
+    if flags.json:
+        report = _json_report(flags, total_dirs, total_files, du)
+        if flags.no_indent:
+            entries = [_json_entry(flags, root, 1, True) for root in roots]
+            if not flags.no_report:
+                entries.append(report)
+            body = f"[{','.join(entries)}]\n"
+        else:
+            body = (
+                "[\n"
+                + ",\n".join(
+                    "  " + _json_entry(flags, root, 1, True) for root in roots
+                )
+                + ("\n,\n  " + report if not flags.no_report else "\n")
+                + "\n]\n"
+            )
+        out = encode_text(body)
+    else:
+        lines: list[str] = []
+        for root in roots:
+            shown = (
+                root.spec.raw_path
+                if root.missing
+                else _meta(flags, root) + _shown(flags, root, True)
+            )
+            lines.append(shown + root.note)
+            lines.extend(_text_lines(flags, root.children or (), ""))
+        if not flags.no_report:
+            summary = _summary(total_dirs, total_files, flags.dirs_only)
+            if flags.du:
+                summary = f" {du:>11} bytes used in {summary}"
+            lines += ["", summary]
+        out = format_records(lines)
     # A walk past walk_limit draws what it listed and says where it
     # stopped, exiting 2 as for a directory it could not open.
-    return format_records(body), IOResult(
+    return out, IOResult(
         exit_code=2 if failed or stopped else 0,
         stderr=format_records(stopped) if stopped else None,
     )
@@ -431,32 +857,43 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
 __all__ = ["facts", "tree"]
 
 
-@dataclass(frozen=True, slots=True)
-class TreeFlags:
-    max_depth: int | None = None
-    show_hidden: bool = False
-    ignore_pattern: str | None = None
-    dirs_only: bool = False
-    match_pattern: str | None = None
-    one_file_system: bool = False
-
-
 def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags | IOResult:
-    """tree's options, ``-L`` read by mirage-rs before any operand is
-    resolved.
+    """tree's options, ``-L`` and ``--filelimit`` read by mirage-rs before
+    any operand is resolved; ``-t``, ``-v``, ``-U`` and ``--sort`` each set
+    the order, the last one typed winning.
 
     Args:
         flags (Mapping[str, FlagValue]): the parsed flags.
 
     Returns:
-        TreeFlags | IOResult: the flags, or tree's refusal of a level.
+        TreeFlags | IOResult: the flags, or tree's refusal of a level or
+        an order.
     """
     fl = FlagView(flags, spec=SPECS["tree"])
     try:
-        level = scan("tree", fl.texts("L"))["L"]
+        values = scan("tree", [*fl.texts("L"), *fl.texts("filelimit")])
     except StreamRefusal as refusal:
         return refused(refusal)
+    level = values["L"]
+    limit = values["filelimit"]
     assert level is None or isinstance(level, int)
+    assert limit is None or isinstance(limit, int)
+    sort: TreeSort = "name"
+    for name, value in fl.occurrences("t", "v", "U", "sort"):
+        if name in _SHORTHANDS:
+            if value is True:
+                sort = _SHORTHANDS[name]
+            continue
+        typed = str(value)
+        if typed not in _SORTS:
+            return IOResult(
+                exit_code=1,
+                stdout=(",".join(_SORTS) + "\n").encode(),
+                stderr=(
+                    f"tree: Sort type '{typed}' not valid, should be one of: "
+                ).encode(),
+            )
+        sort = typed
     return TreeFlags(
         max_depth=level,
         show_hidden=fl.as_bool("a"),
@@ -464,6 +901,21 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags | IOResult:
         dirs_only=fl.as_bool("d"),
         match_pattern=fl.as_str("P"),
         one_file_system=fl.as_bool("x"),
+        full_path=fl.as_bool("f"),
+        no_indent=fl.as_bool("i"),
+        sizes=fl.as_bool("s"),
+        dates=fl.as_bool("D"),
+        perms=fl.as_bool("p"),
+        classify=fl.as_bool("F"),
+        sort=sort,
+        reverse=fl.as_bool("r"),
+        dirs_first=fl.as_bool("dirsfirst"),
+        no_report=fl.as_bool("noreport"),
+        du=fl.as_bool("du"),
+        prune=fl.as_bool("prune"),
+        gitignore=fl.as_bool("gitignore"),
+        file_limit=limit,
+        json=fl.as_bool("J"),
     )
 
 
@@ -475,6 +927,7 @@ async def tree_generic(
     readdir: ReaddirFn,
     stat: StatFn,
     unbounded: tuple[ReaddirFn, StatFn] | None = None,
+    read: ReadStreamFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run tree over resolved operands.
 
@@ -488,6 +941,8 @@ async def tree_generic(
         unbounded (tuple[ReaddirFn, StatFn] | None): the walk to take when
             no ``-L`` bounds it (one the mount answers whole), else
             ``readdir`` and ``stat``.
+        read (ReadStreamFn | None): the mount's reader, for
+            ``--gitignore``.
     """
     if unbounded is not None and parsed.max_depth is None:
         readdir, stat = unbounded
@@ -495,14 +950,10 @@ async def tree_generic(
         paths,
         readdir=readdir,
         stat=stat,
-        max_depth=parsed.max_depth,
-        show_hidden=parsed.show_hidden,
-        ignore_pattern=parsed.ignore_pattern,
-        dirs_only=parsed.dirs_only,
-        match_pattern=parsed.match_pattern,
+        flags=parsed,
+        read=read,
         stat_path=vfs_stat_path(ctx.vfs),
         readdir_path=vfs_readdir_path(ctx.vfs),
         mounts=mounts_of(ctx),
-        one_file_system=parsed.one_file_system,
         links=links_of(ctx),
     )

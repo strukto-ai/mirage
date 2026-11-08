@@ -15,7 +15,9 @@
 // Mirrors python/tests/commands/builtin/generic/test_diff.py.
 
 import { describe, expect, it } from 'vitest'
-import { diffGeneric, parseFlags, quoteHeaderName, switchWords } from './diff.ts'
+import { diffGeneric, parseFlags, quoteHeaderName, switchWords, type DiffFlags } from './diff.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { parseFlags as parseLineFlags } from '../../../workspace/executor/command/flags.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -376,4 +378,84 @@ describe('diff with many output chunks', () => {
       recursive ? 'diff a/sub/x b/sub/x\n' : '',
     )
   })
+})
+
+const HINT = "diff: Try 'diff --help' for more information.\n"
+
+function lineFlags(argv: string[]): DiffFlags | IOResult {
+  return parseFlags(parseLineFlags(argv, specOf('diff'), 'diff', '/').flagKwargs)
+}
+
+describe('parseFlags', () => {
+  it.each([
+    [['-c', '-u'], `diff: conflicting output style options\n${HINT}`],
+    [['-y', '-e'], `diff: conflicting output style options\n${HINT}`],
+    [['--label=a', '--label=b', '--label=c'], 'diff: too many file label options\n'],
+    [['--color=bogus'], `diff: invalid color 'bogus'\n${HINT}`],
+    [['-W', '0'], `diff: invalid width '0'\n${HINT}`],
+    [['-W', '40', '-W', '20'], 'diff: conflicting width options\n'],
+    [['-C', 'x'], `diff: invalid context length 'x'\n${HINT}`],
+    [['-I', '\\('], 'diff: \\(: Unmatched ( or \\(\n'],
+  ])('refuses %j as diffutils does', (argv, stderr) => {
+    const parsed = lineFlags(argv)
+    expect(parsed).toBeInstanceOf(IOResult)
+    const io = parsed as IOResult
+    expect([io.exitCode, new TextDecoder().decode(io.stderr as Uint8Array)]).toEqual([2, stderr])
+  })
+
+  it.each([
+    [[], 'normal', 3],
+    [['-p'], 'context', 3],
+    [['-F', '^a'], 'normal', 3],
+    [['-C', '1'], 'context', 1],
+    [['-n'], 'rcs', 3],
+    [['-y', '--color=always'], 'sides', 3],
+    [['--color=always', '--color'], 'normal', 3],
+    [['-U', '5', '--unified=2'], 'unified', 5],
+  ])('reads %j as one style and its context', (argv, mode, context) => {
+    const parsed = lineFlags(argv) as DiffFlags
+    expect([parsed.mode, parsed.context]).toEqual([mode, context])
+  })
+})
+
+it('heads every pair a recursive side by side shows', async () => {
+  const files: Record<string, string> = {
+    '/d/x/f': 'x\n',
+    '/d/y/f': 'y\n',
+    '/d/x/g': 'same\n',
+    '/d/y/g': 'same\n',
+  }
+  const dirs: Record<string, string[]> = { '/d/x': ['f', 'g'], '/d/y': ['f', 'g'] }
+  async function* read(p: PathSpec): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    yield ENC.encode(files[p.virtual] ?? '')
+  }
+  const readdirOf = (p: PathSpec): Promise<string[]> => Promise.resolve(dirs[p.virtual] ?? [])
+  const statOf = (p: PathSpec): Promise<FileStat> =>
+    Promise.resolve(
+      new FileStat({
+        name: p.virtual,
+        type: p.virtual in dirs ? FileType.DIRECTORY : FileType.FILE,
+      }),
+    )
+  const pair = [operand('x', '/d/x'), operand('y', '/d/y')]
+  for (const [argv, expected] of [
+    [['-r', '-y', '-W', '20'], 'diff x/f y/f\nx     |\ty\ndiff x/g y/g\nsame\tsame\n'],
+    [['-r', '-y', '-W', '20', '--suppress-common-lines'], 'diff x/f y/f\nx     |\ty\n'],
+    [
+      ['-r', '-u', '-s', '--label=A', '--label=B'],
+      'diff A B\n--- A\n+++ B\n@@ -1 +1 @@\n-x\n+y\nFiles A and B are identical\n',
+    ],
+  ] as const) {
+    const flags = lineFlags([...argv]) as DiffFlags
+    const [out, io] = await diffGeneric(
+      flags,
+      pair,
+      { flags: {}, stdin: null, cwd: operand('/', '/') },
+      read,
+      readdirOf,
+      statOf,
+    )
+    expect([new TextDecoder().decode(await materialize(out)), io.exitCode]).toEqual([expected, 1])
+  }
 })

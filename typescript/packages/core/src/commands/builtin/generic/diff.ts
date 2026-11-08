@@ -15,7 +15,7 @@
 import { chunks } from '../../../io/cooperative.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import { DiffPool } from '../../../rs/diff_pool.ts'
-import type { DiffComputer, PairResult } from '../../../rs/diff_types.ts'
+import type { DiffComputer, DiffMode, PairResult } from '../../../rs/diff_types.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import { refused } from '../../../rs/scan.ts'
@@ -45,7 +45,7 @@ import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { shellQuote } from '../../../utils/quote.ts'
-import { fullIsoTime } from '../utils/formatting.ts'
+import { contextTime, fullIsoTime } from '../utils/formatting.ts'
 import { UTC_ZONE, zoneFromEnv, type Zone } from '../../../utils/timezone.ts'
 import { linksOf, dispatchOf } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
@@ -54,12 +54,29 @@ import { systemDate } from '../../../utils/clock.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
+/** diff's line, parsed: one output style, what the comparison sets aside,
+ * and how lines are written; patterns and widths are spelled one character
+ * per byte, as the engine reads them. Mirrors Python's DiffFlags. */
 export interface DiffFlags {
+  readonly mode: DiffMode
   readonly ignoreCase: boolean
   readonly ignoreAllSpace: boolean
   readonly ignoreSpaceChange: boolean
-  readonly ed: boolean
-  readonly unified: boolean
+  readonly ignoreTabExpansion: boolean
+  readonly ignoreTrailingSpace: boolean
+  readonly stripTrailingCr: boolean
+  readonly ignoreBlankLines: boolean
+  readonly ignoreLines: readonly string[]
+  readonly functionLines: readonly string[]
+  readonly showCFunction: boolean
+  readonly expandTabs: boolean
+  readonly initialTab: boolean
+  readonly widths: readonly string[]
+  readonly suppressCommon: boolean
+  readonly leftColumn: boolean
+  readonly text: boolean
+  readonly labels: readonly string[]
+  readonly utf8: boolean
   readonly context: number
   readonly brief: boolean
   readonly recursive: boolean
@@ -73,14 +90,43 @@ export interface DiffFlags {
   readonly excludeFrom: readonly PathSpec[]
 }
 
-// The context -U and --unified give, read by the diff engine: each value as
-// typed, null for a bare --unified. Mirrors Python's `_unified_context`.
-function unifiedContext(typed: readonly (string | null)[]): number | IOResult {
-  if (typed.length === 0) return 3
+// Each output style and the options that ask for it.
+const STYLES: readonly (readonly [DiffMode, readonly string[]])[] = [
+  ['normal', ['normal']],
+  ['context', ['c', 'C', 'context']],
+  ['unified', ['u', 'U', 'unified']],
+  ['ed', ['ed']],
+  ['rcs', ['rcs']],
+  ['sides', ['side_by_side']],
+]
+const HINT = "diff: Try 'diff --help' for more information.\n"
+const WHEN: readonly string[] = ['always', 'never', 'auto']
+
+// Each value the options were typed with, in order, null for a bare long
+// one. Mirrors Python's `_typed`.
+function typed(fl: FlagView, ...names: string[]): (string | null)[] {
+  return fl
+    .occurrences(...names)
+    .filter(([, value]) => value !== false)
+    .map(([, value]) => (value === true ? null : String(value)))
+}
+
+// The context the context and unified options give, with every length,
+// width and pattern checked by the diff engine before any operand is read.
+// Mirrors Python's `_engine_checks`.
+function engineChecks(
+  lengths: readonly (string | null)[],
+  widths: readonly string[],
+  ignoreLines: readonly string[],
+  functionLines: readonly string[],
+): number | IOResult {
   let engine
   try {
     engine = openStreamSync('diff', {
-      unified: typed.map((text) => (text === null ? null : byteView(text))),
+      lengths: lengths.map((text) => (text === null ? null : byteView(text))),
+      widths: widths.map((text) => byteView(text)),
+      ignore_lines: ignoreLines.map((text) => byteView(text)),
+      function_lines: functionLines.map((text) => byteView(text)),
     })
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
@@ -95,23 +141,61 @@ function unifiedContext(typed: readonly (string | null)[]): number | IOResult {
 }
 
 /**
- * diff's options, -U refused by the diff engine before any operand: the
- * flags, or diff's refusal of a -U, exit 2. Mirrors Python's `parse_flags`.
+ * diff's options, the ones diffutils refuses before any operand refused
+ * here: two output styles, a third --label, an unknown --color, and a
+ * length, width or pattern the diff engine refuses (exit 2). A valid
+ * --color changes nothing: output is never colored. Mirrors Python's
+ * `parse_flags`.
  */
-export function parseFlags(bag: Record<string, FlagValue>): DiffFlags | IOResult {
+export function parseFlags(bag: Record<string, FlagValue>, utf8 = false): DiffFlags | IOResult {
   const fl = new FlagView(bag, specOf('diff'))
-  const typed = fl
-    .occurrences('U', 'unified')
-    .map(([, value]) => (value === true ? null : String(value)))
-  const context = unifiedContext(typed)
+  const styles = STYLES.filter(([, names]) =>
+    fl.occurrences(...names).some(([, value]) => value !== false),
+  ).map(([style]) => style)
+  if (styles.length > 1)
+    return new IOResult({
+      exitCode: 2,
+      stderr: ENC.encode(`diff: conflicting output style options\n${HINT}`),
+    })
+  const labels = fl.asList('label')
+  if (labels.length > 2)
+    return new IOResult({ exitCode: 2, stderr: ENC.encode('diff: too many file label options\n') })
+  for (const value of typed(fl, 'color')) {
+    if (value !== null && !WHEN.includes(value))
+      return new IOResult({
+        exitCode: 2,
+        stderr: ENC.encode(`diff: invalid color '${value}'\n${HINT}`),
+      })
+  }
+  const showCFunction = fl.asBool('show_c_function')
+  const mode: DiffMode = styles[0] ?? (showCFunction ? 'context' : 'normal')
+  const ignoreLines = fl.asList('ignore_matching_lines')
+  const functionLines = fl.asList('show_function_line')
+  const widths = typed(fl, 'width').filter((text): text is string => text !== null)
+  const lengths = typed(fl, 'C', 'context', 'U', 'unified')
+  const context = engineChecks(lengths, widths, ignoreLines, functionLines)
   if (context instanceof IOResult) return context
   const newFile = fl.asBool('new_file')
   return {
-    ignoreCase: fl.asBool('i'),
-    ignoreAllSpace: fl.asBool('w'),
-    ignoreSpaceChange: fl.asBool('b'),
-    ed: fl.asBool('e'),
-    unified: fl.asBool('u') || typed.length > 0,
+    mode,
+    ignoreCase: fl.asBool('ignore_case'),
+    ignoreAllSpace: fl.asBool('ignore_all_space'),
+    ignoreSpaceChange: fl.asBool('ignore_space_change'),
+    ignoreTabExpansion: fl.asBool('ignore_tab_expansion'),
+    ignoreTrailingSpace: fl.asBool('ignore_trailing_space'),
+    stripTrailingCr: fl.asBool('strip_trailing_cr'),
+    ignoreBlankLines: fl.asBool('ignore_blank_lines'),
+    ignoreLines: ignoreLines.map((text) => byteView(text)),
+    functionLines: functionLines.map((text) => byteView(text)),
+    showCFunction,
+    expandTabs: fl.asBool('expand_tabs'),
+    initialTab: fl.asBool('initial_tab'),
+    widths: widths.map((text) => byteView(text)),
+    suppressCommon: fl.asBool('suppress_common_lines'),
+    leftColumn: fl.asBool('left_column'),
+    text: fl.asBool('text'),
+    labels,
+    utf8,
     context,
     brief: fl.asBool('brief'),
     recursive: fl.asBool('recursive'),
@@ -183,17 +267,24 @@ export function quoteHeaderName(name: string): string {
   return `"${out}"`
 }
 
-// The time a unified header gives one side, as GNU diff prints it: the
-// modification time as `%Y-%m-%d %H:%M:%S.%N %z` in the zone `TZ` names, read
-// through the dispatcher as `stat` reads it, so a time `touch` keeps in the namespace shows; the
-// epoch for a side -N reads as absent; and the present moment for standard
-// input, as POSIX asks and diffutils does.
+// The time a unified or context header gives one side, as diffutils prints
+// it: the modification time as `%Y-%m-%d %H:%M:%S.%N %z` for a unified header
+// and `%a %b %e %T %Y` for a context one, in the zone `TZ` names, read
+// through the dispatcher as `stat` reads it, so a time `touch` keeps in the
+// namespace shows; the epoch for a side -N reads as absent; and the present
+// moment for standard input, as POSIX asks and diffutils does.
 async function headerTime(walk: Walk, path: PathSpec, absent: boolean): Promise<string> {
-  if (absent) return fullIsoTime(null, walk.zone)
-  if (isStdin(path)) return fullIsoTime(systemDate().toISOString(), walk.zone)
+  const layout = walk.flags.mode === 'context' ? contextTime : fullIsoTime
+  if (absent) return layout(null, walk.zone)
+  if (isStdin(path)) return layout(systemDate().toISOString(), walk.zone)
   const info =
     (walk.statPath !== null ? await walk.statPath(path) : null) ?? (await walk.stat(path))
-  return fullIsoTime(info.modified, walk.zone)
+  return layout(info.modified, walk.zone)
+}
+
+// A side's name, or the --label given for it. Mirrors Python's `_labelled`.
+function labelled(walk: Walk, path: PathSpec, side: number): string {
+  return walk.flags.labels[side] ?? path.rawPath
 }
 
 function childSpec(parent: PathSpec, name: string): PathSpec {
@@ -268,8 +359,8 @@ export function switchWords(argv: readonly string[]): string[] {
   return words
 }
 
-// Whether -q knows the pair differs from its sizes alone: with no ignore
-// option it compares bytes, so two known sizes that differ answer it before
+// Whether -q knows the pair differs from its sizes alone: with no option
+// that sets bytes aside it compares bytes, so two known sizes that differ answer it before
 // either file is read. A stdin operand, a size not known, or a stat that
 // fails leaves it to the read, which reports the failure. Mirrors Python's
 // _sizes_differ.
@@ -280,7 +371,17 @@ async function sizesDiffer(
 ): Promise<boolean> {
   const flags = walk.flags
   const sizeOf = walk.sizeOf
-  if (sizeOf === null || flags.ignoreCase || flags.ignoreAllSpace || flags.ignoreSpaceChange)
+  if (
+    sizeOf === null ||
+    flags.ignoreCase ||
+    flags.ignoreAllSpace ||
+    flags.ignoreSpaceChange ||
+    flags.ignoreTabExpansion ||
+    flags.ignoreTrailingSpace ||
+    flags.stripTrailingCr ||
+    flags.ignoreBlankLines ||
+    flags.ignoreLines.length > 0
+  )
     return false
   const sizes: number[] = []
   for (const [index, path] of paths.entries()) {
@@ -310,29 +411,49 @@ async function diffPair(
   absent: Absent = PRESENT,
 ): Promise<PairResult> {
   const flags = walk.flags
-  const headers =
-    flags.unified && !flags.brief && !flags.ed
-      ? {
-          old_header: `${quoteHeaderName(path1.rawPath)}\t${await headerTime(walk, path1, absent[0])}`,
-          new_header: `${quoteHeaderName(path2.rawPath)}\t${await headerTime(walk, path2, absent[1])}`,
-        }
-      : {}
+  const name1 = labelled(walk, path1, 0)
+  const name2 = labelled(walk, path2, 1)
+  const headed = flags.mode === 'unified' || flags.mode === 'context'
+  const headers: string[] = []
+  const sides: readonly (readonly [PathSpec, boolean])[] = [
+    [path1, absent[0]],
+    [path2, absent[1]],
+  ]
+  for (const [side, [path, gone]] of sides.entries()) {
+    const label = flags.labels[side]
+    if (!headed) headers.push('')
+    else if (label !== undefined) headers.push(label)
+    else headers.push(`${quoteHeaderName(path.rawPath)}\t${await headerTime(walk, path, gone)}`)
+  }
   const result: PairResult =
     flags.brief && (await sizesDiffer(walk, [path1, path2], absent))
       ? { outcome: 'different', output: [], status: 1, stderr: [] }
       : await walk.computer.compare(
           {
-            mode: flags.ed ? 'ed' : flags.unified ? 'unified' : 'normal',
+            mode: flags.mode,
             context: flags.context,
             ignore_case: flags.ignoreCase,
             ignore_all_space: flags.ignoreAllSpace,
             ignore_space_change: flags.ignoreSpaceChange,
-            text: false,
+            ignore_tab_expansion: flags.ignoreTabExpansion,
+            ignore_trailing_space: flags.ignoreTrailingSpace,
+            strip_trailing_cr: flags.stripTrailingCr,
+            ignore_blank_lines: flags.ignoreBlankLines,
+            ignore_lines: [...flags.ignoreLines],
+            function_lines: [...flags.functionLines],
+            show_c_function: flags.showCFunction,
+            expand_tabs: flags.expandTabs,
+            initial_tab: flags.initialTab,
+            widths: [...flags.widths],
+            suppress_common: flags.suppressCommon,
+            left_column: flags.leftColumn,
+            text: flags.text,
             brief: flags.brief,
-            old_label: path1.rawPath,
-            new_label: path2.rawPath,
-            old_header: headers.old_header ?? '',
-            new_header: headers.new_header ?? '',
+            utf8: flags.utf8,
+            old_label: name1,
+            new_label: name2,
+            old_header: headers[0] ?? '',
+            new_header: headers[1] ?? '',
           },
           () => (absent[0] ? new Uint8Array() : walk.stream(path1)),
           () => (absent[1] ? new Uint8Array() : walk.stream(path2)),
@@ -341,12 +462,12 @@ async function diffPair(
   if (result.outcome === 'equal' && flags.identical && result.status === 0)
     return {
       ...result,
-      output: [ENC.encode(`Files ${path1.rawPath} and ${path2.rawPath} are identical\n`)],
+      output: [...result.output, ENC.encode(`Files ${name1} and ${name2} are identical\n`)],
     }
-  if (result.outcome === 'different' && flags.brief)
+  if (result.outcome === 'different' && flags.brief && result.status === 1)
     return {
       ...result,
-      output: [ENC.encode(`Files ${path1.rawPath} and ${path2.rawPath} differ\n`)],
+      output: [ENC.encode(`Files ${name1} and ${name2} differ\n`)],
     }
   return result
 }
@@ -447,15 +568,16 @@ async function diffDirs(
       for (const chunk of pair.stderr) walk.trouble.push(chunk)
       if (pair.status === 2 && pair.stderr.length === 0)
         walk.trouble.push(ENC.encode('diff: comparison failed\n'))
-      if (pair.outcome === 'equal') {
-        for (const chunk of pair.output) parts.push(chunk)
-        continue
-      }
-      differ = true
-      if (!flags.brief)
+      differ ||= pair.outcome === 'different'
+      // Side by side shows an equal pair's common lines too, so its header
+      // comes with every pair the lines are not suppressed for.
+      if (
+        !flags.brief &&
+        (pair.outcome === 'different' || (flags.mode === 'sides' && !flags.suppressCommon))
+      )
         parts.push(
           ENC.encode(
-            `diff${walk.switches} ${quoteHeaderName(childA.rawPath)} ${quoteHeaderName(childB.rawPath)}\n`,
+            `diff${walk.switches} ${quoteHeaderName(labelled(walk, childA, 0))} ${quoteHeaderName(labelled(walk, childB, 1))}\n`,
           ),
         )
       for (const chunk of pair.output) parts.push(chunk)

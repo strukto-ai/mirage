@@ -19,6 +19,28 @@ from mirage.commands.spec.constants import (
 )
 from mirage.commands.spec.types import Argument, CommandSpec
 
+# gunzip is `gzip -d` and zcat `gzip -cd`, and each takes all of gzip's
+# options: -l lists, -t tests, -N restores and -n drops the stored name
+# and time, -r walks directories, and the digits are no-ops past gzip.
+_GZIP_ARGUMENTS = (
+    Argument("-c", "--stdout", "--to-stdout", action="store_true"),
+    Argument("-d", "--decompress", "--uncompress", action="store_true"),
+    Argument("-f", "--force", action="store_true"),
+    Argument("-k", "--keep", action="store_true"),
+    Argument("-l", "--list", action="store_true"),
+    Argument("-n", "--no-name", action="store_true"),
+    Argument("-N", "--name", action="store_true"),
+    Argument("-q", "--quiet", action="store_true"),
+    Argument("-r", "--recursive", action="store_true"),
+    Argument("-S", "--suffix"),
+    Argument("-t", "--test", action="store_true"),
+    Argument("-v", "--verbose", action="store_true"),
+    Argument("-1", "--fast", action="store_true"),
+    *(Argument(f"-{n}", action="store_true") for n in range(2, 9)),
+    Argument("-9", "--best", action="store_true"),
+    PATHS_OPERAND,
+)
+
 SPECS: dict[str, CommandSpec] = {
     "tar": CommandSpec(
         # `tar xzf a.tgz` is the spelling everyone types.
@@ -63,29 +85,8 @@ SPECS: dict[str, CommandSpec] = {
             ),
         ),
     ),
-    "gzip": CommandSpec(
-        arguments=(
-            Argument("-d", action="store_true"),
-            Argument("-k", action="store_true"),
-            Argument("-f", action="store_true"),
-            Argument("-c", action="store_true"),
-            Argument("-q", action="store_true"),
-            Argument("-S"),
-            *(Argument(f"-{n}", action="store_true") for n in range(1, 10)),
-            PATHS_OPERAND,
-        )
-    ),
-    "gunzip": CommandSpec(
-        arguments=(
-            Argument("-k", action="store_true"),
-            Argument("-f", action="store_true"),
-            Argument("-c", action="store_true"),
-            Argument("-t", action="store_true"),
-            Argument("-q", action="store_true"),
-            Argument("-S"),
-            PATHS_OPERAND,
-        )
-    ),
+    "gzip": CommandSpec(arguments=_GZIP_ARGUMENTS),
+    "gunzip": CommandSpec(arguments=_GZIP_ARGUMENTS),
     "zip": CommandSpec(
         arguments=(
             Argument("-r", action="store_true"),
@@ -140,14 +141,5 @@ SPECS: dict[str, CommandSpec] = {
             TEXTS_OPERAND,
         )
     ),
-    # zcat is `gzip -cd`: -f copies input that is not gzip, -q drops
-    # the warnings, and -S names the suffix a missing name is retried with.
-    "zcat": CommandSpec(
-        arguments=(
-            Argument("-f", action="store_true"),
-            Argument("-q", action="store_true"),
-            Argument("-S"),
-            PATHS_OPERAND,
-        )
-    ),
+    "zcat": CommandSpec(arguments=_GZIP_ARGUMENTS),
 }

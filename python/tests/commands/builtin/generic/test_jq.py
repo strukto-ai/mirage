@@ -5,8 +5,10 @@ import pytest
 
 from mirage.commands.builtin.generic import jq as jq_module
 from mirage.commands.builtin.generic.jq import (
+    ModuleFiles,
     jq,
     jq_generic,
+    link_modules,
     option_tape,
 )
 from mirage.commands.config import Context
@@ -14,6 +16,8 @@ from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.spool import ByteSpool
 from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult, materialize
@@ -32,9 +36,12 @@ FILES = {
     "/d/-": b"42\n",
     "/d/spelled.json": b'{"b":1.000,"1":2}',
     "/d/origin.jq": b"[get_prog_origin, get_jq_origin]",
+    "/d/lib/m.jq": b'def f: "m";',
+    "/d/lib/data.json": b"1 2",
+    "/d/imports.jq": b'import "m" as m {search: "./lib"}; m::f',
 }
 
-DIRS = {"/d/dir"}
+DIRS = {"/d/dir", "/d/lib/isdir.jq"}
 
 HINT = (
     "Use jq --help for help with command-line options,\n"
@@ -101,6 +108,114 @@ async def _run(paths: list[str], *texts: str, **flags: FlagValue) -> tuple:
         **flags,
     )
     return await materialize(source) if source is not None else b"", io
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "words, stdout",
+    [
+        (["-L", "/d/lib", 'import "m" as m; m::f'], b'"m"\n'),
+        (["-L/d/lib", 'include "m"; f'], b'"m"\n'),
+        (["--library-path", "/d/lib", 'include "m"; f'], b'"m"\n'),
+        (
+            ["-c", "-L", "/d/lib", 'import "data" as $d; $d, $d::d'],
+            b"[1,2]\n[1,2]\n",
+        ),
+        (["-c", "-L", "/d/lib", "get_search_list"], b'["/d/lib"]\n'),
+        (["-f", "/d/imports.jq"], b'"m"\n'),
+    ],
+)
+async def test_a_program_reads_its_modules_from_the_search_list(
+    words: list[str], stdout: bytes
+):
+    assert await _line("-n", *words) == (stdout, b"", 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "words, stderr",
+    [
+        (
+            ["-L", "/d/lib", 'import "nope" as m; 1'],
+            b"jq: error: module not found: nope\n\njq: 1 compile error\n",
+        ),
+        (
+            ["-L", "/d/lib", 'import "isdir" as m; 1'],
+            b"jq: error loading data file /d/lib/isdir.jq: Could not open "
+            b"/d/lib/isdir.jq: It's a directory\n\njq: 1 compile error\n",
+        ),
+    ],
+)
+async def test_a_module_jq_cannot_load_refuses_the_program(
+    words: list[str], stderr: bytes
+):
+    assert await _line("-n", *words) == (b"", stderr, 3)
+
+
+async def _unread_module(path: PathSpec) -> bytes:
+    raise AssertionError(f"{path.virtual} should not be read")
+
+
+async def _big_module(path: PathSpec) -> bytes:
+    return b"def f: 1;" + b" " * 4096
+
+
+async def _failing_read(path: PathSpec) -> bytes:
+    if path.virtual == "/gone":
+        raise FileNotFoundError(path.virtual)
+    if path.virtual == "/file/x":
+        raise NotADirectoryError(path.virtual)
+    raise PermissionError(errno.EACCES, "denied")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("word", ["-L", "--library-path"])
+async def test_a_library_path_with_no_value_is_refused(word: str):
+    stderr = (
+        "-L takes a parameter: (e.g. -L /search/path or -L/search/path)\n"
+        f"{HINT}\n"
+    )
+    assert await _line("-n", word) == (b"", stderr.encode(), 2)
+
+
+@pytest.mark.asyncio
+async def test_a_program_that_imports_nothing_reads_no_module():
+    assert await link_modules(".a", {}, "/", "/", None, _unread_module) is None
+
+
+@pytest.mark.asyncio
+async def test_what_a_program_imports_stays_inside_the_memory_room():
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(
+            MemoryBudget(1024, lambda: 0),
+            link_modules(
+                'import "m" as m; m::f', {}, "/", "/", None, _big_module
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_module_files_tell_a_missing_file_from_one_that_fails():
+    files = ModuleFiles(_failing_read)
+    try:
+        for path in ("/gone", "/file/x"):
+            served = await files.serve({"op": "read", "path": path}, b"")
+            assert served.reply == {"kind": "missing"}
+        served = await files.serve({"op": "read", "path": "/locked"}, b"")
+        assert served.reply["kind"] == "error"
+        assert served.reply["directory"] is False
+    finally:
+        await files.errors.close()
+
+
+@pytest.mark.asyncio
+async def test_color_options_are_taken_and_the_output_stays_plain():
+    assert await _line("-n", "-c", "-C", "[1]") == (b"[1]\n", b"", 0)
+    assert await _line("-n", "-c", "--color-output", "[1]") == (
+        b"[1]\n",
+        b"",
+        0,
+    )
 
 
 @pytest.mark.asyncio

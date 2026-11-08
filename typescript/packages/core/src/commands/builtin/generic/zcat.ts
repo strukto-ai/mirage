@@ -12,29 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { specOf } from '../../spec/builtins.ts'
-import { FlagView } from '../../spec/flag_view.ts'
-import type { PathSpec } from '../../../types.ts'
+import type { FlagView } from '../../spec/flag_view.ts'
+import { LineFacts, type PathSpec, type ReaddirFn, type StatFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { GZIP_SUFFIX } from '../constants.ts'
-import { linkResolver } from '../utils/links.ts'
-import { decompressInputs } from './decompress.ts'
+import { gzipGeneric } from './gzip.ts'
 
-/** zcat is `gzip -cd`, so -f copies input that is not gzip, -q drops the
- * warnings, and -S names the suffix a missing name is retried with. Mirrors
- * Python's zcat_generic. */
+/** Run zcat, which is `gzip -cd`, over resolved operands. Mirrors Python's
+ * zcat_generic. */
 export async function zcatGeneric(
   paths: PathSpec[],
   ctx: Context,
   stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
+  stat?: StatFn,
+  readdir?: ReaddirFn,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags, specOf('zcat'))
-  return decompressInputs(paths, stream, {
-    stdin: ctx.stdin,
-    toStdout: true,
-    force: fl.asBool('f'),
-    quiet: fl.asBool('q'),
-    suffix: fl.asStr('S') ?? GZIP_SUFFIX,
-    resolver: linkResolver(ctx),
-  })
+  return gzipGeneric(paths, ctx, stream, undefined, undefined, stat, readdir, undefined, 'zcat')
+}
+
+/** A zcat line reads below its operands under -r. Mirrors Python's `facts`. */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ readsSubtree: fl.asBool('recursive') })
 }

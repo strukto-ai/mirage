@@ -9,10 +9,10 @@
     {
       "id": "diff_u_header_carries_the_mtime",
       "seq": 1320200,
-      "command": "( printf 'x\\ny\\n' > /data/dh_a; printf 'x\\nz\\n' > /data/dh_b; touch -t 202601020304.05 /data/dh_a; touch -t 202601020304.06 /data/dh_b; diff -u /data/dh_a /data/dh_b; s=$?; diff -uN /data/dh_a /data/dh_missing | head -2; diff -U0 --new-file /data/dh_missing /data/dh_b | head -2; rm /data/dh_a /data/dh_b; exit $s )",
+      "command": "( printf 'x\\ny\\n' > /data/dh_a; printf 'x\\nz\\n' > /data/dh_b; touch -t 202601020304.05 /data/dh_a; touch -t 202601020304.06 /data/dh_b; diff -u /data/dh_a /data/dh_b; s=$?; diff -uN /data/dh_a /data/dh_missing | head -2; diff -U0 --new-file /data/dh_missing /data/dh_b | head -2; diff -c /data/dh_a /data/dh_b | head -2; diff -u --label OLD -L NEW /data/dh_a /data/dh_b | head -2; rm /data/dh_a /data/dh_b; exit $s )",
       "expect": {
         "exit": 1,
-        "stdout": "--- /data/dh_a\t2026-01-02 03:04:05.000000000 +0000\n+++ /data/dh_b\t2026-01-02 03:04:06.000000000 +0000\n@@ -1,2 +1,2 @@\n x\n-y\n+z\n--- /data/dh_a\t2026-01-02 03:04:05.000000000 +0000\n+++ /data/dh_missing\t1970-01-01 00:00:00.000000000 +0000\n--- /data/dh_missing\t1970-01-01 00:00:00.000000000 +0000\n+++ /data/dh_b\t2026-01-02 03:04:06.000000000 +0000\n",
+        "stdout": "--- /data/dh_a\t2026-01-02 03:04:05.000000000 +0000\n+++ /data/dh_b\t2026-01-02 03:04:06.000000000 +0000\n@@ -1,2 +1,2 @@\n x\n-y\n+z\n--- /data/dh_a\t2026-01-02 03:04:05.000000000 +0000\n+++ /data/dh_missing\t1970-01-01 00:00:00.000000000 +0000\n--- /data/dh_missing\t1970-01-01 00:00:00.000000000 +0000\n+++ /data/dh_b\t2026-01-02 03:04:06.000000000 +0000\n*** /data/dh_a\tFri Jan  2 03:04:05 2026\n--- /data/dh_b\tFri Jan  2 03:04:06 2026\n--- OLD\n+++ NEW\n",
         "stderr": ""
       }
     },

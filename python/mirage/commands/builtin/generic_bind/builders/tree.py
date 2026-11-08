@@ -35,7 +35,7 @@ async def tree(
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(ctx.flags)
     if isinstance(parsed, IOResult):
-        return None, parsed
+        return parsed.stdout, parsed
     files = command_files(ctx, paths)
     resolved = await files.resolve_glob(paths)
     readdir, stat = tree_walk(
@@ -54,6 +54,7 @@ async def tree(
             files.stat,
             files.answers("read_tree"),
         ),
+        read=files.read,
     )
 
 

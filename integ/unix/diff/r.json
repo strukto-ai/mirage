@@ -66,10 +66,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/crd/x/sub /data/crd/y/sub && echo a > /data/crd/x/sub/f && echo b > /data/crd/y/sub/f && echo same > /data/crd/x/g && echo same > /data/crd/y/g && (cd /data/crd && diff -r x y); echo rc=$?",
+      "command": "mkdir -p /data/crd/x/sub /data/crd/y/sub && echo a > /data/crd/x/sub/f && echo b > /data/crd/y/sub/f && echo same > /data/crd/x/g && echo same > /data/crd/y/g && (cd /data/crd && diff -r x y); echo rc=$?; (cd /data/crd && diff -r -y -W 20 x y; diff -r -y -W 20 --suppress-common-lines x y)",
       "expect": {
-        "exit": 0,
-        "stdout": "diff -r x/sub/f y/sub/f\n1c1\n< a\n---\n> b\nrc=1\n",
+        "exit": 1,
+        "stdout": "diff -r x/sub/f y/sub/f\n1c1\n< a\n---\n> b\nrc=1\ndiff -r -y -W 20 x/g y/g\nsame\tsame\ndiff -r -y -W 20 x/sub/f y/sub/f\na     |\tb\ndiff -r -y -W 20 --suppress-common-lines x/sub/f y/sub/f\na     |\tb\n",
         "stderr": ""
       },
       "flags": [

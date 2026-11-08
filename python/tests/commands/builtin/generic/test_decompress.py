@@ -4,7 +4,9 @@ import pytest
 
 from mirage.commands.builtin.generic.decompress import (
     decompress_inputs,
+    gzip_ratio,
     gzip_suffix,
+    list_inputs,
     suffix_refusal,
 )
 from mirage.io.types import materialize
@@ -193,3 +195,63 @@ def test_gzip_suffix_reads_gzips_suffix_table(name, suffix, found):
 )
 def test_suffix_refusal_takes_one_to_thirty_bytes(suffix, refused):
     assert (suffix_refusal(suffix) is not None) is refused
+
+
+@pytest.mark.parametrize(
+    "size,compressed,header,shown",
+    [
+        (18, 41, 24, "  5.6%"),
+        (400, 351, 0, " 12.2%"),
+        (400, 349, 0, " 12.8%"),
+        (0, 22, 20, "  0.0%"),
+        (1, 23, 20, "-200.0%"),
+    ],
+)
+def test_the_ratio_rounds_a_tie_to_even_as_printf_does(
+    size, compressed, header, shown
+):
+    """12.25% is a tie printf's %.1f rounds to even, 12.75% the other
+    way; empty data saves nothing."""
+    assert gzip_ratio(size, compressed, header) == shown
+
+
+@pytest.mark.asyncio
+async def test_a_listing_totals_only_once_a_row_was_printed():
+    """The head and totals come only with a row; a failed input tried
+    last leaves its header bytes out of the totals' ratio."""
+    _, ops = _files({"/d/a.gz": HELLO, "/d/bad.gz": b"junk"})
+    del ops["write"], ops["unlink"]
+    bad = PathSpec.from_str_path("/d/bad.gz")
+    out, io = await list_inputs([bad, bad], **ops)
+    assert (out, io.exit_code) == (b"", 1)
+    out, io = await list_inputs(
+        [PathSpec.from_str_path("/d/a.gz"), bad], **ops
+    )
+    rows = out.decode().splitlines()
+    assert rows[1].split() == ["25", "5", "-40.0%", "/d/a"]
+    assert rows[2].split() == ["25", "5", "-400.0%", "(totals)"]
+    assert io.stderr == b"\ngzip: /d/bad.gz: not in gzip format\n"
+
+
+@pytest.mark.asyncio
+async def test_name_restores_the_stored_name_and_time():
+    stored = gzip.compress(b"hi\n", mtime=946684740)
+    named = stored[:3] + b"\x08" + stored[4:10] + b"orig.txt\0" + stored[10:]
+    _, ops = _files({"/d/x.gz": named})
+    attrs = []
+
+    async def set_attrs(path, fields):
+        attrs.append((path.virtual, fields))
+
+    _, io = await decompress_inputs(
+        [PathSpec.from_str_path("/d/x.gz")],
+        restore=True,
+        verbose=True,
+        set_attrs=set_attrs,
+        **ops,
+    )
+    assert io.exit_code == 0
+    assert attrs == [("/d/orig.txt", {"mtime": "1999-12-31T23:59:00Z"})]
+    assert io.stderr.startswith(b"/d/x.gz:\t") and io.stderr.endswith(
+        b"-- replaced with /d/orig.txt\n"
+    )

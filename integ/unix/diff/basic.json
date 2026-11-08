@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "diff /data/a.txt /data/b.txt",
+      "command": "diff /data/a.txt /data/b.txt; diff -c -L a -L b /data/a.txt /data/b.txt; diff -n /data/a.txt /data/b.txt; diff -y -W 30 /data/a.txt /data/b.txt; diff -y -W 30 --suppress-common-lines --left-column /data/sorted_a.txt /data/sorted_b.txt; diff -T /data/a.txt /data/b.txt | head -2; diff -t -y -W 20 /data/a.txt /data/b.txt | head -1; diff --color=never -u -L a -L b /data/a.txt /data/b.txt | head -4; diff -p -L a -L b /data/a.txt /data/b.txt | head -3; diff -U0 -F '^h' -L a -L b /data/a.txt /data/b.txt; printf '\\303\\251\\tY\\n' > /data/dt_a; printf 'ab\\rc\\tY\\n' > /data/dt_b; diff -t /data/dt_a /data/dt_b | od -c; rm -f /data/dt_a /data/dt_b",
       "expect": {
-        "exit": 1,
-        "stdout": "1,5c1,3\n< hello\n< world\n< foo\n< bar\n< baz\n---\n> 1\n> 2\n> 3\n",
+        "exit": 0,
+        "stdout": "1,5c1,3\n< hello\n< world\n< foo\n< bar\n< baz\n---\n> 1\n> 2\n> 3\n*** a\n--- b\n***************\n*** 1,5 ****\n! hello\n! world\n! foo\n! bar\n! baz\n--- 1,3 ----\n! 1\n! 2\n! 3\nd1 5\na5 3\n1\n2\n3\nhello\t      |\t1\nworld\t      |\t2\nfoo\t      |\t3\nbar\t      <\nbaz\t      <\napple\t      <\ncherry\t      |\tdate\n\t      >\telder\n1,5c1,3\n<\thello\nhello    |  1\n--- a\n+++ b\n@@ -1,5 +1,3 @@\n-hello\n*** a\n--- b\n***************\n--- a\n+++ b\n@@ -1,5 +1,3 @@\n-hello\n-world\n-foo\n-bar\n-baz\n+1\n+2\n+3\n0000000   1   c   1  \\n   <     303 251                                \n0000020   Y  \\n   -   -   -  \\n   >       a   b  \\r   >       c        \n0000040                       Y  \\n\n0000047\n",
         "stderr": ""
       }
     },

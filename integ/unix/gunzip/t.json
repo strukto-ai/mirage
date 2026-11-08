@@ -25,11 +25,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/pgu && printf 'testme\\n' > /data/pgu/t.txt && gzip /data/pgu/t.txt && gunzip -t /data/pgu/t.txt.gz && echo ok=$?",
+      "command": "mkdir -p /data/pgu && printf 'testme\\n' > /data/pgu/t.txt && gzip /data/pgu/t.txt && gunzip -t /data/pgu/t.txt.gz && echo ok=$? && gunzip -l /data/pgu/t.txt.gz && zcat -tv /data/pgu/t.txt.gz",
       "expect": {
         "exit": 0,
-        "stdout": "ok=0\n",
-        "stderr": ""
+        "stdout": "ok=0\n         compressed        uncompressed  ratio uncompressed_name\n                 33                   7 -28.6% /data/pgu/t.txt\n",
+        "stderr": "/data/pgu/t.txt.gz:\t OK\n"
       },
       "flags": [
         "t"

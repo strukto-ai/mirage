@@ -36,13 +36,15 @@ import { ByteSpool } from '../../../io/spool.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { PathSpec, type JsonValue, type ReadStreamFn } from '../../../types.ts'
-import { fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
+import { LINK_TARGET_KEY, PathSpec, type JsonValue, type ReadStreamFn } from '../../../types.ts'
+import type { LinkView } from '../../../view/types.ts'
+import { fsStrerror, isEisdir, isEnoent, isEnotdir, isFsError } from '../../../errors/fs.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import { parent } from '../../../utils/path.ts'
 import { type CommandFnResult, type Context } from '../../config.ts'
 import { helpPage, versionLine } from '../../spec/standard.ts'
 import type { FlagValue } from '../../spec/types.ts'
+import { linksOf } from '../utils/links.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { programFileRefusal, readProgramFile } from './program.ts'
 import { systemNow } from '../../../utils/clock.ts'
@@ -55,6 +57,10 @@ const ENC = new TextEncoder()
 // value is a file the option loop asks for.
 const BINDINGS: ReadonlySet<string> = new Set(['arg', 'argjson', 'rawfile', 'slurpfile'])
 const FILE_BINDINGS: ReadonlySet<string> = new Set(['rawfile', 'slurpfile'])
+
+// What a program that imports a module has to hold, so that any other goes
+// straight to its run.
+const MODULE_WORDS: readonly string[] = ['import', 'include']
 
 // jq's exit status when it refuses the program itself, and when the program
 // file holds a NUL byte.
@@ -148,6 +154,91 @@ class FlagFiles {
         reply: { kind: 'error', message: fsStrerror(error) ?? '', directory: isEisdir(error) },
       }
     }
+  }
+}
+
+/**
+ * Serves the files jq's linker asks for. Reading is how it finds out whether
+ * one is there: a file that is not answers `missing`. Mirrors Python's
+ * ModuleFiles.
+ */
+class ModuleFiles {
+  readonly errors = new ByteSpool()
+
+  constructor(private readonly read: (path: PathSpec) => Promise<Uint8Array>) {}
+
+  /** Read one file, or say why it could not be read. */
+  async serve(request: Readonly<Record<string, JsonValue>>): Promise<Served> {
+    if (request.op !== 'read' || typeof request.path !== 'string')
+      throw new Error(`jq: unknown linker request ${JSON.stringify(request)}`)
+    try {
+      return { reply: { kind: 'data' }, data: await this.read(PathSpec.fromStrPath(request.path)) }
+    } catch (error) {
+      if (isEnoent(error) || isEnotdir(error)) return { reply: { kind: 'missing' } }
+      if (!isFsError(error)) throw error
+      return {
+        reply: { kind: 'error', message: fsStrerror(error) ?? '', directory: isEisdir(error) },
+      }
+    }
+  }
+}
+
+/**
+ * The modules a program imports, read for the run to compile, or null for a
+ * program that cannot import one. Throws StreamRefusal for an import jq could
+ * not load, in jq's report. Mirrors Python's link_modules.
+ */
+// Each symlink in the namespace and what it points at, which jq's search paths
+// resolve through; empty for a program with no search. Mirrors Python's
+// _link_table.
+function linkTable(
+  expression: string,
+  options: Readonly<Record<string, JsonValue>>,
+  links: LinkView | undefined,
+): Record<string, string> {
+  const paths = options.library_paths
+  const searches =
+    (Array.isArray(paths) && paths.length > 0) ||
+    MODULE_WORDS.some((word) => expression.includes(word))
+  if (links === undefined || !searches) return {}
+  const table: Record<string, string> = {}
+  for (const [path, stat] of links.subtree('/')) {
+    const target = stat.extra[LINK_TARGET_KEY]
+    table[path] = typeof target === 'string' ? target : ''
+  }
+  return table
+}
+
+export async function linkModules(
+  expression: string,
+  options: Readonly<Record<string, JsonValue>>,
+  origin: string | null,
+  cwd: string,
+  home: string | null,
+  read: (path: PathSpec) => Promise<Uint8Array>,
+  links: Readonly<Record<string, string>> = {},
+): Promise<JsonValue> {
+  if (!MODULE_WORDS.some((word) => expression.includes(word))) return null
+  const limit = memoryRoom()
+  const stream = await openStream('jq_link', {
+    program: expression,
+    library_paths: options.library_paths ?? [],
+    origin,
+    cwd,
+    home,
+    links: { ...links },
+    ...(limit === null ? {} : { memory: limit }),
+  })
+  const host = new ModuleFiles(read)
+  try {
+    const reply = await materialize(serveRequests(stream, host))
+    return JSON.parse(DEC.decode(reply)) as JsonValue
+  } catch (error) {
+    if (!(error instanceof StreamRefusal) || error.message !== EXHAUSTED) throw error
+    throw new MemoryExhausted()
+  } finally {
+    await host.errors.close()
+    await closeStream(stream)
   }
 }
 
@@ -370,7 +461,7 @@ export async function jqGeneric(
   const plan = await readOptions(...optionTape(fl, texts), readFlagFile)
   if (plan instanceof IOResult) return [null, plan]
   if (plan instanceof Uint8Array) return [plan, new IOResult()]
-  const { config: options, program } = plan
+  const { config: planned, program } = plan
   const programFile = program instanceof PathSpec ? program : null
   let expression = typeof program === 'string' ? program : ''
   if (programFile !== null) {
@@ -404,12 +495,28 @@ export async function jqGeneric(
     operands.push(PathSpec.fromStrPath('/dev/stdin'))
     names.push(STDIN_NAME)
   }
+  let options = planned
   try {
     // jq compiles its program before it opens a single input, so a
     // refusal is all it prints. mirage-rs words jq's refusals itself,
     // reading the program as typed, so its lines and columns are jq's. The
     // run compiles it again when it starts, so nothing is held open for a
     // stream no one reads.
+    const table = linkTable(expression, planned, linksOf(ctx))
+    options = {
+      ...planned,
+      cwd: ctx.cwd.virtual,
+      links: table,
+      linked: await linkModules(
+        expression,
+        planned,
+        origin,
+        ctx.cwd.virtual,
+        ctx.env?.HOME ?? null,
+        readFlagFile,
+        table,
+      ),
+    }
     const checked = await openStream('jq', runConfig(expression, options, env, zone, origin, names))
     await closeStream(checked)
   } catch (error) {

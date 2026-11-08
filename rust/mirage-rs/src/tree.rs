@@ -1,8 +1,10 @@
-//! tree's typed `-L`: C's `strtoul` at base 0, whatever follows the
-//! number ignored, cast to an `int`, and refused below 1 in tree 2.2.1's
-//! one sentence. Only the last `-L` is checked, and `INT_MIN` is refused,
-//! where tree checks each one and takes `INT_MIN`: divergences both hosts
-//! had, kept until they are pinned.
+//! tree's typed `-L` and `--filelimit`. `-L` is C's `strtoul` at base 0,
+//! whatever follows the number ignored, cast to an `int`, and refused
+//! below 1 in tree 2.2.1's one sentence. Only the last `-L` is checked,
+//! and `INT_MIN` is refused, where tree checks each one and takes
+//! `INT_MIN`: divergences both hosts had, kept until they are pinned.
+//! `--filelimit` is C's `atoi` cast to an `int`; one under 1 sets no
+//! limit.
 
 use serde_json::Value as Json;
 
@@ -11,12 +13,19 @@ use crate::number;
 use crate::scan::{Typed, Values, last, unknown};
 
 pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
-    if let Some((name, _)) = options.iter().find(|(name, _)| name != "L") {
+    if let Some((name, _)) = options
+        .iter()
+        .find(|(name, _)| name != "L" && name != "filelimit")
+    {
         return Err(unknown("tree", name));
     }
     let level = last(options, "L").map(level).transpose()?;
+    let limit = last(options, "filelimit")
+        .map(|raw| number::atoi(raw) as i32)
+        .filter(|&limit| limit > 0);
     let mut values = Values::new();
     values.insert("L".to_owned(), level.map_or(Json::Null, Json::from));
+    values.insert("filelimit".to_owned(), limit.map_or(Json::Null, Json::from));
     Ok(values)
 }
 
@@ -93,6 +102,25 @@ mod tests {
     #[test]
     fn only_the_last_level_is_read() {
         let typed: &[(&str, &[u8])] = &[("L", b"0"), ("L", b"2")];
-        assert_eq!(scan("tree", typed).expect("read"), json!({"L": 2}));
+        assert_eq!(
+            scan("tree", typed).expect("read"),
+            json!({"L": 2, "filelimit": null})
+        );
+    }
+
+    #[test]
+    fn a_file_limit_is_atoi_and_none_below_one() {
+        for (raw, limit) in [
+            ("2", json!(2)),
+            (" 7x", json!(7)),
+            ("+3", json!(3)),
+            ("0", json!(null)),
+            ("-1", json!(null)),
+            ("x", json!(null)),
+            ("4294967298", json!(2)),
+        ] {
+            let values = scan("tree", &[("filelimit", raw.as_bytes())]).expect(raw);
+            assert_eq!(values["filelimit"], limit, "{raw}");
+        }
     }
 }

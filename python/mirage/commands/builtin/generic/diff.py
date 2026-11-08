@@ -11,7 +11,10 @@ from dataclasses import dataclass, field
 from datetime import tzinfo
 from functools import partial
 
-from mirage.commands.builtin.utils.formatting import full_iso_time
+from mirage.commands.builtin.utils.formatting import (
+    context_time,
+    full_iso_time,
+)
 from mirage.commands.builtin.utils.links import dispatch_of, links_of
 from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.builtin.utils.stream import (
@@ -38,7 +41,12 @@ from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.diff_pool import DiffPool
-from mirage.rs.diff_types import DiffComputer, DiffOptions, PairResult
+from mirage.rs.diff_types import (
+    DiffComputer,
+    DiffMode,
+    DiffOptions,
+    PairResult,
+)
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused
 from mirage.rs.stream import open_stream
@@ -65,11 +73,29 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class DiffFlags:
+    """diff's line, parsed: one output style, what the comparison sets
+    aside, and how lines are written; patterns and widths are spelled one
+    character per byte, as the engine reads them."""
+
+    mode: DiffMode = "normal"
     ignore_case: bool = False
     ignore_all_space: bool = False
     ignore_space_change: bool = False
-    ed: bool = False
-    unified: bool = False
+    ignore_tab_expansion: bool = False
+    ignore_trailing_space: bool = False
+    strip_trailing_cr: bool = False
+    ignore_blank_lines: bool = False
+    ignore_lines: tuple[str, ...] = ()
+    function_lines: tuple[str, ...] = ()
+    show_c_function: bool = False
+    expand_tabs: bool = False
+    initial_tab: bool = False
+    widths: tuple[str, ...] = ()
+    suppress_common: bool = False
+    left_column: bool = False
+    text: bool = False
+    labels: tuple[str, ...] = ()
+    utf8: bool = False
     context: int = 3
     brief: bool = False
     recursive: bool = False
@@ -162,12 +188,14 @@ def quote_header_name(name: str) -> str:
 
 
 async def _header_time(walk: _Walk, path: PathSpec, absent: bool) -> str:
-    """The time a unified header gives one side, as GNU diff prints it.
+    """The time a unified or context header gives one side, as diffutils
+    prints it.
 
-    The modification time as ``%Y-%m-%d %H:%M:%S.%N %z`` in the zone
-    ``TZ`` names, read through the dispatcher as ``stat`` reads it, so
-    a time ``touch`` keeps in the namespace shows; the epoch for a side
-    -N reads as absent; and the present moment for standard input, as
+    The modification time as ``%Y-%m-%d %H:%M:%S.%N %z`` for a unified
+    header and ``%a %b %e %T %Y`` for a context one, in the zone ``TZ``
+    names, read through the dispatcher as ``stat`` reads it, so a time
+    ``touch`` keeps in the namespace shows; the epoch for a side -N
+    reads as absent; and the present moment for standard input, as
     POSIX asks and diffutils does.
 
     Args:
@@ -175,15 +203,28 @@ async def _header_time(walk: _Walk, path: PathSpec, absent: bool) -> str:
         path (PathSpec): the side.
         absent (bool): whether -N reads it as absent.
     """
+    layout = context_time if walk.flags.mode == "context" else full_iso_time
     if absent:
-        return full_iso_time(None, walk.zone)
+        return layout(None, walk.zone)
     if is_stdin(path):
         now = system_date().isoformat()
-        return full_iso_time(now, walk.zone)
+        return layout(now, walk.zone)
     info = await walk.stat_path(path) if walk.stat_path is not None else None
     if info is None:
         info = await walk.stat_fn(path)
-    return full_iso_time(info.modified, walk.zone)
+    return layout(info.modified, walk.zone)
+
+
+def _labelled(walk: _Walk, path: PathSpec, side: int) -> str:
+    """A side's name, or the --label given for it.
+
+    Args:
+        walk (_Walk): the parsed line.
+        path (PathSpec): the side.
+        side (int): 0 for the first file, 1 for the second.
+    """
+    labels = walk.flags.labels
+    return labels[side] if side < len(labels) else _name(path)
 
 
 def _takes_value(option: Argument) -> bool:
@@ -263,8 +304,8 @@ async def _sizes_differ(
     walk: _Walk, paths: tuple[PathSpec, PathSpec], absent: Absent
 ) -> bool:
     """Whether -q knows the pair differs from its sizes alone: with no
-    ignore option it compares bytes, so two known sizes that differ answer
-    it before either file is read. A stdin operand, a size not known, or a
+    option that sets bytes aside it compares bytes, so two known sizes that
+    differ answer it before either file is read. A stdin operand, a size not known, or a
     stat that fails leaves it to the read, which reports the failure.
 
     Args:
@@ -277,6 +318,11 @@ async def _sizes_differ(
         flags.ignore_case
         or flags.ignore_all_space
         or flags.ignore_space_change
+        or flags.ignore_tab_expansion
+        or flags.ignore_trailing_space
+        or flags.strip_trailing_cr
+        or flags.ignore_blank_lines
+        or flags.ignore_lines
     ):
         return False
     sizes: list[int] = []
@@ -304,30 +350,48 @@ async def _diff_pair(
     absent: Absent = PRESENT,
 ) -> PairResult:
     flags = walk.flags
-    name1, name2 = _name(path1), _name(path2)
+    name1 = _labelled(walk, path1, 0)
+    name2 = _labelled(walk, path2, 1)
+    headed = flags.mode in ("unified", "context")
+    headers = []
+    for side, (path, gone) in enumerate(
+        ((path1, absent[0]), (path2, absent[1]))
+    ):
+        if not headed:
+            headers.append("")
+        elif side < len(flags.labels):
+            headers.append(flags.labels[side])
+        else:
+            headers.append(
+                quote_header_name(_name(path))
+                + "\t"
+                + await _header_time(walk, path, gone)
+            )
     options = DiffOptions(
-        mode="ed" if flags.ed else "unified" if flags.unified else "normal",
+        mode=flags.mode,
         context=flags.context,
         ignore_case=flags.ignore_case,
         ignore_all_space=flags.ignore_all_space,
         ignore_space_change=flags.ignore_space_change,
+        ignore_tab_expansion=flags.ignore_tab_expansion,
+        ignore_trailing_space=flags.ignore_trailing_space,
+        strip_trailing_cr=flags.strip_trailing_cr,
+        ignore_blank_lines=flags.ignore_blank_lines,
+        ignore_lines=flags.ignore_lines,
+        function_lines=flags.function_lines,
+        show_c_function=flags.show_c_function,
+        expand_tabs=flags.expand_tabs,
+        initial_tab=flags.initial_tab,
+        widths=flags.widths,
+        suppress_common=flags.suppress_common,
+        left_column=flags.left_column,
+        text=flags.text,
         brief=flags.brief,
+        utf8=flags.utf8,
         old_label=name1,
         new_label=name2,
-        old_header=(
-            quote_header_name(name1)
-            + "\t"
-            + await _header_time(walk, path1, absent[0])
-        )
-        if flags.unified
-        else "",
-        new_header=(
-            quote_header_name(name2)
-            + "\t"
-            + await _header_time(walk, path2, absent[1])
-        )
-        if flags.unified
-        else "",
+        old_header=headers[0],
+        new_header=headers[1],
     )
     if flags.brief and await _sizes_differ(walk, (path1, path2), absent):
         result = PairResult("different", (), 1, ())
@@ -347,7 +411,10 @@ async def _diff_pair(
     if result.outcome == "equal" and flags.identical and result.status == 0:
         return PairResult(
             result.outcome,
-            (f"Files {name1} and {name2} are identical\n".encode(),),
+            (
+                *result.output,
+                f"Files {name1} and {name2} are identical\n".encode(),
+            ),
             result.status,
             result.stderr,
         )
@@ -476,19 +543,20 @@ async def _diff_dirs(
             walk.status = max(walk.status, result.status)
             if result.stderr:
                 walk.trouble.extend(result.stderr)
-            if result.outcome == "equal":
-                parts.extend(body)
-                continue
-            differ = True
-            if flags.brief:
-                parts.extend(body)
-            else:
+            differ = differ or result.outcome == "different"
+            # Side by side shows an equal pair's common lines too, so its
+            # header comes with every pair the lines are not suppressed for.
+            if not flags.brief and (
+                result.outcome == "different"
+                or (flags.mode == "sides" and not flags.suppress_common)
+            ):
                 header = (
-                    f"diff{walk.switches} {quote_header_name(_name(child_a))} "
-                    f"{quote_header_name(_name(child_b))}\n"
+                    f"diff{walk.switches} "
+                    f"{quote_header_name(_labelled(walk, child_a, 0))} "
+                    f"{quote_header_name(_labelled(walk, child_b, 1))}\n"
                 )
                 parts.append(header.encode())
-                parts.extend(body)
+            parts.extend(body)
         elif a_dir:
             differ = True
             parts.append(
@@ -649,50 +717,138 @@ async def _output(parts: list[bytes]) -> AsyncIterator[bytes]:
 __all__ = ["diff"]
 
 
-def _unified_context(typed: list[str | None]) -> int | IOResult:
-    """The context -U and --unified give, read by the diff engine.
+# Each output style and the options that ask for it.
+_STYLES: dict[DiffMode, tuple[str, ...]] = {
+    "normal": ("normal",),
+    "context": ("c", "C", "context"),
+    "unified": ("u", "U", "unified"),
+    "ed": ("ed",),
+    "rcs": ("rcs",),
+    "sides": ("side_by_side",),
+}
+_HINT = "diff: Try 'diff --help' for more information.\n"
+_WHEN = ("always", "never", "auto")
+
+
+def _typed(fl: FlagView, *names: str) -> list[str | None]:
+    """Each value the options were typed with, in order, None for a bare
+    long one.
 
     Args:
-        typed (list[str | None]): each value as typed, None for a bare
-            --unified.
+        fl (FlagView): the parsed flags.
+        names (str): the options.
     """
-    if not typed:
-        return 3
-    unified: list[JsonValue] = [
-        None if text is None else byte_view(text) for text in typed
+    return [
+        None if value is True else str(value)
+        for _, value in fl.occurrences(*names)
+        if value not in (None, False)
     ]
+
+
+def _engine_checks(
+    lengths: list[str | None],
+    widths: list[str],
+    ignore_lines: list[str],
+    function_lines: list[str],
+) -> int | IOResult:
+    """The context the context and unified options give, with every
+    length, width and pattern checked by the diff engine before any
+    operand is read.
+
+    Args:
+        lengths (list[str | None]): each context length as typed, None
+            for a bare long option.
+        widths (list[str]): each -W as typed.
+        ignore_lines (list[str]): each -I.
+        function_lines (list[str]): each -F.
+    """
+    config: dict[str, JsonValue] = {
+        "lengths": [
+            None if text is None else byte_view(text) for text in lengths
+        ],
+        "widths": [byte_view(text) for text in widths],
+        "ignore_lines": [byte_view(text) for text in ignore_lines],
+        "function_lines": [byte_view(text) for text in function_lines],
+    }
     try:
-        engine = open_stream("diff", {"unified": unified})
+        engine = open_stream("diff", config)
     except StreamRefusal as refusal:
         return refused(refusal)
     context = json.loads(engine.metadata())["context"]
     return int(context)
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> DiffFlags | IOResult:
-    """diff's options, -U refused by the diff engine before any operand.
+def parse_flags(
+    flags: Mapping[str, FlagValue], utf8: bool = False
+) -> DiffFlags | IOResult:
+    """diff's options, the ones diffutils refuses before any operand
+    refused here: two output styles, a third --label, an unknown
+    --color, and a length, width or pattern the diff engine refuses.
+    A valid --color changes nothing: output is never colored.
 
     Args:
         flags (Mapping[str, FlagValue]): the parsed flags.
+        utf8 (bool): the session reads text as UTF-8.
 
     Returns:
-        DiffFlags | IOResult: the flags, or diff's refusal of a -U, exit 2.
+        DiffFlags | IOResult: the flags, or diff's refusal, exit 2.
     """
     fl = FlagView(flags, spec=SPECS["diff"])
-    typed = [
-        None if value is True else str(value)
-        for _, value in fl.occurrences("U", "unified")
+    styles = [
+        style
+        for style, names in _STYLES.items()
+        if any(
+            value not in (None, False) for _, value in fl.occurrences(*names)
+        )
     ]
-    context = _unified_context(typed)
+    if len(styles) > 1:
+        return IOResult(
+            exit_code=2,
+            stderr=f"diff: conflicting output style options\n{_HINT}".encode(),
+        )
+    labels = tuple(fl.as_list("label"))
+    if len(labels) > 2:
+        return IOResult(
+            exit_code=2, stderr=b"diff: too many file label options\n"
+        )
+    for value in _typed(fl, "color"):
+        if value is not None and value not in _WHEN:
+            return IOResult(
+                exit_code=2,
+                stderr=f"diff: invalid color '{value}'\n{_HINT}".encode(),
+            )
+    show_c_function = fl.as_bool("show_c_function")
+    mode: DiffMode = (
+        styles[0] if styles else "context" if show_c_function else "normal"
+    )
+    ignore_lines = fl.as_list("ignore_matching_lines")
+    function_lines = fl.as_list("show_function_line")
+    widths = [text for text in _typed(fl, "width") if text is not None]
+    lengths = _typed(fl, "C", "context", "U", "unified")
+    context = _engine_checks(lengths, widths, ignore_lines, function_lines)
     if isinstance(context, IOResult):
         return context
     new_file = fl.as_bool("new_file")
     return DiffFlags(
-        ignore_case=fl.as_bool("i"),
-        ignore_all_space=fl.as_bool("w"),
-        ignore_space_change=fl.as_bool("b"),
-        ed=fl.as_bool("e"),
-        unified=fl.as_bool("u") or bool(typed),
+        mode=mode,
+        ignore_case=fl.as_bool("ignore_case"),
+        ignore_all_space=fl.as_bool("ignore_all_space"),
+        ignore_space_change=fl.as_bool("ignore_space_change"),
+        ignore_tab_expansion=fl.as_bool("ignore_tab_expansion"),
+        ignore_trailing_space=fl.as_bool("ignore_trailing_space"),
+        strip_trailing_cr=fl.as_bool("strip_trailing_cr"),
+        ignore_blank_lines=fl.as_bool("ignore_blank_lines"),
+        ignore_lines=tuple(byte_view(text) for text in ignore_lines),
+        function_lines=tuple(byte_view(text) for text in function_lines),
+        show_c_function=show_c_function,
+        expand_tabs=fl.as_bool("expand_tabs"),
+        initial_tab=fl.as_bool("initial_tab"),
+        widths=tuple(byte_view(text) for text in widths),
+        suppress_common=fl.as_bool("suppress_common_lines"),
+        left_column=fl.as_bool("left_column"),
+        text=fl.as_bool("text"),
+        labels=labels,
+        utf8=utf8,
         context=context,
         brief=fl.as_bool("brief"),
         recursive=fl.as_bool("recursive"),

@@ -28,6 +28,8 @@ enum Config {
         level: i32,
         #[serde(default)]
         name: String,
+        #[serde(default)]
+        mtime: u32,
     },
     Decode {
         format: Format,
@@ -35,6 +37,8 @@ enum Config {
         test: bool,
         #[serde(default)]
         passthrough: bool,
+        #[serde(default)]
+        list: bool,
     },
 }
 
@@ -48,6 +52,7 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             format,
             level,
             name,
+            mtime,
         } => {
             if !(-1..=9).contains(&level) {
                 return Err(StreamError::new("invalid compression level"));
@@ -55,16 +60,18 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             Ok(match format {
                 Format::Bzip2 => Box::new(Packer::new(bz2::Encoder::new(level))),
                 Format::Xz => Box::new(Packer::new(xz::Encoder::new(level)?)),
-                Format::Gzip => Box::new(Encoder::new(level, name)),
+                Format::Gzip => Box::new(Encoder::new(level, name, mtime)),
             })
         }
         Config::Decode {
             format,
             test,
             passthrough,
+            list,
         } => Ok(match format {
             Format::Bzip2 => Box::new(Unpacker::new(bz2::Decoder::new())),
             Format::Xz => Box::new(Unpacker::new(xz::Decoder::new())),
+            Format::Gzip if list => Box::new(Decoder::listing()),
             Format::Gzip => Box::new(Decoder::new(test, passthrough)),
         }),
     }
@@ -267,9 +274,35 @@ enum Part {
     End,
 }
 
+/// The longest stored name the first member's facts keep.
+const NAME_LIMIT: usize = 4096;
+
+/// What `gzip -l` and `-v` read off an input besides its data: the first
+/// member's stored name and time, the bytes its header and trailer take
+/// (none counted once a second member follows, as the reference counts
+/// them), the bytes read, and the CRC and length the input's last eight
+/// bytes claim.
+#[derive(Default, Serialize)]
+struct Facts {
+    name: Option<String>,
+    mtime: u32,
+    header: u64,
+    compressed: u64,
+    crc: u32,
+    size: u32,
+}
+
 struct Decoder {
     test: bool,
     passthrough: bool,
+    list: bool,
+    named: bool,
+    members: u32,
+    name: Vec<u8>,
+    mtime: u32,
+    header: u64,
+    compressed: u64,
+    tail: Vec<u8>,
     part: Part,
     fixed: Vec<u8>,
     flags: u8,
@@ -291,6 +324,14 @@ impl Decoder {
         Self {
             test,
             passthrough,
+            list: false,
+            named: false,
+            members: 0,
+            name: Vec::new(),
+            mtime: 0,
+            header: 0,
+            compressed: 0,
+            tail: Vec::with_capacity(8),
             part: Part::Fixed,
             fixed: Vec::with_capacity(10),
             flags: 0,
@@ -305,6 +346,46 @@ impl Decoder {
             eof: false,
             failure: None,
             reported: false,
+        }
+    }
+
+    /// A decoder that checks the whole input as `-t` does and writes
+    /// nothing, for its facts, as `gzip -l` reads an input.
+    fn listing() -> Self {
+        Self {
+            list: true,
+            ..Self::new(true, false)
+        }
+    }
+
+    /// Count header bytes of the first member, keeping its name.
+    fn headed(&mut self, data: &[u8], name: bool) {
+        if self.seen {
+            return;
+        }
+        self.header += data.len() as u64;
+        if name {
+            let room = NAME_LIMIT.saturating_sub(self.name.len());
+            let text = data.strip_suffix(&[0]).unwrap_or(data);
+            self.name.extend_from_slice(&text[..text.len().min(room)]);
+        }
+    }
+
+    fn facts(&self) -> Facts {
+        let word = |at: usize| {
+            self.tail
+                .get(at..at + 4)
+                .map_or(0, |b| u32::from_le_bytes(b.try_into().expect("word")))
+        };
+        Facts {
+            name: self
+                .named
+                .then(|| String::from_utf8_lossy(&self.name).into_owned()),
+            mtime: self.mtime,
+            header: if self.members > 1 { 0 } else { self.header + 8 },
+            compressed: self.compressed,
+            crc: word(0),
+            size: word(4),
         }
     }
 
@@ -335,6 +416,7 @@ impl Decoder {
         self.fixed.extend_from_slice(&data[..count]);
         if header {
             self.header_crc.update(&data[..count]);
+            self.headed(&data[..count], false);
         }
         count
     }
@@ -408,6 +490,7 @@ impl Decoder {
                         );
                     } else if target == 4 {
                         self.flags = self.fixed[3];
+                        self.named |= !self.seen && self.flags & 8 != 0;
                         if self.flags & 0x20 != 0 {
                             self.refuse("gzip: {} is encrypted -- not supported".into(), 1);
                         } else if self.flags & 0xc0 != 0 {
@@ -417,6 +500,10 @@ impl Decoder {
                             );
                         }
                     } else if target == 10 {
+                        if !self.seen {
+                            self.mtime =
+                                u32::from_le_bytes(self.fixed[4..8].try_into().expect("mtime"));
+                        }
                         self.fixed.clear();
                         self.part = Part::ExtraLength;
                     }
@@ -439,6 +526,7 @@ impl Decoder {
                 Part::Extra(left) => {
                     let count = left.min(data.len());
                     self.header_crc.update(&data[..count]);
+                    self.headed(&data[..count], false);
                     self.at += count;
                     self.part = if count == left {
                         Part::Name
@@ -452,6 +540,7 @@ impl Decoder {
                         let end = memchr::memchr(0, data);
                         let count = end.map_or(data.len(), |i| i + 1);
                         self.header_crc.update(&data[..count]);
+                        self.headed(&data[..count], flag == 8);
                         self.at += count;
                         if end.is_none() {
                             break;
@@ -475,10 +564,14 @@ impl Decoder {
                             self.refuse(format!("gzip: {{}}: header checksum 0x{stored:04x} != computed checksum 0x{computed:04x}"), 1);
                             continue;
                         }
+                        if !self.seen {
+                            self.header += 2;
+                        }
                         self.fixed.clear();
                     }
                     self.inflater.reset(false);
                     self.crc.reset();
+                    self.members += 1;
                     self.part = Part::Body;
                 }
                 Part::Body => {
@@ -500,7 +593,9 @@ impl Decoder {
                     } else {
                         self.held.len() / 32768 * 32768
                     };
-                    out.extend_from_slice(&self.held[..emit]);
+                    if !self.list {
+                        out.extend_from_slice(&self.held[..emit]);
+                    }
                     self.held.drain(..emit);
                     self.again = produced == limit;
                     match status {
@@ -574,6 +669,9 @@ impl Decoder {
             {
                 self.part = Part::End;
             } else {
+                if self.list {
+                    self.held.clear();
+                }
                 out.append(&mut self.held);
                 let header = matches!(
                     self.part,
@@ -607,6 +705,13 @@ impl Stream for Decoder {
         if self.part == Part::End {
             return Ok(());
         }
+        self.compressed += input.len() as u64;
+        let keep = self.tail.len() + input.len();
+        if keep > 8 {
+            self.tail.drain(..(keep - 8).min(self.tail.len()));
+        }
+        self.tail
+            .extend_from_slice(&input[input.len().saturating_sub(8)..]);
         self.input.extend_from_slice(input);
         self.step(out)
     }
@@ -625,6 +730,9 @@ impl Stream for Decoder {
     }
     fn status(&self) -> i32 {
         self.failure.as_ref().map_or(0, |f| f.exit_code)
+    }
+    fn metadata(&self, out: &mut Vec<u8>) {
+        serde_json::to_writer(out, &self.facts()).expect("gzip facts serialize");
     }
     fn take_stderr(&mut self, out: &mut Vec<u8>) {
         if let Some(failure) = self.failure.as_ref().filter(|_| !self.reported) {
@@ -647,16 +755,10 @@ struct Encoder {
 }
 
 impl Encoder {
-    fn new(level: i32, name: String) -> Self {
-        let mut header = vec![
-            0x1f,
-            0x8b,
-            8,
-            if name.is_empty() { 0 } else { 8 },
-            0,
-            0,
-            0,
-            0,
+    fn new(level: i32, name: String, mtime: u32) -> Self {
+        let mut header = vec![0x1f, 0x8b, 8, if name.is_empty() { 0 } else { 8 }];
+        header.extend_from_slice(&mtime.to_le_bytes());
+        header.extend_from_slice(&[
             if level == 9 {
                 2
             } else if level == 1 {
@@ -665,7 +767,7 @@ impl Encoder {
                 0
             },
             3,
-        ];
+        ]);
         if !name.is_empty() {
             header.extend_from_slice(name.as_bytes());
             header.push(0);
@@ -886,7 +988,7 @@ mod tests {
     #[test]
     fn encoding_and_expansion_are_bounded_at_each_call() {
         let plain = vec![b'x'; OUTPUT * 100];
-        let mut encoder = Encoder::new(9, "name".into());
+        let mut encoder = Encoder::new(9, "name".into(), 0);
         let mut encoded = Vec::new();
         for data in plain.chunks(INPUT) {
             let mut out = Vec::new();
@@ -912,6 +1014,54 @@ mod tests {
         assert!(failure.is_none());
         let mut decoder = Decoder::new(false, false);
         assert!(decoder.feed(&[0; INPUT + 1], &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn a_listing_checks_the_input_and_reads_its_facts_in_any_chunks() {
+        let mut encoder = Encoder::new(-1, "a.txt".into(), 0x3a7b8372);
+        let mut encoded = Vec::new();
+        encoder.feed(b"hello world hello\n", &mut encoded).unwrap();
+        encoder.finish(&mut encoded).unwrap();
+        while encoder.busy() {
+            encoder.drain(&mut encoded).unwrap();
+        }
+        assert_eq!(&encoded[4..8], &0x3a7b8372u32.to_le_bytes());
+        for width in 1..=encoded.len() {
+            let mut decoder = Decoder::listing();
+            let mut out = Vec::new();
+            for input in encoded.chunks(width) {
+                decoder.feed(input, &mut out).unwrap();
+                while decoder.busy() {
+                    decoder.drain(&mut out).unwrap();
+                }
+            }
+            decoder.finish(&mut out).unwrap();
+            assert!(out.is_empty());
+            assert!(decoder.failure.is_none());
+            let facts = decoder.facts();
+            assert_eq!(facts.name.as_deref(), Some("a.txt"));
+            assert_eq!(facts.mtime, 0x3a7b8372);
+            assert_eq!(facts.header, 24);
+            assert_eq!(facts.crc, 0x27a4fb3f);
+            assert_eq!(facts.size, 18);
+        }
+        let mut decoder = Decoder::listing();
+        decoder
+            .feed(&[encoded.as_slice(), HELLO].concat(), &mut Vec::new())
+            .unwrap();
+        decoder.finish(&mut Vec::new()).unwrap();
+        let facts = decoder.facts();
+        assert_eq!((facts.header, facts.compressed, facts.size), (0, 67, 6));
+        let mut decoder = Decoder::listing();
+        decoder.feed(b"q", &mut Vec::new()).unwrap();
+        decoder.finish(&mut Vec::new()).unwrap();
+        assert!(decoder.failure.unwrap().reasons[0].ends_with("unexpected end of file"));
+        let mut broken = encoded.clone();
+        broken[16] ^= 0xff;
+        let mut decoder = Decoder::listing();
+        decoder.feed(&broken, &mut Vec::new()).unwrap();
+        decoder.finish(&mut Vec::new()).unwrap();
+        assert!(decoder.failure.unwrap().reasons[0].ends_with("format violated"));
     }
 
     #[test]

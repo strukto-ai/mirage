@@ -1,21 +1,32 @@
+import logging
 import posixpath
 import string
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from typing import Any
 
 from mirage.commands.builtin.constants import (
     GZIP_KNOWN_SUFFIXES,
+    GZIP_LIST_HEAD,
+    GZIP_LIST_VERBOSE_HEAD,
+    GZIP_LIST_VERBOSE_INDENT,
     GZIP_MAX_SUFFIX,
     GZIP_RETRY_SUFFIXES,
     GZIP_SUFFIX,
     GZIP_TAR_SUFFIXES,
 )
-from mirage.commands.builtin.utils.constants import STDIN_OPERAND
+from mirage.commands.builtin.utils.constants import MONTHS, STDIN_OPERAND
 from mirage.commands.builtin.utils.copy import path_exists
 from mirage.commands.builtin.utils.links import LinkResolver
 from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.commands.builtin.utils.paths import (
+    descendant_path,
+    is_implicit_dir,
+)
 from mirage.commands.builtin.utils.stream import stdin_stream
+from mirage.commands.builtin.utils.tree import before_full_walk
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eloop, enoent
 from mirage.errors.render import fs_error_line
@@ -23,9 +34,28 @@ from mirage.errors.types import DotWalkMissing
 from mirage.io.spool import ByteSpool, spooled
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource, IOResult
+from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
-from mirage.types import PathSpec, PolymorphicReadFn, StatFn
-from mirage.utils.compress import GzipDataError, gunzip_stream
+from mirage.types import (
+    FileStat,
+    FileType,
+    PathSpec,
+    PolymorphicReadFn,
+    ReaddirFn,
+    StatFn,
+)
+from mirage.utils.clock import system_now
+from mirage.utils.compress import (
+    GzipDataError,
+    GzipFacts,
+    gunzip_stream,
+    read_gzip_facts,
+)
+from mirage.utils.dates import epoch_to_iso, iso_timestamp
+
+logger = logging.getLogger(__name__)
+
+SetAttrsFn = Callable[[PathSpec, Mapping[str, Any]], Awaitable[Any]]
 
 _ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
 
@@ -287,6 +317,220 @@ def beside_link(link: str, typed: str) -> PathSpec:
     )
 
 
+def gzip_ratio(size: int, compressed: int, header: int) -> str:
+    """gzip's ratio column: how far below ``size`` the deflated bytes
+    come, the ``header`` bytes left out, none for empty data.
+
+    Args:
+        size (int): the uncompressed length.
+        compressed (int): the compressed length.
+        header (int): the bytes of it a header and trailer take.
+    """
+    saved = 0.0 if size == 0 else 100 * (size - (compressed - header)) / size
+    return f"{saved:5.1f}%"
+
+
+def verbose_line(shown: str, ratio: str, keep: bool, output: str) -> str:
+    """What -v says once an input is done, ``output`` its result's name
+    or ``stdout``.
+
+    Args:
+        shown (str): the input as typed.
+        ratio (str): its ratio column.
+        keep (bool): -k, under which the output was created beside it.
+        output (str): the output's name.
+    """
+    done = "created" if keep else "replaced with"
+    return f"{shown}:\t{ratio} -- {done} {output}\n"
+
+
+def _list_date(epoch: float) -> str:
+    """-l -v's date column, the month, day and minute in UTC.
+
+    Args:
+        epoch (float): the time as epoch seconds.
+    """
+    when = datetime.fromtimestamp(epoch, tz=UTC)
+    return f"{MONTHS[when.month - 1]} {when.day:>2} {when.hour:02d}:{when.minute:02d}"
+
+
+async def input_info(
+    stat: StatFn | None,
+    path: PathSpec,
+    link: str | None = None,
+    resolver: LinkResolver | None = None,
+) -> FileStat | None:
+    """The stat of what the input opened, for the attributes its output
+    takes: a link it followed gives what it leads to. None when it cannot
+    be had.
+
+    Args:
+        stat (StatFn | None): the mount's stat.
+        path (PathSpec): the input.
+        link (str | None): the link the input was opened through.
+        resolver (LinkResolver | None): the namespace's links.
+    """
+    if stat is None or path.raw_path == "-":
+        return None
+    try:
+        if link is not None and resolver is not None:
+            return await resolver.stat(resolver.target(link))
+        return await stat(path)
+    except FS_ERRORS as exc:
+        logger.debug("gzip: no stat for %s: %s", path.virtual, exc)
+        return None
+
+
+async def keep_attributes(
+    set_attrs: SetAttrsFn | None,
+    out: PathSpec,
+    info: FileStat | None,
+    mtime: int = 0,
+) -> None:
+    """Give an in-place output its input's mode and times, as gzip does;
+    a nonzero ``mtime`` is the time -N restores from the header.
+
+    Args:
+        set_attrs (SetAttrsFn | None): sets attributes through the
+            dispatcher.
+        out (PathSpec): the output.
+        info (FileStat | None): the input's stat.
+        mtime (int): the stored time to restore, 0 for none.
+    """
+    if set_attrs is None:
+        return
+    fields: dict[str, Any] = {}
+    if info is not None:
+        if info.mode is not None:
+            fields["mode"] = info.mode & 0o7777
+        fields.update(mtime=info.modified, atime=info.atime)
+    if mtime:
+        fields["mtime"] = epoch_to_iso(mtime)
+    kept = {k: v for k, v in fields.items() if v not in (None, "")}
+    if not kept:
+        return
+    try:
+        await set_attrs(out, kept)
+    except FS_ERRORS as exc:
+        logger.debug("gzip: attributes not kept on %s: %s", out.virtual, exc)
+
+
+async def _is_directory(
+    stat: StatFn, readdir: ReaddirFn, path: PathSpec
+) -> bool:
+    """Whether -r walks into ``path``: a directory, or a prefix a keyed
+    backend lists; a path that cannot be told is opened as a file, which
+    reports why.
+
+    Args:
+        stat (StatFn): the mount's stat.
+        readdir (ReaddirFn): the mount's readdir.
+        path (PathSpec): the operand or a file the walk found.
+    """
+    try:
+        return (await stat(path)).type is FileType.DIRECTORY
+    except FileNotFoundError:
+        try:
+            return await is_implicit_dir(readdir, path)
+        except FS_ERRORS as exc:
+            logger.debug("gzip: no listing for %s: %s", path.virtual, exc)
+            return False
+    except FS_ERRORS as exc:
+        logger.debug("gzip: no stat for %s: %s", path.virtual, exc)
+        return False
+
+
+async def walked(
+    paths: list[PathSpec],
+    report: Callable[[str, int, bool], None],
+    *,
+    recursive: bool = False,
+    stat: StatFn | None = None,
+    readdir: ReaddirFn | None = None,
+) -> AsyncIterator[tuple[PathSpec, bool]]:
+    """Each operand in turn and, under -r, every file below a directory
+    one, siblings in name order; True marks a file the walk found.
+
+    Args:
+        paths (list[PathSpec]): the operands.
+        report (Callable): takes a failure's line, exit code and warning
+            flag.
+        recursive (bool): -r.
+        stat (StatFn | None): the mount's stat.
+        readdir (ReaddirFn | None): the mount's readdir.
+    """
+
+    async def below(
+        stat: StatFn, readdir: ReaddirFn, root: PathSpec, directory: PathSpec
+    ) -> AsyncIterator[PathSpec]:
+        try:
+            names = sorted(await readdir(directory))
+        except FS_ERRORS as exc:
+            report(fs_error_line("gzip", directory, exc), 1, False)
+            return
+        for name in names:
+            child = descendant_path(root, name.rstrip("/"))
+            if await _is_directory(stat, readdir, child):
+                async for found in below(stat, readdir, root, child):
+                    yield found
+            else:
+                yield child
+
+    for path in paths:
+        if (
+            not recursive
+            or stat is None
+            or readdir is None
+            or path.raw_path == "-"
+            or not await _is_directory(stat, readdir, path)
+        ):
+            yield path, False
+            continue
+        async for found in below(stat, readdir, path, path):
+            yield found, True
+
+
+async def ask_before_walks(
+    paths: list[PathSpec],
+    stat: StatFn | None,
+    readdir: ReaddirFn | None,
+    dispatch: DispatchFn | None,
+) -> None:
+    """Let the mount under each directory -r reads refuse the walk, before
+    any file is touched.
+
+    Args:
+        paths (list[PathSpec]): the operands.
+        stat (StatFn | None): the mount's stat.
+        readdir (ReaddirFn | None): the mount's readdir.
+        dispatch (DispatchFn | None): the command's dispatcher.
+
+    Raises:
+        UsageError: a mount refused the walk.
+    """
+    if stat is None or readdir is None:
+        return
+    for path in paths:
+        if path.raw_path != "-" and await _is_directory(stat, readdir, path):
+            await before_full_walk(dispatch, path, "gzip")
+
+
+def _named(path: PathSpec, stored: str | None) -> tuple[str, PathSpec] | None:
+    """The output -N names from the stored name: its last component,
+    beside the input; None when it stores no usable one.
+
+    Args:
+        path (PathSpec): the compressed input.
+        stored (str | None): the name its header stores.
+    """
+    base = posixpath.basename(stored or "")
+    if base in ("", ".", ".."):
+        return None
+    typed = posixpath.join(posixpath.dirname(path.raw_path), base)
+    here = posixpath.dirname("/" + path.virtual.strip("/"))
+    return typed, PathSpec.from_str_path(posixpath.join(here, base))
+
+
 async def decompress_inputs(
     paths: list[PathSpec],
     *,
@@ -297,10 +541,15 @@ async def decompress_inputs(
     keep: bool = False,
     force: bool = False,
     quiet: bool = False,
+    verbose: bool = False,
+    restore: bool = False,
+    recursive: bool = False,
     suffix: str = GZIP_SUFFIX,
     write: Callable[..., Awaitable[None]] | None = None,
     unlink: Callable[..., Awaitable[None]] | None = None,
     stat: StatFn | None = None,
+    readdir: ReaddirFn | None = None,
+    set_attrs: SetAttrsFn | None = None,
     resolver: LinkResolver | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Decode operands in order the way gzip 1.13 does, in its voice.
@@ -316,7 +565,15 @@ async def decompress_inputs(
     stdin cannot open as gzip ends the run, as gzip exits there.
 
     With -f, an output already there is replaced, and when the input
-    then turns out corrupt GNU has already unlinked it: mirage keeps it.
+    then turns out corrupt the reference has already unlinked it: mirage
+    keeps it.
+
+    Under -r a directory gives way to the files below it, and one found
+    there with no known suffix is passed over, said only under -v,
+    unless its bytes go to stdout. -v says each input's ratio once done
+    (``OK`` under -t), never for stdin's. -N names an in-place output
+    from the stored name and gives it the stored time; any in-place
+    output takes its input's mode and times.
 
     Args:
         paths (list[PathSpec]): Expanded operands, empty for stdin.
@@ -328,10 +585,16 @@ async def decompress_inputs(
         force (bool): Replace an output, follow a link, and copy what is
             not gzip.
         quiet (bool): Drop gzip's warnings.
+        verbose (bool): -v.
+        restore (bool): -N.
+        recursive (bool): -r.
         suffix (str): The -S suffix.
         write (Callable | None): Write an in-place result.
         unlink (Callable | None): Remove a replaced input.
         stat (StatFn | None): Stat an operand or an in-place output.
+        readdir (ReaddirFn | None): List a directory under -r.
+        set_attrs (SetAttrsFn | None): Set an in-place output's
+            attributes.
         resolver (LinkResolver | None): The namespace's links, None when there
             are none.
     """
@@ -345,18 +608,23 @@ async def decompress_inputs(
     io = IOResult()
     errors: list[bytes] = []
 
+    def note(line: str) -> None:
+        errors.append(encode_text(line))
+        io.stderr = b"".join(errors)
+
     def report(line: str, code: int, warning: bool = False) -> None:
         if not (warning and quiet):
-            errors.append(encode_text(line))
-            io.stderr = b"".join(errors)
+            note(line)
         if io.exit_code != 1:
             io.exit_code = code
 
-    def fail(exc: GzipDataError, shown: str) -> None:
-        report(exc.render(shown), exc.exit_code, exc.exit_code == 2)
+    def fail(exc: GzipDataError, shown: str, started: str = "") -> None:
+        report(started + exc.render(shown), exc.exit_code, exc.exit_code == 2)
 
     async def run() -> AsyncIterator[bytes]:
-        for operand in operands:
+        async for operand, found in walked(
+            operands, report, recursive=recursive, stat=stat, readdir=readdir
+        ):
             on_stdin = operand.raw_path == "-"
             in_place = not (to_stdout or test_only or on_stdin)
             opened = (
@@ -378,18 +646,27 @@ async def decompress_inputs(
             link = None if opened is None else opened.link
             shown = "stdin" if on_stdin else path.raw_path
             output = _decompressed(path, suffix) if in_place else None
-            if in_place and output is None:
-                if not quiet:
+            passed = (
+                found
+                and (in_place or test_only)
+                and gzip_suffix(path.raw_path, suffix) is None
+            )
+            if passed or (in_place and output is None):
+                if verbose if found else not quiet:
                     report(f"gzip: {shown}: unknown suffix -- ignored\n", 2)
                 await close_quietly(source)
                 continue
+            facts: list[GzipFacts] = []
             spool = ByteSpool()
             try:
                 failure: GzipDataError | None = None
                 try:
                     async with aclosing(
                         gunzip_stream(
-                            source, test_only, force and not in_place
+                            source,
+                            test_only,
+                            force and not in_place,
+                            facts.append,
                         )
                     ) as decoded:
                         async for chunk in decoded:
@@ -409,6 +686,10 @@ async def decompress_inputs(
                             on_stdin and failure.first_header
                         ):
                             return
+                    elif verbose and test_only:
+                        note(" OK\n" if on_stdin else f"{shown}:\t OK\n")
+                    elif verbose and facts and not on_stdin:
+                        note(_decoded_line(shown, facts[0], keep, "stdout"))
                     continue
                 if failure is not None and failure.first_header:
                     fail(failure, shown)
@@ -420,14 +701,25 @@ async def decompress_inputs(
                         "in-place decompression requires write and unlink"
                     )
                 out_name, out = output
+                stored = facts[0] if facts else None
+                named = (
+                    _named(path, stored.name)
+                    if restore and stored is not None
+                    else None
+                )
+                if named is not None:
+                    out_name, out = named
                 if link is not None:
                     out = beside_link(link, out_name)
                 existed = await output_taken(out, stat, resolver)
                 if existed and not force:
                     report(exists_line(out_name), 2)
                     continue
+                started = ""
                 if failure is not None:
-                    fail(failure, shown)
+                    if verbose and failure.keeps_output and stored is not None:
+                        started = f"{shown}:\t"
+                    fail(failure, shown, started)
                     if failure.fatal:
                         return
                     if not failure.keeps_output:
@@ -443,6 +735,18 @@ async def decompress_inputs(
                     if existed:
                         continue
                     return
+                await keep_attributes(
+                    set_attrs,
+                    out,
+                    await input_info(stat, path, link, resolver),
+                    stored.mtime if restore and stored is not None else 0,
+                )
+                if verbose and stored is not None:
+                    note(
+                        _decoded_line(
+                            shown, stored, keep, out_name
+                        ).removeprefix(started)
+                    )
                 if not keep:
                     await remove_input(path, link, unlink, resolver)
             finally:
@@ -455,6 +759,144 @@ async def decompress_inputs(
     ):
         return await spooled(body), io
     return body, io
+
+
+def _decoded_line(shown: str, facts: GzipFacts, keep: bool, out: str) -> str:
+    return verbose_line(
+        shown,
+        gzip_ratio(facts.size, facts.compressed, facts.header),
+        keep,
+        out,
+    )
+
+
+async def list_inputs(
+    paths: list[PathSpec],
+    *,
+    read: PolymorphicReadFn,
+    stdin: ByteSource | None = None,
+    quiet: bool = False,
+    verbose: bool = False,
+    restore: bool = False,
+    recursive: bool = False,
+    suffix: str = GZIP_SUFFIX,
+    stat: StatFn | None = None,
+    readdir: ReaddirFn | None = None,
+    resolver: LinkResolver | None = None,
+) -> tuple[ByteSource | None, IOResult]:
+    """``gzip -l``: one row per input that decodes, checked whole.
+
+    An input opens as for ``-c`` and one that fails to decode is reported
+    in gzip's words and passed over. The head comes before the first
+    row, and with more than one operand a totals row ends the table once
+    any row was printed, its ratio leaving out the header bytes of the
+    input tried last (none for one that failed), as the reference counts
+    it; -q drops both. The name is the input's without its suffix, or the
+    stored one under -N; -v adds the method, the CRC and the date: the
+    file's own, or the stored one under -N.
+
+    Args:
+        paths (list[PathSpec]): Expanded operands, empty for stdin.
+        read (PolymorphicReadFn): Backend reader.
+        stdin (ByteSource | None): Shared standard input cursor.
+        quiet (bool): -q.
+        verbose (bool): -v.
+        restore (bool): -N.
+        recursive (bool): -r.
+        suffix (str): The -S suffix.
+        stat (StatFn | None): Stat an input for its date.
+        readdir (ReaddirFn | None): List a directory under -r.
+        resolver (LinkResolver | None): The namespace's links.
+    """
+    refused = suffix_refusal(suffix)
+    if refused is not None:
+        return None, refused
+    operands = paths or [STDIN_OPERAND]
+    stream = stdin_stream(normalized_read(read), stdin)
+    io = IOResult()
+    errors: list[bytes] = []
+    rows: list[str] = []
+    totals = [0, 0]
+    header = 0
+
+    def report(line: str, code: int, warning: bool = False) -> None:
+        if not (warning and quiet):
+            errors.append(encode_text(line))
+            io.stderr = b"".join(errors)
+        if io.exit_code != 1:
+            io.exit_code = code
+
+    async for operand, found in walked(
+        operands, report, recursive=recursive, stat=stat, readdir=readdir
+    ):
+        on_stdin = operand.raw_path == "-"
+        opened = (
+            None
+            if on_stdin
+            else await open_gzip_input(
+                operand,
+                stream,
+                report,
+                suffix=suffix,
+                follow=True,
+                resolver=resolver,
+            )
+        )
+        if opened is None and not on_stdin:
+            continue
+        path = operand if opened is None else opened.name
+        source = stream(operand) if opened is None else opened.stream
+        shown = "stdin" if on_stdin else path.raw_path
+        if found and gzip_suffix(path.raw_path, suffix) is None:
+            await close_quietly(source)
+            if verbose:
+                report(f"gzip: {shown}: unknown suffix -- ignored\n", 2)
+            continue
+        try:
+            facts = await read_gzip_facts(source)
+        except GzipDataError as exc:
+            header = 0
+            report(exc.render(shown), exc.exit_code, exc.exit_code == 2)
+            continue
+        except FS_ERRORS as exc:
+            header = 0
+            report("\n" + fs_error_line("gzip", shown, exc), 1)
+            continue
+        header = facts.header
+        totals[0] += facts.compressed
+        totals[1] += facts.size
+        stripped = _decompressed(path, suffix)
+        name = (
+            "stdout"
+            if on_stdin
+            else path.raw_path
+            if stripped is None
+            else stripped[0]
+        )
+        if restore and facts.name:
+            name = facts.name
+        numbers = (
+            f"{facts.compressed:>19} {facts.size:>19} "
+            f"{gzip_ratio(facts.size, facts.compressed, facts.header)}"
+        )
+        if not rows and not quiet:
+            rows.append(GZIP_LIST_VERBOSE_HEAD if verbose else GZIP_LIST_HEAD)
+        if verbose:
+            if restore and facts.mtime:
+                when: float = facts.mtime
+            else:
+                info = await input_info(stat, path)
+                stamp = None if info is None else iso_timestamp(info.modified)
+                when = system_now() if stamp is None else stamp
+            numbers = f"defla {facts.crc:08x} {_list_date(when)} {numbers}"
+        rows.append(f"{numbers} {name}")
+    if rows and len(operands) > 1 and not quiet:
+        indent = " " * GZIP_LIST_VERBOSE_INDENT if verbose else ""
+        rows.append(
+            f"{indent}{totals[0]:>19} {totals[1]:>19} "
+            f"{gzip_ratio(totals[1], totals[0], header)} (totals)"
+        )
+    return encode_text("".join(f"{row}\n" for row in rows)), io
 
 
 async def replace_output(
