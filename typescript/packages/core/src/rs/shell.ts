@@ -674,7 +674,7 @@ function texts(items: Item): string[] {
  * until the task finishes. Mirrors Python's mirage._rs.Shell.
  */
 export class Shell {
-  private closed = false
+  private closedInternal = false
   // The frame `frame` set, sent with the next request rather than in one of
   // its own.
   private framed: ShellFrame | null = null
@@ -697,10 +697,15 @@ export class Shell {
 
   /** Free the shell with the next request, rather than when it is collected. */
   close(): void {
-    if (this.closed) return
-    this.closed = true
+    if (this.closedInternal) return
+    this.closedInternal = true
     shells.unregister(this)
     closing.push(this.handle)
+  }
+
+  /** Whether `close` freed the shell. */
+  get closed(): boolean {
+    return this.closedInternal
   }
 
   private call(op: string, ...args: Item[]): Item {

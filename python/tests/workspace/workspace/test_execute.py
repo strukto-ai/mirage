@@ -506,7 +506,8 @@ async def test_a_line_saves_its_session_once_at_its_end():
 
 
 @pytest.mark.asyncio
-async def test_a_line_that_outlives_its_caller_saves_its_session():
+@pytest.mark.parametrize("line", ["spawn", "echo $(spawn)"])
+async def test_a_line_that_outlives_its_caller_saves_its_session(line):
     store = RAMNamespaceStore()
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, session_store=store)
     gate = asyncio.Event()
@@ -526,9 +527,9 @@ async def test_a_line_that_outlives_its_caller_saves_its_session():
             spec=CommandSpec(name="spawn"), handlers={"": CLIHandler(fn=spawn)}
         ),
     )
-    await ws.shell("spawn")
+    await ws.shell(line)
     gate.set()
-    await later[0]
+    assert (await later[0]).exit_code == 0
     saved = (await store.load())[ws._session_mgr.default_id]
     assert saved["env"]["X"] == "late"
     await ws.close()

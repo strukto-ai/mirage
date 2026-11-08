@@ -419,33 +419,36 @@ describe('same-session lines run one at a time', () => {
     expect(casSet.mock.calls[0]?.[1].env).toMatchObject({ x: '3', y: '3' })
   })
 
-  it('a line that outlives its caller saves its session', async () => {
-    const ws = makeWs()
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    const later: Promise<unknown>[] = []
-    ws.registerCli(
-      'spawn',
-      new CLI({
-        spec: new CommandSpec({ name: 'spawn' }),
-        handlers: {
-          '': new CLIHandler({
-            fn: () => {
-              later.push(gate.then(() => ws.shell('X=late', { record: false })))
-              return null
-            },
-          }),
-        },
-      }),
-    )
-    await ws.shell('spawn')
-    release()
-    await later[0]
-    const saved = await ws.stateStore.sessions(ws.workspaceId).load()
-    expect(saved.get(ws.defaultSessionId)?.env).toMatchObject({ X: 'late' })
-  })
+  it.each(['spawn', 'echo $(spawn)'])(
+    'a line that outlives its caller saves its session: %s',
+    async (line) => {
+      const ws = makeWs()
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const later: Promise<unknown>[] = []
+      ws.registerCli(
+        'spawn',
+        new CLI({
+          spec: new CommandSpec({ name: 'spawn' }),
+          handlers: {
+            '': new CLIHandler({
+              fn: () => {
+                later.push(gate.then(() => ws.shell('X=late', { record: false })))
+                return null
+              },
+            }),
+          },
+        }),
+      )
+      await ws.shell(line)
+      release()
+      expect(await later[0]).toMatchObject({ exitCode: 0 })
+      const saved = await ws.stateStore.sessions(ws.workspaceId).load()
+      expect(saved.get(ws.defaultSessionId)?.env).toMatchObject({ X: 'late' })
+    },
+  )
 
   it('a host callback re-entering its own session runs inline', async () => {
     const ws = makeWs()

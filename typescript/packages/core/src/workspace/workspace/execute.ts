@@ -326,10 +326,14 @@ async function runLine(
   await abortable(preflight(env), options.signal)
   // Evaluator calls carry their exact session, including ephemeral forks.
   // Ambient re-entry is safe only with task-local storage: the browser
-  // fallback's newest frame may belong to an unrelated shell call.
+  // fallback's newest frame may belong to an unrelated shell call. A
+  // substitution's shell ends with it, so a host task still bound to one
+  // (started in it, run after it) resolves its session as any host call does.
   const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(env.sessions) : null
   const inPlace =
-    ambient !== null && (options.sessionId === undefined || options.sessionId === ambient.sessionId)
+    ambient !== null &&
+    !ambient.vars.shell.closed &&
+    (options.sessionId === undefined || options.sessionId === ambient.sessionId)
   const targetSession =
     options.session ??
     (inPlace ? ambient : env.sessions.get(options.sessionId ?? env.sessions.defaultId))

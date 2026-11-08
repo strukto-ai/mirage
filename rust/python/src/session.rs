@@ -228,6 +228,8 @@ pub struct Shell {
     parked: usize,
     /// The host's positional lists the last frame read.
     framed: Option<(Py<PyAny>, Vec<Py<PyAny>>)>,
+    /// Set once `close` freed the shell, which nothing runs on again.
+    closed: bool,
 }
 
 impl Shell {
@@ -236,6 +238,7 @@ impl Shell {
             inner: Some(inner),
             parked: 0,
             framed: None,
+            closed: false,
         }
     }
 
@@ -707,6 +710,13 @@ impl Shell {
         self.inner = None;
         self.parked = 0;
         self.framed = None;
+        self.closed = true;
+    }
+
+    /// Whether `close` freed the shell.
+    #[getter]
+    fn closed(&self) -> bool {
+        self.closed
     }
 
     /// Expand `node` as `mode` (`fields`, `text`, `assignment`, `pattern`,

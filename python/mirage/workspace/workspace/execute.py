@@ -572,8 +572,15 @@ async def execute_line(
     # Only this workspace's own binding counts: a session carries one
     # workspace's cwd, env and mount grants, so a callback reaching a
     # second workspace must resolve that workspace's session instead.
+    # A substitution's shell ends with it, so a host task still bound to
+    # one (started in it, run after it) resolves its session as any host
+    # call does.
     ambient = get_current_session_for(ws.sessions)
-    if ambient is not None and session_id in (None, ambient.session_id):
+    if (
+        ambient is not None
+        and not ambient.vars.shell.closed
+        and session_id in (None, ambient.session_id)
+    ):
         session = ambient
         session_id = ambient.session_id
     else:
