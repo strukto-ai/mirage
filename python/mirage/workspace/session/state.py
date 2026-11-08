@@ -81,6 +81,7 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
         outside=outside,
         pipe_status=list(session.pipe_status),
         function_names=None if names is None else list(names),
+        call_lines=list(session.call_lines),
         paren=call_stack is not None and call_stack.paren,
         memory_room=memory_room(),
         line=session.line_number,

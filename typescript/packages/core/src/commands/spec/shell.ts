@@ -281,6 +281,12 @@ export const SHELL_SPECS = Object.freeze(
         new Argument('-@', { action: 'store_true', help: 'accepted, with no effect' }),
       ],
     }),
+    builtin: new CommandSpec({
+      description:
+        'Run a shell builtin, passing over shell functions.\n\n' +
+        'Runs SHELL-BUILTIN with its ARGs even when a shell function has the same name.',
+      epilog: 'The status of SHELL-BUILTIN, or 1 when it is not one.',
+    }),
     command: new CommandSpec({
       description:
         'Run a command, passing over shell functions, or describe it.\n\n' +

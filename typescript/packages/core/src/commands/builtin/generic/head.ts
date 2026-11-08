@@ -25,12 +25,11 @@ import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
 import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { truncateStream } from '../utils/limit.ts'
-import { reportFsError, splitOpened } from '../utils/operands.ts'
+import { operandLines, operandsIo, reportFsError, say, splitOpened } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { encodeText } from '../../../shell/bytes.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { refused, scan } from '../../../rs/scan.ts'
 import { closeStream, openStream } from '../../../rs/stream.ts'
@@ -137,38 +136,54 @@ async function* headStream(
 
 async function* headMulti(
   stream: ReadStreamFn,
-  paths: readonly PathSpec[],
+  paths: readonly (PathSpec | string)[],
   lines: number,
   bytesMode: number | null,
   showHeaders: boolean,
   zeroTerminated: boolean,
-  unread: ReadonlySet<string>,
+  unread: ReadonlyMap<string, string>,
   refused: ReadonlySet<string>,
+  io: IOResult,
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
+  const said = operandLines(paths, unread)
   let printed = false
-  for (const p of paths) {
-    // A directory opened: its header prints and its read fails.
-    const body = unread.has(p.virtual)
-      ? null
-      : headStream(stream(p), lines, bytesMode, zeroTerminated, signal)
-    try {
-      // The first pull opens the file, and `stream` names in `refused` one
-      // whose open it refused, which prints no header, as GNU opens a file
-      // before it heads it.
-      const first = await body?.next()
-      if (showHeaders && !refused.has(p.virtual)) {
-        yield operandHeader(p, printed)
-        printed = true
+  try {
+    for (const [i, p] of paths.entries()) {
+      if (typeof p === 'string') {
+        await say(io, p)
+        said.delete(i)
+        continue
       }
-      if (body === null || first === undefined || first.done === true) continue
-      yield first.value
-      for (let next = await body.next(); next.done !== true; next = await body.next()) {
-        yield next.value
+      // A directory opened: its header prints, then its read fails.
+      const body = unread.has(p.virtual)
+        ? null
+        : headStream(stream(p), lines, bytesMode, zeroTerminated, signal)
+      try {
+        // The first pull opens the file, and `stream` names in `refused` one
+        // whose open it refused, which prints no header, as GNU opens a file
+        // before it heads it.
+        const first = await body?.next()
+        if (showHeaders && !refused.has(p.virtual)) {
+          yield operandHeader(p, printed)
+          printed = true
+        }
+        if (body === null) {
+          await say(io, unread.get(p.virtual) ?? '')
+          said.delete(i)
+          continue
+        }
+        if (first === undefined || first.done === true) continue
+        yield first.value
+        for (let next = await body.next(); next.done !== true; next = await body.next()) {
+          yield next.value
+        }
+      } finally {
+        await closeQuietly(body)
       }
-    } finally {
-      await closeQuietly(body)
     }
+  } finally {
+    if (said.size > 0) await say(io, [...said.values()].join(''))
   }
 }
 
@@ -192,12 +207,12 @@ export async function headGeneric(
   stream = stdinStream(stream, ctx.stdin)
   if (paths.length > 0) {
     const showHeaders = showsHeaders(parsed.verbose, parsed.quiet, paths.length)
-    const [opened, unread, err] = await splitOpened(paths, stat, 'head')
-    const io = new IOResult({
-      exitCode: err === '' ? 0 : 1,
-      stderr: err === '' ? null : encodeText(err),
-    })
-    if (opened.length === 0) return [null, io]
+    const [order, unread] = await splitOpened(paths, stat, 'head')
+    const lines = operandLines(order, unread)
+    if (order.every((p) => typeof p === 'string')) {
+      return [null, operandsIo([...lines.values()].join(''))]
+    }
+    const io = new IOResult({ exitCode: lines.size > 0 ? 1 : 0 })
     const refused = new Set<string>()
     const pushed = parsed.bytesMode === null && !parsed.zeroTerminated && parsed.lines > 0
     const sourceFor = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
@@ -229,13 +244,14 @@ export async function headGeneric(
     return [
       headMulti(
         (path) => (isStdin(path) && ctx.stdin instanceof SharedInput ? ctx.stdin : sourceFor(path)),
-        opened,
+        order,
         parsed.lines,
         parsed.bytesMode,
         showHeaders,
         parsed.zeroTerminated,
         unread,
         refused,
+        io,
         ctx.signal,
       ),
       io,

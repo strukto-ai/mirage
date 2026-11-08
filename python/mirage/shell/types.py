@@ -63,6 +63,8 @@ class TSNodeLike(Protocol):
 
     def child_by_field_name(self, name: str) -> "TSNodeLike | None": ...
 
+    def reread_lines(self) -> list[tuple[int, int, int]]: ...
+
 
 @dataclass(frozen=True, slots=True)
 class AliasExpansion:
@@ -349,6 +351,7 @@ class ShellBuiltin(StrEnum):
     DOT = "."
     EVAL = "eval"
     COMMAND = "command"
+    BUILTIN = "builtin"
     # -- name lookup
     TYPE = "type"
     WHICH = "which"

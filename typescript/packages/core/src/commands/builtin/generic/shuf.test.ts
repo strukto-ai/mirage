@@ -539,7 +539,7 @@ describe('shuf refuses in command-line order', () => {
 })
 
 describe('shuf over several files', () => {
-  it("ends a file's last record at that file", async () => {
+  it('takes one file operand, as GNU does', async () => {
     const files = new Map([
       ['/a', 'a'],
       ['/b', 'b\n'],
@@ -557,9 +557,12 @@ describe('shuf over several files', () => {
     const paths = ['/a', '/b'].map((p) => PathSpec.fromStrPath(p))
     const result = await shufGeneric(paths, [], ctx, stream, stubWrite)
     if (result === null) throw new Error('shuf declined to handle its own operands')
-    const [out] = result
-    const text = out === null ? '' : DEC.decode(await materialize(out))
-    expect(text.split('\n').sort()).toEqual(['', 'a', 'b'])
+    const [out, io] = result
+    expect(out).toBeNull()
+    expect(io.exitCode).toBe(1)
+    expect(DEC.decode(await io.materializeStderr())).toBe(
+      "shuf: extra operand '/b'\nTry 'shuf --help' for more information.\n",
+    )
   })
 })
 

@@ -15,7 +15,7 @@ from mirage.commands.builtin.utils.identity import (
     owner_name,
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
-from mirage.commands.builtin.utils.operands import operand_stat
+from mirage.commands.builtin.utils.operands import at_offsets, operand_stat
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.config import Context
@@ -564,7 +564,7 @@ def _format(
     fmt: str,
     halves: str,
     render: Callable[[_FormatDirective], str],
-    warnings: list[str] | None = None,
+    warnings: list[tuple[int, str]] | None = None,
 ) -> str:
     """Expand a format string, each directive through ``render``.
 
@@ -572,9 +572,10 @@ def _format(
         fmt (str): the format string.
         halves (str): the conversions an ``H`` or ``L`` prefix takes.
         render (Callable[[_FormatDirective], str]): one directive's text.
-        warnings (list[str] | None): ``--printf``'s, which reads the
-            backslash escapes and adds its warnings here; None reads a
-            backslash as itself.
+        warnings (list[tuple[int, str]] | None): ``--printf``'s, which
+            reads the backslash escapes and adds each warning here with
+            where in the report it was said; None reads a backslash as
+            itself.
     """
     parts: list[str] = []
     cursor = 0
@@ -584,7 +585,10 @@ def _format(
             slash = fmt.find("\\", cursor)
             if slash != -1 and (start == -1 or slash < start):
                 parts.append(fmt[cursor:slash])
-                text, cursor = _escape(fmt, slash, warnings)
+                said: list[str] = []
+                text, cursor = _escape(fmt, slash, said)
+                at = sum(len(part) for part in parts)
+                warnings.extend((at, line) for line in said)
                 parts.append(text)
                 continue
         if start == -1:
@@ -606,7 +610,7 @@ def _format_stat(
     s: FileStat,
     name: str,
     identity: Identity | None,
-    warnings: list[str] | None = None,
+    warnings: list[tuple[int, str]] | None = None,
 ) -> str:
     return _format(
         fmt,
@@ -672,7 +676,7 @@ def _render_one(
     name: str,
     fmt: str | None,
     identity: Identity | None,
-    warnings: list[str] | None = None,
+    warnings: list[tuple[int, str]] | None = None,
 ) -> str:
     """One operand's report: the ``-c`` format when given, else GNU's
     default layout.
@@ -682,7 +686,8 @@ def _render_one(
         name (str): operand spelling.
         fmt (str | None): the ``-c`` format, or None for the default.
         identity (Identity | None): session owner and group defaults.
-        warnings (list[str] | None): ``--printf``'s escape warnings.
+        warnings (list[tuple[int, str]] | None): ``--printf``'s escape
+            warnings, each with where in the report it was said.
     """
     if fmt is not None:
         return _format_stat(fmt, s, name, identity, warnings)
@@ -701,17 +706,62 @@ def _records(lines: list[str], printf: bool) -> bytes:
     return format_records(lines)
 
 
-def _drained(warnings: list[str] | None) -> bytes:
-    """The warnings one report raised, as stderr, leaving the list empty.
+def _report(
+    lines: list[str],
+    notes: list[tuple[int, int, bytes]],
+    line: str,
+    warnings: list[tuple[int, str]] | None,
+) -> None:
+    """Add one report, each warning it raised noted where in it it was
+    said (GNU prints ``/f`` before a ``\\q`` warning and ``q`` after
+    it), leaving the warnings empty.
 
     Args:
-        warnings (list[str] | None): ``--printf``'s escape warnings.
+        lines (list[str]): the reports so far.
+        notes (list[tuple[int, int, bytes]]): each stderr line with the
+            report it goes in and the offset in that report.
+        line (str): the report.
+        warnings (list[tuple[int, str]] | None): ``--printf``'s escape
+            warnings, each with where in the report it was said.
     """
-    if not warnings:
-        return b""
-    text = encode_text("".join(warnings))
-    warnings.clear()
-    return text
+    for at, text in warnings or ():
+        notes.append((len(lines), at, encode_text(text)))
+    if warnings:
+        warnings.clear()
+    lines.append(line)
+
+
+def _noted(
+    lines: list[str],
+    notes: list[tuple[int, int, bytes]],
+    printf: bool,
+    failed: bool,
+) -> tuple[ByteSource | None, IOResult]:
+    """The reports as output, each stderr line where it was said.
+
+    Args:
+        lines (list[str]): one report per operand that printed.
+        notes (list[tuple[int, int, bytes]]): each stderr line with the
+            report it goes before or in and the offset in that report.
+        printf (bool): ``--printf``, which adds no newline of its own.
+        failed (bool): whether an operand failed.
+    """
+    io = IOResult(exit_code=1 if failed else 0)
+    if not lines:
+        io.stderr = b"".join(line for _, _, line in notes) or None
+        return None, io
+    starts = [0]
+    for line in lines:
+        starts.append(starts[-1] + len(_records([line], printf)))
+    placed = [
+        (
+            starts[row]
+            + (len(encode_text(lines[row][:at])) if row < len(lines) else 0),
+            text,
+        )
+        for row, at, text in notes
+    ]
+    return at_offsets(_records(lines, printf), placed, io), io
 
 
 async def _dispatched_statfs(
@@ -732,7 +782,7 @@ async def _file_systems(
     fmt: str,
     probe: Callable[[PathSpec], Awaitable[FileStat]],
     statfs: StatfsFn | None,
-    warnings: list[str] | None = None,
+    warnings: list[tuple[int, str]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Report the file system each operand is on, GNU ``stat -f``.
 
@@ -746,15 +796,15 @@ async def _file_systems(
             stat.
         statfs (StatfsFn | None): the type name and capacity of a path's
             mount; None outside a workspace.
-        warnings (list[str] | None): ``--printf``'s escape warnings,
-            or None for ``-c``.
+        warnings (list[tuple[int, str]] | None): ``--printf``'s escape
+            warnings, or None for ``-c``.
     """
     lines: list[str] = []
-    err = ""
+    notes: list[tuple[int, int, bytes]] = []
     failed = False
     for p in paths:
         if p.raw_path == "-":
-            err += f"stat: {_FS_STDIN}\n"
+            notes.append((len(lines), 0, encode_text(f"stat: {_FS_STDIN}\n")))
             failed = True
             continue
         try:
@@ -764,26 +814,24 @@ async def _file_systems(
             )
         except FS_ERRORS as exc:
             strerror = fs_strerror(exc)
-            err += (
-                "stat: cannot read file system information for "
-                f"{shell_quote_always(p.raw_path)}"
-                f"{f': {strerror}' if strerror is not None else ''}\n"
+            notes.append(
+                (
+                    len(lines),
+                    0,
+                    encode_text(
+                        "stat: cannot read file system information for "
+                        f"{shell_quote_always(p.raw_path)}"
+                        f"{f': {strerror}' if strerror is not None else ''}\n"
+                    ),
+                )
             )
             failed = True
             continue
         render = partial(
             _render_fs_directive, kind=kind, cap=cap, name=p.raw_path
         )
-        lines.append(_format(fmt, "", render, warnings))
-        if warnings:
-            err += "".join(warnings)
-            warnings.clear()
-    io = IOResult(
-        exit_code=1 if failed else 0, stderr=encode_text(err) or None
-    )
-    if not lines:
-        return None, io
-    return _records(lines, warnings is not None), io
+        _report(lines, notes, _format(fmt, "", render, warnings), warnings)
+    return _noted(lines, notes, warnings is not None, failed)
 
 
 async def stat(
@@ -831,7 +879,7 @@ async def stat(
         raise missing_operand_error("stat", None)
     if c is None and terse:
         c = _TERSE_FS if f else _TERSE
-    warnings: list[str] | None = [] if printf else None
+    warnings: list[tuple[int, str]] | None = [] if printf else None
     if f:
         probe = partial(
             operand_stat,
@@ -844,7 +892,7 @@ async def stat(
             paths, _FS_LAYOUT if c is None else c, probe, statfs, warnings
         )
     lines: list[str] = []
-    err = b""
+    notes: list[tuple[int, int, bytes]] = []
     failed = False
     for p in paths:
         # GNU stat lstats: a symlink operand reports the link itself,
@@ -852,10 +900,12 @@ async def stat(
         # backend inode, so the namespace is the only authority for it.
         linked = None if L or links is None else links.stat_at(p.virtual)
         if linked is not None:
-            lines.append(
-                _render_one(linked, p.raw_path, c, identity, warnings)
+            _report(
+                lines,
+                notes,
+                _render_one(linked, p.raw_path, c, identity, warnings),
+                warnings,
             )
-            err += _drained(warnings)
             continue
         try:
             s = await operand_stat(
@@ -867,15 +917,18 @@ async def stat(
             )
         except FS_ERRORS as exc:
             # GNU stat keeps reporting the remaining operands, exit 1.
-            err += encode_text(fs_error_line("stat", p, exc))
+            notes.append(
+                (len(lines), 0, encode_text(fs_error_line("stat", p, exc)))
+            )
             failed = True
             continue
-        lines.append(_render_one(s, p.raw_path, c, identity, warnings))
-        err += _drained(warnings)
-    io = IOResult(exit_code=1 if failed else 0, stderr=err or None)
-    if not lines:
-        return None, io
-    return _records(lines, printf), io
+        _report(
+            lines,
+            notes,
+            _render_one(s, p.raw_path, c, identity, warnings),
+            warnings,
+        )
+    return _noted(lines, notes, printf, failed)
 
 
 def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:

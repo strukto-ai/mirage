@@ -14,7 +14,7 @@ from mirage.commands.builtin.generic.du import (
     to_virtual,
 )
 from mirage.commands.config import Context
-from mirage.io.types import IOResult
+from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.view.types import MountView
@@ -91,7 +91,7 @@ async def test_backend_error_on_the_content_probe_reads_as_missing():
         compute_size,
         compute_entries,
     )
-    assert out == b"0\ttotal\n"
+    assert await materialize(out) == b"0\ttotal\n"
     assert io.stderr == (
         b"du: cannot access '/data/nosuch': No such file or directory\n"
     )
@@ -338,7 +338,7 @@ async def test_du_names_a_directory_the_walk_could_not_open():
         compute_size=compute_size,
         compute_entries=compute_entries,
         flags=DuFlags(),
-        missing=(("gone", "No such file or directory"),),
+        missing=(("gone", "No such file or directory", 0),),
         unreadable=lambda: ["/d/t/sealed"],
     )
     assert out.stdout == b"2\tt/open\n2\tt\n"

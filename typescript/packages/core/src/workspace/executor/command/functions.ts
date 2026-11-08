@@ -99,10 +99,12 @@ export async function runShellFunction(
     throw error
   }
   const bodyStdin = share(stdin)
-  cs.push(textArgs, cmdName)
+  cs.push(textArgs, cmdName, false, session.lineNumber)
   let lifted = liftFunctionTraps(session)
   const outerNames = session.functionNames
   if (outerNames !== null) session.functionNames = cs.functionNames()
+  const outerLines = session.callLines
+  session.callLines = cs.callLines()
   // The function's scope: a local shadows the whole record, so the
   // caller's value and attributes come back together when it returns.
   const shell = session.vars.shell
@@ -117,7 +119,7 @@ export async function runShellFunction(
     number,
     number,
     number,
-    readonly number[] | null,
+    SessionState['lineRows'],
     string | null,
     TSNodeLike | null,
   ] = [
@@ -214,6 +216,7 @@ export async function runShellFunction(
     scope.release()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
+    session.callLines = outerLines
     restoreFunctionTraps(session, lifted)
     shell.leave(outerScope)
   }

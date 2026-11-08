@@ -16,6 +16,7 @@ from mirage.commands.builtin.utils.links import (
     mounts_of,
     owed_names,
 )
+from mirage.commands.builtin.utils.operands import at_offsets
 from mirage.commands.builtin.utils.output import (
     format_optional_records,
     format_records,
@@ -32,7 +33,7 @@ from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import fs_strerror, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkError, DotWalkLoop, FsCondition
-from mirage.io.types import IOResult
+from mirage.io.types import ByteSource, IOResult
 from mirage.rs import open_stream
 from mirage.rs.scan import scan, scanned
 from mirage.shell.bytes import decode_text, encode_text, text_view
@@ -1781,13 +1782,15 @@ async def ls_generic(
     readdir: ReaddirFn,
     stat: StatFn,
     options: Mapping[str, Any] | None = None,
-) -> tuple[bytes, IOResult]:
+) -> tuple[ByteSource, IOResult]:
     """Run ls over resolved operands, GNU semantics; mirrors lsGeneric.
 
     The wiring resolves globs, defaults the operands from the cwd, and
     binds the backend ops (including the stat overlay); flag semantics
     live here, and the namespace facts (links, child mounts), the
-    and the identity the owner columns render ride ``ctx``.
+    and the identity the owner columns render ride ``ctx``. GNU looks at
+    every operand before it lists one, so what it reports comes before
+    what it lists (``ls d missing 2>&1``).
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, cwd-defaulted.
@@ -1799,7 +1802,7 @@ async def ls_generic(
         options (Mapping[str, Any] | None): ``ls_options`` the caller read
             before it resolved the operands; None reads them here.
     """
-    return await ls(
+    out, io = await ls(
         paths,
         readdir=readdir,
         stat=stat,
@@ -1814,6 +1817,11 @@ async def ls_generic(
         identity=identity_of(ctx),
         **(ls_options(ctx.flags, ctx.env) if options is None else options),
     )
+    err = await io.materialize_stderr()
+    if not err or not out:
+        return out, io
+    io.stderr = None
+    return at_offsets(out, [(0, err)], io), io
 
 
 __all__ = [

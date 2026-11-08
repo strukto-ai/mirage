@@ -15,7 +15,8 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { mountKey, mountPrefixOf, underPath } from '../../../utils/key_prefix.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { atOffsets } from '../utils/operands.ts'
+import { IOResult } from '../../../io/types.ts'
 import {
   LINK_TARGET_KEY,
   FileStat,
@@ -1243,16 +1244,20 @@ function statNeeded(flags: LsFlags): boolean {
   )
 }
 
+// GNU looks at every operand before it lists one, so what it reports comes
+// before what it lists (`ls d missing 2>&1`). Mirrors Python's ls_generic.
 function finish(
   lines: string[],
   warnings: readonly LsWarning[],
   notices: readonly string[],
 ): CommandFnResult {
-  const out: ByteSource = formatRecords(lines)
+  const out = formatRecords(lines)
   const exitCode = exitStatusFor(warnings)
   if (warnings.length > 0 || notices.length > 0) {
     const stderr = formatRecords([...notices, ...warnings.map((w) => w.message)])
-    return [out, new IOResult({ stderr, exitCode })]
+    if (out.byteLength === 0) return [out, new IOResult({ stderr, exitCode })]
+    const io = new IOResult({ exitCode })
+    return [atOffsets(out, [[0, stderr]], io), io]
   }
   return [out, new IOResult({ exitCode })]
 }

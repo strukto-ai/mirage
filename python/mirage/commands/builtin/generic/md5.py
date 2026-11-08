@@ -1,12 +1,13 @@
+from collections.abc import Sequence
+
 from mirage.commands.builtin.generic.checksum import (
     StoredDigest,
     hash_operands,
 )
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
 from mirage.commands.builtin.utils.operands import (
-    merge_split_errors,
     normalized_read,
-    split_readable,
+    split_in_order,
 )
 from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.config import Context
@@ -19,7 +20,7 @@ def _md5_line(digest: str, label: str) -> bytes:
 
 
 async def md5(
-    paths: list[PathSpec],
+    paths: Sequence[PathSpec | bytes],
     *,
     read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
@@ -28,7 +29,8 @@ async def md5(
     """BSD md5 over the operands, or stdin.
 
     Args:
-        paths (list[PathSpec]): the operands.
+        paths (Sequence[PathSpec | bytes]): the operands, and the stderr
+            line of each that did not read, where it stood.
         read_stream (PolymorphicReadFn): bound reader.
         stdin (ByteSource | None): the line's input.
         stored (StoredDigest | None): the mount's stored digest, asked
@@ -65,18 +67,13 @@ async def md5_generic(
             ``stream(path)``.
         stored (StoredDigest | None): the mount's stored digest.
     """
-    readable, err = await split_readable(paths, stat, "md5")
-    if err and not readable:
-        return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await md5(
-            readable,
-            read_stream=stream,
-            stdin=ctx.stdin,
-            stored=stored,
-        ),
-        err,
-    )
+    order = await split_in_order(paths, stat, "md5")
+    if order and all(isinstance(p, bytes) for p in order):
+        return None, IOResult(
+            exit_code=1,
+            stderr=b"".join(p for p in order if isinstance(p, bytes)),
+        )
+    return await md5(order, read_stream=stream, stdin=ctx.stdin, stored=stored)
 
 
 __all__ = ["md5", "md5_generic"]

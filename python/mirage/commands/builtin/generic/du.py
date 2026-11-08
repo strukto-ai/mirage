@@ -7,7 +7,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from functools import partial
 
@@ -19,6 +19,7 @@ from mirage.commands.builtin.utils.formatting import (
     scaled_size,
 )
 from mirage.commands.builtin.utils.links import mounts_of
+from mirage.commands.builtin.utils.operands import at_offsets
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.builtin.utils.strftime import gnu_strftime
@@ -30,7 +31,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import ZERO_LENGTH_NAME
 from mirage.errors.types import DotWalkError, FsCondition
-from mirage.io.types import IOResult, PathRecord
+from mirage.io.types import ByteSource, IOResult, PathRecord
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused, scan
 from mirage.shell.bytes import decode_text, encode_text
@@ -114,12 +115,15 @@ class DuOutput:
         records (list[PathRecord] | None): each readable operand's
             measurement, None when one was only summed (``-s``, or a
             backend that can only produce a size).
+        notes (list[tuple[int, bytes]]): each stderr line with the
+            offset in ``stdout`` it goes before (``at_offsets``).
     """
 
     stdout: bytes
     stderr: bytes
     exit_code: int
     records: list[PathRecord] | None = None
+    notes: list[tuple[int, bytes]] = field(default_factory=list)
 
 
 def parse_flags(ctx: Context) -> DuFlags | IOResult:
@@ -301,7 +305,7 @@ async def du_operands(
     has_content: Callable[[PathSpec], Awaitable[bool]] | None = None,
     stat_path: StatPath | None = None,
     excludes: Sequence[str] = (),
-) -> tuple[list[PathSpec], list[tuple[str, str]]]:
+) -> tuple[list[PathSpec], list[tuple[str, str, int]]]:
     """Split the operands into the ones du can read and the ones it cannot.
 
     GNU names every operand it fails to stat, keeps going with the rest,
@@ -339,19 +343,20 @@ async def du_operands(
             one is not reported either.
 
     Returns:
-        tuple[list[PathSpec], list[tuple[str, str]]]: readable operands,
-        then the as-typed spelling of each unreadable one paired with the
-        strerror to report it with.
+        tuple[list[PathSpec], list[tuple[str, str, int]]]: readable
+        operands, then the as-typed spelling of each unreadable one with
+        the strerror to report it with and how many readable operands
+        came before it.
     """
     targets = paths if paths else [cwd_spec(cwd)]
     resolved = await resolve_glob(targets)
     present: list[PathSpec] = []
-    missing: list[tuple[str, str]] = []
+    missing: list[tuple[str, str, int]] = []
     if not resolved:
         # An unmatched glob reaches GNU as the literal pattern, which it
         # then reports as unreadable.
         missing = [
-            (p.raw_path, posix_phrase(FsCondition.ENOENT))
+            (p.raw_path, posix_phrase(FsCondition.ENOENT), 0)
             for p in targets
             if not excluded(excludes, p.raw_path)
         ]
@@ -368,6 +373,7 @@ async def du_operands(
                 (
                     path.raw_path,
                     fs_strerror(exc) or posix_phrase(FsCondition.ENOENT),
+                    len(present),
                 )
             )
             continue
@@ -375,7 +381,13 @@ async def du_operands(
             # An operand typed with a trailing slash that did not name a
             # directory. Unreadable like a missing one, but GNU reports
             # the errno it got, so the two cannot share a wording.
-            missing.append((path.raw_path, posix_phrase(FsCondition.ENOTDIR)))
+            missing.append(
+                (
+                    path.raw_path,
+                    posix_phrase(FsCondition.ENOTDIR),
+                    len(present),
+                )
+            )
             continue
         except (FileNotFoundError, ValueError):
             stattable = False
@@ -386,10 +398,14 @@ async def du_operands(
         except PermissionError as exc:
             # The dispatcher refuses to stat it: GNU names the errno it got
             # (`du: cannot access 'P': Permission denied`).
-            missing.append((path.raw_path, fs_strerror(exc) or str(exc)))
+            missing.append(
+                (path.raw_path, fs_strerror(exc) or str(exc), len(present))
+            )
             continue
         if not exists:
-            missing.append((path.raw_path, posix_phrase(FsCondition.ENOENT)))
+            missing.append(
+                (path.raw_path, posix_phrase(FsCondition.ENOENT), len(present))
+            )
             continue
         present.append(path)
     return present, missing
@@ -906,7 +922,7 @@ async def du(
     compute_size: ComputeSize,
     compute_entries: ComputeEntries,
     flags: DuFlags,
-    missing: Sequence[tuple[str, str]] = (),
+    missing: Sequence[tuple[str, str, int]] = (),
     stopped: Callable[[], Sequence[str]] | None = None,
     mounts: MountView | None = None,
     unreadable: Callable[[], Sequence[str]] | None = None,
@@ -925,9 +941,10 @@ async def du(
             ``None`` on backends that can only produce a size, which makes
             both ``-a`` and the per-directory lines degrade to one total.
         flags (DuFlags): the parsed command line.
-        missing (Sequence[tuple[str, str]]): operands that could not be
-            read, as
-            typed. GNU reports each and exits 1 but still prints the rest.
+        missing (Sequence[tuple[str, str, int]]): operands that could
+            not be read, as typed, with the strerror and how many readable
+            operands came before each. GNU reports each where it stood
+            and exits 1 but still prints the rest.
         stopped (Callable[[], Sequence[str]] | None): read after the
             walks for where one ran past ``walk_limit``, each line
             without the command's name.
@@ -958,7 +975,15 @@ async def du(
     totals: list[int] = []
     records: list[PathRecord] | None = []
     latest: Newest | None = None
+    notes: list[tuple[int, str]] = []
+    if flags.warning:
+        notes.append((0, flags.warning))
+    exit_code = 1 if missing else 0
+    left = list(missing)
+    said_unreadable = said_inaccessible = 0
     for run, path in enumerate(paths):
+        while left and left[0][2] <= run:
+            notes.append((len(lines), _unread_operand(*left.pop(0)[:2])))
         if repeated is not None and repeated(path):
             continue
         block, total, measured, newest = await _du_one(
@@ -971,6 +996,32 @@ async def du(
             directories,
             times,
         )
+        # What a walk could not open GNU names as it goes, before the
+        # rows it prints once it is done there.
+        unread = list(unreadable()) if unreadable is not None else []
+        for virtual in unread[said_unreadable:]:
+            notes.append(
+                (
+                    len(lines),
+                    f"du: cannot read directory "
+                    f"'{_respell_under(virtual, paths)}': "
+                    f"{posix_phrase(FsCondition.EACCES)}",
+                )
+            )
+            exit_code = 1
+        said_unreadable = len(unread)
+        lost = list(inaccessible()) if inaccessible is not None else []
+        for virtual, detail in lost[said_inaccessible:]:
+            shown = _respell_under(virtual, paths)
+            notes.append(
+                (
+                    len(lines),
+                    f"du: cannot access '{shown}'"
+                    + (f": {detail}" if detail is not None else ""),
+                )
+            )
+            exit_code = 1
+        said_inaccessible = len(lost)
         lines.extend(block)
         totals.append(total)
         if newest is not None and (latest is None or newest[0] > latest[0]):
@@ -979,43 +1030,39 @@ async def du(
             records = None
         elif records is not None:
             records.extend(measured)
+    notes.extend(
+        (len(lines), _unread_operand(raw, why)) for raw, why, _ in left
+    )
     # GNU still prints the grand total when every operand failed ("0
     # total"), so this stays outside the loop guard.
     if flags.c:
         lines.append(_line(sum(totals), flags, "total", latest))
-
-    notes = [flags.warning] if flags.warning else []
-    notes.extend(
-        f"du: {ZERO_LENGTH_NAME}"
-        if raw == ""
-        else f"du: cannot access '{raw}': {detail}"
-        for raw, detail in missing
-    )
-    exit_code = 1 if missing else 0
-    for virtual in unreadable() if unreadable is not None else ():
-        notes.append(
-            f"du: cannot read directory "
-            f"'{_respell_under(virtual, paths)}': "
-            f"{posix_phrase(FsCondition.EACCES)}"
-        )
-        exit_code = 1
-    for virtual, detail in inaccessible() if inaccessible is not None else ():
-        shown = _respell_under(virtual, paths)
-        notes.append(
-            f"du: cannot access '{shown}'"
-            + (f": {detail}" if detail is not None else "")
-        )
-        exit_code = 1
     for line in stopped() if stopped is not None else ():
-        notes.append(f"du: {line}")
+        notes.append((len(lines), f"du: {line}"))
         exit_code = 1
-    stderr = ("\n".join(notes) + "\n").encode() if notes else b""
-    stdout = (
-        b"".join(encode_text(line) + b"\0" for line in lines)
+    rows = (
+        [encode_text(line) + b"\0" for line in lines]
         if flags.null
-        else format_records(lines)
+        else [format_records([line]) for line in lines]
     )
-    return DuOutput(stdout, stderr, exit_code, records)
+    starts = [0]
+    for row in rows:
+        starts.append(starts[-1] + len(row))
+    placed = [(starts[row], encode_text(f"{text}\n")) for row, text in notes]
+    stderr = b"".join(line for _, line in placed)
+    return DuOutput(b"".join(rows), stderr, exit_code, records, placed)
+
+
+def _unread_operand(raw: str, detail: str) -> str:
+    """GNU's line for an operand du could not read.
+
+    Args:
+        raw (str): the operand as typed.
+        detail (str): the strerror.
+    """
+    if raw == "":
+        return f"du: {ZERO_LENGTH_NAME}"
+    return f"du: cannot access '{raw}': {detail}"
 
 
 def _respell_under(virtual: str, paths: Sequence[PathSpec]) -> str:
@@ -1047,7 +1094,7 @@ async def du_generic(
     inaccessible: Callable[[], Sequence[tuple[str, str | None]]] | None = None,
     repeated: Callable[[PathSpec], bool] | None = None,
     times: Callable[[], Mapping[str, str]] | None = None,
-) -> tuple[bytes, IOResult]:
+) -> tuple[ByteSource, IOResult]:
     """Run one whole ``du`` invocation over flags already read
     (``read_flags``), to rendered bytes.
 
@@ -1117,9 +1164,8 @@ async def du_generic(
         repeated=repeated,
         times=times,
     )
-    return out.stdout, IOResult(
-        stderr=out.stderr, exit_code=out.exit_code, records=out.records
-    )
+    io = IOResult(exit_code=out.exit_code, records=out.records)
+    return at_offsets(out.stdout, out.notes, io), io
 
 
 def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:

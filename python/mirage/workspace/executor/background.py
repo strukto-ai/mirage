@@ -14,7 +14,15 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Coroutine, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Sequence,
+)
+from contextlib import aclosing
 from dataclasses import replace
 from typing import Any
 
@@ -81,6 +89,7 @@ from mirage.workspace.executor.statement import (
     answer_closed,
     failed_read,
     forks,
+    interleaved,
     nested_shell,
     record_status,
     reported_command,
@@ -96,8 +105,24 @@ from mirage.workspace.types import ExecutionNode
 logger = logging.getLogger(__name__)
 
 
+async def tagged(
+    channel: Channel, stream: AsyncIterator[bytes]
+) -> AsyncGenerator[tuple[Channel, bytes], None]:
+    """``stream``'s chunks, each with the channel they go out on.
+
+    Args:
+        channel (Channel): the channel.
+        stream (AsyncIterator[bytes]): the output.
+    """
+    async for chunk in stream:
+        yield channel, chunk
+
+
 async def pump(
-    console: JobConsole, channel: Channel, stream: ByteSource | None
+    console: JobConsole,
+    channel: Channel,
+    stream: ByteSource | None,
+    io: IOResult | None = None,
 ) -> None:
     """Send a command's output to a console as chunks arrive.
 
@@ -109,12 +134,15 @@ async def pump(
     before it fetches more; a source that reads nothing to make its
     bytes (``OutputStream.eager``) runs ahead into the pipe's buffer, as
     bash's ``seq 1 | sleep 30`` writer does and exits. A write that fails
-    closes the source too, as TypeScript's ``for await`` does.
+    closes the source too, as TypeScript's ``for await`` does. With
+    ``io``, the stderr the command writes as its stream is read goes out
+    among the chunks (``interleaved``); the rest stays on ``io``.
 
     Args:
         console (JobConsole): where the output goes.
         channel (Channel): which stream the bytes belong to.
         stream (ByteSource | None): the output to drain.
+        io (IOResult | None): the result whose stderr the stream writes.
     """
     if stream is None:
         return
@@ -123,16 +151,22 @@ async def pump(
             await console.emit(channel, stream)
         return
     eager = isinstance(stream, OutputStream) and stream.eager
+    pairs = (
+        interleaved(stream, io) if io is not None else tagged(channel, stream)
+    )
     try:
-        async for chunk in stream:
-            if chunk:
-                await console.emit(channel, chunk)
-            if not isinstance(console, PipeConsole):
-                continue
-            if not eager:
-                await console.drain()
-            if console.closed_reader:
-                return
+        async with aclosing(pairs) as parts:
+            async for part_channel, chunk in parts:
+                if chunk:
+                    await console.emit(part_channel, chunk)
+                if part_channel != channel or not isinstance(
+                    console, PipeConsole
+                ):
+                    continue
+                if not eager:
+                    await console.drain()
+                if console.closed_reader:
+                    return
     finally:
         await close_quietly(stream)
 
@@ -145,9 +179,9 @@ async def drained(
 ) -> tuple[None, IOResult, ExecutionNode]:
     """Write a finished statement's returned output to a sink.
 
-    Its stdout goes before its stderr, since one command keeps no order
-    between them; what it already wrote there as it ran (a function
-    body, a redirected group) came first. A read its stream fails is the
+    Its stderr goes among its stdout as the stream wrote it, the rest
+    after (``interleaved``); what it already wrote there as it ran (a
+    function body, a redirected group) came first. A read its stream fails is the
     statement's own failure (``failed_read``). The result carries no
     output, so nothing lands twice.
 
@@ -158,7 +192,7 @@ async def drained(
         exec_node (ExecutionNode): its record.
     """
     try:
-        await pump(sink, Channel.STDOUT, stdout)
+        await pump(sink, Channel.STDOUT, stdout, io)
     except OSError as exc:
         await failed_read(io, exc, exec_node)
     except PipeClosed:

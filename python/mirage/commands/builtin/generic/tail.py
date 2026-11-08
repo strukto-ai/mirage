@@ -9,8 +9,10 @@ from typing import Any, Callable
 
 from mirage.commands.builtin.utils.links import dispatch_of
 from mirage.commands.builtin.utils.operands import (
+    operand_lines,
     operands_io,
     report_fs_error,
+    say,
     split_opened,
 )
 from mirage.commands.builtin.utils.stream import (
@@ -269,7 +271,7 @@ async def tail(
 
 
 async def tail_multi(
-    paths: list[PathSpec],
+    paths: list[PathSpec | bytes],
     *,
     read: Callable[..., Any],
     n: int | None = None,
@@ -278,7 +280,7 @@ async def tail_multi(
     from_byte: int | None = None,
     terminator: int = 10,
     show_headers: bool = False,
-    unread: frozenset[str] = frozenset(),
+    unread: Mapping[str, bytes] | None = None,
     io: IOResult | None = None,
     selected: bool = False,
 ) -> AsyncIterator[bytes]:
@@ -290,68 +292,82 @@ async def tail_multi(
     line between files. The per-file source is produced lazily by ``read``.
 
     Args:
-        paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
+        paths (list[PathSpec | bytes]): Resolved paths, only
+            ``.virtual`` read, and the stderr line of each operand that
+            did not open, said on ``io`` where it stood.
         read (Callable[..., Any]): Bound reader called as ``read(path)``;
             returns bytes, an awaitable of bytes, or an async byte iterator.
-        unread (frozenset[str]): operands that opened but do not read (a
-            directory): each prints its header and nothing else.
+        unread (Mapping[str, bytes] | None): operands that opened but do
+            not read (a directory): each prints its header, then its line.
         io (IOResult | None): the result a failed read is reported on,
             so the next operand still prints; None lets it raise.
     """
+    unread = unread or {}
+    lines = operand_lines(paths, unread)
     printed = 0
-    for p in paths:
-        header = b""
-        if show_headers:
-            # The blank line goes before a printed block, not an operand:
-            # a file after one that printed nothing starts without it.
-            header = operand_header(p, printed > 0)
-        pending = header
-        if p.virtual in unread:
-            if pending:
-                yield pending
-                printed += 1
-            continue
-        # A stream opens on its first read, so the header waits for that
-        # read: an operand whose open is refused prints no header, as
-        # tailGeneric's whole read does.
-        try:
-            source = read(p)
-            if inspect.isawaitable(source):
-                source = await source
-            output = (
-                chunks(source)
-                if selected
-                else tail(
-                    source,
-                    n=n,
-                    c=c,
-                    from_line=from_line,
-                    from_byte=from_byte,
-                    terminator=terminator,
+    try:
+        for i, p in enumerate(paths):
+            if isinstance(p, bytes):
+                if io is not None:
+                    await say(io, lines.pop(i))
+                continue
+            header = b""
+            if show_headers:
+                # The blank line goes before a printed block, not an operand:
+                # a file after one that printed nothing starts without it.
+                header = operand_header(p, printed > 0)
+            pending = header
+            if p.virtual in unread:
+                if pending:
+                    yield pending
+                    printed += 1
+                if io is not None:
+                    await say(io, lines.pop(i))
+                continue
+            # A stream opens on its first read, so the header waits for that
+            # read: an operand whose open is refused prints no header, as
+            # tailGeneric's whole read does.
+            try:
+                source = read(p)
+                if inspect.isawaitable(source):
+                    source = await source
+                output = (
+                    chunks(source)
+                    if selected
+                    else tail(
+                        source,
+                        n=n,
+                        c=c,
+                        from_line=from_line,
+                        from_byte=from_byte,
+                        terminator=terminator,
+                    )
                 )
-            )
-            async for chunk in output:
+                async for chunk in output:
+                    if pending:
+                        yield pending
+                        pending = b""
+                    yield chunk
+            except FS_ERRORS as exc:
+                if io is None:
+                    raise
+                # A read that fails once the stat passed (a table past its
+                # read cap) is reported, and the next operand still prints.
+                # The open succeeded, so a read failure still heads it; the
+                # report lands first, as a reader may stop at the header.
+                await report_fs_error(io, "tail", p, exc)
+                if pending and isinstance(exc, READ_FAILURES):
+                    yield pending
+                    pending = b""
+            else:
                 if pending:
                     yield pending
                     pending = b""
-                yield chunk
-        except FS_ERRORS as exc:
-            if io is None:
-                raise
-            # A read that fails once the stat passed (a table past its
-            # read cap) is reported, and the next operand still prints.
-            # The open succeeded, so a read failure still heads it; the
-            # report lands first, as a reader may stop at the header.
-            await report_fs_error(io, "tail", p, exc)
-            if pending and isinstance(exc, READ_FAILURES):
-                yield pending
-                pending = b""
-        else:
-            if pending:
-                yield pending
-                pending = b""
-        if header and not pending:
-            printed += 1
+            if header and not pending:
+                printed += 1
+    finally:
+        if lines and io is not None:
+            await say(io, b"".join(lines.values()))
 
 
 def _note(io: IOResult, message: str) -> None:
@@ -1029,8 +1045,15 @@ async def tail_generic(
         return None, IOResult(stderr=warnings or None)
     if paths:
         show_headers = shows_headers(parsed.verbose, parsed.quiet, len(paths))
-        opened, unread, err = await split_opened(paths, stat, "tail")
-        io = operands_io(err)
+        order, unread = await split_opened(paths, stat, "tail")
+        opened = [p for p in order if isinstance(p, PathSpec)]
+        io = operands_io(
+            b"".join(operand_lines(order, unread).values())
+            if parsed.follow or not opened
+            else b""
+        )
+        if not parsed.follow and (len(opened) < len(order) or unread):
+            io.exit_code = 1
         if warnings:
             io.stderr = warnings + (
                 io.stderr if isinstance(io.stderr, bytes) else b""
@@ -1062,7 +1085,7 @@ async def tail_generic(
                 show_headers=show_headers,
                 flags=parsed,
                 io=io,
-                unread=unread,
+                unread=frozenset(unread),
                 only_stdin=all(is_stdin(p) for p in paths),
                 follow_lines=n if from_end else None,
                 follow=follow,
@@ -1071,7 +1094,7 @@ async def tail_generic(
         if not opened:
             return None, io
         return tail_multi(
-            opened,
+            order,
             read=functools.partial(
                 _tail_file,
                 read=stream,

@@ -469,12 +469,31 @@ impl Shell {
             .is_some_and(|var| var.has(vars::UNASSIGNED)))
     }
 
-    /// The line `declare -p` prints for a name; None for one unset or
-    /// hidden.
-    fn declaration<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyAny>>> {
-        listing::declaration(self.store()?, name)
+    /// The line `declare -p` prints for a name, `RANDOM` drawing; None
+    /// for one unset or hidden.
+    fn declaration<'py>(
+        &mut self,
+        py: Python<'py>,
+        name: &str,
+    ) -> PyResult<Option<Bound<'py, PyAny>>> {
+        listing::declaration(self.store_mut()?, name)
             .map(|line| text_of(py, &line))
             .transpose()
+    }
+
+    /// The lines a bare `declare -p` prints, sorted by name, narrowed by
+    /// its option `letters`, the running command's temporaries in `skip`
+    /// left out.
+    fn listing<'py>(
+        &self,
+        py: Python<'py>,
+        letters: &str,
+        skip: Vec<String>,
+    ) -> PyResult<Vec<Bound<'py, PyAny>>> {
+        listing::listing(self.store()?, letters, &skip)
+            .iter()
+            .map(|line| text_of(py, line))
+            .collect()
     }
 
     /// The variable lines a bare `set` prints, sorted by name, the running
@@ -571,11 +590,11 @@ impl Shell {
     /// parameters, each running function's, `$?`, `$$`, `$!`, `$0`, the
     /// `set -o` and `shopt` options set, `max_env` and the bytes the
     /// session holds outside its variables, `${PIPESTATUS[@]}`,
-    /// `${FUNCNAME[@]}` (None once unset made it an ordinary name) and
-    /// whether the shell is a `( )` subshell or a forked stage, the bytes
+    /// `${FUNCNAME[@]}` (None once unset made it an ordinary name),
+    /// `${BASH_LINENO[@]}` and whether the shell is a `( )` subshell or a forked stage, the bytes
     /// left under `max_memory` (None for no cap), `$LINENO`, `$BASHPID`,
     /// and the voice the shell's own diagnostics lead with.
-    #[pyo3(signature = (*, positional, calls, status, pid, last_job, argv0, options, shopts, env_limit, outside, pipe_status, function_names, paren, memory_room, line, bash_pid, voice))]
+    #[pyo3(signature = (*, positional, calls, status, pid, last_job, argv0, options, shopts, env_limit, outside, pipe_status, function_names, call_lines, paren, memory_room, line, bash_pid, voice))]
     #[allow(clippy::too_many_arguments)]
     fn frame(
         &mut self,
@@ -591,6 +610,7 @@ impl Shell {
         outside: usize,
         pipe_status: Vec<i32>,
         function_names: Option<Vec<Bound<'_, PyAny>>>,
+        call_lines: Vec<usize>,
         paren: bool,
         memory_room: Option<usize>,
         line: usize,
@@ -617,6 +637,7 @@ impl Shell {
             outside,
             pipe_status,
             function_names: function_names.as_deref().map(texts).transpose()?,
+            call_lines,
             paren,
             memory_room,
             line,

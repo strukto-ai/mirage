@@ -35,6 +35,7 @@ struct Parsed {
     names: Vec<u8>,
     extras: Vec<u32>,
     text: Vec<u8>,
+    reread: Vec<u32>,
 }
 
 /// The trees parses kept, each until the host drops it, for the engine's
@@ -310,6 +311,30 @@ pub extern "C" fn mirage_rs_shell_words(
         parsed.message = words;
         parsed.message.len()
     })
+}
+
+/// Lay the tree kept under `handle` out from node `index` as bash prints
+/// a `$( )` body it reads again: per node under it, its index, the line
+/// `$LINENO` numbers it by and the line it ends on, from 0, into the
+/// reread buffer. Returns how many numbers it holds.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_reread(handle: u32, index: u32) -> usize {
+    let lines = TREES
+        .with_borrow(|trees| trees.kept.get(&handle).cloned())
+        .map(|tree| mirage_rs::shell::reread_lines(&tree, index as usize))
+        .unwrap_or_default();
+    PARSED.with_borrow_mut(|parsed| {
+        parsed.reread.clear();
+        for (node, line, end) in lines {
+            parsed.reread.extend_from_slice(&[node, line, end]);
+        }
+        parsed.reread.len()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_reread_lines() -> *const u32 {
+    PARSED.with_borrow(|parsed| parsed.reread.as_ptr())
 }
 
 #[unsafe(no_mangle)]

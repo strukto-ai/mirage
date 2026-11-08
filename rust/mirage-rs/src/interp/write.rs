@@ -12,7 +12,8 @@ use std::future::Future;
 use super::{Diagnostic, Signal};
 use crate::arith::{self, plain_decimal};
 use crate::vars::{
-    Assigned, Coercion, Draws, Indexed, NAMEREF, Store, Value, entry_bytes, strip_key_quotes,
+    Assigned, Coercion, Draws, INTEGER, Indexed, NAMEREF, Store, Value, entry_bytes,
+    strip_key_quotes,
 };
 
 /// bash's own exit when it cannot allocate.
@@ -236,6 +237,18 @@ impl<G: Gate> Writer<'_, G> {
                     self.land_coercion(&mut coercion).await?;
                     return Err(fatal(self.store.voice(), error));
                 }
+            }
+        }
+        if value.is_array() && self.store.seeds_random(&name) {
+            // An element written to RANDOM seeds it, which bash evaluates
+            // there: one that does not evaluate ends the line.
+            let mut seeding = Coercion::default();
+            if let Err(error) =
+                self.store
+                    .coerce(&mut seeding, value.clone(), INTEGER, None, assigned)
+            {
+                self.land_coercion(&mut coercion).await?;
+                return Err(fatal(self.store.voice(), error));
             }
         }
         let rendering = value.rendering();
@@ -713,7 +726,7 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use super::*;
-    use crate::vars::{INTEGER, RANDOM, READONLY};
+    use crate::vars::{RANDOM, READONLY};
 
     #[derive(Default)]
     struct Recorder {

@@ -28,7 +28,8 @@ import { ExecutionNode } from '../../../types.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
 import { classify, describe, programFile } from '../lookup/index.ts'
 import { NameKind } from '../lookup/types.ts'
-import { builtinUsage } from '../shared.ts'
+import { builtinUsage, result, written } from '../shared.ts'
+import { BASH_BUILTINS } from '../../../lookup/constants.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 
 /**
@@ -48,13 +49,12 @@ function probe(
   registry: MountRegistry,
   parser?: ParseScope,
 ): RedirectResult {
-  const outLines: string[] = []
-  const errLines: string[] = []
+  const pieces: [boolean, string][] = []
   let anyFound = false
   for (const name of rest) {
     const kind = classify(name, session, registry)
     if (kind === null) {
-      if (mode === 'V') errLines.push(`${shellVoice()}command: ${name}: not found`)
+      if (mode === 'V') pieces.push([true, `${shellVoice()}command: ${name}: not found\n`])
       continue
     }
     anyFound = true
@@ -68,16 +68,13 @@ function probe(
           : kind === NameKind.FILE
             ? programFile(name)
             : name
-    outLines.push(line)
+    pieces.push([false, `${line}\n`])
   }
-  const out = outLines.length > 0 ? encodeText(`${outLines.join('\n')}\n`) : null
-  const err = errLines.length > 0 ? encodeText(`${errLines.join('\n')}\n`) : new Uint8Array()
+  // The status and the diagnostics are independent: bash prints `command:
+  // nope: not found` for a missing name and still exits 0 when another name
+  // resolved.
   const code = rest.length === 0 || anyFound ? 0 : 1
-  return [
-    out,
-    new IOResult({ exitCode: code, stderr: err }),
-    new ExecutionNode({ command: 'command', exitCode: code, stderr: err }),
-  ]
+  return written('command', pieces, code)
 }
 
 /**
@@ -122,8 +119,25 @@ export async function handleCommandBuiltin(
     return [null, new IOResult(), new ExecutionNode({ command: 'command', exitCode: 0 })]
   }
 
-  const innerName = rest[0] ?? ''
-  const inner = shellJoin(rest)
+  return pastFunctions('command', executeFn, rest, session, stdin, callStack)
+}
+
+/**
+ * Run `words` past a shell function or alias of their head's name: the name
+ * is masked in the session tables for the inner run, so a shadowing function
+ * is skipped while builtins and mount commands still resolve. `cmd` is the
+ * builtin that runs them, named on the node. Mirrors Python's _past_functions.
+ */
+async function pastFunctions(
+  cmd: string,
+  executeFn: ExecuteStringFn,
+  words: readonly string[],
+  session: SessionState,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+): Promise<RedirectResult> {
+  const innerName = words[0] ?? ''
+  const inner = shellJoin(words)
   // Function bodies are never undefined, so a defined captured value means
   // a shadowing function was masked and must be restored after the run.
   const savedFn = session.functions[innerName]
@@ -141,11 +155,57 @@ export async function handleCommandBuiltin(
       stdin,
       ...(callStack !== null ? { callStack } : {}),
     })
-    return [io.stdout, io, new ExecutionNode({ command: 'command', exitCode: io.exitCode })]
+    return [io.stdout, io, new ExecutionNode({ command: cmd, exitCode: io.exitCode })]
   } finally {
     if (savedFn !== undefined) session.functions[innerName] = savedFn
     if (savedAlias !== undefined) session.aliases[innerName] = savedAlias
   }
+}
+
+/**
+ * Run the `builtin` builtin (`builtin [shell-builtin [arg ...]]`): a shell
+ * builtin past a function or alias of its name, in the caller's frames as
+ * `command` does, and a refusal of any other word (`builtin: ls: not a shell
+ * builtin`, status 1); with no word it does nothing. `--` ends its options
+ * and any other one is refused with status 2. Pinned against bash 5.2 on
+ * debian:stable-slim. Mirrors Python's handle_builtin.
+ */
+export async function handleBuiltin(
+  executeFn: ExecuteStringFn,
+  args: readonly string[],
+  session: SessionState,
+  stdin: ByteSource | null = null,
+  callStack: CallStack | null = null,
+): Promise<RedirectResult> {
+  let words = args
+  const first = words[0]
+  if (first === '--') words = words.slice(1)
+  else if (first !== undefined && first.startsWith('-') && first !== '-') {
+    return result('builtin', {
+      exitCode: 2,
+      stderr: `${shellVoice()}builtin: ${first}: invalid option\n${builtinUsage('builtin')}`,
+    })
+  }
+  const name = words[0]
+  if (name === undefined) return result('builtin')
+  if (!BASH_BUILTINS.has(name)) {
+    return result('builtin', {
+      exitCode: 1,
+      stderr: `${shellVoice()}builtin: ${name}: not a shell builtin\n`,
+    })
+  }
+  return pastFunctions('builtin', executeFn, words, session, stdin, callStack)
+}
+
+/** The `builtin` arm. */
+export async function builtinBuiltin(call: BuiltinCall): Promise<RedirectResult> {
+  return handleBuiltin(
+    call.executeFn,
+    [...call.argv.args],
+    call.context.session,
+    call.stdin,
+    call.callStack,
+  )
 }
 
 /** The `command` arm. */

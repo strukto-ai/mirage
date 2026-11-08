@@ -19,6 +19,8 @@ import { SHELL_SYNOPSES } from '../../../commands/spec/synopsis.ts'
 import type { RedirectResult } from '../../../context/session_context.ts'
 import { GlobLimitError } from '../../../errors/types.ts'
 import { IOResult } from '../../../io/types.ts'
+import { atOffsets } from '../../../commands/builtin/utils/operands.ts'
+import { concat } from '../../../utils/bytes.ts'
 import type { PolicyDenied } from '../../../policy/errors.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
@@ -60,6 +62,42 @@ export function result(
   io.exitCode = exitCode
   if (err.length > 0) io.stderr = err
   return [init.out ?? null, io, new ExecutionNode({ command: cmd, exitCode, stderr: err })]
+}
+
+/**
+ * `result` for a builtin whose output and errors take turns: each error goes
+ * out where it was written among the output, as bash writes both as it goes
+ * (`declare -p a missing b 2>&1`). `pieces` is each piece of text in the
+ * order written, true for stderr. Mirrors Python's written.
+ */
+export function written(
+  cmd: string,
+  pieces: readonly (readonly [boolean, string])[],
+  exitCode = 0,
+): RedirectResult {
+  const out: Uint8Array[] = []
+  let size = 0
+  const notes: [number, Uint8Array][] = []
+  for (const [err, text] of pieces) {
+    const data = encodeText(text)
+    if (err) notes.push([size, data])
+    else {
+      out.push(data)
+      size += data.byteLength
+    }
+  }
+  const body = concat(out)
+  const err = concat(notes.map(([, line]) => line))
+  const node = new ExecutionNode({ command: cmd, exitCode, stderr: err })
+  if (body.byteLength === 0 || err.byteLength === 0) {
+    return [
+      body.byteLength > 0 ? body : null,
+      new IOResult({ exitCode, stderr: err.byteLength > 0 ? err : null }),
+      node,
+    ]
+  }
+  const io = new IOResult({ exitCode })
+  return [atOffsets(body, notes, io), io, node]
 }
 
 export function ok(cmd: string, out?: Uint8Array | null): RedirectResult {

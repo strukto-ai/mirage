@@ -263,6 +263,7 @@ export const ShellBuiltin = Object.freeze({
   DOT: '.',
   EVAL: 'eval',
   COMMAND: 'command',
+  BUILTIN: 'builtin',
   // -- name lookup
   TYPE: 'type',
   WHICH: 'which',
@@ -424,6 +425,11 @@ export interface TSNodeLike {
   id?: number
   /** Field lookup (`variable_assignment.name`). */
   childForFieldName?(fieldName: string): TSNodeLike | null
+  /**
+   * Each node under this one, a `$( )` body bash reads again as it prints it,
+   * by id: the line `$LINENO` numbers it by and the line it ends on, from 0.
+   */
+  rereadLines?(): ReadonlyMap<number, readonly [number, number]>
 }
 
 /**

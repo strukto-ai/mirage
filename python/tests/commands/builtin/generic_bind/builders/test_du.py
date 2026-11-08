@@ -186,7 +186,9 @@ async def test_a_walk_past_the_limit_reports_partial_output_and_exits_one():
 
 @pytest.mark.asyncio
 async def test_each_operand_walks_under_its_own_limit():
-    out, code, err = await _du(_Mount(walk_limit=2), ["/db", "/db/sub"])
+    out, code, err = await _du(
+        _Mount(walk_limit=2), ["/db", "/db/sub"], count_links=True
+    )
     assert (out, code, err) == (
         "0\t/db/sub\n3\t/db\n2\t/db/sub\n",
         1,

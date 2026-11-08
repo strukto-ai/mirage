@@ -59,6 +59,7 @@ pub struct Frame {
     pub outside: usize,
     pub pipe_status: Vec<i32>,
     pub function_names: Option<Vec<Vec<u8>>>,
+    pub call_lines: Vec<usize>,
     pub paren: bool,
     pub memory_room: Option<usize>,
     pub line: usize,
@@ -82,6 +83,7 @@ impl Shell {
         self.vars.set_specials(
             frame.pipe_status,
             frame.function_names,
+            frame.call_lines,
             frame.line,
             frame.bash_pid,
             frame.voice,

@@ -53,6 +53,7 @@ export function frame(session: SessionState, callStack: CallStack | null = null)
     outside,
     pipeStatus: session.pipeStatus,
     functionNames: session.functionNames,
+    callLines: session.callLines,
     paren: callStack?.paren ?? false,
     memoryRoom: memoryRoom(),
     line: session.lineNumber,

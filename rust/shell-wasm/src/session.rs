@@ -636,9 +636,18 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .is_some_and(|var| var.has(vars::UNASSIGNED)),
         ),
         "declaration" => Item::opt(
-            listing::declaration(shell.store()?, &args.string()?),
+            listing::declaration(shell.store_mut()?, &args.string()?),
             Item::text,
         ),
+        "listing" => {
+            let letters = args.string()?;
+            let skip = names_in(args.list()?)?;
+            Item::list(
+                listing::listing(shell.store()?, &letters, &skip)
+                    .into_iter()
+                    .map(Item::text),
+            )
+        }
         "assignments" => {
             let skip = names_in(args.list()?)?;
             Item::list(
@@ -717,6 +726,11 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .maybe()?
                 .map(|item| texts(one(item, Args::list)?))
                 .transpose()?;
+            let call_lines = args
+                .list()?
+                .into_iter()
+                .map(|item| size(one(item, Args::int)?))
+                .collect::<Result<Vec<_>, String>>()?;
             let frame = Frame {
                 positional,
                 calls,
@@ -730,6 +744,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 outside,
                 pipe_status,
                 function_names,
+                call_lines,
                 paren: args.flag()?,
                 memory_room: optional_size(args.maybe()?)?,
                 line: size(args.int()?)?,

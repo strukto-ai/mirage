@@ -105,7 +105,7 @@ describe('lsGeneric', () => {
       return new FileStat({ name: key(p).split('/').pop() ?? '', type: FileType.FILE })
     }
     const result = await lsGeneric([spec('/')], ctx({}), () => Promise.resolve(names), slowStat)
-    expect(DEC.decode((result?.[0] ?? new Uint8Array()) as Uint8Array).split('\n')).toHaveLength(41)
+    expect(DEC.decode(await materialize(result?.[0] ?? null)).split('\n')).toHaveLength(41)
     expect(peak).toBe(1)
   })
 })
@@ -150,7 +150,7 @@ async function status(
   const result = await lsGeneric(paths.map(spec), ctx(flags), codeReaddir, codeStat)
   if (result === null) return [-1, '']
   const [out, io] = result
-  return [io.exitCode, DEC.decode((out ?? new Uint8Array()) as Uint8Array)]
+  return [io.exitCode, DEC.decode(await materialize(out))]
 }
 
 describe('lsGeneric exit codes', () => {
@@ -205,7 +205,9 @@ describe('structure-only directories', () => {
       ),
     )
     expect(result?.[1].exitCode).toBe(LS_OK)
-    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/ghost:\ndeep\n\n/ghost/deep:\nlnk\n')
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe(
+      '/ghost:\ndeep\n\n/ghost/deep:\nlnk\n',
+    )
   })
 
   // A directory whose listing is refused is refused whole: a name the
@@ -235,7 +237,7 @@ describe('structure-only directories', () => {
       ),
     )
     expect(result?.[1].exitCode).toBe(LS_MINOR_PROBLEM)
-    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/base:\nsealed\nx\n')
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe('/base:\nsealed\nx\n')
     expect(DEC.decode(result?.[1].stderr as Uint8Array)).toBe(
       "ls: cannot open directory '/base/sealed': Permission denied\n",
     )
@@ -258,7 +260,7 @@ describe('structure-only directories', () => {
       ),
     )
     expect(result?.[1].exitCode).toBe(LS_OK)
-    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('deep/\n')
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe('deep/\n')
   })
 })
 
@@ -278,7 +280,7 @@ describe('honest per-entry errors', () => {
     const result = await lsGeneric([spec('/')], ctx(flags), readdir, statFailingEntries(err))
     return {
       code: result?.[1].exitCode,
-      stdout: DEC.decode(result?.[0] as Uint8Array),
+      stdout: DEC.decode(await materialize(result?.[0] ?? null)),
       stderr: DEC.decode((result?.[1].stderr ?? new Uint8Array()) as Uint8Array),
     }
   }
@@ -334,7 +336,7 @@ describe('honest per-entry errors', () => {
       key(p) === '/' ? stat(p) : Promise.reject(stamped(key(p), 'EACCES'))
     const result = await lsGeneric([spec('/')], ctx({ S: true }), marking, denying)
     expect(result?.[1].exitCode).toBe(LS_MINOR_PROBLEM)
-    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('afile\nzdir\n')
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe('afile\nzdir\n')
   })
 
   it('still ends the command on a timeout or an abort', async () => {
@@ -596,7 +598,7 @@ describe('dot entries respect mount boundaries', () => {
           )
           expect(result?.[1].exitCode).toBe(0)
           expect(result?.[1].stderr).toBeNull()
-          const output = DEC.decode(result?.[0] as Uint8Array)
+          const output = DEC.decode(await materialize(result?.[0] ?? null))
           const dotMode = subdir ? 'drwxr-x---' : 'drwxr-x--x'
           const parentMode =
             subdir || !prefix ? 'drwxr-x--x' : namespace ? 'drwx------' : 'drwxr-xr-x'
@@ -833,6 +835,8 @@ describe('ls formats, quoting and ignore patterns', () => {
       read({}, env),
     )
     expect(result?.[1].exitCode).toBe(LS_FAILURE)
+    // What ls reports goes before what it lists, said as the listing is read.
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe('/q:\na\n')
     expect(DEC.decode(await materialize(result?.[1].stderr ?? null))).toBe(
       "ls: ignoring invalid value of environment variable QUOTING_STYLE: 'bogus'\n" +
         "ls: cannot access '/nope': No such file or directory\n",

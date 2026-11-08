@@ -15,6 +15,7 @@
 from collections.abc import Sequence
 from functools import partial
 
+from mirage.commands.builtin.utils.operands import at_offsets
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.synopsis import SHELL_SYNOPSES
@@ -65,6 +66,42 @@ def result(
     if err:
         io.stderr = err
     return out, io, ExecutionNode(command=cmd, exit_code=exit_code, stderr=err)
+
+
+def written(
+    cmd: str, pieces: Sequence[tuple[bool, str]], exit_code: int = 0
+) -> Result:
+    """``result`` for a builtin whose output and errors take turns:
+    each error goes out where it was written among the output, as bash
+    writes both as it goes (``declare -p a missing b 2>&1``).
+
+    Args:
+        cmd (str): command name recorded on the ExecutionNode.
+        pieces (Sequence[tuple[bool, str]]): each piece of text in the
+            order written, True for stderr.
+        exit_code (int): exit code for both IOResult and ExecutionNode.
+    """
+    out: list[bytes] = []
+    size = 0
+    notes: list[tuple[int, bytes]] = []
+    for failed, text in pieces:
+        data = encode_text(text)
+        if failed:
+            notes.append((size, data))
+        else:
+            out.append(data)
+            size += len(data)
+    body = b"".join(out)
+    err = b"".join(line for _, line in notes)
+    node = ExecutionNode(command=cmd, exit_code=exit_code, stderr=err)
+    if not body or not err:
+        return (
+            body or None,
+            IOResult(exit_code=exit_code, stderr=err or None),
+            node,
+        )
+    io = IOResult(exit_code=exit_code)
+    return at_offsets(body, notes, io), io, node
 
 
 def ok(cmd: str, out: bytes | None = None) -> Result:

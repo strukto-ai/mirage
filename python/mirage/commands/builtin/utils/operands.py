@@ -13,7 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import inspect
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import replace
 from functools import partial
 
@@ -21,7 +27,8 @@ from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import eisdir
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import DotWalkError
-from mirage.io.stream import async_chain, close_quietly, ensure_stream
+from mirage.io.cooperative import chunks
+from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -158,34 +165,109 @@ async def split_readable(
         tuple[list[PathSpec], bytes]: Readable operands in order, and the
         concatenated stderr lines for the failed ones (``b""`` if none).
     """
-    readable: list[PathSpec] = []
-    err = b""
+    order = await split_in_order(paths, stat, cmd_name)
+    readable = [p for p in order if isinstance(p, PathSpec)]
+    return readable, b"".join(p for p in order if isinstance(p, bytes))
+
+
+async def split_in_order(
+    paths: list[PathSpec],
+    stat: StatFn,
+    cmd_name: str,
+) -> list[PathSpec | bytes]:
+    """``split_readable``'s partition kept in operand order: each
+    operand that reads, or the stderr line of one that failed, where it
+    stood, for ``in_order`` to say when the output reaches it.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved operands in command order.
+        stat (StatFn): Bound stat called as ``stat(path)``.
+        cmd_name (str): Command name for the stderr prefix.
+    """
+    order: list[PathSpec | bytes] = []
     for p in paths:
         try:
             st = await stat(p)
         except FS_ERRORS as exc:
-            err += encode_text(fs_error_line(cmd_name, p, exc))
+            order.append(encode_text(fs_error_line(cmd_name, p, exc)))
             continue
         if getattr(st, "type", None) == FileType.DIRECTORY:
-            err += encode_text(fs_error_line(cmd_name, p, eisdir(p)))
+            order.append(encode_text(fs_error_line(cmd_name, p, eisdir(p))))
             continue
-        readable.append(p)
-    return readable, err
+        order.append(p)
+    return order
+
+
+async def in_order(
+    parts: Sequence[AsyncIterator[bytes] | bytes], io: IOResult
+) -> AsyncIterator[bytes]:
+    """The parts' streams one after another, each bytes part a failed
+    operand's stderr line said on ``io`` when the output reaches it, as
+    GNU reports an operand and goes on (``cat a missing b``). A reader
+    that stops early still finds the lines it never reached on ``io``,
+    after what it read. Mirrors TypeScript's ``inOrder``.
+
+    Args:
+        parts (Sequence[AsyncIterator[bytes] | bytes]): each operand's
+            output, or its stderr line.
+        io (IOResult): the result the lines are said on.
+    """
+    lines = [p for p in parts if isinstance(p, bytes)]
+    said = 0
+    try:
+        for part in parts:
+            if isinstance(part, bytes):
+                said += 1
+                await say(io, part)
+                continue
+            async for chunk in part:
+                yield chunk
+    finally:
+        if said < len(lines):
+            await say(io, b"".join(lines[said:]))
+        for part in parts:
+            if not isinstance(part, bytes):
+                await close_quietly(part)
+
+
+def at_offsets(
+    body: bytes, notes: Sequence[tuple[int, bytes]], io: IOResult
+) -> ByteSource:
+    """``body`` with each note, a stderr line and the offset in ``body``
+    it was written before, said on ``io`` when the output reaches it, for
+    a command that renders all it prints before it prints (``wc a
+    missing b``); ``body`` itself when there is no note.
+
+    Args:
+        body (bytes): the rendered output.
+        notes (Sequence[tuple[int, bytes]]): each line and its offset,
+            in order.
+        io (IOResult): the result the lines are said on.
+    """
+    if not notes:
+        return body
+    parts: list[AsyncIterator[bytes] | bytes] = []
+    start = 0
+    for offset, line in notes:
+        parts.extend((chunks(body[start:offset]), line))
+        start = offset
+    parts.append(chunks(body[start:]))
+    return in_order(parts, io)
 
 
 async def split_opened(
     paths: list[PathSpec],
     stat: StatFn,
     cmd_name: str,
-) -> tuple[list[PathSpec], frozenset[str], bytes]:
-    """``split_readable`` for the commands that head each operand.
+) -> tuple[list[PathSpec | bytes], dict[str, bytes]]:
+    """``split_in_order`` for the commands that head each operand.
 
     GNU head and tail open an operand before they read it, and a
     directory opens: its ``==> name <==`` header prints and only the
     read after it fails. So a directory keeps its place among the
-    opened operands, named in the unread set, while one that does not
-    open at all (a missing name) is dropped as ``split_readable`` drops
-    it.
+    opened operands, its line said after its header, while one that
+    does not open at all (a missing name) leaves its line where it
+    stood, as ``split_in_order`` does.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands in command order.
@@ -193,27 +275,57 @@ async def split_opened(
         cmd_name (str): Command name for the stderr prefix.
 
     Returns:
-        tuple[list[PathSpec], frozenset[str], bytes]: the operands that
-        open, in order; the virtual paths among them whose read fails;
-        and the stderr lines.
+        tuple[list[PathSpec | bytes], dict[str, bytes]]: the operands
+        that open and the lines of those that do not, in order; and the
+        line of each opened one whose read fails, by virtual path.
     """
-    opened: list[PathSpec] = []
-    unread: set[str] = set()
-    err = b""
+    order: list[PathSpec | bytes] = []
+    unread: dict[str, bytes] = {}
     for p in paths:
         try:
             st = await stat(p)
         except FS_ERRORS as exc:
-            err += encode_text(fs_error_line(cmd_name, p, exc))
+            line = encode_text(fs_error_line(cmd_name, p, exc))
             if not isinstance(exc, READ_FAILURES):
+                order.append(line)
                 continue
-            unread.add(p.virtual)
+            unread[p.virtual] = line
         else:
             if getattr(st, "type", None) == FileType.DIRECTORY:
-                err += encode_text(fs_error_line(cmd_name, p, eisdir(p)))
-                unread.add(p.virtual)
-        opened.append(p)
-    return opened, frozenset(unread), err
+                unread[p.virtual] = encode_text(
+                    fs_error_line(cmd_name, p, eisdir(p))
+                )
+        order.append(p)
+    return order, unread
+
+
+def operand_lines(
+    order: list[PathSpec | bytes], unread: Mapping[str, bytes]
+) -> dict[int, bytes]:
+    """Each stderr line of a ``split_opened`` partition by its operand's
+    index, in operand order: a command pops each as it says it, and
+    says what is left once its reader stops.
+
+    Args:
+        order (list[PathSpec | bytes]): the partition.
+        unread (Mapping[str, bytes]): the lines of opened operands.
+    """
+    lines: dict[int, bytes] = {}
+    for i, p in enumerate(order):
+        line = p if isinstance(p, bytes) else unread.get(p.virtual)
+        if line:
+            lines[i] = line
+    return lines
+
+
+async def say(io: IOResult, line: bytes) -> None:
+    """Put an operand's stderr line on ``io`` after what it holds.
+
+    Args:
+        io (IOResult): the result.
+        line (bytes): the line.
+    """
+    io.stderr = await materialize(io.stderr) + line
 
 
 def operands_io(err: bytes) -> IOResult:
@@ -291,19 +403,21 @@ async def report_fs_error(
 
 
 def per_operand(
-    paths: list[PathSpec],
+    paths: Sequence[PathSpec | bytes],
     read: Callable[[PathSpec], AsyncIterator[bytes]],
     stdin: ByteSource | None,
     io: IOResult,
     cmd_name: str,
     each: Callable[[ByteSource], AsyncIterator[bytes]],
 ) -> AsyncIterator[bytes]:
-    """``each`` over every operand in turn, or over stdin without one.
+    """``each`` over every operand in turn, or over stdin without one;
+    a failed operand's line (``split_in_order``) is said where it stood.
 
     Mirrors TypeScript's ``perOperand``.
 
     Args:
-        paths (list[PathSpec]): the operands.
+        paths (Sequence[PathSpec | bytes]): the operands, and the stderr
+            line of each that did not read.
         read (Callable[[PathSpec], AsyncIterator[bytes]]): opens one.
         stdin (ByteSource | None): the input when there is no operand.
         io (IOResult): where a failed operand is reported.
@@ -313,9 +427,37 @@ def per_operand(
     """
     if not paths:
         return each(stdin or b"")
-    return async_chain(
-        [each(reported_stream(read(p), io, p, cmd_name)) for p in paths]
+    return in_order(
+        [
+            p
+            if isinstance(p, bytes)
+            else each(reported_stream(read(p), io, p, cmd_name))
+            for p in paths
+        ],
+        io,
     )
+
+
+async def errors_first(
+    result: tuple[ByteSource | None, IOResult], err: bytes
+) -> tuple[ByteSource | None, IOResult]:
+    """``merge_split_errors`` for a command whose lines come before its
+    output, as GNU's do when it holds its output until it ends (``rev``,
+    ``tac``).
+
+    Args:
+        result (tuple[ByteSource | None, IOResult]): The body's return.
+        err (bytes): Stderr lines for the operands dropped by the split;
+            when non-empty the command exits 1.
+    """
+    out, io = result
+    if not err:
+        return result
+    io.exit_code = 1
+    if out is None:
+        await say(io, err)
+        return None, io
+    return in_order([err, chunks(out)], io), io
 
 
 async def _awaited_stream(

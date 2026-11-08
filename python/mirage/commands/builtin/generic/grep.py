@@ -378,16 +378,19 @@ async def grep_generic(
         or (f.max_count is not None and f.max_count <= 1)
     )
     failed = False
-    diagnostics: list[bytes] = []
     matched = False
     printed = False
+
+    def note(line: bytes) -> None:
+        # Said as it happens, so it lands among the output it came with.
+        io.stderr = (io.stderr if isinstance(io.stderr, bytes) else b"") + line
 
     def warn(message: str) -> None:
         nonlocal failed
         failed = True
         io.exit_code = exit_code_for(matched, failed, f.quiet)
         if not f.no_messages:
-            diagnostics.append((message + "\n").encode())
+            note((message + "\n").encode())
 
     def update_status(file_io: IOResult) -> None:
         io.exit_code = exit_code_for(
@@ -413,7 +416,7 @@ async def grep_generic(
                 if here in chain:
                     if not f.no_messages:
                         loop = f"grep: {p.raw_path}: warning: recursive"
-                        diagnostics.append(f"{loop} directory loop\n".encode())
+                        note(f"{loop} directory loop\n".encode())
                     return
                 chain = (*chain, here)
             entries = (
@@ -500,26 +503,20 @@ async def grep_generic(
                 failed = failed or file_io.exit_code == 2
                 update_status(file_io)
                 if file_io.stderr:
-                    diagnostics.append(await materialize(file_io.stderr))
+                    note(await materialize(file_io.stderr))
         except FS_ERRORS as exc:
             warn(f"grep: {p.raw_path}: {_reason(exc)}")
 
     async def run() -> AsyncIterator[bytes]:
-        try:
-            for path in paths:
-                try:
-                    async with aclosing(scan(path)) as output:
-                        async for chunk in output:
-                            yield chunk
-                except WalkLimitError as exc:
-                    warn(f"grep: {exc}")
-                if f.quiet and matched:
-                    break
-        finally:
-            if diagnostics:
-                io.stderr = (await materialize(io.stderr)) + b"".join(
-                    diagnostics
-                )
+        for path in paths:
+            try:
+                async with aclosing(scan(path)) as output:
+                    async for chunk in output:
+                        yield chunk
+            except WalkLimitError as exc:
+                warn(f"grep: {exc}")
+            if f.quiet and matched:
+                break
 
     return run(), io
 

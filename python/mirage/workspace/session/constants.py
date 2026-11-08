@@ -38,6 +38,7 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "last_exit_code",
     "pipe_status",
     "function_names",
+    "call_lines",
     "shell_options",
     "shopts",
     "aliases",
@@ -109,4 +110,6 @@ ENV_EXHAUSTED_STATUS = 2
 
 # The record's keys a session's variables fill, which a flush compares by
 # their store's version instead of reading them out again.
-VAR_KEYS = frozenset({"env", "arrays", "assocs", "var_attrs", "managed"})
+VAR_KEYS = frozenset(
+    {"env", "arrays", "assocs", "var_attrs", "unassigned", "managed"}
+)

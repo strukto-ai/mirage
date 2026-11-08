@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from mirage.commands.builtin.utils.files0 import listed_names
-from mirage.commands.builtin.utils.operands import operands_io
+from mirage.commands.builtin.utils.operands import at_offsets
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
@@ -215,6 +215,28 @@ def format_count_rows(
     flags: WCFlags,
     width: int | None = None,
 ) -> bytes:
+    return format_records(
+        count_lines(rows, totals, operand_count, flags, width)
+    )
+
+
+def count_lines(
+    rows: list[tuple[WCCounts, str | None]],
+    totals: WCCounts,
+    operand_count: int,
+    flags: WCFlags,
+    width: int | None = None,
+) -> list[str]:
+    """The lines ``format_count_rows`` prints, one per row and the
+    total, without terminators.
+
+    Args:
+        rows (list[tuple[WCCounts, str | None]]): each row and its name.
+        totals (WCCounts): the summed counts.
+        operand_count (int): how many operands the line named.
+        flags (WCFlags): the parsed flags.
+        width (int | None): the column width, None for the printed one.
+    """
     if flags.total == "only":
         values = _selected_values(
             totals,
@@ -224,23 +246,21 @@ def format_count_rows(
             chars=flags.chars,
             max_line_length=flags.max_line_length,
         )
-        return encode_text(" ".join(str(value) for value in values) + "\n")
+        return [" ".join(str(value) for value in values)]
     output_rows = list(rows)
     include_total = flags.total == "always" or (
         flags.total == "auto" and operand_count > 1
     )
     if include_total:
         output_rows.append((totals, "total"))
-    return format_records(
-        format_wc_lines(
-            output_rows,
-            lines=flags.lines,
-            words=flags.words,
-            bytes_=flags.bytes_,
-            chars=flags.chars,
-            max_line_length=flags.max_line_length,
-            width=width,
-        )
+    return format_wc_lines(
+        output_rows,
+        lines=flags.lines,
+        words=flags.words,
+        bytes_=flags.bytes_,
+        chars=flags.chars,
+        max_line_length=flags.max_line_length,
+        width=width,
     )
 
 
@@ -275,7 +295,7 @@ async def format_multi(
     line_count: Callable[[PathSpec], Awaitable[int | None]] | None = None,
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
     listed_from: str | None = None,
-) -> tuple[bytes, bytes, list[PathRecord]]:
+) -> tuple[bytes, list[tuple[int, bytes]], list[PathRecord]]:
     """Format wc output for multiple already-resolved paths.
 
     Globs are expanded by the caller (``resolve_glob``) before this runs, so
@@ -306,9 +326,11 @@ async def format_multi(
             empty entry by its number and pads nothing when it is stdin.
 
     Returns:
-        tuple[bytes, bytes, list[PathRecord]]: Encoded wc output (``b""``
-        when nothing prints), concatenated stderr lines for failed
-        operands (``b""`` if none), and each printed row's counts.
+        tuple[bytes, list[tuple[int, bytes]], list[PathRecord]]: Encoded
+        wc output (``b""`` when nothing prints), the stderr line of each
+        failed operand with the offset in the output it goes before, as
+        GNU reports one and goes on (``at_offsets``), and each printed
+        row's counts.
     """
     flags = WCFlags(
         lines=lines,
@@ -322,7 +344,7 @@ async def format_multi(
     named: list[tuple[PathSpec, int]] = []
     sizes: list[int | None] = []
     totals = WCCounts()
-    err = b""
+    notes: list[tuple[int, bytes]] = []
     counted = (
         line_count
         if lines
@@ -342,7 +364,7 @@ async def format_multi(
         if listed_from is not None:
             refusal = _listed_refusal(listed_from, path, run)
             if refusal:
-                err += encode_text(refusal)
+                notes.append((len(rows), encode_text(refusal)))
                 continue
         try:
             found = (
@@ -367,14 +389,18 @@ async def format_multi(
                 counts = await wc(source, flags=flags)
         except IsADirectoryError as exc:
             # GNU opens a directory and fails only to read it, so it prints
-            # a row of zeros beside the error and pads as for a stream.
-            err += encode_text(fs_error_line("wc", path, exc))
+            # a row of zeros, then the error, and pads as for a stream.
             rows.append((WCCounts(), path.raw_path))
             named.append((path, run))
             sizes.append(None)
+            notes.append(
+                (len(rows), encode_text(fs_error_line("wc", path, exc)))
+            )
             continue
         except FS_ERRORS as exc:
-            err += encode_text(fs_error_line("wc", path, exc))
+            notes.append(
+                (len(rows), encode_text(fs_error_line("wc", path, exc)))
+            )
             continue
         rows.append((counts, path.raw_path))
         named.append((path, run))
@@ -404,8 +430,15 @@ async def format_multi(
         )
         for (counts, _), (path, run) in zip(rows, named)
     ]
-    body = format_count_rows(rows, totals, len(paths), flags, width)
-    return body, err, records
+    printed = count_lines(rows, totals, len(paths), flags, width)
+    starts = [0]
+    for line in printed:
+        starts.append(starts[-1] + len(format_records([line])))
+    placed = [
+        (0 if flags.total == "only" else starts[min(row, len(printed))], line)
+        for row, line in notes
+    ]
+    return format_records(printed), placed, records
 
 
 def _listed_refusal(listed_from: str, path: PathSpec, run: int) -> str:
@@ -513,7 +546,7 @@ async def wc_generic(
         # A listed name may sit on another mount than the one that counts
         # lines, so a list reads every file it names.
         counted = line_count if listed_from is None else None
-        body, err, records = await format_multi(
+        body, notes, records = await format_multi(
             paths,
             read=stream,
             lines=parsed.lines,
@@ -526,9 +559,9 @@ async def wc_generic(
             size_of=size_of,
             listed_from=listed_from,
         )
-        io = operands_io(err)
+        io = IOResult(exit_code=1 if notes else 0)
         io.records = records
-        return body, io
+        return at_offsets(body, notes, io), io
     source = resolve_source(ctx.stdin)
     counts = await wc(source, flags=parsed)
     if parsed.total == "only":

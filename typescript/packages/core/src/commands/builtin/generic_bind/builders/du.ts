@@ -68,6 +68,12 @@ export class DuTally {
   // operand's walk.
   readonly times = new Map<string, string>()
 
+  // Each path the walks counted, so a later operand counts none of it again,
+  // as GNU counts a file once a line (an operand already counted prints
+  // nothing); null under -l, and under -L, which counts by the file a link
+  // reaches.
+  counted: Set<string> | null = null
+
   // The mount table the limits come from; the --exclude and -X patterns, an
   // entry one matches neither stat'ed nor walked; and under --time the clock
   // each entry's time is read from.
@@ -76,6 +82,11 @@ export class DuTally {
     readonly excludes: readonly string[] = [],
     readonly clock: LsTimeKind | null = null,
   ) {}
+
+  /** Whether an earlier operand's walk already counted this one. Mirrors Python's repeated. */
+  repeated(path: PathSpec): boolean {
+    return this.counted?.has(`/${stripSlash(path.virtual)}`) === true
+  }
 }
 
 /**
@@ -237,6 +248,10 @@ async function duWalk(
     const row = await counted(follow, path, info, tally)
     if (row === null) return 0
     info = row
+  } else if (tally.counted !== null) {
+    const key = `/${stripSlash(path.virtual)}`
+    if (tally.counted.has(key)) return 0
+    tally.counted.add(key)
   }
   if (tally.clock !== null) {
     const stamp = timeOf(info, tally.clock)
@@ -357,6 +372,7 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
       'dereference'
       ? new Dereference(links, flags.asBool('one_file_system') ? (mountsOf(ctx) ?? null) : null)
       : null
+  if (follow === null && !flags.asBool('count_links')) tally.counted = new Set()
   const computeSize: ComputeSize = (p) => walkSize(treeOf(files, listing), tally, follow, p)
   const computeEntries: ComputeEntries = (p) =>
     walkEntries(treeOf(files, listing), tally, follow, p)
@@ -373,7 +389,7 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
     () => tally.unreadable,
     () => tally.directories,
     () => tally.inaccessible,
-    follow === null ? undefined : (p) => follow.repeated(p),
+    follow === null ? (p) => tally.repeated(p) : (p) => follow.repeated(p),
     () => tally.times,
   )
 }

@@ -141,11 +141,13 @@ async def run_shell_function(
         execute_node = partial(execute_node, sink=sink)
     # The body's statements read the caller's stdin in turn.
     stdin = share(stdin)
-    cs.push(text_args, function_name=cmd_name)
+    cs.push(text_args, function_name=cmd_name, call_line=session.line_number)
     lifted = lift_function_traps(session)
     outer_names = session.function_names
     if outer_names is not None:
         session.function_names = cs.function_names()
+    outer_lines = session.call_lines
+    session.call_lines = cs.call_lines()
     # The function's scope: a local shadows the whole record, so the
     # caller's value and attributes come back together when it returns.
     shell = session.vars.shell
@@ -249,5 +251,6 @@ async def run_shell_function(
         cs.pop()
         if session.function_names is not None:
             session.function_names = outer_names
+        session.call_lines = outer_lines
         restore_function_traps(session, lifted)
         shell.leave(outer_scope)

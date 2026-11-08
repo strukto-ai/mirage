@@ -84,6 +84,11 @@ class DuTally:
             entry's time is read from.
         times (dict[str, str]): each entry's time by virtual path, under
             ``--time``; like ``directories``, one operand's walk.
+        counted (set[str] | None): each path the walks counted, so a
+            later operand counts none of it again, as GNU counts a file
+            once a line (an operand already counted prints nothing);
+            None under ``-l``, and under ``-L``, which counts by the
+            file a link reaches.
     """
 
     mounts: MountView | None = None
@@ -94,6 +99,16 @@ class DuTally:
     excludes: tuple[str, ...] = ()
     clock: LsTimeKind | None = None
     times: dict[str, str] = field(default_factory=dict)
+    counted: set[str] | None = None
+
+    def repeated(self, path: PathSpec) -> bool:
+        """Whether an earlier operand's walk already counted this one.
+
+        Args:
+            path (PathSpec): the operand.
+        """
+        key = "/" + path.virtual.strip("/")
+        return self.counted is not None and key in self.counted
 
 
 def _account_for_walk_error(
@@ -256,6 +271,11 @@ async def _du_walk(
         if counted is None:
             return 0
         info = counted
+    elif tally.counted is not None:
+        key = "/" + path.virtual.strip("/")
+        if key in tally.counted:
+            return 0
+        tally.counted.add(key)
     if tally.clock is not None:
         stamp = time_of(info, tally.clock)
         if stamp is not None:
@@ -425,6 +445,8 @@ async def du(
         == ["dereference"]
         else None
     )
+    if follow is None and not fl.as_bool("count_links"):
+        tally.counted = set()
 
     async def compute_size(path: PathSpec) -> int:
         return await walk_size(_tree_of(files, listing), tally, follow, path)
@@ -447,7 +469,7 @@ async def du(
         unreadable=lambda: tally.unreadable,
         directories=lambda: tally.directories,
         inaccessible=lambda: tally.inaccessible,
-        repeated=follow.repeated if follow is not None else None,
+        repeated=follow.repeated if follow is not None else tally.repeated,
         times=lambda: tally.times,
     )
 
