@@ -353,6 +353,33 @@ describe('tree sizes, orders and JSON', () => {
     expect([DEC.decode(out), io.exitCode]).toEqual([expected, 0])
   })
 
+  it('draws a tree too long for one call', { timeout: 60_000 }, async () => {
+    const names = Array.from({ length: 200_000 }, (_, i) => `/r/f${String(i)}`)
+    const flags = lineFlags(['--noreport']) as TreeFlags
+    const [out] = (await generic(
+      flags,
+      [
+        new PathSpec({
+          virtual: '/r',
+          directory: '/r',
+          resolved: false,
+          vfsPath: 'r',
+          rawPath: '/r',
+        }),
+      ],
+      ctx({}),
+      (p: PathSpec) => Promise.resolve(p.virtual === '/r' ? names : []),
+      (p: PathSpec) =>
+        Promise.resolve(
+          new FileStat({
+            name: p.virtual.split('/').pop() ?? '',
+            type: p.virtual === '/r' ? FileType.DIRECTORY : FileType.FILE,
+          }),
+        ),
+    )) as [Uint8Array, IOResult]
+    expect(DEC.decode(out).split('\n').length).toBe(200_002)
+  })
+
   it('sorts by status change where a backend keeps one', async () => {
     const rootStat = new FileStat({ name: 'r', type: FileType.DIRECTORY })
     const times = new Map([

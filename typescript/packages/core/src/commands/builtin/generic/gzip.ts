@@ -23,7 +23,7 @@ import { gnuBasename } from '../../../utils/path.ts'
 import { gzipCompressStream } from '../../../utils/compress.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { linkResolver } from '../utils/links.ts'
+import { dispatchOf, linkResolver } from '../utils/links.ts'
 import { formatRecords } from '../utils/output.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
 import { stdinStream } from '../utils/stream.ts'
@@ -34,6 +34,7 @@ import {
   existsLine,
   gzipRatio,
   gzipSuffix,
+  askBeforeWalks,
   inputInfo,
   keepAttributes,
   listInputs,
@@ -148,6 +149,7 @@ export async function gzipGeneric(
   const resolver = linkResolver(ctx)
   const refused = suffixRefusal(suffix)
   if (refused !== null) return [null, refused]
+  if (recursive) await askBeforeWalks(paths, stat, readdir, dispatchOf(ctx))
   const files = {
     ...(stat !== undefined ? { stat } : {}),
     ...(readdir !== undefined ? { readdir } : {}),
@@ -215,7 +217,7 @@ export async function gzipGeneric(
             note(`gzip: ${p.rawPath} already has ${known} suffix -- unchanged`)
           continue
         }
-        const info = await inputInfo(stat, p)
+        const info = await inputInfo(stat, p, link, resolver)
         const stamp = info === null ? null : isoTimestamp(info.modified)
         const seconds = stamp === null || named === false ? null : Math.trunc(stamp)
         const undated = seconds !== null && !(seconds > 0 && seconds <= LAST_STAMP)
@@ -310,5 +312,6 @@ export async function gzipGeneric(
 export function facts(fl: FlagView, operands: readonly (string | PathSpec)[]): LineFacts {
   return new LineFacts({
     writes: operands.length > 0 && !['stdout', 'test', 'list'].some((n) => fl.asBool(n)),
+    readsSubtree: fl.asBool('recursive'),
   })
 }

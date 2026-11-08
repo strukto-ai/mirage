@@ -7181,12 +7181,12 @@
         },
         {
           "op": "exec",
-          "command": "chmod -R 700 /out; echo $?; chown -R 7 /out; echo $?; chgrp -R 7 /data/d; echo $?",
+          "command": "chmod -R 700 /out; echo $?; chown -R 7 /out; echo $?; chgrp -R 7 /data/d; echo $?; gzip -r /data/d; echo $?; zcat -r /data/d; echo $?",
           "expect": {
             "value": {
               "exit_code": 0,
-              "stdout": "1\n1\n1\n",
-              "stderr": "chmod: more than 2 files in scope (walk_limit); narrow the path\nchown: more than 2 files in scope (walk_limit); narrow the path\nchgrp: more than 2 files in scope (walk_limit); narrow the path\n"
+              "stdout": "1\n1\n1\n1\n1\n",
+              "stderr": "chmod: more than 2 files in scope (walk_limit); narrow the path\nchown: more than 2 files in scope (walk_limit); narrow the path\nchgrp: more than 2 files in scope (walk_limit); narrow the path\ngzip: more than 2 files in scope (walk_limit); narrow the path\ngzip: more than 2 files in scope (walk_limit); narrow the path\n"
             }
           }
         },

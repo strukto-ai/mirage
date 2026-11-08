@@ -853,22 +853,17 @@ impl Diff {
         let mut column = from;
         let mut written = out.len();
         let mut end = from;
-        let units: Vec<(u32, &[u8])> = if self.config.utf8 {
-            let mut units = Vec::new();
-            for chunk in text.utf8_chunks() {
+        // Read as the column fills, so a long line costs only what is shown.
+        let units: Box<dyn Iterator<Item = (u32, &[u8])> + '_> = if self.config.utf8 {
+            Box::new(text.utf8_chunks().flat_map(|chunk| {
                 let valid = chunk.valid();
-                for (at, c) in valid.char_indices() {
-                    units.push((u32::from(c), &valid.as_bytes()[at..at + c.len_utf8()]));
-                }
-                for byte in chunk.invalid().chunks(1) {
-                    units.push((0x80, byte));
-                }
-            }
-            units
+                valid
+                    .char_indices()
+                    .map(move |(at, c)| (u32::from(c), &valid.as_bytes()[at..at + c.len_utf8()]))
+                    .chain(chunk.invalid().chunks(1).map(|byte| (0x80, byte)))
+            }))
         } else {
-            text.chunks(1)
-                .map(|byte| (u32::from(byte[0]), byte))
-                .collect()
+            Box::new(text.chunks(1).map(|byte| (u32::from(byte[0]), byte)))
         };
         for (cp, bytes) in units {
             if cp == u32::from(b'\t') {

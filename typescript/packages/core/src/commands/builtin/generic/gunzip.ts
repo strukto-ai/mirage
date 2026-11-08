@@ -39,5 +39,6 @@ export async function gunzipGeneric(
 export function facts(fl: FlagView, operands: readonly (string | PathSpec)[]): LineFacts {
   return new LineFacts({
     writes: operands.length > 0 && !['stdout', 'test', 'list'].some((n) => fl.asBool(n)),
+    readsSubtree: fl.asBool('recursive'),
   })
 }

@@ -62,5 +62,6 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     """
     return LineFacts(
         writes=len(operands) > 0
-        and not any(fl.as_bool(n) for n in ("stdout", "test", "list"))
+        and not any(fl.as_bool(n) for n in ("stdout", "test", "list")),
+        reads_subtree=fl.as_bool("recursive"),
     )

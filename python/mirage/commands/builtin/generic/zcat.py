@@ -1,7 +1,16 @@
+from collections.abc import Sequence
+
 from mirage.commands.builtin.generic.gzip import gzip_generic
 from mirage.commands.config import Context
+from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, PolymorphicReadFn, ReaddirFn, StatFn
+from mirage.types import (
+    LineFacts,
+    PathSpec,
+    PolymorphicReadFn,
+    ReaddirFn,
+    StatFn,
+)
 
 
 async def zcat_generic(
@@ -35,4 +44,14 @@ async def zcat_generic(
     )
 
 
-__all__ = ["zcat_generic"]
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A zcat line reads below its operands under ``-r``.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(reads_subtree=fl.as_bool("recursive"))
+
+
+__all__ = ["facts", "zcat_generic"]

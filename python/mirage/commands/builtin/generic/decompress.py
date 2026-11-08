@@ -26,6 +26,7 @@ from mirage.commands.builtin.utils.paths import (
     is_implicit_dir,
 )
 from mirage.commands.builtin.utils.stream import stdin_stream
+from mirage.commands.builtin.utils.tree import before_full_walk
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eloop, enoent
 from mirage.errors.render import fs_error_line
@@ -33,6 +34,7 @@ from mirage.errors.types import DotWalkMissing
 from mirage.io.spool import ByteSpool, spooled
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource, IOResult
+from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import (
     FileStat,
@@ -352,17 +354,27 @@ def _list_date(epoch: float) -> str:
     return f"{MONTHS[when.month - 1]} {when.day:>2} {when.hour:02d}:{when.minute:02d}"
 
 
-async def input_info(stat: StatFn | None, path: PathSpec) -> FileStat | None:
-    """The input's own stat, for the attributes its output takes; None
-    when it cannot be had.
+async def input_info(
+    stat: StatFn | None,
+    path: PathSpec,
+    link: str | None = None,
+    resolver: LinkResolver | None = None,
+) -> FileStat | None:
+    """The stat of what the input opened, for the attributes its output
+    takes: a link it followed gives what it leads to. None when it cannot
+    be had.
 
     Args:
         stat (StatFn | None): the mount's stat.
         path (PathSpec): the input.
+        link (str | None): the link the input was opened through.
+        resolver (LinkResolver | None): the namespace's links.
     """
     if stat is None or path.raw_path == "-":
         return None
     try:
+        if link is not None and resolver is not None:
+            return await resolver.stat(resolver.target(link))
         return await stat(path)
     except FS_ERRORS as exc:
         logger.debug("gzip: no stat for %s: %s", path.virtual, exc)
@@ -476,6 +488,31 @@ async def walked(
             continue
         async for found in below(stat, readdir, path, path):
             yield found, True
+
+
+async def ask_before_walks(
+    paths: list[PathSpec],
+    stat: StatFn | None,
+    readdir: ReaddirFn | None,
+    dispatch: DispatchFn | None,
+) -> None:
+    """Let the mount under each directory -r reads refuse the walk, before
+    any file is touched.
+
+    Args:
+        paths (list[PathSpec]): the operands.
+        stat (StatFn | None): the mount's stat.
+        readdir (ReaddirFn | None): the mount's readdir.
+        dispatch (DispatchFn | None): the command's dispatcher.
+
+    Raises:
+        UsageError: a mount refused the walk.
+    """
+    if stat is None or readdir is None:
+        return
+    for path in paths:
+        if path.raw_path != "-" and await _is_directory(stat, readdir, path):
+            await before_full_walk(dispatch, path, "gzip")
 
 
 def _named(path: PathSpec, stored: str | None) -> tuple[str, PathSpec] | None:
@@ -698,7 +735,7 @@ async def decompress_inputs(
                 await keep_attributes(
                     set_attrs,
                     out,
-                    await input_info(stat, path),
+                    await input_info(stat, path, link, resolver),
                     stored.mtime if restore and stored is not None else 0,
                 )
                 if verbose and stored is not None:

@@ -3,6 +3,7 @@ import { fsErrorLine } from '../../../errors/render.ts'
 import { ByteSpool, spooled } from '../../../io/spool.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import {
   FileType,
@@ -38,6 +39,7 @@ import { pathExists } from '../utils/copy.ts'
 import type { LinkResolver } from '../utils/links.ts'
 import { descendantPath, isImplicitDir } from '../utils/paths.ts'
 import { stdinStream } from '../utils/stream.ts'
+import { beforeFullWalk } from '../utils/tree.ts'
 
 export type SetAttrsFn = (path: PathSpec, fields: SetAttrFields) => Promise<unknown>
 
@@ -301,14 +303,18 @@ function listDate(epoch: number): string {
   return `${MONTHS[when.getUTCMonth()] ?? ''} ${String(when.getUTCDate()).padStart(2)} ${hh}:${mm}`
 }
 
-/** The input's own stat, for the attributes its output takes; null when it
- * cannot be had. Mirrors Python's input_info. */
+/** The stat of what the input opened, for the attributes its output takes:
+ * a link it followed gives what it leads to. Null when it cannot be had.
+ * Mirrors Python's input_info. */
 export async function inputInfo(
   stat: StatFn | undefined,
   path: PathSpec,
+  link: string | null = null,
+  resolver: LinkResolver | null = null,
 ): Promise<FileStat | null> {
   if (stat === undefined || path.rawPath === '-') return null
   try {
+    if (link !== null && resolver !== null) return await resolver.stat(resolver.target(link))
     return await stat(path)
   } catch (err) {
     if (!isFsError(err)) throw err
@@ -406,6 +412,20 @@ export async function* walked(
     }
     for await (const found of below(stat, readdir, path, path)) yield [found, true]
   }
+}
+
+/** Let the mount under each directory -r reads refuse the walk, before any
+ * file is touched. Throws its refusal. Mirrors Python's ask_before_walks. */
+export async function askBeforeWalks(
+  paths: readonly PathSpec[],
+  stat: StatFn | undefined,
+  readdir: ReaddirFn | undefined,
+  dispatch: DispatchFn | undefined,
+): Promise<void> {
+  if (stat === undefined || readdir === undefined) return
+  for (const path of paths)
+    if (path.rawPath !== '-' && (await isDirectory(stat, readdir, path)))
+      await beforeFullWalk(dispatch, path, 'gzip')
 }
 
 /** The output -N names from the stored name: its last component, beside the
@@ -579,7 +599,7 @@ export async function decompressInputs(
         await keepAttributes(
           options.setAttrs,
           out,
-          await inputInfo(options.stat, path),
+          await inputInfo(options.stat, path, link, resolver),
           options.restore === true && stored !== null ? stored.mtime : 0,
         )
         if (verbose && stored !== null) note(decodedLine(shown, stored, keep, outName))

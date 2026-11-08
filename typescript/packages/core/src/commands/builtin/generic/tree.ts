@@ -550,7 +550,8 @@ function textLines(flags: TreeFlags, nodes: readonly TreeNode[], prefix: string)
     const lead = flags.noIndent ? '' : prefix + (last ? LAST : BRANCH)
     lines.push(lead + meta(flags, node) + shown(flags, node) + node.note)
     if (node.children !== null && node.children.length > 0)
-      lines.push(...textLines(flags, node.children, prefix + (last ? INDENT : VERTICAL)))
+      for (const line of textLines(flags, node.children, prefix + (last ? INDENT : VERTICAL)))
+        lines.push(line)
   })
   return lines
 }
@@ -767,7 +768,7 @@ export async function treeGeneric(
     for (const root of roots) {
       const line = root.missing ? root.spec.rawPath : meta(flags, root) + shown(flags, root, true)
       lines.push(line + root.note)
-      lines.push(...textLines(flags, root.children ?? [], ''))
+      for (const below of textLines(flags, root.children ?? [], '')) lines.push(below)
     }
     if (!flags.noReport) {
       let tail = summary(totalDirs, totalFiles, flags.dirsOnly)

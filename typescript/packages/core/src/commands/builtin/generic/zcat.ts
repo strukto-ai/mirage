@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec, ReaddirFn, StatFn } from '../../../types.ts'
+import type { FlagView } from '../../spec/flag_view.ts'
+import { LineFacts, type PathSpec, type ReaddirFn, type StatFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { gzipGeneric } from './gzip.ts'
 
@@ -26,4 +27,9 @@ export async function zcatGeneric(
   readdir?: ReaddirFn,
 ): Promise<CommandFnResult> {
   return gzipGeneric(paths, ctx, stream, undefined, undefined, stat, readdir, undefined, 'zcat')
+}
+
+/** A zcat line reads below its operands under -r. Mirrors Python's `facts`. */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ readsSubtree: fl.asBool('recursive') })
 }

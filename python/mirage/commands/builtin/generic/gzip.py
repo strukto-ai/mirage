@@ -12,6 +12,7 @@ from functools import partial
 from mirage.commands.builtin.constants import GZIP_SUFFIX
 from mirage.commands.builtin.generic.decompress import (
     SetAttrsFn,
+    ask_before_walks,
     beside_link,
     decompress_inputs,
     exists_line,
@@ -29,7 +30,11 @@ from mirage.commands.builtin.generic.decompress import (
     walked,
 )
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
-from mirage.commands.builtin.utils.links import LinkResolver, link_resolver
+from mirage.commands.builtin.utils.links import (
+    LinkResolver,
+    dispatch_of,
+    link_resolver,
+)
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import stdin_stream
@@ -42,6 +47,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.io.spool import ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, drain
 from mirage.io.types import ByteSource, IOResult
+from mirage.runtime.types import DispatchFn
 from mirage.types import (
     LineFacts,
     PathSpec,
@@ -120,6 +126,7 @@ async def gzip(
     suffix: str = GZIP_SUFFIX,
     level: int = zlib.Z_DEFAULT_COMPRESSION,
     resolver: LinkResolver | None = None,
+    dispatch: DispatchFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """gzip, gunzip and zcat over resolved operands, stdin when none.
 
@@ -153,10 +160,14 @@ async def gzip(
         suffix (str): the -S suffix.
         level (int): the compression level.
         resolver (LinkResolver | None): the namespace's links.
+        dispatch (DispatchFn | None): the command's dispatcher, which
+            asks a mount before -r walks it.
     """
     refused = suffix_refusal(suffix)
     if refused is not None:
         return None, refused
+    if recursive:
+        await ask_before_walks(paths, stat, readdir, dispatch)
     if listing:
         return await list_inputs(
             paths,
@@ -240,7 +251,7 @@ async def gzip(
                             "suffix -- unchanged"
                         )
                     continue
-                info = await input_info(stat, p)
+                info = await input_info(stat, p, link, resolver)
                 stamp = None if info is None else iso_timestamp(info.modified)
                 seconds = (
                     None if stamp is None or named is False else int(stamp)
@@ -356,7 +367,8 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     """
     return LineFacts(
         writes=len(operands) > 0
-        and not any(fl.as_bool(n) for n in ("stdout", "test", "list"))
+        and not any(fl.as_bool(n) for n in ("stdout", "test", "list")),
+        reads_subtree=fl.as_bool("recursive"),
     )
 
 
@@ -456,6 +468,7 @@ async def gzip_generic(
         suffix=parsed.suffix,
         level=parsed.level,
         resolver=link_resolver(ctx),
+        dispatch=dispatch_of(ctx),
     )
 
 

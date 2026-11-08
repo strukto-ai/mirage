@@ -15,6 +15,11 @@
 
 import { expect, it } from 'vitest'
 import { eacces, enoent } from '../../../errors/fs.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import { Files } from '../../../workspace/files.ts'
+import { type Context } from '../../config.ts'
+import { type LinkResolver } from '../utils/links.ts'
+import { inputInfo } from './decompress.ts'
 import { gzipGeneric } from './gzip.ts'
 import { gunzip } from '../../../utils/compress.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -173,4 +178,57 @@ it('refuses an output already there before the date warning', async () => {
     2,
     'gzip: /f.gz already exists;\tnot overwritten\n',
   ])
+})
+
+it('asks the mount before -r touches a file', async () => {
+  const touched: string[] = []
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async function* read(path: PathSpec): AsyncIterable<Uint8Array> {
+    touched.push(path.virtual)
+    yield new TextEncoder().encode('x')
+  }
+  const dispatch = (name: string, path: PathSpec): Promise<never> => {
+    expect([name, path.virtual]).toEqual(['before_full_walk', '/d'])
+    return Promise.reject(new Error('more than 1 files in scope (walk_limit); narrow the path'))
+  }
+  await expect(
+    gzipGeneric(
+      [PathSpec.fromStrPath('/d')],
+      {
+        flags: { recursive: true },
+        stdin: null,
+        cwd: PathSpec.fromStrPath('/'),
+        vfs: new Files(dispatch as unknown as DispatchFn, null, null, { ledger: false }),
+      } as unknown as Context,
+      read,
+      () => Promise.resolve(),
+      () => Promise.resolve(),
+      (path) =>
+        Promise.resolve(
+          new FileStat({
+            name: 'n',
+            type: path.virtual === '/d' ? FileType.DIRECTORY : FileType.FILE,
+          }),
+        ),
+      () => Promise.resolve(['/d/a', '/d/b']),
+    ),
+  ).rejects.toThrow('gzip: more than 1 files')
+  expect(touched).toEqual([])
+})
+
+it('reads what a followed link leads to', async () => {
+  const resolver = {
+    target: (): string => '/secret',
+    stat: (virtual: string): Promise<FileStat> => {
+      expect(virtual).toBe('/secret')
+      return Promise.resolve(new FileStat({ name: 's', type: FileType.FILE, mode: 0o100600 }))
+    },
+  } as unknown as LinkResolver
+  const info = await inputInfo(
+    () => Promise.resolve(new FileStat({ name: 'l', type: FileType.SYMLINK })),
+    PathSpec.fromStrPath('/d/link'),
+    '/d/link',
+    resolver,
+  )
+  expect(info?.mode).toBe(0o100600)
 })

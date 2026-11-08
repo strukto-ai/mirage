@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.zcat import zcat_generic
+from mirage.commands.builtin.generic.zcat import facts, zcat_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
@@ -43,4 +43,4 @@ async def zcat(
     )
 
 
-BUILDER = GenericCommand("zcat", zcat, read=True)
+BUILDER = GenericCommand("zcat", zcat, read=True, facts=facts)

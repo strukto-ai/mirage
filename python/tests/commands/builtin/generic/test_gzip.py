@@ -14,11 +14,14 @@
 
 import gzip
 import zlib
+from types import SimpleNamespace
 
 import pytest
 
+from mirage.commands.builtin.generic.decompress import input_info
 from mirage.commands.builtin.generic.gzip import extract_level
 from mirage.commands.builtin.generic.gzip import gzip as compress_inputs
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import materialize
@@ -213,3 +216,58 @@ async def test_an_output_already_there_is_refused_before_the_date_warning():
         2,
         "gzip: /f.gz already exists;\tnot overwritten\n",
     )
+
+
+@pytest.mark.asyncio
+async def test_recursion_asks_the_mount_before_touching_a_file():
+    touched = []
+
+    async def read(path):
+        touched.append(path.virtual)
+        yield b"x"
+
+    async def write(path, data):
+        touched.append(path.virtual)
+
+    async def stat(path):
+        kind = FileType.DIRECTORY if path.virtual == "/d" else FileType.FILE
+        return FileStat(name="n", type=kind)
+
+    async def readdir(path):
+        return ["/d/a", "/d/b"]
+
+    async def dispatch(name, path):
+        assert (name, path.virtual) == ("before_full_walk", "/d")
+        raise ValueError(
+            "more than 1 files in scope (walk_limit); narrow the path"
+        )
+
+    with pytest.raises(UsageError) as refused:
+        await compress_inputs(
+            [PathSpec.from_str_path("/d")],
+            read_bytes=read,
+            write_bytes=write,
+            unlink=write,
+            stat=stat,
+            readdir=readdir,
+            recursive=True,
+            dispatch=dispatch,
+        )
+    assert str(refused.value).startswith("gzip: more than 1 files")
+    assert touched == []
+
+
+@pytest.mark.asyncio
+async def test_a_followed_link_gives_what_it_leads_to():
+    async def no_follow(path):
+        return FileStat(name="link", type=FileType.SYMLINK)
+
+    async def target(virtual):
+        assert virtual == "/secret"
+        return FileStat(name="secret", type=FileType.FILE, mode=0o100600)
+
+    resolver = SimpleNamespace(target=lambda link: "/secret", stat=target)
+    info = await input_info(
+        no_follow, PathSpec.from_str_path("/d/link"), "/d/link", resolver
+    )
+    assert info is not None and info.mode == 0o100600

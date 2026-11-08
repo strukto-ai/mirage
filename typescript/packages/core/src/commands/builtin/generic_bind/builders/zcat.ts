@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { zcatGeneric } from '../../generic/zcat.ts'
+import { facts, zcatGeneric } from '../../generic/zcat.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, dirAwareStream, resolveOrEmpty } from '../files.ts'
@@ -27,4 +27,5 @@ export const BUILDER: GenericCommand = {
   name: 'zcat',
   read: true,
   fn: zcat,
+  facts: facts,
 }
