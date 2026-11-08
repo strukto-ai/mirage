@@ -442,3 +442,20 @@ fn a_heavy_function_pattern_gives_the_host_turns() {
     assert!(count > 1, "{count} turns");
     assert!(output.ends_with(b"@@ -2 +2 @@\n-x\n+y\n"), "{output:?}");
 }
+
+#[test]
+fn expanded_tabs_count_only_printable_ascii() {
+    for (line, expected) in [
+        (&b"X\tY\n"[..], &b"< X       Y\n"[..]),
+        (b"\xc3\xa9\tY\n", b"< \xc3\xa9        Y\n"),
+        (b"\xff\tY\n", b"< \xff        Y\n"),
+        (b"\x01\tY\n", b"< \x01        Y\n"),
+        (b"a\x08b\tY\n", b"< a\x08b       Y\n"),
+        (b"\x08\tY\n", b"<         Y\n"),
+        (b"ab\rc\tY\n", b"< ab\r< c       Y\n"),
+    ] {
+        let (output, ..) = compare(r#"{"expand_tabs":true}"#, line, b"z\n");
+        let printed = output.split_inclusive(|byte| *byte == b'\n').nth(1);
+        assert_eq!(printed, Some(expected), "{line:?}");
+    }
+}

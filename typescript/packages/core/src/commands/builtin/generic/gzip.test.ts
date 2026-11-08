@@ -112,20 +112,26 @@ it('compression stores the input time and keeps its attributes', async () => {
 
 const UNDATED = 'gzip: /f: warning: file timestamp out of range for gzip format\n'
 
+// eslint-disable-next-line @typescript-eslint/require-await
+async function* hello(): AsyncIterable<Uint8Array> {
+  yield new TextEncoder().encode('hello\n')
+}
+
+function refusingWalks(name: string, path: PathSpec): Promise<never> {
+  expect([name, path.virtual]).toEqual(['before_full_walk', '/d'])
+  return Promise.reject(new Error('more than 1 files in scope (walk_limit); narrow the path'))
+}
+
 async function dated(
   modified: string,
   flags: Record<string, boolean> = {},
   taken = false,
 ): Promise<[Uint8Array | undefined, number, string]> {
   const writes = new Map<string, Uint8Array>()
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async function* read(): AsyncIterable<Uint8Array> {
-    yield new TextEncoder().encode('hello\n')
-  }
   const result = await gzipGeneric(
     [PathSpec.fromStrPath('/f')],
     { flags, stdin: null, cwd: PathSpec.fromStrPath('/') },
-    read,
+    hello,
     async (path, data) => {
       writes.set(path.virtual, await materialize(data))
     },
@@ -187,10 +193,6 @@ it('asks the mount before -r touches a file', async () => {
     touched.push(path.virtual)
     yield new TextEncoder().encode('x')
   }
-  const dispatch = (name: string, path: PathSpec): Promise<never> => {
-    expect([name, path.virtual]).toEqual(['before_full_walk', '/d'])
-    return Promise.reject(new Error('more than 1 files in scope (walk_limit); narrow the path'))
-  }
   await expect(
     gzipGeneric(
       [PathSpec.fromStrPath('/d')],
@@ -198,7 +200,7 @@ it('asks the mount before -r touches a file', async () => {
         flags: { recursive: true },
         stdin: null,
         cwd: PathSpec.fromStrPath('/'),
-        vfs: new Files(dispatch as unknown as DispatchFn, null, null, { ledger: false }),
+        vfs: new Files(refusingWalks as unknown as DispatchFn, null, null, { ledger: false }),
       } as unknown as Context,
       read,
       () => Promise.resolve(),

@@ -121,6 +121,19 @@ describe('treeGeneric operand that is not a directory', () => {
     throw new Error('a non-directory operand must not be listed')
   }
 
+  it('counts no bytes for a missing path', async () => {
+    const [out, io] = (await treeGeneric(
+      [spec('/gone')],
+      { ...optsWith(null), flags: { du: true } } as unknown as Context,
+      unreached,
+      unreached,
+    )) as [Uint8Array, IOResult]
+    expect(DEC.decode(out).trimEnd().split('\n').pop()?.trim()).toBe(
+      '0 bytes used in 0 directories, 0 files',
+    )
+    expect(io.exitCode).toBe(2)
+  })
+
   // An unreadable directory that does exist still reaches the walk, which
   // renders the same marker with exit 2 (a permission error, not absence).
   it('still walks a directory it cannot list', async () => {
@@ -241,6 +254,33 @@ describe('treeGeneric across a nested mount', () => {
         '',
       ].join('\n'),
     )
+  })
+
+  it.each([
+    ['its own row', true],
+    ['the mount table alone', false],
+  ])('prints a mount root from %s', async (_name, known) => {
+    const dispatch: DispatchFn = (op, path) =>
+      Promise.resolve([
+        op === 'readdir'
+          ? listing(owner(path.virtual), path.virtual)
+          : known
+            ? new FileStat({ name: '', type: FileType.DIRECTORY, mode: 0o40700 })
+            : null,
+        new IOResult(),
+      ])
+    const withRow = {
+      ...ctx({ p: true, noreport: true }),
+      vfs: new Files(dispatch, readers(['/', `${ROOT}/`]), null, { ledger: false }),
+    } as unknown as Context
+    const [out] = (await runWithMountGate('/', MountMode.WRITE, () =>
+      treeGeneric([spec('/base')], withRow, backendReaddir, backendStat),
+    )) as [Uint8Array, unknown]
+    const row =
+      DEC.decode(out)
+        .split('\n')
+        .find((line) => line.endsWith('inner')) ?? ''
+    expect(row.includes('drwx------')).toBe(known)
   })
 
   it('stops at the mount point under -L 1', async () => {

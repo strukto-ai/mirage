@@ -152,6 +152,22 @@ async def test_a_module_jq_cannot_load_refuses_the_program(
     assert await _line("-n", *words) == (b"", stderr, 3)
 
 
+async def _unread(path: PathSpec) -> bytes:
+    raise AssertionError(f"{path.virtual} should not be read")
+
+
+async def _big_module(path: PathSpec) -> bytes:
+    return b"def f: 1;" + b" " * 4096
+
+
+async def _failing_read(path: PathSpec) -> bytes:
+    if path.virtual == "/gone":
+        raise FileNotFoundError(path.virtual)
+    if path.virtual == "/file/x":
+        raise NotADirectoryError(path.virtual)
+    raise PermissionError(errno.EACCES, "denied")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("word", ["-L", "--library-path"])
 async def test_a_library_path_with_no_value_is_refused(word: str):
@@ -164,34 +180,23 @@ async def test_a_library_path_with_no_value_is_refused(word: str):
 
 @pytest.mark.asyncio
 async def test_a_program_that_imports_nothing_reads_no_module():
-    async def read(path: PathSpec) -> bytes:
-        raise AssertionError(f"{path.virtual} should not be read")
-
-    assert await link_modules(".a", {}, "/", "/", None, read) is None
+    assert await link_modules(".a", {}, "/", "/", None, _unread) is None
 
 
 @pytest.mark.asyncio
 async def test_what_a_program_imports_stays_inside_the_memory_room():
-    async def read(path: PathSpec) -> bytes:
-        return b"def f: 1;" + b" " * 4096
-
     with pytest.raises(MemoryExhausted):
         await run_with_memory(
             MemoryBudget(1024, lambda: 0),
-            link_modules('import "m" as m; m::f', {}, "/", "/", None, read),
+            link_modules(
+                'import "m" as m; m::f', {}, "/", "/", None, _big_module
+            ),
         )
 
 
 @pytest.mark.asyncio
 async def test_module_files_tell_a_missing_file_from_one_that_fails():
-    async def read(path: PathSpec) -> bytes:
-        if path.virtual == "/gone":
-            raise FileNotFoundError(path.virtual)
-        if path.virtual == "/file/x":
-            raise NotADirectoryError(path.virtual)
-        raise PermissionError(errno.EACCES, "denied")
-
-    files = ModuleFiles(read)
+    files = ModuleFiles(_failing_read)
     try:
         for path in ("/gone", "/file/x"):
             served = await files.serve({"op": "read", "path": path}, b"")

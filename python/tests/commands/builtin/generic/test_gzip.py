@@ -29,6 +29,50 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.workspace.executor.command.flags import parse_flags
 
 
+async def _hello(path):
+    yield b"hello\n"
+
+
+async def _no_unlink(path):
+    pass
+
+
+async def _dated_input(path):
+    if path.virtual == "/f.gz":
+        raise FileNotFoundError(path.virtual)
+    return FileStat(
+        name="f",
+        type=FileType.FILE,
+        mode=0o100640,
+        modified="2001-02-03T04:05:06Z",
+    )
+
+
+async def _walked_stat(path):
+    kind = FileType.DIRECTORY if path.virtual == "/d" else FileType.FILE
+    return FileStat(name="n", type=kind)
+
+
+async def _two_files(path):
+    return ["/d/a", "/d/b"]
+
+
+async def _refusing_walks(name, path):
+    assert (name, path.virtual) == ("before_full_walk", "/d")
+    raise ValueError(
+        "more than 1 files in scope (walk_limit); narrow the path"
+    )
+
+
+async def _no_follow(path):
+    return FileStat(name="link", type=FileType.SYMLINK)
+
+
+async def _link_target(virtual):
+    assert virtual == "/secret"
+    return FileStat(name="secret", type=FileType.FILE, mode=0o100600)
+
+
 def _level(argv: list[str]) -> int:
     parsed = parse_flags(argv, SPECS["gzip"], "gzip", "/")
     return extract_level(FlagView(parsed.flag_kwargs, spec=SPECS["gzip"]))
@@ -101,24 +145,8 @@ async def test_compression_stores_the_input_time_and_keeps_its_attributes():
     writes = {}
     attrs = []
 
-    async def read(path):
-        yield b"hello\n"
-
     async def write(path, data):
         writes[path.virtual] = await materialize(data)
-
-    async def unlink(path):
-        pass
-
-    async def stat(path):
-        if path.virtual == "/f.gz":
-            raise FileNotFoundError(path.virtual)
-        return FileStat(
-            name="f",
-            type=FileType.FILE,
-            mode=0o100640,
-            modified="2001-02-03T04:05:06Z",
-        )
 
     async def set_attrs(path, fields):
         attrs.append((path.virtual, fields))
@@ -126,10 +154,10 @@ async def test_compression_stores_the_input_time_and_keeps_its_attributes():
     for named in (None, False):
         _, io = await compress_inputs(
             [PathSpec.from_str_path("/f")],
-            read_bytes=read,
+            read_bytes=_hello,
             write_bytes=write,
-            unlink=unlink,
-            stat=stat,
+            unlink=_no_unlink,
+            stat=_dated_input,
             set_attrs=set_attrs,
             named=named,
         )
@@ -150,14 +178,8 @@ UNDATED = "gzip: /f: warning: file timestamp out of range for gzip format\n"
 async def _dated(modified: str, *, taken: bool = False, **options):
     writes = {}
 
-    async def read(path):
-        yield b"hello\n"
-
     async def write(path, data):
         writes[path.virtual] = await materialize(data)
-
-    async def unlink(path):
-        pass
 
     async def stat(path):
         if path.virtual == "/f.gz" and not taken:
@@ -166,9 +188,9 @@ async def _dated(modified: str, *, taken: bool = False, **options):
 
     body, io = await compress_inputs(
         [PathSpec.from_str_path("/f")],
-        read_bytes=read,
+        read_bytes=_hello,
         write_bytes=write,
-        unlink=unlink,
+        unlink=_no_unlink,
         stat=stat,
         **options,
     )
@@ -229,29 +251,16 @@ async def test_recursion_asks_the_mount_before_touching_a_file():
     async def write(path, data):
         touched.append(path.virtual)
 
-    async def stat(path):
-        kind = FileType.DIRECTORY if path.virtual == "/d" else FileType.FILE
-        return FileStat(name="n", type=kind)
-
-    async def readdir(path):
-        return ["/d/a", "/d/b"]
-
-    async def dispatch(name, path):
-        assert (name, path.virtual) == ("before_full_walk", "/d")
-        raise ValueError(
-            "more than 1 files in scope (walk_limit); narrow the path"
-        )
-
     with pytest.raises(UsageError) as refused:
         await compress_inputs(
             [PathSpec.from_str_path("/d")],
             read_bytes=read,
             write_bytes=write,
             unlink=write,
-            stat=stat,
-            readdir=readdir,
+            stat=_walked_stat,
+            readdir=_two_files,
             recursive=True,
-            dispatch=dispatch,
+            dispatch=_refusing_walks,
         )
     assert str(refused.value).startswith("gzip: more than 1 files")
     assert touched == []
@@ -259,15 +268,10 @@ async def test_recursion_asks_the_mount_before_touching_a_file():
 
 @pytest.mark.asyncio
 async def test_a_followed_link_gives_what_it_leads_to():
-    async def no_follow(path):
-        return FileStat(name="link", type=FileType.SYMLINK)
-
-    async def target(virtual):
-        assert virtual == "/secret"
-        return FileStat(name="secret", type=FileType.FILE, mode=0o100600)
-
-    resolver = SimpleNamespace(target=lambda link: "/secret", stat=target)
+    resolver = SimpleNamespace(
+        target=lambda link: "/secret", stat=_link_target
+    )
     info = await input_info(
-        no_follow, PathSpec.from_str_path("/d/link"), "/d/link", resolver
+        _no_follow, PathSpec.from_str_path("/d/link"), "/d/link", resolver
     )
     assert info is not None and info.mode == 0o100600

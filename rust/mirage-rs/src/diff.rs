@@ -424,14 +424,37 @@ fn address(range: std::ops::Range<usize>) -> String {
 }
 
 /// A line's text as `-t` writes it: each tab spaced out to the next stop
-/// of eight, counted from the text's start.
-fn expanded(text: &[u8]) -> Vec<u8> {
+/// of eight. Only a printable ASCII byte moves the column, any other byte
+/// staying put in every locale; a backspace steps back, or goes unwritten
+/// at the start; a carriage return starts over, the line's `prefix` again
+/// when more of the line follows.
+fn expanded(text: &[u8], prefix: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
-    for &byte in text {
-        if byte == b'\t' {
-            out.resize((out.len() / 8 + 1) * 8, b' ');
-        } else {
-            out.push(byte);
+    let mut column = 0;
+    for (at, &byte) in text.iter().enumerate() {
+        match byte {
+            b'\t' => {
+                let spaces = 8 - column % 8;
+                out.resize(out.len() + spaces, b' ');
+                column += spaces;
+            }
+            b'\r' => {
+                out.push(byte);
+                column = 0;
+                if at + 1 < text.len() {
+                    out.extend_from_slice(prefix);
+                }
+            }
+            0x08 => {
+                if column > 0 {
+                    column -= 1;
+                    out.push(byte);
+                }
+            }
+            _ => {
+                column += usize::from((0x20..0x7f).contains(&byte));
+                out.push(byte);
+            }
         }
     }
     out
@@ -1135,7 +1158,7 @@ impl Diff {
                     self.pieces.push_front(Piece::Text(tail.into(), 0));
                     let text = bytes.start..bytes.end - usize::from(newline);
                     if self.config.expand_tabs {
-                        let wide = expanded(&self.inputs[input][text]);
+                        let wide = expanded(&self.inputs[input][text], prefix);
                         self.pieces.push_front(Piece::Text(wide.into(), 0));
                     } else {
                         self.pieces.push_front(Piece::Range { input, bytes: text });

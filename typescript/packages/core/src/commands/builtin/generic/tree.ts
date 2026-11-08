@@ -214,6 +214,27 @@ function gitignoreLines(text: string, base: string): Ignore[] {
   return rules
 }
 
+// A mount root's row. The mount table already says it is a directory, and the
+// backend serving it may not stat its own root (an empty mount, or a prefix
+// store with no marker object), so only -p and -D, which print from the row,
+// ask for the real one. Mirrors Python's `_mount_row`.
+async function mountRow(
+  flags: TreeFlags,
+  crossStat: ((p: PathSpec) => Promise<FileStat>) | null,
+  spec: PathSpec,
+  name: string,
+): Promise<FileStat> {
+  const row = new FileStat({ name, type: FileType.DIRECTORY })
+  if (crossStat === null || !(flags.perms || flags.dates)) return row
+  try {
+    return (await crossStat(spec)).with({ name, type: FileType.DIRECTORY })
+  } catch (err) {
+    if (!isWalkError(err)) throw err
+    console.debug(`tree: no row for mount ${spec.virtual}: ${String(err)}`)
+    return row
+  }
+}
+
 // Whether a path fits a pattern, a `**` for any run of segments and, last in
 // the pattern, at least one. Only the latest `**` is ever retried, since it
 // can take whatever an earlier one would have, so the work stays the path's
@@ -403,10 +424,7 @@ async function walkTree(
     const crossing = nested.includes(childPath) && treeOpts.crossReaddir !== null
     let s: FileStat
     if (crossing) {
-      // The mount table already says this is a directory, and the
-      // backend serving it may not stat its own root (an empty mount, or
-      // a prefix store with no marker object).
-      s = new FileStat({ name, type: FileType.DIRECTORY })
+      s = await mountRow(flags, treeOpts.crossStat, sub, name)
     } else {
       try {
         s = await stat(sub)
@@ -717,6 +735,7 @@ export async function treeGeneric(
     if (statPath !== undefined && start === null) {
       root.note = UNOPENABLE_MARK
       root.missing = true
+      root.du = 0
       anyError = true
       continue
     }

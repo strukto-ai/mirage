@@ -204,6 +204,69 @@ async def test_tree_crosses_into_a_nested_mount():
     assert io.exit_code == 0
 
 
+async def _nothing_there(path):
+    return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("known", [True, False])
+async def test_tree_prints_a_mount_roots_own_details(known):
+    parent = {"/base": _dir("base"), "/base/inner": _dir("inner")}
+    child = {"/base/inner": _dir("inner")}
+    child["/base/inner"] = FileStat(
+        name="",
+        type=FileType.DIRECTORY,
+        mode=0o40700,
+        modified="2001-02-03T04:05:06Z",
+    )
+    readdir, stat = _make_backend(parent)
+    readdir_path, stat_path = _dispatch_pair(parent, child, "/base/inner")
+
+    async def without_root(path):
+        virtual = path.virtual if isinstance(path, PathSpec) else path
+        return None if virtual == "/base/inner" else await stat_path(path)
+
+    output, _ = await tree(
+        [_spec("/base")],
+        flags=TreeFlags(perms=True, no_report=True),
+        readdir=readdir,
+        stat=stat,
+        mounts=_mounts_view(["/base/inner"]),
+        readdir_path=readdir_path,
+        stat_path=stat_path if known else without_root,
+    )
+    row = output.decode().splitlines()[-1]
+    assert row.endswith("inner")
+    assert ("drwx------" in row) is known
+
+
+@pytest.mark.asyncio
+async def test_tree_counts_no_bytes_for_a_missing_path():
+    readdir, stat = _make_backend({})
+    output, io = await tree(
+        [_spec("/gone")],
+        flags=TreeFlags(du=True),
+        readdir=readdir,
+        stat=stat,
+        stat_path=_nothing_there,
+    )
+    assert output.decode().splitlines()[-1].split()[0] == "0"
+    assert io.exit_code == 2
+
+
+@pytest.mark.asyncio
+async def test_tree_json_writes_a_name_it_cannot_decode_as_its_bytes():
+    name = "bad\udcff"
+    readdir, stat = _make_backend({"/r": _dir("r"), f"/r/{name}": _file(name)})
+    output, _ = await tree(
+        [_spec("/r")],
+        flags=TreeFlags(json=True, no_report=True),
+        readdir=readdir,
+        stat=stat,
+    )
+    assert b'"name":"bad\xff"' in output
+
+
 _SIZED = {
     "/r": _dir("r"),
     "/r/a.txt": _file("a.txt", 6),

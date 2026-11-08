@@ -2,7 +2,7 @@ import json
 import logging
 import posixpath
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from typing import Literal
 
@@ -24,6 +24,7 @@ from mirage.errors.fs import enoent
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused, scan
+from mirage.shell.bytes import encode_text
 from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
@@ -136,6 +137,31 @@ async def _cross_stat(stat_path: StatPath, path: PathSpec) -> FileStat:
     if stat is None:
         raise enoent(path.virtual)
     return stat
+
+
+async def _mount_row(
+    flags: TreeFlags, cross_stat: StatFn | None, spec: PathSpec
+) -> FileStat:
+    """A mount root's row. The mount table already says it is a directory,
+    and the backend serving it may not stat its own root (an empty mount,
+    or a prefix store with no marker object), so only -p and -D, which
+    print from the row, ask for the real one.
+
+    Args:
+        flags (TreeFlags): the options.
+        cross_stat (StatFn | None): stat through the dispatcher.
+        spec (PathSpec): the mount root.
+    """
+    name = posixpath.basename(spec.virtual.rstrip("/"))
+    row = FileStat(name=name, type=FileType.DIRECTORY)
+    if cross_stat is None or not (flags.perms or flags.dates):
+        return row
+    try:
+        found = await cross_stat(spec)
+    except WALK_ERRORS as exc:
+        logger.debug("tree: no row for mount %s: %s", spec.virtual, exc)
+        return row
+    return replace(found, name=name, type=FileType.DIRECTORY)
 
 
 def _child_mounts(mounts: MountView | None, directory: str) -> list[str]:
@@ -415,13 +441,7 @@ async def _walk_tree(
         )
         crossing = entry in child_mounts and cross_readdir is not None
         if crossing:
-            # The mount table already says this is a directory, and the
-            # backend serving it may not stat its own root (an empty
-            # mount, or a prefix store with no marker object).
-            s = FileStat(
-                name=posixpath.basename(entry.rstrip("/")),
-                type=FileType.DIRECTORY,
-            )
+            s = await _mount_row(flags, cross_stat, entry_spec)
         else:
             try:
                 s = await stat(entry_spec)
@@ -740,6 +760,7 @@ async def tree(
         if stat_path is not None and start is None:
             root.note = UNOPENABLE_MARK
             root.missing = True
+            root.du = 0
             failed = True
             continue
         if start is not None and start.type != FileType.DIRECTORY:
@@ -797,7 +818,7 @@ async def tree(
                 + ("\n,\n  " + report if not flags.no_report else "\n")
                 + "\n]\n"
             )
-        out = body.encode()
+        out = encode_text(body)
     else:
         lines: list[str] = []
         for root in roots:
