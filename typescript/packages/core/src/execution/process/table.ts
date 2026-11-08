@@ -313,6 +313,11 @@ export class ProcessTable {
   }
 
   /** Host-only inventory, including disowned and stopping runners. */
+  /** Whether the runner `pid` names has not ended. */
+  runs(pid: number): boolean {
+    return this.runners.has(pid)
+  }
+
   live(): readonly ProcessHandle[] {
     return [...this.runners.values()].map((entry) => entry.handle)
   }

@@ -3244,7 +3244,9 @@ class Workspace:
                 should it fail before it ends, as a line refused the
                 workspace's lease does.
         """
-        ambient, session_id = reentry(self._session_mgr, session_id)
+        ambient, session_id = reentry(
+            self._session_mgr, self.process_table, session_id
+        )
         if ambient is not None:
             return await run()
         # Hydrate first: a workspace on a shared store adopts the
@@ -3319,7 +3321,9 @@ class Workspace:
                 the session whose ``$?`` its status becomes; None for a
                 nested line.
         """
-        ambient, session_id = reentry(self._session_mgr, session_id)
+        ambient, session_id = reentry(
+            self._session_mgr, self.process_table, session_id
+        )
         if ambient is not None:
             return await run(), None
         await self.ensure_sessions_loaded()

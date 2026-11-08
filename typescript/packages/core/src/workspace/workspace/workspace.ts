@@ -2376,7 +2376,11 @@ export class Workspace {
    * @param options the caller's options, with the `cwd` or `env`.
    */
   private async runBeside(command: string, options: ExecuteOptions): Promise<ExecuteResult> {
-    const [ambient, sessionId] = reentry(this.sessionManager, options.sessionId)
+    const [ambient, sessionId] = reentry(
+      this.sessionManager,
+      this.jobTable.processes,
+      options.sessionId,
+    )
     if (ambient !== null) return executeLine(this.executeEnv(), command, options)
     await abortable(this.ensureSessionsLoaded(), options.signal)
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
@@ -2438,7 +2442,7 @@ export class Workspace {
     line?: LineHandle,
   ): Promise<T> {
     if (session !== undefined) return run()
-    const [ambient, named] = reentry(this.sessionManager, sessionId)
+    const [ambient, named] = reentry(this.sessionManager, this.jobTable.processes, sessionId)
     if (ambient !== null) return run()
     // Hydrate first: a workspace on a shared store adopts the persisted
     // default id there, and a key taken before that names a session no

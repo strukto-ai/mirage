@@ -424,6 +424,15 @@ class ProcessTable:
                 process.revoked = True
                 process.terminate()
 
+    def runs(self, pid: int) -> bool:
+        """Whether the runner ``pid`` names has not ended.
+
+        Args:
+            pid (int): a pid this table gave out.
+        """
+        with self._lock:
+            return pid in self._live
+
     def live(self) -> tuple[ProcessHandle, ...]:
         """Host-only inventory, including disowned and stopping runners."""
         with self._lock:

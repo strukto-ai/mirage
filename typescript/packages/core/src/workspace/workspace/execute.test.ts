@@ -451,11 +451,21 @@ describe('same-session lines run one at a time', () => {
     },
   )
 
-  it('a task its line waits on runs in the line', async () => {
+  it.each([
+    [['echo $(spawn); await_late; echo "J=$J"'], '\nJ=joined\n'],
+    [
+      ['{ held; echo $(spawn); await_late; echo "J=$J"; } &', 'wait; echo "R=$J"'],
+      '\nJ=joined\nR=\n',
+    ],
+  ])('a task its shell waits on runs in that shell: %j', async (lines, out) => {
     const ws = makeWs()
     let release!: () => void
+    let resume!: () => void
     const gate = new Promise<void>((resolve) => {
       release = resolve
+    })
+    const hold = new Promise<void>((resolve) => {
+      resume = resolve
     })
     const later: Promise<{ stdout: Uint8Array }>[] = []
     const handlers: Record<string, CLIVerbFn> = {
@@ -467,6 +477,10 @@ describe('same-session lines run one at a time', () => {
         release()
         return [(await later[0])?.stdout ?? new Uint8Array(), new IOResult()]
       },
+      held: async () => {
+        await hold
+        return null
+      },
     }
     for (const [name, fn] of Object.entries(handlers)) {
       ws.registerCli(
@@ -474,8 +488,10 @@ describe('same-session lines run one at a time', () => {
         new CLI({ spec: new CommandSpec({ name }), handlers: { '': new CLIHandler({ fn }) } }),
       )
     }
-    const io = await ws.shell('echo $(spawn); await_late; echo $J')
-    expect(stdoutStr(io)).toBe('\njoined\n')
+    for (const line of lines.slice(0, -1)) await ws.shell(line)
+    resume()
+    const io = await ws.shell(lines.at(-1) ?? '')
+    expect(stdoutStr(io)).toBe(out)
   })
 
   it('a host callback re-entering its own session runs inline', async () => {

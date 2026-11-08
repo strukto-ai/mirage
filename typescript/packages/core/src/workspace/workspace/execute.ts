@@ -107,6 +107,7 @@ import {
 import { parseRows, refusedRow } from '../node/program.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
+import type { ProcessTable } from '../../execution/process/table.ts'
 import type { SessionManager } from '../session/manager.ts'
 import { type SessionState } from '../session/session.ts'
 import { type StatusWriter, ExecutionNode } from '../types.ts'
@@ -260,12 +261,14 @@ async function drainToSink(sink: JobConsole, result: ExecuteResult): Promise<Exe
  * the browser fallback's newest binding may belong to an unrelated call. A
  * substitution's shell ends with it, so a host task still bound to one
  * (started in it, run after it) continues in the nearest shell around it
- * whose line still runs, as a callback fired mid-line does, and once none
- * runs it is a line of its own on that session's id: it waits its turn and
- * resolves the session as a host call naming it does.
+ * while that shell still runs (its line, or the process of its job or
+ * subshell), as a callback fired mid-line does, and once it has ended is a
+ * line of its own on that session's id: it waits its turn and resolves the
+ * session as a host call naming it does.
  */
 export function reentry(
   sessions: SessionManager,
+  processes: ProcessTable,
   sessionId: string | undefined,
 ): [SessionState | null, string | undefined] {
   const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(sessions) : null
@@ -275,12 +278,12 @@ export function reentry(
   if (!ambient.vars.shell.closed) return [ambient, ambient.sessionId]
   let context = getCurrentEvaluation()
   while (context?.session.vars.shell.closed) context = context.parent
-  let line = context
-  while (line?.parent) line = line.parent
-  if (context !== null && line !== null && sessions.runs(line)) {
-    return [context.session, ambient.sessionId]
-  }
-  return [null, ambient.sessionId]
+  if (context === null) return [null, ambient.sessionId]
+  let owner = context
+  while (owner.parent !== null && owner.parent.session === owner.session) owner = owner.parent
+  const pid = owner.session.processId
+  const runs = owner.parent === null ? sessions.runs(owner) : pid !== null && processes.runs(pid)
+  return runs ? [context.session, ambient.sessionId] : [null, ambient.sessionId]
 }
 
 /**
@@ -356,7 +359,7 @@ async function runLine(
   // the signal at once rather than holding the caller.
   await abortable(preflight(env), options.signal)
   // Evaluator calls carry their exact session, including ephemeral forks.
-  const [ambient, sessionId] = reentry(env.sessions, options.sessionId)
+  const [ambient, sessionId] = reentry(env.sessions, env.jobTable.processes, options.sessionId)
   const inPlace = ambient !== null
   const targetSession =
     options.session ?? ambient ?? env.sessions.get(sessionId ?? env.sessions.defaultId)
