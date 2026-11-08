@@ -33,6 +33,10 @@ from mirage.workspace.files import Files
 from tests.fixtures.vfs_io import BatchedRAM
 
 
+async def _rows(*args, **kwargs):
+    return [row async for row in walk_find(*args, **kwargs)]
+
+
 async def find_walk_generic(*args, **kwargs):
     out, io = await stream_walk_find(*args, **kwargs)
     return await materialize(out), io
@@ -126,9 +130,7 @@ def _root_spec() -> PathSpec:
 )
 async def test_walk_find_tolerates_not_found(readdir, args, expected):
     stat = AsyncMock(side_effect=FileNotFoundError("gone"))
-    results = await walk_find(
-        _root_spec(), readdir=readdir, stat=stat, args=args
-    )
+    results = await _rows(_root_spec(), readdir=readdir, stat=stat, args=args)
     assert results == expected
 
 
@@ -165,14 +167,14 @@ async def test_walk_find_propagates_any_other_error(
     readdir, stat, args, match
 ):
     with pytest.raises(ValueError, match=match):
-        await walk_find(_root_spec(), readdir=readdir, stat=stat, args=args)
+        await _rows(_root_spec(), readdir=readdir, stat=stat, args=args)
 
 
 @pytest.mark.asyncio
 async def test_walk_find_emits_start_path_at_depth_zero():
     readdir = AsyncMock(return_value=["/child.txt"])
     stat = AsyncMock(return_value=FileStat(name="/", type=FileType.DIRECTORY))
-    results = await walk_find(
+    results = await _rows(
         _root_spec(),
         readdir=readdir,
         stat=stat,
@@ -218,7 +220,7 @@ async def test_walk_find_records_an_entry_whose_stat_fails_and_walks_on():
     exc = RuntimeError("upstream 502 Bad Gateway")
     readdir, stat = _flaky(exc)
     unstatted: dict[str, Exception] = {}
-    results = await walk_find(
+    results = await _rows(
         _root_spec(),
         readdir=readdir,
         stat=stat,
@@ -233,7 +235,7 @@ async def test_walk_find_records_an_entry_whose_stat_fails_and_walks_on():
 async def test_walk_find_fails_a_stat_test_without_asking_again():
     calls: list[str] = []
     readdir, stat = _flaky(RuntimeError("upstream 502 Bad Gateway"), calls)
-    results = await walk_find(
+    results = await _rows(
         _root_spec(),
         readdir=readdir,
         stat=stat,
@@ -249,7 +251,7 @@ async def test_walk_find_keeps_an_unstatted_entry_another_or_arm_matches():
     exc = RuntimeError("upstream 502 Bad Gateway")
     readdir, stat = _flaky(exc)
     unstatted: dict[str, Exception] = {}
-    results = await walk_find(
+    results = await _rows(
         _root_spec(),
         readdir=readdir,
         stat=stat,
@@ -264,7 +266,7 @@ async def test_walk_find_keeps_an_unstatted_entry_another_or_arm_matches():
 async def test_walk_find_propagates_an_entry_failure_it_does_not_collect():
     readdir, stat = _flaky(RuntimeError("upstream 502 Bad Gateway"))
     with pytest.raises(RuntimeError, match="502"):
-        await walk_find(
+        await _rows(
             _root_spec(),
             readdir=readdir,
             stat=stat,
@@ -276,7 +278,7 @@ async def test_walk_find_propagates_an_entry_failure_it_does_not_collect():
 async def test_walk_find_propagates_a_timeout_even_when_collecting():
     readdir, stat = _flaky(CommandTimeoutError("stat", 5))
     with pytest.raises(CommandTimeoutError):
-        await walk_find(
+        await _rows(
             _root_spec(),
             readdir=readdir,
             stat=stat,
@@ -321,7 +323,7 @@ async def test_walk_find_empty_matches_empty_files_and_dirs():
         }
         return stats[spec.virtual]
 
-    results = await walk_find(
+    results = await _rows(
         _root_spec(),
         readdir=readdir,
         stat=stat,
@@ -357,13 +359,13 @@ async def test_walk_find_time_test_before_prune_gates_it():
     gated = parse_find_args(
         ("-mindepth", "1", "-newermt", "2010-01-01", "-prune")
     )
-    assert await walk_find(
+    assert await _rows(
         _root_spec(), readdir=readdir, stat=stat, args=gated
     ) == ["/new", "/old/f.txt"]
     firm = parse_find_args(
         ("-mindepth", "1", "-prune", "-newermt", "2010-01-01")
     )
-    assert await walk_find(
+    assert await _rows(
         _root_spec(), readdir=readdir, stat=stat, args=firm
     ) == ["/new"]
 
@@ -729,7 +731,7 @@ async def test_walk_find_reports_a_directory_it_may_not_open():
         return FileStat(name=spec.virtual, type=kinds[spec.virtual])
 
     unreadable: list[str] = []
-    results = await walk_find(
+    results = await _rows(
         _root_spec(),
         readdir=readdir,
         stat=stat,
@@ -739,7 +741,7 @@ async def test_walk_find_reports_a_directory_it_may_not_open():
     assert results == ["/", "/open", "/open/o", "/sealed"]
     assert unreadable == ["/sealed"]
     with pytest.raises(PermissionError):
-        await walk_find(
+        await _rows(
             _root_spec(),
             readdir=readdir,
             stat=stat,
@@ -865,7 +867,7 @@ async def test_empty_walk_does_not_treat_unknown_size_as_zero():
         )
     )
     readdir = AsyncMock(return_value=[])
-    result = await walk_find(
+    result = await _rows(
         PathSpec.from_str_path("/records.jsonl", "records.jsonl"),
         readdir=readdir,
         stat=stat,

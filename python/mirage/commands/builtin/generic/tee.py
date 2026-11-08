@@ -26,8 +26,9 @@ from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
 from mirage.io.errors import PipeClosed
+from mirage.io.spool import ByteSpool
 from mirage.io.stream import OutputStream, close_quietly
-from mirage.io.types import ByteSource, ClosedPipe, IOResult, materialize
+from mirage.io.types import ByteSource, ClosedPipe, IOResult
 from mirage.io.writer import ByteWriter
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SIGPIPE_STATUS
@@ -125,13 +126,43 @@ async def write_one(
     if append_bytes is not None:
         await append_bytes(path, raw)
         return
-    existing = b""
-    try:
-        existing = await materialize(read_stream(path))
-    except FileNotFoundError as exc:
-        # GNU tee -a creates a missing file: append to empty.
-        logger.debug("appending to a new file at %s: %s", path.virtual, exc)
-    await write_bytes(path, existing + raw)
+    await _rewritten(path, read_stream, write_bytes, raw)
+
+
+async def _rewritten(
+    path: PathSpec,
+    read_stream: Callable[..., AsyncIterator[bytes]],
+    write_bytes: Callable[..., Awaitable[None]],
+    source: ByteSource,
+) -> None:
+    """Append with no native append: the file is written back whole, its
+    old bytes then ``source``. They are spooled first, so the write that
+    replaces them never reads its own path, and memory holds a chunk of
+    them at a time.
+
+    Args:
+        path (PathSpec): the operand.
+        read_stream (Callable): backend read.
+        write_bytes (Callable): backend whole-file write.
+        source (ByteSource): the bytes to add, consumed once.
+    """
+    async with ByteSpool() as spool:
+        try:
+            await spool.fill(read_stream(path))
+        except FileNotFoundError as exc:
+            # tee -a creates a missing file: append to empty.
+            logger.debug(
+                "appending to a new file at %s: %s", path.virtual, exc
+            )
+
+        async def joined() -> AsyncIterator[bytes]:
+            async for chunk in spool.stream():
+                yield chunk
+            async with aclosing(chunks(source)) as stream:
+                async for chunk in stream:
+                    yield chunk
+
+        await write_bytes(path, joined())
 
 
 async def open_refusal(
@@ -386,21 +417,7 @@ async def _consume_output(
     elif append_bytes is not None:
         await append_bytes(path, source)
     else:
-        existing = b""
-        try:
-            existing = await materialize(read_stream(path))
-        except FileNotFoundError as exc:
-            logger.debug(
-                "appending to a new file at %s: %s", path.virtual, exc
-            )
-
-        async def joined() -> AsyncIterator[bytes]:
-            yield existing
-            async with aclosing(chunks(source)) as stream:
-                async for chunk in stream:
-                    yield chunk
-
-        await write_bytes(path, joined())
+        await _rewritten(path, read_stream, write_bytes, source)
 
 
 async def _tee_stream(

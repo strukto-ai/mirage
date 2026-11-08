@@ -23,6 +23,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.errors.fs import eacces, efbig, fs_error
 from mirage.errors.types import FsCondition
 from mirage.io import IOResult
+from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.clock import Clock, ManualClock
@@ -85,10 +86,10 @@ class _UnknownSizeDispatch:
     size-unknown for a regular file.
 
     Args:
-        content (bytes | OSError): what read returns, or raises.
+        content (ByteSource | OSError): what read returns, or raises.
     """
 
-    def __init__(self, content: bytes | OSError) -> None:
+    def __init__(self, content: ByteSource | OSError) -> None:
         self.content = content
 
     async def __call__(
@@ -309,6 +310,24 @@ async def test_s_unknown_size_reads_content():
     assert await eval_flat(empty, ["-s", "/data/zte.txt"]) is False
     full = _stub_ctx(_UnknownSizeDispatch(b"x"))
     assert await eval_flat(full, ["-s", "/data/zt.txt"]) is True
+
+
+@pytest.mark.asyncio
+async def test_s_unknown_size_reads_one_chunk_and_closes_the_read():
+    pulled: list[bytes] = []
+    closed: list[bool] = []
+
+    async def body():
+        try:
+            for part in (b"x" * 10, b"y" * 10):
+                pulled.append(part)
+                yield part
+        finally:
+            closed.append(True)
+
+    ctx = _stub_ctx(_UnknownSizeDispatch(body()))
+    assert await eval_flat(ctx, ["-s", "/data/zt.txt"]) is True
+    assert (pulled, closed) == ([b"x" * 10], [True])
 
 
 @pytest.mark.asyncio

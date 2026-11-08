@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   AsyncLineIterator,
   charWidth,
@@ -98,6 +98,20 @@ describe('AsyncLineIterator', () => {
     for await (const line of lines) rest.push(decode(line))
     expect(rest).toEqual(['b', 'c'])
   })
+  it('loads many chunks in order around the lines read between them', async () => {
+    const lines = new AsyncLineIterator(
+      fromChunks([
+        encode('a\n'),
+        ...Array.from({ length: 50 }, () => encode('x')),
+        encode('\nb\n'),
+      ]),
+    )
+    expect(decode((await lines.readline()) ?? new Uint8Array())).toBe('a')
+    await lines.loadRest()
+    const rest: string[] = []
+    for await (const line of lines) rest.push(decode(line))
+    expect(rest).toEqual(['x'.repeat(50), 'b'])
+  })
 
   it('read1 answers what one pull brings, up to its size, and keeps the rest', async () => {
     let pulled = 0
@@ -173,6 +187,14 @@ describe('readChars counts characters, not bytes', () => {
     expect([decode(data), done]).toEqual(['\u00e9x', true])
   })
 
+  it('reads a run of characters across pulls up to the delimiter', async () => {
+    const lines = new AsyncLineIterator(
+      fromChunks([encode('ab'), encode('c\u00e9'), encode('d\nz')]),
+    )
+    const [taken, complete] = await lines.readChars(10, 0x0a)
+    expect([decode(taken), complete]).toEqual(['abc\u00e9d', true])
+    expect(decode((await lines.readline()) ?? new Uint8Array())).toBe('z')
+  })
   it('stops at the delimiter and reports a short read at EOF', async () => {
     const stop = new AsyncLineIterator(fromChunks([encode('ab:cd')]))
     expect(await stop.readChars(4, 0x3a).then(([d, ok]) => [decode(d), ok])).toEqual(['ab', true])
@@ -265,4 +287,29 @@ describe('SharedInput', () => {
     expect(lineBuffer(shared)).toBe(shared.lines)
     expect(decode((await lineBuffer(encode('a\nb\n')).readline()) ?? new Uint8Array())).toBe('a')
   })
+})
+
+it('keeps what readChars took out of a reader that runs while it waits', async () => {
+  const lines = new AsyncLineIterator(fromChunks([encode('abcdef')]))
+  expect(await lines.peek()).toBe(true)
+  const budget = (lines as unknown as { budget: { run: () => Promise<void> | undefined } }).budget
+  let turn = 0
+  vi.spyOn(budget, 'run').mockImplementation(() => (++turn === 3 ? Promise.resolve() : undefined))
+  const read = lines.readChars(4, null)
+  const other = lines.readChunk()
+  const [[taken], rest] = await Promise.all([read, other])
+  expect(taken.byteLength).toBeGreaterThan(0)
+  expect(decode(taken) + decode(rest ?? new Uint8Array())).toBe('abcdef')
+})
+
+it('lets go of the rest a kept descriptor read', async () => {
+  const big = new Uint8Array((1 << 17) + 5).fill(0x78)
+  big.set(encode('\nend\n'), 1 << 17)
+  const lines = new AsyncLineIterator(fromChunks([big]))
+  await lines.loadRest()
+  expect((await lines.readline())?.byteLength).toBe(1 << 17)
+  const buf = (lines as unknown as { buf: Uint8Array }).buf
+  expect([buf.byteLength, buf.byteOffset]).toEqual([4, 0])
+  expect(decode((await lines.readline()) ?? new Uint8Array())).toBe('end')
+  expect((lines as unknown as { buf: Uint8Array }).buf.buffer.byteLength).toBe(0)
 })

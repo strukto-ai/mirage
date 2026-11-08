@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import replace
 
 from mirage.core.generic.types import (
@@ -477,9 +477,8 @@ def without_prune(node: PredNode) -> PredNode:
 
 
 def pruned_keys(node: PredNode) -> list[str]:
-    """Every directory key the tree's ``-prune`` nodes reached.
-
-    A pending prune counts until ``settle_prunes`` decides it.
+    """Every directory key the tree's ``-prune`` nodes reached, pending
+    ones included.
 
     Args:
         node (PredNode): the predicate tree, after evaluation.
@@ -490,21 +489,6 @@ def pruned_keys(node: PredNode) -> list[str]:
         return pruned_keys(node.kid)
     if isinstance(node, (And, Or)):
         return [key for kid in node.kids for key in pruned_keys(kid)]
-    return []
-
-
-def pending_prunes(node: PredNode) -> list[PendingPrune]:
-    """Every ``-prune`` still waiting on a time test.
-
-    Args:
-        node (PredNode): the predicate tree, after evaluation.
-    """
-    if isinstance(node, Prune):
-        return list(node.pending)
-    if isinstance(node, Not):
-        return pending_prunes(node.kid)
-    if isinstance(node, (And, Or)):
-        return [p for kid in node.kids for p in pending_prunes(kid)]
     return []
 
 
@@ -538,69 +522,6 @@ def time_tests_failing(node: PredNode) -> PredNode:
     if isinstance(node, Or):
         return Or([time_tests_failing(kid) for kid in node.kids])
     return node
-
-
-def settle_prunes(
-    node: PredNode,
-    mtimes: Mapping[str, float | None],
-    stats: Mapping[str, FileStat | None] | None = None,
-) -> None:
-    """Decide the pending prunes whose directory mtime is now known.
-
-    Each decided directory leaves the pending ledgers and is evaluated
-    again with its mtime, so the prunes it reaches are exactly GNU's,
-    whichever arm the tests send it down: ``find d -newermt X -prune``
-    skips only the contents of directories newer than ``X``, and
-    ``( -mtime 1 -o -type d ) -prune`` skips every directory's. A key
-    ``mtimes`` does not name stays pending.
-
-    Args:
-        node (PredNode): the predicate tree, after evaluation.
-        mtimes (Mapping[str, float | None]): epoch-second mtime per
-            directory key, None for a directory that reports none.
-        stats (Mapping[str, FileStat | None] | None): the stat taken of
-            each, for a time test that reads another stamp.
-    """
-    decided: dict[str, FindEntry] = {}
-    for prune in _prune_nodes(node):
-        still = [p for p in prune.pending if p.entry.key not in mtimes]
-        decided.update(
-            (p.entry.key, p.entry)
-            for p in prune.pending
-            if p.entry.key in mtimes
-        )
-        prune.pending[:] = still
-    for key, entry in decided.items():
-        mtime = mtimes[key]
-        tree = node if mtime is not None else time_tests_failing(node)
-        stat = entry.stat if stats is None else stats.get(key, entry.stat)
-        evaluate(tree, replace(entry, mtime=mtime, stat=stat), Effects())
-
-
-def drop_pruned(
-    rows: list[str], tree: PredNode, prefix: str = ""
-) -> list[str]:
-    """The rows minus everything under a directory ``-prune`` reached.
-
-    The pruned directory itself stays, the root spelled ``/`` included:
-    GNU reports it when the rest of the expression does, and only its
-    contents go unvisited.
-
-    Args:
-        rows (list[str]): rows spelled as the ledger's keys are, or as
-            display paths when ``prefix`` is given.
-        tree (PredNode): the evaluated tree holding the ledger.
-        prefix (str): mount prefix the rows carry and the keys do not.
-    """
-    stems = [
-        display_path(prefix, key).rstrip("/") + "/"
-        for key in pruned_keys(tree)
-    ]
-    if not stems:
-        return rows
-    return [
-        r for r in rows if not any(r.startswith(s) and r != s for s in stems)
-    ]
 
 
 def tree_has_empty(node: PredNode) -> bool:

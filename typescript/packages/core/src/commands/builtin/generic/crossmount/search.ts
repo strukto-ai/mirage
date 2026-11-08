@@ -13,10 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { combinedExit } from './fanout/exit.ts'
-import { joinRuns } from './fanout/fanout.ts'
 import { ownedScopes } from './scopes.ts'
-import type { CrossResult, OperandRun, RunSingle, OwnedScope } from './types.ts'
-import { mergeOperandIos, runOperands, runSeparator } from './utils.ts'
+import type { CrossResult, RunSingle, OwnedScope } from './types.ts'
+import { operandOutput, runSeparator } from './utils.ts'
 import { filenameMode, lineWarnings, parseFlags } from '../grep.ts'
 import {
   labelFlags,
@@ -49,6 +48,8 @@ import { Totals, splitFooter, type RgFlags } from '../../rg_search.ts'
 import { formatTotals, openRg } from '../../rg_stream.ts'
 import { formatRecords } from '../../utils/output.ts'
 import { concat } from '../../../../utils/bytes.ts'
+import { chunks } from '../../../../io/cooperative.ts'
+import { currentCaller, withCaller } from '../../../../context/session_context.ts'
 import { LinkResolver, linkView, mountView } from '../../utils/links.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
 import { byteView, encodeText } from '../../../../shell/bytes.ts'
@@ -234,60 +235,8 @@ export async function runSearch(
       else yield { path, walked: false }
     }
   }
-  const results: OperandRun[] = []
-  const walked = new Set<number>()
-  for await (const scope of scopes()) {
-    signal?.throwIfAborted()
-    if (scope.error !== undefined || scope.diagnostic !== undefined) {
-      const message =
-        scope.diagnostic ??
-        (scope.error === undefined
-          ? ''
-          : rg === null
-            ? fsErrorLine(name, scope.path, scope.error)
-            : walkErrorLine(
-                scope.path.rawPath,
-                scope.error,
-                rg.threads !== 1 && (paths.length > 1 || scope.walked),
-              ) + '\n')
-      results.push({
-        scope: scope.path,
-        data: new Uint8Array(),
-        io: new IOResult({
-          exitCode: 2,
-          stderr: rg?.noMessages ? null : encodeText(message),
-        }),
-      })
-      continue
-    }
-    const local = grep === null ? labelFlags(bag) : { ...bag }
-    if (grep !== null) flagOccurrences(local).push(...flagOccurrences(bag))
-    if (grep !== null && filenameMode(view) === null) {
-      const owner = mountView(vfs)?.rootOf(scope.path.virtual)
-      const repeated = owners.filter((o) => o === owner).length > 1
-      if (
-        scope.stat?.type !== FileType.DIRECTORY ||
-        repeated ||
-        (scope.walked && !mountView(vfs)?.isRoot(scope.path.virtual))
-      )
-        local.with_filename = true
-    }
-    const runs = await runOperands(execute, name, [scope.path], [...texts], local)
-    if (scope.stat?.type === FileType.DIRECTORY) walked.add(results.length)
-    for (const item of runs) results.push(item)
-    if (stops && runs.at(-1)?.io.exitCode === 0) break
-  }
-  const code = combinedExit(
-    name,
-    results.map((r) => r.io.exitCode),
-    results.map((r) => r.io.exitCode !== 0 && r.io.stderr !== null),
-    quiet,
-  )
-  const [parts, footer] =
-    rg !== null && (rg.stats === true || rg.json === true)
-      ? await oneFooter(results, rg, walked, started)
-      : [results.map((r) => r.data), new Uint8Array()]
-  const body = concat([joinRuns(parts, runSeparator(name, bag)), footer])
+  const footed = rg !== null && (rg.stats === true || rg.json === true)
+  const separator = runSeparator(name, bag)
   // Each run says what the line says once, grep's warnings or rg's notes of
   // the ignore files it could not read; the line keeps one.
   const noted =
@@ -296,55 +245,132 @@ export async function runSearch(
       : rg !== null && notes.length > 0 && !rg.noMessages
         ? formatRecords(notes)
         : new Uint8Array()
-  if (noted.length === 0) return [body, await mergeOperandIos(results, code)]
-  for (const r of results) {
-    if (r.io.stderr === null) continue
-    const err = await materialize(r.io.stderr)
-    const kept =
-      err.length >= noted.length && noted.every((byte, i) => err[i] === byte)
-        ? err.subarray(noted.length)
-        : err
-    r.io.stderr = kept.length === 0 ? null : kept
+  const io = new IOResult()
+  // Each run's output goes on as it comes, so a reader that stops early stops
+  // the search; the result settles as it drains.
+  async function* body(): AsyncGenerator<Uint8Array> {
+    const codes: number[] = []
+    const errored: boolean[] = []
+    const said: Uint8Array[] = [noted]
+    const totals = new Totals()
+    let footers = false
+    let printed = false
+    try {
+      for await (const scope of scopes()) {
+        signal?.throwIfAborted()
+        if (scope.error !== undefined || scope.diagnostic !== undefined) {
+          const message =
+            scope.diagnostic ??
+            (scope.error === undefined
+              ? ''
+              : rg === null
+                ? fsErrorLine(name, scope.path, scope.error)
+                : walkErrorLine(
+                    scope.path.rawPath,
+                    scope.error,
+                    rg.threads !== 1 && (paths.length > 1 || scope.walked),
+                  ) + '\n')
+          codes.push(2)
+          const quietly = rg?.noMessages === true
+          errored.push(!quietly)
+          if (!quietly) said.push(encodeText(message))
+          continue
+        }
+        const local = grep === null ? labelFlags(bag) : { ...bag }
+        if (grep !== null) flagOccurrences(local).push(...flagOccurrences(bag))
+        if (grep !== null && filenameMode(view) === null) {
+          const owner = mountView(vfs)?.rootOf(scope.path.virtual)
+          const repeated = owners.filter((o) => o === owner).length > 1
+          if (
+            scope.stat?.type !== FileType.DIRECTORY ||
+            repeated ||
+            (scope.walked && !mountView(vfs)?.isRoot(scope.path.virtual))
+          )
+            local.with_filename = true
+        }
+        const [out, run] = await execute(name, [scope.path], [...texts], local)
+        let pieces: AsyncIterable<Uint8Array> = operandOutput(name, scope.path, out, run, signal)
+        if (footed) {
+          const parts: Uint8Array[] = []
+          for await (const piece of pieces) parts.push(piece)
+          const walked = scope.stat?.type === FileType.DIRECTORY
+          const [head, cut] = cutFooter(concat(parts), rg, walked, totals)
+          footers ||= cut
+          pieces = chunks(head, signal)
+        }
+        let first = true
+        try {
+          for await (const data of pieces) {
+            if (data.byteLength === 0) continue
+            if (first && printed && separator !== '') yield encodeText(separator)
+            first = false
+            printed = true
+            yield data
+          }
+        } finally {
+          // Recorded even when the reader stops inside this run, so what it
+          // already found is reported.
+          codes.push(run.exitCode)
+          errored.push(run.exitCode !== 0 && run.stderr !== null)
+          if (run.stderr !== null) {
+            const err = await materialize(run.stderr)
+            said.push(
+              noted.length > 0 &&
+                err.length >= noted.length &&
+                noted.every((byte, i) => err[i] === byte)
+                ? err.subarray(noted.length)
+                : err,
+            )
+          }
+          if (run.refusal !== null) io.refusal = run.refusal
+        }
+        if (stops && run.exitCode === 0) break
+      }
+      if (footers && rg !== null) yield await totalFooter(rg, totals, printed, started)
+    } finally {
+      const stderr = concat(said)
+      io.stderr = stderr.length > 0 ? stderr : null
+      io.exitCode = combinedExit(name, codes, errored, quiet)
+    }
   }
-  const io = await mergeOperandIos(results, code)
-  io.stderr = concat([noted, io.stderr === null ? new Uint8Array() : await materialize(io.stderr)])
-  return [body, io]
+  return [withCaller(body(), currentCaller()), io]
 }
 
 /**
- * The runs' outputs with each --stats block or --json summary cut off, and
- * the one footer that totals them, as a single rg prints it. A run that walked
- * a directory on ripgrep's parallel searcher closed its last --heading group
- * with a blank line too; that line goes with its footer. Mirrors Python's
- * `_one_footer`.
+ * One run's output with its --stats block or --json summary cut off and added
+ * to `totals`, and whether it had one. A run that walked a directory on
+ * ripgrep's parallel searcher closed its last --heading group with a blank
+ * line too; that line goes with its footer. Mirrors Python's `_cut_footer`.
  */
-async function oneFooter(
-  results: readonly OperandRun[],
+function cutFooter(
+  data: Uint8Array,
   f: RgFlags,
-  walked: ReadonlySet<number>,
-  started: number,
-): Promise<[Uint8Array[], Uint8Array]> {
+  walked: boolean,
+  totals: Totals,
+): [Uint8Array, boolean] {
   const summary = jsonSummary(f)
+  const [head, part] = splitFooter(data, summary)
+  if (part === null) return [data, false]
+  totals.merge(part)
   const blank = !summary && headed(f) && runsParallel(f)
-  const parts = results.map((r) => r.data)
-  const totals = new Totals()
-  let found = false
-  for (const [i, data] of parts.entries()) {
-    const [head, part] = splitFooter(data, summary)
-    if (part === null) continue
-    found = true
-    totals.merge(part)
-    parts[i] = blank && head.length > 0 && walked.has(i) ? head.subarray(0, -1) : head
-  }
-  if (!found) return [parts, new Uint8Array()]
+  return [blank && head.length > 0 && walked ? head.subarray(0, -1) : head, true]
+}
+
+/**
+ * The one footer that totals the runs, as a single rg prints it. Mirrors
+ * Python's `_total_footer`.
+ */
+async function totalFooter(
+  f: RgFlags,
+  totals: Totals,
+  printed: boolean,
+  started: number,
+): Promise<Uint8Array> {
   const total = (performance.now() - started) / 1000
-  if (summary) return [parts, await formatTotals(totals, 'summary', total)]
-  const printed = parts.some((d) => d.length > 0)
-  return [
-    parts,
-    concat([
-      blank && printed ? encodeText('\n') : new Uint8Array(),
-      await formatTotals(totals, 'stats', total),
-    ]),
-  ]
+  if (jsonSummary(f)) return formatTotals(totals, 'summary', total)
+  const blank = headed(f) && runsParallel(f)
+  return concat([
+    blank && printed ? encodeText('\n') : new Uint8Array(),
+    await formatTotals(totals, 'stats', total),
+  ])
 }

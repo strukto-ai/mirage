@@ -35,6 +35,7 @@ import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.t
 import { ExecutionNode } from '../types.ts'
 import { type Files, readerOf } from '../files.ts'
 import { lineFacts } from '../lookup/index.ts'
+import { framed, mountVoice } from './command/handler.ts'
 
 const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'du'])
 
@@ -206,6 +207,11 @@ export async function fanOutTraversal(
         stderr: formatFsError(cmdName, err, paths),
       })
     }
+  }
+  if (stdout !== null && !(stdout instanceof Uint8Array)) {
+    // A walk that streams meets a failing mount as it is read; that failure
+    // is this command's result too.
+    stdout = framed(stdout, io, mountVoice(cmdName, paths))
   }
   // Only the mounts the walk can reach bound its output: a hidden one never
   // contributes a row, so its stricter limit must not apply.

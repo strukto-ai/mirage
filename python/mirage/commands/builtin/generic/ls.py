@@ -4,7 +4,14 @@ import posixpath
 import string
 import sys
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Callable,
+    Mapping,
+    Sequence,
+)
+from contextlib import aclosing
 from dataclasses import dataclass, fields, replace
 from typing import Any
 
@@ -16,7 +23,7 @@ from mirage.commands.builtin.utils.links import (
     mounts_of,
     owed_names,
 )
-from mirage.commands.builtin.utils.operands import at_offsets
+from mirage.commands.builtin.utils.operands import at_offsets, say
 from mirage.commands.builtin.utils.output import (
     format_optional_records,
     format_records,
@@ -485,12 +492,12 @@ class Operand:
     """One ls operand once its kind is known.
 
     ``row`` is set when the operand is not a directory: GNU prints those
-    first, as one block with no header. ``groups`` holds one
-    ``(dir, entries)`` pair per directory listed under the operand — one
-    for a plain listing, the whole pre-order subtree under ``-R``. Both
-    empty means the operand could not be accessed. ``notes`` holds each
-    directory the walk could not list, with the number of groups listed
-    before it: GNU reports one where its listing would have printed.
+    first, as one block with no header. ``groups`` holds the operand's own
+    ``(dir, entries)`` listing; under ``-R`` what lies below is walked as
+    it prints. Both empty means the operand could not be accessed.
+    ``notes`` holds a directory the operand could not list, with the
+    number of groups listed before it: GNU reports one where its listing
+    would have printed.
     """
 
     path: PathSpec
@@ -1068,24 +1075,21 @@ async def probe_operand(
     all_files: bool = False,
     sort_by: LsSortBy = LsSortBy.NAME,
     reverse: bool = False,
-    recursive: bool = False,
     command_line_arg: bool = True,
     links: LinkView | None = None,
     deref: bool = False,
     follow_args: bool = False,
     child_mounts: ChildMounts | None = None,
-    mounts: MountView | None = None,
     stat_path: StatPath | None = None,
     time_kind: LsTimeKind = LsTimeKind.MTIME,
     group_dirs_first: bool = False,
     stat_needed: bool = True,
     quote: Quote | None = None,
-    chain: tuple[str, ...] = (),
     spell: Callable[[str], str] | None = None,
     budget: WalkBudget | None = None,
     ignore: Sequence[str] = (),
 ) -> tuple[Operand, list[LsWarning]]:
-    """List one operand and report whether it turned out to be a directory.
+    """List one directory and report whether it turned out to be one.
 
     Args:
         path (PathSpec): the operand to list.
@@ -1094,7 +1098,6 @@ async def probe_operand(
         all_files (bool): keep dotfiles.
         sort_by (LsSortBy): active sort key.
         reverse (bool): reverse the sort.
-        recursive (bool): descend, emitting one group per directory (-R).
         command_line_arg (bool): False below an operand, where GNU downgrades
             a failure to a minor problem (exit 1).
         links (LinkView | None): the namespace's symlink facts.
@@ -1105,14 +1108,6 @@ async def probe_operand(
         child_mounts (ChildMounts | None): session-filtered child-mount
             names, merged into every listing: a mountpoint is an
             ordinary directory entry of its parent, ``-R`` or not.
-        mounts (MountView | None): the mount boundaries this walk's
-            ``readdir`` cannot cross. Under ``-R`` such a root is listed
-            but never descended, because that listing is another
-            backend's and the cross-mount fan-out assembles the group;
-            a namespace-only directory *above* one is descended, since
-            no other run renders it. None for a walk that can cross --
-            the relay's readdir routes per path, so it descends a
-            nested mount itself.
         stat_path (StatPath | None): dispatcher-backed stat, for the
             child-mount rows no backend can supply.
         time_kind (LsTimeKind): which timestamp ``-t`` compares.
@@ -1121,8 +1116,6 @@ async def probe_operand(
             ``stat_needed``.
         quote (Quote | None): how a name prints, for
             ``--sort=width``; None for as it is.
-        chain (tuple[str, ...]): under ``-RL``, the directories open
-            above this one, each as the path it resolves to.
         spell (Callable[[str], str] | None): a path below the operand as
             the operand spelled it; None at the operand itself.
         budget (WalkBudget | None): under ``-R``, the entries the walk
@@ -1251,68 +1244,7 @@ async def probe_operand(
         group_dirs_first=group_dirs_first,
         quote=quote,
     )
-    groups: list[tuple[PathSpec, list[FileStat]]] = [(path, entries)]
-    notes: list[tuple[int, LsWarning]] = []
-    if recursive:
-        real = links.resolve if deref and links is not None else None
-        if real is not None and not chain:
-            chain = (real(path.virtual),)
-        for entry in entries:
-            if entry.type != FileType.DIRECTORY:
-                continue
-            child_path = _child_spec(path, entry.name)
-            if mounts is not None and mounts.is_root(child_path.virtual):
-                # A nested mount's root. Its row belongs here, but its
-                # listing is another backend's, which this walk cannot
-                # read: the cross-mount fan-out renders that group.
-                continue
-            if budget is not None and not budget.opens(child_path.virtual):
-                continue
-            below = chain
-            if real is not None:
-                # Under -L a directory is the one it resolves to, and one
-                # open above this one is never listed again (exit 2).
-                here = real(child_path.virtual)
-                if here in chain:
-                    notes.append(
-                        (
-                            len(groups),
-                            LsWarning(
-                                f"ls: {spell(child_path.virtual)}: "
-                                "not listing already-listed directory",
-                                True,
-                            ),
-                        )
-                    )
-                    continue
-                below = (*chain, here)
-            child, child_ws = await probe_operand(
-                child_path,
-                readdir=readdir,
-                stat=stat,
-                all_files=all_files,
-                sort_by=sort_by,
-                reverse=reverse,
-                recursive=True,
-                command_line_arg=False,
-                links=links,
-                deref=deref,
-                child_mounts=child_mounts,
-                mounts=mounts,
-                stat_path=stat_path,
-                time_kind=time_kind,
-                group_dirs_first=group_dirs_first,
-                stat_needed=stat_needed,
-                quote=quote,
-                chain=below,
-                spell=spell,
-                budget=budget,
-                ignore=ignore,
-            )
-            notes.extend((len(groups) + at, note) for at, note in child.notes)
-            groups.extend(child.groups)
-            warnings.extend(child_ws)
-    return Operand(path, None, groups, tuple(notes)), warnings
+    return Operand(path, None, [(path, entries)]), warnings
 
 
 async def _operand_row(
@@ -1547,38 +1479,22 @@ def _render_group(
 
 
 def _finish(
-    results: list[str],
-    warnings: list[LsWarning],
-    notices: Sequence[str],
-    placed: Sequence[tuple[int, LsWarning]] = (),
+    results: list[str], warnings: list[LsWarning], notices: Sequence[str]
 ) -> tuple[ByteSource, IOResult]:
-    """The listing, what GNU reports before it said on ``io`` first and
-    each placed warning at the line it is written before.
+    """The listing, with what GNU reports before it said on ``io`` first.
 
     Args:
         results (list[str]): the listing's lines.
         warnings (list[LsWarning]): reported before the listing.
         notices (Sequence[str]): stderr lines that come first of all.
-        placed (Sequence[tuple[int, LsWarning]]): each warning with the
-            index in ``results`` it is written before, in order.
     """
     out = format_records(results)
-    io = IOResult(
-        exit_code=exit_status_for([*warnings, *(w for _, w in placed)])
-    )
-    leading = format_records([*notices, *(w.message for w in warnings)])
+    io = IOResult(exit_code=exit_status_for(warnings))
+    lines = [*notices, *(w.message for w in warnings)]
     if not out:
-        io.stderr = format_optional_records(
-            [*notices, *(w.message for w in warnings)]
-            + [w.message for _, w in placed]
-        )
+        io.stderr = format_optional_records(lines)
         return out, io
-    notes = [(0, leading)] if leading else []
-    offset = done = 0
-    for index, warning in placed:
-        offset += len(format_records(results[done:index]))
-        done = index
-        notes.append((offset, format_records([warning.message])))
+    notes = [(0, format_records(lines))] if lines else []
     return at_offsets(out, notes, io), io
 
 
@@ -1677,35 +1593,32 @@ async def ls(
         indicator=indicator,
         group_dirs_first=group_dirs_first,
     )
+    probe = functools.partial(
+        probe_operand,
+        readdir=readdir,
+        stat=stat,
+        all_files=all_files,
+        sort_by=sort_by,
+        reverse=reverse,
+        links=links,
+        deref=deref,
+        follow_args=follow_args,
+        child_mounts=child_mounts,
+        stat_path=stat_path,
+        time_kind=time_kind,
+        group_dirs_first=group_dirs_first,
+        stat_needed=needed,
+        quote=quote,
+        ignore=ignore,
+    )
     operands: list[Operand] = []
+    budgets: dict[int, WalkBudget] = {}
     for p in paths:
         budget = WalkBudget(p, mounts) if recursive else None
-        operand, p_ws = await probe_operand(
-            p,
-            readdir=readdir,
-            stat=stat,
-            all_files=all_files,
-            sort_by=sort_by,
-            reverse=reverse,
-            recursive=recursive,
-            links=links,
-            deref=deref,
-            follow_args=follow_args,
-            child_mounts=child_mounts,
-            mounts=mounts,
-            stat_path=stat_path,
-            time_kind=time_kind,
-            group_dirs_first=group_dirs_first,
-            stat_needed=needed,
-            quote=quote,
-            budget=budget,
-            ignore=ignore,
-        )
+        operand, p_ws = await probe(p, budget=budget)
         warnings.extend(p_ws)
         if budget is not None:
-            warnings.extend(
-                LsWarning(f"ls: {line}", False) for line in budget.stopped
-            )
+            budgets[id(operand)] = budget
         operands.append(operand)
     if len(operands) > 1:
         operands = await _sort_operands(
@@ -1717,105 +1630,255 @@ async def ls(
             quote=quote,
         )
 
-    # GNU names every listed directory once there is more than one operand
-    # (or under -R); a lone directory operand is listed bare.
-    headed = recursive or len(paths) > 1
-    rows = [o.row for o in operands if o.row is not None]
-    row_paths = [o.path.virtual for o in operands if o.row is not None]
-    render(
-        rows,
-        hrefs=row_paths if hyperlink else None,
-        targets=await link_targets(rows, row_paths, links, long, indicator),
-    )
-    printed = bool(rows)
-    placed: list[tuple[int, LsWarning]] = []
-    for operand in operands:
-        notes = operand.notes
-        at = 0
-        for index, (dir_spec, entries) in enumerate(operand.groups):
-            while at < len(notes) and notes[at][0] <= index:
-                placed.append((len(results), notes[at][1]))
-                at += 1
-            if show_dot_entries:
-                dots = []
-                prefix = mount_prefix_of(dir_spec.virtual, dir_spec.vfs_path)
-                for name in (".", ".."):
-                    if ignored(ignore, name):
-                        continue
-                    target = posixpath.normpath(
-                        posixpath.join(dir_spec.virtual, name)
+    async def below(
+        path: PathSpec,
+        entries: list[FileStat],
+        chain: tuple[str, ...],
+        spell: Callable[[str], str],
+        budget: WalkBudget | None,
+    ) -> AsyncIterator[tuple[PathSpec, list[FileStat]] | LsWarning]:
+        # -R lists each directory below an operand as the walk reaches it,
+        # in pre-order, so a reader that stops early stops the walk; what
+        # the walk reports goes out where the walk meets it.
+        real = links.resolve if deref and links is not None else None
+        if real is not None and not chain:
+            chain = (real(path.virtual),)
+        for entry in entries:
+            if entry.type != FileType.DIRECTORY:
+                continue
+            child_path = _child_spec(path, entry.name)
+            if mounts is not None and mounts.is_root(child_path.virtual):
+                # A nested mount's root. Its row belongs here, but its
+                # listing is another backend's, which this walk cannot
+                # read: the cross-mount fan-out renders that group.
+                continue
+            if budget is not None and not budget.opens(child_path.virtual):
+                continue
+            under = chain
+            if real is not None:
+                # Under -L a directory is the one it resolves to, and one
+                # open above this one is never listed again (exit 2).
+                here = real(child_path.virtual)
+                if here in chain:
+                    yield LsWarning(
+                        f"ls: {spell(child_path.virtual)}: "
+                        "not listing already-listed directory",
+                        True,
                     )
-                    row = FileStat(name=name, type=FileType.DIRECTORY)
-                    # Only the namespace can stat a parent outside this
-                    # mount; otherwise keep the synthetic directory row.
-                    if needed and (
-                        stat_path is not None or under_path(target, prefix)
-                    ):
-                        try:
-                            if stat_path is not None:
-                                found = await stat_path(target)
-                            else:
-                                found = await stat(
-                                    PathSpec(
-                                        virtual=target,
-                                        directory=target,
-                                        vfs_path=rekey(
-                                            dir_spec.virtual,
-                                            dir_spec.vfs_path,
-                                            target,
-                                        ),
-                                    ),
-                                )
-                            if found is not None:
-                                row = replace(found, name=name)
-                        except (OSError, ValueError) as exc:
-                            logger.debug("ls: stat %s: %r", target, exc)
-                            row = _stat_failed_row(name)
-                            warnings.append(
-                                LsWarning(
-                                    f"ls: cannot access '{name}': "
-                                    f"{_err_text(exc)}",
-                                    False,
-                                )
-                            )
-                    dots.append(row)
-                entries = sort_stats(
-                    dots + entries,
-                    sort_by,
-                    reverse,
-                    time_kind=time_kind,
-                    group_dirs_first=group_dirs_first,
-                    quote=quote,
-                )
-            if headed:
-                if printed:
-                    results.append("")
-                header = respell_one(
-                    dir_spec.virtual,
-                    operand.path.virtual,
-                    operand.path.raw_path,
-                )
-                results.append(
-                    f"{header if quote is None else quote(header)}:"
-                )
-            # ls prints allocated blocks here; VFS has no allocation
-            # metadata, so report unknown instead of inventing a block count.
-            if long or columns.blocks:
-                results.append("total ?" if entries else "total 0")
-            entry_paths = [
-                posixpath.join(dir_spec.virtual, e.name) for e in entries
-            ]
-            render(
-                entries,
-                hrefs=entry_paths if hyperlink else None,
-                targets=await link_targets(
-                    entries, entry_paths, links, long, indicator
-                ),
+                    continue
+                under = (*chain, here)
+            child, child_ws = await probe(
+                child_path,
+                command_line_arg=False,
+                spell=spell,
+                budget=budget,
             )
-            printed = True
-        placed.extend((len(results), note) for _, note in notes[at:])
+            for warning in (*child_ws, *(note for _, note in child.notes)):
+                yield warning
+            for dir_spec, listed in child.groups:
+                yield dir_spec, listed
+                async for item in below(
+                    dir_spec, listed, under, spell, budget
+                ):
+                    yield item
 
-    return _finish(results, warnings, notices, placed)
+    finished: set[int] = set()
+
+    async def groups(
+        operand: Operand,
+    ) -> AsyncIterator[tuple[PathSpec, list[FileStat]] | LsWarning]:
+        spell = functools.partial(
+            respell_one,
+            original=operand.path.virtual,
+            raw=operand.path.raw_path,
+        )
+        budget = budgets.get(id(operand))
+        for _, note in operand.notes:
+            yield note
+        for dir_spec, entries in operand.groups:
+            yield dir_spec, entries
+            if recursive:
+                async for item in below(dir_spec, entries, (), spell, budget):
+                    yield item
+        if budget is not None:
+            for line in budget.stopped:
+                yield LsWarning(f"ls: {line}", False)
+        finished.add(id(operand))
+
+    async def with_dots(
+        dir_spec: PathSpec, entries: list[FileStat], found: list[LsWarning]
+    ) -> list[FileStat]:
+        dots = []
+        prefix = mount_prefix_of(dir_spec.virtual, dir_spec.vfs_path)
+        for name in (".", ".."):
+            if ignored(ignore, name):
+                continue
+            target = posixpath.normpath(posixpath.join(dir_spec.virtual, name))
+            row = FileStat(name=name, type=FileType.DIRECTORY)
+            # Only the namespace can stat a parent outside this mount;
+            # otherwise keep the synthetic directory row.
+            if needed and (
+                stat_path is not None or under_path(target, prefix)
+            ):
+                try:
+                    if stat_path is not None:
+                        found_row = await stat_path(target)
+                    else:
+                        found_row = await stat(
+                            PathSpec(
+                                virtual=target,
+                                directory=target,
+                                vfs_path=rekey(
+                                    dir_spec.virtual,
+                                    dir_spec.vfs_path,
+                                    target,
+                                ),
+                            ),
+                        )
+                    if found_row is not None:
+                        row = replace(found_row, name=name)
+                except (OSError, ValueError) as exc:
+                    logger.debug("ls: stat %s: %r", target, exc)
+                    row = _stat_failed_row(name)
+                    found.append(
+                        LsWarning(
+                            f"ls: cannot access '{name}': {_err_text(exc)}",
+                            False,
+                        )
+                    )
+            dots.append(row)
+        return sort_stats(
+            dots + entries,
+            sort_by,
+            reverse,
+            time_kind=time_kind,
+            group_dirs_first=group_dirs_first,
+            quote=quote,
+        )
+
+    async def pieces() -> AsyncGenerator[bytes | LsWarning, None]:
+        # The listing a block at a time, each warning the walk meets
+        # between the blocks it falls between.
+        # ls names every listed directory once there is more than one
+        # operand (or under -R); a lone directory operand is listed bare.
+        headed = recursive or len(paths) > 1
+        rows = [o.row for o in operands if o.row is not None]
+        row_paths = [o.path.virtual for o in operands if o.row is not None]
+        render(
+            rows,
+            hrefs=row_paths if hyperlink else None,
+            targets=await link_targets(
+                rows, row_paths, links, long, indicator
+            ),
+        )
+        printed = bool(rows)
+        if results:
+            yield format_records(results)
+            results.clear()
+        for operand in operands:
+            async for item in groups(operand):
+                if isinstance(item, LsWarning):
+                    yield item
+                    continue
+                dir_spec, entries = item
+                if show_dot_entries:
+                    found: list[LsWarning] = []
+                    entries = await with_dots(dir_spec, entries, found)
+                    for warning in found:
+                        yield warning
+                if headed:
+                    if printed:
+                        results.append("")
+                    header = respell_one(
+                        dir_spec.virtual,
+                        operand.path.virtual,
+                        operand.path.raw_path,
+                    )
+                    results.append(
+                        f"{header if quote is None else quote(header)}:"
+                    )
+                # ls prints allocated blocks here; VFS has no allocation
+                # metadata, so report unknown instead of inventing a block
+                # count.
+                if long or columns.blocks:
+                    results.append("total ?" if entries else "total 0")
+                entry_paths = [
+                    posixpath.join(dir_spec.virtual, e.name) for e in entries
+                ]
+                render(
+                    entries,
+                    hrefs=entry_paths if hyperlink else None,
+                    targets=await link_targets(
+                        entries, entry_paths, links, long, indicator
+                    ),
+                )
+                printed = True
+                if results:
+                    yield format_records(results)
+                    results.clear()
+
+    # GNU looks at every operand before it lists one, so what that found
+    # goes first; the rest goes where the walk met it.
+    reported = list(warnings)
+    pending = [*notices, *(w.message for w in warnings)]
+    if recursive:
+        io = IOResult()
+
+        async def stream() -> AsyncIterator[bytes]:
+            try:
+                async with aclosing(pieces()) as walked:
+                    async for piece in walked:
+                        if isinstance(piece, LsWarning):
+                            reported.append(piece)
+                            pending.append(piece.message)
+                            continue
+                        if pending:
+                            await say(io, format_records(pending))
+                            pending.clear()
+                        yield piece
+            finally:
+                # A reader that stops early still gets what was found for
+                # the operands it never finished, after what it read.
+                seen = {id(warning) for warning in reported}
+                for operand in operands:
+                    if id(operand) in finished:
+                        continue
+                    budget = budgets.get(id(operand))
+                    stopped = budget.stopped if budget is not None else ()
+                    for warning in (
+                        *(note for _, note in operand.notes),
+                        *(LsWarning(f"ls: {line}", False) for line in stopped),
+                    ):
+                        if id(warning) not in seen:
+                            seen.add(id(warning))
+                            reported.append(warning)
+                            pending.append(warning.message)
+                if pending:
+                    await say(io, format_records(pending))
+                io.exit_code = exit_status_for(reported)
+
+        return stream(), io
+    body: list[bytes] = []
+    notes: list[tuple[int, bytes]] = []
+    offset = 0
+    async for piece in pieces():
+        if isinstance(piece, LsWarning):
+            reported.append(piece)
+            pending.append(piece.message)
+            continue
+        if pending:
+            notes.append((offset, format_records(pending)))
+            pending.clear()
+        body.append(piece)
+        offset += len(piece)
+    out = b"".join(body)
+    io = IOResult(exit_code=exit_status_for(reported))
+    if not out:
+        io.stderr = format_optional_records(pending)
+        return out, io
+    if pending:
+        notes.append((offset, format_records(pending)))
+    return at_offsets(out, notes, io), io
 
 
 async def ls_generic(

@@ -288,12 +288,66 @@ async def test_ls_serious_problem_outranks_a_minor_one():
     denying_readdir = partial(
         _readdir_denying, readdir=readdir, blocked="/dir/sub"
     )
-    _, io = await ls(
+    out, io = await ls(
         [_spec("/dir"), _spec("/nope")],
         readdir=denying_readdir,
         stat=stat,
         recursive=True,
     )
+    await materialize(out)
+    assert io.exit_code == LS_FAILURE
+    # As ls does, an operand is checked before any is listed, so its
+    # failure is named before what the walk meets below another.
+    assert (io.stderr or b"").decode().splitlines() == [
+        "ls: cannot access '/nope': No such file or directory",
+        "ls: cannot open directory '/dir/sub': Permission denied",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_recursive_ls_lists_each_directory_as_the_walk_reaches_it():
+    tree = {
+        "/dir": _dir("dir"),
+        "/dir/a": _dir("a"),
+        "/dir/a/x": _file("x"),
+        "/dir/b": _dir("b"),
+        "/dir/b/y": _file("y"),
+    }
+    readdir, stat = _make_fs_backend(tree)
+    listed: list[str] = []
+
+    async def tracked(p: PathSpec, index=None) -> list[str]:
+        listed.append(p.virtual)
+        return await readdir(p)
+
+    out, _ = await ls(
+        [_spec("/dir")], readdir=tracked, stat=stat, recursive=True
+    )
+    assert await anext(out) == b"/dir:\na\nb\n"
+    assert listed == ["/dir"]
+    assert await materialize(out) == b"\n/dir/a:\nx\n\n/dir/b:\ny\n"
+    assert listed == ["/dir", "/dir/a", "/dir/b"]
+
+
+@pytest.mark.asyncio
+async def test_recursive_ls_closed_early_reports_an_operand_it_never_reached():
+    tree = {
+        "/a": _dir("a"),
+        "/a/x": _file("x"),
+        "/z": _dir("z"),
+        "/z/y": _file("y"),
+    }
+    readdir, stat = _make_fs_backend(tree)
+    denying = partial(_readdir_denying, readdir=readdir, blocked="/z")
+    out, io = await ls(
+        [_spec("/a"), _spec("/z")],
+        readdir=denying,
+        stat=stat,
+        recursive=True,
+    )
+    assert await anext(out) == b"/a:\nx\n"
+    await out.aclose()
+    assert io.stderr == b"ls: cannot open directory '/z': Permission denied\n"
     assert io.exit_code == LS_FAILURE
 
 
@@ -352,6 +406,7 @@ async def test_structure_only_chain_descends_under_recursive():
         child_mounts=child_mounts,
         mounts=_mount_view("/ghost/deep/lnk"),
     )
+    out = await materialize(out)
     assert io.exit_code == 0
     assert out.decode() == "/ghost:\ndeep\n\n/ghost/deep:\nlnk\n"
 
@@ -381,6 +436,7 @@ async def test_a_directory_it_may_not_open_lists_nothing_owed_to_it():
         recursive=True,
         child_mounts=lambda d: ["il"] if d == "/base/sealed" else [],
     )
+    out = await materialize(out)
     assert io.exit_code == LS_MINOR_PROBLEM
     assert (await materialize(out)).decode() == "/base:\nsealed\nx\n"
     assert io.stderr == (

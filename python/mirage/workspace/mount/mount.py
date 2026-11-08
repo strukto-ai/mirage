@@ -95,7 +95,7 @@ from mirage.context.session_context import awaits_as, with_caller
 from mirage.core.dev.device import active_pipe, pipe_below
 from mirage.core.dev.pipe import DevicePipe
 from mirage.core.generic.rewrite import (
-    append_by_rewrite,
+    append_by_spooled_rewrite,
     expect_offset,
     pwrite_by_streamed_rewrite,
     refuse_taken,
@@ -1723,9 +1723,7 @@ class MountEntry:
         """
         try:
             if not self.vfs.supports("append"):
-                return await self._append_by_rewrite(
-                    path, await materialize(data), index
-                )
+                return await self._append_by_rewrite(path, data, index)
             append: Callable[..., Awaitable[Any]] = self.vfs.append
             return await append(
                 path,
@@ -1764,11 +1762,11 @@ class MountEntry:
     async def _append_by_rewrite(
         self,
         path: PathSpec,
-        data: bytes,
+        data: ByteSource,
         index: IndexCacheStore = NULL_INDEX,
     ) -> FileStat | None:
-        return await append_by_rewrite(
-            functools.partial(self._read, index),
+        return await append_by_spooled_rewrite(
+            functools.partial(self._read_into, index),
             functools.partial(self._replace, index),
             functools.partial(self._stat, index),
             path,

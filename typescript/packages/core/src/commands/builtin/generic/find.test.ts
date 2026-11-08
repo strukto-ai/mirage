@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runWithCacheManager } from '../../../cache/context.ts'
 import type { FindOptions } from '../../../core/generic/find.ts'
-import { modifiedTs } from '../../../core/generic/find.ts'
+import { modifiedTs, walkFind } from '../../../core/generic/find.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { SessionProfile } from '../../../policy/profile.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -50,10 +50,29 @@ function spec(p: string): PathSpec {
   return new PathSpec({ vfsPath: stripSlash(p), virtual: p, directory: p, resolved: false })
 }
 
-function fakeFind(root: PathSpec, _options: FindOptions): Promise<string[]> {
-  if (root.virtual === '/missing') return Promise.reject(enoent(root.virtual))
-  if (root.virtual === '/limited') return Promise.reject(new Error('rate limited'))
-  return Promise.resolve(['/found.txt'])
+// eslint-disable-next-line @typescript-eslint/require-await -- a walk that fails before its first row
+async function* fakeFind(root: PathSpec, _options: FindOptions): AsyncGenerator<string> {
+  if (root.virtual === '/missing') throw enoent(root.virtual)
+  if (root.virtual === '/limited') throw new Error('rate limited')
+  yield '/found.txt'
+}
+
+// eslint-disable-next-line @typescript-eslint/require-await -- rows a walk would yield
+async function* walked(...rows: string[]): AsyncGenerator<string> {
+  yield* rows
+}
+
+// The real walk over a listing that must not be read.
+function unlisted(stat: FileStat) {
+  return (root: PathSpec, options: FindOptions) =>
+    walkFind(
+      root,
+      {
+        readdir: () => Promise.reject(new Error('must not fetch descendants')),
+        stat: () => Promise.resolve(stat),
+      },
+      options,
+    )
 }
 
 function optsWith(stat: FileStat | null, flags: Record<string, unknown> = {}): Context {
@@ -76,7 +95,7 @@ describe('generic command find', () => {
       const get = vi.spyOn(ws.cache, 'get')
       const row = new FileStat({ name: 'logs', type: FileType.DIRECTORY })
       const result = await runWithCacheManager(ws.mount('/mnt').cacheManager, () =>
-        findGeneric([spec('/mnt/logs')], [], optsWith(row), () => Promise.resolve([])),
+        findGeneric([spec('/mnt/logs')], [], optsWith(row), () => walked('/mnt/logs')),
       )
       expect(result?.[1].exitCode).toBe(0)
       expect(DEC.decode(result?.[0] ?? undefined)).toBe('/mnt/logs\n')
@@ -105,7 +124,7 @@ describe('generic command find', () => {
       content: ContentType.TEXT,
     } as FileStat
 
-    function unreachedFind(): Promise<string[]> {
+    function unreachedFind(): AsyncIterable<string> {
       throw new Error('find op must not be called for a file start point')
     }
 
@@ -191,11 +210,9 @@ describe('generic command find', () => {
         resolved: false,
       })
       const result = await findGeneric([root], [], optsWith(dirStat), () =>
-        Promise.resolve(['/mnt/logs/child.txt']),
+        walked('/mnt/logs', '/mnt/logs/child.txt'),
       )
       expect(result?.[1].exitCode).toBe(0)
-      // GNU lists the start point before descending, and this op reports
-      // descendants only, so the row comes from the generic.
       expect(DEC.decode(result?.[0] ?? undefined)).toBe('/mnt/logs\n/mnt/logs/child.txt\n')
     })
 
@@ -208,52 +225,10 @@ describe('generic command find', () => {
         resolved: false,
       })
       const result = await findGeneric([root], [], optsWith(dirStat), () =>
-        Promise.resolve(['/mnt/a.txt']),
+        walked('/mnt', '/mnt/a.txt'),
       )
       expect(DEC.decode(result?.[0] ?? undefined)).toBe('/mnt\n/mnt/a.txt\n')
     })
-  })
-
-  // GNU findutils 4.10.0, pinned on debian:stable-slim:
-  //   find <empty dir>            -> <empty dir>
-  //   find <empty dir> -empty     -> <empty dir>
-  //   find <empty dir> -not -empty -> (empty)
-  describe('directory start point that holds nothing', () => {
-    const dirStat = { name: 'mnt', type: FileType.DIRECTORY } as FileStat
-
-    function root(): PathSpec {
-      return new PathSpec({
-        vfsPath: '',
-        virtual: '/mnt',
-        directory: '/',
-        resolved: false,
-      })
-    }
-
-    // Without an emptiness probe the backend's own row stands; with one, the
-    // backend's row is dropped, not merged (ssh reports every directory as
-    // non-empty, so merging would print a directory `-not -empty` must skip).
-    it.each([
-      [[], {}, [], undefined, '/mnt\n'],
-      [[], { empty: true }, [], true, '/mnt\n'],
-      [[], { empty: true }, [], false, ''],
-      [[], { empty: true }, ['/'], undefined, '/mnt\n'],
-      [['-not', '-empty'], {}, ['/'], true, ''],
-    ] as const)(
-      'answers %j %o over rows %j with the probe saying %s',
-      async (texts, flags, rows, empty, expected) => {
-        const result = await findGeneric(
-          [root()],
-          [...texts],
-          optsWith(dirStat, flags),
-          () => Promise.resolve([...rows]),
-          undefined,
-          empty === undefined ? undefined : () => Promise.resolve(empty),
-        )
-        expect(result?.[1].exitCode).toBe(0)
-        expect(DEC.decode(result?.[0] ?? undefined)).toBe(expected)
-      },
-    )
   })
 
   it('propagates non-ENOENT errors', async () => {
@@ -277,15 +252,9 @@ describe('generic command find', () => {
   })
 })
 
-it('streams the start point before calling a native backend', async () => {
-  const result = await streamFind(
-    [spec('/remote')],
-    [],
-    optsWith({ name: 'remote', type: FileType.DIRECTORY } as FileStat),
-    () => {
-      throw new Error('must not fetch descendants')
-    },
-  )
+it('streams the start point before listing it', async () => {
+  const remote = { name: 'remote', type: FileType.DIRECTORY } as FileStat
+  const result = await streamFind([spec('/remote')], [], optsWith(remote), unlisted(remote))
   if (result === null) throw new Error('find returned no result')
   const out = result[0] as AsyncGenerator<Uint8Array, void>
   const first = await out.next()
@@ -294,18 +263,17 @@ it('streams the start point before calling a native backend', async () => {
   await out.return(undefined)
 })
 
-it('streams a start point whose mtime is known before fetching descendants', async () => {
+it('streams a start point whose mtime is known before listing it', async () => {
+  const remote = {
+    name: 'remote',
+    type: FileType.DIRECTORY,
+    modified: new Date().toISOString(),
+  } as FileStat
   const result = await streamFind(
     [spec('/remote')],
     ['-mtime', '+0', '-o', '-mtime', '-1'],
-    optsWith({
-      name: 'remote',
-      type: FileType.DIRECTORY,
-      modified: new Date().toISOString(),
-    } as FileStat),
-    () => {
-      throw new Error('must not fetch descendants')
-    },
+    optsWith(remote),
+    unlisted(remote),
   )
   if (result === null) throw new Error('find returned no result')
   const out = result[0] as AsyncGenerator<Uint8Array, void>

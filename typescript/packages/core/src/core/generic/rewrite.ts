@@ -24,66 +24,24 @@ export type ReadFn = (path: PathSpec) => Promise<Uint8Array>
 export type WriteFn<Written = unknown> = RewriteWriteFn<Written>
 
 /**
- * Append by reading the file and writing it back whole.
+ * Append by spooling the file and writing it back whole, its bytes and the
+ * new ones streamed, so memory holds a chunk at a time whatever the sizes and
+ * the write carries the version the read did. The new bytes are spooled
+ * before the file is read: a streamed write lets its path go while its source
+ * is pulled, so a write landing meanwhile is in the file the replacement is
+ * made from.
  *
- * Not atomic against a concurrent writer. A zero-byte append is an open for
+ * Existing-file rewrites follow the mount's write policy, and a missing file
+ * is created only while it is still absent. A zero-byte append is an open for
  * appending with nothing written after it (`cmd >> f` opens `f` before `cmd`
  * runs): it creates a missing file and leaves an existing one alone, so it
  * costs a stat rather than moving the whole object twice to add nothing, and
- * cannot put back bytes a concurrent writer had just replaced. The read takes
- * the caller's index, as every other read does: an id-addressed backend (Box,
- * Drive) turns a path into an id through it. Mirrors Python's
- * `append_by_rewrite`.
+ * cannot put back bytes a concurrent writer had just replaced. `read` fills a
+ * spool with the whole file and answers the version the read carried; only
+ * ENOENT means empty. Mirrors Python's `append_by_spooled_rewrite`.
  */
-export async function appendByRewrite<Written>(
-  read: ReadFn,
-  write: RewriteWriteFn<Written>,
-  stat: StatFn,
-  path: PathSpec,
-  data: Uint8Array,
-): Promise<Written | undefined> {
-  if (data.length === 0) {
-    let found: FileStat
-    try {
-      found = await stat(path)
-    } catch (error) {
-      if (!isMissingPath(error)) throw error
-      return await write({
-        path,
-        body: data,
-        condition: await writeCondition(path, 'put', OwnRead.ABSENT),
-      })
-    }
-    if (found.type === FileType.DIRECTORY) throw eisdir(path)
-    return
-  }
-  let existing: Uint8Array
-  let own: string | OwnRead | null
-  try {
-    ;[existing, own] = await readVersioned(path, () => read(path))
-    own = own ?? OwnRead.UNKNOWN
-  } catch (error) {
-    if (!isMissingPath(error)) throw error
-    return await write({
-      path,
-      body: data,
-      condition: await writeCondition(path, 'put', OwnRead.ABSENT),
-    })
-  }
-  const joined = new Uint8Array(existing.length + data.length)
-  joined.set(existing)
-  joined.set(data, existing.length)
-  return await write({ path, body: joined, condition: await writeCondition(path, 'put', own) })
-}
-
-/**
- * Stage a read-modify-write with bounded RAM and the read's version. The new
- * bytes are spooled before the file is read: a streamed write lets its path
- * go while its source is pulled, so a write landing meanwhile is in the file
- * the replacement is made from.
- */
-export async function appendByStreamedRewrite<Written>(
-  read: (path: PathSpec, onVersion: (version: string | null) => void) => AsyncIterable<Uint8Array>,
+export async function appendBySpooledRewrite<Written>(
+  read: (path: PathSpec, spool: ByteSpool) => Promise<string | null>,
   write: RewriteWriteFn<Written>,
   stat: StatFn,
   path: PathSpec,
@@ -108,13 +66,9 @@ export async function appendByStreamedRewrite<Written>(
       if (found.type === FileType.DIRECTORY) throw eisdir(path)
       return
     }
-    let own: string | OwnRead = OwnRead.UNKNOWN
+    let own: string | OwnRead
     try {
-      await spool.fill(
-        read(path, (version) => {
-          own = version ?? OwnRead.UNKNOWN
-        }),
-      )
+      own = (await read(path, spool)) ?? OwnRead.UNKNOWN
     } catch (error) {
       if (!isMissingPath(error) || spool.size > 0) throw error
       own = OwnRead.ABSENT
@@ -128,6 +82,35 @@ export async function appendByStreamedRewrite<Written>(
     await incoming.close()
     await spool.close()
   }
+}
+
+/**
+ * `appendBySpooledRewrite` over a streaming reader, which hands the version
+ * it read to the callback it is given. Mirrors Python's
+ * `append_by_streamed_rewrite`.
+ */
+export async function appendByStreamedRewrite<Written>(
+  read: (path: PathSpec, onVersion: (version: string | null) => void) => AsyncIterable<Uint8Array>,
+  write: RewriteWriteFn<Written>,
+  stat: StatFn,
+  path: PathSpec,
+  data: ByteSource,
+): Promise<Written | undefined> {
+  return appendBySpooledRewrite(
+    async (target, spool) => {
+      let seen: string | null = null
+      await spool.fill(
+        read(target, (version) => {
+          seen = version
+        }),
+      )
+      return seen
+    },
+    write,
+    stat,
+    path,
+    data,
+  )
 }
 
 /**

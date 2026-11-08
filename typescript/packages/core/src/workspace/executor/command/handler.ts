@@ -303,7 +303,7 @@ async function rendered(
 }
 
 /** Keep a deferred failure on its command, after any emitted bytes. */
-async function* framed(
+export async function* framed(
   source: ByteSource,
   io: IOResult,
   voice: HandlerVoice,

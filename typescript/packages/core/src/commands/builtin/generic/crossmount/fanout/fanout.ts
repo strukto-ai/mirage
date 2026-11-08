@@ -62,7 +62,10 @@ export async function runFanout(
       flags.verbose = true
     }
   }
-  if (![Cmd.FIND, Cmd.RM, Cmd.RMDIR, Cmd.UNLINK, Cmd.TOUCH, Cmd.MKDIR].includes(cmdName)) {
+  // The commands that change a mount run every operand before their output is
+  // read, so a reader that stops early leaves none undone; the rest stream,
+  // find's records joining once the last run drains.
+  if (![Cmd.RM, Cmd.RMDIR, Cmd.UNLINK, Cmd.TOUCH, Cmd.MKDIR].includes(cmdName)) {
     const separator =
       (cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) &&
       new FlagView(flags, specOf(cmdName)).asBool('verbose')
