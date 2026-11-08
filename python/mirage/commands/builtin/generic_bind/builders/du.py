@@ -84,6 +84,11 @@ class DuTally:
             entry's time is read from.
         times (dict[str, str]): each entry's time by virtual path, under
             ``--time``; like ``directories``, one operand's walk.
+        counted (set[str] | None): each path the walks counted, so a
+            later operand counts none of it again, as GNU counts a file
+            once a line (an operand already counted prints nothing);
+            None under ``-l``, and under ``-L``, which counts by the
+            file a link reaches.
     """
 
     mounts: MountView | None = None
@@ -94,6 +99,16 @@ class DuTally:
     excludes: tuple[str, ...] = ()
     clock: LsTimeKind | None = None
     times: dict[str, str] = field(default_factory=dict)
+    counted: set[str] | None = None
+
+    def repeated(self, path: PathSpec) -> bool:
+        """Whether an earlier operand's walk already counted this one.
+
+        Args:
+            path (PathSpec): the operand.
+        """
+        key = "/" + path.virtual.strip("/")
+        return self.counted is not None and key in self.counted
 
 
 def _account_for_walk_error(
@@ -144,7 +159,10 @@ class Dereference:
     first), and a directory the walk may not list leaves the link the one
     name that reaches the file, which GNU then counts it under. Under
     ``-x`` a link that leads onto another mount is left out whole, as GNU
-    leaves out what stat(2) places on another device.
+    leaves out what stat(2) places on another device. Under ``-l`` GNU
+    counts a file each time a name reaches it, its own tree's links and
+    every operand included, and leaves out only a link back to a
+    directory the walk is inside, the loop it would repeat.
 
     Args:
         links (LinkView): the namespace's symlink facts.
@@ -156,6 +174,9 @@ class Dereference:
         home (str | None): under ``-x``, the mount that operand lies on.
         waiting (list[tuple[PathSpec, str]]): the walk's links into its
             tree, each with the path it resolves to.
+        count_links (bool): ``-l``, which counts a file under every name.
+        inside (tuple[str, ...]): under ``-l``, the directories the walk
+            is inside, each as the path it resolves to.
     """
 
     links: LinkView
@@ -164,6 +185,8 @@ class Dereference:
     tree: str = "/"
     home: str | None = None
     waiting: list[tuple[PathSpec, str]] = field(default_factory=list)
+    count_links: bool = False
+    inside: tuple[str, ...] = ()
 
     def operand(self, path: PathSpec) -> "Dereference":
         """This invocation's state, walking one operand.
@@ -173,7 +196,7 @@ class Dereference:
         """
         tree = self.links.resolve(path.virtual)
         home = self.mounts.root_of(tree) if self.mounts is not None else None
-        return replace(self, tree=tree, home=home, waiting=[])
+        return replace(self, tree=tree, home=home, waiting=[], inside=())
 
     def repeated(self, path: PathSpec) -> bool:
         """Whether an earlier operand's walk already counted this one.
@@ -214,6 +237,8 @@ async def _counted(
         and follow.mounts.root_of(real) != follow.home
     ):
         return None
+    if follow.count_links:
+        return None if real in follow.inside else target
     if info.type == FileType.SYMLINK and under_path(real, follow.tree):
         follow.waiting.append((path, real))
         return None
@@ -256,6 +281,11 @@ async def _du_walk(
         if counted is None:
             return 0
         info = counted
+    elif tally.counted is not None:
+        key = "/" + path.virtual.strip("/")
+        if key in tally.counted:
+            return 0
+        tally.counted.add(key)
     if tally.clock is not None:
         stamp = time_of(info, tally.clock)
         if stamp is not None:
@@ -268,6 +298,9 @@ async def _du_walk(
     tally.directories.append(path.virtual)
     if not scan.opens(path.virtual):
         return 0
+    if follow is not None and follow.count_links:
+        real = follow.links.resolve(path.virtual)
+        follow = replace(follow, inside=(*follow.inside, real))
     limit = scan.listing_limit(path.virtual)
     try:
         children = await (
@@ -417,7 +450,11 @@ async def du(
 
     links = links_of(ctx)
     follow = (
-        Dereference(links, mounts if fl.as_bool("one_file_system") else None)
+        Dereference(
+            links,
+            mounts if fl.as_bool("one_file_system") else None,
+            count_links=fl.as_bool("count_links"),
+        )
         if links is not None
         and fl.typed_order(
             "dereference", "no_dereference", "dereference_args", "H"
@@ -425,6 +462,8 @@ async def du(
         == ["dereference"]
         else None
     )
+    if follow is None and not fl.as_bool("count_links"):
+        tally.counted = set()
 
     async def compute_size(path: PathSpec) -> int:
         return await walk_size(_tree_of(files, listing), tally, follow, path)
@@ -447,7 +486,7 @@ async def du(
         unreadable=lambda: tally.unreadable,
         directories=lambda: tally.directories,
         inaccessible=lambda: tally.inaccessible,
-        repeated=follow.repeated if follow is not None else None,
+        repeated=follow.repeated if follow is not None else tally.repeated,
         times=lambda: tally.times,
     )
 

@@ -19,6 +19,7 @@
 mod reading;
 mod value;
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -62,6 +63,7 @@ pub const RANDOM: &str = "RANDOM";
 /// shell computes at each read until `unset` makes them ordinary names.
 pub const LINENO: &str = "LINENO";
 pub const BASHPID: &str = "BASHPID";
+pub const BASH_LINENO: &str = "BASH_LINENO";
 /// bash 5.2's generator: Park-Miller's minimal standard stepped through
 /// Schrage's method, so `RANDOM=42` is the same sequence everywhere.
 const RANDOM_A: i64 = 16807;
@@ -143,6 +145,9 @@ pub struct Store {
     /// `${FUNCNAME[@]}`: the running functions, innermost first; None
     /// once `unset FUNCNAME` made it an ordinary name.
     function_names: Option<Vec<Vec<u8>>>,
+    /// `${BASH_LINENO[@]}`: the line each running function and sourced
+    /// file was called from, innermost first.
+    call_lines: Vec<usize>,
     /// `$LINENO`, the running command's line, and `$BASHPID`, the process
     /// running it.
     line: usize,
@@ -181,6 +186,7 @@ impl Store {
             held: 0,
             pipe_status: Vec::new(),
             function_names: Some(Vec::new()),
+            call_lines: Vec::new(),
             line: 0,
             bash_pid: 0,
             plain: Vec::new(),
@@ -190,19 +196,21 @@ impl Store {
     }
 
     /// Set what the shell keeps of its own: each stage's status in the
-    /// last pipeline, the running functions, innermost first, the running
-    /// command's line, the process running it, and the voice its
-    /// diagnostics lead with.
+    /// last pipeline, the running functions and the lines each frame was
+    /// called from, innermost first, the running command's line, the
+    /// process running it, and the voice its diagnostics lead with.
     pub fn set_specials(
         &mut self,
         pipe_status: Vec<i32>,
         function_names: Option<Vec<Vec<u8>>>,
+        call_lines: Vec<usize>,
         line: usize,
         bash_pid: u32,
         voice: Vec<u8>,
     ) {
         self.pipe_status = pipe_status;
         self.function_names = function_names;
+        self.call_lines = call_lines;
         self.line = line;
         self.bash_pid = bash_pid;
         self.voice = voice;
@@ -238,8 +246,8 @@ impl Store {
         }
     }
 
-    /// `PIPESTATUS`, and `FUNCNAME` until `unset FUNCNAME`, from the shell's
-    /// own bookkeeping, which a lookup and arithmetic answer, through a
+    /// `PIPESTATUS`, `BASH_LINENO`, and `FUNCNAME` until `unset FUNCNAME`,
+    /// from the shell's own bookkeeping, which a lookup and arithmetic answer, through a
     /// reference too, and an assignment never reaches; None for every other
     /// name, or a hidden one.
     pub fn special(&self, name: &str) -> Option<Indexed> {
@@ -251,6 +259,11 @@ impl Store {
                     .map(|status| status.to_string().into_bytes()),
             ),
             ("FUNCNAME", Some(names)) => Indexed::dense(names.iter().cloned()),
+            (BASH_LINENO, _) => Indexed::dense(
+                self.call_lines
+                    .iter()
+                    .map(|line| line.to_string().into_bytes()),
+            ),
             _ => return None,
         };
         (!self.hidden(&name)).then_some(array)
@@ -258,16 +271,26 @@ impl Store {
 
     /// The names set now whose value the shell computes at each read, which
     /// `${!prefix@}` lists beside the stored ones: `PIPESTATUS` once a
-    /// command has run, `FUNCNAME` inside a function, and `RANDOM`,
-    /// `LINENO` and `BASHPID` until each is no longer special.
+    /// command has run, `FUNCNAME` inside a function, `BASH_LINENO` even
+    /// empty, and `RANDOM`, `LINENO` and `BASHPID` until each is no longer
+    /// special.
     pub fn computed(&self) -> impl Iterator<Item = &'static str> + '_ {
-        [RANDOM, LINENO, BASHPID, "PIPESTATUS", "FUNCNAME"]
-            .into_iter()
-            .filter(|&name| {
-                self.random_special(name)
-                    || self.dynamic(name).is_some()
-                    || self.special(name).is_some_and(|array| !array.is_empty())
-            })
+        [
+            RANDOM,
+            LINENO,
+            BASHPID,
+            "PIPESTATUS",
+            "FUNCNAME",
+            BASH_LINENO,
+        ]
+        .into_iter()
+        .filter(|&name| {
+            self.random_special(name)
+                || self.dynamic(name).is_some()
+                || self
+                    .special(name)
+                    .is_some_and(|array| !array.is_empty() || name == BASH_LINENO)
+        })
     }
 
     /// Whether this store saves as `other` does, record for record. A
@@ -478,6 +501,16 @@ impl Store {
         match self.visible(name)?.value.as_ref()? {
             Value::Indexed(array) => Some(array),
             _ => None,
+        }
+    }
+
+    /// An indexed array as a read finds it: `PIPESTATUS`, `FUNCNAME` and
+    /// `BASH_LINENO` from the shell's own bookkeeping (`special`), else the
+    /// variable's.
+    pub fn array(&self, name: &str) -> Option<Cow<'_, Indexed>> {
+        match self.special(name) {
+            Some(array) => Some(Cow::Owned(array)),
+            None => self.indexed(name).map(Cow::Borrowed),
         }
     }
 
@@ -870,6 +903,7 @@ impl Store {
         forked.hidden = self.hidden.clone();
         forked.pipe_status = self.pipe_status.clone();
         forked.function_names = self.function_names.clone();
+        forked.call_lines = self.call_lines.clone();
         forked.line = self.line;
         forked.bash_pid = self.bash_pid;
         forked.plain = self.plain.clone();
@@ -1495,6 +1529,7 @@ mod tests {
         store.set_specials(
             vec![1, 0],
             Some(vec![b"f".to_vec(), b"main".to_vec()]),
+            vec![4],
             0,
             0,
             Vec::new(),
@@ -1508,7 +1543,7 @@ mod tests {
             false,
         );
         assert_eq!(outcome.value.unwrap(), 12);
-        store.set_specials(vec![3], None, 0, 0, Vec::new());
+        store.set_specials(vec![3], None, Vec::new(), 0, 0, Vec::new());
         let outcome = store.arith(
             &mut draws,
             b"PIPESTATUS[0] + FUNCNAME[0]",
@@ -1530,7 +1565,14 @@ mod tests {
     #[test]
     fn lineno_and_bashpid_compute_until_unset_or_made_local() {
         let mut store = store();
-        store.set_specials(Vec::new(), None, 7, 42, b"bash: line 7: ".to_vec());
+        store.set_specials(
+            Vec::new(),
+            None,
+            Vec::new(),
+            7,
+            42,
+            b"bash: line 7: ".to_vec(),
+        );
         store.seed("r", Value::Scalar(b"LINENO".to_vec()));
         store.set_attr("r", Some(NAMEREF), true);
         assert_eq!(store.dynamic(LINENO), Some(b"7".to_vec()));

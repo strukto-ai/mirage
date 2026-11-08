@@ -8,6 +8,7 @@ use crate::interp::escapes::{decode_ansi_c, unquoted_runs};
 use crate::interp::parameter::scan_parameter;
 use crate::interp::pattern::Pattern;
 use crate::interp::write::Fault;
+use crate::utf8::unit_len;
 
 impl<H: Host> Expander<'_, H> {
     /// A pattern word as runs, each quoted or live: what `case` patterns
@@ -156,7 +157,7 @@ impl<H: Host> Expander<'_, H> {
         while i < text.len() {
             let byte = text[i];
             if byte == b'\\' && i + 1 < text.len() {
-                let end = i + 1 + char_len(&text[i + 1..]);
+                let end = i + 1 + unit_len(&text[i + 1..]);
                 pattern.push(&std::mem::take(&mut live), false, utf8);
                 pattern.push(&text[i + 1..end], true, utf8);
                 i = end;
@@ -288,23 +289,6 @@ pub(super) fn regex_text(runs: &[(Vec<u8>, bool)]) -> Vec<u8> {
         i += 1;
     }
     out
-}
-
-/// How many bytes the character at the start of `text` takes: one for a
-/// byte that starts no character.
-pub(super) fn char_len(text: &[u8]) -> usize {
-    let width = match text.first() {
-        Some(0xC0..=0xDF) => 2,
-        Some(0xE0..=0xEF) => 3,
-        Some(0xF0..=0xF7) => 4,
-        _ => 1,
-    };
-    let width = width.min(text.len());
-    if std::str::from_utf8(&text[..width]).is_ok() {
-        width
-    } else {
-        1
-    }
 }
 
 /// Index of the next unescaped `quote` from `start`.

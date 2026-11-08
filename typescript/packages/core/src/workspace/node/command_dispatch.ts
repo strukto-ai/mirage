@@ -53,17 +53,10 @@ import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
 import { Recorder, outputTarget } from '../../shell/descriptors.ts'
 import { ArithError, DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
-import {
-  ALIAS_WORD_TYPES,
-  getCommandName,
-  getParts,
-  getText,
-  readRow,
-  splitEnvPrefix,
-} from '../../shell/helpers.ts'
+import { getCommandName, getParts, getText, readRow, splitEnvPrefix } from '../../shell/helpers.ts'
 import type { JobTable } from '../../execution/job/index.ts'
 import { shellJoin } from '../../shell/join.ts'
-import { WORD_BREAKS } from '../../shell/parse/constants.ts'
+import { ALIAS_WORD_TYPES, WORD_BREAKS } from '../../shell/parse/constants.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { TSNodeLike } from '../../shell/types.ts'

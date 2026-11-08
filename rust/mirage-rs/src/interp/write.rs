@@ -9,10 +9,13 @@
 use std::collections::HashSet;
 use std::future::Future;
 
+use super::shell::Shell;
 use super::{Diagnostic, Signal};
 use crate::arith::{self, plain_decimal};
+use crate::integer::parse_decimal;
 use crate::vars::{
-    Assigned, Coercion, Draws, Indexed, NAMEREF, Store, Value, entry_bytes, strip_key_quotes,
+    Assigned, Coercion, Draws, INTEGER, Indexed, NAMEREF, Store, Value, entry_bytes,
+    strip_key_quotes,
 };
 
 /// bash's own exit when it cannot allocate.
@@ -147,7 +150,34 @@ pub struct Writer<'a, G: Gate> {
     pub outside: usize,
 }
 
-impl<G: Gate> Writer<'_, G> {
+impl<'a, G: Gate> Writer<'a, G> {
+    /// A writer over a shell's variables with its options and bounds,
+    /// asking `gate`, its warnings landing in `diagnostics`.
+    pub fn of(
+        shell: &'a mut Shell,
+        gate: &'a mut G,
+        diagnostics: Option<&'a mut Vec<Diagnostic>>,
+    ) -> Self {
+        Writer {
+            allexport: shell.option("allexport"),
+            nounset: shell.option("nounset"),
+            limit: shell.env_limit,
+            outside: shell.outside,
+            store: &mut shell.vars,
+            gate,
+            diagnostics,
+        }
+    }
+
+    /// The name a write lands on: a reference's target when `follow_ref`.
+    fn aim(&self, name: &str, follow_ref: bool) -> String {
+        if follow_ref {
+            self.store.target(name)
+        } else {
+            name.to_owned()
+        }
+    }
+
     fn visible(&self, name: &str) -> Result<(), Fault> {
         if self.store.hidden(name) {
             return Err(Fault::Hidden(name.to_owned()));
@@ -193,11 +223,7 @@ impl<G: Gate> Writer<'_, G> {
         assigned: Option<&Assigned>,
         added: Option<&[u8]>,
     ) -> Result<(), Fault> {
-        let name = if follow_ref {
-            self.store.target(name)
-        } else {
-            name.to_owned()
-        };
+        let name = self.aim(name, follow_ref);
         self.visible(&name)?;
         if self.store.is_readonly(&name, false) {
             return Err(Fault::Readonly {
@@ -238,6 +264,21 @@ impl<G: Gate> Writer<'_, G> {
                 }
             }
         }
+        if value.is_array() && self.store.seeds_random(&name) {
+            // An element written to RANDOM seeds it, which bash evaluates
+            // there, landing what it assigns (`RANDOM[0]='x=5'`): one that
+            // does not evaluate ends the line.
+            match self
+                .store
+                .coerce(&mut coercion, value, INTEGER, None, assigned)
+            {
+                Ok(shaped) => value = shaped,
+                Err(error) => {
+                    self.land_coercion(&mut coercion).await?;
+                    return Err(fatal(self.store.voice(), error));
+                }
+            }
+        }
         let rendering = value.rendering();
         if self.gate.listens() {
             self.gate
@@ -252,11 +293,7 @@ impl<G: Gate> Writer<'_, G> {
         if let Some(word) = seeding {
             match self.store.evaluate_integer(&mut coercion, word, None) {
                 Ok(text) => {
-                    let state = std::str::from_utf8(&text)
-                        .ok()
-                        .and_then(|text| text.parse::<i64>().ok())
-                        .unwrap_or(0)
-                        .rem_euclid(1 << 32) as u32;
+                    let state = parse_decimal::<i64>(&text).unwrap_or(0).rem_euclid(1 << 32) as u32;
                     self.store.seed_random(word.clone(), state);
                 }
                 Err(error) => {
@@ -329,11 +366,7 @@ impl<G: Gate> Writer<'_, G> {
     /// an enclosing scope's value and is then refused gives that value back
     /// to the scope.
     pub async fn unset(&mut self, name: &str, follow_ref: bool) -> Result<(), Fault> {
-        let name = if follow_ref {
-            self.store.target(name)
-        } else {
-            name.to_owned()
-        };
+        let name = self.aim(name, follow_ref);
         if self.store.hidden(&name) {
             return Ok(());
         }
@@ -383,11 +416,7 @@ impl<G: Gate> Writer<'_, G> {
         on: bool,
         follow_ref: bool,
     ) -> Result<(), Fault> {
-        let name = if follow_ref && attr != Some(NAMEREF) {
-            self.store.target(name)
-        } else {
-            name.to_owned()
-        };
+        let name = self.aim(name, follow_ref && attr != Some(NAMEREF));
         self.visible(&name)?;
         if self.gate.listens() {
             self.gate.pre(Verb::Set, &name, None, self.store).await?;
@@ -455,11 +484,7 @@ impl<G: Gate> Writer<'_, G> {
                 Some(Assigned::Keys(HashSet::from([key]))),
             )
         } else if key.is_some() || self.store.indexed(&name).is_some() {
-            let index = key
-                .as_deref()
-                .and_then(|key| std::str::from_utf8(key).ok())
-                .and_then(|key| key.parse().ok())
-                .unwrap_or(0);
+            let index = key.as_deref().and_then(parse_decimal).unwrap_or(0);
             let mut array = match self.store.indexed(&name) {
                 Some(array) => array.clone(),
                 None => Indexed::dense(
@@ -486,8 +511,14 @@ impl<G: Gate> Writer<'_, G> {
         let landed = self.land_writes(std::mem::take(&mut coercion.writes)).await;
         self.store.step_forward(globals);
         landed?;
+        self.settle(&mut coercion.draws)
+    }
+
+    /// Replay an evaluation's `RANDOM` draws; a seed that does not
+    /// evaluate stops the line as a coercion's error does.
+    fn settle(&mut self, draws: &mut Draws) -> Result<(), Fault> {
         self.store
-            .settle(&mut coercion.draws)
+            .settle(draws)
             .map_err(|error| fatal(self.store.voice(), error))
     }
 
@@ -508,9 +539,7 @@ impl<G: Gate> Writer<'_, G> {
             Err(error) => (0, Some(error)),
         };
         self.land_writes(outcome.writes).await?;
-        self.store
-            .settle(&mut draws)
-            .map_err(|error| fatal(self.store.voice(), error))?;
+        self.settle(&mut draws)?;
         match error {
             None => Ok(index),
             Some(arith::Error::Arith {
@@ -681,9 +710,7 @@ impl<G: Gate> Writer<'_, G> {
                 }
             }
         }
-        self.store
-            .settle(&mut draws)
-            .map_err(|error| fatal(self.store.voice(), error))?;
+        self.settle(&mut draws)?;
         landed?;
         value.map_err(|error| match error {
             arith::Error::Unbound(name) => Signal::unbound(self.store.voice(), &name).into(),
@@ -713,7 +740,7 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use super::*;
-    use crate::vars::{INTEGER, RANDOM, READONLY};
+    use crate::vars::{RANDOM, READONLY};
 
     #[derive(Default)]
     struct Recorder {
@@ -843,6 +870,16 @@ mod tests {
         let mut gate = Recorder::default();
         run(writer(&mut store, &mut gate).set(RANDOM, scalar("42"), true, None, None)).unwrap();
         assert_eq!(store.next_random().unwrap(), Some(17772));
+    }
+
+    #[test]
+    fn an_element_seeding_random_lands_what_it_assigns() {
+        let mut store = Store::new(Arc::new(|| 1));
+        let mut gate = Recorder::default();
+        let seeded = Value::Indexed(Indexed::dense([b"x=1+2".to_vec()]));
+        run(writer(&mut store, &mut gate).set(RANDOM, seeded, true, None, None)).unwrap();
+        assert_eq!(text(&store, "x").as_deref(), Some("3"));
+        assert_eq!(store.indexed(RANDOM).unwrap().get(0), Some(&b"3"[..]));
     }
 
     #[test]

@@ -17,7 +17,10 @@ from mirage.workspace.executor.builtins.alias.alias import (
     alias_builtin,
     unalias_builtin,
 )
-from mirage.workspace.executor.builtins.command.command import command_builtin
+from mirage.workspace.executor.builtins.command.command import (
+    builtin_builtin,
+    command_builtin,
+)
 from mirage.workspace.executor.builtins.condition.condition import test_builtin
 from mirage.workspace.executor.builtins.control.control import (
     break_builtin,
@@ -108,6 +111,7 @@ BUILTINS: dict[str, BuiltinFn] = {
     SB.DOT: source_builtin,
     SB.EVAL: eval_builtin,
     SB.COMMAND: command_builtin,
+    SB.BUILTIN: builtin_builtin,
     SB.TYPE: type_builtin,
     SB.WHICH: which_builtin,
     SB.HELP: help_builtin,

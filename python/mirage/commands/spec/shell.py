@@ -471,6 +471,14 @@ SHELL_SPECS: dict[str, CommandSpec] = {
             ),
         ),
     ),
+    "builtin": CommandSpec(
+        description=(
+            "Run a shell builtin, passing over shell functions.\n\n"
+            "Runs SHELL-BUILTIN with its ARGs even when a shell function "
+            "has the same name."
+        ),
+        epilog="The status of SHELL-BUILTIN, or 1 when it is not one.",
+    ),
     "command": CommandSpec(
         description=(
             "Run a command, passing over shell functions, or describe it.\n\n"

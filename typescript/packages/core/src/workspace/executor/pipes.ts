@@ -171,13 +171,13 @@ export async function handlePipe(
               sink: output,
               signal: stops,
             })
-            await pump(output, Channel.STDOUT, out)
+            await pump(output, Channel.STDOUT, out, ran)
             return [null, ran, node]
           }),
         )
         io = result
         childExec = execution
-        await pump(output, Channel.STDOUT, stdout)
+        await pump(output, Channel.STDOUT, stdout, io)
         await pump(output, Channel.STDERR, io.stderr)
         await waits?.join(rest)
       } catch (error) {

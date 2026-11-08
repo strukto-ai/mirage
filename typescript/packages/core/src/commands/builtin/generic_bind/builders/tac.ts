@@ -15,7 +15,7 @@
 import type { CommandFn } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { GenericCommand } from '../adapter.ts'
-import { commandFiles, dirAwareStream, resolveOrEmpty } from '../files.ts'
+import { commandFiles, dirAwareStat, dirAwareStream, resolveOrEmpty } from '../files.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
@@ -30,8 +30,8 @@ import {
 } from '../../../../rs/stream.ts'
 import { byteView, utf8Locale } from '../../../../shell/bytes.ts'
 import { concat } from '../../../../utils/bytes.ts'
-import { resolveSource, stdinStream } from '../../utils/stream.ts'
-import { reportedStream } from '../../utils/operands.ts'
+import { resolveSource, stdinStat, stdinStream } from '../../utils/stream.ts'
+import { errorsFirst, operandsIo, reportedStream, splitReadable } from '../../utils/operands.ts'
 
 const ENC = new TextEncoder()
 
@@ -101,13 +101,25 @@ const tac: CommandFn = async (_accessor, paths, _texts, ctx) => {
     await closeStream(engine)
     throw err
   }
+  let readable: PathSpec[]
+  let err: string
+  try {
+    ;[readable, err] = await splitReadable(resolved, stdinStat(dirAwareStat(files, ctx)), 'tac')
+  } catch (error) {
+    await closeStream(engine)
+    throw error
+  }
+  if (err !== '' && readable.length === 0) {
+    await closeStream(engine)
+    return [null, operandsIo(err)]
+  }
   const stream = stdinStream(dirAwareStream(files, ctx), ctx.stdin)
   const io = new IOResult()
   const sources =
-    resolved.length > 0
-      ? resolved.map((path) => reportedStream(stream(path), io, path, 'tac'))
+    readable.length > 0
+      ? readable.map((path) => reportedStream(stream(path), io, path, 'tac'))
       : [resolveSource(ctx.stdin)]
-  return [reversed(engine, sources, io, ctx.signal), io]
+  return errorsFirst([reversed(engine, sources, io, ctx.signal), io], err)
 }
 
 export const BUILDER: GenericCommand = {

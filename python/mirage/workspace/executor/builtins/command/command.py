@@ -16,11 +16,12 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from mirage.io.types import ByteSource
-from mirage.shell.bytes import encode_text
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.shell.call_stack import CallStack
 from mirage.shell.join import shell_join
 from mirage.shell.voice import shell_voice
 from mirage.utils.quote import single_quote
+from mirage.workspace.executor.builtins.alias.alias import aliases_on
 from mirage.workspace.executor.builtins.getopt import last_of, scan_options
 from mirage.workspace.executor.builtins.lookup import (
     classify,
@@ -28,8 +29,19 @@ from mirage.workspace.executor.builtins.lookup import (
     program_file,
 )
 from mirage.workspace.executor.builtins.lookup.types import NameKind
-from mirage.workspace.executor.builtins.shared import builtin_usage, ok, result
+from mirage.workspace.executor.builtins.shared import (
+    builtin_usage,
+    ok,
+    result,
+    written,
+)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.lookup.constants import (
+    BASH_BUILTINS,
+    KEYWORDS,
+    SHELL_NAMES,
+)
+from mirage.workspace.lookup.lookup import without_capture
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -56,15 +68,14 @@ def _probe(
         session (SessionState): shell session state.
         registry (MountRegistry): mount registry.
     """
-    out_lines: list[str] = []
-    err_lines: list[str] = []
+    pieces: list[tuple[bool, str]] = []
     any_found = False
     for name in rest:
         kind = classify(name, session, registry)
         if kind is None:
             if mode == "V":
-                err_lines.append(
-                    f"{shell_voice()}command: {name}: not found\n"
+                pieces.append(
+                    (True, f"{shell_voice()}command: {name}: not found\n")
                 )
             continue
         any_found = True
@@ -78,15 +89,12 @@ def _probe(
             line = program_file(name)
         else:
             line = name
-        out_lines.append(f"{line}\n")
-    out = encode_text("".join(out_lines)) if out_lines else None
+        pieces.append((False, f"{line}\n"))
     # The status and the diagnostics are independent: bash prints
     # `command: nope: not found` for a missing name and still exits 0
     # when another name resolved.
     code = 0 if (not rest or any_found) else 1
-    return result(
-        "command", out=out, exit_code=code, stderr="".join(err_lines)
-    )
+    return written("command", pieces, code)
 
 
 async def handle_command_builtin(
@@ -134,31 +142,147 @@ async def handle_command_builtin(
     if not rest:
         return ok("command")
 
-    inner_name = rest[0]
-    inner = shell_join(rest)
-    # Function bodies are never None, so popping with a None default lets
-    # `is not None` mean "a shadowing function was masked" for restore.
-    # An alias is masked the same way: bash expands an alias only as a
-    # command's first word, which `command` is, so `command cat` runs
-    # the program past `alias cat=...` too.
-    saved_fn = session.functions.pop(inner_name, None)
-    saved_alias = session.aliases.pop(inner_name, None)
+    return await _past_functions(
+        "command", execute_fn, rest, session, stdin, call_stack
+    )
+
+
+async def _past_functions(
+    cmd: str,
+    execute_fn: Callable[..., Any],
+    words: Sequence[str],
+    session: SessionState,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    routing: RouteDecision[RuntimeIdentity] | None = None,
+) -> Result:
+    """Run ``words`` past a shell function or alias of their head's name.
+
+    A head the line would read as more than a name is single-quoted, as
+    bash takes the word as it is: one an alias would expand, so the
+    alias table stays whole for the builtin to read (``builtin alias
+    alias``), a reserved word (``command time``) and an assignment
+    (``command X=5``). Any other head goes as typed. A shadowing
+    function is masked in the session for the inner run while builtins
+    and mount commands still resolve; a function never shadows a
+    builtin, so one named like a builtin stays.
+
+    Args:
+        cmd (str): the builtin that runs them, named on the node.
+        execute_fn (Callable): shell evaluator for the inner line.
+        words (list[str]): the command and its arguments.
+        session (SessionState): shell session state.
+        stdin (ByteSource | None): piped input for the inner run.
+        call_stack (CallStack | None): the caller's frames; None runs
+            the target as a line of its own.
+        routing (RouteDecision | None): the placement the inner line
+            runs under; None keeps the line's own.
+    """
+    inner_name = words[0]
+    inner = shell_join(words)
+    if (
+        "=" in inner_name
+        or inner_name in KEYWORDS
+        or (aliases_on(session) and inner_name in session.aliases)
+    ):
+        rest = shell_join(words[1:])
+        inner = single_quote(inner_name) + (f" {rest}" if rest else "")
+    # A function never shadows a bash builtin mirage runs, so one of such
+    # a name stays for the builtin to read or remove (`builtin unset -f
+    # unset`); an interpreter's (`python3`) is still masked. Function
+    # bodies are never None, so popping with a None default lets `is not
+    # None` mean "a shadowing function was masked" for restore.
+    saved_fn = (
+        None
+        if inner_name in BASH_BUILTINS and inner_name in SHELL_NAMES
+        else session.functions.pop(inner_name, None)
+    )
+    placement = {} if routing is None else {"routing_decision": routing}
     try:
         io = await execute_fn(
             inner,
             session_id=session.session_id,
             stdin=stdin,
             call_stack=call_stack,
+            **placement,
         )
     finally:
         if saved_fn is not None:
             session.functions[inner_name] = saved_fn
-        if saved_alias is not None:
-            session.aliases[inner_name] = saved_alias
     return (
         io.stdout,
         io,
-        ExecutionNode(command="command", exit_code=io.exit_code),
+        ExecutionNode(command=cmd, exit_code=io.exit_code),
+    )
+
+
+async def handle_builtin(
+    execute_fn: Callable[..., Any],
+    args: list[str],
+    session: SessionState,
+    stdin: ByteSource | None = None,
+    call_stack: CallStack | None = None,
+    routing: RouteDecision[RuntimeIdentity] | None = None,
+) -> Result:
+    """Run the ``builtin`` builtin (``builtin [shell-builtin [arg ...]]``).
+
+    It runs a shell builtin past a function or alias of its name, in the
+    caller's frames as ``command`` does, and past a runtime that captures
+    the name (``builtin kill``), and refuses any other word
+    (``builtin: ls: not a shell builtin``, status 1); with no word it
+    does nothing. ``--`` ends its options and any other one is refused
+    with status 2. Pinned against bash 5.2 on debian:stable-slim.
+
+    Args:
+        execute_fn (Callable): shell evaluator for the inner line.
+        args (list[str]): words after the ``builtin`` name.
+        session (SessionState): shell session state.
+        stdin (ByteSource | None): piped input for the inner run.
+        call_stack (CallStack | None): the caller's frames; None runs
+            the target as a line of its own.
+        routing (RouteDecision | None): the line's placement.
+    """
+    if args[:1] == ["--"]:
+        args = args[1:]
+    elif args and args[0].startswith("-") and args[0] != "-":
+        return result(
+            "builtin",
+            exit_code=2,
+            stderr=f"{shell_voice()}builtin: {args[0]}: invalid option\n"
+            + builtin_usage("builtin"),
+        )
+    if not args:
+        return ok("builtin")
+    if args[0] not in BASH_BUILTINS:
+        return result(
+            "builtin",
+            exit_code=1,
+            stderr=f"{shell_voice()}builtin: {args[0]}: not a shell builtin\n",
+        )
+    return await _past_functions(
+        "builtin",
+        execute_fn,
+        args,
+        session,
+        stdin,
+        call_stack,
+        without_capture(routing, args[0]),
+    )
+
+
+async def builtin_builtin(call: BuiltinCall) -> Result:
+    """The ``builtin`` arm.
+
+    Args:
+        call (BuiltinCall): the invocation.
+    """
+    return await handle_builtin(
+        call.execute_fn,
+        list(call.argv.args),
+        call.context.session,
+        call.stdin,
+        call.call_stack,
+        call.context.frame.routing,
     )
 
 

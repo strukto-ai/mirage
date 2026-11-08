@@ -22,7 +22,7 @@ import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
-import { builtinUsage, result } from '../shared.ts'
+import { builtinUsage, result, written } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 import { describe, locations, programFile } from './classify.ts'
 import { TYPE_OPTIONS, WHICH_OPTIONS, WHICH_USAGE } from './constants.ts'
@@ -58,34 +58,31 @@ export function handleType(
   const mode = lastOf(scan.letters, 'tpP')
   const allMode = scan.letters.includes('a')
   const hidden = scan.letters.includes('f') ? NameKind.FUNCTION : null
-  const outLines: string[] = []
-  const errLines: string[] = []
+  const pieces: [boolean, string][] = []
   let allFound = true
   for (const name of scan.operands) {
     if (mode === 'P') {
       if (program(name, session, registry) === null) allFound = false
-      else outLines.push(`${programFile(name)}\n`)
+      else pieces.push([false, `${programFile(name)}\n`])
       continue
     }
     const kinds = locations(name, session, registry, allMode, hidden)
     if (kinds.length === 0) {
       allFound = false
-      if (mode === null) errLines.push(`${shellVoice()}type: ${name}: not found\n`)
+      if (mode === null) pieces.push([true, `${shellVoice()}type: ${name}: not found\n`])
       continue
     }
-    if (mode === 't') for (const item of kinds.map((kind) => `${kind}\n`)) outLines.push(item)
+    if (mode === 't') for (const kind of kinds) pieces.push([false, `${kind}\n`])
     else if (mode === 'p') {
-      for (const kind of kinds) if (kind === NameKind.FILE) outLines.push(`${programFile(name)}\n`)
-    } else outLines.push(...kinds.map((kind) => `${describe(name, kind, session, parser)}\n`))
+      for (const kind of kinds)
+        if (kind === NameKind.FILE) pieces.push([false, `${programFile(name)}\n`])
+    } else
+      for (const kind of kinds) pieces.push([false, `${describe(name, kind, session, parser)}\n`])
   }
-  const out = outLines.length > 0 ? encodeText(outLines.join('')) : null
-  const err = encodeText(errLines.join(''))
+  // One call, so the diagnostics never ride on the status: a partial miss
+  // both warns and reports through the exit code.
   const code = scan.operands.length === 0 || allFound ? 0 : 1
-  return [
-    out,
-    new IOResult({ exitCode: code, stderr: err }),
-    new ExecutionNode({ command: 'type', exitCode: code, stderr: err }),
-  ]
+  return written('type', pieces, code)
 }
 
 /**

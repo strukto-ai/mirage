@@ -48,5 +48,6 @@ export const VAR_KEYS: ReadonlySet<string> = new Set([
   'arrays',
   'assocs',
   'var_attrs',
+  'unassigned',
   'managed',
 ])

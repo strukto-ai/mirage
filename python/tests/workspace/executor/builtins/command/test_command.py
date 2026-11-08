@@ -197,6 +197,22 @@ async def test_run_mode_joins_and_runs():
 
 
 @pytest.mark.asyncio
+async def test_run_mode_quotes_a_head_an_alias_would_expand():
+    shell = FakeShell()
+    session = make_session()
+    session.aliases["echo"] = "echo E"
+    await handle_command_builtin(
+        shell, ["echo", "x"], session, make_registry()
+    )
+    session.shopts["expand_aliases"] = True
+    await handle_command_builtin(
+        shell, ["echo", "x"], session, make_registry()
+    )
+    assert shell.lines == ["echo x", "'echo' x"]
+    assert session.aliases == {"echo": "echo E"}
+
+
+@pytest.mark.asyncio
 async def test_run_mode_runs_in_the_callers_frames():
     shell = FakeShell()
     frames = CallStack()

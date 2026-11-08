@@ -1,10 +1,11 @@
-//! The layout the session engine's requests and replies take across the
-//! module boundary: one item, a tag byte then its body, little-endian.
-//! 0 none, 1 false, 2 true, 3 a number (`i64`, which the host reads as a
-//! float), 4 text (a `u32` length and the bytes, which the host reads as
-//! shell text), 5 a list (a `u32` count and the items), 6 a map (a `u32`
-//! count and each key then value), 7 a big integer (`i64`, which the host
-//! reads exactly), 8 raw bytes (as text, which the host keeps as bytes).
+//! The item a binding hands the session engine's requests and replies
+//! across in, and its layout across the wasm module boundary: a tag byte
+//! then its body, little-endian. 0 none, 1 false, 2 true, 3 a number
+//! (`i64`, which the host reads as a float), 4 text (a `u32` length and the
+//! bytes, which the host reads as shell text), 5 a list (a `u32` count and
+//! the items; a tuple too), 6 a map (a `u32` count and each key then
+//! value), 7 a big integer (`i64`, which the host reads exactly), 8 raw
+//! bytes (as text, which the host keeps as bytes).
 
 pub enum Item {
     Nil,
@@ -12,6 +13,8 @@ pub enum Item {
     Int(i64),
     Text(Vec<u8>),
     List(Vec<Item>),
+    /// A list the host unpacks by position, which Python reads as a tuple.
+    Tuple(Vec<Item>),
     Map(Vec<(Item, Item)>),
     Big(i64),
     Raw(Vec<u8>),
@@ -28,6 +31,10 @@ impl Item {
 
     pub fn list(items: impl IntoIterator<Item = Item>) -> Self {
         Item::List(items.into_iter().collect())
+    }
+
+    pub fn tuple(items: impl IntoIterator<Item = Item>) -> Self {
+        Item::Tuple(items.into_iter().collect())
     }
 
     pub fn opt<T>(value: Option<T>, f: impl FnOnce(T) -> Item) -> Self {
@@ -51,7 +58,7 @@ impl Item {
                 len(out, bytes.len());
                 out.extend_from_slice(bytes);
             }
-            Item::List(items) => {
+            Item::List(items) | Item::Tuple(items) => {
                 out.push(5);
                 len(out, items.len());
                 for item in items {
@@ -168,7 +175,7 @@ impl Args {
 
     pub fn list(&mut self) -> Result<Vec<Item>, String> {
         match self.item()? {
-            Item::List(items) => Ok(items),
+            Item::List(items) | Item::Tuple(items) => Ok(items),
             _ => Err("a request expected a list".to_owned()),
         }
     }
@@ -185,4 +192,21 @@ impl Args {
 /// Read `item` as one argument, through `read`.
 pub fn one<T>(item: Item, read: impl FnOnce(&mut Args) -> Result<T, String>) -> Result<T, String> {
     read(&mut Args::new(vec![item]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_tuple_goes_on_the_wire_as_a_list() {
+        let (mut tuple, mut list) = (Vec::new(), Vec::new());
+        Item::tuple([Item::text("ok"), Item::Big(3)]).encode(&mut tuple);
+        Item::list([Item::text("ok"), Item::Big(3)]).encode(&mut list);
+        assert_eq!(tuple, list);
+        assert!(matches!(
+            Item::decode(&mut &tuple[..]),
+            Some(Item::List(items)) if items.len() == 2
+        ));
+    }
 }

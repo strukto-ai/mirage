@@ -13,7 +13,9 @@ const SPECIALS: &[u8] = b"@*#?-$!";
 const NULL_OPERATORS: &[u8] = b"-=?+";
 const OPERATORS: &[u8] = b"}@#%-=?+/^,~";
 
-fn starts_name(byte: Option<&u8>) -> bool {
+/// Whether a parameter starting with `byte` is a name, which can be
+/// assigned, rather than a positional or a special.
+pub(crate) fn starts_name(byte: Option<&u8>) -> bool {
     byte.is_some_and(|b| *b == b'_' || b.is_ascii_alphabetic())
 }
 

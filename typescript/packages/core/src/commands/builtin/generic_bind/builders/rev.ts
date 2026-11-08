@@ -15,12 +15,12 @@
 import { revGeneric } from '../../generic/rev.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
-import { commandFiles, dirAwareStream, resolveOrEmpty } from '../files.ts'
+import { commandFiles, dirAwareStat, dirAwareStream, resolveOrEmpty } from '../files.ts'
 
 const rev: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return revGeneric(resolved, ctx, dirAwareStream(files, ctx))
+  return revGeneric(resolved, ctx, dirAwareStat(files, ctx), dirAwareStream(files, ctx))
 }
 
 export const BUILDER: GenericCommand = {

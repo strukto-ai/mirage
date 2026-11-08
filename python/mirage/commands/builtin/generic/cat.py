@@ -5,10 +5,11 @@ from mirage.commands.builtin.utils.constants import CHAR_DEVICE_MAX_BYTES
 from mirage.commands.builtin.utils.limit import truncate_stream
 from mirage.commands.builtin.utils.links import own_output
 from mirage.commands.builtin.utils.operands import (
+    in_order,
     normalized_read,
     operands_io,
     reported_stream,
-    split_readable,
+    split_in_order,
 )
 from mirage.commands.builtin.utils.stream import (
     resolve_source,
@@ -20,7 +21,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.stream import OutputStream, async_chain, close_quietly
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.stream import open_stream
 from mirage.shell.bytes import encode_text
@@ -108,12 +109,13 @@ async def cat_generic(
             stats[p.virtual] = row
             return row
 
-        readable, err = await split_readable(paths, remember_stat, "cat")
-        if not readable:
-            return None, operands_io(err)
+        order = await split_in_order(paths, remember_stat, "cat")
+        if not any(isinstance(p, PathSpec) for p in order):
+            return None, operands_io(
+                b"".join(p for p in order if isinstance(p, bytes))
+            )
         io = IOResult()
-        if err:
-            io.stderr = err
+        if any(isinstance(p, bytes) for p in order):
             io.exit_code = 1
 
         async def source_for(p: PathSpec) -> AsyncIterator[bytes]:
@@ -125,9 +127,11 @@ async def cat_generic(
             return source
 
         writes = own_output(ctx)
-        source: ByteSource = async_chain(
+        source: ByteSource = in_order(
             [
-                reported_stream(
+                p
+                if isinstance(p, bytes)
+                else reported_stream(
                     _unless_output(await source_for(p), io, p)
                     if writes(p)
                     else await source_for(p),
@@ -135,8 +139,9 @@ async def cat_generic(
                     p,
                     "cat",
                 )
-                for p in readable
-            ]
+                for p in order
+            ],
+            io,
         )
         if wants_display:
             return display_lines(source, parsed), io

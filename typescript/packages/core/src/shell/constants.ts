@@ -54,11 +54,13 @@ export const OUTPUT_ONLY_BUILTINS: ReadonlySet<string> = new Set([
 // The dynamic variables the shell answers itself: PIPESTATUS reads the
 // session's record of the last pipeline (`SessionState.pipeStatus`) and
 // FUNCNAME the frames on the call stack (`SessionState.functionNames`),
-// neither held in the variable store; RANDOM steps mirage-rs's generator,
+// neither held in the variable store, and BASH_LINENO the line each was
+// called from, which no unset ends; RANDOM steps mirage-rs's generator,
 // which stores each draw on the name; LINENO is the running command's line
 // and BASHPID the process running it.
 export const PIPESTATUS = 'PIPESTATUS'
 export const FUNCNAME = 'FUNCNAME'
+export const BASH_LINENO = 'BASH_LINENO'
 export const RANDOM = 'RANDOM'
 export const LINENO = 'LINENO'
 export const BASHPID = 'BASHPID'
@@ -317,6 +319,7 @@ export const BUILTIN_GROUP: ReadonlyMap<ShellBuiltin, BuiltinGroup> = new Map<
   [ShellBuiltin.DOT, BuiltinGroup.RUNNING_LINES],
   [ShellBuiltin.EVAL, BuiltinGroup.RUNNING_LINES],
   [ShellBuiltin.COMMAND, BuiltinGroup.RUNNING_LINES],
+  [ShellBuiltin.BUILTIN, BuiltinGroup.RUNNING_LINES],
   [ShellBuiltin.TYPE, BuiltinGroup.NAME_LOOKUP],
   [ShellBuiltin.WHICH, BuiltinGroup.NAME_LOOKUP],
   [ShellBuiltin.HELP, BuiltinGroup.NAME_LOOKUP],

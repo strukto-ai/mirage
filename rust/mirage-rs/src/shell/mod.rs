@@ -15,6 +15,7 @@ mod heredoc;
 mod lex;
 mod lower;
 mod parser;
+mod reread;
 mod scan;
 mod test_command;
 mod tree;
@@ -24,6 +25,7 @@ mod word;
 mod tests;
 
 pub use lower::Heredoc;
+pub use reread::reread_lines;
 pub use tree::{FIELDS, KINDS, Node, Refusal, Tree, field_id};
 
 /// How a line is read: the names the shell expands as aliases, each a

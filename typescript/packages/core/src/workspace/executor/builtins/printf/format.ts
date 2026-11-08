@@ -23,9 +23,10 @@ import { concat } from '../../../../utils/bytes.ts'
  * Format raw shell arguments through the shared bounded engine. The output
  * comes out as the engine drains it, one bounded step at a time, so a wide
  * field or a long reuse of the format is never held whole, and a reader that
- * stops early stops the engine. The status and stderr settle on `io` as the
- * output ends, or as its reader stops: the status the format reached, unless
- * an output limit set one first, and the stderr ahead of that limit's notice.
+ * stops early stops the engine. A diagnostic lands on `io` where the engine
+ * wrote it among the output, and the status settles as the output ends, or as
+ * its reader stops: the status the format reached, unless an output limit set
+ * one first.
  * `voice` leads a builtin diagnostic, read when the builtin ran rather than
  * when its output drains. Mirrors Python's printf_output.
  */
@@ -48,6 +49,12 @@ export async function* printfOutput(
   })
   const budget = new YieldBudget(signal)
   const errors: Uint8Array[] = []
+  const said = (): void => {
+    if (errors.length === 0) return
+    const err = concat(errors)
+    errors.length = 0
+    io.stderr = io.stderr instanceof Uint8Array ? concat([io.stderr, err]) : err
+  }
   try {
     for (const [index, text] of [fmt, ...args].entries()) {
       for (let at = 0; at < text.length;) {
@@ -64,22 +71,23 @@ export async function* printfOutput(
     const output = stream.finish()
     const first = stream.takeStderr()
     if (first.byteLength > 0) errors.push(first)
-    if (output.byteLength > 0) yield output
+    if (output.byteLength > 0) {
+      said()
+      yield output
+    }
     while (stream.busy()) {
       const part = stream.drain()
       const more = stream.takeStderr()
       if (more.byteLength > 0) errors.push(more)
-      if (part.byteLength > 0) yield part
+      if (part.byteLength > 0) {
+        said()
+        yield part
+      }
       await budget.run()
     }
   } finally {
-    if (stream.live) {
-      if (io.exitCode === 0) io.exitCode = stream.status()
-      const err = concat(errors)
-      if (err.byteLength > 0) {
-        io.stderr = io.stderr instanceof Uint8Array ? concat([err, io.stderr]) : err
-      }
-    }
+    said()
+    if (stream.live && io.exitCode === 0) io.exitCode = stream.status()
     await closeStream(stream)
   }
 }

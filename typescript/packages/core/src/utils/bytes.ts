@@ -25,6 +25,13 @@ export function concat(chunks: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
   return out
 }
 
+/** Whether `data` begins with `prefix`, as Python's `bytes.startswith`. */
+export function startsWith(data: Uint8Array, prefix: Uint8Array): boolean {
+  if (prefix.length > data.length) return false
+  for (let i = 0; i < prefix.length; i++) if (data[i] !== prefix[i]) return false
+  return true
+}
+
 /** Where `needle` first occurs in `haystack` at or after `from`, -1 when it
  * does not; an empty `needle` occurs at `from`. */
 export function findBytes(haystack: Uint8Array, needle: Uint8Array, from = 0): number {

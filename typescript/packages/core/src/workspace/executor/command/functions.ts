@@ -32,6 +32,7 @@ import type { PathSpec } from '../../../types.ts'
 import { wordText } from '../../../types.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import { argsBytes, checkEnv, framesBytes } from '../../session/budget.ts'
+import { calledLines } from '../../session/functions.ts'
 import type { SessionState } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { bodyAliases } from '../builtins/alias/alias.ts'
@@ -99,10 +100,12 @@ export async function runShellFunction(
     throw error
   }
   const bodyStdin = share(stdin)
-  cs.push(textArgs, cmdName)
+  cs.push(textArgs, cmdName, false, session.lineNumber)
   let lifted = liftFunctionTraps(session)
   const outerNames = session.functionNames
   if (outerNames !== null) session.functionNames = cs.functionNames()
+  const outerLines = session.callLines
+  session.callLines = cs.callLines()
   // The function's scope: a local shadows the whole record, so the
   // caller's value and attributes come back together when it returns.
   const shell = session.vars.shell
@@ -117,7 +120,7 @@ export async function runShellFunction(
     number,
     number,
     number,
-    readonly number[] | null,
+    SessionState['lineRows'],
     string | null,
     TSNodeLike | null,
   ] = [
@@ -140,7 +143,7 @@ export async function runShellFunction(
     ;[session.parseCurrent, session.parseRow] = site.mark
   }
   session.lineRow = site?.row ?? 0
-  session.lineRows = null
+  session.lineRows = site === undefined ? null : calledLines(site.lines, body)
   session.parseName = site?.name ?? 'environment'
   session.aliasView = site?.aliases ?? null
   // Its commands stand under the definition's place, on a hand-off of
@@ -214,6 +217,7 @@ export async function runShellFunction(
     scope.release()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
+    session.callLines = outerLines
     restoreFunctionTraps(session, lifted)
     shell.leave(outerScope)
   }

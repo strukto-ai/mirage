@@ -223,6 +223,18 @@ describe('handleCommandBuiltin run mode', () => {
     expect(shell).toHaveBeenCalledWith("echo 'a b' '$x'", expect.anything())
   })
 
+  it('quotes a head an alias would expand', async () => {
+    const shell = vi.fn(() => Promise.resolve(new IOResult()))
+    const session = makeSession()
+    session.aliases.echo = 'echo E'
+    await handleCommandBuiltin(shell, ['echo', 'x'], session, makeRegistry())
+    session.shopts.expand_aliases = true
+    await handleCommandBuiltin(shell, ['echo', 'x'], session, makeRegistry())
+    expect(shell).toHaveBeenNthCalledWith(1, 'echo x', expect.anything())
+    expect(shell).toHaveBeenNthCalledWith(2, "'echo' x", expect.anything())
+    expect(session.aliases).toEqual({ echo: 'echo E' })
+  })
+
   it('forwards pipe stdin to the inner command', async () => {
     const shell = vi.fn(() => Promise.resolve(new IOResult()))
     const piped = new TextEncoder().encode('piped\n')

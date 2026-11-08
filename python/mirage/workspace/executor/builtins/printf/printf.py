@@ -32,6 +32,7 @@ from mirage.workspace.executor.builtins.printf.format import (
 )
 from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
+    denied_line,
     fail,
     identifier_line,
     readonly_line,
@@ -170,9 +171,7 @@ async def handle_printf(
     if status == "readonly":
         return fail("printf", errors + readonly_line("printf", base) + "\n")
     if status == "denied":
-        return fail(
-            "printf", errors + f"{shell_voice()}{base}: permission denied\n"
-        )
+        return fail("printf", errors + denied_line(base) + "\n")
     if status != "ok":
         return fail(
             "printf",

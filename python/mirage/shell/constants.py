@@ -90,11 +90,13 @@ OUTPUT_ONLY_BUILTINS = frozenset({"echo", "printf", "true", "false", ":"})
 # The dynamic variables the shell answers itself: PIPESTATUS reads the
 # session's record of the last pipeline (`SessionState.pipe_status`) and
 # FUNCNAME the frames on the call stack (`SessionState.function_names`),
-# neither held in the variable store; RANDOM steps mirage-rs's generator,
+# neither held in the variable store, and BASH_LINENO the line each was
+# called from, which no unset ends; RANDOM steps mirage-rs's generator,
 # which stores each draw on the name; LINENO is the running command's
 # line and BASHPID the process running it.
 PIPESTATUS = "PIPESTATUS"
 FUNCNAME = "FUNCNAME"
+BASH_LINENO = "BASH_LINENO"
 RANDOM = "RANDOM"
 LINENO = "LINENO"
 BASHPID = "BASHPID"
@@ -320,6 +322,7 @@ BUILTIN_GROUP: Mapping[ShellBuiltin, BuiltinGroup] = {
     ShellBuiltin.DOT: BuiltinGroup.RUNNING_LINES,
     ShellBuiltin.EVAL: BuiltinGroup.RUNNING_LINES,
     ShellBuiltin.COMMAND: BuiltinGroup.RUNNING_LINES,
+    ShellBuiltin.BUILTIN: BuiltinGroup.RUNNING_LINES,
     ShellBuiltin.TYPE: BuiltinGroup.NAME_LOOKUP,
     ShellBuiltin.WHICH: BuiltinGroup.NAME_LOOKUP,
     ShellBuiltin.HELP: BuiltinGroup.NAME_LOOKUP,

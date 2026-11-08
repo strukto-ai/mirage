@@ -15,7 +15,8 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { mountKey, mountPrefixOf, underPath } from '../../../utils/key_prefix.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { atOffsets } from '../utils/operands.ts'
+import { IOResult } from '../../../io/types.ts'
 import {
   LINK_TARGET_KEY,
   FileStat,
@@ -144,11 +145,14 @@ interface WalkOpts {
 // a directory: GNU prints those first, as one block with no header. `groups`
 // holds one [dir, entries] pair per directory listed under the operand — one
 // for a plain listing, the whole pre-order subtree under -R. Both empty means
-// the operand could not be accessed.
+// the operand could not be accessed. `notes` holds each directory the walk
+// could not list, with the number of groups listed before it: GNU reports one
+// where its listing would have printed.
 interface Operand {
   readonly path: PathSpec
   readonly row: FileStat | null
   readonly groups: [PathSpec, FileStat[]][]
+  readonly notes?: readonly (readonly [number, LsWarning])[]
 }
 
 function errText(err: unknown): string {
@@ -775,11 +779,17 @@ async function probeOperand(
     // it names, and a directory it may not read is worded apart, the entry
     // being there.
     const verb = found !== null && isEacces(err) ? 'cannot open directory' : 'cannot access'
-    warnings.push({
+    const refusal: LsWarning = {
       message: `ls: ${verb} '${path.rawPath}': ${errText(refused ?? err)}`,
       serious: commandLineArg,
-    })
-    return { path, row: null, groups: [] }
+    }
+    if (commandLineArg && verb === 'cannot access') {
+      warnings.push(refusal)
+      return { path, row: null, groups: [] }
+    }
+    // A directory that is there but will not open is reported where its
+    // listing would have printed (GNU 9.7).
+    return { path, row: null, groups: [], notes: [[0, refusal]] }
   }
   if (stats.length === 0 && !structureOnly) {
     let row: FileStat | null = null
@@ -800,6 +810,7 @@ async function probeOperand(
     ctx.quote,
   )
   const groups: [PathSpec, FileStat[]][] = [[path, entries]]
+  const notes: [number, LsWarning][] = []
   if (ctx.recursive) {
     const real = ctx.deref && links !== null ? (virtual: string) => links.resolve(virtual) : null
     const open = real !== null && chain.length === 0 ? [real(path.virtual)] : chain
@@ -819,10 +830,13 @@ async function probeOperand(
         // above this one is never listed again (exit 2).
         const here = real(childPath)
         if (open.includes(here)) {
-          warnings.push({
-            message: `ls: ${spelled(childPath)}: not listing already-listed directory`,
-            serious: true,
-          })
+          notes.push([
+            groups.length,
+            {
+              message: `ls: ${spelled(childPath)}: not listing already-listed directory`,
+              serious: true,
+            },
+          ])
           continue
         }
         below = [...open, here]
@@ -841,10 +855,11 @@ async function probeOperand(
       // child's whole pre-order subtree as call arguments and overflow the
       // engine's argument limit on a very wide tree. Mirrors Python's
       // `groups.extend(child.groups)`.
+      for (const [at, note] of child.notes ?? []) notes.push([groups.length + at, note])
       for (const group of child.groups) groups.push(group)
     }
   }
-  return { path, row: null, groups }
+  return { path, row: null, groups, notes }
 }
 
 // Sort row for one operand, named with the operand's own spelling.
@@ -1243,18 +1258,36 @@ function statNeeded(flags: LsFlags): boolean {
   )
 }
 
+// GNU looks at every operand before it lists one, so what it reports comes
+// before what it lists (`ls d missing 2>&1`), all but a directory it does not
+// list (one that will not open, one -L already listed), reported where that
+// listing would have printed: `placed` holds each such warning with the index
+// in `lines` it is written before, in order.
+// Mirrors Python's _finish.
 function finish(
   lines: string[],
   warnings: readonly LsWarning[],
   notices: readonly string[],
+  placed: readonly (readonly [number, LsWarning])[] = [],
 ): CommandFnResult {
-  const out: ByteSource = formatRecords(lines)
-  const exitCode = exitStatusFor(warnings)
-  if (warnings.length > 0 || notices.length > 0) {
-    const stderr = formatRecords([...notices, ...warnings.map((w) => w.message)])
+  const out = formatRecords(lines)
+  const exitCode = exitStatusFor([...warnings, ...placed.map(([, w]) => w)])
+  const leading = [...notices, ...warnings.map((w) => w.message)]
+  if (leading.length === 0 && placed.length === 0) return [out, new IOResult({ exitCode })]
+  if (out.byteLength === 0) {
+    const stderr = formatRecords([...leading, ...placed.map(([, w]) => w.message)])
     return [out, new IOResult({ stderr, exitCode })]
   }
-  return [out, new IOResult({ exitCode })]
+  const notes: [number, Uint8Array][] = leading.length > 0 ? [[0, formatRecords(leading)]] : []
+  let offset = 0
+  let done = 0
+  for (const [index, warning] of placed) {
+    offset += formatRecords(lines.slice(done, index)).byteLength
+    done = index
+    notes.push([offset, formatRecords([warning.message])])
+  }
+  const io = new IOResult({ exitCode })
+  return [atOffsets(out, notes, io), io]
 }
 
 // `statPath` stats a mount root or dot entry across mounts; the cross-mount relay passes none.
@@ -1389,8 +1422,17 @@ export async function lsGeneric(
     await linkTargets(rows, rowPaths, links, render),
   )
   let printed = rows.length > 0
+  const placed: [number, LsWarning][] = []
   for (const operand of operands) {
-    for (const [dirSpec, group] of operand.groups) {
+    const notes = operand.notes ?? []
+    let at = 0
+    for (const [index, [dirSpec, group]] of operand.groups.entries()) {
+      let note = notes[at]
+      while (note !== undefined && note[0] <= index) {
+        placed.push([lines.length, note[1]])
+        at += 1
+        note = notes[at]
+      }
       let entries = group
       if (flags.showDotEntries) {
         const dots: FileStat[] = []
@@ -1443,7 +1485,8 @@ export async function lsGeneric(
       )
       printed = true
     }
+    for (const [, note] of notes.slice(at)) placed.push([lines.length, note])
   }
 
-  return finish(lines, warnings, notices)
+  return finish(lines, warnings, notices, placed)
 }

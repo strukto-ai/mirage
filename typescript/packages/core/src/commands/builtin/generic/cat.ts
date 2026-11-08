@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { asyncChain, ensureStream } from '../../../io/stream.ts'
+import { ensureStream } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import {
   FileType,
@@ -25,7 +25,7 @@ import {
 } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { ownOutput } from '../utils/links.ts'
-import { reportedStream, splitReadable } from '../utils/operands.ts'
+import { inOrder, reportedStream, splitInOrder } from '../utils/operands.ts'
 import { resolveSource, streamOutput } from '../utils/stream.ts'
 import { openStream } from '../../../rs/stream.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -117,24 +117,29 @@ export async function catGeneric(
       stats.set(p.virtual, row)
       return row
     }
-    const [readable, err] = await splitReadable(paths, rememberStat, 'cat')
-    const errBytes = err === '' ? null : encodeText(err)
+    const order = await splitInOrder(paths, rememberStat, 'cat')
+    const readable = order.filter((p): p is PathSpec => typeof p !== 'string')
+    const failed = readable.length < order.length
     if (readable.length === 0) {
-      return [null, new IOResult({ exitCode: err === '' ? 0 : 1, stderr: errBytes })]
+      const lines = order.filter((p): p is string => typeof p === 'string')
+      return [null, new IOResult({ exitCode: 1, stderr: encodeText(lines.join('')) })]
     }
-    const outputs: AsyncIterable<Uint8Array>[] = []
-    const io = new IOResult({ exitCode: err === '' ? 0 : 1, stderr: errBytes })
+    const io = new IOResult({ exitCode: failed ? 1 : 0 })
     const writes = ownOutput(ctx)
-    for (const p of readable) {
+    const outputs = order.map((p) => {
+      if (typeof p === 'string') return encodeText(p)
       let source: ByteSource = stream(p)
       if (stats.get(p.virtual)?.type === FileType.CHAR_DEVICE) {
         source = truncateStream(source, io, new Limit({ maxBytes: CHAR_DEVICE_MAX_BYTES }))
       }
       const out = writes(p) ? unlessOutput(ensureStream(source), io, p) : ensureStream(source)
-      outputs.push(readable.length === 1 ? out : reportedStream(out, io, p, 'cat'))
-    }
-    const merged = outputs.length === 1 ? outputs[0] : asyncChain(outputs)
-    if (merged === undefined) throw new Error('cat: missing readable stream')
+      return order.length === 1 ? out : reportedStream(out, io, p, 'cat')
+    })
+    const only = outputs[0]
+    const merged =
+      outputs.length === 1 && only !== undefined && !(only instanceof Uint8Array)
+        ? only
+        : inOrder(outputs, io)
     const out: ByteSource = wantsDisplay ? await displayLines(merged, display, ctx.signal) : merged
     return [out, io]
   }

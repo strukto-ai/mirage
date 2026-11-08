@@ -15,8 +15,7 @@
 from mirage.policy import PolicyDenied
 from mirage.policy.policies import Policies
 from mirage.shell.array import array_extent, array_unset
-from mirage.shell.constants import FUNCNAME
-from mirage.shell.errors import ArithError
+from mirage.shell.constants import BASH_LINENO, FUNCNAME
 from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
@@ -25,6 +24,7 @@ from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
     fail,
     finish,
+    identifier_line,
     require_view,
     subscript_expansion,
 )
@@ -34,8 +34,8 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     deref,
     env_get,
+    fatal_subscript_index,
     session_view,
-    subscript_index,
     visible_arrays,
     visible_assocs,
 )
@@ -56,23 +56,6 @@ def _unset_variable(session: SessionState, name: str) -> None:
         session._getopts_optind = None
     if name == FUNCNAME:
         session.function_names = None
-
-
-async def _fatal_index(
-    session: SessionState, subscript: str, policies: Policies | None
-) -> int:
-    """``subscript_index`` whose failure ends the line, in bash's words:
-    ``unset 'a[1/0]'`` aborts with ``1/0: division by 0``.
-
-    Args:
-        session (SessionState): the session the subscript reads.
-        subscript (str): the raw subscript text.
-        policies (Policies | None): the policies its assignments clear.
-    """
-    try:
-        return await subscript_index(session, subscript, policies)
-    except ArithError as exc:
-        raise exc.signal(fatal=True) from exc
 
 
 async def _unset_element(
@@ -134,11 +117,11 @@ async def _unset_element(
         # the name's existence.
         if env_get(session, base) is None:
             return "ok"
-        if await _fatal_index(session, subscript, policies) != 0:
+        if await fatal_subscript_index(session, subscript, policies) != 0:
             return "notarray"
         await view.unset(base)
         return "ok"
-    idx = await _fatal_index(session, subscript, policies)
+    idx = await fatal_subscript_index(session, subscript, policies)
     if idx < 0:
         idx += array_extent(arr)
         if idx < 0:
@@ -168,8 +151,9 @@ async def handle_unset(
 ) -> Result:
     """Unset shell variables, arrays, or functions, with bash's flags.
 
-    ``-v`` targets a variable only, ``-f`` a function only, and a bare
-    name a variable if one exists or else a function. A ``name[idx]``
+    ``-v`` targets a variable only, and refuses a word that names none;
+    ``-f`` a function only, never with ``-v``; and a bare name a
+    variable if one exists or else a function. A ``name[idx]``
     operand clears one element; the readonly guard resolves it to the
     base name first, since that is what ``readonly`` records. ``-n``
     unsets a name reference itself, where a bare name unsets what the
@@ -189,7 +173,7 @@ async def handle_unset(
         answered = flag_help("unset")
         if answered is not None:
             return answered
-    mode = "auto"
+    letters: set[str] = set()
     i = 0
     while i < len(args) and args[i].startswith("-") and args[i] != "-":
         tok = args[i]
@@ -197,12 +181,7 @@ async def handle_unset(
             i += 1
             break
         if all(ch in "vfn" for ch in tok[1:]):
-            if "f" in tok[1:]:
-                mode = "f"
-            elif "n" in tok[1:]:
-                mode = "n"
-            else:
-                mode = "v"
+            letters.update(tok[1:])
             i += 1
             continue
         return fail(
@@ -211,9 +190,21 @@ async def handle_unset(
             + builtin_usage("unset"),
             2,
         )
+    if {"f", "v"} <= letters:
+        return fail(
+            "unset",
+            f"{shell_voice()}unset: cannot simultaneously unset a function"
+            " and a variable\n",
+        )
+    mode = next((m for m in "fnv" if m in letters), "auto")
     errors: list[str] = []
     for name in args[i:]:
         view = require_view(state)
+        if "v" in letters and TARGET_RE.match(name) is None:
+            # Only a variable must be named as one: without -v bash falls
+            # back to the function table, which takes any name.
+            errors.append(identifier_line("unset", name) + "\n")
+            continue
         if mode == "n":
             # `unset -n` drops the reference itself rather than what it
             # points at; on a name that is not a reference bash unsets
@@ -221,6 +212,9 @@ async def handle_unset(
             # frozen reference refuses, writable target or not.
             if view.is_readonly(name, False):
                 errors.append(_readonly(name, "variable"))
+                continue
+            if name == BASH_LINENO:
+                errors.append(f"{shell_voice()}unset: {name}: cannot unset\n")
                 continue
             try:
                 await view.unset(name, follow_ref=False)
@@ -243,6 +237,9 @@ async def handle_unset(
         base = target.group(1) if target is not None else name
         if view.is_readonly(base):
             errors.append(_readonly(deref(session, base), "variable"))
+            continue
+        if not is_element and deref(session, base) == BASH_LINENO:
+            errors.append(f"{shell_voice()}unset: {name}: cannot unset\n")
             continue
         existed = (
             is_element

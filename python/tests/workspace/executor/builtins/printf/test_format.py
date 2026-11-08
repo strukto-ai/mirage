@@ -137,3 +137,14 @@ async def test_a_wide_field_comes_out_in_bounded_steps():
         first = await anext(parts)
     assert first == b" " * len(first)
     assert 0 < len(first) <= 16 * 1024
+
+
+async def test_a_long_diagnostic_lands_whole_before_the_output_after_it():
+    io = IOResult()
+    async with aclosing(printf_output("%d|", ["x" * 50000], io)) as parts:
+        first = await anext(parts)
+        assert (
+            io.stderr
+            == b"bash: printf: " + b"x" * 50000 + b": invalid number\n"
+        )
+    assert first == b"0|"

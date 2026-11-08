@@ -16,6 +16,7 @@ import { expandTilde } from '../utils/path.ts'
 import { encodeText } from './bytes.ts'
 import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from './constants.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from './escapes.ts'
+import { ALIAS_WORD_TYPES } from './parse/constants.ts'
 import { ProgramNode } from './parse/program.ts'
 import type { PipelineStages, TSNodeLike } from './types.ts'
 import { NodeType as NT, ProcessSubDirection, Redirect, RedirectKind } from './types.ts'
@@ -997,12 +998,6 @@ export function getFunctionBody(node: TSNodeLike): TSNodeLike[] | null {
     },
   ]
 }
-
-/**
- * What an unquoted plain word parses as: the only words bash checks for an
- * alias, a name of digits included. Mirrors Python's ALIAS_WORD_TYPES.
- */
-export const ALIAS_WORD_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER])
 
 /**
  * A command with its alias words replaced as bash reads it, and the aliases

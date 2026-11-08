@@ -58,18 +58,22 @@ from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.console.types import Channel
 from mirage.shell.constants import (
+    CANNOT_EXECUTE_STATUS,
     NOT_FOUND_STATUS,
     SIGPIPE_STATUS,
 )
 from mirage.shell.join import shell_join
 from mirage.shell.variable import ShellVar, VarAttr
+from mirage.types import FileType, PathSpec
 from mirage.utils.quote import shell_quote
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.background import pump
 from mirage.workspace.executor.builtins.script.script import read_script_bytes
+from mirage.workspace.executor.builtins.shared import abs_path
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.lookup.lookup import execs
 from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import env_snapshot
 from mirage.workspace.types import ExecutionNode
 
@@ -916,6 +920,42 @@ def xargs_missing(name: str) -> str:
     return f"xargs: {name}: No such file or directory\n"
 
 
+async def _unrunnable(
+    name: str,
+    session: SessionState,
+    registry: MountRegistry,
+    dispatch: DispatchFn | None,
+) -> tuple[str, int] | None:
+    """What xargs says, and the status it stops with, when it cannot
+    exec its command: 127 for nothing to run, 126 for a directory or a
+    path exec refuses (``./file/child`` is not a directory), as GNU's
+    exec answers; None when the command runs.
+
+    Args:
+        name (str): the command word.
+        session (SessionState): the session it would run in.
+        registry (MountRegistry): mount registry (command registration).
+        dispatch (DispatchFn | None): stats a path the word names.
+    """
+    if "/" not in name or dispatch is None:
+        if execs(name, session, registry):
+            return None
+        return xargs_missing(name), NOT_FOUND_STATUS
+    spec = PathSpec.from_str_path(abs_path(name, session.cwd))
+    try:
+        row, _ = await dispatch("stat", spec)
+    except FileNotFoundError:
+        return xargs_missing(name), NOT_FOUND_STATUS
+    except FS_ERRORS as exc:
+        said = fs_strerror(exc)
+        if said is None:
+            raise
+        return f"xargs: {name}: {said}\n", CANNOT_EXECUTE_STATUS
+    if getattr(row, "type", None) == FileType.DIRECTORY:
+        return f"xargs: {name}: Permission denied\n", CANNOT_EXECUTE_STATUS
+    return None
+
+
 async def _drain_child(
     child: Awaitable[IOResult], output: IOResult, pipe: PipeConsole
 ) -> None:
@@ -946,6 +986,7 @@ async def _run_lines(
     trace: bool = False,
     slot_var: str | None = None,
     registry: MountRegistry | None = None,
+    dispatch: DispatchFn | None = None,
     stdin: ByteSource | None = None,
     torn: list[IOResult],
 ) -> AsyncGenerator[tuple[list[IOResult], int | None], None]:
@@ -973,6 +1014,7 @@ async def _run_lines(
             carries each command's slot number.
         registry (MountRegistry | None): where a command name is looked
             up; None runs every name.
+        dispatch (DispatchFn | None): stats a command named by a path.
         stdin (ByteSource | None): input shared by all commands (-a).
         torn (list[IOResult]): filled at teardown with the runs still
             going, for the caller to record.
@@ -1031,14 +1073,14 @@ async def _run_lines(
         words = [decode_text(word) for word in event]
         if trace:
             results.append(IOResult(stderr=encode_text(_trace(event))))
-        if registry is not None and not execs(words[0], session, registry):
-            results.append(
-                IOResult(
-                    stderr=encode_text(xargs_missing(words[0])),
-                    exit_code=NOT_FOUND_STATUS,
-                )
-            )
-            stop = NOT_FOUND_STATUS
+        refused = (
+            await _unrunnable(words[0], session, registry, dispatch)
+            if registry is not None
+            else None
+        )
+        if refused is not None:
+            line, stop = refused
+            results.append(IOResult(stderr=encode_text(line), exit_code=stop))
             stopping.set()
             return results, None
         pipe = PipeConsole()
@@ -1260,6 +1302,7 @@ async def handle_xargs(
             trace="t" in plan.flags,
             slot_var=plan.slot_var,
             registry=registry,
+            dispatch=dispatch,
             stdin=child_stdin,
             torn=torn,
         )

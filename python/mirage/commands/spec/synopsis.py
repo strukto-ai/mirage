@@ -114,6 +114,7 @@ SHELL_SYNOPSES: dict[str, str] = {
     "[[ ... ]]": "[[ expression ]]",
     "alias": "alias [-p] [name[=value] ... ]",
     "break": "break [n]",
+    "builtin": "builtin [shell-builtin [arg ...]]",
     "case": "case WORD in [PATTERN [| PATTERN]...) COMMANDS ;;]... esac",
     "cd": "cd [-L|[-P [-e]] [-@]] [dir]",
     "command": "command [-pVv] command [arg ...]",

@@ -3,9 +3,8 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.commands.builtin.utils.operands import (
-    merge_split_errors,
     per_operand,
-    split_readable,
+    split_in_order,
 )
 from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
 from mirage.commands.config import Context
@@ -80,9 +79,12 @@ async def fmt_generic(
             ``stream(path)``.
     """
     stat = stdin_stat(stat)
-    readable, err = await split_readable(paths, stat, "fmt")
-    if err and not readable:
-        return None, IOResult(exit_code=1, stderr=err)
+    order = await split_in_order(paths, stat, "fmt")
+    if order and all(isinstance(p, bytes) for p in order):
+        return None, IOResult(
+            exit_code=1,
+            stderr=b"".join(p for p in order if isinstance(p, bytes)),
+        )
     config: dict[str, JsonValue] = {
         "width": parsed.width,
         "goal": parsed.goal,
@@ -92,11 +94,10 @@ async def fmt_generic(
         "crown": parsed.crown,
         "uniform": parsed.uniform,
     }
-    io = IOResult()
+    io = IOResult(exit_code=int(any(isinstance(p, bytes) for p in order)))
     read = stdin_stream(stream, ctx.stdin)
     each = partial(run_stream, "fmt", config)
-    output = per_operand(readable, read, ctx.stdin, io, "fmt", each)
-    return await merge_split_errors((output, io), err)
+    return per_operand(order, read, ctx.stdin, io, "fmt", each), io
 
 
 __all__ = ["fmt_generic", "parse_flags"]

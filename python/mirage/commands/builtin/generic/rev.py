@@ -1,7 +1,7 @@
 from functools import partial
 
 from mirage.commands.builtin.utils.operands import (
-    merge_split_errors,
+    errors_first,
     per_operand,
     split_readable,
 )
@@ -41,7 +41,7 @@ async def rev_generic(
     zero = FlagView(ctx.flags, spec=SPECS["rev"]).as_bool("zero")
     each = partial(run_stream, "rev", {"zero": True} if zero else {})
     output = per_operand(readable, read, ctx.stdin, io, "rev", each)
-    return await merge_split_errors((output, io), err)
+    return await errors_first((output, io), err)
 
 
 __all__ = ["rev_generic"]

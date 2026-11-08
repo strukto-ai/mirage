@@ -65,6 +65,7 @@ from mirage.shell.helpers import (
     get_case_word,
     get_cfor_parts,
     get_for_parts,
+    get_function_body,
     get_function_name,
     get_function_source,
     get_if_branches,
@@ -157,7 +158,7 @@ from mirage.workspace.node.test_expr import (
 from mirage.workspace.node.timing import timed_by, timing_report
 from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session.budget import check_env, entry_bytes
-from mirage.workspace.session.functions import FunctionSite
+from mirage.workspace.session.functions import FunctionSite, site_lines
 from mirage.workspace.session.state import (
     bind_last_word,
     positional_params,
@@ -1639,13 +1640,21 @@ async def _execute_node(
             entry_bytes(name, source),
         )
         session.functions[name] = source
+        row = session.line_number - 1
         session._function_sites[name] = FunctionSite(
             source,
             alias_mark(session, node.start_point[0]),
             defined_at(node, handed),
             alias_view(session, node, alias_mark(session, read_row(node))),
             session._parse_name or "environment",
-            session.line_number - 1,
+            row,
+            None
+            if session._line_rows is None
+            else site_lines(
+                session._line_rows,
+                row - session._line_row,
+                get_function_body(node),
+            ),
         )
         return result(f"function {name}")
 
