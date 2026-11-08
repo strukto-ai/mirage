@@ -387,8 +387,7 @@ def masked_names(
     observes the replacement. The prefix ends at the first statement
     that is anything else, that runs in the background (``&`` detaches
     it to a subshell, so nothing persists), or that touches a readonly
-    or protected name (the write fails and the standing value stays
-    observable). A
+    name (the write fails and the standing value stays observable). A
     name read while still unmasked (``TOKEN=$TOKEN``) stays fetched:
     within a statement the read precedes the write.
 
@@ -433,15 +432,12 @@ def masked_names(
         following = children[idx + 1] if idx + 1 < len(children) else None
         if following is not None and following.type == "&":
             break
-        refused = any(
-            (
-                name in session.vars
-                and VarAttr.READONLY in session.vars[name].attrs
-            )
-            or session.vars.shell.protected(name)
+        readonly = any(
+            name in session.vars
+            and VarAttr.READONLY in session.vars[name].attrs
             for name in masks
         )
-        if refused:
+        if readonly:
             break
         for name in referenced_names(stmt):
             for target in (name, deref(session, name)):

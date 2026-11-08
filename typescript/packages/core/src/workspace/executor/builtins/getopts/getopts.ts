@@ -39,7 +39,7 @@ async function getoptsFinish(
   // The name is assigned last, exactly as bash does: OPTIND/OPTARG and
   // the hidden cursor still advance, but a bad destination fails the
   // write and turns the call into a status-1 error. Writes go through
-  // the session view, so a protected or readonly OPTARG / OPTIND
+  // the session view, so a hidden or readonly OPTARG / OPTIND
   // refuses here too.
   try {
     if (!isValidName(name)) {

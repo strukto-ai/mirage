@@ -27,7 +27,6 @@ from mirage.types import (
     HiddenVars,
     MountMode,
     ProcessScope,
-    ProtectedVars,
     ShowEntry,
     ShownPaths,
     Visibility,
@@ -152,7 +151,6 @@ def visibility_from(
         processes (ProcessScope): which processes the session sees.
     """
     hidden, shown, variables = value["hidden"], value["shown"], value["vars"]
-    protected = value["protected"]
     return Visibility(
         paths=HiddenPaths(
             paths=tuple(from_units(v) for v in hidden["paths"]),
@@ -178,12 +176,6 @@ def visibility_from(
             patterns=tuple(from_units(v) for v in variables["patterns"]),
         )
         if variables["names"] or variables["patterns"]
-        else None,
-        protected=ProtectedVars(
-            names=tuple(from_units(v) for v in protected["names"]),
-            patterns=tuple(from_units(v) for v in protected["patterns"]),
-        )
-        if protected["names"] or protected["patterns"]
         else None,
         processes=processes,
     )

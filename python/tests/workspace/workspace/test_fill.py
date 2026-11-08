@@ -2051,24 +2051,6 @@ async def test_self_read_in_the_prefix_keeps_the_fetch():
         await ws.close()
 
 
-@pytest.mark.asyncio
-async def test_a_protected_name_never_masks():
-    # A write to a protected name is refused, as one to a readonly name
-    # is, so it is no mask: the standing value stays the one a read finds.
-    calls, fetch = counting_source({"TOKEN": "t0"})
-    register_secrets("fake", FakeConfig, fetch)
-    ws = _ws(
-        {"TOKEN": {"from": "fake", "ref": "r"}},
-        profiles={"default": {"vars": {"protect": ["TOKEN"]}}},
-    )
-    try:
-        io = await ws.shell("TOKEN=local; printenv TOKEN")
-        assert io.stderr == b"TOKEN: permission denied\n"
-        assert calls == ["r"]
-    finally:
-        await ws.close()
-
-
 class AccountConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

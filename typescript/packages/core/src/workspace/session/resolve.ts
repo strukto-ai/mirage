@@ -86,7 +86,6 @@ interface ProfileReply {
   readonly commands: RulesReply | null
   readonly paths: PathsReply | null
   readonly vars: number[][] | null
-  readonly protect: number[][] | null
   readonly mounts:
     | readonly {
         readonly prefix: number[]
@@ -122,7 +121,6 @@ function profileWire(profile: SessionProfile): Wire {
     commands: block == null ? null : rulesWire(block),
     paths: pathsWire(profile.paths),
     vars: profile.vars == null ? null : profile.vars.hide.map(units),
-    protect: profile.vars?.protect == null ? null : profile.vars.protect.map(units),
     mounts:
       profile.mounts == null
         ? null
@@ -172,13 +170,7 @@ function profileFields(value: ProfileReply): ProfileFields {
   return {
     commands: rulesFrom(value.commands),
     paths: pathsFrom(value.paths),
-    vars:
-      value.vars === null && value.protect === null
-        ? null
-        : {
-            hide: (value.vars ?? []).map(fromUnits),
-            ...(value.protect === null ? {} : { protect: value.protect.map(fromUnits) }),
-          },
+    vars: value.vars === null ? null : { hide: value.vars.map(fromUnits) },
     mounts:
       value.mounts === null
         ? null

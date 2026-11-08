@@ -202,9 +202,8 @@ under `rm`/`mv`/`mkdir`/... and refuses it as a source of `tar -c`, `zip`,
 the one precedence list (builtin, namespace command, function, CLI, mount);
 `workspace/executor/` runs pipes, redirects, jobs and control flow.
 Follow tables live in `workspace/lookup/constants.py`. Every session write
-lands through the Rust store's writer, which refuses a hidden, protected
-(`vars.protect`) or readonly name; only shell bookkeeping and `seed_var`
-are exempt.
+lands through the Rust store's writer, which refuses a hidden or readonly
+name; only shell bookkeeping and `seed_var` are exempt.
 
 ### CommandSpec
 

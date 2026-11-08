@@ -208,14 +208,12 @@ def test_an_expansion_asks_the_host_for_a_substitution() -> None:
     assert diagnostics == [b"w\n"]
 
 
-def test_a_write_lands_at_once_and_a_protected_name_refuses() -> None:
+def test_a_write_lands_at_once_and_a_hidden_name_refuses() -> None:
     shell = Shell(lambda: 7)
     assert shell.set("y", "1") == (("ok", 0), [])
     assert shell.get("y") == ("1", "", None)
-    shell.protect(["z"], ["P_*"])
-    assert shell.protected("P_1") and not shell.protected("y")
-    assert shell.set("z", "2") == (("denied", "z"), [])
-    assert shell.unset("P_1") == (("denied", "P_1"), [])
+    shell.hide(["z"], [])
+    assert shell.set("z", "2") == (("hidden", "z"), [])
     assert shell.get("z") is None
 
 

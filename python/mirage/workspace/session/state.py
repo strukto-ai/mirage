@@ -105,8 +105,8 @@ def run_write(
     diagnostics: list[str | bytes] | None = None,
     call_stack: CallStack | None = None,
 ) -> int:
-    """Run one write on the session's shell; a hidden or protected name
-    refuses with EACCES.
+    """Run one write on the session's shell; a hidden name refuses with
+    EACCES.
 
     Args:
         session (SessionState): the session written.
@@ -317,7 +317,7 @@ async def subscript_index(session: SessionState, subscript: str) -> int:
         subscript (str): the raw subscript text.
 
     Raises:
-        PolicyDenied: an assignment named a hidden or protected name.
+        PolicyDenied: an assignment named a hidden name.
         ExitSignal: an assignment named a readonly variable, which ends
             the shell wherever a subscript is.
         ArithError: the subscript does not evaluate.
@@ -415,19 +415,18 @@ def appended(
     return (text, added) if integer else (join_bytes(text + added), None)
 
 
-def ensure_var_writable(session: SessionState, name: str) -> None:
-    """Refuse a write that names a hidden or protected variable, the vars
-    twin of EACCES on a create into hidden path space.
+def ensure_var_visible(session: SessionState, name: str) -> None:
+    """Refuse a write that names a hidden variable, the vars twin of
+    EACCES on a create into hidden path space.
 
     Args:
         session (SessionState): the session being written.
         name (str): variable name.
 
     Raises:
-        PolicyDenied: the name is hidden or protected for this session.
+        PolicyDenied: the name is hidden for this session.
     """
-    shell = session.vars.shell
-    if shell.hidden(name) or shell.protected(name):
+    if session.vars.shell.hidden(name):
         raise PolicyDenied(errno.EACCES, f"{name}: permission denied", name)
 
 
@@ -476,7 +475,7 @@ async def push_words(
 
     Raises:
         ReadonlyVariableError: the name is readonly.
-        PolicyDenied: the name is hidden or protected.
+        PolicyDenied: the name is hidden.
     """
     _element_write(session, lambda shell: shell.push(name, words))
 
@@ -563,8 +562,8 @@ async def assign_element(
         str: ``"ok"``, ``"denied"``, ``"readonly"``, or ``"subscript"``.
 
     Raises:
-        PolicyDenied: an assignment the subscript made named a hidden or
-            protected name.
+        PolicyDenied: an assignment the subscript made named a hidden
+            name.
         ArithError: the name carries ``-i`` and the text does not
             evaluate.
     """
@@ -594,7 +593,7 @@ async def set_var(
     """Write one variable through the session plane.
 
     A string stores a scalar, a ShellArray an indexed array, a dict an
-    associative one. Readonly, hidden and protected names refuse; the
+    associative one. Readonly and hidden names refuse; the
     value is shaped by the name's attributes (``-i -l -u``) before it
     lands. Writers with richer mechanics compute the resulting value on a
     copy and hand it here.
@@ -614,7 +613,7 @@ async def set_var(
 
     Raises:
         ReadonlyVariableError: the name is readonly.
-        PolicyDenied: the name is hidden or protected.
+        PolicyDenied: the name is hidden.
     """
     _refuse_deciding(name)
     raw, assoc = raw_value(value)
@@ -676,7 +675,7 @@ async def mark_var(
             at; ``declare -rn r`` marks the reference itself.
 
     Raises:
-        PolicyDenied: the name is hidden or protected.
+        PolicyDenied: the name is hidden.
     """
     _refuse_deciding(name)
     letter = None if attr is None else attr.value
@@ -801,7 +800,7 @@ def seed_var(session: SessionState, name: str, value: ShellValue) -> None:
     the shell's own bookkeeping (``$PWD``/``$OLDPWD`` after a ``cd``,
     ``BASH_REMATCH`` after ``[[ =~ ]]``). A variable the line named goes
     through `SessionView.set` instead. A prefix assignment
-    (``FOO=bar cmd``) lands here too, after asking ``ensure_var_writable``.
+    (``FOO=bar cmd``) lands here too, after asking ``ensure_var_visible``.
 
     Nor does it count against max_env: a caller that grows a value a
     line chose, as that prefix assignment does, calls ``check_env``

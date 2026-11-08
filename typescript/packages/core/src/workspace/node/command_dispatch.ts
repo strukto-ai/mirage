@@ -110,7 +110,7 @@ import type { SessionState } from '../session/session.ts'
 import {
   bindLastWord,
   deref,
-  ensureVarWritable,
+  ensureVarVisible,
   envIsReadonly,
   seedVar,
   visibleEnv,
@@ -313,13 +313,13 @@ export async function executeCommand(
     // Each check is of the name the write lands on, a reference's target
     // (`r=new cmd` over `declare -n r=T` writes T).
     const k = deref(session, given)
-    // The hidden and protected check runs first, as in setVar: calling a
-    // hidden name "readonly" would leak that it exists. Both branches below
-    // write through `seedVar`, past the writer's checks (an `export` inside
-    // a function keeps its prefix past the call), so this loop is the only
+    // The hidden check runs first, as in setVar: calling a hidden name
+    // "readonly" would leak that it exists. Both branches below write
+    // through `seedVar`, past the writer's checks (an `export` inside a
+    // function keeps its prefix past the call), so this loop is the only
     // place a narrowed session is kept from clobbering the host's value.
     try {
-      ensureVarWritable(session, k)
+      ensureVarVisible(session, k)
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
       return writeRefused(err, name !== '' ? name : k)
@@ -508,7 +508,7 @@ function rmUnseen(
   return { kept, hidden }
 }
 
-/** A prefix assignment to a hidden or protected name: bash's line, exit 1. */
+/** A prefix assignment to a hidden name: bash's line, exit 1. */
 function writeRefused(err: PolicyDenied, command: string): RedirectResult {
   const stderr = encodeText(`${shellVoice()}${err.message}\n`)
   return [

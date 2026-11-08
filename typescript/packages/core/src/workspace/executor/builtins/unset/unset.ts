@@ -177,9 +177,8 @@ export async function handleUnset(
     }
     const existed =
       isElement || name in session.env || name in session.arrays || name in session.assocs
-    // Both spellings refuse a protected base name: the whole-variable
-    // unset through the view, an element unset inside unsetOne, so
-    // `unset 'X[0]'` cannot sidestep what refuses `unset X`.
+    // Both spellings go through the view for the base name: the
+    // whole-variable unset, and an element unset inside unsetOne.
     let status: string
     try {
       if (subscript !== undefined) {

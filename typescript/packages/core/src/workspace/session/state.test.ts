@@ -125,22 +125,6 @@ describe('sessionView', () => {
     expect(session.env.A).toBe('1')
   })
 
-  it('a protected name reads and refuses every write', async () => {
-    const [view, session] = makeView()
-    session.visibility = {
-      ...session.visibility,
-      protected: { names: ['A'], patterns: ['SECRET_*'] },
-    }
-    expect(view.get('A')).toBe('1')
-    await expect(view.set('SECRET_KEY', 'x')).rejects.toThrow('SECRET_KEY: permission')
-    expect('SECRET_KEY' in session.env).toBe(false)
-    await expect(view.unset('A')).rejects.toBeInstanceOf(PolicyDenied)
-    await expect(view.mark('A', VarAttr.Readonly, true)).rejects.toBeInstanceOf(PolicyDenied)
-    expect(session.vars.get('A')?.attrs.has(VarAttr.Readonly)).toBe(false)
-    await view.set('PUBLIC', 'y')
-    expect(session.env.PUBLIC).toBe('y')
-  })
-
   it('envSnapshot is a copy', () => {
     const session = new SessionState({ sessionId: 's', cwd: '/', vars: varsFromEnv({ A: '1' }) })
     const snap = envSnapshot(session)
@@ -329,10 +313,6 @@ describe('subscriptIndex', () => {
     // session past it.
     expect(await subscriptIndex(s, 'RANDOM=42, RANDOM')).toBe(17772n)
     expect(s.vars.shell.nextRandom()).toBe(26794)
-    // A protected name the subscript assigns refuses.
-    s.visibility = { ...s.visibility, protected: { patterns: ['SECRET_*'] } }
-    await expect(subscriptIndex(s, 'SECRET_N=1')).rejects.toBeInstanceOf(PolicyDenied)
-    expect(s.env.SECRET_N).toBeUndefined()
   })
 })
 

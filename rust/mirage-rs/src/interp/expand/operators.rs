@@ -405,12 +405,12 @@ fn unescape_all(text: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A refused expansion-time write discards the line: a hidden or
-/// protected name in its words, and an `-i` value that does not evaluate
-/// as `n=1+` does, in the shell's `voice`.
+/// A refused expansion-time write discards the line: a hidden name in its
+/// words, and an `-i` value that does not evaluate as `n=1+` does, in the
+/// shell's `voice`.
 pub(super) fn write_refusal(voice: &[u8], fault: Fault) -> Fault {
     match fault {
-        Fault::Denied(name) => discard(voice, &format!("{name}: permission denied\n")),
+        Fault::Hidden(name) => discard(voice, &format!("{name}: permission denied\n")),
         Fault::Arith(error) => Signal::arith(voice, &error, "", true).into(),
         other => other,
     }

@@ -147,8 +147,6 @@ pub struct Store {
     random_seed: Seed,
     random_last: u32,
     hidden: Option<Arc<VisibilityMatcher>>,
-    /// The names a profile protects: read as any name is, never written.
-    protected: Option<Arc<VisibilityMatcher>>,
     ids: Ids,
     held: usize,
     /// A fresh stamp on every change to the records or the hidden names.
@@ -195,7 +193,6 @@ impl Store {
             random_seed: Seed::Fresh,
             random_last: 0,
             hidden: None,
-            protected: None,
             ids,
             held: 0,
             stamp: fresh_stamp(),
@@ -345,21 +342,21 @@ impl Store {
 
     /// Hide the names a session's visibility lists, exactly or by glob.
     pub fn hide_vars(&mut self, names: &[String], patterns: &[String]) {
-        self.hide(var_matcher(names, patterns));
-    }
-
-    /// Protect the names a session's profile lists, exactly or by glob:
-    /// they read as any name does, and a set, unset or mark of one is
-    /// refused as a write to a hidden name is.
-    pub fn protect_vars(&mut self, names: &[String], patterns: &[String]) {
-        self.protected = var_matcher(names, patterns);
-    }
-
-    pub fn protected(&self, name: &str) -> bool {
-        self.protected.as_ref().is_some_and(|matcher| {
-            let units: Vec<u32> = name.chars().map(u32::from).collect();
-            matcher.var_hidden(&units)
-        })
+        let units = |list: &[String]| -> Vec<Vec<u32>> {
+            list.iter()
+                .map(|name| name.chars().map(u32::from).collect())
+                .collect()
+        };
+        let hides = !names.is_empty() || !patterns.is_empty();
+        self.hide(hides.then(|| {
+            Arc::new(VisibilityMatcher::new(Visibility {
+                vars: VarScope {
+                    names: units(names),
+                    patterns: units(patterns),
+                },
+                ..Visibility::default()
+            }))
+        }));
     }
 
     /// The bytes the variables hold: every record, names and values, and
@@ -939,7 +936,6 @@ impl Store {
         forked.held = self.held;
         forked.stamp = self.stamp;
         forked.hidden = self.hidden.clone();
-        forked.protected = self.protected.clone();
         forked.pipe_status = self.pipe_status.clone();
         forked.function_names = self.function_names.clone();
         forked.call_lines = self.call_lines.clone();
@@ -1179,24 +1175,6 @@ impl Store {
         }
         Ok(self.record(name).and_then(Var::text).map(<[u8]>::to_vec))
     }
-}
-
-/// A matcher over variable names, exact or by glob; None for no names.
-fn var_matcher(names: &[String], patterns: &[String]) -> Option<Arc<VisibilityMatcher>> {
-    let units = |list: &[String]| -> Vec<Vec<u32>> {
-        list.iter()
-            .map(|name| name.chars().map(u32::from).collect())
-            .collect()
-    };
-    (!names.is_empty() || !patterns.is_empty()).then(|| {
-        Arc::new(VisibilityMatcher::new(Visibility {
-            vars: VarScope {
-                names: units(names),
-                patterns: units(patterns),
-            },
-            ..Visibility::default()
-        }))
-    })
 }
 
 /// Case-convert the UTF-8 runs of `text`, any other byte kept as it is.

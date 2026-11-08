@@ -19,10 +19,9 @@ from mirage.workspace import Workspace
 
 
 @pytest.fixture
-def guarded():
-    """A workspace whose profile protects ``AWS_*`` and seeds one."""
-    profile = {"vars": {"protect": ["AWS_*"]}, "env": {"AWS_REGION": "eu"}}
-    with Workspace({"/ram/": RAMVFS()}, profiles={"default": profile}) as ws:
+def ws():
+    """A workspace with one RAM mount."""
+    with Workspace({"/ram/": RAMVFS()}) as ws:
         yield ws
 
 
@@ -39,61 +38,6 @@ async def value_of(ws, name: str) -> bytes:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "line,name",
-    [
-        ("export AWS_PROFILE=x", "AWS_PROFILE"),
-        ("AWS_PROFILE=x", "AWS_PROFILE"),
-        # Every expansion-time writer below lands in the store, which
-        # refuses a protected name whichever door the write came in by.
-        ('echo "${AWS_PROFILE:=x}"', "AWS_PROFILE"),
-        ("echo $((AWS_LIMIT=5))", "AWS_LIMIT"),
-        ('v=abcdef; echo "${v:$((AWS_LIMIT=1)):2}"', "AWS_LIMIT"),
-        ('a=(one two); echo "${a[@]:${AWS_LIMIT:=1}}"', "AWS_LIMIT"),
-        ("((AWS_LIMIT=5))", "AWS_LIMIT"),
-        ("printf -v AWS_KEY %s x", "AWS_KEY"),
-        ("for ((AWS_I=0; AWS_I<1; AWS_I++)); do :; done", "AWS_I"),
-        # The write re-aims an unset reference, so the mark lands on a
-        # name the assignment itself never named.
-        ("declare -n ref; export ref=AWS_KEY", "AWS_KEY"),
-        ("declare -n ref; readonly ref=AWS_KEY", "AWS_KEY"),
-        ("AWS_KEY=x printenv AWS_KEY", "AWS_KEY"),
-        ("read AWS_KEY <<< x", "AWS_KEY"),
-        ("AWS_KEY+=(x)", "AWS_KEY"),
-    ],
-)
-async def test_every_session_writer_refuses_a_protected_name(
-    guarded, line: str, name: str
-):
-    result = await guarded.shell(line)
-    assert result.exit_code == 1, f"{line!r} was not refused"
-    assert f"{name}: permission denied".encode() in (result.stderr or b"")
-    assert await value_of(guarded, name) == b"[]", f"{line!r} wrote anyway"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line",
-    [
-        "AWS_REGION=us",
-        "unset AWS_REGION",
-        "unset 'AWS_REGION[0]'",
-        "export -n AWS_REGION",
-        "readonly AWS_REGION",
-    ],
-)
-async def test_a_protected_name_reads_and_keeps_what_the_operator_set(
-    guarded, line: str
-):
-    result = await guarded.shell(line)
-    assert result.exit_code == 1, f"{line!r} was not refused"
-    assert b"AWS_REGION: permission denied" in (result.stderr or b"")
-    assert await value_of(guarded, "AWS_REGION") == b"[eu]"
-    shown = await guarded.shell("declare -p AWS_REGION")
-    assert shown.stdout == b'declare -x AWS_REGION="eu"\n'
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
     "line,name,expected",
     [
         ('echo "${OTHER:=x}"', "OTHER", b"[x]"),
@@ -103,22 +47,11 @@ async def test_a_protected_name_reads_and_keeps_what_the_operator_set(
         ("for ((I=0; I<1; I++)); do :; done", "I", b"[1]"),
     ],
 )
-async def test_a_name_no_rule_covers_still_writes(
-    guarded, line: str, name: str, expected: bytes
+async def test_an_expansion_write_lands(
+    ws, line: str, name: str, expected: bytes
 ):
-    await guarded.shell(line)
-    assert await value_of(guarded, name) == expected
-
-
-@pytest.mark.asyncio
-async def test_a_subscripted_printf_target_refuses_a_protected_name(guarded):
-    # `printf -v name[i]` writes the session's array table, so it is a
-    # session write like any other.
-    result = await guarded.shell("printf -v 'AWS_KEY[0]' %s x")
-    assert result.exit_code == 1
-    assert b"AWS_KEY: permission denied" in (result.stderr or b"")
-    read = await guarded.shell('echo "[${AWS_KEY[0]}]"')
-    assert (read.stdout or b"").strip() == b"[]"
+    await ws.shell(line)
+    assert await value_of(ws, name) == expected
 
 
 @pytest.mark.asyncio
@@ -136,53 +69,21 @@ async def test_a_subscripted_printf_target_refuses_a_protected_name(guarded):
     ],
 )
 async def test_an_expansion_write_keeps_the_other_elements(
-    guarded, line: str, expected: bytes
+    ws, line: str, expected: bytes
 ):
-    result = await guarded.shell(line)
+    result = await ws.shell(line)
     assert (result.stdout or b"").strip() == expected
 
 
 @pytest.mark.asyncio
-async def test_refused_offset_does_not_expand_length(guarded):
-    result = await guarded.shell(
-        'v=abcdef; echo "${v:(AWS_LIMIT=1):${OTHER:=2}}"'
-    )
-    assert result.exit_code == 1
-    assert b"AWS_LIMIT: permission denied" in (result.stderr or b"")
-    assert await value_of(guarded, "AWS_LIMIT") == b"[]"
-    assert await value_of(guarded, "OTHER") == b"[]"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line,name,expected",
-    [
-        ("readonly SAFE=(one) AWS_BLOCKED=(two)", "SAFE", "-ar"),
-        ("export SAFE=(one) AWS_BLOCKED=(two)", "SAFE", "-ax"),
-        ("declare -rx SAFE=(one) AWS_BLOCKED=(two)", "SAFE", "-arx"),
-    ],
-)
-async def test_a_refused_literal_leaves_the_stored_ones_marked(
-    guarded, line: str, name: str, expected: str
-):
-    # The literals store first and take their marks once they all have;
-    # a protected later one must not leave an earlier one stored but
-    # unfrozen.
-    result = await guarded.shell(line)
-    assert b"AWS_BLOCKED: permission denied" in (result.stderr or b"")
-    shown = await guarded.shell(f"declare -p {name}")
-    assert shown.stdout == f'declare {expected} {name}=([0]="one")\n'.encode()
-
-
-@pytest.mark.asyncio
-async def test_a_literal_mark_stays_on_the_target_its_write_cleared(guarded):
+async def test_a_literal_mark_stays_on_the_target_its_write_cleared(ws):
     # The literal writes through `ref` to `T`; the plain operand then
     # re-aims `ref` at `AWS_KEY`, and the literal's `-x` must not follow
-    # it to the protected name. Under `-n` it marks the reference itself.
-    result = await guarded.shell(
+    # it there. Under `-n` it marks the reference itself.
+    result = await ws.shell(
         "T=old; declare -n ref=T; declare -nx ref=AWS_KEY ref=(one)"
     )
     assert result.exit_code == 0
-    shown = await guarded.shell("declare -p ref AWS_KEY")
+    shown = await ws.shell("declare -p ref AWS_KEY")
     assert shown.stdout == b'declare -nx ref="AWS_KEY"\n'
     assert b"AWS_KEY: not found" in (shown.stderr or b"")

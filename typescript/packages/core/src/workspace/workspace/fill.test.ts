@@ -1517,24 +1517,6 @@ describe('fillEnv through execute', () => {
     }
   })
 
-  it('a protected name never masks', async () => {
-    // A write to a protected name is refused, as one to a readonly name
-    // is, so it is no mask: the standing value stays the one a read finds.
-    const { calls, fetch } = countingSource({ TOKEN: 't0' })
-    registerSecrets('fake-gated', FakeConfig, fetch)
-    const ws = makeWs(
-      { TOKEN: { from: 'fake-gated', ref: 'r' } },
-      SessionProfile({ vars: { protect: ['TOKEN'] } }),
-    )
-    try {
-      const io = await ws.shell('TOKEN=local; printenv TOKEN')
-      expect(stderrStr(io)).toBe('TOKEN: permission denied\n')
-      expect(calls).toEqual(['r'])
-    } finally {
-      await ws.close()
-    }
-  })
-
   it.each([false, true])(
     'a cli fetches only the invoked verb path (mounted=%s)',
     async (mounted) => {

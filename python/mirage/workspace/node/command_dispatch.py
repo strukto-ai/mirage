@@ -158,7 +158,7 @@ from mirage.workspace.session.budget import check_env, entry_bytes
 from mirage.workspace.session.state import (
     bind_last_word,
     deref,
-    ensure_var_writable,
+    ensure_var_visible,
     env_is_readonly,
     seed_var,
     visible_env,
@@ -397,14 +397,14 @@ async def execute_command(
         # Each check is of the name the write lands on, a reference's
         # target (`r=new cmd` over `declare -n r=T` writes T).
         k = deref(session, given)
-        # The hidden and protected check runs first, as in set_var:
-        # calling a hidden name "readonly" would leak that it exists. Both
-        # branches below write through `seed_var`, past the writer's
-        # checks (an `export` inside a function keeps its prefix past the
-        # call), so this loop is the only place a narrowed session is kept
-        # from clobbering the host's value.
+        # The hidden check runs first, as in set_var: calling a hidden
+        # name "readonly" would leak that it exists. Both branches below
+        # write through `seed_var`, past the writer's checks (an `export`
+        # inside a function keeps its prefix past the call), so this loop
+        # is the only place a narrowed session is kept from clobbering the
+        # host's value.
         try:
-            ensure_var_writable(session, k)
+            ensure_var_visible(session, k)
         except PolicyDenied as exc:
             return _write_refused(exc, name or k)
         if k in session.readonly_vars:
@@ -627,8 +627,7 @@ def _rm_unseen(
 def _write_refused(
     exc: PolicyDenied, command: str
 ) -> tuple[None, IOResult, ExecutionNode]:
-    """A prefix assignment to a hidden or protected name: bash's line,
-    exit 1.
+    """A prefix assignment to a hidden name: bash's line, exit 1.
 
     Args:
         exc (PolicyDenied): the refusal.

@@ -360,25 +360,12 @@ value again. Bytes already delivered to a program remain in its memory.
 back whole or not at all. To cap how much a command prints, use
 `post_execute`.
 
-### A variable the operator owns
+### Variables
 
 A variable write reaches no method: a variable does nothing until a
 command, a file call or a connection uses it, and each of those methods
-reads the session, so a rule about a value goes there. To keep a variable
-the operator's, protect it in the profile instead:
-
-```yaml
-profiles:
-  reviewer:
-    env:
-      GITHUB_TOKEN: {from: env}
-    vars:
-      protect: [GITHUB_TOKEN, AWS_*]
-```
-
-The session reads `$GITHUB_TOKEN`; `export AWS_SECRET=x` gets
-`AWS_SECRET: permission denied`, exit 1, as a write to a hidden name does.
-See [Agent profiles](/home/profiles).
+reads the session (`ctx.session`, and a command's `env`), so a rule about
+a value goes in the method that uses it.
 
 ### pre_network and post_network
 
@@ -560,4 +547,4 @@ held, and the approved retry runs it again.
 [policy.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/policy/policy.py)
 and
 [policy.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/policy/policy.ts)
-run a coded policy beside a profile's script.
+run a profile's scripts.

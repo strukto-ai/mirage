@@ -7314,13 +7314,13 @@ components:
         \ prefix: a mode, ask and deny rules for lines\n        working inside the mount,\
         \ and hides under it. A mount the\n        mapping omits keeps its own mode and gains\
         \ no rules.\n    paths (PathsBlock | None): the profile's hides, absolute.\n    vars\
-        \ (VarsBlock | None): the profile's hidden and protected\n        variables.\n   \
-        \ commands (CommandsBlock | None): the profile's allow list and its\n        ask /\
-        \ deny rules, absolute paths.\n    policy (dict[ScriptMethod, list[ProfilePolicy]]\
-        \ | None): the\n        profile's policy: each ``pre_`` method's programs, asked in\n\
-        \        order.\n    network (bool | dict[str, list[str]] | None): where the\n   \
-        \     session's lines may connect, the workspace's ``network``\n        grammar, held\
-        \ besides the workspace's own; None leaves the\n        workspace's alone."
+        \ (VarsBlock | None): the profile's hidden variables.\n    commands (CommandsBlock\
+        \ | None): the profile's allow list and its\n        ask / deny rules, absolute paths.\n\
+        \    policy (dict[ScriptMethod, list[ProfilePolicy]] | None): the\n        profile's\
+        \ policy: each ``pre_`` method's programs, asked in\n        order.\n    network (bool\
+        \ | dict[str, list[str]] | None): where the\n        session's lines may connect,\
+        \ the workspace's ``network``\n        grammar, held besides the workspace's own;\
+        \ None leaves the\n        workspace's alone."
     SessionResponse:
       properties:
         session_id:
@@ -7608,20 +7608,11 @@ components:
           type: array
           title: Hide
           default: []
-        protect:
-          items:
-            type: string
-          type: array
-          title: Protect
-          default: []
       additionalProperties: false
       type: object
       title: VarsBlock
       description: "``vars:`` of a profile.\n\nArgs:\n    hide (tuple[str, ...]): variable\
-        \ names or globs over names the\n        session reads as unset.\n    protect\
-        \ (tuple[str, ...]): variable names or globs over names the\n        session\
-        \ reads but cannot set, unset or mark: the operator's\n        to set, through\
-        \ the profile's ``env``."
+        \ names or globs over names the\n        session reads as unset."
     WorkspaceBrief:
       properties:
         id:

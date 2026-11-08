@@ -61,7 +61,7 @@ from mirage.workspace.node.assignment import expand_array_items
 from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session.state import (
     conversion_scalar,
-    ensure_var_writable,
+    ensure_var_visible,
     seed_var,
 )
 from mirage.workspace.types import ExecutionNode
@@ -361,11 +361,11 @@ async def execute_declaration(
             if "=" in bare or want is None:
                 continue
             want_assoc = want is VarKind.ASSOC
-            # A hidden or protected name refuses like any assignment
-            # spelling before anything lands, the readonly conversion
-            # below included, which writes past the writer's checks.
+            # A hidden name refuses like any assignment spelling before
+            # anything lands, the readonly conversion below included,
+            # which writes past the writer's checks.
             try:
-                ensure_var_writable(session, bare)
+                ensure_var_visible(session, bare)
             except PolicyDenied as exc:
                 raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
             fresh = (

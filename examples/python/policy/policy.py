@@ -14,44 +14,18 @@
 
 import asyncio
 
-from mirage import (
-    CommandContext,
-    CommandExplanation,
-    Deny,
-    MountMode,
-    Policy,
-    Workspace,
-)
+from mirage import CommandExplanation, MountMode, Workspace
 from mirage.runtime.types import ScriptSource
 from mirage.vfs.ram import RAMVFS
 
-# A release workspace under two policies, one through each entry point code
-# has, and the point of the example is what each entry point is for:
-#
-#   a coded Policy     a class passed as ``policies=[...]``. It runs in
-#                      this process, needs no engine, may define any of
-#                      the eight methods, and speaks for every session:
-#                      the operator's own rule.
-#   a profile policy   programs passed as a profile's ``policy`` block,
-#                      a list per pre_ method, each with the runtime that
-#                      runs it. They run sandboxed on that runtime, read
-#                      the same ctx as JSON, print their answer, and
-#                      speak only for the sessions under that profile.
-#
-# A variable the operator owns is no policy at all: the profile protects
-# it (``vars.protect``), so its sessions read it and cannot set it.
+# A release workspace under a profile policy: programs passed as a
+# profile's ``policy`` block, a list per pre_ method, each with the
+# runtime that runs it. They run sandboxed on that runtime, read the same
+# ctx a coded policy reads, as JSON, print their answer, and speak only
+# for the sessions under that profile.
 #
 # The same block spelled as a document is policy_yaml.py, beside this
 # file.
-
-
-class NothingIsRemoved(Policy):
-    """Refuse every ``rm``, for everyone."""
-
-    async def pre_command(self, ctx: CommandContext) -> Deny | None:
-        if ctx.command == "rm":
-            return Deny("nothing is removed here")
-        return None
 
 
 # The reviewer's programs: python source, run on monty, one for each
@@ -87,7 +61,7 @@ SEED = [
 ]
 
 # "host" runs the line with no session, which is the workspace's own
-# unrestricted view: no profile, so no program, but every coded policy.
+# unrestricted view: no profile, so no program.
 LINES = [
     (
         "reviewer",
@@ -101,22 +75,10 @@ LINES = [
     ),
     (
         "reviewer",
-        "export AWS_SECRET=x",
-        "the profile protects a credential",
-    ),
-    (
-        "reviewer",
         "export SAFE=1 && echo $SAFE",
         "silence where no method objects",
     ),
-    ("reviewer", "rm /repo/notes.txt", "the coded policy"),
     ("host", "cat /repo/flagged.txt", "no profile, so no program"),
-    ("host", "export AWS_SECRET=x", "and nothing protected"),
-    (
-        "host",
-        "rm /repo/notes.txt",
-        "the coded policy speaks for every session",
-    ),
 ]
 
 
@@ -140,10 +102,8 @@ async def main() -> None:
             "/scratch/": RAMVFS(),
         },
         mode=MountMode.WRITE,
-        policies=[NothingIsRemoved()],
         profiles={
             "reviewer": {
-                "vars": {"protect": ["AWS_*"]},
                 "policy": {
                     "pre_command": [{"script": MARKED, "runtime": "monty"}],
                     "pre_vfs": [{"script": COLD, "runtime": "monty"}],

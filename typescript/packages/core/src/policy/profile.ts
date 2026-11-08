@@ -72,14 +72,9 @@ export interface PathsBlock {
   readonly reasons?: readonly HideReason[]
 }
 
-/**
- * `vars:` of a profile: `hide` lists names or globs over names the session
- * reads as unset, `protect` those it reads but cannot set, unset or mark:
- * the operator's to set, through the profile's `env`.
- */
+/** `vars:` of a profile: names or globs over names the session reads as unset. */
 export interface VarsBlock {
   readonly hide: readonly string[]
-  readonly protect?: readonly string[]
 }
 
 /**
@@ -262,7 +257,7 @@ export interface CompiledProfile {
   readonly profile: string | null
 }
 
-const VARS_FIELDS = ['hide', 'protect'] as const
+const VARS_FIELDS = ['hide'] as const
 const COMMANDS_FIELDS = ['allow', 'ask', 'deny'] as const
 const MOUNT_COMMANDS_FIELDS = ['ask', 'deny'] as const
 const PROFILE_MOUNT_FIELDS = ['mode', 'commands', 'paths'] as const
@@ -365,10 +360,7 @@ export function PathsBlock(raw: unknown, where = 'paths'): PathsBlock {
 export function VarsBlock(raw: unknown, where = 'vars'): VarsBlock {
   const obj = asObject(raw, where)
   rejectUnknownKeys(obj, VARS_FIELDS, where)
-  return {
-    hide: stringList(obj.hide, `${where}.hide`),
-    ...(obj.protect === undefined ? {} : { protect: stringList(obj.protect, `${where}.protect`) }),
-  }
+  return { hide: stringList(obj.hide, `${where}.hide`) }
 }
 
 export function CommandsBlock(raw: unknown, where = 'commands'): CommandsBlock {
@@ -670,13 +662,7 @@ export function profileToDict(profile: SessionProfile): Record<string, unknown> 
   const doc: Record<string, unknown> = {}
   if (profile.cwd != null) doc.cwd = profile.cwd
   if (profile.env != null) doc.env = { ...profile.env }
-  if (profile.vars != null) {
-    const { hide, protect = [] } = profile.vars
-    doc.vars = {
-      ...(hide.length > 0 ? { hide: [...hide] } : {}),
-      ...(protect.length > 0 ? { protect: [...protect] } : {}),
-    }
-  }
+  if (profile.vars != null) doc.vars = { hide: [...profile.vars.hide] }
   if (profile.policy != null) {
     doc.policy = Object.fromEntries(
       Object.entries(profile.policy).map(([method, programs]) => [

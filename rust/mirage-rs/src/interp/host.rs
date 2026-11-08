@@ -124,7 +124,7 @@ pub fn arith_error(error: &arith::Error) -> Item {
 /// errors.
 pub fn fault_out(fault: &Fault) -> Item {
     match fault {
-        Fault::Denied(name) => Item::tuple([Item::text("denied"), Item::text(name)]),
+        Fault::Hidden(name) => Item::tuple([Item::text("hidden"), Item::text(name)]),
         Fault::Readonly { name, subscript } => Item::tuple([
             Item::text("readonly"),
             Item::text(name),

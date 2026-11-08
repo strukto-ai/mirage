@@ -223,14 +223,12 @@ describe('Shell', () => {
     expect(diagnostics).toEqual([new TextEncoder().encode('w\n')])
   })
 
-  it('lands a write at once, and refuses a protected name', () => {
+  it('lands a write at once, and refuses a hidden name', () => {
     const shell = Shell.create(() => 7)
     expect(shell.set('y', '1')).toEqual([['ok', 0n], []])
     expect(shell.get('y')).toEqual(['1', '', null])
-    shell.protect(['z'], ['P_*'])
-    expect(shell.protected('P_1') && !shell.protected('y')).toBe(true)
-    expect(shell.set('z', '2')).toEqual([['denied', 'z'], []])
-    expect(shell.unset('P_1')).toEqual([['denied', 'P_1'], []])
+    shell.hide(['z'], [])
+    expect(shell.set('z', '2')).toEqual([['hidden', 'z'], []])
     expect(shell.get('z')).toBeNull()
   })
 

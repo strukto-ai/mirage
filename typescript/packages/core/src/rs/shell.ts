@@ -840,18 +840,6 @@ export class Shell {
     return this.call('hidden', name) as boolean
   }
 
-  /**
-   * Protect the names a session's profile lists, exactly or by glob: they
-   * read as any name does, and a write to one is refused.
-   */
-  protect(names: readonly string[], patterns: readonly string[]): void {
-    this.call('protect', names, patterns)
-  }
-
-  protected(name: string): boolean {
-    return this.call('protected', name) as boolean
-  }
-
   namerefTarget(name: string): string | null {
     return this.call('nameref_target', name) as string | null
   }
@@ -1087,7 +1075,7 @@ export class Shell {
     return this.write('is_set', reference, options.expanded ?? false)
   }
 
-  /** Write one element, or a bare name: 0 landed, 1 denied, 2 readonly, 3 no element. */
+  /** Write one element, or a bare name: 0 landed, 1 hidden, 2 readonly, 3 no element. */
   element(
     name: string,
     subscript: string | null,

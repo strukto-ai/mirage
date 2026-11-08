@@ -83,7 +83,6 @@ pub fn compile_profile(profile: &Profile) -> RestrictionPlan {
             hidden: classify_paths(&hidden),
             shown,
             vars: classify_vars(profile.vars.as_deref().unwrap_or_default()),
-            protected: classify_vars(profile.protect.as_deref().unwrap_or_default()),
         },
         mount_modes: modes,
         hide_reasons: reasons,
@@ -98,12 +97,6 @@ fn union(left: &[Text], right: &[Text]) -> Vec<Text> {
         }
     }
     out
-}
-
-/// Both lists of names, once each, None when neither states one.
-fn add_names(base: Option<&[Text]>, inline: Option<&[Text]>) -> Option<Vec<Text>> {
-    (base.is_some() || inline.is_some())
-        .then(|| union(base.unwrap_or_default(), inline.unwrap_or_default()))
 }
 
 fn add_commands(base: Option<&Rules>, inline: Option<&Rules>) -> Option<Rules> {
@@ -221,8 +214,14 @@ pub fn restrict_profile(
     Ok(Some(Profile {
         commands: add_commands(base.commands.as_ref(), inline.commands.as_ref()),
         paths: add_paths(base.paths.as_ref(), inline.paths.as_ref()),
-        vars: add_names(base.vars.as_deref(), inline.vars.as_deref()),
-        protect: add_names(base.protect.as_deref(), inline.protect.as_deref()),
+        vars: if base.vars.is_some() || inline.vars.is_some() {
+            Some(union(
+                base.vars.as_deref().unwrap_or_default(),
+                inline.vars.as_deref().unwrap_or_default(),
+            ))
+        } else {
+            None
+        },
         mounts,
     }))
 }
@@ -260,7 +259,6 @@ mod tests {
                 ..Paths::default()
             }),
             vars: Some(vec![text("SECRET"), text("AWS_*")]),
-            protect: Some(vec![text("GITHUB_TOKEN"), text("OP_*")]),
             mounts: Some(vec![Mount {
                 prefix: text("/repo/"),
                 mode: Some(Mode::Read),
@@ -314,13 +312,6 @@ mod tests {
             VarScope {
                 names: vec![text("SECRET")],
                 patterns: vec![text("AWS_*")]
-            }
-        );
-        assert_eq!(
-            plan.visibility.protected,
-            VarScope {
-                names: vec![text("GITHUB_TOKEN")],
-                patterns: vec![text("OP_*")]
             }
         );
         assert_eq!(plan.mount_modes, vec![(text("/repo/"), Mode::Read)]);
@@ -388,7 +379,6 @@ mod tests {
                 }],
             }),
             vars: Some(vec![text("A")]),
-            protect: Some(vec![text("TOKEN")]),
             mounts: Some(vec![Mount {
                 prefix: text("/repo"),
                 mode: Some(Mode::Exec),
@@ -413,7 +403,6 @@ mod tests {
                 ..Paths::default()
             }),
             vars: Some(vec![text("A"), text("B")]),
-            protect: Some(vec![text("TOKEN"), text("KEY_*")]),
             mounts: Some(vec![
                 Mount {
                     prefix: text("/repo"),
@@ -458,7 +447,6 @@ mod tests {
         );
         assert_eq!(merged.paths.as_ref().unwrap().reasons.len(), 2);
         assert_eq!(merged.vars, Some(vec![text("A"), text("B")]));
-        assert_eq!(merged.protect, Some(vec![text("TOKEN"), text("KEY_*")]));
         let mounts = merged.mounts.unwrap();
         assert_eq!(
             mounts.iter().map(|mount| &mount.prefix).collect::<Vec<_>>(),
@@ -476,7 +464,6 @@ mod tests {
             commands: Some(Rules::default()),
             paths: Some(Paths::default()),
             vars: Some(vec![]),
-            protect: None,
             mounts: Some(vec![Mount {
                 prefix: text("/repo"),
                 commands: Some(Rules::default()),
@@ -494,7 +481,6 @@ mod tests {
         assert!(merged.commands.is_some());
         assert!(merged.paths.is_some());
         assert_eq!(merged.vars, Some(vec![]));
-        assert_eq!(merged.protect, None);
         let mount = &merged.mounts.unwrap()[0];
         assert_eq!(mount.commands, None);
         assert_eq!(mount.paths, None);

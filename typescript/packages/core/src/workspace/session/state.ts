@@ -81,8 +81,7 @@ function refuseDeciding(name: string): void {
 }
 
 /**
- * Run one write on the session's shell; a hidden or protected name refuses
- * with EACCES. `write` is the shell's write, which answers its result and its
+ * Run one write on the session's shell; a hidden name refuses with EACCES. `write` is the shell's write, which answers its result and its
  * warnings. Mirrors Python's run_write.
  */
 export function runWrite(
@@ -325,13 +324,11 @@ export function appended(
 }
 
 /**
- * Refuse a write that names a hidden or protected variable, the vars twin of
- * EACCES on a create into hidden path space. Mirrors Python's
- * ensure_var_writable.
+ * Refuse a write that names a hidden variable, the vars twin of EACCES on a
+ * create into hidden path space. Mirrors Python's ensure_var_visible.
  */
-export function ensureVarWritable(session: SessionState, name: string): void {
-  const shell = session.vars.shell
-  if (shell.hidden(name) || shell.protected(name)) {
+export function ensureVarVisible(session: SessionState, name: string): void {
+  if (session.vars.shell.hidden(name)) {
     throw new PolicyDenied(`${name}: permission denied`, name)
   }
 }
@@ -432,8 +429,8 @@ export async function assignElement(
 
 /**
  * Write one variable through the session plane. A string stores a scalar, a
- * ShellArray an indexed array, a record an associative one. Readonly, hidden
- * and protected names refuse; the value is shaped by the name's attributes
+ * ShellArray an indexed array, a record an associative one. Readonly and
+ * hidden names refuse; the value is shaped by the name's attributes
  * (`-i -l -u`) before it lands. `followRef` resolves a `declare -n` reference
  * to its target first; `assigned` names the elements an array write assigns;
  * `added` is an integer `+=`'s text; without a `diagnostics` sink, a seed's
@@ -586,7 +583,7 @@ export function shadowLocal(session: SessionState, name: string, inherit = false
  * shell's own bookkeeping (`$PWD`/`$OLDPWD` after a `cd`, `BASH_REMATCH`
  * after `[[ =~ ]]`). A variable the line named goes through
  * `SessionView.set` instead. A prefix assignment (`FOO=bar cmd`) lands here
- * too, after asking `ensureVarWritable`.
+ * too, after asking `ensureVarVisible`.
  *
  * Nor does it count against max_env: a caller that grows a value a line
  * chose, as a prefix assignment does, calls `checkEnv` first.

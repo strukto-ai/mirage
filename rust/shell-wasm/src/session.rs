@@ -461,13 +461,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             Item::Nil
         }
         "hidden" => Item::Bool(shell.store()?.hidden(&args.string()?)),
-        "protect" => {
-            let names = names_in(args.list()?)?;
-            let patterns = names_in(args.list()?)?;
-            shell.store_mut()?.protect_vars(&names, &patterns);
-            Item::Nil
-        }
-        "protected" => Item::Bool(shell.store()?.protected(&args.string()?)),
         "nameref_target" => Item::opt(shell.store()?.nameref_target(&args.string()?), Item::text),
         "deref" => Item::text(shell.store()?.deref(&args.string()?)),
         "shown" => Item::text(quote::shown(&args.bytes()?, shell.shell()?.utf8())),

@@ -53,7 +53,7 @@ import { expandNode, expandSubscript } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { conversionScalar, ensureVarWritable, seedVar, sessionView } from '../session/state.ts'
+import { conversionScalar, ensureVarVisible, seedVar, sessionView } from '../session/state.ts'
 import type { ExpandedWords } from './types.ts'
 import { ExecutionNode } from '../types.ts'
 import { expandArrayItems } from './assignment.ts'
@@ -329,11 +329,11 @@ export async function executeDeclaration(
       const want = kind ?? (elements.has(bare) ? VarKind.Indexed : null)
       if (bare.includes('=') || want === null) continue
       const wantAssoc = want === VarKind.Assoc
-      // A hidden or protected name refuses like any assignment spelling
-      // before anything lands, the readonly conversion below included,
-      // which writes past the writer's checks.
+      // A hidden name refuses like any assignment spelling before anything
+      // lands, the readonly conversion below included, which writes past
+      // the writer's checks.
       try {
-        ensureVarWritable(session, bare)
+        ensureVarVisible(session, bare)
       } catch (err) {
         if (!(err instanceof PolicyDenied)) throw err
         throw new DiscardSignal(encodeText(`${err.message}\n`))

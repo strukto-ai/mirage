@@ -80,7 +80,7 @@ def fault_error(fault: Fault) -> BaseException:
     """
     error: BaseException
     match fault:
-        case ("denied", name):
+        case ("hidden", name):
             return PolicyDenied(
                 errno.EACCES, f"{name}: permission denied", name
             )
@@ -160,11 +160,10 @@ async def drive(
             failure = exc
             task.answer_failed()
     result, said = task.finish()
-    # A profile changed while the host answered hid or protected its names
-    # on a copy lent meanwhile; the shell, back with its owner, takes them
-    # now.
+    # A profile changed while the host answered hid its names on a copy
+    # lent meanwhile; the shell, back with its owner, takes them now.
     if host.session.visibility is not shown:
-        host.session.guard_vars()
+        host.session.hide_vars()
     diagnostics.extend(said)
     if failure is not None:
         raise failure

@@ -1,4 +1,4 @@
-# The reviewer's profile as a document: the block policy.py passes in
+# The reviewer's policy as a document: the block policy.py passes in
 # code, with its program beside this file. One file, read by both
 # implementations:
 #
@@ -15,8 +15,6 @@ mounts:
 
 profiles:
   reviewer:
-    vars:
-      protect: [AWS_*]
     policy:
       pre_command:
         - {script: ./guard.py, runtime: monty}

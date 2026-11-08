@@ -358,9 +358,8 @@ function unsetMasks(stmt: TSNodeLike): ReadonlySet<string> | null {
  * only run from later statements, and even an opaque read there
  * observes the replacement. The prefix ends at the first statement
  * that is anything else, that runs in the background (`&` detaches it
- * to a subshell, so nothing persists), or that touches a readonly or
- * protected name (the write fails and the standing value stays
- * observable). A name
+ * to a subshell, so nothing persists), or that touches a readonly name
+ * (the write fails and the standing value stays observable). A name
  * read while still unmasked (`TOKEN=$TOKEN`) stays fetched: within a
  * statement the read precedes the write.
  *
@@ -398,12 +397,11 @@ export function maskedNames(
     if (masks === null) break
     const following = children[idx + 1]
     if (following?.type === '&') break
-    const refused = [...masks].some(
-      (name) =>
-        (session.vars.get(name)?.attrs.has(VarAttr.Readonly) ?? false) ||
-        session.vars.shell.protected(name),
-    )
-    if (refused) break
+    const readonlyHit = [...masks].some((name) => {
+      const record = session.vars.get(name)
+      return record?.attrs.has(VarAttr.Readonly) ?? false
+    })
+    if (readonlyHit) break
     for (const name of referencedNames(stmt)) {
       for (const target of [name, deref(session, name)]) {
         if (!masked.has(target)) needed.add(target)

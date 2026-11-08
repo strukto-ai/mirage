@@ -26,7 +26,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ReadonlyVariableError
 from mirage.shell.parse.parse import parse_program
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
-from mirage.types import HiddenVars, ProtectedVars, Visibility
+from mirage.types import HiddenVars, Visibility
 from mirage.view.types import SessionView
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
@@ -118,27 +118,6 @@ def test_readonly_refusal_is_typed():
         with pytest.raises(ReadonlyVariableError):
             await view.unset("A")
         assert session.env["A"] == "1"
-
-    asyncio.run(run())
-
-
-def test_a_protected_name_reads_and_refuses_every_write():
-    async def run():
-        view, session = _view()
-        session.visibility = Visibility(
-            protected=ProtectedVars(names=("A",), patterns=("SECRET_*",))
-        )
-        assert view.get("A") == "1"
-        with pytest.raises(PolicyDenied, match="SECRET_KEY: permission"):
-            await view.set("SECRET_KEY", "x")
-        assert "SECRET_KEY" not in session.env
-        with pytest.raises(PolicyDenied):
-            await view.unset("A")
-        with pytest.raises(PolicyDenied):
-            await view.mark("A", VarAttr.READONLY, True)
-        assert VarAttr.READONLY not in session.vars["A"].attrs
-        await view.set("PUBLIC", "y")
-        assert session.env["PUBLIC"] == "y"
 
     asyncio.run(run())
 
@@ -385,9 +364,9 @@ def test_subscript_index_lands_its_assignments_and_seeds_random():
         # the session past it.
         assert await subscript_index(session, "RANDOM=42, RANDOM") == 17772
         assert session.vars.shell.next_random() == 26794
-        # A protected name the subscript assigns refuses.
+        # A hidden name the subscript assigns refuses.
         session.visibility = Visibility(
-            protected=ProtectedVars(patterns=("SECRET_*",))
+            vars=HiddenVars(patterns=("SECRET_*",))
         )
         with pytest.raises(PolicyDenied):
             await subscript_index(session, "SECRET_N=1")

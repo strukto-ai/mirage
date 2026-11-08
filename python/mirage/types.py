@@ -723,21 +723,6 @@ class HiddenVars:
     patterns: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
-class ProtectedVars:
-    """What one session reads but cannot write: a set, unset or mark of
-    one of these names is refused with EACCES, as a write to a hidden name
-    is.
-
-    Args:
-        names (tuple[str, ...]): exact variable names.
-        patterns (tuple[str, ...]): globs over names (``GITHUB_*``).
-    """
-
-    names: tuple[str, ...] = ()
-    patterns: tuple[str, ...] = ()
-
-
 ProcessScope = Literal["session", "workspace"]
 
 
@@ -756,15 +741,12 @@ class Visibility:
         shown (ShownPaths | None): the show entries, which re-open a
             hidden subtree and state a subtree's mode.
         vars (HiddenVars | None): the hidden variable names.
-        protected (ProtectedVars | None): the variable names the session
-            reads but cannot write.
         processes (ProcessScope): whose processes the session sees.
     """
 
     paths: HiddenPaths | None = None
     shown: ShownPaths | None = None
     vars: HiddenVars | None = None
-    protected: ProtectedVars | None = None
     processes: ProcessScope = "session"
 
 

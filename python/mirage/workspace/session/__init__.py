@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from mirage.workspace.session.manager import SessionManager
     from mirage.workspace.session.session import SessionState
     from mirage.workspace.session.state import (
-        ensure_var_writable,
+        ensure_var_visible,
         env_snapshot,
         session_view,
         visible_arrays,
@@ -43,7 +43,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.workspace.session.manager": ("SessionManager",),
     "mirage.workspace.session.session": ("SessionState",),
     "mirage.workspace.session.state": (
-        "ensure_var_writable",
+        "ensure_var_visible",
         "env_snapshot",
         "session_view",
         "visible_arrays",
@@ -54,7 +54,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
 __all__ = [
     "SessionManager",
     "SessionState",
-    "ensure_var_writable",
+    "ensure_var_visible",
     "env_snapshot",
     "get_current_session",
     "get_current_session_for",

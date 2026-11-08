@@ -291,17 +291,6 @@ impl Shell {
         Ok(self.store()?.hidden(name))
     }
 
-    /// Protect the names a session's profile lists, exactly or by glob:
-    /// they read as any name does, and a write to one is refused.
-    fn protect(&mut self, names: Vec<String>, patterns: Vec<String>) -> PyResult<()> {
-        self.store_mut()?.protect_vars(&names, &patterns);
-        Ok(())
-    }
-
-    fn protected(&self, name: &str) -> PyResult<bool> {
-        Ok(self.store()?.protected(name))
-    }
-
     fn nameref_target(&self, name: &str) -> PyResult<Option<String>> {
         Ok(self.store()?.nameref_target(name).map(str::to_owned))
     }
@@ -705,8 +694,8 @@ impl Shell {
     }
 
     /// Write one element a builtin names, or a bare name as element 0;
-    /// the result is 0 landed, 1 denied (hidden or protected), 2 readonly
-    /// or 3 a subscript that names no element. `warns` as for `set`.
+    /// the result is 0 landed, 1 hidden, 2 readonly or 3 a subscript that
+    /// names no element. `warns` as for `set`.
     #[pyo3(signature = (name, subscript, value, *, append = false, warns = true))]
     #[allow(clippy::too_many_arguments)]
     fn element(

@@ -3687,11 +3687,6 @@
           }
         },
         "scriptedops": {
-          "vars": {
-            "protect": [
-              "AWS_*"
-            ]
-          },
           "policy": {
             "pre_command": [
               {
@@ -3896,11 +3891,6 @@
           }
         },
         "scriptedopswasm": {
-          "vars": {
-            "protect": [
-              "AWS_*"
-            ]
-          },
           "policy": {
             "pre_vfs": [
               {
@@ -3965,11 +3955,6 @@
           }
         },
         "scriptedopswasm": {
-          "vars": {
-            "protect": [
-              "AWS_*"
-            ]
-          },
           "policy": {
             "pre_vfs": [
               {

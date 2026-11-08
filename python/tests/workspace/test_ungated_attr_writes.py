@@ -18,7 +18,7 @@ import pathlib
 SRC = pathlib.Path(__file__).resolve().parents[2] / "mirage"
 
 # `set_attr` is the *ungated* attribute entry point: it writes the record
-# past the writer's hidden, protected and readonly checks. That is correct
+# past the writer's hidden and readonly checks. That is correct
 # only where this operand's own path already passed them, which is a
 # per-call-site fact and not a property of the function it sits in.
 # Reading a nearby `view.set` and assuming it covers the name at hand is

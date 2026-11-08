@@ -152,9 +152,7 @@ describe('execution bindings', () => {
     const ws = world()
     try {
       await ws.shell('echo private > /secret/a')
-      ws.createSession('agent', {
-        profile: { paths: { hide: ['/secret'] }, vars: { hide: [], protect: ['SECRET'] } },
-      })
+      ws.createSession('agent', { profile: { paths: { hide: ['/secret'] } } })
       const context = ws.runtimeContext('agent'),
         other = ws.runtimeContext()
       expect(required(mountView(context.ctx.vfs)).visibleDescendants('/')).not.toContain('/secret')
@@ -166,9 +164,6 @@ describe('execution bindings', () => {
       expect(required(context.ctx.session).get('PUBLIC')).toBe('agent')
       expect(required(other.ctx.session).get('PUBLIC')).toBeNull()
       expect(context.ctx.env?.PUBLIC).toBeUndefined()
-      await expect(required(context.ctx.session).set('SECRET', 'no')).rejects.toThrow(
-        'SECRET: permission denied',
-      )
       const reads = await Promise.all([
         runWithCaller(context.caller, async () => {
           await Promise.resolve()

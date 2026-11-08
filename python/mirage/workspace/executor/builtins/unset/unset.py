@@ -84,7 +84,7 @@ async def _unset_one(
             subscript outside an existing array.
 
     Raises:
-        PolicyDenied: the name is protected.
+        PolicyDenied: the subscript assigned a hidden name.
     """
     try:
         return await unset_element(session, base, subscript, every)
@@ -204,9 +204,8 @@ async def handle_unset(
             or name in session.arrays
             or name in session.assocs
         )
-        # Both spellings refuse a protected base name: the whole-variable
-        # unset through the view, an element unset inside _unset_one, so
-        # `unset 'X[0]'` cannot sidestep what refuses `unset X`.
+        # Both spellings go through the session view: the whole-variable
+        # unset through its env half, an element unset inside _unset_one.
         try:
             if subscript is not None:
                 # `@` and `*` name every element as typed, never once a

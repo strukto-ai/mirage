@@ -327,25 +327,6 @@
    ]
   },
   {
-   "id": "a_protected_variable_reads_and_refuses_every_write",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
-   "steps": [
-    {"op": "session", "id": "agent", "profile": {"env": {"KEPT": "old"}, "vars": {"protect": ["KEPT", "OP_*", "RANDOM"]}}},
-    {"op": "exec", "session": "agent", "command": "export KEPT=new; echo $KEPT", "expect": {"value": {"exit_code": 0, "stdout": "old\n", "stderr": "KEPT: permission denied\n", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "KEPT=new printenv KEPT", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: KEPT: permission denied\n", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "unset KEPT; echo $KEPT", "expect": {"value": {"exit_code": 0, "stdout": "old\n", "stderr": "KEPT: permission denied\n", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "export -n KEPT", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "KEPT: permission denied\n", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "f() { local KEPT=mine; }; f", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "KEPT: permission denied\n", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "OP_TOKEN=1; echo after", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "OP_TOKEN: permission denied\n", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "echo ${KEPT:=x} ${OP_NEW:=y}", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: OP_NEW: permission denied\n", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "read OP_LINE <<< hi", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "OP_LINE: permission denied\n", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "RANDOM=(1 2)", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "RANDOM: permission denied\n", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "[ \"$RANDOM\" != \"$RANDOM\" ] && echo draws", "expect": {"value": {"exit_code": 0, "stdout": "draws\n", "stderr": "", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "declare -p KEPT", "expect": {"value": {"exit_code": 0, "stdout": "declare -x KEPT=\"old\"\n", "stderr": "", "refusal": null}}},
-    {"op": "exec", "command": "export KEPT=mine; echo $KEPT", "expect": {"value": {"exit_code": 0, "stdout": "mine\n", "stderr": "", "refusal": null}}}
-   ]
-  },
-  {
    "id": "a_hook_answering_outside_its_kinds_fails_the_line",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [

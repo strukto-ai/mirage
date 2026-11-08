@@ -23,8 +23,7 @@ const ENV_EXHAUSTED_STATUS: i32 = 2;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Element {
     Landed,
-    /// A name the session may not write: hidden or protected.
-    Denied,
+    Hidden,
     Readonly,
     /// The subscript names no element: empty, or before the first.
     Subscript,
@@ -52,9 +51,9 @@ pub fn element_reference(reference: &[u8]) -> Option<(&str, Option<&[u8]>)> {
 /// Why a write did not land.
 #[derive(Debug)]
 pub enum Fault {
-    /// The name is hidden or protected for this session: EACCES, the
-    /// variables twin of a create into hidden path space.
-    Denied(String),
+    /// The name is hidden for this session: EACCES, the variables twin of
+    /// a create into hidden path space.
+    Hidden(String),
     Readonly {
         name: String,
         subscript: bool,
@@ -130,22 +129,16 @@ impl<'a> Writer<'a> {
         }
     }
 
-    /// Whether the session may not write `name`: hidden, which reads as
-    /// unset, or protected, which reads as any name does.
-    fn denied(&self, name: &str) -> bool {
-        self.store.hidden(name) || self.store.protected(name)
-    }
-
-    fn permitted(&self, name: &str) -> Result<(), Fault> {
-        if self.denied(name) {
-            return Err(Fault::Denied(name.to_owned()));
+    fn visible(&self, name: &str) -> Result<(), Fault> {
+        if self.store.hidden(name) {
+            return Err(Fault::Hidden(name.to_owned()));
         }
         Ok(())
     }
 
-    /// Refuse a write to a hidden, protected or readonly name.
+    /// Refuse a write to a hidden or readonly name.
     fn writable(&self, name: &str) -> Result<(), Fault> {
-        self.permitted(name)?;
+        self.visible(name)?;
         if self.store.is_readonly(name, false) {
             return Err(Fault::Readonly {
                 name: name.to_owned(),
@@ -199,8 +192,7 @@ impl<'a> Writer<'a> {
     }
 
     /// Write one variable: a reference's target unless `follow_ref` is off
-    /// (`declare -n r=w` re-aims `r`), refused when hidden, protected or
-    /// readonly, its value shaped by the name's attributes (`assigned`
+    /// (`declare -n r=w` re-aims `r`), refused when hidden or readonly, its value shaped by the name's attributes (`assigned`
     /// naming the elements an array write assigns, `added` an integer
     /// `+=`'s text, evaluated after the held one), a `RANDOM=` seeding the
     /// generator.
@@ -417,8 +409,7 @@ impl<'a> Writer<'a> {
     /// indexes after it, as one write. An associative subscript is the key
     /// verbatim, and a key not there clears nothing; an indexed one is
     /// arithmetic, its writes landed first; a scalar's element 0 is the
-    /// whole scalar. A hidden or unset name clears nothing, quietly, and a
-    /// protected one is refused. An
+    /// whole scalar. A hidden or unset name clears nothing, quietly. An
     /// array the shell computes (`PIPESTATUS`, `FUNCNAME`) clears nothing
     /// whatever a write left on its name, as a read answers from it, but
     /// its subscript is still read, so its writes land and an index before
@@ -437,7 +428,6 @@ impl<'a> Writer<'a> {
         if self.store.hidden(&name) {
             return Ok(Element::Landed);
         }
-        self.permitted(&name)?;
         if let Some(array) = self.store.special(&name) {
             if every {
                 return Ok(Element::Landed);
@@ -496,7 +486,7 @@ impl<'a> Writer<'a> {
     }
 
     /// Drop one variable; a missing or hidden name is quiet, as bash's
-    /// unset of a missing name is, and a protected one is refused.
+    /// unset of a missing name is.
     pub fn unset(&mut self, name: &str, follow_ref: bool) -> Result<(), Fault> {
         let name = self.aim(name, follow_ref);
         if self.store.hidden(&name) {
@@ -519,7 +509,7 @@ impl<'a> Writer<'a> {
         follow_ref: bool,
     ) -> Result<(), Fault> {
         let name = self.aim(name, follow_ref && attr != Some(NAMEREF));
-        self.permitted(&name)?;
+        self.visible(&name)?;
         if self.store.record(&name).is_none() {
             self.check(0, entry_bytes(&name, None))?;
         }
@@ -683,9 +673,9 @@ impl<'a> Writer<'a> {
     /// `append` concatenating onto what it holds, or adding under `-i`.
     /// An associative subscript is the key verbatim, an indexed one
     /// arithmetic whose writes land first, even on a readonly name, as
-    /// bash's `read 'a[x=3]'` leaves x at 3. A name hidden, protected,
-    /// readonly or given a subscript that names no element comes back as
-    /// its [`Element`] for the caller to voice.
+    /// bash's `read 'a[x=3]'` leaves x at 3. A name hidden, readonly or
+    /// given a subscript that names no element comes back as its
+    /// [`Element`] for the caller to voice.
     pub fn element(
         &mut self,
         name: &str,
@@ -694,8 +684,8 @@ impl<'a> Writer<'a> {
         append: bool,
     ) -> Result<Element, Fault> {
         let name = self.store.target(name);
-        if self.denied(&name) {
-            return Ok(Element::Denied);
+        if self.store.hidden(&name) {
+            return Ok(Element::Hidden);
         }
         // An existing scalar becomes element 0, even when empty: bash
         // resolves `x[-1]` against the length-1 array that makes, and a
@@ -766,8 +756,7 @@ impl<'a> Writer<'a> {
     }
 
     /// An arithmetic command (`(( ))`, `let`, `for ((;;))`): evaluated,
-    /// its writes landed in order, a hidden or protected name refusing and
-    /// the writes
+    /// its writes landed in order, a hidden name refusing and the writes
     /// after it never landing, as a readonly name stops the evaluation
     /// itself (`let 'X=5, R=3'` leaves X at 5). The draws settle either
     /// way, and an unset name under `set -u` stops the line only after the
@@ -781,8 +770,8 @@ impl<'a> Writer<'a> {
         let value = outcome.value;
         let mut landed = Ok(());
         for write in outcome.writes {
-            if self.denied(&self.store.target(&write.name)) {
-                landed = Err(Fault::Denied(write.name));
+            if self.store.hidden(&self.store.target(&write.name)) {
+                landed = Err(Fault::Hidden(write.name));
                 break;
             }
             match self.land_element(&write.name, write.key, write.value.into_bytes()) {
@@ -853,37 +842,6 @@ mod tests {
             .unwrap();
         assert_eq!(text(&store, "x").as_deref(), Some("5"));
         assert_eq!(text(&store, "n").as_deref(), Some("6"));
-    }
-
-    #[test]
-    fn a_protected_name_reads_and_refuses_every_write() {
-        let mut store = Store::new(Arc::new(|| 1));
-        store.seed("TOKEN", scalar("op"));
-        store.seed("a", Value::Indexed(Indexed::dense([b"1".to_vec()])));
-        store.protect_vars(&["TOKEN".to_owned()], &["a*".to_owned()]);
-        let mut writer = writer(&mut store);
-        let denied = |fault| matches!(fault, Err(Fault::Denied(name)) if name == "TOKEN");
-        assert!(denied(writer.set("TOKEN", scalar("x"), true, None, None)));
-        assert!(denied(writer.unset("TOKEN", true)));
-        assert!(denied(writer.mark("TOKEN", Some(EXPORT), true, true)));
-        assert!(matches!(
-            writer.arith(b"TOKEN=1", false),
-            Err(Fault::Denied(_))
-        ));
-        assert_eq!(
-            writer.element("a", Some(b"1"), b"2", false).unwrap(),
-            Element::Denied
-        );
-        assert!(matches!(
-            writer.push("a", vec![b"2".to_vec()]),
-            Err(Fault::Denied(_))
-        ));
-        assert!(matches!(
-            writer.unset_element("a", b"0", false),
-            Err(Fault::Denied(_))
-        ));
-        assert_eq!(text(writer.store, "TOKEN").as_deref(), Some("op"));
-        assert_eq!(writer.store.indexed("a").unwrap().count(), 1);
     }
 
     #[test]

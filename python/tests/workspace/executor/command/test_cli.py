@@ -1027,22 +1027,6 @@ async def test_a_leaf_writes_the_session_through_its_entry_point():
         assert echoed.stdout == b"abc\n"
 
 
-@pytest.mark.asyncio
-async def test_a_leafs_session_write_refuses_a_protected_name():
-    # An entry point that wrote the session directly would make an
-    # installed CLI the way around a protected name, which is the whole
-    # reason writes go through one entry point rather than to the session.
-    profile = {"vars": {"protect": ["AWS_*"]}}
-    with Workspace({"/ram/": RAMVFS()}, profiles={"default": profile}) as ws:
-        ws.register_cli("stash", STASH)
-        denied = await ws.shell("stash AWS_PROFILE prod")
-        assert denied.exit_code != 0
-        assert denied.stderr == b"stash: AWS_PROFILE: Permission denied\n"
-        assert (await ws.shell("echo $AWS_PROFILE")).stdout == b"\n"
-        allowed = await ws.shell("stash OTHER fine")
-        assert allowed.exit_code == 0
-
-
 def _out_of_band_writer(root):
     """A leaf that reaches its service past every mount, as an account
     CLI does: the file lands on disk, and no vfs path was touched."""

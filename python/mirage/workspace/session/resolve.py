@@ -117,9 +117,6 @@ def _profile_wire(profile: SessionProfile) -> Wire:
         "vars": None
         if profile.vars is None
         else [units(v) for v in profile.vars.hide],
-        "protect": None
-        if profile.vars is None
-        else [units(v) for v in profile.vars.protect],
         "mounts": None
         if profile.mounts is None
         else [
@@ -216,11 +213,8 @@ def _profile_fields(
         if rules is not None
         else None,
         _paths_from(value["paths"]),
-        VarsBlock(
-            hide=tuple(from_units(v) for v in value["vars"] or ()),
-            protect=tuple(from_units(v) for v in value["protect"] or ()),
-        )
-        if value["vars"] is not None or value["protect"] is not None
+        VarsBlock(hide=tuple(from_units(v) for v in value["vars"]))
+        if value["vars"] is not None
         else None,
         mounts,
     )

@@ -96,8 +96,8 @@ enum Request {
         profile: Profile,
     },
     Restrict {
-        base: Option<Box<Profile>>,
-        inline: Option<Box<Profile>>,
+        base: Option<Profile>,
+        inline: Option<Profile>,
     },
     ClassifyPaths {
         entries: Vec<Text>,
@@ -199,7 +199,7 @@ impl Policy {
             Request::Compile { profile } => reply(out, compile_profile(&profile)),
             Request::Restrict { base, inline } => reply(
                 out,
-                restrict_profile(base.as_deref(), inline.as_deref()).map_err(StreamError::new)?,
+                restrict_profile(base.as_ref(), inline.as_ref()).map_err(StreamError::new)?,
             ),
             Request::ClassifyPaths { entries } => reply(out, classify_paths(&entries)),
             Request::IsGlob { entry } => reply(out, is_glob(&entry)),

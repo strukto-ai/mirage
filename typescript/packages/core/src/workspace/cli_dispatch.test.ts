@@ -579,26 +579,6 @@ describe('the session plane reaches a CLI leaf', () => {
     const echoed = await ws.shell('echo $TOKEN')
     expect(dec.decode(echoed.stdout)).toBe('abc\n')
   })
-
-  it("a leaf's session write refuses a protected name", async () => {
-    // An entry point that wrote the session directly would make an
-    // installed CLI the way around a protected name, which is the whole
-    // reason writes go through one entry point rather than to the session.
-    const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/data': ram },
-      {
-        mode: MountMode.WRITE,
-        profiles: { default: SessionProfile({ vars: { protect: ['AWS_*'] } }) },
-      },
-    )
-    ws.registerCli('stash', STASH)
-    const denied = await ws.shell('stash AWS_PROFILE prod')
-    expect(denied.exitCode).not.toBe(0)
-    expect(dec.decode(denied.stderr)).toBe('stash: AWS_PROFILE: Permission denied\n')
-    expect(dec.decode((await ws.shell('echo $AWS_PROFILE')).stdout)).toBe('\n')
-    expect((await ws.shell('stash OTHER fine')).exitCode).toBe(0)
-  })
 })
 
 describe('CLI dispatch under an aborted invocation', () => {

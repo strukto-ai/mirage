@@ -72,8 +72,8 @@ ChildMounts = Callable[[str], list[str]]
 EnvGet = Callable[[str], "str | None"]
 # A process-view copy of the whole environment.
 EnvSnapshot = Callable[[], dict[str, str]]
-# Write one variable through the session plane (readonly, hidden and
-# protected names refused).
+# Write one variable through the session plane (readonly and hidden names
+# refused).
 # General over variable shapes: a string stores a scalar, a ShellArray
 # stores a whole array, and the session view keeps the two storages exclusive.
 # Writers with richer mechanics (subscripts, appends, holes) compute the
@@ -113,7 +113,7 @@ class EnvUnset(Protocol):
 # because it writes no value: `export NAME`, `readonly NAME` and a bare
 # `local NAME` on a fresh name leave it *unset* and merely declared,
 # which is a state `EnvSet` cannot express. Gated all the same -- a mark
-# is a session write, so a hidden or protected name refuses.
+# is a session write, so a hidden name refuses.
 # `follow_ref` is `EnvSet`'s: `declare -rn r` marks the reference itself.
 
 
@@ -150,7 +150,7 @@ class SessionView:
     The ``LinkView`` pattern on the session plane: every field answers
     through the plane's own writers (``workspace/session/state``), so
     reads arrive exactly as the shell sees them and writes clear
-    readonly plus the hidden and protected names. The plain ``env``
+    readonly and the hidden names. The plain ``env``
     kwarg every command already receives stays the frozen process-view
     snapshot; this view is the live, gated handle for the command that
     needs one, and it is the whole capability: no field reaches the raw

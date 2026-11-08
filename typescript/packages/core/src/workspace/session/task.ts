@@ -58,7 +58,7 @@ function permissionDenied(name: string): PolicyDenied {
 export function faultError(fault: readonly Item[]): Error {
   const [tag] = fault
   switch (tag) {
-    case 'denied':
+    case 'hidden':
       return permissionDenied(fault[1] as string)
     case 'readonly':
       return new ReadonlyVariableError(fault[1] as string, fault[2] as boolean)
@@ -173,9 +173,9 @@ export async function drive(
     }
   }
   const [result, said] = task.finish()
-  // A profile changed while the host answered hid or protected its names on
-  // a copy lent meanwhile; the shell, back with its owner, takes them now.
-  if (host.session.visibility !== shown) host.session.guardVars()
+  // A profile changed while the host answered hid its names on a copy lent
+  // meanwhile; the shell, back with its owner, takes them now.
+  if (host.session.visibility !== shown) host.session.hideVars()
   diagnostics.push(...said)
   if (failed) throw failure
   if (result[0] !== 'ok') throw faultError(result)

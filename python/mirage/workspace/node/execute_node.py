@@ -193,7 +193,7 @@ async def _eval_cfor_expr(
             which aborts the loop the same way an invalid expression
             does; the writes before it have landed.
         ExitSignal: that assignment was inside a subscript.
-        PolicyDenied: one of the writes named a hidden or protected name.
+        PolicyDenied: one of the writes named a hidden name.
     """
     if not exprs:
         return default

@@ -61,7 +61,7 @@ class _OverlayRAMVFS(RAMVFS):
     setattr = BaseVFS.setattr
 
 
-def _two_mounts(policies=None, protect: tuple[str, ...] = ()) -> Workspace:
+def _two_mounts(policies=None) -> Workspace:
     a = RAMVFS()
     a._store.files["/x.txt"] = b"public\n"
     b = RAMVFS()
@@ -70,7 +70,6 @@ def _two_mounts(policies=None, protect: tuple[str, ...] = ()) -> Workspace:
         {"/a": (a, MountMode.WRITE), "/b": (b, MountMode.WRITE)},
         mode=MountMode.WRITE,
         policies=policies,
-        profiles={"default": {"vars": {"protect": list(protect)}}},
     )
 
 
@@ -322,49 +321,6 @@ def test_overlay_setattr_still_lands_without_policies():
     assert meta is not None and meta.mode == 0o600
 
 
-def test_export_refuses_a_protected_name():
-    # A protected name refuses an env write whichever tier asked.
-    ws = _two_mounts(protect=("SECRET*",))
-
-    async def run():
-        denied = await ws.shell("export SECRET_X=1")
-        allowed = await ws.shell("export PUBLIC_X=1")
-        return denied, allowed
-
-    denied, allowed = asyncio.run(run())
-    assert denied.exit_code != 0
-    assert b"permission denied" in (denied.stderr or b"")
-    assert "SECRET_X" not in ws.env
-    assert allowed.exit_code == 0
-    assert ws.env.get("PUBLIC_X") == "1"
-
-
-def test_every_declaring_spelling_refuses_a_protected_name():
-    # A mark is a session write, so the no-value forms refuse too: a
-    # `readonly NAME` that walked past would create the record and freeze
-    # the name against every later write the operator's own wiring makes.
-    ws = _two_mounts(protect=("SECRET*",))
-
-    async def run():
-        return [
-            await ws.shell(line)
-            for line in (
-                "SECRET_A=1",
-                "export SECRET_B",
-                "readonly SECRET_C",
-                "readonly SECRET_D=1",
-                "declare SECRET_E",
-            )
-        ]
-
-    for io in asyncio.run(run()):
-        assert io.exit_code != 0, f"unexpected success: {io}"
-        assert b"permission denied" in (io.stderr or b"")
-    session = ws.get_session(ws.default_session_id)
-    for name in ("SECRET_A", "SECRET_B", "SECRET_C", "SECRET_D", "SECRET_E"):
-        assert name not in session.vars
-
-
 def test_a_hidden_name_cannot_be_marked_readonly():
     # The same gate from the other side: a session that cannot see the
     # name must not be able to freeze it either, which would deny the
@@ -506,219 +462,6 @@ def test_facade_symlink_respects_the_sessions_view():
     assert not ws.namespace.is_link("/b/lk")
 
 
-def test_bare_export_of_a_new_name_refuses_a_protected_name():
-    # `export NAME` writes no value, but marking a name is still a
-    # session write, so it refuses as an assignment does.
-    ws = _two_mounts(protect=("SECRET*",))
-
-    async def run():
-        denied = await ws.shell("export SECRET_BARE")
-        allowed = await ws.shell("export PUBLIC_BARE")
-        listed = await ws.shell("export -p")
-        return denied, allowed, await listed.stdout_str()
-
-    denied, allowed, listed = asyncio.run(run())
-    assert denied.exit_code != 0
-    assert b"permission denied" in (denied.stderr or b"")
-    assert "SECRET_BARE" not in ws.env
-    assert allowed.exit_code == 0
-    # Marked but unset, which is bash's third state: `export -p` lists
-    # it bare while the environment does not carry it at all.
-    assert "PUBLIC_BARE" not in ws.env
-    assert "declare -x PUBLIC_BARE\n" in listed
-    assert "SECRET_BARE" not in listed
-
-
-def test_local_refuses_a_protected_name():
-    ws = _two_mounts(protect=("SECRET*",))
-
-    async def run():
-        return await ws.shell("f() { local SECRET_L=1; }; f")
-
-    io = asyncio.run(run())
-    assert io.exit_code != 0
-    assert b"permission denied" in (io.stderr or b"")
-    assert "SECRET_L" not in ws.env
-
-
-def test_plain_assignment_refuses_a_protected_name():
-    # A refusal mirrors the readonly case: a fatal variable-assignment
-    # error that abandons the rest of the line.
-    ws = _two_mounts(protect=("SECRET*",))
-
-    async def run():
-        denied = await ws.shell("SECRET_P=1; echo after")
-        allowed = await ws.shell("PUBLIC_P=1")
-        return denied, allowed
-
-    denied, allowed = asyncio.run(run())
-    assert denied.exit_code != 0
-    assert b"permission denied" in (denied.stderr or b"")
-    assert "SECRET_P" not in ws.env
-    assert allowed.exit_code == 0
-    assert ws.env.get("PUBLIC_P") == "1"
-
-
-def test_append_assignment_refuses_a_protected_name():
-    # An integer `+=` onto a protected name is refused before it
-    # evaluates, so nothing its sides assign lands.
-    ws = _two_mounts(protect=("SECRET*",))
-    session = ws.get_session(ws.default_session_id)
-    seed_var(session, "SECRET_N", "1")
-    set_attr(session, "SECRET_N", VarAttr.INTEGER)
-
-    async def run():
-        return [
-            await ws.shell(line) for line in ("SECRET_A+=x", "SECRET_N+=X=5")
-        ]
-
-    for io in asyncio.run(run()):
-        assert io.exit_code != 0
-    assert "SECRET_A" not in ws.env
-    assert "X" not in ws.env
-    assert ws.env["SECRET_N"] == "1"
-
-
-def test_array_assignment_refuses_a_protected_name():
-    # A protected name must not be writable by switching to array
-    # syntax: SECRET=(a b) lands on the same session plane as SECRET=x.
-    ws = _two_mounts(protect=("SECRET*",))
-
-    async def run():
-        return await ws.shell("SECRET_V=(a b); echo after")
-
-    io = asyncio.run(run())
-    assert io.exit_code != 0
-    assert b"permission denied" in (io.stderr or b"")
-    sess = ws._session_mgr.get(ws._session_mgr.default_id)
-    assert "SECRET_V" not in sess.arrays
-
-
-def test_array_append_assignment_refuses_a_protected_name():
-    ws = _two_mounts(protect=("SECRET*",))
-
-    async def run():
-        return await ws.shell("SECRET_VA+=(a)")
-
-    io = asyncio.run(run())
-    assert io.exit_code != 0
-    sess = ws._session_mgr.get(ws._session_mgr.default_id)
-    assert "SECRET_VA" not in sess.arrays
-
-
-def test_subscript_assignment_refuses_a_protected_name():
-    ws = _two_mounts(protect=("SECRET*",))
-
-    async def run():
-        return await ws.shell("SECRET_S[0]=x")
-
-    io = asyncio.run(run())
-    assert io.exit_code != 0
-    sess = ws._session_mgr.get(ws._session_mgr.default_id)
-    assert "SECRET_S" not in sess.arrays
-    assert "SECRET_S" not in ws.env
-
-
-def test_scalar_append_onto_an_existing_array_refuses_a_protected_name():
-    # SECRET+=x on a name that already holds an array appends to
-    # element 0 through a branch of its own; it is still a session
-    # write.
-    ws = _two_mounts(protect=("SECRET*",))
-    sess = ws._session_mgr.get(ws._session_mgr.default_id)
-    seed_var(sess, "SECRET_E", make_array(["a"]))
-
-    async def run():
-        return await ws.shell("SECRET_E+=x")
-
-    io = asyncio.run(run())
-    assert io.exit_code != 0
-    assert sess.arrays["SECRET_E"] == make_array(["a"])
-
-
-def test_declaration_array_assignment_refuses_a_protected_name():
-    # export/declare with an array literal store through the staged
-    # path, not handle_export, so it has to refuse there too.
-    ws = _two_mounts(protect=("SECRET*",))
-
-    async def run():
-        return await ws.shell("export SECRET_D=(a)")
-
-    io = asyncio.run(run())
-    assert io.exit_code != 0
-    assert b"permission denied" in (io.stderr or b"")
-    sess = ws._session_mgr.get(ws._session_mgr.default_id)
-    assert "SECRET_D" not in sess.arrays
-
-
-def test_bare_declare_a_refuses_a_protected_name():
-    # `declare -a NAME` with no value stores an empty array (or converts
-    # the scalar it holds), a write like any other.
-    ws = _two_mounts(protect=("SECRET*",))
-
-    async def run():
-        return await ws.shell("declare -a SECRET_B; declare -A SECRET_M")
-
-    io = asyncio.run(run())
-    assert io.exit_code != 0
-    assert b"permission denied" in (io.stderr or b"")
-    sess = ws._session_mgr.get(ws._session_mgr.default_id)
-    assert "SECRET_B" not in sess.arrays
-    assert "SECRET_M" not in sess.assocs
-
-
-def test_bare_declare_a_of_a_readonly_name_refuses_a_protected_name():
-    # bash converts a readonly scalar all the same, past the readonly
-    # refusal the writer makes, so the protected name is checked first.
-    ws = _two_mounts(protect=("SECRET*",))
-    sess = ws._session_mgr.get(ws._session_mgr.default_id)
-    seed_var(sess, "SECRET_R", "v")
-    set_attr(sess, "SECRET_R", VarAttr.READONLY)
-
-    async def run():
-        return await ws.shell("declare -a SECRET_R")
-
-    io = asyncio.run(run())
-    assert io.exit_code != 0
-    assert "SECRET_R" not in sess.arrays
-    assert sess.env["SECRET_R"] == "v"
-
-
-def test_a_prefix_assignment_refuses_a_protected_name():
-    # `SECRET=leak cmd` is a session write like any other, and the form
-    # puts it in the command's environment; its seeding goes past the
-    # writer's checks, so the prefix loop checks the name itself.
-    ws = _two_mounts(protect=("SECRET*",))
-
-    async def run():
-        denied = await ws.shell("SECRET_K=leak printenv SECRET_K")
-        out = await denied.stdout_str() if denied.stdout else ""
-        allowed = await ws.shell("OPEN_K=fine printenv OPEN_K")
-        return denied, out, await allowed.stdout_str()
-
-    denied, out, allowed_out = asyncio.run(run())
-    assert denied.exit_code != 0
-    assert b"permission denied" in (denied.stderr or b"")
-    assert out == ""
-    # A name the profile leaves alone still reaches the command.
-    assert allowed_out == "fine\n"
-
-
-def test_declare_x_on_an_existing_name_refuses_a_protected_name():
-    # `declare -x NAME` on a name that already exists writes no value, so
-    # the export mark is the only session write there is; stamping it
-    # directly would let an agent export a credential the operator set.
-    ws = _two_mounts(protect=("SECRET*",))
-    sess = ws._session_mgr.get(ws._session_mgr.default_id)
-    seed_var(sess, "SECRET_TOKEN", "hunter2")
-
-    io = asyncio.run(ws.shell("declare -x SECRET_TOKEN"))
-    assert io.exit_code != 0
-    assert b"permission denied" in (io.stderr or b"")
-    assert VarAttr.EXPORT not in sess.vars["SECRET_TOKEN"].attrs
-    # The value is untouched and still readable as a shell variable.
-    assert sess.vars["SECRET_TOKEN"].value == "hunter2"
-
-
 def test_a_declaration_stamps_what_stored_despite_a_bad_sibling():
     # GNU keeps the valid operands and reports the invalid one, so
     # `declare -x GOOD=1 1BAD=x` exits 1 and still answers
@@ -853,55 +596,6 @@ def test_readonly_loop_variable_refuses_before_the_body():
     denied, out = asyncio.run(run())
     assert denied.exit_code != 0
     assert "ran" not in out
-
-
-def test_subscripted_unset_of_a_scalar_refuses_a_protected_name():
-    # `unset 'SECRET[0]'` on a scalar is the whole unset in element
-    # clothing; the element branch used to skip the view entirely.
-    ws = _two_mounts(protect=("SECRET*",))
-    seed_var(ws.get_session(ws.default_session_id), "SECRET_U", "v")
-
-    async def run():
-        return await ws.shell("unset 'SECRET_U[0]'")
-
-    io = asyncio.run(run())
-    assert io.exit_code != 0
-    assert b"permission denied" in (io.stderr or b"")
-    assert ws.env.get("SECRET_U") == "v"
-
-
-def test_subscripted_unset_of_an_array_element_refuses_a_protected_name():
-    ws = _two_mounts(protect=("SECRET*",))
-    sess = ws._session_mgr.get(ws._session_mgr.default_id)
-    seed_var(sess, "SECRET_W", make_array(["a", "b"]))
-
-    async def run():
-        return await ws.shell("unset 'SECRET_W[1]'")
-
-    io = asyncio.run(run())
-    assert io.exit_code != 0
-    assert sess.arrays["SECRET_W"] == make_array(["a", "b"])
-
-
-def test_for_loop_variable_refuses_a_protected_name():
-    # The loop variable is a session write per iteration; a refused
-    # write aborts the loop before its body runs, like a readonly
-    # loop variable in bash.
-    ws = _two_mounts(protect=("SECRET*",))
-
-    async def run():
-        denied = await ws.shell("for SECRET_I in a b; do echo ran; done")
-        out = await denied.stdout_str() if denied.stdout else ""
-        allowed = await ws.shell("for PUB_I in a b; do echo ok; done")
-        allowed_out = await allowed.stdout_str()
-        return denied, out, allowed, allowed_out
-
-    denied, out, allowed, allowed_out = asyncio.run(run())
-    assert denied.exit_code != 0
-    assert "ran" not in out
-    assert "SECRET_I" not in ws.env
-    assert allowed.exit_code == 0
-    assert allowed_out.count("ok") == 2
 
 
 def _hidden_vars_ws() -> Workspace:

@@ -97,11 +97,10 @@ export function visibilityFrom(
     readonly hidden: { readonly paths: number[][]; readonly patterns: number[][] }
     readonly shown: readonly { readonly path: number[]; readonly mode: MountMode | null }[]
     readonly vars: { readonly names: number[][]; readonly patterns: number[][] }
-    readonly protected: { readonly names: number[][]; readonly patterns: number[][] }
   },
   processes: ProcessScope = 'session',
 ): Visibility {
-  const { hidden, shown, vars, protected: guarded } = value
+  const { hidden, shown, vars } = value
   return {
     paths:
       hidden.paths.length + hidden.patterns.length === 0
@@ -115,10 +114,6 @@ export function visibilityFrom(
       vars.names.length + vars.patterns.length === 0
         ? null
         : { names: vars.names.map(fromUnits), patterns: vars.patterns.map(fromUnits) },
-    protected:
-      guarded.names.length + guarded.patterns.length === 0
-        ? null
-        : { names: guarded.names.map(fromUnits), patterns: guarded.patterns.map(fromUnits) },
     processes,
   }
 }
