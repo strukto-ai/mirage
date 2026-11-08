@@ -21,6 +21,8 @@ from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.control import (
+    ContinueSignal,
+    _absorbed,
     execute_body,
     handle_if,
     handle_while,
@@ -66,6 +68,33 @@ def runner(execute, sess: SessionState):
 
 def result(stdout=None, exit_code=0):
     return stdout, IOResult(exit_code=exit_code), ExecutionNode()
+
+
+@pytest.mark.asyncio
+async def test_while_stops_at_a_set_e_failure_in_its_body():
+    turns = 0
+
+    async def execute(n, *_args):
+        nonlocal turns
+        if n.text == "cond":
+            return result()
+        turns += 1
+        assert turns < 3
+        return result(exit_code=1)
+
+    sess = SessionState(session_id="test")
+    sess.shell_options["errexit"] = True
+    _, io, _ = await handle_while(
+        runner(execute, sess), [node("cond")], [node("body")], sess
+    )
+    assert (turns, io.exit_code) == (1, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_continue_with_no_output_adds_nothing_to_the_loop():
+    kept: list = []
+    await _absorbed(ContinueSignal(), kept, IOResult())
+    assert kept == []
 
 
 @pytest.mark.asyncio

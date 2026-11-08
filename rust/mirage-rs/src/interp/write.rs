@@ -443,7 +443,8 @@ impl<'a, G: Gate> Writer<'a, G> {
     /// (`a+=(x y)`): each lands in place as `set_element` writes it, as
     /// bash's do, so an `-i` word's own write to the array stands
     /// (`b+=(2 'b[1]=9,1')` leaves `b[1]` at 9). A word refused takes back
-    /// the slots the append filled before it, but under `-i`, where the
+    /// the slots the append filled before it, with what they held when
+    /// it wrapped onto them, but under `-i`, where the
     /// words before it are evaluated and may write the array, the array
     /// stays as they left it, as bash's does. With a policy listening, the
     /// whole value lands through `set` as one write, but under `-i` each
@@ -478,13 +479,14 @@ impl<'a, G: Gate> Writer<'a, G> {
         let mut filled = Vec::new();
         for (index, word) in slots {
             let slot = Slot::Index(index);
+            let replaced = self.store.element(&name, &slot).map(<[u8]>::to_vec);
             if let Err(fault) = self
                 .set_element(&name, slot.clone(), Some(word), None)
                 .await
             {
                 if !integer {
-                    for slot in filled.into_iter().rev() {
-                        self.store.put_element(&name, &slot, None, false);
+                    for (slot, replaced) in filled.into_iter().rev() {
+                        self.store.put_element(&name, &slot, replaced, false);
                     }
                     let (attrs, managed) = marks;
                     let changed = self
@@ -499,7 +501,7 @@ impl<'a, G: Gate> Writer<'a, G> {
                 }
                 return Err(fault);
             }
-            filled.push(slot);
+            filled.push((slot, replaced));
         }
         Ok(())
     }
@@ -1396,6 +1398,12 @@ mod tests {
         run(writer.push("w", vec![b"y".to_vec()])).unwrap();
         writer.limit = None;
         assert!(writer.store.held() < grown);
+        let kept: Vec<_> = writer.store.indexed("w").unwrap().iter().collect();
+        assert_eq!(kept, [(i64::MIN, &b"y"[..]), (i64::MAX, &b"x"[..])]);
+        writer.limit = Some(writer.store.held());
+        let failed = run(writer.push("w", vec![b"z".to_vec(), b"far too long".to_vec()]));
+        writer.limit = None;
+        assert!(failed.is_err());
         let kept: Vec<_> = writer.store.indexed("w").unwrap().iter().collect();
         assert_eq!(kept, [(i64::MIN, &b"y"[..]), (i64::MAX, &b"x"[..])]);
         let counted: usize = writer

@@ -379,7 +379,7 @@ async def _absorbed(
             extended in place.
         merged_io (IOResult): the loop's result so far.
     """
-    all_stdout.append(sig.stdout)
+    _keep(all_stdout, sig.stdout)
     merged_io = await merged_io.merge(sig.io)
     if sig.levels > 1:
         sig.stdout, sig.io = _chain_streams(all_stdout), merged_io
@@ -433,7 +433,9 @@ async def handle_if(
 # statements: `execute_node` refuses every node while the option is on,
 # so the `break` or the false condition the driver is waiting for is one
 # of the refused nodes and it would spin forever. GNU never runs the
-# loop at all, which is what falling straight out of it produces.
+# loop at all, which is what falling straight out of it produces. A
+# `set -e` failure in a body stops the driver the same way: the body
+# has stopped at it, and another turn would run the shell on.
 async def handle_for(
     run: BodyRun,
     variable: str,
@@ -483,6 +485,8 @@ async def handle_for(
             continue
         merged_io = await merged_io.merge(io)
         all_stdout.append(stdout)
+        if session.errexit_exiting:
+            break
     # The loop variable is an ordinary variable in bash and keeps its
     # last value after the loop (`for X in a b; do :; done; echo $X`
     # prints b); nothing is put back.
@@ -522,6 +526,8 @@ async def handle_while(
             raise await carried(sig, _chain_streams(all_stdout), merged_io)
         merged_io = await merged_io.merge(io)
         _keep(all_stdout, stdout)
+        if session.errexit_exiting:
+            break
     return _collect_loop_result(all_stdout, merged_io, label)
 
 
@@ -570,6 +576,8 @@ async def handle_cfor(
                 continue
             merged_io = await merged_io.merge(io)
             _keep(all_stdout, stdout)
+            if session.errexit_exiting:
+                break
             await eval_expr(exprs[2], 0)
     except (ArithError, PolicyDenied, ReadonlyVariableError) as exc:
         if isinstance(exc, ArithError) and exc.in_subscript:
@@ -754,6 +762,8 @@ async def handle_select(
         else:
             merged_io = await merged_io.merge(io)
             all_stdout.append(stdout)
+            if session.errexit_exiting:
+                break
         show_menu = not visible_env(session).get("REPLY")
     # As with `for`, the selection variable keeps its last value.
     return _collect_loop_result(all_stdout, merged_io, "select")

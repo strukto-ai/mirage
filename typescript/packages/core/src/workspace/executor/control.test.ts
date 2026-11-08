@@ -37,6 +37,20 @@ function runner(execute: ExecuteNodeFn, session: SessionState): BodyRun {
 }
 
 describe('handleWhile', () => {
+  it('stops at a set -e failure in its body', async () => {
+    let turns = 0
+    const execute: ExecuteNodeFn = (n) => {
+      if (n.text === 'cond') return Promise.resolve([null, new IOResult(), new ExecutionNode()])
+      turns += 1
+      expect(turns).toBeLessThan(3)
+      return Promise.resolve([null, new IOResult({ exitCode: 1 }), new ExecutionNode()])
+    }
+    const s = new SessionState({ sessionId: 'test' })
+    s.shellOptions.errexit = true
+    const [, io] = await handleWhile(runner(execute, s), [node('cond')], [node('body')], s)
+    expect([turns, io.exitCode]).toEqual([1, 1])
+  })
+
   it('runs until its condition fails', async () => {
     let turns = 0
     const execute: ExecuteNodeFn = (n) => {

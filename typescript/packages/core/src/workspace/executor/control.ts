@@ -324,7 +324,7 @@ async function absorbed(
   allStdout: (ByteSource | null)[],
   mergedIo: IOResult,
 ): Promise<IOResult> {
-  allStdout.push(sig.stdout)
+  keep(allStdout, sig.stdout)
   const merged = await mergedIo.merge(sig.io)
   if (sig.levels > 1) {
     sig.stdout = chainStreams(allStdout)
@@ -381,7 +381,9 @@ export async function handleIf(
 // statements: `executeNode` refuses every node while the option is on, so
 // the `break` or the false condition the driver is waiting for is one of
 // the refused nodes and it would spin forever. GNU never runs the
-// loop at all, which is what falling straight out of it produces.
+// loop at all, which is what falling straight out of it produces. A
+// `set -e` failure in a body stops the driver the same way: the body has
+// stopped at it, and another turn would run the shell on.
 export async function handleFor(
   run: BodyRun,
   variable: string,
@@ -423,6 +425,7 @@ export async function handleFor(
       const [stdout, io] = await run(body, bound)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
+      if (session.errexitExiting) break
     } catch (sig) {
       if (!(sig instanceof LoopSignal)) throw sig
       mergedIo = await absorbed(sig, allStdout, mergedIo)
@@ -460,6 +463,7 @@ export async function handleWhile(
       const [stdout, io] = await run(body, bound)
       keep(allStdout, stdout)
       mergedIo = await mergedIo.merge(io)
+      if (session.errexitExiting) break
     } catch (sig) {
       if (!(sig instanceof LoopSignal)) {
         if (isUnwinding(sig)) throw await carried(sig, chainStreams(allStdout), mergedIo)
@@ -504,6 +508,7 @@ export async function handleCfor(
         const [stdout, io] = await run(body, bound)
         keep(allStdout, stdout)
         mergedIo = await mergedIo.merge(io)
+        if (session.errexitExiting) break
       } catch (sig) {
         if (!(sig instanceof LoopSignal)) throw sig
         mergedIo = await absorbed(sig, allStdout, mergedIo)
@@ -682,6 +687,7 @@ export async function handleSelect(
       const [stdout, io] = await run(body, bound)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
+      if (session.errexitExiting) break
     } catch (sig) {
       if (!(sig instanceof LoopSignal)) throw sig
       mergedIo = await absorbed(sig, allStdout, mergedIo)
