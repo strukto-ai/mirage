@@ -40,6 +40,10 @@ async def test_a_script_naming_a_saved_policy_gets_its_source():
     )
 
 
+async def _broken_listing() -> list[Policy]:
+    raise RuntimeError("an unrelated policy is broken")
+
+
 @pytest.mark.asyncio
 async def test_only_the_named_policies_are_read_each_once(monkeypatch):
     store = memory_resource_store()
@@ -51,11 +55,8 @@ async def test_only_the_named_policies_are_read_each_once(monkeypatch):
         read.append(name)
         return await get_policy(name)
 
-    async def broken() -> list[Policy]:
-        raise RuntimeError("an unrelated policy is broken")
-
     monkeypatch.setattr(store, "get_policy", counted)
-    monkeypatch.setattr(store, "list_policies", broken)
+    monkeypatch.setattr(store, "list_policies", _broken_listing)
     await with_policies(store, _programs("guard.py", "guard.py"))
     assert read == ["guard.py"]
 
