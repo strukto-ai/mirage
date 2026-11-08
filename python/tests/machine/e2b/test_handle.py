@@ -393,12 +393,13 @@ async def test_a_cancelled_line_is_killed_and_reaped_by_its_own_tag(
     ]
 
 
+async def _hang(_handle: FakeHandle) -> None:
+    await asyncio.Event().wait()
+
+
 @pytest.mark.asyncio
 async def test_a_stop_that_times_out_starts_no_other_stop(monkeypatch):
-    async def hang(self):
-        await asyncio.Event().wait()
-
-    monkeypatch.setattr(FakeHandle, "wait", hang)
+    monkeypatch.setattr(FakeHandle, "wait", _hang)
     monkeypatch.setattr(
         "mirage.machine.handle.MACHINE_STOP_WAIT_SECONDS", 0.01
     )
