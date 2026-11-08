@@ -269,6 +269,12 @@ mirage policy create guard.py --source @guard.py
 mirage policy get guard.py -o yaml
 ```
 
+A profile program's `script: guard.py` in a template names the saved policy,
+on the daemon as on the hosted API; `template create` sends the name as
+written. The daemon reads the policy's source when it creates or starts the
+workspace. A script that names no saved policy, or a path such as
+`./guard.py`, is read as a file.
+
 ### Asks
 
 | Command | Does |

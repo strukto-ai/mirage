@@ -67,6 +67,7 @@ from mirage.server.multipart import (
 )
 from mirage.server.paths import load_daemon_id
 from mirage.server.registry import Claim, WorkspaceEntry
+from mirage.server.resources.policies import with_policies
 from mirage.server.resources.strukto import with_entries
 from mirage.server.routers.templates import (
     NO_WORKSPACE_ID,
@@ -414,8 +415,9 @@ async def _with_saved(
     request: Request, config: WorkspaceConfig, written: dict[str, Any]
 ) -> WorkspaceConfig:
     """The config a create builds, with the saved entries its pointers
-    name filled in; after the digest and the policies, which judge the
-    config as written and never see a sealed value.
+    name filled in and each policy script that names a saved policy given
+    its source; after the digest and the policies, which judge the config
+    as written and never see a sealed value.
 
     Args:
         request (Request): the HTTP request, for the app's store.
@@ -423,15 +425,22 @@ async def _with_saved(
         written (dict[str, Any]): the config as written.
 
     Raises:
-        HTTPException: 501 on a server of many accounts, 400 for a name
-            that is not saved or a saved value its field cannot take.
+        HTTPException: 501 for pointers on a server of many accounts, 400
+            for a name that is not saved or a saved value its field cannot
+            take.
     """
     refs = secret_refs(written)
-    if not refs:
-        return config
-    require_one_account(request)
+    store = request.app.state.resources
     try:
-        return await with_entries(request.app.state.resources, written, refs)
+        named = (
+            written
+            if request.app.state.registry.accounts_required
+            else await with_policies(store, written)
+        )
+        if not refs:
+            return config if named is written else check_config(named)
+        require_one_account(request)
+        return await with_entries(store, named, refs)
     except ResourceError as e:
         raise store_refusal(e) from e
 

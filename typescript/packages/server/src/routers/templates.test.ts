@@ -159,6 +159,42 @@ describe('templates router', () => {
     await app.close()
   })
 
+  it('runs the saved policy a template names by its name', async () => {
+    const app = appWithStore()
+    await app.resources.createPolicy({
+      name: 'guard.py',
+      source:
+        'def pre_command(ctx):\n' +
+        '    if ctx["command"] == "rm":\n' +
+        '        return {"kind": "deny", "reason": "deletes are disabled"}\n',
+    })
+    await app.inject({
+      method: 'POST',
+      url: '/v1/templates',
+      payload: {
+        name: 'guarded',
+        config: {
+          ...RAM,
+          profiles: { reviewer: { policy: { pre_command: [{ script: 'guard.py' }] } } },
+          profile: 'reviewer',
+        },
+      },
+    })
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: { id: 'guarded', template: 'guarded' },
+    })
+    expect(r.statusCode).toBe(201)
+    const ran = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/guarded/shell',
+      payload: { command: 'touch /a && rm /a' },
+    })
+    expect(ran.json<{ refusal?: { reason: string } }>().refusal?.reason).toBe('deletes are disabled')
+    await app.close()
+  })
+
   it('reads a saved field into a managed env entry', async () => {
     const app = appWithStore()
     await app.resources.createEntry('vfs', {
