@@ -3530,7 +3530,7 @@ class Workspace:
                 argument overrides policy, never capability. Raises
                 ValueError for a name that is not a workspace entry.
             machine: Explicit machine for this line, by its ``machines:``
-                name: the native runtime runs what it serves on it, over
+                name: the machine runtime runs what it serves on it, over
                 its entry's own machine, for this line only (nested evals
                 inherit it). Raises ValueError for a name that is not a
                 workspace machine.

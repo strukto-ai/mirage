@@ -16,7 +16,7 @@ import type { MachineTable } from '../../execution/machine/table.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import type { WorkspaceBinding } from '../../runtime/binding.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
-import { NativeRuntime } from '../../runtime/native/runtime.ts'
+import { MachineRuntime } from '../../runtime/machine/runtime.ts'
 import {
   bindCommands,
   buildRuntime,
@@ -47,7 +47,7 @@ export class Runtimes {
   entries: readonly Runtime[] = []
   private readonly registry: MountRegistry
   private readonly binding: WorkspaceBinding
-  /** The machines a native entry runs its programs on. */
+  /** The machines a machine entry runs its programs on. */
   readonly machines: MachineTable
   private readonly retiring = new Map<Runtime, Promise<void>>()
 
@@ -56,7 +56,7 @@ export class Runtimes {
     /** The `runtimes` option: instances and name shorthands, or undefined for the default world. */
     entries: RuntimeEntry[] | undefined
     binding: WorkspaceBinding
-    /** The machines a native entry runs on. */
+    /** The machines a machine entry runs on. */
     machines: MachineTable
   }) {
     this.registry = init.registry
@@ -98,14 +98,18 @@ export class Runtimes {
   }
 
   /**
-   * Bind an entry to the workspace, and a native one to its machines.
+   * Bind an entry to the workspace, and a machine one to its machines once
+   * the workspace has it, so an entry another workspace holds keeps its own.
    *
    * Throws:
-   *   Error: a native entry's machine is not the workspace's.
+   *   Error: a machine entry's machine is not the workspace's, or another
+   *   workspace holds the entry.
    */
   private bindEntry(entry: Runtime): void {
-    if (entry instanceof NativeRuntime) entry.bindMachines(this.machines)
+    const onMachine = entry instanceof MachineRuntime
+    if (onMachine && entry.defaultMachine !== null) this.machines.get(entry.defaultMachine)
     entry.bind(this.binding)
+    if (onMachine) entry.bindMachines(this.machines)
   }
 
   /** Unbind an entry's commands now and close it once it is idle. */

@@ -34,7 +34,7 @@ import {
   reapLine,
   wrapLine,
 } from '@struktoai/mirage-core/machine/constants'
-import { captured, native, on } from '../../../tests/fixtures/machine.ts'
+import { captured, machineRuntime, on } from '../../../tests/fixtures/machine.ts'
 
 const DEC = new TextDecoder()
 
@@ -51,7 +51,7 @@ function runLine(
   more: Partial<Context> = {},
 ) {
   const ctx = { stdin, flags: { c }, env: {}, cwd: PathSpec.fromStrPath(cwd), ...more }
-  return native(rt).runLine(undefined, [], [], ctx)
+  return machineRuntime(rt).runLine(undefined, [], [], ctx)
 }
 
 class FakeExitError extends Error {
@@ -820,7 +820,7 @@ describe('E2BMachine output bytes', () => {
     async (streamed) => {
       const runtime = new ShellE2BMachine('box', { sandboxId: 'sb-live' })
       const said = { out: [] as number[], err: [] as number[] }
-      const result = await native(runtime).runLine(
+      const result = await machineRuntime(runtime).runLine(
         undefined,
         [],
         [],
@@ -853,7 +853,7 @@ describe('E2BMachine output bytes', () => {
       env: {},
       cwd: PathSpec.fromStrPath('/'),
     }
-    const result = await native(runtime).runLine(undefined, [], [], ctx, (chunk) => {
+    const result = await machineRuntime(runtime).runLine(undefined, [], [], ctx, (chunk) => {
       said += DEC.decode(chunk)
       if (said.includes('one\n')) first.resolve(undefined)
       return Promise.resolve()
@@ -905,7 +905,7 @@ it('passes on a streamed tail without a newline', async () => {
     into.push(DEC.decode(chunk))
     return Promise.resolve()
   }
-  const result = await native(runtime).runLine(
+  const result = await machineRuntime(runtime).runLine(
     undefined,
     [],
     [],

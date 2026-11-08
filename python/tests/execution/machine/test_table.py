@@ -22,7 +22,7 @@ from mirage.execution.machine.types import MachineProcess, MachineState
 from mirage.execution.types import MachinePid
 from mirage.machine.constants import CHECK_LINE, PROCESS
 from mirage.machine.handle import MachineHandle
-from mirage.runtime.native import NativeRuntime
+from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -115,7 +115,7 @@ def _sleepers(**boxes: MachineHandle) -> Workspace:
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         machines=boxes,
-        runtimes=[NativeRuntime(["train"], machine=next(iter(boxes)))],
+        runtimes=[MachineRuntime(["train"], machine=next(iter(boxes)))],
     )
 
 
@@ -191,4 +191,23 @@ async def test_a_machine_pid_names_the_process_whose_program_has_it():
     finally:
         a.ended.set()
         b.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_machine_pid_answers_wait_once_its_program_ended():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        pid = int((await ws.shell("train 1 & echo $!")).stdout)
+        await _started(box)
+        await ws.shell("ps")
+        box.ended.set()
+        async with asyncio.timeout(5):
+            while pid in {p.record.pid for p in ws.process_table.live()}:
+                await asyncio.sleep(0.01)
+        said = await ws.shell("wait 412")
+        assert (said.exit_code, said.stderr) == (143, None)
+    finally:
+        box.ended.set()
         await ws.close()

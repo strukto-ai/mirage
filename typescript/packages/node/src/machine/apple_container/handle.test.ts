@@ -28,7 +28,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AppleContainerConfig } from './config.ts'
 import { AppleContainerMachine } from './handle.ts'
 import { Workspace } from '../../workspace.ts'
-import { captured, native, on } from '../../../tests/fixtures/machine.ts'
+import { captured, machineRuntime, on } from '../../../tests/fixtures/machine.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -301,7 +301,7 @@ it('preserves argv through execute and shares the shell connection', async () =>
   const runtime = makeRuntime({ container: 'box', env: { E: 'config' } })
   const argv = ['node', 'a b', '$(echo literal)', '', '--flag'] as const
   const stdin = ENC.encode('input')
-  const result = await native(runtime).execute(
+  const result = await machineRuntime(runtime).execute(
     [],
     argv,
     { stdin, flags: {}, cwd: PathSpec.fromStrPath('/work'), env: { E: 'request' } },
@@ -328,18 +328,18 @@ it('preserves argv through execute and shares the shell connection', async () =>
     ],
     stdin,
   ])
-  await native(runtime).execute(
+  await machineRuntime(runtime).execute(
     [],
     [],
     { stdin: null, flags: { c: 'pwd' }, cwd: PathSpec.fromStrPath('/work') },
     { kind: 'line' },
   )
   expect(runtime.inspected()).toEqual(['box'])
-  expect([isProcessExecutor(native(runtime)), isLineExecutor(native(runtime))]).toEqual([
+  expect([isProcessExecutor(machineRuntime(runtime)), isLineExecutor(machineRuntime(runtime))]).toEqual([
     true,
     true,
   ])
-  expect(native(runtime).filesystem).toEqual([])
+  expect(machineRuntime(runtime).filesystem).toEqual([])
 })
 
 it('refuses empty argv and a stopped container before executing', async () => {
@@ -347,9 +347,9 @@ it('refuses empty argv and a stopped container before executing', async () => {
   runtime.states.box = 'stopped'
   const ctx = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') }
   const opts = { kind: 'process' } as const
-  await expect(native(runtime).execute([], [], ctx, opts)).rejects.toThrow('argv must not be empty')
+  await expect(machineRuntime(runtime).execute([], [], ctx, opts)).rejects.toThrow('argv must not be empty')
   expect(runtime.calls).toHaveLength(0)
-  await expect(native(runtime).execute([], ['node'], ctx, opts)).rejects.toThrow('not running')
+  await expect(machineRuntime(runtime).execute([], ['node'], ctx, opts)).rejects.toThrow('not running')
   expect(runtime.calls).toHaveLength(1)
 })
 

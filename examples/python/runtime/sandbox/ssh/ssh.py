@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.runtime.native import NativeRuntime
+from mirage.runtime.machine import MachineRuntime
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 
@@ -81,7 +81,7 @@ async def main() -> None:
         {"/data": data, REMOTE_DIR: proj},
         mode=MountMode.EXEC,
         machines={"box": {"provider": "ssh", "host": "dev"}},
-        runtimes=[NativeRuntime(["python3"], machine="box"), "workspace"],
+        runtimes=[MachineRuntime(["python3"], machine="box"), "workspace"],
     )
 
     # Seed both sides through the workspace: the dataset into S3, the

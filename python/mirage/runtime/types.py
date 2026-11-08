@@ -51,7 +51,7 @@ class RouteDecision(Generic[_R]):
         fallback (_R | None): where commands no entry captures run:
             the catch-all workspace runtime, or None when the workspace
             runtime declares captures; unbound commands then exit 126.
-        machine (str | None): the machine the native runtime runs what
+        machine (str | None): the machine the machine runtime runs what
             it serves on, by its ``machines:`` name, when the placement
             names one; None leaves each native entry on its own.
     """

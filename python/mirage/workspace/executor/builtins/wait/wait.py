@@ -28,8 +28,7 @@ from mirage.workspace.executor.background import report_jobs
 from mirage.workspace.executor.builtins.constants import IDENTIFIER_RE
 from mirage.workspace.executor.builtins.jobspec import (
     job_result,
-    job_with_pid,
-    machine_process,
+    job_with_machine_pid,
     process_view,
     resolve_spec,
     session_of,
@@ -181,15 +180,14 @@ async def handle_wait(
     visible = job_table.list_jobs(sid)
     for spec in specs:
         if spec.isdigit() and 0 < int(spec) < FIRST_PID:
-            found, ambiguous = await machine_process(
-                process_view(job_table, session), int(spec)
+            job, ambiguous = await job_with_machine_pid(
+                process_view(job_table, session), visible, int(spec)
             )
             if ambiguous:
                 errors.append(
                     f"{shell_voice()}wait: {spec}: ambiguous job spec"
                 )
                 continue
-            job = job_with_pid(visible, found.pid) if found else None
             refusal = f"pid {spec} is not a child of this shell"
         else:
             job, refusal = resolve_spec(visible, spec)

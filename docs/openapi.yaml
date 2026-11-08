@@ -7955,6 +7955,10 @@ components:
         runtime:
           type: string
           description: Run the line on this runtime, by name, instead of the one routing picks.
+        machine:
+          type: string
+          description: Run the line's programs on this machine, by name, instead of the one
+            routing picks.
         record:
           type: boolean
           default: true

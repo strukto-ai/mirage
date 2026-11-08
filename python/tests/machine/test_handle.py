@@ -35,10 +35,10 @@ from mirage.machine.constants import (
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin
-from mirage.runtime.native import NativeRuntime
+from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import FileStat, FileType, Limit, PathSpec
-from tests.fixtures.machine import native, on
+from tests.fixtures.machine import machine_runtime, on
 
 
 class RecordingSandbox(MachineHandle):
@@ -145,7 +145,7 @@ async def test_cwd_passes_through_verbatim_and_env_merges():
     box = RecordingSandbox(captures=("@line",), config={"env": {"BASE": "1"}})
     cwd = PathSpec.from_str_path("/data/deep")
     ctx = Context(flags={"c": "nvidia-smi"}, env={"LINE": "2"}, cwd=cwd)
-    result = await native(box).run_line(None, [], [], ctx)
+    result = await machine_runtime(box).run_line(None, [], [], ctx)
     assert result.exit_code == 0
     # The sandbox serves the workspace at the same prefixes as the
     # host, so nothing is rewritten.
@@ -174,7 +174,7 @@ async def test_machines_take_lines_not_stages():
     # A machine's runtime is a line executor, never the engine inside
     # one command: it carries the line entry point and no interpreter
     # entry point.
-    runtime = native(RecordingSandbox())
+    runtime = machine_runtime(RecordingSandbox())
     assert isinstance(runtime, LineExecutorMixin)
     assert not isinstance(runtime, LanguageRuntime)
     with pytest.raises(UnsupportedExecutionError, match="code execution"):
@@ -228,7 +228,7 @@ async def test_a_cancelled_run_stops_what_it_left_in_the_box():
 
     box = StuckBox(captures=("yes",))
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
-    task = asyncio.create_task(native(box).run_line(None, [], [], ctx))
+    task = asyncio.create_task(machine_runtime(box).run_line(None, [], [], ctx))
     while not box.execs:
         await asyncio.sleep(0)
     task.cancel()
@@ -255,7 +255,7 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
 
     async def run() -> int:
-        return (await native(box).run_line(None, [], [], ctx)).exit_code
+        return (await machine_runtime(box).run_line(None, [], [], ctx)).exit_code
 
     runner = ProcessTable(bind=run_as_process).start(
         session_id="s", command="yes", cwd=ctx.cwd, run=run
@@ -279,7 +279,7 @@ async def test_a_run_in_the_box_is_tagged_with_its_process():
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
 
     async def run() -> int:
-        return (await native(box).run_line(None, [], [], ctx)).exit_code
+        return (await machine_runtime(box).run_line(None, [], [], ctx)).exit_code
 
     runner = ProcessTable("w1", bind=run_as_process).start(
         session_id="s", command="yes", cwd=ctx.cwd, run=run
@@ -331,7 +331,7 @@ async def test_a_box_that_stops_answering_holds_a_cancel_only_so_long(
     monkeypatch.setattr("mirage.machine.handle.REAP_WAIT_SECONDS", 0.01)
     box = DeadBox(captures=("yes",))
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
-    task = asyncio.create_task(native(box).run_line(None, [], [], ctx))
+    task = asyncio.create_task(machine_runtime(box).run_line(None, [], [], ctx))
     while not box.execs:
         await asyncio.sleep(0)
     task.cancel()
@@ -389,7 +389,7 @@ async def test_remote_line_invalidates_local_read_caches():
 
 
 def test_reach_is_remote():
-    assert NativeRuntime.reach == "remote"
+    assert MachineRuntime.reach == "remote"
 
 
 class FaketimeBox(RecordingSandbox):

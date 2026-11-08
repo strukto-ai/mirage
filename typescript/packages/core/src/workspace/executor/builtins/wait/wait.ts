@@ -30,8 +30,7 @@ import { reportJobs } from '../../background.ts'
 import { IDENTIFIER_RE } from '../constants.ts'
 import {
   jobResult,
-  jobWithPid,
-  machineProcess,
+  jobWithMachinePid,
   processView,
   resolveSpec,
   sessionOf,
@@ -167,12 +166,16 @@ export async function handleWait(
     let job: JobHandle | null
     let refusal: string
     if (/^[0-9]+$/.test(spec) && Number(spec) > 0 && Number(spec) < FIRST_PID) {
-      const [found, ambiguous] = await machineProcess(processView(jobTable, session), Number(spec))
+      const [held, ambiguous] = await jobWithMachinePid(
+        processView(jobTable, session),
+        visible,
+        Number(spec),
+      )
       if (ambiguous) {
         errors.push(`${shellVoice()}wait: ${spec}: ambiguous job spec`)
         continue
       }
-      job = found === null ? null : jobWithPid(visible, found.id.pid)
+      job = held
       refusal = `pid ${spec} is not a child of this shell`
     } else [job, refusal] = resolveSpec(visible, spec)
     if (job === null) {

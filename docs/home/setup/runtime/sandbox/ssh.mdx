@@ -4,7 +4,7 @@ icon: /images/ssh-logo.svg
 description: Run captured programs on any machine you can reach over SSH.
 ---
 
-The `ssh` machine provider reaches a machine running `sshd`, and the `native`
+The `ssh` machine provider reaches a machine running `sshd`, and the `machine`
 runtime runs captured programs on it. Anything you can
 already `ssh` into works, with nothing to install on it. You run the
 machine; Mirage only runs programs on it. Python SDK and Node.
@@ -34,7 +34,7 @@ Python on the machine too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.native import NativeRuntime
+    from mirage.runtime.machine import MachineRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -47,14 +47,14 @@ Python on the machine too.
                 "identity_file": "~/.ssh/id_ed25519",
             }
         },
-        runtimes=[NativeRuntime(["@python", "@external"], machine="box")],
+        runtimes=[MachineRuntime(["@python", "@external"], machine="box")],
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, NativeRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, MachineRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
@@ -68,7 +68,7 @@ Python on the machine too.
             identityFile: '~/.ssh/id_ed25519',
           },
         },
-        runtimes: [new NativeRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        runtimes: [new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' })],
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -84,7 +84,7 @@ Python on the machine too.
         username: deploy
         identity_file: ~/.ssh/id_ed25519
     runtimes:
-      - name: native
+      - name: machine
         captures: ["@python", "@external"]
         machine: box
     mounts:
@@ -122,7 +122,7 @@ machines:
     provider: ssh
     host: mybox
 runtimes:
-  - name: native
+  - name: machine
     captures: ["@python", "@external"]
     machine: box
 ```

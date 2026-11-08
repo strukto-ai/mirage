@@ -14,7 +14,7 @@
         },
         "runtimes": [
           {
-            "name": "native",
+            "name": "machine",
             "captures": [
               "uname"
             ],
@@ -48,7 +48,7 @@
         },
         "runtimes": [
           {
-            "name": "native",
+            "name": "machine",
             "captures": [
               "uname"
             ],
@@ -82,7 +82,7 @@
         },
         "runtimes": [
           {
-            "name": "native",
+            "name": "machine",
             "captures": [
               "uname"
             ],

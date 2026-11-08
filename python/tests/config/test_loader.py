@@ -602,7 +602,7 @@ def e2b_config(api_key, provider="e2b", **extra):
                     "api_key": api_key,
                 }
             },
-            "runtimes": [{"name": "native", "machine": "box"}, "workspace"],
+            "runtimes": [{"name": "machine", "machine": "box"}, "workspace"],
             **extra,
         },
         env={},
@@ -622,7 +622,7 @@ async def test_a_machine_credential_reads_a_pointer(monkeypatch, provider):
     assert box.config.api_key == "key_from_env"
     assert box.config.sandbox_id == "sbx-1"
     native, workspace = kwargs["runtimes"]
-    assert (native.name, native.default_machine) == ("native", "box")
+    assert (native.name, native.default_machine) == ("machine", "box")
     assert workspace == "workspace"
 
 

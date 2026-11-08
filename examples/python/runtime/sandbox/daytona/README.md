@@ -14,13 +14,13 @@ runs Mirage itself.
 ```
 your machine (control plane)                 Daytona sandbox (yours)
   Workspace: /data -> S3VFS               provisioned by you:
-  native ["python3"] -> machine daytona   -->    mirage workspace create sandbox.yaml
+  machine ["python3"] -> machine daytona   -->    mirage workspace create sandbox.yaml
   vfs runs every other line locally              -> FUSE-mounts S3 at /data
   cd /data; python3 train.py  ------------>    cwd passes through; train.py reads /data
 ```
 
 1. The workspace declares `/data` as an `S3VFS` and the sandbox as a
-   `daytona` machine; the `native` runtime captures `python3` lines and runs
+   `daytona` machine; the `machine` runtime captures `python3` lines and runs
    them there; everything else stays on the local vfs.
 1. Mirage never creates, provisions, or deletes sandboxes: you create one
    (below), provision the workspace inside it (`create_sandbox.py` does both:

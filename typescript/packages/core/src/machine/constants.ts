@@ -354,6 +354,7 @@ export function signalLine(target: string | MachinePid, signum: number): string 
   if (typeof target !== 'string') {
     const pid = String(target.pid)
     return (
+      `PATH=${REAP_PATH}; ` +
       `s=$(cat /proc/${pid}/stat 2>/dev/null) || exit ${absent}; ` +
       'set -- ${s##*)}; ' +
       `[ "\${20}" = ${String(Math.trunc(target.started))} ] || exit ${absent}; ` +

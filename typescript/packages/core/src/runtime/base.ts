@@ -181,7 +181,11 @@ export abstract class Runtime<E = unknown> {
       const kind = opts.kind ?? 'code'
       const capture = this.binding?.capture()
       const restricted = capture?.restrictedMounts ?? []
-      if (this.reach !== 'workspace' && restricted.length > 0 && !this.servesSession(restricted))
+      if (
+        this.reach !== 'workspace' &&
+        restricted.length > 0 &&
+        !this.servesSession(restricted, ctx)
+      )
         return refusedRun(
           this.voice(ctx),
           "runtime cannot enforce this session's file restrictions",
@@ -368,8 +372,9 @@ export abstract class Runtime<E = unknown> {
    * Whether every restricted mount is served through this caller's gate.
    *
    * @param _restrictedMounts the mounts the session restricts.
+   * @param _ctx the run's context.
    */
-  protected servesSession(_restrictedMounts: readonly string[]): boolean {
+  protected servesSession(_restrictedMounts: readonly string[], _ctx: Context): boolean {
     return false
   }
 

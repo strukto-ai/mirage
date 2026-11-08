@@ -27,7 +27,7 @@ from pathlib import Path
 from mirage import RAMVFS, MountMode, PathSpec, Workspace
 from mirage.commands.config import Context
 from mirage.machine.microsandbox import MicrosandboxMachine
-from mirage.runtime.native import NativeRuntime
+from mirage.runtime.machine import MachineRuntime
 
 SANDBOX = os.environ["MIRAGE_E2E_SANDBOX"]
 GUEST = "/e2e-guest"
@@ -138,7 +138,7 @@ async def mode_checks(mode):
         mode=MountMode.EXEC,
         machines={"msb": runtime},
         runtimes=[
-            NativeRuntime(["python3", "dash", "sleep"], machine="msb"),
+            MachineRuntime(["python3", "dash", "sleep"], machine="msb"),
             "workspace",
         ],
         profiles={"hidden": {"paths": {"hide": [prefix + "/secret.txt"]}}},
@@ -334,7 +334,7 @@ async def cycles():
                     "msb", {"sandbox": SANDBOX, "mount_type": "ssh"}
                 )
             },
-            runtimes=[NativeRuntime(["python3"], machine="msb"), "workspace"],
+            runtimes=[MachineRuntime(["python3"], machine="msb"), "workspace"],
         )
         try:
             result = await ws.shell("python3 -c 'print(\"cycle\")'")
@@ -468,7 +468,7 @@ async def missing_fuse_device():
                 "msb", {"sandbox": SANDBOX, "mount_type": "ssh"}
             )
         },
-        runtimes=[NativeRuntime(["python3"], machine="msb"), "workspace"],
+        runtimes=[MachineRuntime(["python3"], machine="msb"), "workspace"],
     )
     moved = await raw(
         "test -c /dev/fuse && test ! -e /dev/fuse-mirage-e2e && "

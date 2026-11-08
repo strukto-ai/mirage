@@ -379,6 +379,7 @@ def signal_line(target: str | MachinePid, signum: int) -> str:
     if isinstance(target, MachinePid):
         pid = target.pid
         return (
+            f"PATH={REAP_PATH}; "
             f"s=$(cat /proc/{pid}/stat 2>/dev/null) || exit {REAP_ABSENT}; "
             "set -- ${s##*)}; "
             f'[ "${{20}}" = {int(target.started)} ] || exit {REAP_ABSENT}; '

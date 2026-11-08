@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { MachineHandle } from '../../machine/handle.ts'
 import type { Policy } from '../../policy/base.ts'
 import type { CommandContext, CommandExplanation, Route, ShellNode } from '../../policy/types.ts'
-import { NativeRuntime } from '../../runtime/native/runtime.ts'
+import { MachineRuntime } from '../../runtime/machine/runtime.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
@@ -44,7 +44,7 @@ function workspace(...policies: Policy[]): Workspace {
     {
       mode: MountMode.EXEC,
       machines: { a: new Box('a'), b: new Box('b') },
-      runtimes: [new NativeRuntime({ captures: ['hostname'], machine: 'a' }), 'workspace'],
+      runtimes: [new MachineRuntime({ captures: ['hostname'], machine: 'a' }), 'workspace'],
       policies,
     },
   )
@@ -124,8 +124,8 @@ describe('routing on machines', () => {
     try {
       const said = await ws.explain('hostname; hostname -s; ls')
       expect([...commands(said.node)].map((c) => [c.command, c.runtime, c.machine])).toEqual([
-        ['hostname', 'native', 'box:a'],
-        ['hostname', 'native', 'box:b'],
+        ['hostname', 'machine', 'box:a'],
+        ['hostname', 'machine', 'box:b'],
         ['ls', '', ''],
       ])
     } finally {

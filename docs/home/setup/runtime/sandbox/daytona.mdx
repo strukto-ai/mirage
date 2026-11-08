@@ -5,7 +5,7 @@ description: Run captured programs in a Daytona cloud sandbox you created.
 ---
 
 The `daytona` machine provider reaches a running
-[Daytona](https://www.daytona.io) sandbox, by ID, and the `native` runtime
+[Daytona](https://www.daytona.io) sandbox, by ID, and the `machine` runtime
 runs captured programs in it. You create and size the
 sandbox; Mirage only runs programs in it. Python SDK and Node.
 
@@ -38,27 +38,27 @@ Python in the sandbox too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.native import NativeRuntime
+    from mirage.runtime.machine import MachineRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
         machines={"box": {"provider": "daytona", "sandbox_id": "sandbox-id"}},
-        runtimes=[NativeRuntime(["@python", "@external"], machine="box")],
+        runtimes=[MachineRuntime(["@python", "@external"], machine="box")],
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, NativeRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, MachineRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
         machines: { box: { provider: 'daytona', sandboxId: 'sandbox-id' } },
-        runtimes: [new NativeRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        runtimes: [new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' })],
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -72,7 +72,7 @@ Python in the sandbox too.
         provider: daytona
         sandbox_id: ${DAYTONA_SANDBOX_ID}
     runtimes:
-      - name: native
+      - name: machine
         captures: ["@python", "@external"]
         machine: box
     mounts:

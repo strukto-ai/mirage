@@ -314,8 +314,8 @@ def test_a_route_places_a_line_or_a_command_only():
 def test_a_route_may_name_a_machine_alone():
     printed = _answer(kind="route", machine="gpu")
     assert script_action(printed, "pre_command") == Route(machine="gpu")
-    both = _answer(kind="route", runtime="native", machine="gpu")
-    assert script_action(both, "pre_execute") == Route("native", machine="gpu")
+    both = _answer(kind="route", runtime="machine", machine="gpu")
+    assert script_action(both, "pre_execute") == Route("machine", machine="gpu")
 
 
 def test_a_route_carries_the_reason_it_gives():

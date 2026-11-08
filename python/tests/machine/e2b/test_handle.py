@@ -39,13 +39,13 @@ from mirage.machine.e2b import E2BConfig, E2BMachine, sdk
 from mirage.machine.e2b.constants import PTY_MARK, PTY_RAW
 from mirage.runtime.types import RunResult, SandboxPipe
 from mirage.types import PathSpec
-from tests.fixtures.machine import native, on
+from tests.fixtures.machine import machine_runtime, on
 
 
 def _line(box: E2BMachine, line: str, stdin: bytes | None, env=None):
     cwd = PathSpec.from_str_path("/workspace")
     ctx = Context(flags={"c": line}, stdin=stdin, env=env, cwd=cwd)
-    return native(box).run_line(None, [], [], ctx)
+    return machine_runtime(box).run_line(None, [], [], ctx)
 
 
 def b64(text: str) -> str:

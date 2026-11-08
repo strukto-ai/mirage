@@ -15,9 +15,9 @@
 import { MachineTable } from '../../src/execution/machine/table.ts'
 import type { MachineHandle } from '../../src/machine/handle.ts'
 import type { RuntimeEntry } from '../../src/runtime/base.ts'
-import { NativeRuntime } from '../../src/runtime/native/runtime.ts'
+import { MachineRuntime } from '../../src/runtime/machine/runtime.ts'
 
-/** A handle whose native runtime captures `captures`, for a test. */
+/** A handle whose machine runtime captures `captures`, for a test. */
 export function captured<T extends MachineHandle>(handle: T, captures: readonly string[]): T {
   ;(handle as { captures?: readonly string[] }).captures = captures
   return handle
@@ -29,13 +29,13 @@ function capturesOf(handle: MachineHandle): readonly string[] | undefined {
 }
 
 /**
- * A native runtime on one machine, bound to it as a workspace binds its
+ * A machine runtime on one machine, bound to it as a workspace binds its
  * entries, capturing what a fake handle's `captures` names. Mirrors
- * Python's `tests/fixtures/machine.native`.
+ * Python's `tests/fixtures/machine.machine_runtime`.
  */
-export function native(handle: MachineHandle): NativeRuntime {
+export function machineRuntime(handle: MachineHandle): MachineRuntime {
   const captures = capturesOf(handle)
-  const runtime = new NativeRuntime({
+  const runtime = new MachineRuntime({
     machine: handle.name,
     ...(captures !== undefined ? { captures } : {}),
   })
@@ -53,7 +53,7 @@ export function on(
   ...rest: RuntimeEntry[]
 ): { machines: Record<string, MachineHandle>; runtimes: RuntimeEntry[] } {
   const captures = capturesOf(handle)
-  const entry = new NativeRuntime({
+  const entry = new MachineRuntime({
     machine: handle.name,
     ...(captures !== undefined ? { captures } : {}),
   })

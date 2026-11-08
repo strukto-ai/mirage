@@ -29,7 +29,7 @@ from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
-from tests.fixtures.machine import native, on
+from tests.fixtures.machine import machine_runtime, on
 
 
 class FakeAppleContainerMachine(AppleContainerMachine):
@@ -243,7 +243,7 @@ async def test_process_preserves_argv_and_probes_the_container_once(
     argv = ("node", "a b", "$(echo literal)", "", "--flag")
     work = PathSpec.from_str_path("/work")
     ctx = Context(cwd=work, env={"E": "request"}, stdin=b"input")
-    result = await native(runtime).execute([], list(argv), ctx, kind="process")
+    result = await machine_runtime(runtime).execute([], list(argv), ctx, kind="process")
     assert result.stdout == b"out:--flag"
     assert result.stderr == b"warn"
     assert runtime.calls[-1] == (
@@ -267,11 +267,11 @@ async def test_process_preserves_argv_and_probes_the_container_once(
         b"input",
     )
     line = Context(flags={"c": "pwd"}, cwd=work)
-    await native(runtime).execute([], [], line, kind="line")
+    await machine_runtime(runtime).execute([], [], line, kind="line")
     assert runtime.inspected() == ["box"]
-    assert isinstance(native(runtime), ProcessExecutorMixin)
-    assert isinstance(native(runtime), LineExecutorMixin)
-    assert native(runtime).filesystem == ()
+    assert isinstance(machine_runtime(runtime), ProcessExecutorMixin)
+    assert isinstance(machine_runtime(runtime), LineExecutorMixin)
+    assert machine_runtime(runtime).filesystem == ()
 
 
 @pytest.mark.asyncio
@@ -280,10 +280,10 @@ async def test_process_refuses_empty_argv_and_a_stopped_container():
         states={"box": "stopped"}, config={"container": "box"}
     )
     with pytest.raises(ValueError, match="argv must not be empty"):
-        await native(runtime).execute([], [], Context(), kind="process")
+        await machine_runtime(runtime).execute([], [], Context(), kind="process")
     assert not runtime.calls
     with pytest.raises(RuntimeError, match="not running"):
-        await native(runtime).execute([], ["node"], Context(), kind="process")
+        await machine_runtime(runtime).execute([], ["node"], Context(), kind="process")
     assert len(runtime.calls) == 1
 
 

@@ -1432,7 +1432,7 @@ const RUNTIME_ENTRY: Record<string, { captures?: string[]; config?: Record<strin
 // Runtimes that need a host the hosted runners do not give every job: an
 // unmet requirement skips their variants even under INTEG_RUNTIME_STRICT.
 const OPTIONAL_RUNTIMES = new Set(['sandlock', 'e2b', 'smolvm', 'microsandbox', 'apple_container'])
-// A machine provider's variant runs the native runtime on a machine of that
+// A machine provider's variant runs the machine runtime on a machine of that
 // provider, its config the machine's `machines:` entry. Mirrors run.py
 // `MACHINE_PROVIDERS`.
 const MACHINE_PROVIDERS = new Set([
@@ -1556,7 +1556,7 @@ function forRuntime(testCase: Case, runtime: string): Case | null {
     if (MACHINE_PROVIDERS.has(runtime) && typeof entry !== 'string') {
       const { config = {}, ...rest } = entry
       world.machines = { [runtime]: { provider: runtime, ...(config as Record<string, unknown>) } }
-      entry = { ...rest, name: 'native', machine: runtime }
+      entry = { ...rest, name: 'machine', machine: runtime }
     }
     world.runtimes = [entry, 'workspace']
   }

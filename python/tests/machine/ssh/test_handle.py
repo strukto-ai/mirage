@@ -28,11 +28,11 @@ from mirage.machine.ssh import SSHMachine, sdk
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 from mirage.vfs.ssh import SSHVFS, SSHConfig
-from tests.fixtures.machine import native, on
+from tests.fixtures.machine import machine_runtime, on
 
 
 def _line(box: SSHMachine, line: str, stdin: bytes | None = None):
-    return native(box).run_line(
+    return machine_runtime(box).run_line(
         None, [], [], Context(flags={"c": line}, stdin=stdin)
     )
 

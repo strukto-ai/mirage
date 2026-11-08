@@ -213,7 +213,7 @@ class Runtime(ABC, Generic[E]):
                 capture is not None
                 and self.reach != "workspace"
                 and capture.restricted_mounts
-                and not self._serves_session(capture.restricted_mounts)
+                and not self._serves_session(capture.restricted_mounts, ctx)
             ):
                 return refused_run(
                     self.voice(ctx),
@@ -484,12 +484,15 @@ class Runtime(ABC, Generic[E]):
                 self._engine_task = None
             raise
 
-    def _serves_session(self, restricted_mounts: tuple[str, ...]) -> bool:
+    def _serves_session(
+        self, restricted_mounts: tuple[str, ...], ctx: Context
+    ) -> bool:
         """Whether every restricted mount is served through this caller's gate.
 
         Args:
             restricted_mounts (tuple[str, ...]): the mounts the session
                 restricts.
+            ctx (Context): the run's context.
         """
         return False
 

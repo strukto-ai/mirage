@@ -20,7 +20,7 @@ A runtime runs the programs in a line. Mirage's own commands (`grep`, `cat`, pip
 | [`pyodide`](/home/setup/runtime/pyodide) | `python3`, CPython in WebAssembly | Mirage workspace | TypeScript |
 | [`quickjs`](/home/setup/runtime/quickjs) | `node` and `js`, with Node.js's common APIs | Mirage workspace | both (default) |
 | [`local`](/home/setup/runtime/local) | host programs such as `python3`, `node` or `tsx` | host | Python, Node |
-| [`native`](/home/setup/runtime/sandbox) | native programs | a [machine](/home/setup/runtime/sandbox): a container, VM, cloud sandbox or SSH host | Python, Node; E2B also in the browser |
+| [`machine`](/home/setup/runtime/sandbox) | native programs | a [machine](/home/setup/runtime/sandbox): a container, VM, cloud sandbox or SSH host | Python, Node; E2B also in the browser |
 | [`sandlock`](/home/setup/runtime/sandbox/sandlock) | native programs | this Linux host, confined | Python, Node |
 
 ## Routing
@@ -35,13 +35,13 @@ machines:
     mount_type: ssh
 runtimes:
   - monty
-  - name: native
+  - name: machine
     machine: box
   - workspace
 ```
 
 An entry is a name, or a mapping with `name`, `captures` and `config`; a
-`native` entry names its `machine` instead of taking `config`. The
+`machine` entry names its `machine` instead of taking `config`. The
 name is a runtime Mirage ships, one you registered in code, or
 a `./file.py:Class` (Python) or `./file.mjs:Class` (TypeScript) reference to
 [your own runtime](/home/setup/runtime/custom). Config keys are snake_case in YAML for both SDKs, and a
@@ -104,7 +104,7 @@ machines:
     provider: docker
     container: my-sandbox
 runtimes:
-  - name: native
+  - name: machine
     captures: ["@python", "@external"]
     machine: box
 ```

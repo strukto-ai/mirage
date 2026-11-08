@@ -28,8 +28,8 @@ import {
 } from '../mixin.ts'
 import type { OutputFn, RunResult } from '../types.ts'
 
-/** A native entry's options: a runtime's, and the machine a run goes to by default. */
-export interface NativeOptions extends RuntimeOptions {
+/** A machine entry's options: a runtime's, and the machine a run goes to by default. */
+export interface MachineOptions extends RuntimeOptions {
   machine?: string
 }
 
@@ -41,13 +41,13 @@ export interface NativeOptions extends RuntimeOptions {
  * machine its route names (`execute({ machine })`, a policy's Route), else
  * to this entry's `machine`. Captures default to `@external`, the programs
  * nothing in Mirage resolves; an explicit `@line` sends whole lines, run as
- * `/bin/sh -c`. Mirrors Python's `NativeRuntime`.
+ * `/bin/sh -c`. Mirrors Python's `MachineRuntime`.
  */
-export class NativeRuntime
+export class MachineRuntime
   extends Runtime<undefined>
   implements LineExecutorMixin<undefined>, ProcessExecutorMixin<undefined>
 {
-  readonly name = 'native'
+  readonly name = 'machine'
   // Programs execute on the machine and act on its world (its filesystem,
   // its network); the workspace gate never sees those effects, however well
   // isolated the machine itself is.
@@ -58,7 +58,7 @@ export class NativeRuntime
   readonly defaultMachine: string | null
   private machines: MachineTable | null = null
 
-  constructor(options: NativeOptions = {}) {
+  constructor(options: MachineOptions = {}) {
     const { machine, ...rest } = options
     super(rest, [EXTERNAL_COMMANDS])
     this.defaultMachine = machine ?? null
@@ -116,9 +116,8 @@ export class NativeRuntime
     return handles.length > 0 && handles.every((h) => h.fileEffectsDispatched(this.binding))
   }
 
-  protected override servesSession(restrictedMounts: readonly string[]): boolean {
-    const handles = this.machines?.handles() ?? []
-    return handles.length > 0 && handles.every((h) => h.servesSession(restrictedMounts))
+  protected override servesSession(restrictedMounts: readonly string[], ctx: Context): boolean {
+    return this.handle(ctx).servesSession(restrictedMounts)
   }
 
   /**

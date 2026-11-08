@@ -25,7 +25,7 @@ from mirage.machine.smolvm import SmolvmMachine
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
-from tests.fixtures.machine import native, on
+from tests.fixtures.machine import machine_runtime, on
 
 
 class FakeSmolvmMachine(SmolvmMachine):
@@ -163,7 +163,7 @@ async def test_process_preserves_argv_and_shares_the_shell_connection(
     argv = ("node", "a b", "$(echo literal)", "", "--flag")
     work = PathSpec.from_str_path("/work")
     ctx = Context(cwd=work, env={"E": "request"}, stdin=b"input")
-    result = await native(runtime).execute([], list(argv), ctx, kind="process")
+    result = await machine_runtime(runtime).execute([], list(argv), ctx, kind="process")
     assert result.stdout == b"out:--flag"
     assert result.stderr == b"warn"
     assert runtime.calls[-1] == (
@@ -190,21 +190,21 @@ async def test_process_preserves_argv_and_shares_the_shell_connection(
         b"input",
     )
     line = Context(flags={"c": "pwd"}, cwd=work)
-    await native(runtime).execute([], [], line, kind="line")
+    await machine_runtime(runtime).execute([], [], line, kind="line")
     assert sum(args[1] == "status" for args, _ in runtime.calls) == 1
-    assert isinstance(native(runtime), ProcessExecutorMixin)
-    assert isinstance(native(runtime), LineExecutorMixin)
-    assert native(runtime).filesystem == ()
+    assert isinstance(machine_runtime(runtime), ProcessExecutorMixin)
+    assert isinstance(machine_runtime(runtime), LineExecutorMixin)
+    assert machine_runtime(runtime).filesystem == ()
 
 
 @pytest.mark.asyncio
 async def test_process_refuses_a_stopped_vm_and_empty_argv():
     runtime = FakeSmolvmMachine(state="stopped", config={"machine": "vm"})
     with pytest.raises(ValueError, match="argv must not be empty"):
-        await native(runtime).execute([], [], Context(), kind="process")
+        await machine_runtime(runtime).execute([], [], Context(), kind="process")
     assert not runtime.calls
     with pytest.raises(RuntimeError, match="not running"):
-        await native(runtime).execute([], ["node"], Context(), kind="process")
+        await machine_runtime(runtime).execute([], ["node"], Context(), kind="process")
     assert len(runtime.calls) == 1
 
 

@@ -19,7 +19,7 @@ import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/works
 const dec = new TextDecoder()
 
 /**
- * Run one raw line on a machine from /home/user, as the native runtime runs
+ * Run one raw line on a machine from /home/user, as the machine runtime runs
  * an `@line` capture there.
  */
 export function runLine(machine: MachineHandle, line: string, stdin: Uint8Array | null = null) {

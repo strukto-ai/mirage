@@ -21,7 +21,7 @@ import { PROCESS } from '@struktoai/mirage-core/machine/constants'
 import { TAGGED_PRELUDE } from './constants.ts'
 import { MicrosandboxMachine } from './handle.ts'
 import * as program from '../program.ts'
-import { captured, native, on } from '../../../tests/fixtures/machine.ts'
+import { captured, machineRuntime, on } from '../../../tests/fixtures/machine.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -53,7 +53,7 @@ describe('MicrosandboxMachine', () => {
     try {
       const runtime = new MicrosandboxMachine('box', { sandbox: 'box' })
       await expect(
-        native(runtime).execute(
+        machineRuntime(runtime).execute(
           [],
           [],
           {
@@ -123,7 +123,7 @@ describe('MicrosandboxMachine', () => {
     try {
       const runtime = new MicrosandboxMachine('box', { sandbox: 'box', env: { MARK: 'config' } })
       const words = ['python3', 'a b', '$(literal)', '', '--flag'] as const
-      const result = await native(runtime).execute(
+      const result = await machineRuntime(runtime).execute(
         [],
         words,
         { flags: {}, cwd: PathSpec.fromStrPath('/work'), env: { MARK: 'request' }, stdin: input },
@@ -191,7 +191,7 @@ describe('MicrosandboxMachine', () => {
       const runtime = new MicrosandboxMachine('box', { sandbox: 'box' })
       const pending =
         phase === 'initial'
-          ? native(runtime).execute(
+          ? machineRuntime(runtime).execute(
               [],
               ['true'],
               {
@@ -279,7 +279,7 @@ describe.skipIf(!MOUNT_SANDBOX)('real guest workspace mounts', () => {
 it.skipIf(!STOPPED_SANDBOX)('does not start a real stopped guest', async () => {
   const runtime = new MicrosandboxMachine('box', { sandbox: STOPPED_SANDBOX })
   await expect(
-    native(runtime).execute(
+    machineRuntime(runtime).execute(
       [],
       [],
       { flags: { c: 'echo must-not-run' }, cwd: PathSpec.fromStrPath('/'), env: {}, stdin: null },
@@ -298,7 +298,7 @@ describe.skipIf(!SANDBOX)('MicrosandboxMachine real guest', () => {
     const cwd = PathSpec.fromStrPath('/data')
     const payload = new Uint8Array([105, 110, 112, 117, 116, 0, 255, 13, 10])
     const words = ['a b', '$(echo literal)', '', '--flag']
-    const result = await native(runtime).execute(
+    const result = await machineRuntime(runtime).execute(
       [],
       [
         'python3',
@@ -313,7 +313,7 @@ describe.skipIf(!SANDBOX)('MicrosandboxMachine real guest', () => {
     expect(new Uint8Array(result.stdout)).toEqual(payload)
     expect(JSON.parse(DEC.decode(result.stderr))).toEqual(['/data', 'request', words])
     expect(result.exitCode).toBe(7)
-    const shell = await native(runtime).execute(
+    const shell = await machineRuntime(runtime).execute(
       [],
       [],
       { flags: { c: 'printf "%s" "$MARK"; pwd' }, cwd: cwd, env: {}, stdin: null },
@@ -322,7 +322,7 @@ describe.skipIf(!SANDBOX)('MicrosandboxMachine real guest', () => {
     expect(DEC.decode(shell.stdout)).toBe('config/data\n')
     expect(DEC.decode(shell.stderr)).toBe('')
     expect(shell.exitCode).toBe(0)
-    const files = await native(runtime).execute(
+    const files = await machineRuntime(runtime).execute(
       [],
       [
         'python3',

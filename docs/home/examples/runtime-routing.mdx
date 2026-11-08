@@ -27,7 +27,7 @@ ephemeral. Mirage runs programs in it and leaves its lifecycle to Daytona.
 
 ## The workspace
 
-Two runtimes capture `python3`: `monty` first, then `native`, which runs it
+Two runtimes capture `python3`: `monty` first, then `machine`, which runs it
 on the `gpu` machine, the Daytona sandbox. The route
 policy is a script that runs on Monty, read from `route.py`:
 
@@ -45,7 +45,7 @@ machines:
 
 runtimes:
   - monty
-  - name: native
+  - name: machine
     captures: ["python3"]
     machine: gpu
   - workspace
@@ -63,7 +63,7 @@ any line that names PyTorch or CUDA to the GPU:
 ```python route.py
 def pre_execute(ctx):
     if any(word in ctx["line"] for word in ("torch", "cuda")):
-        return {"kind": "route", "runtime": "native", "reason": "the line uses PyTorch or CUDA"}
+        return {"kind": "route", "runtime": "machine", "reason": "the line uses PyTorch or CUDA"}
 ```
 
 A line the script stays silent on runs on the first runtime that captures
@@ -91,7 +91,7 @@ RUNTIMES = {
         "language and part of the standard library, with no packages, GPU, "
         "network or subprocesses"
     ),
-    "native": (
+    "machine": (
         "a cloud sandbox with an NVIDIA GPU, CUDA, PyTorch and the full "
         "standard library, billed while it runs"
     ),
@@ -124,7 +124,7 @@ preview and the run agree:
 
 
     class RuntimeChoice(BaseModel):
-        runtime: Literal["monty", "native"]
+        runtime: Literal["monty", "machine"]
         reason: str
 
 
@@ -156,7 +156,7 @@ preview and the run agree:
     import { z } from 'zod'
     import { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
 
-    const RuntimeChoice = z.object({ runtime: z.enum(['monty', 'native']), reason: z.string() })
+    const RuntimeChoice = z.object({ runtime: z.enum(['monty', 'machine']), reason: z.string() })
     type Choice = z.infer<typeof RuntimeChoice>
 
     const choices = new Map<string, Choice>()

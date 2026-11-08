@@ -1607,15 +1607,15 @@
     "isRoute": "A type guard for the Route answer; Python asks isinstance."
    }
   },
-  "runtime/native/runtime": {
+  "runtime/machine/runtime": {
    "typescript_only": {
-    "NativeOptions": "TypeScript's constructor takes one typed options object; Python takes keyword arguments."
+    "MachineOptions": "TypeScript's constructor takes one typed options object; Python takes keyword arguments."
    }
   },
   "runtime/table": {
    "typescript_only": {
     "MACHINE_PROVIDERS": "TypeScript's machine registry fills as packages load, so the hint for a runtimes entry naming a provider lists them here; Python reads the registry's module table.",
-    "NATIVE_KEYS": "A TypeScript object literal swallows a typo key, so the entry options are checked by hand; Python's keyword arguments raise TypeError on one."
+    "MACHINE_KEYS": "A TypeScript object literal swallows a typo key, so the entry options are checked by hand; Python's keyword arguments raise TypeError on one."
    }
   },
   "server/routers/machines": {

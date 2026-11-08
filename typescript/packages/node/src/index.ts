@@ -155,7 +155,7 @@ export type { SharePointConfig } from '@struktoai/mirage-core/accessor/sharepoin
 export type { AirtableConfig } from '@struktoai/mirage-core/core/airtable/config'
 export type { GitHubConfig } from '@struktoai/mirage-core/core/github/config'
 export { MontyRuntime } from '@struktoai/mirage-core/runtime/python/monty/runtime'
-export { NativeRuntime } from '@struktoai/mirage-core/runtime/native/runtime'
+export { MachineRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 export type { E2BConfig } from '@struktoai/mirage-core/machine/e2b/config'
 export { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
 export { BoxVFS } from '@struktoai/mirage-core/vfs/box/box'

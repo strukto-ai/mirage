@@ -83,7 +83,7 @@ export interface Deny {
  * Deny.
  *
  * The runtime serves every command it captures there, as a `routePolicy`
- * verdict naming it does; the machine is where the native runtime runs
+ * verdict naming it does; the machine is where the machine runtime runs
  * what it serves, over its entry's own machine. A Deny at the stage
  * outranks it, and two policies placing one line on different runtimes or
  * machines refuse it, since neither choice is the line's. Mirrors the
@@ -93,7 +93,7 @@ export interface Route {
   kind: 'route'
   /** The runtime entry's name; absent leaves each command on its first capturer. */
   runtime?: string
-  /** The machine's name under `machines:`; absent leaves each native runtime on its own. */
+  /** The machine's name under `machines:`; absent leaves each machine runtime on its own. */
   machine?: string
   /** Why the line goes there, for `explain` to show; absent when the policy gives none. */
   reason?: string

@@ -15,7 +15,7 @@
 import { homedir } from 'node:os'
 import {
   MountMode,
-  NativeRuntime,
+  MachineRuntime,
   S3VFS,
   SSHVFS,
   Workspace,
@@ -94,7 +94,7 @@ async function main(): Promise<void> {
           identityFile: IDENTITY,
         },
       },
-      runtimes: [new NativeRuntime({ captures: ['python3'], machine: 'box' }), 'workspace'],
+      runtimes: [new MachineRuntime({ captures: ['python3'], machine: 'box' }), 'workspace'],
     },
   )
 

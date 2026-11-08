@@ -16,7 +16,7 @@
         },
         "runtimes": [
           {
-            "name": "native",
+            "name": "machine",
             "captures": [
               "printenv"
             ],
@@ -55,7 +55,7 @@
         },
         "runtimes": [
           {
-            "name": "native",
+            "name": "machine",
             "captures": [
               "@line"
             ],
@@ -87,7 +87,7 @@
         },
         "runtimes": [
           {
-            "name": "native",
+            "name": "machine",
             "captures": [
               "@line"
             ],

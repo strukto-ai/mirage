@@ -27,7 +27,7 @@ from mirage.runtime.types import OutputFn, RunResult, RuntimeReach
 from mirage.types import PathSpec
 
 
-class NativeRuntime(
+class MachineRuntime(
     Runtime[None], LineExecutorMixin[None], ProcessExecutorMixin[None]
 ):
     """Run a machine's own programs through that machine's exec.
@@ -47,7 +47,7 @@ class NativeRuntime(
             names none.
     """
 
-    name = "native"
+    name = "machine"
     # Programs execute on the machine and act on its world (its
     # filesystem, its network); the workspace gate never sees those
     # effects, however well isolated the machine itself is.
@@ -122,11 +122,10 @@ class NativeRuntime(
             h.file_effects_dispatched(self._binding) for h in handles
         )
 
-    def _serves_session(self, restricted_mounts: tuple[str, ...]) -> bool:
-        handles = self._machines.handles() if self._machines else []
-        return bool(handles) and all(
-            h.serves_session(restricted_mounts) for h in handles
-        )
+    def _serves_session(
+        self, restricted_mounts: tuple[str, ...], ctx: Context
+    ) -> bool:
+        return self.handle(ctx).serves_session(restricted_mounts)
 
     async def run_line(
         self,

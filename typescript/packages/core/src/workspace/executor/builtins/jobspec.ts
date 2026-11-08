@@ -79,6 +79,34 @@ export async function machineProcess(
   return [found[0] ?? null, false]
 }
 
+/**
+ * The job whose own process ran the program a machine pid names, which
+ * `wait` reads as the pid of a program on its machine. A job whose program
+ * has ended still answers until the job is collected. The view is brought
+ * in step with the machines first (`scan`), which learns a program's pid
+ * there. Returns the job, a running program's before an ended one's, null
+ * for none, and whether jobs on more than one machine ran a program with
+ * that pid, which bash's `ambiguous job spec` refuses.
+ */
+export async function jobWithMachinePid(
+  processes: ProcessView,
+  jobs: readonly JobHandle[],
+  number: number,
+): Promise<[JobHandle | null, boolean]> {
+  await processes.scan()
+  const held: [JobHandle, boolean][] = []
+  const machines = new Set<string>()
+  for (const job of jobs) {
+    const record = job.process?.record
+    if (record === undefined || record.machinePid?.pid !== number) continue
+    held.push([job, record.machinePid.exited != null])
+    machines.add(record.machine.toString())
+  }
+  if (machines.size > 1) return [null, true]
+  held.sort((a, b) => Number(a[1]) - Number(b[1]))
+  return [held[0]?.[0] ?? null, false]
+}
+
 export function jobNumbered(jobs: readonly JobHandle[], jobId: number): JobHandle | null {
   return jobs.find((j) => j.id === jobId && !j.reported) ?? null
 }

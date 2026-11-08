@@ -5,7 +5,7 @@ description: Run captured programs in a smolvm microVM with its own kernel.
 ---
 
 The `smolvm` machine provider reaches a running
-[smolvm](https://smolmachines.com) microVM, by name, and the `native` runtime
+[smolvm](https://smolmachines.com) microVM, by name, and the `machine` runtime
 runs captured programs in it. Each machine has its own guest kernel, on macOS, Linux and
 Windows. You create and start the machine; Mirage only runs programs in it.
 Python SDK and Node.
@@ -30,27 +30,27 @@ Python in the machine too.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.native import NativeRuntime
+    from mirage.runtime.machine import MachineRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
         machines={"box": {"provider": "smolvm", "machine": "mirage-box"}},
-        runtimes=[NativeRuntime(["@python", "@external"], machine="box")],
+        runtimes=[MachineRuntime(["@python", "@external"], machine="box")],
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, NativeRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, MachineRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
         machines: { box: { provider: 'smolvm', machine: 'mirage-box' } },
-        runtimes: [new NativeRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        runtimes: [new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' })],
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -64,7 +64,7 @@ Python in the machine too.
         provider: smolvm
         machine: mirage-box
     runtimes:
-      - name: native
+      - name: machine
         captures: ["@python", "@external"]
         machine: box
     mounts:

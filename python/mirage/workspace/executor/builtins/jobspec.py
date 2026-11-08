@@ -16,6 +16,7 @@
 from mirage.execution.job import JobHandle, JobTable
 from mirage.execution.process.types import Process
 from mirage.execution.process.view import ProcessView
+from mirage.execution.types import MachinePid
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
@@ -109,6 +110,42 @@ def job_numbered(jobs: list[JobHandle], job_id: int) -> JobHandle | None:
     """
     return next((j for j in jobs if j.id == job_id and not j.reported), None)
 
+
+async def job_with_machine_pid(
+    processes: ProcessView, jobs: list[JobHandle], number: int
+) -> tuple[JobHandle | None, bool]:
+    """The job whose own process ran the program a machine pid names,
+    which ``wait`` reads as the pid of a program on its machine. A job
+    whose program has ended still answers until the job is collected.
+    The view is brought in step with the machines first (``scan``),
+    which learns a program's pid there.
+
+    Args:
+        processes (ProcessView): the session's view of the processes.
+        jobs (list[JobHandle]): the jobs the builtin can see.
+        number (int): the pid as typed.
+
+    Returns:
+        tuple[JobHandle | None, bool]: the job, a running program's
+        before an ended one's, None for none, and whether jobs on more
+        than one machine ran a program with that pid, which bash's
+        ``ambiguous job spec`` refuses.
+    """
+    await processes.scan()
+    held: list[tuple[JobHandle, MachinePid]] = []
+    machines: set[str] = set()
+    for job in jobs:
+        record = job.process.record if job.process is not None else None
+        if record is None or record.machine_pid is None:
+            continue
+        if record.machine_pid.pid != number:
+            continue
+        held.append((job, record.machine_pid))
+        machines.add(str(record.machine))
+    if len(machines) > 1:
+        return None, True
+    held.sort(key=lambda pair: pair[1].exited is not None)
+    return (held[0][0] if held else None), False
 
 def job_with_pid(jobs: list[JobHandle], pid: int) -> JobHandle | None:
     """The job a bare PID names.

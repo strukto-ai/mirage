@@ -32,7 +32,7 @@ import { SSHMachine } from './handle.ts'
 import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
 import { runAsProcess } from '@struktoai/mirage-core/context/session_context'
 import type { Ssh2Sdk } from './sdk.ts'
-import { native, on } from '../../../tests/fixtures/machine.ts'
+import { machineRuntime, on } from '../../../tests/fixtures/machine.ts'
 
 vi.mock('node:os', async (original) => ({
   ...(await original<typeof Os>()),
@@ -362,13 +362,13 @@ describe('SSHMachine cancellation', () => {
 it('reconnects after the previous client closes', async () => {
   const runtime = new SdkFakeRuntime('box', { host: 'box' })
   const ctx = { stdin: null, flags: { c: 'true' }, cwd: PathSpec.fromStrPath('/') }
-  await native(runtime).runLine(undefined, [], [], ctx)
+  await machineRuntime(runtime).runLine(undefined, [], [], ctx)
   const first = made.at(-1)
   if (first === undefined) throw new Error('no SSH client')
-  await native(runtime).runLine(undefined, [], [], ctx)
+  await machineRuntime(runtime).runLine(undefined, [], [], ctx)
   expect(made.at(-1)).toBe(first)
   first.end()
-  await native(runtime).runLine(undefined, [], [], ctx)
+  await machineRuntime(runtime).runLine(undefined, [], [], ctx)
   expect(made.at(-1)).not.toBe(first)
   await runtime.close()
 })

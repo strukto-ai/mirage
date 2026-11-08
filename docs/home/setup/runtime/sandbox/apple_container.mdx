@@ -5,7 +5,7 @@ description: Run captured programs in containers under Apple's container tool on
 ---
 
 The `apple_container` machine provider reaches a running container under
-Apple's `container` tool, and the `native` runtime runs captured programs in
+Apple's `container` tool, and the `machine` runtime runs captured programs in
 it. It can map each session to its own container, so
 every agent gets one. You start the containers; Mirage only runs programs
 in them. Needs Apple silicon and macOS 26 or later. Python SDK and Node.
@@ -36,27 +36,27 @@ map from session ID to container, for one container per agent.
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import RAMVFS, MountMode, Workspace
-    from mirage.runtime.native import NativeRuntime
+    from mirage.runtime.machine import MachineRuntime
 
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
         machines={"box": {"provider": "apple_container", "container": "my-sandbox"}},
-        runtimes=[NativeRuntime(["@python", "@external"], machine="box")],
+        runtimes=[MachineRuntime(["@python", "@external"], machine="box")],
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, NativeRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { MountMode, MachineRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
         machines: { box: { provider: 'apple_container', container: 'my-sandbox' } },
-        runtimes: [new NativeRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+        runtimes: [new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' })],
       },
     )
     await ws.shell("python3 -c 'print(1 + 1)'")
@@ -72,7 +72,7 @@ map from session ID to container, for one container per agent.
         containers:
           agent-1: agent-1-box
     runtimes:
-      - name: native
+      - name: machine
         captures: ["@python", "@external"]
         machine: box
     mounts:

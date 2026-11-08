@@ -24,9 +24,10 @@ from mirage.machine.constants import PROCESS
 from mirage.machine.microsandbox import MicrosandboxMachine
 from mirage.machine.microsandbox.constants import TAGGED_PRELUDE
 from mirage.machine.registry import build_machine
+from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
-from tests.fixtures.machine import native, on
+from tests.fixtures.machine import machine_runtime
 
 
 @pytest.mark.asyncio
@@ -62,7 +63,7 @@ async def test_refuses_unusable_status_before_exec(
         "box", {"provider": "microsandbox", **{"sandbox": "box"}}
     )
     with pytest.raises(RuntimeError, match=message):
-        await native(runtime).execute(
+        await machine_runtime(runtime).execute(
             [],
             [],
             Context(
@@ -128,7 +129,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
         },
     )
     words = ("python3", "a b", "$(literal)", "", "--flag")
-    result = await native(runtime).execute(
+    result = await machine_runtime(runtime).execute(
         [],
         list(words),
         Context(
@@ -186,7 +187,7 @@ async def test_real_guest_process_shell_and_fuse():
     cwd = PathSpec.from_str_path("/data")
     payload = b"input\x00\xff\r\n"
     words = ("a b", "$(echo literal)", "", "--flag")
-    result = await native(runtime).execute(
+    result = await machine_runtime(runtime).execute(
         [],
         list(
             (
@@ -206,7 +207,7 @@ async def test_real_guest_process_shell_and_fuse():
     assert result.stdout == payload
     assert json.loads(result.stderr) == ["/data", "request", list(words)]
     assert result.exit_code == 7
-    shell = await native(runtime).execute(
+    shell = await machine_runtime(runtime).execute(
         [],
         [],
         Context(flags={"c": 'printf "%s" "$MARK"; pwd'}, cwd=cwd),
@@ -215,7 +216,7 @@ async def test_real_guest_process_shell_and_fuse():
     assert shell.stdout == b"config/data\n"
     assert shell.stderr == b""
     assert shell.exit_code == 0
-    files = await native(runtime).execute(
+    files = await machine_runtime(runtime).execute(
         [],
         list(
             (
@@ -239,11 +240,9 @@ async def test_real_guest_process_shell_and_fuse():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
+        machines={"box": MicrosandboxMachine("box", {"sandbox": SANDBOX})},
         runtimes=[
-            MicrosandboxMachine(
-                captures=["python3", "@external"],
-                config={"sandbox": SANDBOX},
-            ),
+            MachineRuntime(["python3", "@external"], machine="box"),
             "workspace",
         ],
     )
@@ -276,14 +275,14 @@ MOUNT_SANDBOX = os.environ.get("MIRAGE_INTEG_MICROSANDBOX_MOUNT_SANDBOX")
 async def test_real_ssh_mount_serves_the_host_session_and_unmounts(mount_type):
     prefix = f"/mirage-python-{mount_type}"
     runtime = MicrosandboxMachine(
-        captures=["python3"],
-        config={"sandbox": MOUNT_SANDBOX, "mount_type": mount_type},
+        "box", {"sandbox": MOUNT_SANDBOX, "mount_type": mount_type}
     )
     ws = Workspace(
         {prefix: RAMVFS()},
         mode=MountMode.EXEC,
         profiles={"agent": {"paths": {"hide": [f"{prefix}/secret.txt"]}}},
-        **on(runtime, "workspace"),
+        machines={"box": runtime},
+        runtimes=[MachineRuntime(["python3"], machine="box"), "workspace"],
     )
     try:
         assert (
@@ -330,7 +329,7 @@ def test_mount_type_rejects_an_unknown_value():
 async def test_real_stopped_guest_is_not_started():
     runtime = MicrosandboxMachine("box", config={"sandbox": STOPPED_SANDBOX})
     with pytest.raises(RuntimeError, match="state: Stopped"):
-        await native(runtime).execute(
+        await machine_runtime(runtime).execute(
             [],
             [],
             Context(

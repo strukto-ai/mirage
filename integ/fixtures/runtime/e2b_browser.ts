@@ -14,7 +14,7 @@
 
 import { Limit, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
 import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
-import { NativeRuntime } from '@struktoai/mirage-core/runtime/native/runtime'
+import { MachineRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 
 import { exerciseCancellation, runLine } from './e2b_cancel.ts'
 
@@ -86,7 +86,7 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
         mode: MountMode.EXEC,
         machines: { e2b: machine },
         runtimes: [
-          new NativeRuntime({ captures: ['python3', 'node'], machine: 'e2b' }),
+          new MachineRuntime({ captures: ['python3', 'node'], machine: 'e2b' }),
           'workspace',
         ],
       },
@@ -120,7 +120,7 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
     {
       mode: MountMode.EXEC,
       machines: { e2b: cancellable },
-      runtimes: [new NativeRuntime({ captures: ['@line'], machine: 'e2b' }), 'workspace'],
+      runtimes: [new MachineRuntime({ captures: ['@line'], machine: 'e2b' }), 'workspace'],
       commandLimits: { '@line': new Limit({ timeoutSeconds: 5 }) },
     },
   )

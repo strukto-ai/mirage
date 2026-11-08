@@ -7,7 +7,7 @@ description: Run captured programs on a container, VM, cloud sandbox or remote m
 A machine is somewhere you already have: a container, a microVM, a cloud
 sandbox or a host over SSH. Declare each one under `machines:` with the
 `provider` that reaches it, and run captured programs there with the
-`native` runtime, whose `machine` names it. You create and stop the machine;
+`machine` runtime, whose `machine` names it. You create and stop the machine;
 Mirage only runs programs on it. `captures` defaults to
 [`@external`](/home/setup/runtime/overview#captures), every program Mirage
 does not have itself.
@@ -18,7 +18,7 @@ machines:
     provider: docker
     container: my-sandbox
 runtimes:
-  - name: native
+  - name: machine
     machine: box
 ```
 

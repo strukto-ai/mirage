@@ -17,17 +17,17 @@ from typing import Any
 
 from mirage.execution.machine.table import MachineTable
 from mirage.machine.handle import MachineHandle
-from mirage.runtime.native import NativeRuntime
+from mirage.runtime.machine import MachineRuntime
 
 
-def native(handle: MachineHandle) -> NativeRuntime:
-    """A native runtime on one machine, bound to it as a workspace binds
+def machine_runtime(handle: MachineHandle) -> MachineRuntime:
+    """A machine runtime on one machine, bound to it as a workspace binds
     its entries, capturing what a fake handle's ``captures`` names.
 
     Args:
         handle (MachineHandle): the machine.
     """
-    runtime = NativeRuntime(captures_of(handle), machine=handle.name)
+    runtime = MachineRuntime(captures_of(handle), machine=handle.name)
     runtime.bind_machines(MachineTable({handle.name: handle}))
     return runtime
 
@@ -41,7 +41,7 @@ def on(handle: MachineHandle, *rest: Any) -> dict[str, Any]:
         handle (MachineHandle): the machine.
         rest (Any): the entries listed after it.
     """
-    entry = NativeRuntime(captures_of(handle), machine=handle.name)
+    entry = MachineRuntime(captures_of(handle), machine=handle.name)
     return {"machines": {handle.name: handle}, "runtimes": [entry, *rest]}
 
 

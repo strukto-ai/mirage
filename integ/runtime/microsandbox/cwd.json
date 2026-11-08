@@ -16,7 +16,7 @@
         },
         "runtimes": [
           {
-            "name": "native",
+            "name": "machine",
             "captures": [
               "uname"
             ],

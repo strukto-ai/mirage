@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CHECK_LINE, PROCESS } from '../../machine/constants.ts'
 import { MachineHandle } from '../../machine/handle.ts'
-import { NativeRuntime } from '../../runtime/native/runtime.ts'
+import { MachineRuntime } from '../../runtime/machine/runtime.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -145,7 +145,7 @@ function sleepers(boxes: Record<string, Sleeper>): Workspace {
     {
       mode: MountMode.EXEC,
       machines: boxes,
-      runtimes: [new NativeRuntime({ captures: ['train'], machine: Object.keys(boxes)[0] ?? '' })],
+      runtimes: [new MachineRuntime({ captures: ['train'], machine: Object.keys(boxes)[0] ?? '' })],
     },
   )
 }
@@ -225,6 +225,25 @@ describe('MachineTable scans', () => {
     } finally {
       a.finish()
       b.finish()
+      await ws.close()
+    }
+  })
+
+  it('answers wait for a machine pid once its program ended', async () => {
+    const box = new Sleeper('a')
+    const ws = sleepers({ a: box })
+    try {
+      const pid = Number(DEC.decode((await ws.shell('train 1 & echo $!')).stdout).trim())
+      await started(box)
+      await ws.shell('ps')
+      box.finish()
+      await vi.waitFor(() => {
+        expect(ws.processTable.live().map((p) => p.record.id.pid)).not.toContain(pid)
+      })
+      const said = await ws.shell('wait 412')
+      expect([said.exitCode, DEC.decode(said.stderr)]).toEqual([143, ''])
+    } finally {
+      box.finish()
       await ws.close()
     }
   })

@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto'
 import { Workspace, SSHVFS, SSHMachine } from '@struktoai/mirage-node'
 import { Limit, MountMode, RAMVFS } from '@struktoai/mirage-core'
 import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
-import { NativeRuntime } from '@struktoai/mirage-core/runtime/native/runtime'
+import { MachineRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 import { exerciseCancellation, runLine } from '../../fixtures/runtime/e2b_cancel.ts'
 
 const dec = new TextDecoder()
@@ -73,7 +73,7 @@ try {
     {
       mode: MountMode.EXEC,
       machines: { e2b },
-      runtimes: [new NativeRuntime({ captures: ['@line'], machine: 'e2b' }), 'workspace'],
+      runtimes: [new MachineRuntime({ captures: ['@line'], machine: 'e2b' }), 'workspace'],
       commandLimits: { '@line': new Limit({ timeoutSeconds: 5 }) },
     },
   )
@@ -89,7 +89,7 @@ try {
     {
       mode: MountMode.EXEC,
       machines: { ssh },
-      runtimes: [new NativeRuntime({ captures: ['python3'], machine: 'ssh' }), 'workspace'],
+      runtimes: [new MachineRuntime({ captures: ['python3'], machine: 'ssh' }), 'workspace'],
     },
   )
   try {

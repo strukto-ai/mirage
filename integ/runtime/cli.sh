@@ -97,7 +97,7 @@ RUNTIMES='{
 # `runtime@ram` (every mount here is RAM: this is a case's ram variant), is
 # merged over `expect`, and the world runs the runtime's table entry with
 # the case's `entry` laid over it; a machine provider's config becomes its
-# `machines:` entry, which the native runtime runs on.
+# `machines:` entry, which the machine runtime runs on.
 # INTEG_RUNTIMES (comma separated) keeps only the runtimes it names.
 runtime_variants() {
   local case_json="$1" host="$2"
@@ -143,7 +143,7 @@ runtime_variants() {
          end) as $entry
       | (if ($t.machines | index($r)) != null and ($entry | type) == "object"
          then {machines: {($r): ({provider: $r} + ($entry.config // {}))},
-               runtimes: [($entry | del(.config)) + {name: "native", machine: $r}, "workspace"]}
+               runtimes: [($entry | del(.config)) + {name: "machine", machine: $r}, "workspace"]}
          else {runtimes: [$entry, "workspace"]} end) as $placed
       | $c + {
           id: ($c.id + "@" + $r),

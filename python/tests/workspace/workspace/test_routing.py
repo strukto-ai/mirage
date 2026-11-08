@@ -17,7 +17,7 @@ import pytest
 from mirage import Policy, Workspace
 from mirage.machine.handle import MachineHandle
 from mirage.policy import Route
-from mirage.runtime.native import NativeRuntime
+from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.routing import RouteError
 from mirage.runtime.types import RunResult
 from mirage.types import MountMode
@@ -41,7 +41,7 @@ def _workspace(*policies: Policy) -> Workspace:
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         machines={"a": _Box("a"), "b": _Box("b")},
-        runtimes=[NativeRuntime(["hostname"], machine="a"), "workspace"],
+        runtimes=[MachineRuntime(["hostname"], machine="a"), "workspace"],
         policies=list(policies),
     )
 
@@ -112,8 +112,8 @@ async def test_explain_names_the_machine_a_command_runs_on():
         said = await ws.explain("hostname; hostname -s; ls")
         commands = [node for node in _commands(said.node) if node.command]
         assert [(c.command, c.runtime, c.machine) for c in commands] == [
-            ("hostname", "native", "box:a"),
-            ("hostname", "native", "box:b"),
+            ("hostname", "machine", "box:a"),
+            ("hostname", "machine", "box:b"),
             ("ls", "", ""),
         ]
     finally:

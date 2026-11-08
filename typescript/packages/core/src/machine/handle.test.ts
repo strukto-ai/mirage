@@ -34,7 +34,7 @@ import type { RunResult } from '../runtime/types.ts'
 import type { MachineConfig } from './config.ts'
 import { ProcessTable } from '../execution/process/table.ts'
 import { runAsProcess } from '../context/session_context.ts'
-import { native, on } from '../../tests/fixtures/machine.ts'
+import { machineRuntime, on } from '../../tests/fixtures/machine.ts'
 import { FIRST_PID } from '../execution/process/constants.ts'
 
 const ENC = new TextEncoder()
@@ -288,7 +288,7 @@ describe('MachineHandle', () => {
 
   it('passes cwd through verbatim and merges env', async () => {
     const box = new RecordingSandbox({ captures: ['@line'], config: { env: { BASE: '1' } } })
-    const result = await native(box).runLine(undefined, [], [], {
+    const result = await machineRuntime(box).runLine(undefined, [], [], {
       flags: { c: 'nvidia-smi' },
       stdin: null,
       env: { LINE: '2' },
@@ -323,7 +323,7 @@ describe('MachineHandle', () => {
   it('machines take lines, not stages', () => {
     // A machine's runtime is a line executor, never the engine inside one
     // command: it carries the line entry point and no interpreter entry point.
-    const runtime = native(new RecordingSandbox())
+    const runtime = machineRuntime(new RecordingSandbox())
     expect(isLineExecutor(runtime)).toBe(true)
     expect(runtime).not.toBeInstanceOf(LanguageRuntime)
   })
@@ -395,7 +395,7 @@ describe('MachineHandle', () => {
       cwd: PathSpec.fromStrPath('/'),
       signal: abort.signal,
     }
-    const run = native(box).runLine(undefined, [], [], ctx)
+    const run = machineRuntime(box).runLine(undefined, [], [], ctx)
     const rejected = expect(run).rejects.toMatchObject({ name: 'AbortError' })
     await vi.waitFor(() => {
       expect(box.execs).toHaveLength(1)
@@ -449,7 +449,7 @@ describe('MachineHandle', () => {
       cancel: () => {
         abort.abort()
       },
-      run: async () => (await native(box).runLine(undefined, [], [], ctx)).exitCode,
+      run: async () => (await machineRuntime(box).runLine(undefined, [], [], ctx)).exitCode,
     })
     await vi.waitFor(() => {
       expect(box.execs).toHaveLength(1)
@@ -473,7 +473,7 @@ describe('MachineHandle', () => {
       command: 'yes',
       cwd: ctx.cwd,
       cancel: () => undefined,
-      run: async () => (await native(box).runLine(undefined, [], [], ctx)).exitCode,
+      run: async () => (await machineRuntime(box).runLine(undefined, [], [], ctx)).exitCode,
     })
     expect((await runner.join()).exit).toBe(0)
     expect(box.execs[0]?.[2][PROCESS]).toBe(`w1:${String(FIRST_PID)}`)
@@ -549,7 +549,7 @@ describe('MachineHandle', () => {
         cwd: PathSpec.fromStrPath('/'),
         signal: abort.signal,
       }
-      const run = native(box).runLine(undefined, [], [], ctx)
+      const run = machineRuntime(box).runLine(undefined, [], [], ctx)
       const rejected = expect(run).rejects.toMatchObject({ name: 'AbortError' })
       await vi.waitFor(() => {
         expect(box.execs).toHaveLength(1)
