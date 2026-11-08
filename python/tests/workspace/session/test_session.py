@@ -55,6 +55,8 @@ TRANSIENT_FIELDS = (
     "_alias_expansion",
     "status_writer",
     "_borrowed",
+    "_positional_held",
+    "_env_held",
 )
 
 

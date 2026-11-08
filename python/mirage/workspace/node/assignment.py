@@ -21,12 +21,9 @@ from mirage.policy import PolicyDenied
 from mirage.policy.policies import Policies
 from mirage.shell.array import (
     ShellArray,
-    array_extent,
-    array_get,
-    array_set,
-    array_with,
     build_assoc_literal,
     build_indexed_literal,
+    keyed_word,
     make_array,
 )
 from mirage.shell.bytes import encode_text
@@ -38,7 +35,7 @@ from mirage.shell.errors import (
 )
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
-from mirage.shell.variable import ShellValue, VarAttr
+from mirage.shell.variable import ShellValue
 from mirage.shell.voice import shell_voice
 from mirage.shell.xtrace import trace_assignment
 from mirage.types import word_text
@@ -56,29 +53,14 @@ from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session.state import (
-    appended,
+    assign_element,
     conversion_scalar,
     deref,
+    push_words,
     session_view,
     subscript_index,
+    var_kind,
 )
-
-
-async def _fatal_index(
-    context: EvaluationContext, subscript: str, policies: Policies | None
-) -> int:
-    """``subscript_index`` whose failure ends the line, in bash's words.
-
-    Args:
-        context (EvaluationContext): the session the subscript reads.
-        subscript (str): the raw subscript text.
-        policies (Policies | None): the policies its writes clear.
-    """
-    session = context.session
-    try:
-        return await subscript_index(session, subscript, policies)
-    except ArithError as exc:
-        raise exc.signal(fatal=True) from exc
 
 
 async def _fatal_index_literal(
@@ -103,11 +85,10 @@ async def _fatal_index_literal(
 
 
 def _refuse_readonly(view: SessionView, key: str) -> None:
-    """Discard the line on a write to a readonly ``key`` before its new
-    value is built: bash refuses an array literal before expanding it,
-    and an element write once its value and subscript are read, before
-    the array would grow to the index (``a[2**40]=x``). The store refuses
-    every other spelling (``_assign_var``).
+    """Discard the line on a literal written to a readonly ``key``
+    before it is expanded, as bash refuses it. The store refuses every
+    other spelling once its value and subscript are read, before the
+    array would grow to the index (``a[2**40]=x``).
 
     Args:
         view (SessionView): the gated session view.
@@ -119,38 +100,49 @@ def _refuse_readonly(view: SessionView, key: str) -> None:
         )
 
 
-async def _assign_var(
-    view: SessionView,
-    key: str,
-    value: ShellValue,
-    assigned: frozenset[int | str] | None = None,
-    added: str | None = None,
-) -> None:
-    """One assignment through the session view; denial is fatal.
-
-    Every assignment spelling (scalar, array literal, subscript,
-    append) computes its resulting value and stores through
-    ``view.set``, so the gate and the storage invariant live in the
-    session view, not here. A readonly name or a denial is a fatal
-    variable-assignment error that abandons the rest of the line
-    (builtins like ``export`` merely fail with 1 and continue).
+def _bad_subscript(subscript_node: Any) -> DiscardSignal:
+    """bash's refusal of an assignment subscript, naming its raw
+    spelling (``m[$e]: bad array subscript``).
 
     Args:
-        view (SessionView): the gated session view.
-        key (str): the variable being written.
-        value (ShellValue): the resulting value to store.
-        assigned (frozenset[int | str] | None): the elements written,
-            None for the whole value.
-        added (str | None): an integer ``+=``'s text (``appended``).
+        subscript_node (Any): the ``subscript`` node.
+    """
+    return DiscardSignal(
+        encode_text(
+            f"{shell_voice()}{get_text(subscript_node)}: bad array subscript\n"
+        )
+    )
+
+
+async def _landed(write: Awaitable[str | None]) -> str | None:
+    """One assignment's write, whose refusal is fatal: a readonly name
+    or a denial abandons the rest of the line (builtins like ``export``
+    merely fail with 1 and continue), and an arithmetic error in a
+    subscript or an ``-i`` value ends the shell.
+
+    Args:
+        write (Awaitable[str | None]): the gated write, and the status
+            an element write comes to.
     """
     try:
-        await view.set(key, value, assigned=assigned, added=added)
+        return await write
     except PolicyDenied as exc:
         raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
     except ReadonlyVariableError as exc:
         raise DiscardSignal(encode_text(f"{shell_voice()}{exc}\n")) from exc
     except ArithError as exc:
         raise exc.signal(fatal=True) from exc
+
+
+async def _assign_var(view: SessionView, key: str, value: ShellValue) -> None:
+    """One whole value through the session view; denial is fatal.
+
+    Args:
+        view (SessionView): the gated session view.
+        key (str): the variable being written.
+        value (ShellValue): the resulting value to store.
+    """
+    await _landed(view.set(key, value))
 
 
 async def expand_array_items(
@@ -251,10 +243,12 @@ async def execute_assignment(
 ) -> Result:
     """Execute one top-level variable assignment (`a=1`, `a[i]+=v`).
 
-    Every spelling -- scalar, array literal, subscript, append -- is
-    computed with bash's own mechanics on a copy of the held value and
-    then stored through the session view, which owns the admission gate
-    and the scalar/array invariant.
+    A literal is built with bash's own mechanics and stored whole
+    through the session view, but ``a+=(x y)`` onto an indexed array
+    appends in the store. Every other spelling (scalar, subscript,
+    append) is one element write the store makes in place, so an
+    assignment costs its element, not the array; the view owns the
+    admission gate and the scalar/array invariant either way.
 
     Args:
         node (Any): the ``variable_assignment`` node.
@@ -288,17 +282,11 @@ async def execute_assignment(
     # spelling is kept for slicing the subscript out of the source.
     key = deref(session, spelled) or spelled
     append = any(c.type == "+=" for c in node.children)
-    # `+=` on an integer adds, element by element too (`appended`).
-    held_var = session.vars.get(key)
-    integer = held_var is not None and VarAttr.INTEGER in held_var.attrs
     val_nodes = [
         c
         for c in node.named_children
         if c.type not in (NT.VARIABLE_NAME, "subscript")
     ]
-    # Every branch below computes its resulting value with bash's
-    # own mechanics on a copy, then stores through the one session
-    # view, which owns the gate and the scalar/array invariant.
     policies = namespace.registry.policies
     view = session_view(
         session, policies, diagnostics=context.frame.diagnostics
@@ -321,9 +309,11 @@ async def execute_assignment(
         items = await expand_array_items(
             val_nodes[0], context, execute_fn, registry, namespace, cs
         )
-        amap = session.assocs.get(key)
-        if amap is not None:
-            built, bad_words = build_assoc_literal(amap, items, append)
+        kind = var_kind(session, key)
+        if kind == "assoc":
+            built, bad_words = build_assoc_literal(
+                session.assocs.get(key), items, append
+            )
             await _assign_var(view, key, built)
             # A plain word in a keyed literal is dropped with a warning
             # and the assignment still succeeds; unlike a declaration's,
@@ -337,13 +327,22 @@ async def execute_assignment(
                     for word in bad_words
                 ),
             )
-        held = session.arrays.get(key)
+        if (
+            append
+            and kind == "indexed"
+            and not any(keyed_word(word) is not None for word in items)
+        ):
+            # `arr+=(...)` starts at the extent, so it fills the hole a
+            # trailing `unset arr[last]` left but skips interior ones.
+            await _landed(push_words(session, policies, key, items))
+            return result(
+                text, exit_code=assignment_status(context.frame, sub_seq)
+            )
+        held = session.arrays.get(key) if append else None
         if append and held is None:
             scalar = conversion_scalar(session, key)
             held = None if scalar is None else make_array([scalar])
-        # `arr+=(...)` starts at the extent, so it fills the hole a
-        # trailing `unset arr[last]` left but skips interior ones;
-        # a `[i]=v` element places at i and the next plain word
+        # A `[i]=v` element places at i and the next plain word
         # continues from there.
         base = await _fatal_index_literal(
             held,
@@ -368,87 +367,41 @@ async def execute_assignment(
         context.frame.diagnostics.append(
             encode_text(trace_assignment(target, val, append) + "\n")
         )
+    subscript = None
     if subscript_node is not None:
-        sub_text = await _subscript_key_text(
+        # bash discards the rest of the line on a bad assignment
+        # subscript (status 1), naming the raw spelling (`m[$e]: bad
+        # array subscript`): a blank one, an associative key that
+        # expands empty, or an index before the first element. An
+        # indexed subscript that merely *expands* empty stays legal
+        # (arithmetic on nothing is 0).
+        if not get_text(subscript_node)[len(spelled) + 1 : -1]:
+            raise _bad_subscript(subscript_node)
+        subscript = await _subscript_key_text(
             subscript_node, spelled, context, execute_fn, cs, policies
         )
-        amap = session.assocs.get(key)
-        raw_sub = get_text(subscript_node)[len(spelled) + 1 : -1]
-        if not raw_sub or (amap is not None and sub_text == ""):
-            # bash discards the rest of the line on a bad assignment
-            # subscript (status 1), naming the raw spelling
-            # (`m[$e]: bad array subscript`). An indexed subscript
-            # that is blank or merely *expands* empty stays legal
-            # (arithmetic on nothing is 0), so only the associative
-            # kind checks the expanded text.
-            raise DiscardSignal(
-                encode_text(
-                    f"{shell_voice()}{get_text(subscript_node)}: "
-                    "bad array subscript\n"
-                )
-            )
-        if amap is not None:
-            # The subscript is the key: no arithmetic, `m[1+1]`
-            # writes the key "1+1".
-            new_map = dict(amap)
-            new_map[sub_text], added = (
-                appended(amap.get(sub_text, ""), val, integer)
-                if append
-                else (val, None)
-            )
-            await _assign_var(view, key, new_map, frozenset({sub_text}), added)
-            return result(
-                text, exit_code=assignment_status(context.frame, sub_seq)
-            )
-        arr = session.arrays.get(key)
-        if arr is None:
-            scalar = conversion_scalar(session, key)
-            arr = make_array([] if scalar is None else [scalar])
-        idx = await _fatal_index(context, sub_text, policies)
-        if idx < 0:
-            idx += array_extent(arr)
-        if idx < 0:
-            # Same fatal shape as the empty subscript above.
-            raise DiscardSignal(
-                encode_text(
-                    f"{shell_voice()}{get_text(subscript_node)}: "
-                    "bad array subscript\n"
-                )
-            )
-        _refuse_readonly(view, key)
-        slot, added = (
-            appended(array_get(arr, idx), val, integer)
-            if append
-            else (val, None)
+    # `a=x` writes element 0 of an array and the key "0" of a map,
+    # keeping the rest; `a+=x` appends onto it, and `n+=3` on an integer
+    # name adds (`declare -i n=5; n+=3` stores 8).
+    status = await _landed(
+        assign_element(
+            session,
+            policies,
+            key,
+            subscript,
+            val,
+            append,
+            diagnostics=context.frame.diagnostics,
         )
-        await _assign_var(
-            view, key, array_with(arr, idx, slot), frozenset({idx}), added
+    )
+    if status == "readonly":
+        raise DiscardSignal(
+            encode_text(f"{shell_voice()}{key}: readonly variable\n")
         )
-        return result(
-            text, exit_code=assignment_status(context.frame, sub_seq)
-        )
-    held_map = session.assocs.get(key)
-    held_arr = session.arrays.get(key)
-    stored, added = val, None
-    if append:
-        # `a+=x` appends onto element 0 (key "0" of a map); `n+=3` on
-        # an integer name adds: `declare -i n=5; n+=3` stores 8.
-        stored, added = appended(
-            held_map or held_arr or session.env.get(key), val, integer
-        )
-    if held_map is not None:
-        # `m=x` on an associative array writes the literal key "0"
-        # and keeps every other key, as bash does.
-        new_map = dict(held_map)
-        new_map["0"] = stored
-        await _assign_var(view, key, new_map, frozenset({"0"}), added)
-    elif held_arr is not None:
-        # `a=x` writes element 0 and keeps the rest.
-        new_arr = held_arr.copy()
-        array_set(new_arr, 0, stored)
-        await _assign_var(view, key, new_arr, frozenset({0}), added)
-    else:
-        await _assign_var(view, key, stored, added=added)
+    if status == "denied":
+        raise DiscardSignal(encode_text(f"{key}: permission denied\n"))
+    if status == "subscript":
+        raise _bad_subscript(subscript_node)
     # Reassigning OPTIND (even to its current value) restarts the
     # getopts scan at the first letter of the word it names, as bash 5.2
     # does (`OPTIND=1` midway through `-ab` makes getopts read `a` again).

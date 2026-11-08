@@ -62,9 +62,9 @@ async def _read_store(
     """Store one ``read`` target, scalar or ``name[sub]`` element.
 
     bash accepts a subscripted target (``read "m[k]"``), which is an
-    element write, not a variable literally named ``m[k]``; the
-    readonly guard resolves the base name first, since that is what
-    ``readonly`` records.
+    element write, not a variable literally named ``m[k]``, its
+    subscript read before a readonly base refuses (``read 'a[x=3]'``
+    leaves x at 3).
 
     Args:
         session (SessionState): shell session state.
@@ -82,9 +82,9 @@ async def _read_store(
     target = TARGET_RE.match(var)
     base = target.group(1) if target is not None else var
     subscript = target.group(2) if target is not None else None
-    if view.is_readonly(base):
-        return readonly_refusal("read", base)
     if subscript is None:
+        if view.is_readonly(base):
+            return readonly_refusal("read", base)
         try:
             await view.set(var, value)
         except PolicyDenied as exc:

@@ -424,6 +424,17 @@ pub enum Write {
         value: Vec<u8>,
         append: bool,
     },
+    /// Words appended at an indexed array's extent (`a+=(x y)`).
+    Push {
+        name: String,
+        words: Vec<Vec<u8>>,
+    },
+    /// One element cleared (`unset 'a[i]'`); the result is the
+    /// [`Element`] it came to.
+    UnsetElement {
+        name: String,
+        subscript: Vec<u8>,
+    },
 }
 
 /// Run one session write through the gate; an error a `RANDOM=` seed
@@ -490,6 +501,11 @@ pub fn write(shell: Shell, write: Write, listens: bool, warns: bool) -> Task<End
                     append,
                 } => writer
                     .element(&name, subscript.as_deref(), &value, append)
+                    .await
+                    .map(|element| element as i64),
+                Write::Push { name, words } => writer.push(&name, words).await.map(|()| 0),
+                Write::UnsetElement { name, subscript } => writer
+                    .unset_element(&name, &subscript)
                     .await
                     .map(|element| element as i64),
                 Write::Integer { text, added } => writer

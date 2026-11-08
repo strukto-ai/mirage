@@ -174,8 +174,9 @@ export async function expand(
     return mode === 'pattern' ? [[text, true]] : text
   }
   const session = context.session
+  const heard = await listens(policies, session.sessionId)
   frame(session, callStack)
-  const task = session.vars.shell.expand(node, mode, listens(policies))
+  const task = session.vars.shell.expand(node, mode, heard)
   const host = new ExpandHost(context, executeFn, callStack, policies, word)
   return drive(task, host, context.frame.diagnostics)
 }

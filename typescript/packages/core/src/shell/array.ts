@@ -93,29 +93,6 @@ export function arraySet(arr: ShellArray, idx: number | bigint, value: string): 
 }
 
 /**
- * A copy of `arr` with `value` assigned at `idx`.
- *
- * What a writer hands the session view: the session view speaks in whole
- * variables, so an element write states itself as the array the write
- * produces. Building it on a copy is what keeps a refusal from leaving
- * the element applied.
- */
-export function arrayWith(arr: ShellArray, idx: number | bigint, value: string): ShellArray {
-  const updated = arr.copy()
-  updated.set(idx, value)
-  return updated
-}
-
-/**
- * Clear one element, keeping the indices of the elements after it. The
- * extent stays at one past the highest assigned index, matching how bash
- * resolves `arr[-1]`.
- */
-export function arrayUnset(arr: ShellArray, idx: number | bigint): void {
-  arr.unset(idx)
-}
-
-/**
  * Split one `[key]=value` literal element, null for a plain word.
  *
  * The split lands on the first `]=`, which is where bash finds it after

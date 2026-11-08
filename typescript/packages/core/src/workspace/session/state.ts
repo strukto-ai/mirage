@@ -25,7 +25,15 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import type { ShellValue, VarAttr } from '../../shell/variable.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import type { SessionView } from '../../view/types.ts'
-import { argsBytes, checkEnv, entryBytes, envLimit, framesBytes, outsideBytes } from './budget.ts'
+import {
+  argsBytes,
+  checkEnv,
+  entryBytes,
+  envLimit,
+  framesBytes,
+  outsideBytes,
+  positionalBytes,
+} from './budget.ts'
 import type { SessionState } from './session.ts'
 import { drive, faultError, listens, SessionGate } from './task.ts'
 
@@ -71,8 +79,9 @@ export async function runWrite(
   start: (heard: boolean) => ShellTask,
   diagnostics: (string | Uint8Array)[] | null = null,
 ): Promise<bigint> {
+  const heard = await listens(policies, session.sessionId)
   frame(session)
-  const task = start(listens(policies))
+  const task = start(heard)
   return (await drive(task, new SessionGate(session, policies), diagnostics ?? [])) as bigint
 }
 
@@ -89,11 +98,22 @@ export async function runWrite(
  * `export -f` marked, as a `BASH_FUNC_NAME%%` entry. mirage hands those to a
  * nested shell directly (`SessionState.newShell`), so neither `env` nor a
  * runtime lists them.
+ *
+ * The shell reads its records out once per change: a command takes the
+ * snapshot several times (its words, its admission, its context), and every
+ * take after the first is a copy of the last.
  */
 export function envSnapshot(session: SessionState): Record<string, string> {
-  const out = Object.create(null) as Record<string, string>
-  for (const [name, value] of session.vars.shell.exported()) out[name] = value
-  return out
+  const shell = session.vars.shell
+  const stamp = shell.stamp()
+  let held = session.envHeld
+  if (held?.[0] !== stamp) {
+    const env = Object.create(null) as Record<string, string>
+    for (const [name, value] of shell.exported()) env[name] = value
+    held = [stamp, env]
+    session.envHeld = held
+  }
+  return Object.assign(Object.create(null) as Record<string, string>, held[1])
 }
 
 /**
@@ -231,8 +251,9 @@ export async function sessionArith(
   expand = false,
 ): Promise<bigint> {
   const shell = session.vars.shell
+  const heard = await listens(policies, session.sessionId)
   frame(session, callStack)
-  const task = shell.arith(text, expand, { listens: listens(policies) })
+  const task = shell.arith(text, expand, { listens: heard })
   return (await drive(task, new SessionGate(session, policies), [])) as bigint
 }
 
@@ -325,7 +346,75 @@ export async function gateRestoredVars(
   }
 }
 
-const ELEMENT_STATUS = ['ok', 'denied', 'readonly', 'subscript'] as const
+const ELEMENT_STATUS = ['ok', 'denied', 'readonly', 'subscript', 'notarray'] as const
+
+/**
+ * What the value a name stands for is, references followed: `scalar`,
+ * `indexed` or `assoc`; null when unset or hidden. It reads no value, so
+ * asking it of a large array costs nothing. Mirrors Python's var_kind.
+ */
+export function varKind(
+  session: SessionState,
+  name: string,
+): 'scalar' | 'indexed' | 'assoc' | null {
+  return session.vars.shell.kind(name)
+}
+
+/**
+ * Run one element write as one call, so a ONCE answer to its `pre_session`
+ * question stands until its `post_session` one is answered too, and name the
+ * status it came to. Mirrors Python's _element_write.
+ */
+async function elementWrite(
+  session: SessionState,
+  policies: Policies | null,
+  start: (listens: boolean) => ShellTask,
+  diagnostics: (string | Uint8Array)[] | null = null,
+): Promise<(typeof ELEMENT_STATUS)[number]> {
+  const write = (): Promise<bigint> => runWrite(session, policies, start, diagnostics)
+  let code = 0n
+  if (policies === null || !asyncContextIsolatesTasks) code = await write()
+  else {
+    await policies.decisions.withinCall(session.sessionId, async () => {
+      code = await write()
+    })
+  }
+  return ELEMENT_STATUS[Number(code)] ?? 'ok'
+}
+
+/**
+ * Append words at the extent of the indexed array a name holds (`a+=(x y)`),
+ * as one gated write; with no policy listening it lands in place, so a loop
+ * building an array costs each word once. Mirrors Python's push_words.
+ */
+export async function pushWords(
+  session: SessionState,
+  policies: Policies | null,
+  name: string,
+  words: readonly string[],
+): Promise<void> {
+  const shell = session.vars.shell
+  await elementWrite(session, policies, (heard) => shell.push(name, words, { listens: heard }))
+}
+
+/**
+ * Clear one element (`unset 'a[i]'`) as one gated write, keeping the indexes
+ * after it: an associative subscript is the key verbatim, an indexed one
+ * arithmetic whose writes land first, and a scalar's element 0 the whole
+ * scalar. A hidden or unset name clears nothing. Mirrors Python's
+ * unset_element.
+ */
+export async function unsetElement(
+  session: SessionState,
+  policies: Policies | null,
+  name: string,
+  subscript: string,
+): Promise<(typeof ELEMENT_STATUS)[number]> {
+  const shell = session.vars.shell
+  return elementWrite(session, policies, (heard) =>
+    shell.unsetElement(name, subscript, { listens: heard }),
+  )
+}
 
 /**
  * Whether a `name` / `name[sub]` reference names a set value, what `test -v`
@@ -348,12 +437,14 @@ export async function elementIsSet(
 }
 
 /**
- * Assign one element (or a bare name resolved as element 0) a builtin names,
- * as one gated write of the whole value it makes, so a `pre_session` rule
- * sees `m[k]=v` as a write to `m`. The subscript arrives already expanded: an
- * associative name takes it as the key verbatim, an indexed one evaluates it
- * as arithmetic. Without a `diagnostics` sink, a seed's arithmetic error
- * propagates. Mirrors Python's assign_element.
+ * Assign one element (or a bare name resolved as element 0 of an array, a
+ * scalar otherwise) as one gated write, so a `pre_session` rule sees
+ * `m[k]=v` as a write to `m`; with no policy listening it lands in place.
+ * The subscript arrives already expanded: an associative name takes it as
+ * the key verbatim, an indexed one evaluates it as arithmetic, even when the
+ * name is readonly. `append` concatenates, or adds under `-i`. Without a
+ * `diagnostics` sink, a seed's arithmetic error propagates. Mirrors Python's
+ * assign_element.
  */
 export async function assignElement(
   session: SessionState,
@@ -366,21 +457,12 @@ export async function assignElement(
 ): Promise<(typeof ELEMENT_STATUS)[number]> {
   const shell = session.vars.shell
   const warns = diagnostics !== null
-  const write = (): Promise<bigint> =>
-    runWrite(
-      session,
-      policies,
-      (heard) => shell.element(name, subscript, value, { append, listens: heard, warns }),
-      diagnostics,
-    )
-  let code = 0n
-  if (policies === null || !asyncContextIsolatesTasks) code = await write()
-  else {
-    await policies.decisions.withinCall(session.sessionId, async () => {
-      code = await write()
-    })
-  }
-  return ELEMENT_STATUS[Number(code)] ?? 'ok'
+  return elementWrite(
+    session,
+    policies,
+    (heard) => shell.element(name, subscript, value, { append, listens: heard, warns }),
+    diagnostics,
+  )
 }
 
 /**
@@ -508,7 +590,9 @@ export function positionalParams(session: SessionState, callStack: CallStack | n
 
 /**
  * Replace the positional parameters in scope; `set --` and `shift` inside a
- * function change the function's own.
+ * function change the function's own. `values` is held as given and never
+ * changed in place, which lets a frame and `positionalBytes` know an array
+ * they read already.
  */
 export function setPositionalParams(
   session: SessionState,
@@ -524,7 +608,7 @@ export function setPositionalParams(
     )
     callStack.setPositional(values)
   } else {
-    checkEnv(session, argsBytes(session.positionalArgs), argsBytes(values))
+    checkEnv(session, positionalBytes(session), argsBytes(values))
     session.positionalArgs = values
   }
 }

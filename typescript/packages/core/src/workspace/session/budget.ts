@@ -74,6 +74,21 @@ export function argsBytes(args: readonly string[]): number {
 }
 
 /**
+ * The bytes a session's positional parameters hold, measured once per array:
+ * `setPositionalParams` replaces the array rather than change it, so a frame
+ * or a write reads the count again without walking every parameter. Mirrors
+ * Python's `positional_bytes`.
+ */
+export function positionalBytes(session: SessionState): number {
+  let held = session.positionalHeld
+  if (held?.[0] !== session.positionalArgs) {
+    held = [session.positionalArgs, argsBytes(session.positionalArgs)]
+    session.positionalHeld = held
+  }
+  return held[1]
+}
+
+/**
  * The bytes the frames on a call stack hold in positional parameters, which
  * `envBytes` does not count. Mirrors Python's `frames_bytes`.
  */
@@ -90,7 +105,7 @@ export function framesBytes(callStack: CallStack): number {
  * `outside_bytes`.
  */
 export function outsideBytes(session: SessionState): number {
-  let held = argsBytes(session.positionalArgs) + savesBytes(session)
+  let held = positionalBytes(session) + savesBytes(session)
   for (const [name, body] of Object.entries(session.functions)) held += entryBytes(name, body)
   for (const [name, text] of Object.entries(session.aliases)) held += entryBytes(name, text)
   return held

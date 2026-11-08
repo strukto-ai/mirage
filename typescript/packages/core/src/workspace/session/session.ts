@@ -589,6 +589,12 @@ export class SessionState {
   borrowed: SharedInput[] = []
   // The records running prefix assignments set aside, held until put back.
   prefixSaves: ReadonlyMap<string, ShellVar | null>[] = []
+  // The positional parameters' array and the bytes it holds, measured once
+  // per array (`positionalBytes`). Runtime only.
+  positionalHeld: readonly [readonly string[], number] | null = null
+  // The exported scalars as the shell's records stamped them, read out once
+  // per change (`envSnapshot`). Runtime only.
+  envHeld: readonly [number, Readonly<Record<string, string>>] | null = null
   mountModes: ReadonlyMap<string, MountMode> | null
   private vis: Visibility | undefined
   hideReasons: readonly HideReason[]

@@ -168,11 +168,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "readonly -a UF=(x y); printf -v 'UF[0]' zz; echo rc=$?; echo [${UF[@]}]",
+      "command": "readonly -a UF=(x y); printf -v 'UF[0]' zz; echo rc=$?; printf -v 'UF[uf=1]' zz; echo rc=$? uf=$uf; read 'UF[ur=2]' <<< w; echo rc=$? ur=$ur; echo [${UF[@]}]",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\n[x y]\n",
-        "stderr": "bash: line 1: UF: readonly variable\n"
+        "stdout": "rc=1\nrc=1 uf=1\nrc=1 ur=2\n[x y]\n",
+        "stderr": "bash: line 1: UF: readonly variable\nbash: line 1: UF: readonly variable\nbash: line 1: UF: readonly variable\n"
       }
     },
     {

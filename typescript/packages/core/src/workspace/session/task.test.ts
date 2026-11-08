@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { YieldBudget } from '../../io/yield_budget.ts'
 import { ShellTask } from '../../rs/shell.ts'
 import { DEFAULT_VISIBILITY } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -61,10 +62,10 @@ describe('drive', () => {
       await ws.shell('shopt -s extglob; TOKEN=t')
       seedVar(session, 'X', 'a'.repeat(50_000))
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      const resumed = ShellTask.prototype.answerResumed
-      vi.spyOn(ShellTask.prototype, 'answerResumed').mockImplementation(function (this: ShellTask) {
+      const run = YieldBudget.prototype.run
+      vi.spyOn(YieldBudget.prototype, 'run').mockImplementation(function (this: YieldBudget) {
         session.visibility = hidden
-        resumed.call(this)
+        return run.call(this)
       })
       const result = await ws.shell('x=${X//+(?)/x}; echo "${TOKEN-unset}"')
       expect(session.visibility).toBe(hidden)

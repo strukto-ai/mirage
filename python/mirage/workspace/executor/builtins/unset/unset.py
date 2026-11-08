@@ -14,7 +14,6 @@
 
 from mirage.policy import PolicyDenied
 from mirage.policy.policies import Policies
-from mirage.shell.array import array_extent, array_unset
 from mirage.shell.constants import FUNCNAME
 from mirage.shell.errors import ArithError
 from mirage.shell.voice import shell_voice
@@ -33,11 +32,8 @@ from mirage.workspace.expand.types import SubscriptFn
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     deref,
-    env_get,
     session_view,
-    subscript_index,
-    visible_arrays,
-    visible_assocs,
+    unset_element,
 )
 
 
@@ -58,54 +54,29 @@ def _unset_variable(session: SessionState, name: str) -> None:
         session.function_names = None
 
 
-async def _fatal_index(
-    session: SessionState, subscript: str, policies: Policies | None
-) -> int:
-    """``subscript_index`` whose failure ends the line, in bash's words:
-    ``unset 'a[1/0]'`` aborts with ``1/0: division by 0``.
-
-    Args:
-        session (SessionState): the session the subscript reads.
-        subscript (str): the raw subscript text.
-        policies (Policies | None): the policies its assignments clear.
-    """
-    try:
-        return await subscript_index(session, subscript, policies)
-    except ArithError as exc:
-        raise exc.signal(fatal=True) from exc
-
-
-async def _unset_element(
+async def _unset_one(
     session: SessionState,
-    view: SessionView,
     base: str,
     subscript: str,
     policies: Policies | None = None,
 ) -> str:
-    """Clear one array element, or a scalar addressed as ``base[0]``.
+    """Clear one array element, or a scalar addressed as ``base[0]``, as
+    one gated write, so a denial leaves the array untouched.
 
     Clearing an element keeps the indices of the elements after it, as
     bash does: it leaves a hole, which neither expands in ``${arr[@]}``
     nor counts toward ``${#arr[@]}`` but keeps ``${arr[i]}`` addressing
-    the same values. A subscript on a scalar names element 0 only:
-    ``x[0]`` unsets the scalar and any other subscript is an error. A
-    subscript on a name that holds nothing at all is a silent no-op,
-    but on an existing array a negative subscript still below zero
-    after the extent is added is a bad-subscript error.
-
-    The element mechanics are the builtin's own, but the landing write
-    goes through the session view: a scalar's element 0 is the whole unset,
-    and an array's hole punch is computed on a copy and stored with
-    ``view.set``, so a denial leaves the array untouched. Validation
-    errors write nothing and so never ask.
+    the same values. A subscript on a scalar names element 0 only, and a
+    subscript on a name that holds nothing at all, or a hidden one, is a
+    silent no-op. A subscript that does not evaluate ends the line, in
+    bash's words: ``unset 'a[1/0]'`` aborts with ``1/0: division by 0``.
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView): the gated session view.
         base (str): the variable name without the subscript.
         subscript (str): the subscript text between the brackets.
-        policies (Policies | None): the policies an indexed subscript's
-            assignments clear.
+        policies (Policies | None): the policies the write and the
+            subscript's assignments clear.
 
     Returns:
         str: ``"ok"``, ``"notarray"`` when a non-zero subscript was
@@ -115,38 +86,10 @@ async def _unset_element(
     Raises:
         PolicyDenied: a pre_session policy refused the write.
     """
-    amap = visible_assocs(session).get(base)
-    if amap is not None:
-        # The subscript is the key, verbatim: `unset "m[1+1]"` removes
-        # the key "1+1", and a key that is not there (GNU pins
-        # `unset "m[@]"` on an associative array as this same no-op)
-        # answers quietly without a write.
-        if subscript not in amap:
-            return "ok"
-        new_map = dict(amap)
-        new_map.pop(subscript)
-        await view.set(base, new_map)
-        return "ok"
-    arr = visible_arrays(session).get(base)
-    if arr is None:
-        # Visible reads on purpose: a hidden base answers the unset
-        # branch's silent no-op instead of a denial that would leak
-        # the name's existence.
-        if env_get(session, base) is None:
-            return "ok"
-        if await _fatal_index(session, subscript, policies) != 0:
-            return "notarray"
-        await view.unset(base)
-        return "ok"
-    idx = await _fatal_index(session, subscript, policies)
-    if idx < 0:
-        idx += array_extent(arr)
-        if idx < 0:
-            return "subscript"
-    new_arr = arr.copy()
-    array_unset(new_arr, idx)
-    await view.set(base, new_arr)
-    return "ok"
+    try:
+        return await unset_element(session, policies, base, subscript)
+    except ArithError as exc:
+        raise exc.signal(fatal=True) from exc
 
 
 def _readonly(name: str, kind: str) -> str:
@@ -252,15 +195,13 @@ async def handle_unset(
         )
         # Both spellings clear the pre_session gate for the base name:
         # the whole-variable unset through the view's env half, an
-        # element unset inside _unset_element, so `unset 'X[0]'` cannot
+        # element unset inside _unset_one, so `unset 'X[0]'` cannot
         # sidestep a policy that vetoes `unset X`.
         try:
             if subscript is not None:
                 if subscripts is not None:
                     subscript = await subscripts(subscript)
-                status = await _unset_element(
-                    session, view, base, subscript, policies
-                )
+                status = await _unset_one(session, base, subscript, policies)
             else:
                 await view.unset(name)
                 _unset_variable(session, deref(session, name))

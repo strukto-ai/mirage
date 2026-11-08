@@ -21,13 +21,14 @@ mod value;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::arith::{self, Halt, Outcome, Vars};
 use crate::policy::{VarScope, Visibility, VisibilityMatcher};
 
 use reading::Reading;
 use value::saves_alike;
-pub use value::{Assoc, Indexed, Kind, Managed, Value, Var, entry_bytes};
+pub use value::{Assoc, Indexed, Kind, Managed, Slot, Value, Var, entry_bytes};
 
 /// `declare -i`: a value assigned is evaluated as arithmetic.
 pub const INTEGER: u8 = 1;
@@ -117,6 +118,14 @@ pub enum Assigned {
     Keys(HashSet<Vec<u8>>),
 }
 
+/// The stamps the stores' records take, each used once across every store.
+static STAMPS: AtomicU64 = AtomicU64::new(1);
+
+/// A stamp no store has taken.
+fn fresh_stamp() -> u64 {
+    STAMPS.fetch_add(1, Ordering::Relaxed)
+}
+
 /// Where a host draws a generator's first seed: the workspace's id source.
 pub type Ids = Arc<dyn Fn() -> u32 + Send + Sync>;
 
@@ -138,6 +147,11 @@ pub struct Store {
     hidden: Option<Arc<VisibilityMatcher>>,
     ids: Ids,
     held: usize,
+    /// What the records and the names hidden from them are stamped with,
+    /// a fresh stamp on every change: a fork keeps its source's until it
+    /// changes, so a stamp names one view of the records, which a host
+    /// keys what it derives from them by (`exported`).
+    stamp: u64,
     /// `${PIPESTATUS[@]}`: each stage's status in the last pipeline.
     pipe_status: Vec<i32>,
     /// `${FUNCNAME[@]}`: the running functions, innermost first; None
@@ -179,6 +193,7 @@ impl Store {
             hidden: None,
             ids,
             held: 0,
+            stamp: fresh_stamp(),
             pipe_status: Vec::new(),
             function_names: Some(Vec::new()),
             line: 0,
@@ -295,6 +310,12 @@ impl Store {
     /// writes.
     pub fn hide(&mut self, matcher: Option<Arc<VisibilityMatcher>>) {
         self.hidden = matcher;
+        self.stamp = fresh_stamp();
+    }
+
+    /// The stamp the records and the names hidden from them carry now.
+    pub fn stamp(&self) -> u64 {
+        self.stamp
     }
 
     /// Hide the names a session's visibility lists, exactly or by glob.
@@ -382,6 +403,7 @@ impl Store {
         if var.is_none() && !self.vars.contains_key(name) {
             return None;
         }
+        self.stamp = fresh_stamp();
         let vars = Arc::make_mut(&mut self.vars);
         let old = match var {
             Some(var) => {
@@ -595,6 +617,50 @@ impl Store {
             self.note_kind(name, value);
         }
         self.place(name, Some(Arc::new(var)))
+    }
+
+    /// The element `slot` of the array `name` holds, None when the record
+    /// holds no array of that kind or the slot no element.
+    pub fn element(&self, name: &str, slot: &Slot) -> Option<&[u8]> {
+        self.record(name)?.value.as_ref()?.element(slot)
+    }
+
+    /// Write one element of the array `name` holds in place, or clear it
+    /// with None, keeping the indexes after it, as `land` stores a whole
+    /// value: the record assigned, a managed pointer dropped, exported
+    /// under `set -a`. The table and the record are copied first only
+    /// while a fork or a saved scope shares them. False when the record
+    /// holds no array of the slot's kind.
+    pub fn put_element(
+        &mut self,
+        name: &str,
+        slot: &Slot,
+        text: Option<Vec<u8>>,
+        allexport: bool,
+    ) -> bool {
+        if !self
+            .record(name)
+            .and_then(|var| var.value.as_ref())
+            .is_some_and(|value| value.is_array())
+        {
+            return false;
+        }
+        let grown = text.as_deref().map_or(0, |text| slot.bytes(text));
+        let Some(var) = Arc::make_mut(&mut self.vars).get_mut(name) else {
+            return false;
+        };
+        let var = Arc::make_mut(var);
+        let Some(old) = var.value.as_mut().and_then(|value| value.put(slot, text)) else {
+            return false;
+        };
+        var.attrs &= !UNASSIGNED;
+        var.managed = None;
+        if allexport {
+            var.attrs |= EXPORT;
+        }
+        self.held = self.held + grown - old.map_or(0, |old| slot.bytes(&old));
+        self.stamp = fresh_stamp();
+        true
     }
 
     /// The innermost scope on the call path that saved `name`.
@@ -867,6 +933,7 @@ impl Store {
         let mut forked = Self::new(self.ids.clone());
         forked.vars = self.vars.clone();
         forked.held = self.held;
+        forked.stamp = self.stamp;
         forked.hidden = self.hidden.clone();
         forked.pipe_status = self.pipe_status.clone();
         forked.function_names = self.function_names.clone();
@@ -1035,13 +1102,18 @@ impl Store {
     /// Shape one scalar as its name's attributes say, at the write, as
     /// bash does: integer first, then case, which in the C locale changes
     /// only ASCII letters.
-    fn coerce_text(
+    /// Shape one text as attributes `attrs` say: evaluated under `-i`
+    /// (`added` an integer `+=`'s text), cased under `-l` or `-u`.
+    pub fn coerce_text(
         &mut self,
         coercion: &mut Coercion,
         text: Vec<u8>,
         attrs: u8,
         added: Option<&[u8]>,
     ) -> Result<Vec<u8>, arith::Error> {
+        if attrs & (INTEGER | LOWER | UPPER) == 0 {
+            return Ok(text);
+        }
         let text = if attrs & INTEGER != 0 {
             self.evaluate_integer(coercion, &text, added)?
         } else {
@@ -1090,7 +1162,7 @@ impl Store {
             }
             Value::Assoc(map) => {
                 let mut out = Assoc::default();
-                for (key, text) in map.entries {
+                for (key, text) in *map {
                     let skip = matches!(assigned, Some(Assigned::Keys(set)) if !set.contains(&key));
                     let text = if skip {
                         text
@@ -1243,7 +1315,47 @@ mod tests {
         let keys: Vec<_> = map.iter().map(|(k, _)| k.to_vec()).collect();
         assert_eq!(keys, vec![b"b".to_vec(), b"c".to_vec()]);
         assert_eq!(map.get(b"c"), Some(&b"4"[..]));
+        let keys: Vec<Vec<u8>> = (0..20).map(|n| format!("k{n}").into_bytes()).collect();
+        for key in &keys {
+            map.set(key.clone(), b"v".to_vec());
+        }
+        for key in &keys[..18] {
+            map.remove(key);
+        }
+        let kept: Vec<_> = map.iter().map(|(k, _)| k.to_vec()).collect();
+        assert_eq!(
+            kept,
+            vec![
+                b"b".to_vec(),
+                b"c".to_vec(),
+                keys[18].clone(),
+                keys[19].clone()
+            ]
+        );
+        assert_eq!((map.len(), map.get(&keys[19])), (4, Some(&b"v"[..])));
+        map.remove(&keys[18]);
+        map.remove(&keys[19]);
         assert_eq!(Value::Assoc(Box::new(map)).rendering(), b"3 4");
+    }
+
+    #[test]
+    fn an_element_lands_in_place_unless_a_fork_shares_the_record() {
+        let mut store = store();
+        store.seed("a", Value::Indexed(Indexed::dense([b"x".to_vec()])));
+        let record = Arc::as_ptr(&store.vars["a"]);
+        let stamp = store.stamp();
+        assert!(store.put_element("a", &Slot::Index(5), Some(b"yz".to_vec()), false));
+        assert!(std::ptr::eq(record, Arc::as_ptr(&store.vars["a"])));
+        assert_ne!(store.stamp(), stamp);
+        assert_eq!(store.held(), 1 + 2 + 3);
+        let forked = store.fork();
+        assert_eq!(forked.stamp(), store.stamp());
+        assert!(store.put_element("a", &Slot::Index(0), None, false));
+        assert_eq!(forked.indexed("a").map(Indexed::count), Some(2));
+        assert_eq!(store.indexed("a").map(Indexed::count), Some(1));
+        assert_eq!(store.held(), 1 + 3);
+        let key = Slot::Key(b"k".to_vec());
+        assert!(!store.put_element("a", &key, Some(b"v".to_vec()), false));
     }
 
     #[test]

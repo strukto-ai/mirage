@@ -220,8 +220,9 @@ async def expand(
             return [mark_globs(text)]
         return [(text, True)] if mode == "pattern" else text
     session = context.session
+    heard = await listens(policies, session.session_id)
     frame(session, call_stack)
-    task = session.vars.shell.expand(node, mode, listens(policies))
+    task = session.vars.shell.expand(node, mode, heard)
     host = ExpandHost(context, execute_fn, call_stack, policies, word)
     return await drive(task, host, context.frame.diagnostics)
 

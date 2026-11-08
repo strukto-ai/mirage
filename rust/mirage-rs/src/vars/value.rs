@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use super::{NAMEREF, UNASSIGNED, letters};
+use super::{Assigned, NAMEREF, UNASSIGNED, letters};
 
 /// An indexed array as bash keeps one: only its assigned elements, by
 /// index. `a[1000000000]=x` holds one element, and an index no write
@@ -49,8 +49,13 @@ impl Indexed {
         self.0.get(&index).map(Vec::as_slice)
     }
 
-    pub fn set(&mut self, index: i64, value: Vec<u8>) {
-        self.0.insert(index, value);
+    /// Assign `value` at `index`, handing back what the index held.
+    pub fn set(&mut self, index: i64, value: Vec<u8>) -> Option<Vec<u8>> {
+        self.0.insert(index, value)
+    }
+
+    pub fn remove(&mut self, index: i64) -> Option<Vec<u8>> {
+        self.0.remove(&index)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (i64, &[u8])> {
@@ -82,15 +87,17 @@ impl Indexed {
 }
 
 /// An associative array, its keys in the order they were first assigned.
+/// A removed key leaves a hole the walk skips, so a removal costs what a
+/// lookup does; the holes are swept once they outnumber the keys.
 #[derive(Clone, Debug, Default)]
 pub struct Assoc {
-    pub(super) entries: Vec<(Vec<u8>, Vec<u8>)>,
+    entries: Vec<Option<(Vec<u8>, Vec<u8>)>>,
     at: HashMap<Vec<u8>, usize>,
 }
 
 impl PartialEq for Assoc {
     fn eq(&self, other: &Self) -> bool {
-        self.entries == other.entries
+        self.iter().eq(other.iter())
     }
 }
 
@@ -98,41 +105,48 @@ impl Eq for Assoc {}
 
 impl Assoc {
     pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
-        self.at.get(key).map(|&i| self.entries[i].1.as_slice())
+        let i = *self.at.get(key)?;
+        self.entries[i].as_ref().map(|(_, value)| value.as_slice())
     }
 
-    pub fn set(&mut self, key: Vec<u8>, value: Vec<u8>) {
+    /// Assign `value` at `key`, handing back what the key held.
+    pub fn set(&mut self, key: Vec<u8>, value: Vec<u8>) -> Option<Vec<u8>> {
         match self.at.get(&key) {
-            Some(&i) => self.entries[i].1 = value,
+            Some(&i) => self.entries[i]
+                .as_mut()
+                .map(|(_, held)| std::mem::replace(held, value)),
             None => {
                 self.at.insert(key.clone(), self.entries.len());
-                self.entries.push((key, value));
+                self.entries.push(Some((key, value)));
+                None
             }
         }
     }
 
     pub fn remove(&mut self, key: &[u8]) -> Option<Vec<u8>> {
         let i = self.at.remove(key)?;
-        let (_, value) = self.entries.remove(i);
-        for at in self.at.values_mut() {
-            if *at > i {
-                *at -= 1;
+        let (_, value) = self.entries[i].take()?;
+        if self.entries.len() > 2 * self.at.len() + 8 {
+            self.entries.retain(Option::is_some);
+            for (i, (key, _)) in self.entries.iter().flatten().enumerate() {
+                self.at.insert(key.clone(), i);
             }
         }
         Some(value)
     }
 
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.at.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.at.is_empty()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&[u8], &[u8])> {
         self.entries
             .iter()
+            .flatten()
             .map(|(key, value)| (key.as_slice(), value.as_slice()))
     }
 
@@ -145,6 +159,15 @@ impl Assoc {
     }
 }
 
+impl IntoIterator for Assoc {
+    type Item = (Vec<u8>, Vec<u8>);
+    type IntoIter = std::iter::Flatten<std::vec::IntoIter<Option<(Vec<u8>, Vec<u8>)>>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.into_iter().flatten()
+    }
+}
+
 impl FromIterator<(Vec<u8>, Vec<u8>)> for Assoc {
     fn from_iter<I: IntoIterator<Item = (Vec<u8>, Vec<u8>)>>(entries: I) -> Self {
         let mut assoc = Self::default();
@@ -152,6 +175,34 @@ impl FromIterator<(Vec<u8>, Vec<u8>)> for Assoc {
             assoc.set(key, value);
         }
         assoc
+    }
+}
+
+/// One element of an array: an indexed one's index or an associative
+/// one's key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Slot {
+    Index(i64),
+    Key(Vec<u8>),
+}
+
+impl Slot {
+    /// The bytes `text` holds at this slot against `max_env`: the
+    /// element, the key, and one more.
+    pub fn bytes(&self, text: &[u8]) -> usize {
+        match self {
+            Slot::Index(_) => text.len() + 1,
+            Slot::Key(key) => key.len() + text.len() + 1,
+        }
+    }
+
+    /// What a write of this slot assigns, for an `-i` array's coercion:
+    /// the slot when it `put` a value, nothing when it cleared one.
+    pub fn assigned(&self, put: bool) -> Assigned {
+        match self {
+            Slot::Index(index) => Assigned::Indexes(put.then_some(*index).into_iter().collect()),
+            Slot::Key(key) => Assigned::Keys(put.then(|| key.clone()).into_iter().collect()),
+        }
     }
 }
 
@@ -195,6 +246,28 @@ impl Value {
         !matches!(self, Value::Scalar(_))
     }
 
+    /// The element `slot` names, None when the value is no array of the
+    /// slot's kind or the slot holds none.
+    pub fn element(&self, slot: &Slot) -> Option<&[u8]> {
+        match (self, slot) {
+            (Value::Indexed(array), Slot::Index(index)) => array.get(*index),
+            (Value::Assoc(map), Slot::Key(key)) => map.get(key),
+            _ => None,
+        }
+    }
+
+    /// Assign `text` at `slot`, or clear the slot with None, handing back
+    /// what it held; None when the value is no array of the slot's kind.
+    pub fn put(&mut self, slot: &Slot, text: Option<Vec<u8>>) -> Option<Option<Vec<u8>>> {
+        Some(match (self, slot, text) {
+            (Value::Indexed(array), Slot::Index(index), Some(text)) => array.set(*index, text),
+            (Value::Indexed(array), Slot::Index(index), None) => array.remove(*index),
+            (Value::Assoc(map), Slot::Key(key), Some(text)) => map.set(key.clone(), text),
+            (Value::Assoc(map), Slot::Key(key), None) => map.remove(key),
+            _ => return None,
+        })
+    }
+
     pub fn kind(&self) -> Kind {
         match self {
             Value::Scalar(_) => Kind::Scalar,
@@ -210,6 +283,30 @@ pub enum Kind {
     Scalar,
     Indexed,
     Assoc,
+}
+
+impl Kind {
+    /// The kind as a host names it: `scalar`, `indexed` or `assoc`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Scalar => "scalar",
+            Kind::Indexed => "indexed",
+            Kind::Assoc => "assoc",
+        }
+    }
+}
+
+impl std::str::FromStr for Kind {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, String> {
+        Ok(match name {
+            "scalar" => Kind::Scalar,
+            "indexed" => Kind::Indexed,
+            "assoc" => Kind::Assoc,
+            other => return Err(format!("no value kind {other}")),
+        })
+    }
 }
 
 /// Where a managed variable's value comes from: host configuration, never

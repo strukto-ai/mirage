@@ -15,20 +15,12 @@
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { arrayExtent, arrayUnset } from '../../../../shell/array.ts'
 import type { Policies } from '../../../../policy/index.ts'
 import { FUNCNAME } from '../../../../shell/constants.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import type { SessionView } from '../../../../view/types.ts'
-import { type SessionState, sessionEntry } from '../../../session/session.ts'
-import {
-  deref,
-  envGet,
-  sessionView,
-  subscriptIndex,
-  visibleArrays,
-  visibleAssocs,
-} from '../../../session/state.ts'
+import type { SessionState } from '../../../session/session.ts'
+import { deref, sessionView, unsetElement } from '../../../session/state.ts'
 import { TARGET_RE } from '../constants.ts'
 import { flagHelp } from '../help/help.ts'
 import type { SubscriptFn } from '../../../expand/types.ts'
@@ -48,80 +40,29 @@ function unsetVariable(session: SessionState, name: string): void {
 }
 
 /**
- * `subscriptIndex` whose failure ends the line, in bash's words: `unset
- * 'a[1/0]'` aborts with `1/0: division by 0`.
- */
-async function fatalIndex(
-  session: SessionState,
-  subscript: string,
-  policies: Policies | null,
-): Promise<bigint> {
-  try {
-    return await subscriptIndex(session, subscript, policies)
-  } catch (err) {
-    if (err instanceof ArithError) throw err.signal('', true)
-    throw err
-  }
-}
-
-/**
- * Clear one array element, or a scalar addressed as `base[0]`.
+ * Clear one array element, or a scalar addressed as `base[0]`, as one gated
+ * write, so a denial leaves the array untouched.
  *
  * Clearing an element keeps the indices of the elements after it, as bash
  * does: it leaves a hole, which neither expands in `${arr[@]}` nor counts
  * toward `${#arr[@]}` but keeps `${arr[i]}` addressing the same values. A
- * subscript on a scalar names element 0 only: `x[0]` unsets the scalar
- * and any other subscript reports `notarray`. A subscript on a name that
- * holds nothing at all is a silent no-op, but on an existing array a
- * negative subscript still below zero after the extent is added reports
- * `subscript`.
- *
- * The element mechanics are the builtin's own, but every landing write
- * still mutates `base`'s session state, so it clears the plane's gate
- * first: for an array base the view's env half is empty, so `view.unset`
- * is exactly the gate, and for a scalar's element 0 it is the whole
- * unset itself. Validation errors write nothing and so never ask. `policies`
- * are what an indexed subscript's assignments clear.
+ * subscript on a scalar names element 0 only, and a subscript on a name
+ * that holds nothing at all, or a hidden one, is a silent no-op. A subscript
+ * that does not evaluate ends the line, in bash's words: `unset 'a[1/0]'`
+ * aborts with `1/0: division by 0`.
  */
-async function unsetElement(
+async function unsetOne(
   session: SessionState,
-  view: SessionView,
   base: string,
   subscript: string,
   policies: Policies | null = null,
-): Promise<'ok' | 'notarray' | 'subscript'> {
-  const amap = sessionEntry(visibleAssocs(session), base)
-  if (amap !== undefined) {
-    // The subscript is the key, verbatim: `unset "m[1+1]"` removes the
-    // key "1+1", and a key that is not there (GNU pins `unset "m[@]"`
-    // on an associative array as this same no-op) answers quietly
-    // without a write.
-    if (!Object.hasOwn(amap, subscript)) return 'ok'
-    const next = { ...amap }
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete next[subscript]
-    await view.set(base, next)
-    return 'ok'
+): Promise<string> {
+  try {
+    return await unsetElement(session, policies, base, subscript)
+  } catch (err) {
+    if (err instanceof ArithError) throw err.signal('', true)
+    throw err
   }
-  const arr = sessionEntry(visibleArrays(session), base)
-  if (arr === undefined) {
-    // Visible reads on purpose: a hidden base answers the unset
-    // branch's silent no-op instead of a denial that would leak the
-    // name's existence.
-    if (envGet(session, base) === null) return 'ok'
-    if ((await fatalIndex(session, subscript, policies)) !== 0n) return 'notarray'
-    await view.unset(base)
-    return 'ok'
-  }
-  let idx = await fatalIndex(session, subscript, policies)
-  if (idx < 0n) {
-    idx += arrayExtent(arr)
-    if (idx < 0n) return 'subscript'
-  }
-  const next = arr.copy()
-  arrayUnset(next, idx)
-  await view.set(base, next)
-  return 'ok'
 }
 
 /** bash's refusal to unset a readonly variable or function. */
@@ -214,13 +155,13 @@ export async function handleUnset(
       isElement || name in session.env || name in session.arrays || name in session.assocs
     // Both spellings clear the preSession gate for the base name: the
     // whole-variable unset through the view's env half, an element
-    // unset inside unsetElement, so `unset 'X[0]'` cannot sidestep a
+    // unset inside unsetOne, so `unset 'X[0]'` cannot sidestep a
     // policy that vetoes `unset X`.
-    let status: 'ok' | 'notarray' | 'subscript'
+    let status: string
     try {
       if (subscript !== undefined) {
         if (subscripts !== null) subscript = await subscripts(subscript)
-        status = await unsetElement(session, view, base, subscript, policies)
+        status = await unsetOne(session, base, subscript, policies)
       } else {
         await view.unset(name)
         unsetVariable(session, deref(session, name) || name)
