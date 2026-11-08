@@ -62,7 +62,7 @@ describe('handleWait', () => {
       return [new IOResult({ exitCode: 3 }), new ExecutionNode({ command: 'foo', exitCode: 3 })]
     }
     const j = await jt.submit({ command: 'foo', run, abort: new AbortController(), cwd: '/' })
-    const [resStdout, resIo] = await handleWait(jt, ['wait', j.id.toString()])
+    const [resStdout, resIo] = await handleWait(jt, ['wait', String(j.pid)])
     expect(resStdout).toBeNull()
     expect(resIo.exitCode).toBe(3)
     expect(resIo.stderr).toBeNull()

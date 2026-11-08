@@ -14,11 +14,17 @@
 
 import { type Zone } from '../../../../utils/timezone.ts'
 
-/** What a ps line selects and prints. */
+/**
+ * What a ps line selects and prints: the `-p` selection (a number under
+ * `FIRST_PID` is a machine pid), whether a letter selected every process,
+ * the `-o` keys and headers, and whether BSD `f` or `--forest` draws each
+ * command under its parent's.
+ */
 export interface PsOptions {
   readonly pids: ReadonlySet<number>
   readonly all: boolean
   readonly columns: readonly (readonly [string, string])[]
+  readonly forest: boolean
 }
 
 /**

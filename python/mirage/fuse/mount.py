@@ -27,7 +27,7 @@ from mirage.bridge.sync import blocking
 from mirage.fuse.backend import MountBackend, prepare_backend
 from mirage.fuse.darwin import install_macfuse_extensions, timespec_ns
 from mirage.fuse.fs import MirageFS
-from mirage.runtime.sandbox.program import serve, unserve
+from mirage.machine.program import serve, unserve
 from mirage.types import JsonValue
 from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.session.session import SessionState

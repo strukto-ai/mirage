@@ -34,7 +34,7 @@ from mirage.fuse.mount import (
     mount_background,
     unmount_with_fusermount,
 )
-from mirage.runtime.sandbox.program import serve, unserve
+from mirage.machine.program import serve, unserve
 from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.session.session import SessionState
 

@@ -379,6 +379,7 @@ class JobTable:
             limit=limit,
             ignores=IGNORED_SIGNALS,
             one_command=simple,
+            program_ignores=IGNORED_SIGNALS,
         )
         line, group = process.record.line, process.record.group
         try:

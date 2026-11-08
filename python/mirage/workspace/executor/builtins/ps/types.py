@@ -21,14 +21,18 @@ class PsOptions:
     """What a ps line selects and prints.
 
     Args:
-        pids (frozenset[int]): ``-p`` selection, empty for none.
+        pids (frozenset[int]): ``-p`` selection, empty for none; a
+            number under ``FIRST_PID`` is a machine pid.
         all (bool): a letter that selects every process was given.
         columns (tuple[tuple[str, str], ...]): ``-o`` keys and headers.
+        forest (bool): BSD ``f`` or ``--forest``, which draws each
+            command under its parent's.
     """
 
     pids: frozenset[int]
     all: bool
     columns: tuple[tuple[str, str], ...]
+    forest: bool = False
 
 
 @dataclass(frozen=True, slots=True)

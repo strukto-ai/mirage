@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+from collections.abc import Callable
+from functools import partial
 from typing import Any, Protocol
 
 from mirage._rs import Shell, ShellNode, ShellTask
@@ -96,18 +98,27 @@ class TaskHost(Protocol):
         """
         ...
 
+    async def listens(self) -> bool:
+        """Whether a policy hears the session's writes now, which a task
+        is told again each time the host answers it."""
+        ...
 
-def listens(policies: Policies | None) -> bool:
-    """Whether a session write asks anyone: a policy that hears session
-    writes, or a dry run deciding, which refuses every write.
+
+async def listens(policies: Policies | None, session_id: str) -> bool:
+    """Whether a session write asks anyone: a policy that hears this
+    session's writes, or a dry run deciding, which refuses every write. A
+    profile's programs speak for its own sessions only, so a session none
+    governs writes without a gate, and an element write lands in place.
 
     Args:
         policies (Policies | None): the workspace's policies.
+        session_id (str): the session written.
     """
     if explaining() is DryRun.DECIDING:
         return True
     return policies is not None and (
-        policies.wants("pre_session") or policies.wants("post_session")
+        await policies.wants_for("pre_session", session_id)
+        or await policies.wants_for("post_session", session_id)
     )
 
 
@@ -157,6 +168,9 @@ class SessionGate:
             await post_session_gate(self.policies, ctx, old)
         else:
             await pre_session_gate(self.policies, ctx)
+
+    async def listens(self) -> bool:
+        return await listens(self.policies, self.session.session_id)
 
 
 def fault_error(
@@ -230,32 +244,49 @@ async def drive(
         records.shell = (
             ask[-1] if ask[0] in ("gate", "pause") else ask[1].fork()
         )
+        answer: Callable[[], None] = task.answer_failed
+        heard: bool | None = None
         try:
             match ask:
-                case ("substitute", shell, body, node, span, read):
+                case ("substitute", _, body, node, span, read):
                     out, err, status = await host.substitute(
-                        shell, body, node, span, read
+                        ask[1], body, node, span, read
                     )
-                    task.answer_substituted(out, err, status)
-                case ("process", shell, node):
-                    task.answer_path(await host.process(shell, node))
+                    answer = partial(task.answer_substituted, out, err, status)
+                case ("process", _, node):
+                    path = await host.process(ask[1], node)
+                    answer = partial(task.answer_path, path)
                 case ("gate", post, verb, key, value, old, _):
                     try:
                         await host.gate(post, verb, key, value, old)
                     except PolicyDenied as exc:
                         record = len(refusals) + 1
                         refusals[record] = exc
-                        task.answer_gate((key, record))
+                        answer = partial(task.answer_gate, (key, record))
                     else:
-                        task.answer_gate(None)
+                        answer = partial(task.answer_gate, None)
                 case ("pause", _):
                     await task_turn()
-                    task.answer_resumed()
+                    answer = task.answer_resumed
+            # Asked while the lent copy stands in for the session, so a
+            # policy reading the session to answer finds one to read.
+            heard = await host.listens()
+        except BaseException as exc:
+            failure = exc
+            answer = task.answer_failed
+        finally:
+            records.shell = held
+        # The copies the request lent go before the task goes on, so a
+        # write it lands shares its records with none and copies nothing;
+        # a policy added while the host answered hears what comes next.
+        del ask
+        try:
+            if heard is not None:
+                task.listen(heard)
+            answer()
         except BaseException as exc:
             failure = exc
             task.answer_failed()
-        finally:
-            records.shell = held
     result, said = task.finish()
     # A profile changed while the host answered hid its names on a copy
     # lent meanwhile; the shell, back with its owner, takes them now.

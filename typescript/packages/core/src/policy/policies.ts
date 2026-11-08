@@ -285,6 +285,16 @@ export function agreed(routes: readonly Route[]): Deny | Route | null {
 }
 
 /**
+ * The Route a command's `preCommand` answers agree on: null when none
+ * places it, and when two disagree, which refuses the command (`settled`).
+ * Mirrors the Python `command_route`.
+ */
+export function commandRoute(answers: readonly (Deny | Ask | Route)[]): Route | null {
+  const placed = agreed(answers.filter((a): a is Route => a.kind === 'route'))
+  return placed?.kind === 'route' ? placed : null
+}
+
+/**
  * What a stage's answers come to, by kind: the first Deny, else the first
  * Ask, else the Route every placing answer agrees on. Mirrors the Python
  * `settled`.

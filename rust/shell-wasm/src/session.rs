@@ -381,6 +381,24 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             };
             return engine.write(handle, write, listens, warns);
         }
+        "push" => {
+            let name = args.string()?;
+            let words = texts(args.list()?)?;
+            let listens = args.flag()?;
+            return engine.write(handle, Write::Push { name, words }, listens, true);
+        }
+        "unset_element" => {
+            let name = args.string()?;
+            let subscript = args.bytes()?;
+            let every = args.flag()?;
+            let listens = args.flag()?;
+            let write = Write::UnsetElement {
+                name,
+                subscript,
+                every,
+            };
+            return engine.write(handle, write, listens, true);
+        }
         "arith" => {
             let text = args.bytes()?;
             let listens = args.flag()?;
@@ -415,12 +433,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             })
         }
         "visible_names" => {
-            let kind = match args.string()?.as_str() {
-                "scalar" => Kind::Scalar,
-                "indexed" => Kind::Indexed,
-                "assoc" => Kind::Assoc,
-                other => return Err(format!("no value kind {other}")),
-            };
+            let kind: Kind = args.string()?.parse()?;
             Item::list(
                 shell
                     .store()?
@@ -429,6 +442,13 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                     .map(Item::text),
             )
         }
+        "kind" => Item::opt(
+            shell
+                .store()?
+                .visible(&args.string()?)
+                .and_then(|var| var.value.as_ref()),
+            |value| Item::text(value.kind().name()),
+        ),
         "indexed" => Item::opt(shell.shell()?.indexed(&args.string()?), |array| {
             host::value_out(&Value::Indexed(array.into_owned()))
         }),
@@ -447,6 +467,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .map(|(name, var)| Item::list([Item::text(name), host::record_out(var)])),
         ),
         "len" => Item::int(shell.store()?.records().count()),
+        "stamp" => Item::int(shell.store()?.stamp()),
         "contains" => Item::Bool(shell.store()?.record(&args.string()?).is_some()),
         "held" => Item::int(shell.0.held()),
         "hide" => {
@@ -559,12 +580,19 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         }
         "next_random" => host::random_out(&shell.store_mut()?.next_random()),
         "frame" => {
-            let positional = texts(args.list()?)?;
+            let positional = args
+                .maybe()?
+                .map(|item| texts(one(item, Args::list)?))
+                .transpose()?;
             let calls = args
-                .list()?
-                .into_iter()
-                .map(|call| texts(one(call, Args::list)?))
-                .collect::<Result<Vec<_>, String>>()?;
+                .maybe()?
+                .map(|item| {
+                    one(item, Args::list)?
+                        .into_iter()
+                        .map(|call| texts(one(call, Args::list)?))
+                        .collect::<Result<Vec<_>, String>>()
+                })
+                .transpose()?;
             let status = i32::try_from(args.int()?).unwrap_or(1);
             let pid = u32::try_from(args.int()?).unwrap_or(0);
             let last_job = args
@@ -684,6 +712,11 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             engine.jobs.remove(&handle);
         }
         return Ok(Item::list([fields, Item::Bool(more)]));
+    }
+    if op == "listen" {
+        let listens = args.flag()?;
+        engine.job(handle)?.job.listen(listens);
+        return Ok(Item::Nil);
     }
     let answer = match op {
         "answer_substituted" => Answer::Substituted(Substitution {

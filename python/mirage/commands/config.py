@@ -76,6 +76,9 @@ class Context:
             source, so a seeded workspace replays them.
         runtime (CommandRuntime | None): Where an interpreter command
             runs its code, and what policy lets that code start and load.
+        machine (str | None): The machine a routed program runs on, by
+            its ``machines:`` name, when its route or ``execute()`` names
+            one; None leaves it to its runtime's own.
         find (FindExpr | None): find's expression, read once by mirage-rs
             for the whole line; ``find`` reads it in place of its words.
     """
@@ -91,6 +94,7 @@ class Context:
     processes: ProcessView | None = None
     shell: ShellFn | None = None
     runtime: CommandRuntime | None = None
+    machine: str | None = None
     diff: DiffComputer | None = None
     ids: IdSource = field(default_factory=SystemIdSource)
     find: FindExpr | None = None

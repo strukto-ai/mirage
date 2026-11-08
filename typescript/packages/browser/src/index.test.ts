@@ -29,20 +29,13 @@ describe('@struktoai/mirage-browser barrel exports', () => {
   })
 
   it('registers E2B only after importing its core subpath', async () => {
-    expect(browserPkg).not.toHaveProperty('E2BRuntime')
-    expect(browserPkg.knownRuntimes()).not.toContain('e2b')
-    const { E2BRuntime } = await import('@struktoai/mirage-core/runtime/sandbox/e2b/runtime')
-    expect(browserPkg.knownRuntimes()).toContain('e2b')
-    const workspace = new browserPkg.Workspace(
-      {},
-      {
-        runtimes: [
-          new E2BRuntime({ captures: ['python3'], config: { sandboxId: 'test' } }),
-          'workspace',
-        ],
-      },
-    )
+    const options = { machines: { box: { provider: 'e2b', sandboxId: 'test' } } }
+    expect(browserPkg).not.toHaveProperty('E2BMachine')
+    expect(() => new browserPkg.Workspace({}, options)).toThrow(/unknown machine provider: 'e2b'/)
+    const { E2BMachine } = await import('@struktoai/mirage-core/machine/e2b/handle')
+    const workspace = new browserPkg.Workspace({}, options)
     expect(workspace).toBeInstanceOf(browserPkg.Workspace)
+    expect(workspace.machineTable.get('box')).toBeInstanceOf(E2BMachine)
     await workspace.close()
   })
 

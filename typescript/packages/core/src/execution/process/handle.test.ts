@@ -239,6 +239,23 @@ describe('ProcessHandle', () => {
     expect([done.exit, handle.signal, children]).toEqual([137, 9, [15, 9]])
   })
 
+  it('ignores only what the program that takes it inherits', () => {
+    const handle = new ProcessHandle(
+      info(),
+      () => Promise.resolve(3),
+      ignore,
+      ignore,
+      undefined,
+      undefined,
+      new Set([2, 3]),
+    )
+    handle.oneCommand = true
+    handle.programIgnores = new Set([2])
+    expect(handle.ignores.has(3)).toBe(true)
+    expect(handle.take(null, 'local')).toBe(true)
+    expect([...handle.ignores]).toEqual([2])
+  })
+
   // A runner started for one command is its program once, on the program's
   // machine and runtime; one started for more, or taken already, is not,
   // and a host program's pid lands on the record.

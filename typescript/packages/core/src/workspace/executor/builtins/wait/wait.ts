@@ -28,7 +28,8 @@ import { ExecutionNode } from '../../../types.ts'
 import { builtinUsage, identifierLine } from '../shared.ts'
 import { reportJobs } from '../../background.ts'
 import { IDENTIFIER_RE } from '../constants.ts'
-import { jobResult, resolveSpec, sessionOf } from '../jobspec.ts'
+import { jobResult, jobWithMachinePid, processView, resolveSpec, sessionOf } from '../jobspec.ts'
+import { FIRST_PID } from '../../../../execution/process/constants.ts'
 
 /**
  * Block until the first of several jobs ends, and return it. Once one has,
@@ -156,7 +157,21 @@ export async function handleWait(
   await jobTable.sync(sid)
   const visible = jobTable.listJobs(sid)
   for (const spec of specs) {
-    const [job, refusal] = resolveSpec(visible, spec)
+    let job: JobHandle | null
+    let refusal: string
+    if (/^[0-9]+$/.test(spec) && Number(spec) > 0 && Number(spec) < FIRST_PID) {
+      const [held, ambiguous] = await jobWithMachinePid(
+        processView(jobTable, session),
+        visible,
+        Number(spec),
+      )
+      if (ambiguous) {
+        errors.push(`${shellVoice()}wait: ${spec}: ambiguous job spec`)
+        continue
+      }
+      job = held
+      refusal = `pid ${spec} is not a child of this shell`
+    } else [job, refusal] = resolveSpec(visible, spec)
     if (job === null) {
       errors.push(`${shellVoice()}wait: ${refusal}`)
       continue

@@ -49,6 +49,7 @@ from mirage.workspace.workspace.utils import command_name
 
 async def run_whole_line(
     runtime: LineExecutorMixin[Any],
+    machine: str | None,
     command: str,
     stdin: ByteSource | None,
     session: SessionState,
@@ -72,6 +73,7 @@ async def run_whole_line(
     Args:
         runtime (LineExecutorMixin): the runtime that captured the
             whole line.
+        machine (str | None): the machine the line's placement names.
         command (str): the raw command line.
         stdin (ByteSource | None): bytes piped into the line.
         session (SessionState): session supplying cwd and env.
@@ -104,6 +106,7 @@ async def run_whole_line(
         stdin=stdin,
         env=env_snapshot(session),
         cwd=PathSpec.from_str_path(session.cwd),
+        machine=machine,
     )
 
     async def run(output: OutputFn, errors: OutputFn) -> RunResult:

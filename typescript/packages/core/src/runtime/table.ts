@@ -15,6 +15,7 @@
 import { compareCodePoints } from '../utils/sort.ts'
 import type { Runtime } from './base.ts'
 import type { RuntimeOptions } from './config.ts'
+import type { RouteDecision } from './types.ts'
 import {
   EXTERNAL_COMMANDS,
   JS_GROUP,
@@ -25,6 +26,7 @@ import {
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import { LanguageRuntime } from './language.ts'
 import { isLineExecutor, isProcessExecutor, type LineExecutorMixin } from './mixin.ts'
+import { MachineRuntime } from './machine/runtime.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { WorkspaceRuntime } from './workspace.ts'
@@ -45,6 +47,7 @@ const NAMED: Record<
     monty: MontyRuntime,
     quickjs: QuickJsRuntime,
     workspace: WorkspaceRuntime,
+    machine: MachineRuntime,
   },
 )
 
@@ -58,13 +61,16 @@ const NAMED: Record<
 export const DEFAULT_ENTRIES: readonly string[] = ['monty', 'quickjs', 'workspace']
 
 // The runtimes @struktoai/mirage-node registers when it is imported.
-const NODE_RUNTIMES: readonly string[] = [
+const NODE_RUNTIMES: readonly string[] = ['local', 'sandlock']
+
+// The machine providers: names a runtimes entry may still carry from
+// before machines had their own block.
+const MACHINE_PROVIDERS: readonly string[] = [
   'apple_container',
   'daytona',
   'docker',
-  'local',
+  'e2b',
   'microsandbox',
-  'sandlock',
   'smolvm',
   'ssh',
 ]
@@ -84,10 +90,13 @@ const RUNTIME_HINTS: Record<string, string> = {
   sandlock:
     "runtime 'sandlock' lives in @struktoai/mirage-node; import that package " +
     'to register it. Sandlock requires Linux and `sandlock` on PATH.',
-  e2b:
-    "runtime 'e2b' registers when its module is imported: " +
-    "'@struktoai/mirage-core/runtime/sandbox/e2b/runtime' in a browser, or " +
-    '@struktoai/mirage-node, which imports it',
+  ...Object.fromEntries(
+    MACHINE_PROVIDERS.map((name) => [
+      name,
+      `'${name}' is a machine provider, not a runtime: declare the machine under ` +
+        `machines: with provider: ${name}, and run its programs with the machine runtime`,
+    ]),
+  ),
 }
 
 // Every runtime is constructed the same way; config keys are checked
@@ -96,16 +105,14 @@ const RUNTIME_HINTS: Record<string, string> = {
 // (`**options` raises TypeError on an unknown kwarg); a TS object
 // literal would silently swallow a typo key without it.
 const ENTRY_KEYS: readonly string[] = ['captures', 'config']
+// The one runtime that runs on a machine takes one more: its default.
+const MACHINE_KEYS: readonly string[] = [...ENTRY_KEYS, 'machine']
 
 // The names mirage ships: core's own, and the ones its packages register
 // when they load, so `registerRuntime` can refuse to shadow one the way
 // the VFS and CLI registries refuse a builtin name. A package's own
 // registration is the first under its name; any later one shadows it.
-const BUILTIN_RUNTIMES: ReadonlySet<string> = new Set([
-  ...Object.keys(NAMED),
-  ...NODE_RUNTIMES,
-  'e2b',
-])
+const BUILTIN_RUNTIMES: ReadonlySet<string> = new Set([...Object.keys(NAMED), ...NODE_RUNTIMES])
 
 /**
  * Register a runtime class under a config name. Host-side only, like
@@ -142,7 +149,11 @@ export function knownRuntimes(): string[] {
  */
 export function checkRuntimeOptions(name: string, options: Record<string, unknown>): void {
   for (const key of Object.keys(options)) {
-    if (!ENTRY_KEYS.includes(key)) {
+    if (key === 'machine' && name !== 'machine' && name in NAMED)
+      throw new Error(
+        `runtime '${name}' runs on the workspace's machine; a machine takes the machine runtime`,
+      )
+    if (!(name === 'machine' ? MACHINE_KEYS : ENTRY_KEYS).includes(key)) {
       const knownKeys = ENTRY_KEYS.map((k) => `'${k}'`).join(', ')
       throw new Error(`unknown ${name} runtime option '${key}' (expected: ${knownKeys})`)
     }
@@ -303,6 +314,45 @@ export function wholeLineRuntime(
  */
 export function isSandbox(entry: Runtime | null | undefined): entry is Runtime & LineExecutorMixin {
   return entry != null && isLineExecutor(entry) && entry.reach === 'remote'
+}
+
+/**
+ * The decision a policy's route places a line or a command on.
+ *
+ * `workspace` keeps it in Mirage: no line executor (an `@line` capture)
+ * takes it, and each command stays on its first other capturer. Any other
+ * runtime serves every command it captures over `bindings`; none leaves
+ * each command where `bindings` put it. `bindings` are the static ones for
+ * a line, the line's own for a command. Mirrors Python's `routed`.
+ *
+ * Throws:
+ *   Error: no entry has the runtime's name.
+ */
+export function routed(
+  entries: readonly Runtime[],
+  bindings: Readonly<Record<string, Runtime | null | undefined>>,
+  runtime: string | undefined,
+  machine: string | undefined,
+): RouteDecision<Runtime> {
+  // Null prototype: captures are arbitrary command names.
+  const placed = Object.create(null) as Record<string, Runtime | null>
+  if (runtime === 'workspace') {
+    for (const entry of entries) {
+      for (const command of entry.captures) placed[command] = null
+    }
+    Object.assign(
+      placed,
+      bindCommands(entries.filter((entry) => !entry.captures.includes(WHOLE_LINE))),
+    )
+  } else {
+    Object.assign(placed, bindings)
+    if (runtime !== undefined) Object.assign(placed, runtimeBindingsFor(entries, runtime))
+  }
+  return {
+    bindings: placed,
+    fallback: catchAll(entries),
+    ...(machine !== undefined ? { machine } : {}),
+  }
 }
 
 /**

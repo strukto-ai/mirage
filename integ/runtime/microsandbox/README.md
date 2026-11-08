@@ -42,8 +42,8 @@ msb remove --force mirage-e2e
 
 ## SDK tests
 
-The [Python tests](../../../python/tests/runtime/sandbox/microsandbox/) and
-[TypeScript tests](../../../typescript/packages/node/src/runtime/sandbox/microsandbox/)
+The [Python tests](../../../python/tests/machine/microsandbox/) and
+[TypeScript tests](../../../typescript/packages/node/src/machine/microsandbox/)
 use these variables; unset variables skip the corresponding tests:
 
 - `MIRAGE_INTEG_MICROSANDBOX_SANDBOX`: running guest with `python3` and a

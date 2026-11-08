@@ -1,0 +1,126 @@
+---
+title: smolvm
+icon: /images/smolvm-logo.svg
+description: Run captured programs in a smolvm microVM with its own kernel.
+---
+
+The `smolvm` machine provider reaches a running
+[smolvm](https://smolmachines.com) microVM, by name, and the `machine` runtime
+runs captured programs in it. Each machine has its own guest kernel, on macOS, Linux and
+Windows. You create and start the machine; Mirage only runs programs in it.
+Python SDK and Node.
+
+## Installation
+
+Install the `smolvm` CLI. Create and start a machine from an image that
+has what [connecting the workspace](#connecting-the-workspace) needs:
+
+```bash
+smolvm machine create --net --name mirage-box --image my-mirage-image
+smolvm machine start --name mirage-box
+```
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python in the machine too.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.machine import MachineRuntime
+
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"box": {"provider": "smolvm", "machine": "mirage-box"}},
+        runtimes=[MachineRuntime(["@python", "@external"], machine="box")],
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, MachineRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { box: { provider: 'smolvm', machine: 'mirage-box' } },
+        runtimes: [new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+      },
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    machines:
+      box:
+        provider: smolvm
+        machine: mirage-box
+    runtimes:
+      - name: machine
+        captures: ["@python", "@external"]
+        machine: box
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+## Connecting the workspace
+
+A program in the machine opens workspace files at the same paths as in
+Mirage, so the machine must see the mounts there. `mount_type` picks how, as
+for [Docker](/home/setup/machine/docker#connecting-the-workspace):
+`ssh` serves every mount over `smolvm machine exec` (the guest needs
+`sshfs`), `fuse` leaves them to a Mirage inside, and `both` mixes the two.
+
+For `fuse`, use [the machine image](/home/setup/machine/overview#the-machine-image),
+which carries Mirage and `fuse3`. Write the same mounts at the same paths
+into `sandbox.yaml`, put it in the machine (in its image, or a directory
+passed with `--volume`), and start Mirage with it:
+
+```yaml
+mounts:
+  /data:
+    vfs: s3
+    config:
+      bucket: my-bucket
+    backend: fuse
+    mountpoint: /data
+```
+
+```bash
+smolvm machine exec --name mirage-box -- mirage workspace create /tmp/sandbox.yaml
+```
+
+- This workspace's mount modes and permissions do not reach those files;
+  `sandbox.yaml` decides.
+- Keep the machine's paths in step with the host's mounts yourself.
+
+## Runtime behavior
+
+| Capability | In the machine |
+| --- | --- |
+| Command | The captured program and its words, as typed |
+| Piped input | stdin |
+| Environment | The session's, over the config `env` |
+| Working directory | The shell's, unchanged |
+| Workspace files | By `mount_type`; see [above](#connecting-the-workspace) |
+| Host files | Only directories passed with `--volume` at boot |
+| Disk and network | The machine's own |
+
+## Notes
+
+- The machine must be `running`. Start a `stopped` or `created` machine,
+  or clone a `frozen` machine before using it. Mirage cannot run commands
+  while a machine is `unreachable`.
+- Lines sent to one machine share its files and processes. Give each tenant
+  its own machine.

@@ -703,7 +703,9 @@ export class Shell {
   private closed = false
   // The frame `frame` set, sent with the next request rather than in one of
   // its own.
-  private framed: Item[] | null = null
+  private framed: ShellFrame | null = null
+  // The positional arrays the engine last took.
+  private sent: Pick<ShellFrame, 'positional' | 'calls'> | null = null
 
   private constructor(readonly handle: number) {
     shells.register(this, handle, this)
@@ -732,9 +734,42 @@ export class Shell {
     if (framed === null) return engine('shell', op, [this.handle, ...args])
     this.framed = null
     return batch([
-      ['shell', 'frame', this.handle, ...framed],
+      ['shell', 'frame', this.handle, ...this.frameItems(framed)],
       ['shell', op, this.handle, ...args],
     ])
+  }
+
+  /**
+   * A frame as the engine takes it, positional parameters it holds already
+   * left out: the host replaces an array rather than change it.
+   */
+  private frameItems(frame: ShellFrame): Item[] {
+    const sent = this.sent
+    this.sent = { positional: frame.positional, calls: frame.calls }
+    const sameCalls =
+      sent !== null &&
+      sent.calls.length === frame.calls.length &&
+      sent.calls.every((call, i) => call === frame.calls[i])
+    return [
+      sent?.positional === frame.positional ? null : frame.positional,
+      sameCalls ? null : frame.calls,
+      frame.status,
+      frame.pid,
+      frame.lastJob,
+      frame.argv0,
+      frame.options as ReadonlyMap<Item, Item>,
+      frame.shopts as ReadonlyMap<Item, Item>,
+      frame.envLimit,
+      frame.outside,
+      frame.pipeStatus,
+      frame.functionNames,
+      frame.callLines,
+      frame.paren,
+      frame.memoryRoom,
+      frame.line,
+      frame.bashPid,
+      frame.voice,
+    ]
   }
 
   private task(op: string, tree: ShellTree | null, ...args: Item[]): ShellTask {
@@ -765,6 +800,11 @@ export class Shell {
   /** The names a reader lists for one kind of value, sorted: each a lookup finds. */
   visibleNames(kind: 'scalar' | 'indexed' | 'assoc'): string[] {
     return texts(this.call('visible_names', kind))
+  }
+
+  /** What the value a name stands for is, references followed; null when unset or hidden. */
+  kind(name: string): 'scalar' | 'indexed' | 'assoc' | null {
+    return this.call('kind', name) as 'scalar' | 'indexed' | 'assoc' | null
   }
 
   /** An indexed array as `${a[@]}` reads it, `PIPESTATUS` and `FUNCNAME` from the frame. */
@@ -832,6 +872,11 @@ export class Shell {
 
   isReadonly(name: string, followRef: boolean): boolean {
     return this.call('is_readonly', name, followRef) as boolean
+  }
+
+  /** The stamp the records and the names hidden from them carry, fresh on every change. */
+  stamp(): number {
+    return Number(this.call('stamp'))
   }
 
   /** The exported scalars a child process inherits, hidden names left out. */
@@ -952,29 +997,9 @@ export class Shell {
     return this.call('next_random') as number | null | readonly Item[]
   }
 
-  /** Hand the shell the state around a line that it reads. */
   /** Set the frame the next operation reads, sent along with it. */
   frame(frame: ShellFrame): void {
-    this.framed = [
-      frame.positional,
-      frame.calls,
-      frame.status,
-      frame.pid,
-      frame.lastJob,
-      frame.argv0,
-      frame.options as ReadonlyMap<Item, Item>,
-      frame.shopts as ReadonlyMap<Item, Item>,
-      frame.envLimit,
-      frame.outside,
-      frame.pipeStatus,
-      frame.functionNames,
-      frame.callLines,
-      frame.paren,
-      frame.memoryRoom,
-      frame.line,
-      frame.bashPid,
-      frame.voice,
-    ]
+    this.framed = frame
   }
 
   /**
@@ -1064,7 +1089,7 @@ export class Shell {
     return this.task('is_set', null, reference, options.expanded ?? false, options.listens ?? false)
   }
 
-  /** Write one element a builtin names: 0 landed, 1 hidden, 2 readonly, 3 no element. */
+  /** Write one element, or a bare name: 0 landed, 1 hidden, 2 readonly, 3 no element. */
   element(
     name: string,
     subscript: string | null,
@@ -1081,6 +1106,19 @@ export class Shell {
       options.listens ?? false,
       options.warns ?? true,
     )
+  }
+
+  /** Append words at an indexed array's extent (`a+=(x y)`). */
+  push(name: string, words: readonly string[], options: Heard = {}): ShellTask {
+    return this.task('push', null, name, words, options.listens ?? false)
+  }
+
+  /**
+   * Clear one element (`unset 'a[i]'`), or every one when `every`, a subscript
+   * typed as `@` or `*`: 0 cleared, 3 no element, 4 not an array.
+   */
+  unsetElement(name: string, subscript: string, every = false, options: Heard = {}): ShellTask {
+    return this.task('unset_element', null, name, subscript, every, options.listens ?? false)
   }
 
   /**
@@ -1218,6 +1256,11 @@ export class ShellTask {
   /** The host has let others run; the operation goes on. */
   answerResumed(): void {
     this.land(this.call('answer_resumed'))
+  }
+
+  /** Whether a policy hears the session's writes from now on, told before each answer. */
+  listen(listens: boolean): void {
+    this.call('listen', listens)
   }
 
   /** The host could not do what was asked; the operation stops. */

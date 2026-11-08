@@ -598,6 +598,10 @@ export class SessionState {
   borrowed: SharedInput[] = []
   // The records running prefix assignments set aside, held until put back.
   prefixSaves: ReadonlyMap<string, ShellVar | null>[] = []
+  // Runtime memo of `positionalBytes`.
+  positionalHeld: readonly [readonly string[], number] | null = null
+  // Runtime memo of `envSnapshot`.
+  envHeld: readonly [number, Readonly<Record<string, string>>] | null = null
   mountModes: ReadonlyMap<string, MountMode> | null
   private vis: Visibility | undefined
   hideReasons: readonly HideReason[]

@@ -14,8 +14,10 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Context } from '../../commands/config.ts'
+import { MachineHandle } from '../../machine/handle.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
+import { MachineRuntime } from '../../runtime/machine/runtime.ts'
 import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { Program, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
@@ -95,6 +97,18 @@ function workspace(...runtimes: Runtime[]): Workspace {
 async function python3(ws: Workspace, runtime?: string): Promise<[number, string, string]> {
   const io = await ws.shell('python3 -c x', runtime !== undefined ? { runtime } : {})
   return [io.exitCode, DEC.decode(io.stdout), DEC.decode(io.stderr)]
+}
+
+class Idle extends MachineHandle {
+  static override readonly provider = 'idle'
+
+  connect(): Promise<void> {
+    return Promise.resolve()
+  }
+
+  protected execArgv(): Promise<RunResult> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
 }
 
 describe('removeRuntime', () => {
@@ -244,6 +258,27 @@ describe('shadowed captures', () => {
       ])
     } finally {
       delete logger.warn
+      await ws.close()
+    }
+  })
+
+  it('leaves a native entry another workspace holds on its own machines', async () => {
+    const runtime = new MachineRuntime({ captures: ['uname'], machine: 'box' })
+    const first = new Idle('box')
+    const ws = new Workspace(
+      { '/d': new RAMVFS() },
+      { mode: MountMode.EXEC, machines: { box: first }, runtimes: [runtime] },
+    )
+    try {
+      expect(
+        () =>
+          new Workspace(
+            { '/d': new RAMVFS() },
+            { mode: MountMode.EXEC, machines: { box: new Idle('box') }, runtimes: [runtime] },
+          ),
+      ).toThrow('already bound')
+      expect(runtime.handle({} as Context)).toBe(first)
+    } finally {
       await ws.close()
     }
   })

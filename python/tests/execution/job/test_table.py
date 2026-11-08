@@ -25,6 +25,7 @@ from mirage.execution.job.handle import JobHandle
 from mirage.execution.job.table import JobTable
 from mirage.execution.job.types import JobState
 from mirage.execution.process.config import ProcessPermissions
+from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import LineId
@@ -1459,7 +1460,8 @@ async def test_a_closed_table_drops_its_record_and_the_lease():
 @pytest.mark.asyncio
 async def test_a_claim_reaps_this_daemons_programs_from_before_a_restart():
     store = RAMExecutionStore()
-    await store.publish("d", {"7": _ran(7)}, 7)
+    pid = FIRST_PID + 6
+    await store.publish("d", {str(pid): _ran(pid)}, pid)
     reaped: list[dict] = []
 
     async def reaper(record: dict, signum: int) -> bool:
@@ -1472,9 +1474,9 @@ async def test_a_claim_reaps_this_daemons_programs_from_before_a_restart():
     async with asyncio.timeout(5):
         while a._reaping:
             await asyncio.sleep(0.01)
-    assert reaped == [_ran(7)]
+    assert reaped == [_ran(pid)]
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
-    assert job.pid == 8
+    assert job.pid == pid + 1
     await a.kill_all()
     await a.close()
 

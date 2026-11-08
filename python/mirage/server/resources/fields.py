@@ -26,6 +26,7 @@ from pydantic_core import PydanticUndefined
 from mirage.commands.cli.mcp.constants import NAME as MCP_CLI
 from mirage.commands.cli.specs import cli_spec_for, known_cli_names
 from mirage.core.mcp.config import MCPConfig
+from mirage.machine.registry import known_providers, machine_class
 from mirage.resources.types import EntryKind
 from mirage.runtime.constants import SECRET_CONFIG_FIELDS
 from mirage.runtime.table import known_runtimes, runtime_class
@@ -245,10 +246,24 @@ def runtime_types() -> TypeTable:
     return out
 
 
+def machine_types() -> TypeTable:
+    """Every machine provider, with its config's fields."""
+    out: TypeTable = {}
+    for provider in known_providers():
+        try:
+            cls = machine_class(provider)
+        except ImportError as e:
+            logger.debug("machine %s is not installed: %s", provider, e)
+            continue
+        out[provider] = dataclass_fields(cls.config_cls)
+    return out
+
+
 TYPES = {
     "vfs": vfs_types,
     "cli": cli_types,
     "runtime": runtime_types,
+    "machine": machine_types,
 }
 
 

@@ -1,0 +1,307 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { buildMachine } from '@struktoai/mirage-core/machine/registry'
+import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { MountMode } from '@struktoai/mirage-core/types'
+import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
+import { describe, expect, it } from 'vitest'
+import { Workspace } from '../../workspace.ts'
+import type { DockerConfig } from './config.ts'
+import { DockerMachine } from './handle.ts'
+import { on } from '../../../tests/fixtures/machine.ts'
+
+const DEC = new TextDecoder()
+const ENC = new TextEncoder()
+
+class FakeDockerMachine extends DockerMachine {
+  running = true
+  readonly calls: [string[], Uint8Array | null][] = []
+
+  protected override async docker(
+    args: string[],
+    source: ByteSource | null = null,
+    output: OutputFn | null = null,
+  ): Promise<RunResult> {
+    const stdin = source === null ? null : await materialize(source)
+    this.calls.push([args.slice(), stdin])
+    if (args[0] === 'inspect') {
+      return Promise.resolve({
+        stdout: ENC.encode(`{"Status": "${this.running ? 'running' : 'exited'}"}`),
+        stderr: new Uint8Array(),
+        exitCode: 0,
+      })
+    }
+    const script = args[args.length - 1] ?? ''
+    const stdout = ENC.encode(`out:${script}`)
+    if (output !== null) await output(stdout)
+    return {
+      stdout: output === null ? stdout : new Uint8Array(),
+      stderr: ENC.encode('warn'),
+      exitCode: 0,
+    }
+  }
+}
+
+function makeRuntime(
+  config: DockerConfig | Record<string, unknown> = { container: 'cid-42' },
+): FakeDockerMachine {
+  return new FakeDockerMachine('box', config as DockerConfig)
+}
+
+describe('DockerMachine', () => {
+  it('connect checks the user container is running', async () => {
+    const runtime = makeRuntime()
+    await runtime.connect()
+    expect(runtime.calls[0]?.[0]).toEqual(['inspect', '--format', '{{json .State}}', 'cid-42'])
+  })
+
+  it('connect fails loud on a stopped container', async () => {
+    const runtime = makeRuntime()
+    runtime.running = false
+    await expect(runtime.connect()).rejects.toThrow('not running')
+  })
+
+  it('container is required, and not blank', () => {
+    expect(() => makeRuntime({})).toThrow('container')
+    expect(() => makeRuntime({ container: '  ' })).toThrow(
+      'docker config needs a nonblank container',
+    )
+  })
+
+  it('threads cwd, env, stdin, and real stderr through exec', async () => {
+    const runtime = makeRuntime()
+    const result = await runtime.execLine('wc -l', ENC.encode('a\nb\n'), { E: '1' }, '/root/ws')
+    expect(result.exitCode).toBe(0)
+    expect(DEC.decode(result.stdout)).toBe('out:wc -l')
+    expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('warn')
+    const [args, stdin] = runtime.calls[runtime.calls.length - 1] ?? [[], null]
+    expect(args).toEqual([
+      'exec',
+      '-i',
+      '-w',
+      '/',
+      '-e',
+      'E=1',
+      'cid-42',
+      '/bin/sh',
+      '-c',
+      'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"',
+      'sh',
+      '/root/ws',
+      '/bin/sh',
+      '-c',
+      'wc -l',
+    ])
+    expect(DEC.decode(stdin ?? new Uint8Array())).toBe('a\nb\n')
+  })
+
+  it('takes a mountType of ssh, fuse or both', () => {
+    expect(() => new DockerMachine('box', { container: 'c', mountType: 'nfs' as never })).toThrow(
+      'docker mountType must be one of ssh, fuse, both, not "nfs"',
+    )
+    expect(() => new DockerMachine('box', { container: 'c', mountType: 'ssh' })).not.toThrow()
+  })
+
+  it("registers under the config name 'docker'", () => {
+    const machine = buildMachine('box', { provider: 'docker', container: 'cid-42' })
+    expect(machine).toBeInstanceOf(DockerMachine)
+    expect(String(machine.id)).toBe('docker:box')
+  })
+})
+
+// A fake `docker` on PATH running `script`, for the real spawn path.
+async function withFakeDocker(script: string, run: (fake: string) => Promise<void>): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'fake-docker-'))
+  const fake = join(dir, 'docker')
+  await writeFile(fake, script, { mode: 0o755 })
+  const savedPath = process.env.PATH
+  process.env.PATH = `${dir}:${savedPath ?? ''}`
+  try {
+    await run(fake)
+  } finally {
+    process.env.PATH = savedPath
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+// The real spawn path: a container command that exits without draining
+// its stdin EPIPEs the pipe. Without the stdin error guard the stream's
+// unhandled 'error' event crashes the whole process (python suppresses
+// the matching BrokenPipeError inside communicate()). A fake `docker`
+// on PATH that ignores stdin reproduces it against the real spawn.
+describe.skipIf(process.platform === 'win32')('DockerMachine stdin EPIPE', () => {
+  it('a command that ignores a large stdin resolves instead of crashing', async () => {
+    await withFakeDocker('#!/bin/sh\nexit 0\n', async () => {
+      const runtime = new DockerMachine('box', { container: 'cid-42' })
+      const big = new Uint8Array(4 * 1024 * 1024)
+      const result = await runtime.execLine('head -1', big, {}, '/')
+      expect(result.exitCode).toBe(0)
+    })
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('DockerMachine pipe', () => {
+  it('holds docker exec open byte for byte', async () => {
+    await withFakeDocker(`#!/bin/sh\nprintf '%s\\n' "$@" > "$0.args"\nexec cat\n`, async (fake) => {
+      const runtime = new DockerMachine('box', { container: 'cid-42' })
+      const pipe = await runtime.openPipe('exec sshfs x y')
+      const payload = Uint8Array.from({ length: 256 }, (_, i) => i)
+      pipe.writer.write(payload)
+      pipe.writer.end()
+      const got: number[] = []
+      for await (const chunk of pipe.reader) got.push(...chunk)
+      expect(got).toEqual([...payload])
+      await pipe.stop()
+      expect((await readFile(`${fake}.args`, 'utf8')).split('\n')).toEqual([
+        'exec',
+        '-i',
+        '-w',
+        '/',
+        'cid-42',
+        '/bin/sh',
+        '-c',
+        'exec sshfs x y',
+        '',
+      ])
+    })
+  })
+
+  it('outlives a command that ends before its answer is written', async () => {
+    await withFakeDocker('#!/bin/sh\nexit 0\n', async () => {
+      const runtime = new DockerMachine('box', { container: 'cid-42' })
+      const pipe = await runtime.openPipe('exec sshfs x y')
+      const chunks = pipe.reader.getReader()
+      while (!(await chunks.read()).done) continue
+      pipe.writer.write(new Uint8Array(4 * 1024 * 1024))
+      await pipe.stop()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+  })
+})
+
+// A container that answers its mount table and takes sshfs pipes.
+class MountingDockerMachine extends FakeDockerMachine {
+  readonly table = new Map<string, [string, string]>()
+
+  protected override async docker(
+    args: string[],
+    source: ByteSource | null = null,
+    output: OutputFn | null = null,
+  ): Promise<RunResult> {
+    if (args[args.length - 1] !== 'cat /proc/mounts') return super.docker(args, source, output)
+    const stdin = source === null ? null : await materialize(source)
+    this.calls.push([args.slice(), stdin])
+    const rows = [...this.table].map(([p, [source, t]]) => `${source} ${p} ${t} rw 0 0\n`).join('')
+    return Promise.resolve({ stdout: ENC.encode(rows), stderr: new Uint8Array(), exitCode: 0 })
+  }
+
+  override openPipe(command: string): Promise<SandboxPipe> {
+    const words = [...command.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
+    this.table.set(words[6] ?? '', [words[5] ?? '', 'fuse.sshfs'])
+    let end: () => void = () => undefined
+    const reader = new ReadableStream<Uint8Array>({
+      start(controller) {
+        end = () => {
+          controller.close()
+        }
+      },
+    })
+    return Promise.resolve({
+      reader,
+      writer: { write: () => undefined, end: () => undefined },
+      stop: () => {
+        end()
+        return Promise.resolve()
+      },
+    })
+  }
+}
+
+const RESTRICTIONS: SessionProfile[] = [
+  { paths: { hide: ['/data/secret'] } },
+  { commands: { deny: [{ paths: ['/data/secret'], reason: 'sealed' }] } },
+  { mounts: new Map([['/data', { mode: MountMode.READ }]]) },
+]
+
+function restricted(runtime: DockerMachine, profile: SessionProfile): Workspace {
+  return new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.EXEC, profiles: { agent: profile }, ...on(runtime, 'workspace') },
+  )
+}
+
+function ran(runtime: FakeDockerMachine, line: string): boolean {
+  const words = line.split(' ')
+  return runtime.calls.some(([args]) => args.slice(-words.length).join(' ') === words.join(' '))
+}
+
+describe('DockerMachine under session restrictions', () => {
+  it.each(RESTRICTIONS)('refuses a line with no mount type', async (profile) => {
+    const runtime = makeRuntime({ container: 'c' })
+    const ws = restricted(runtime, profile)
+    try {
+      const agent = await ws.session('agent', { profile: 'agent' })
+      const result = await agent.shell('tool run')
+      expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+        126,
+        'docker: Permission denied\n',
+      ])
+      expect(runtime.calls).toEqual([])
+      expect((await (await ws.session('other')).shell('tool run')).exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each(RESTRICTIONS)('refuses a line on fuse mounts', async (profile) => {
+    const runtime = new MountingDockerMachine('box', { container: 'c', mountType: 'fuse' })
+    const ws = restricted(runtime, profile)
+    try {
+      const agent = await ws.session('agent', { profile: 'agent' })
+      const result = await agent.shell('tool run')
+      expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+        126,
+        'docker: Permission denied\n',
+      ])
+      expect(ran(runtime, 'tool run')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each(RESTRICTIONS)(
+    'serves a restricted session its files over ssh mounts',
+    async (profile) => {
+      const runtime = new MountingDockerMachine('box', { container: 'c', mountType: 'ssh' })
+      const ws = restricted(runtime, profile)
+      try {
+        const agent = await ws.session('agent', { profile: 'agent' })
+        const result = await agent.shell('tool run')
+        expect(result.exitCode).toBe(0)
+        expect([...runtime.table].map(([p, [, kind]]) => [p, kind])).toEqual([
+          ['/data', 'fuse.sshfs'],
+        ])
+        expect(ran(runtime, 'tool run')).toBe(true)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+})

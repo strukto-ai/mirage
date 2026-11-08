@@ -45,6 +45,8 @@ from mirage.io.network import (
     network_routes,
     run_with_network,
 )
+from mirage.machine.handle import MachineHandle
+from mirage.machine.registry import build_machine
 from mirage.policy.constants import METHODS
 from mirage.policy.profile import (
     ProfilePolicy,
@@ -54,7 +56,7 @@ from mirage.policy.profile import (
 from mirage.policy.types import ProfileScript, ProfileScripts
 from mirage.rs.document import validate_document
 from mirage.runtime.base import Runtime
-from mirage.runtime.table import build_runtime
+from mirage.runtime.table import NAMED, build_runtime
 from mirage.runtime.types import Language, ScriptSource
 from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.sources import (
@@ -656,6 +658,11 @@ def _build_runtime_entries(
         name = options.pop("name", None)
         if not isinstance(name, str) or not name:
             raise ValueError("runtime entry needs a non-empty 'name'")
+        if "machine" in options and name in NAMED and name != "machine":
+            raise ValueError(
+                f"runtime {name!r} runs on the workspace's machine; a"
+                " machine takes the machine runtime"
+            )
         try:
             out.append(
                 _runtime_class(name)(**options)
@@ -669,6 +676,34 @@ def _build_runtime_entries(
             masked = mask_values(
                 str(exc), secrets[i] if i < len(secrets) else ()
             )
+            if masked == str(exc):
+                raise
+            raise ValueError(masked) from None
+    return out
+
+
+def _build_machines(
+    machines: dict[str, dict[str, Any]],
+    secrets: dict[str, tuple[str, ...]],
+) -> dict[str, MachineHandle]:
+    """Turn the ``machines:`` block into each machine's handle.
+
+    Args:
+        machines (dict[str, dict[str, Any]]): each entry by name: its
+            ``provider`` and how to reach it.
+        secrets (dict[str, tuple[str, ...]]): per machine, the values
+            its entry read from a secret, which a refusal of it masks.
+
+    Raises:
+        ValueError: an entry no provider builds.
+    """
+    out: dict[str, MachineHandle] = {}
+    for name, entry in machines.items():
+        try:
+            out[name] = build_machine(name, entry)
+        except Exception as exc:
+            # As a runtime entry's: the message must not quote a secret.
+            masked = mask_values(str(exc), secrets.get(name, ()))
             if masked == str(exc):
                 raise
             raise ValueError(masked) from None
@@ -727,6 +762,15 @@ class WorkspaceConfig(BaseModel):
     # Per runtime entry, the values `resolve_secrets` read into its
     # config, which a refusal of it masks.
     _runtime_secrets: tuple[tuple[str, ...], ...] = PrivateAttr(default=())
+    # The machines programs run on, by name: each a provider plus how to
+    # reach it ({provider: docker, container: tools}). A machine runtime
+    # entry's `machine` names one. Unset = none.
+    machines: dict[str, dict[str, Any]] | None = None
+    # Per machine, the values `resolve_secrets` read into its entry,
+    # which a refusal of it masks.
+    _machine_secrets: dict[str, tuple[str, ...]] = PrivateAttr(
+        default_factory=dict
+    )
     # The route policy, a program the way a profile's policy names one:
     # {script: route.py, runtime: monty}. The script is embedded at load;
     # it prints {"kind": "route", "runtime": ...} to place a line, or
@@ -909,6 +953,10 @@ class WorkspaceConfig(BaseModel):
         if self.store is not None:
             kwargs["store"] = _build_state_store(self.store)
             kwargs["owns_store"] = True
+        if self.machines is not None:
+            kwargs["machines"] = _build_machines(
+                self.machines, self._machine_secrets
+            )
         if self.runtimes is not None:
             kwargs["runtimes"] = _build_runtime_entries(
                 self.runtimes, self._runtime_secrets
@@ -1091,10 +1139,11 @@ async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
 
     The async half of the YAML loader, and the reason
     :meth:`WorkspaceConfig.to_workspace_kwargs` can stay sync: a
-    `{from, ref, key}` in `mounts.*.config`, `clis.*.config` or a
-    `runtimes` entry's `config` is fetched here, so `build_vfs` and
-    `build_runtime` receive the credential itself and no VFS config,
-    runtime, client or backend learns that this plane exists. Mirrors
+    `{from, ref, key}` in `mounts.*.config`, `clis.*.config`, a
+    `runtimes` entry's `config` or a `machines` entry is fetched here, so
+    `build_vfs`, `build_runtime` and `build_machine` receive the
+    credential itself and no VFS config, runtime, machine, client or
+    backend learns that this plane exists. Mirrors
     the TypeScript `configToWorkspaceArgs`, which does the same thing
     inline because it is async already.
 
@@ -1117,6 +1166,7 @@ async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
     configs = [block.config for block in config.mounts.values()]
     configs += [block.config for block in (config.clis or {}).values()]
     configs += [c for c in runtimes if c is not None]
+    configs += list((config.machines or {}).values())
     sources = await resolve_sources_for(config.secrets, configs)
     mounts = {
         prefix: block.model_copy(
@@ -1154,9 +1204,21 @@ async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
             entries.append({**entry, "config": read})
             secrets.append(tuple(fetched_values(raw, read)))
         update["runtimes"] = entries
+    held: dict[str, tuple[str, ...]] = {}
+    if config.machines is not None:
+        machines: dict[str, dict[str, Any]] = {}
+        for name, raw in config.machines.items():
+            read = await resolve_config_secrets(
+                raw, sources, f"machines.{name}"
+            )
+            machines[name] = read
+            held[name] = tuple(fetched_values(raw, read))
+        update["machines"] = machines
     resolved = config.model_copy(update=update)
     if any(secrets):
         resolved._runtime_secrets = tuple(secrets)
+    if any(held.values()):
+        resolved._machine_secrets = held
     return resolved
 
 

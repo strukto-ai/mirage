@@ -5,3 +5,11 @@
  * Python's `MAX_PROCESSES`.
  */
 export const MAX_PROCESSES = 128
+
+/**
+ * Mirage numbers its processes past 4194304, the most pids a Linux kernel
+ * hands out (2**22), so a number at or under it names a machine's process
+ * and a number above it a Mirage one, wherever either is written. Mirrors
+ * Python's `FIRST_PID`.
+ */
+export const FIRST_PID = 4194305

@@ -314,10 +314,22 @@ describe('scriptAction', () => {
     }
   })
 
-  it('places a line at preExecute only', () => {
+  it('places a line or a command only', () => {
     const printed = bytes(answer({ kind: 'route', runtime: 'docker' }))
     expect(scriptAction(printed, 'preExecute')).toEqual({ kind: 'route', runtime: 'docker' })
-    expect(() => scriptAction(printed, 'preCommand')).toThrow('cannot answer route at pre_command')
+    expect(scriptAction(printed, 'preCommand')).toEqual({ kind: 'route', runtime: 'docker' })
+    expect(() => scriptAction(printed, 'preVfs')).toThrow('cannot answer route at pre_vfs')
+  })
+
+  it('may name a machine alone', () => {
+    const printed = bytes(answer({ kind: 'route', machine: 'gpu' }))
+    expect(scriptAction(printed, 'preCommand')).toEqual({ kind: 'route', machine: 'gpu' })
+    const both = bytes(answer({ kind: 'route', runtime: 'machine', machine: 'gpu' }))
+    expect(scriptAction(both, 'preExecute')).toEqual({
+      kind: 'route',
+      runtime: 'machine',
+      machine: 'gpu',
+    })
   })
 
   it('carries the reason a route gives', () => {
@@ -335,6 +347,7 @@ describe('scriptAction', () => {
     '{"deny": "x"}',
     '{"kind": "allow"}',
     '{"kind": "route"}',
+    '{"kind": "ask", "machine": "gpu"}',
     '{"kind": "deny", "runtime": "docker"}',
     '{"kind": "deny", "reason": "x", "policy": "Mine"}',
     '{"kind": "deny"}\n{"kind": "ask"}',

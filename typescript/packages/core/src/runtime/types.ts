@@ -42,6 +42,12 @@ export interface RouteDecision<R extends RuntimeIdentity> {
    * then exit 126.
    */
   readonly fallback: R | null
+  /**
+   * The machine the machine runtime runs what it serves on, by its
+   * `machines:` name, when the placement names one; absent leaves each
+   * native entry on its own.
+   */
+  readonly machine?: string
 }
 
 /**

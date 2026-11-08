@@ -117,11 +117,15 @@ fn record_in(
 /// `ShellTask` runs on it the shell is the task's, and any read of it
 /// raises until the task finishes.
 #[pyclass(module = "mirage._rs")]
-pub struct Shell(Held);
+pub struct Shell(
+    Held,
+    /// The host's positional lists the last frame read.
+    Option<(Py<PyAny>, Vec<Py<PyAny>>)>,
+);
 
 impl Shell {
     fn wrap(inner: Inner) -> Self {
-        Self(Held::new(inner))
+        Self(Held::new(inner), None)
     }
 
     fn shell(&self) -> PyResult<&Inner> {
@@ -206,18 +210,23 @@ impl Shell {
     /// The names a reader lists for one kind of value (`scalar`,
     /// `indexed` or `assoc`), sorted: each a lookup finds.
     fn visible_names(&self, kind: &str) -> PyResult<Vec<String>> {
-        let kind = match kind {
-            "scalar" => Kind::Scalar,
-            "indexed" => Kind::Indexed,
-            "assoc" => Kind::Assoc,
-            _ => return Err(PyValueError::new_err(format!("no value kind {kind}"))),
-        };
+        let kind: Kind = kind.parse().map_err(PyValueError::new_err)?;
         Ok(self
             .store()?
             .visible_names(kind)
             .into_iter()
             .map(str::to_owned)
             .collect())
+    }
+
+    /// What the value a name stands for is (`scalar`, `indexed` or
+    /// `assoc`), references followed; None when unset or hidden.
+    fn kind(&self, name: &str) -> PyResult<Option<&'static str>> {
+        Ok(self
+            .store()?
+            .visible(name)
+            .and_then(|var| var.value.as_ref())
+            .map(|value| value.kind().name()))
     }
 
     /// An indexed array by name as `${a[@]}` reads it, `PIPESTATUS` and
@@ -262,6 +271,13 @@ impl Shell {
 
     fn __contains__(&self, name: &str) -> PyResult<bool> {
         Ok(self.store()?.record(name).is_some())
+    }
+
+    /// The stamp the records and the names hidden from them carry, a
+    /// fresh one on every change, which a host keys what it derives from
+    /// them by.
+    fn stamp(&self) -> PyResult<u64> {
+        Ok(self.store()?.stamp())
     }
 
     /// The bytes every record holds, names and values; while a task
@@ -481,8 +497,8 @@ impl Shell {
     #[allow(clippy::too_many_arguments)]
     fn frame(
         &mut self,
-        positional: Vec<Bound<'_, PyAny>>,
-        calls: Vec<Vec<Bound<'_, PyAny>>>,
+        positional: Bound<'_, PyAny>,
+        calls: Vec<Bound<'_, PyAny>>,
         status: i32,
         pid: u32,
         last_job: Option<u32>,
@@ -502,11 +518,38 @@ impl Shell {
     ) -> PyResult<()> {
         let texts =
             |list: &[Bound<'_, PyAny>]| list.iter().map(bytes_of).collect::<PyResult<Vec<_>>>();
-        let positional = texts(&positional)?;
-        let calls = calls
-            .iter()
-            .map(|call| texts(call))
-            .collect::<PyResult<Vec<_>>>()?;
+        let read = |list: &Bound<'_, PyAny>| {
+            list.try_iter()?
+                .map(|item| bytes_of(&item?))
+                .collect::<PyResult<Vec<_>>>()
+        };
+        let (held, held_calls) = match &self.1 {
+            Some((held, calls)) => (Some(held.as_ptr()), Some(calls)),
+            None => (None, None),
+        };
+        let same_calls = held_calls.is_some_and(|held| {
+            held.len() == calls.len()
+                && held
+                    .iter()
+                    .zip(&calls)
+                    .all(|(held, call)| held.as_ptr() == call.as_ptr())
+        });
+        let framed = Some((
+            positional.clone().unbind(),
+            calls.iter().map(|call| call.clone().unbind()).collect(),
+        ));
+        // The host replaces a list rather than change it, so one it handed
+        // over before is read already.
+        let positional = if held == Some(positional.as_ptr()) {
+            None
+        } else {
+            Some(read(&positional)?)
+        };
+        let calls = if same_calls {
+            None
+        } else {
+            Some(calls.iter().map(read).collect::<PyResult<Vec<_>>>()?)
+        };
         let frame = Frame {
             positional,
             calls,
@@ -528,6 +571,7 @@ impl Shell {
             voice: bytes_of(&voice)?,
         };
         self.shell_mut()?.apply(frame);
+        self.1 = framed;
         Ok(())
     }
 
@@ -700,6 +744,38 @@ impl Shell {
         Self::write_task(slf, write, listens, warns)
     }
 
+    /// Append words at an indexed array's extent (`a+=(x y)`).
+    #[pyo3(signature = (name, words, *, listens = false))]
+    fn push(
+        slf: &Bound<'_, Self>,
+        name: String,
+        words: Vec<Bound<'_, PyAny>>,
+        listens: bool,
+    ) -> PyResult<ShellTask> {
+        let words = words.iter().map(bytes_of).collect::<PyResult<_>>()?;
+        Self::write_task(slf, Write::Push { name, words }, listens, true)
+    }
+
+    /// Clear one element (`unset 'a[i]'`), or every one when `every`, a
+    /// subscript typed as `@` or `*`; the result is 0 cleared, 3 a
+    /// subscript that names no element or 4 one other than 0 on a scalar.
+    #[pyo3(signature = (name, subscript, *, every = false, listens = false))]
+    fn unset_element(
+        slf: &Bound<'_, Self>,
+        name: String,
+        subscript: Bound<'_, PyAny>,
+        every: bool,
+        listens: bool,
+    ) -> PyResult<ShellTask> {
+        let subscript = bytes_of(&subscript)?;
+        let write = Write::UnsetElement {
+            name,
+            subscript,
+            every,
+        };
+        Self::write_task(slf, write, listens, true)
+    }
+
     /// Evaluate an arithmetic command or `let` operand, its writes landed;
     /// `expand` for a `let` operand, whose subscripts expand first.
     #[pyo3(signature = (text, *, listens = false, expand = false))]
@@ -854,6 +930,9 @@ impl ShellTask {
     }
 
     fn answer(&mut self, py: Python<'_>, answer: Answer) -> PyResult<()> {
+        // The request goes before the task resumes, so the copies it lent
+        // share no record with a write the task lands.
+        self.asked = None;
         let step = self
             .job
             .answer(answer)
@@ -909,6 +988,12 @@ impl ShellTask {
     /// The host has let others run; the operation goes on.
     fn answer_resumed(&mut self, py: Python<'_>) -> PyResult<()> {
         self.answer(py, Answer::Resumed)
+    }
+
+    /// Whether a policy hears the session's writes from now on, told
+    /// before each answer.
+    fn listen(&mut self, listens: bool) {
+        self.job.listen(listens);
     }
 
     /// The host could not do what was asked; the operation stops.

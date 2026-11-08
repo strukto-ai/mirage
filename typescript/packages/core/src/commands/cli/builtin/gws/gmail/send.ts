@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FlagView } from '../../../../../commands/spec/flag_view.ts'
+import { FlagView } from '../../../../spec/flag_view.ts'
 import { sendMessage } from '../../../../../core/gmail/send.ts'
 import type { GoogleApiAccessor } from '../../../../../accessor/google_api.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
-import type { CommandFnResult, Context } from '../../../../../commands/config.ts'
+import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { compactJsonBytes } from '../../../../../core/render/json.ts'
 

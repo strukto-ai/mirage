@@ -83,6 +83,7 @@ from mirage.server.routers import (
     health,
     jobs,
     lines,
+    machines,
     oauth,
     processes,
     sessions,
@@ -489,6 +490,7 @@ def build_app(
     app.include_router(lines.router)
     app.include_router(jobs.router)
     app.include_router(processes.router)
+    app.include_router(machines.router)
     app.include_router(shell.router)
     app.include_router(ssh.router)
     app.include_router(tools.router)

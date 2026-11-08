@@ -1,7 +1,7 @@
 import asyncio
 import errno
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from threading import RLock
 
 from mirage.execution.constants import (
@@ -10,6 +10,7 @@ from mirage.execution.constants import (
     LOCAL_MACHINE,
 )
 from mirage.execution.process.config import ProcessPermissions, ProcessScope
+from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.handle import ExecutionBind, ProcessHandle
 from mirage.execution.process.types import Process, ProcessRunner, ProcessState
 from mirage.execution.process.view import ProcessView
@@ -78,9 +79,9 @@ class ProcessTable:
         self._bind = bind
         self._changed = changed
         self._ended_hook = ended
-        self._next_pid = 1
+        self._next_pid = FIRST_PID
         self._live: dict[int, tuple[int, ProcessHandle]] = {}
-        self._ended: dict[int, Process] = {}
+        self._ended: dict[int, tuple[int, Process]] = {}
         self._ancestors: dict[int, tuple[int, ...]] = {}
         self._generations: dict[str, int] = {}
         self._lock = RLock()
@@ -88,6 +89,17 @@ class ProcessTable:
         # The host's ceiling on any session's limit, a lifted one
         # included, whatever profile, snapshot or store set it.
         self.ceiling: int | None = None
+        # Brings the table in step with what each machine runs now: the
+        # processes a scan finds there join it, and leave once a scan no
+        # longer sees them. The workspace sets it, since it holds the
+        # machines.
+        self.scanner: Callable[[], Awaitable[None]] | None = None
+        # Sends a signal to a process that is a program on a machine as
+        # ``kill`` sent it, answering whether it ran, or None for a
+        # process Mirage stops itself. The workspace sets it.
+        self.sender: (
+            Callable[[ProcessHandle, int], Awaitable[bool] | None] | None
+        ) = None
 
     def start(
         self,
@@ -106,6 +118,7 @@ class ProcessTable:
         machine: MachineId | None = None,
         runtime: str | None = None,
         one_command: bool = False,
+        program_ignores: frozenset[int] = frozenset(),
     ) -> ProcessHandle:
         """Track a runner; its caller owns admission before command effects.
 
@@ -119,7 +132,9 @@ class ProcessTable:
             limit (int | None): the most runners the session may hold,
                 this one included, held under ``ceiling``; None for no
                 cap. Stopping runners count until they finish cleanup and
-                leave the live registry.
+                leave the live registry. A process a scan found on a
+                machine (no runtime, a machine pid) counts against its
+                machine's own limits, not this one.
             line (LineId | None): the line the runner runs for; None
                 takes its parent's.
             started (Callable[[ProcessHandle], None] | None): what the
@@ -144,6 +159,8 @@ class ProcessTable:
                 for Mirage itself.
             one_command (bool): it runs exactly one command, whose
                 program it is (``ProcessHandle.take``).
+            program_ignores (frozenset[int]): what that program ignores
+                as well, where ``ignores`` is more than a shell's.
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -159,6 +176,10 @@ class ProcessTable:
                     1
                     for _, handle in self._live.values()
                     if handle.record.session_id == session_id
+                    and (
+                        handle.record.runtime is not None
+                        or handle.record.machine_pid is None
+                    )
                 )
                 >= limit
             ):
@@ -206,6 +227,7 @@ class ProcessTable:
                 self._now,
             )
             handle.one_command = one_command
+            handle.program_ignores = program_ignores
             eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
             self._ancestors[pid] = ancestry
@@ -221,7 +243,8 @@ class ProcessTable:
 
     @property
     def last_pid(self) -> int:
-        """The highest pid handed out so far, 0 before the first."""
+        """The highest pid handed out so far, the one before
+        ``FIRST_PID`` before the first."""
         return self._next_pid - 1
 
     def continue_after(self, pid: int) -> None:
@@ -251,13 +274,56 @@ class ProcessTable:
         for child in self._under(pid):
             child.terminate(signal)
 
-    def signal_group(self, group_id: int, signal: int) -> bool:
+    async def scan(self) -> None:
+        """Bring the table in step with what each machine runs now
+        (``scanner``), as ``ps`` does before it lists."""
+        if self.scanner is not None:
+            await self.scanner()
+
+    def send(
+        self, handle: ProcessHandle, signal: int
+    ) -> Awaitable[bool] | None:
+        """Send a signal to a program on a machine as ``kill`` sent it
+        (``sender``): what it does with it is its own, and it ends when
+        it exits.
+
+        Args:
+            handle (ProcessHandle): the runner.
+            signal (int): the signal.
+
+        Returns:
+            Awaitable[bool] | None: whether it ran, once sent; None for a
+            runner Mirage stops itself (``deliver``).
+        """
+        if self.sender is None or signal in handle.ignores:
+            return None
+        return self.sender(handle, signal)
+
+    async def send_group(self, group_id: int, signal: int) -> None:
+        """Send a signal a process takes and goes on to every program on
+        a machine in a process group as ``send`` does, leaving Mirage's
+        own runners as they are. The machines are scanned first, so what
+        a program started there is in the group.
+
+        Args:
+            group_id (int): the group.
+            signal (int): the signal.
+        """
+        await self.scan()
+        members = self._members(group_id)
+        sending = [self.send(member, signal) for member in members]
+        await asyncio.gather(*(sent for sent in sending if sent is not None))
+
+    async def signal_group(self, group_id: int, signal: int) -> bool:
         """Deliver a signal to every live runner of a process group, as
-        killpg(2) does: a runner that ignores it (a shell) hands it to the
+        killpg(2) does: a program on a machine gets it as sent
+        (``send``), a runner that ignores it (a shell) hands it to the
         program it runs right now (``ProcessHandle.interrupt``), and any
         other stops with it and leaves the rest of the group to their own
         delivery. The deepest runners hear it first, so a native program
-        knows the signal before the shell that waits for it stops.
+        knows the signal before the shell that waits for it stops. The
+        machines are scanned first, so what a program started there is
+        in the group.
 
         Args:
             group_id (int): the group.
@@ -266,9 +332,9 @@ class ProcessTable:
         Returns:
             bool: whether the group had a live runner.
         """
+        await self.scan()
         members = self._members(group_id)
-        for member in members:
-            deliver(member, signal)
+        await _signal_members(self, members, signal)
         return bool(members)
 
     def _members(self, group_id: int) -> list[ProcessHandle]:
@@ -299,7 +365,7 @@ class ProcessTable:
                 return
             del self._live[pid]
             self._ended.pop(pid, None)
-            self._ended[pid] = handle.record
+            self._ended[pid] = (entry[0], handle.record)
             self._prune()
         if self._ended_hook is not None:
             try:
@@ -386,10 +452,17 @@ class ProcessTable:
         def probe_group(group_id: int) -> bool:
             return group(group_id) is not None
 
-        def signal_group(group_id: int, signal: int) -> bool:
+        def send(pid: int, signal: int) -> Awaitable[bool] | None:
+            with self._lock:
+                handle = signal_target(pid)
+            if handle is None:
+                return None
+            return self.send(handle, signal)
+
+        async def signal_group(group_id: int, signal: int) -> bool:
+            await self.scan()
             members = group(group_id)
-            for member in members or ():
-                deliver(member, signal)
+            await _signal_members(self, members or [], signal)
             return members is not None
 
         def granted() -> ProcessPermissions | None:
@@ -403,6 +476,8 @@ class ProcessTable:
             permissions=granted,
             probe_group=probe_group,
             signal_group=signal_group,
+            scan=self.scan,
+            send=send,
         )
 
     def revoke_session(self, session_id: str) -> None:
@@ -424,6 +499,28 @@ class ProcessTable:
                 process.revoked = True
                 process.terminate()
 
+    def current(self, record: Process) -> bool:
+        """Whether the record the table keeps under ``record``'s pid,
+        live or ended, started in its session as it is now: one closed or
+        re-profiled since is not, so a session that reuses the id sees
+        none of its predecessor's.
+
+        Args:
+            record (Process): the process.
+        """
+        with self._lock:
+            live = self._live.get(record.pid)
+            entry = (
+                (live[0], live[1].record)
+                if live is not None
+                else self._ended.get(record.pid)
+            )
+            return (
+                entry is not None
+                and entry[1].session_id == record.session_id
+                and entry[0] == self._generations.get(record.session_id, 0)
+            )
+
     def live(self) -> tuple[ProcessHandle, ...]:
         """Host-only inventory, including disowned and stopping runners."""
         with self._lock:
@@ -436,7 +533,7 @@ class ProcessTable:
         in turn keeps its latest."""
         with self._lock:
             self._prune()
-            kept = dict(self._ended)
+            kept = {pid: record for pid, (_, record) in self._ended.items()}
             kept.update(
                 (pid, handle.record) for pid, (_, handle) in self._live.items()
             )
@@ -466,7 +563,7 @@ class ProcessTable:
         in the order they ended."""
         cutoff = self._now() - HISTORY_SECONDS
         while self._ended:
-            pid, record = next(iter(self._ended.items()))
+            pid, (_, record) = next(iter(self._ended.items()))
             if (
                 len(self._ended) <= HISTORY_MAX_RECORDS
                 and (record.ended_at or 0) > cutoff
@@ -517,3 +614,33 @@ class ProcessTable:
                 errors.append(exc)
         if errors:
             raise ExceptionGroup("process cancellation failed", errors)
+
+
+async def _signal_members(
+    table: ProcessTable, members: list[ProcessHandle], signal: int
+) -> None:
+    """Deliver a signal to each runner of a group, in order: the
+    programs on machines as sent, Mirage's own at once (``deliver``). A
+    runner that ignores it, a shell, hands it to the program it runs
+    right now, unless a process of that program, a child a scan found,
+    already got it as sent.
+
+    Args:
+        table (ProcessTable): the table the runners run in.
+        members (list[ProcessHandle]): the runners, deepest first.
+        signal (int): the signal.
+    """
+    sending: list[Awaitable[bool]] = []
+    reached: set[int] = set()
+    for member in members:
+        sent = table.send(member, signal)
+        if sent is not None:
+            sending.append(sent)
+            reached.add(member.record.pid)
+        elif signal not in member.ignores or not any(
+            other.record.parent == member.record.pid
+            and other.record.pid in reached
+            for other in members
+        ):
+            deliver(member, signal)
+    await asyncio.gather(*sending)

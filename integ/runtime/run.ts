@@ -188,6 +188,7 @@ interface World {
   max_memory?: string | number | null
   network?: NetworkSetting
   register_runtimes?: Record<string, string>
+  machines?: Record<string, Record<string, unknown>>
   runtimes?: (string | Record<string, unknown>)[]
   route_policy?: { script: string; runtime: string }
   policies?: PolicySpec[]
@@ -877,6 +878,7 @@ function buildEntry(entry: string | Record<string, unknown>): RuntimeEntry {
     // loader applies.
     options.config = camelizeKeys(expand(entry.config) as Record<string, unknown>)
   }
+  if (entry.machine !== undefined) options.machine = entry.machine
   return buildRuntime(entry.name as string, options)
 }
 
@@ -923,6 +925,14 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   if (world.session_id !== undefined) options.sessionId = world.session_id
   if (world.max_memory !== undefined) options.maxMemory = world.max_memory
   if (world.network !== undefined) options.network = world.network
+  if (world.machines !== undefined) {
+    options.machines = Object.fromEntries(
+      Object.entries(world.machines).map(([name, spec]) => [
+        name,
+        camelizeKeys(expand(spec) as Record<string, unknown>),
+      ]),
+    )
+  }
   if (world.runtimes !== undefined) options.runtimes = world.runtimes.map(buildEntry)
   if (world.route_policy !== undefined) {
     options.routePolicy = {
@@ -1422,6 +1432,17 @@ const RUNTIME_ENTRY: Record<string, { captures?: string[]; config?: Record<strin
 // Runtimes that need a host the hosted runners do not give every job: an
 // unmet requirement skips their variants even under INTEG_RUNTIME_STRICT.
 const OPTIONAL_RUNTIMES = new Set(['sandlock', 'e2b', 'smolvm', 'microsandbox', 'apple_container'])
+// A machine provider's variant runs the machine runtime on a machine of that
+// provider, its config the machine's `machines:` entry. Mirrors run.py
+// `MACHINE_PROVIDERS`.
+const MACHINE_PROVIDERS = new Set([
+  'docker',
+  'ssh',
+  'e2b',
+  'smolvm',
+  'microsandbox',
+  'apple_container',
+])
 
 /** The world entry for one runtime of a case's matrix. Mirrors run.py `_entry`. */
 function runtimeEntry(
@@ -1530,7 +1551,15 @@ function forRuntime(testCase: Case, runtime: string): Case | null {
   }
   if (programs === 0 && language !== null) return null
   const world = structuredClone(testCase.world ?? {})
-  if (!onHost) world.runtimes = [runtimeEntry(runtime, testCase.entry ?? {}), 'workspace']
+  if (!onHost) {
+    let entry = runtimeEntry(runtime, testCase.entry ?? {})
+    if (MACHINE_PROVIDERS.has(runtime) && typeof entry !== 'string') {
+      const { config = {}, ...rest } = entry
+      world.machines = { [runtime]: { provider: runtime, ...(config as Record<string, unknown>) } }
+      entry = { ...rest, name: 'machine', machine: runtime }
+    }
+    world.runtimes = [entry, 'workspace']
+  }
   return {
     ...testCase,
     id: `${testCase.id}@${runtime}`,

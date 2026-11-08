@@ -110,8 +110,8 @@ async def with_entries(
         refs (list[str]): the entries its pointers name.
 
     Raises:
-        ResourceError: a name is not saved as a VFS, CLI or runtime, or
-            a saved value is one its field cannot take.
+        ResourceError: a name is not saved as a VFS, CLI, runtime or
+            machine, or a saved value is one its field cannot take.
     """
     kinds = {
         entry.name: kind
@@ -124,7 +124,8 @@ async def with_entries(
         kind = kinds.get(ref)
         if kind is None:
             raise ResourceError(
-                "invalid", f"{ref} is not saved as a VFS, CLI or runtime"
+                "invalid",
+                f"{ref} is not saved as a VFS, CLI, runtime or machine",
             )
         entry = await store.reveal_entry(kind, ref)
         plain[ref] = entry.fields

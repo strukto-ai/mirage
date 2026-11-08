@@ -66,7 +66,7 @@ describe('handleKill', () => {
     const abort = new AbortController()
     const task = pendingRun(abort)
     const j = await jt.submit({ command: 'sleep', run: task, abort, cwd: '/' })
-    const [, io] = await handleKill(jt, ['kill', j.id.toString()])
+    const [, io] = await handleKill(jt, ['kill', String(j.pid)])
     expect(io.exitCode).toBe(0)
     expect(jt.get(j.id)?.signal).not.toBeNull()
   })

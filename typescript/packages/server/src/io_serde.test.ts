@@ -144,7 +144,13 @@ describe('checked and answered', () => {
     try {
       const said = explanationToDict(await ws.explain("python3 -c 'print(1)'"))
       expect(said.answers).toEqual([
-        { kind: 'route', runtime: 'monty', reason: 'plain arithmetic', policy: 'OnMonty' },
+        {
+          kind: 'route',
+          runtime: 'monty',
+          machine: null,
+          reason: 'plain arithmetic',
+          policy: 'OnMonty',
+        },
       ])
     } finally {
       await ws.close()

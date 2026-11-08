@@ -1,0 +1,136 @@
+---
+title: Daytona
+icon: /images/daytona-logo.svg
+description: Run captured programs in a Daytona cloud sandbox you created.
+---
+
+The `daytona` machine provider reaches a running
+[Daytona](https://www.daytona.io) sandbox, by ID, and the `machine` runtime
+runs captured programs in it. You create and size the
+sandbox; Mirage only runs programs in it. Python SDK and Node.
+
+## Installation
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```bash
+    pip install 'mirage-ai[daytona]'
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```bash
+    pnpm add @daytonaio/sdk
+    ```
+  </Tab>
+</Tabs>
+
+Boot the sandbox from an image or snapshot that has what
+[connecting the workspace](#connecting-the-workspace) needs.
+Set `api_key` in the config, or `DAYTONA_API_KEY`.
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python in the sandbox too.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.machine import MachineRuntime
+
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"box": {"provider": "daytona", "sandbox_id": "sandbox-id"}},
+        runtimes=[MachineRuntime(["@python", "@external"], machine="box")],
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, MachineRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { box: { provider: 'daytona', sandboxId: 'sandbox-id' } },
+        runtimes: [new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+      },
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    machines:
+      box:
+        provider: daytona
+        sandbox_id: ${DAYTONA_SANDBOX_ID}
+    runtimes:
+      - name: machine
+        captures: ["@python", "@external"]
+        machine: box
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+## Connecting the workspace
+
+A program in the sandbox opens workspace files at the same paths as in
+Mirage, so the sandbox must see the mounts there. Mirage does not serve them
+into a Daytona sandbox: use [the machine image](/home/setup/machine/overview#the-machine-image),
+which carries Mirage and `fuse3`. Write the same mounts at the same paths
+into `sandbox.yaml`, and start Mirage with it in the sandbox:
+
+```yaml
+mounts:
+  /data:
+    vfs: s3
+    config:
+      bucket: my-bucket
+    backend: fuse
+    mountpoint: /data
+```
+
+```bash
+mirage workspace create /tmp/sandbox.yaml
+```
+
+- This workspace's mount modes and permissions do not reach those files;
+  `sandbox.yaml` decides.
+- Keep the sandbox's paths in step with the host's mounts yourself.
+
+## Runtime behavior
+
+| Capability | In the sandbox |
+| --- | --- |
+| Command | The captured program and its words, as typed |
+| Piped input | Uploaded to a temporary file in the sandbox and read as stdin |
+| Environment | The session's, over the config `env` |
+| Working directory | The shell's, unchanged |
+| Workspace files | What the Mirage inside serves; see [above](#connecting-the-workspace) |
+| Disk and network | The sandbox's own |
+
+## Notes
+
+- Closing the workspace leaves the sandbox running.
+- Output comes back as the program wrote it, binary included: the
+  sandbox base64-encodes it on the way out, so the image needs `dd` and
+  `base64` (Debian, Ubuntu and Alpine images have both), and output
+  takes about a third more to transfer. Without them a line runs
+  nothing, prints why and exits 127.
+- Sizing, GPUs, snapshots, networking, idle-stop and auto-delete stay
+  Daytona settings. The
+  [Daytona example](https://github.com/strukto-ai/mirage/tree/main/examples/python/runtime/sandbox/daytona)
+  covers baking a snapshot and a full read and write round trip.
+- A Daytona sandbox has no timeout of its own: after a Mirage
+  [timeout](/home/setup/machine/overview#timeouts), the program keeps running and billing until you
+  stop it.

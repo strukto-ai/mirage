@@ -75,7 +75,7 @@ async def test_wait_answers_the_awaited_jobs_status_and_prints_nothing():
     job = await submit_settled(
         table, stdout=b"out", stderr=b"done", exit_code=3
     )
-    stdout, io, _ = await handle_wait(table, ["wait", str(job.id)])
+    stdout, io, _ = await handle_wait(table, ["wait", str(job.pid)])
     assert stdout is None
     assert io.exit_code == 3
     assert io.stderr is None

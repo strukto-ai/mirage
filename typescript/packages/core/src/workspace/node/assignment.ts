@@ -17,12 +17,9 @@ import { runInCommandScope } from '../../cache/index/scope.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import {
-  arrayExtent,
-  arrayGet,
-  arraySet,
-  arrayWith,
   buildAssocLiteral,
   buildIndexedLiteral,
+  keyedWord,
   makeArray,
   type ShellArray,
 } from '../../shell/array.ts'
@@ -31,7 +28,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError, DiscardSignal, ReadonlyVariableError } from '../../shell/errors.ts'
 import { getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { type ShellValue, VarAttr } from '../../shell/variable.ts'
+import type { ShellValue } from '../../shell/variable.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 import { wordText } from '../../types.ts'
 import type { Policies } from '../../policy/index.ts'
@@ -46,12 +43,13 @@ import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import {
-  appended,
+  assignElement,
   conversionScalar,
   deref,
-  fatalSubscriptIndex,
+  pushWords,
   sessionView,
   subscriptIndex,
+  varKind,
 } from '../session/state.ts'
 
 /** `buildIndexedLiteral` whose subscript failure ends the line. */
@@ -70,11 +68,10 @@ async function fatalIndexLiteral(
 }
 
 /**
- * Discard the line on a write to a readonly `key` before its new value is
- * built: bash refuses an array literal before expanding it, and an element
- * write once its value and subscript are read, before the array would grow
- * to the index (`a[2**40]=x`). The store refuses every other spelling
- * (`assignVar`).
+ * Discard the line on a literal written to a readonly `key` before it is
+ * expanded, as bash refuses it. The store refuses every other spelling once
+ * its value and subscript are read, before the array would grow to the index
+ * (`a[2**40]=x`).
  */
 function refuseReadonly(view: SessionView, key: string): void {
   if (view.isReadonly(key, false)) {
@@ -82,25 +79,22 @@ function refuseReadonly(view: SessionView, key: string): void {
   }
 }
 
+/** bash's refusal of an assignment subscript, naming its raw spelling (`m[$e]: bad array subscript`). */
+function badSubscript(subscriptNode: TSNodeLike): DiscardSignal {
+  return new DiscardSignal(
+    encodeText(`${shellVoice()}${subscriptNode.text}: bad array subscript\n`),
+  )
+}
+
 /**
- * One assignment through the session view; denial is fatal.
- *
- * Every assignment spelling (scalar, array literal, subscript, append)
- * computes its resulting value and stores through `view.set`, so the
- * gate and the storage invariant live in the session view, not here. A
- * readonly name or a denial is a fatal variable-assignment error that
- * abandons the rest of the line (builtins like `export` merely fail with 1
- * and continue).
+ * One assignment's write, whose refusal is fatal: a readonly name or a
+ * denial abandons the rest of the line (builtins like `export` merely fail
+ * with 1 and continue), and an arithmetic error in a subscript or an `-i`
+ * value ends the shell.
  */
-async function assignVar(
-  view: SessionView,
-  key: string,
-  value: ShellValue,
-  assigned: ReadonlySet<bigint | string> | null = null,
-  added: string | null = null,
-): Promise<void> {
+async function landed<T>(write: Promise<T>): Promise<T> {
   try {
-    await view.set(key, value, true, assigned, added)
+    return await write
   } catch (err) {
     if (err instanceof PolicyDenied) throw new DiscardSignal(encodeText(`${err.message}\n`))
     if (err instanceof ReadonlyVariableError) {
@@ -109,6 +103,11 @@ async function assignVar(
     if (err instanceof ArithError) throw err.signal('', true)
     throw err
   }
+}
+
+/** One whole value through the session view; denial is fatal. */
+async function assignVar(view: SessionView, key: string, value: ShellValue): Promise<void> {
+  await landed(view.set(key, value, true))
 }
 
 // Array-literal elements behave like any other shell word list: command
@@ -180,10 +179,11 @@ async function subscriptKeyText(
 /**
  * Execute one top-level variable assignment (`a=1`, `a[i]+=v`).
  *
- * Every spelling — scalar, array literal, subscript, append — is
- * computed with bash's own mechanics on a copy of the held value and
- * then stored through the session view, which owns the admission gate
- * and the scalar/array invariant.
+ * A literal is built with bash's own mechanics and stored whole through the
+ * session view, but `a+=(x y)` onto an indexed array appends in the store.
+ * Every other spelling (scalar, subscript, append) is one element write the
+ * store makes in place, so an assignment costs its element, not the array;
+ * the view owns the admission gate and the scalar/array invariant either way.
  */
 export async function executeAssignment(
   node: TSNodeLike,
@@ -208,14 +208,9 @@ export async function executeAssignment(
   // slicing the subscript out of the source.
   const key = deref(session, spelled) || spelled
   const append = node.children.some((c) => c.type === '+=')
-  // `+=` on an integer adds, element by element too (`appended`).
-  const integer = session.vars.get(key)?.attrs.has(VarAttr.Integer) === true
   const valNodes = node.namedChildren.filter(
     (c) => c.type !== NT.VARIABLE_NAME && c.type !== 'subscript',
   )
-  // Every branch below computes its resulting value with bash's own
-  // mechanics on a copy, then stores through the one session view,
-  // which owns the gate and the scalar/array invariant.
   const policies = registry.policies
   const view = sessionView(session, policies, context.frame.diagnostics)
   const firstVal = valNodes[0]
@@ -239,9 +234,9 @@ export async function executeAssignment(
       namespace,
       callStack,
     )
-    const heldMap = session.assocs[key]
-    if (heldMap !== undefined) {
-      const { map, badWords } = buildAssocLiteral(heldMap, items, append)
+    const kind = varKind(session, key)
+    if (kind === 'assoc') {
+      const { map, badWords } = buildAssocLiteral(session.assocs[key] ?? null, items, append)
       await assignVar(view, key, map)
       // A plain word in a keyed literal is dropped with a warning and the
       // assignment still succeeds; unlike a declaration's, this voice does
@@ -256,15 +251,19 @@ export async function executeAssignment(
           .join(''),
       })
     }
-    let held: ShellArray | null = session.arrays[key] ?? null
+    if (append && kind === 'indexed' && items.every((word) => keyedWord(word) === null)) {
+      // `arr+=(...)` starts at the extent, so it fills the hole a trailing
+      // `unset arr[last]` left but skips interior ones.
+      await landed(pushWords(session, policies, key, items))
+      return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
+    }
+    let held: ShellArray | null = append ? (session.arrays[key] ?? null) : null
     if (append && held === null) {
       const scalar = conversionScalar(session, key)
       held = scalar === null ? null : makeArray([scalar])
     }
-    // `arr+=(...)` starts at the extent, so it fills the hole a
-    // trailing `unset arr[last]` left but skips interior ones; a
-    // `[i]=v` element places at i and the next plain word continues
-    // from there.
+    // A `[i]=v` element places at i and the next plain word continues from
+    // there.
     const base = await fatalIndexLiteral(held, items, append, (sub) =>
       subscriptIndex(session, sub, policies),
     )
@@ -279,8 +278,15 @@ export async function executeAssignment(
     const target = subscriptNode === null ? spelled : getText(subscriptNode)
     context.frame.diagnostics.push(encodeText(`${traceAssignment(target, val, append)}\n`))
   }
+  let subscript: string | null = null
   if (subscriptNode !== null) {
-    const subText = await subscriptKeyText(
+    // bash discards the rest of the line on a bad assignment subscript
+    // (status 1), naming the raw spelling (`m[$e]: bad array subscript`): a
+    // blank one, an associative key that expands empty, or an index before
+    // the first element. An indexed subscript that merely *expands* empty
+    // stays legal (arithmetic on nothing is 0).
+    if (subscriptNode.text.slice(spelled.length + 1, -1) === '') throw badSubscript(subscriptNode)
+    subscript = await subscriptKeyText(
       subscriptNode,
       spelled,
       context,
@@ -288,68 +294,18 @@ export async function executeAssignment(
       callStack,
       policies,
     )
-    const heldMap = session.assocs[key]
-    const rawSub = subscriptNode.text.slice(spelled.length + 1, -1)
-    if (rawSub === '' || (heldMap !== undefined && subText === '')) {
-      // bash discards the rest of the line on a bad assignment subscript
-      // (status 1), naming the raw spelling (`m[$e]: bad array
-      // subscript`). An indexed subscript that is blank or merely
-      // *expands* empty stays legal (arithmetic on nothing is 0), so
-      // only the associative kind checks the expanded text.
-      throw new DiscardSignal(
-        encodeText(`${shellVoice()}${subscriptNode.text}: bad array subscript\n`),
-      )
-    }
-    if (heldMap !== undefined) {
-      // The subscript is the key: no arithmetic, `m[1+1]` writes the
-      // key "1+1".
-      const newMap = Object.assign(Object.create(null) as Record<string, string>, heldMap)
-      const held = Object.hasOwn(heldMap, subText) ? heldMap[subText] : ''
-      const [slot, added] = append ? appended(held ?? '', val, integer) : [val, null]
-      newMap[subText] = slot
-      await assignVar(view, key, newMap, new Set([subText]), added)
-      return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
-    }
-    let arr: ShellArray | undefined = session.arrays[key]
-    if (arr === undefined) {
-      const scalar = conversionScalar(session, key)
-      arr = makeArray(scalar === null ? [] : [scalar])
-    }
-    let idx = await fatalSubscriptIndex(context.session, subText, policies)
-    if (idx < 0n) idx += arrayExtent(arr)
-    if (idx < 0n) {
-      // Same fatal shape as the empty subscript above.
-      throw new DiscardSignal(
-        encodeText(`${shellVoice()}${subscriptNode.text}: bad array subscript\n`),
-      )
-    }
-    refuseReadonly(view, key)
-    const [slot, added] = append ? appended(arrayGet(arr, idx), val, integer) : [val, null]
-    await assignVar(view, key, arrayWith(arr, idx, slot), new Set([idx]), added)
-    return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
   }
-  const heldMap = session.assocs[key]
-  const heldArr = session.arrays[key]
-  let [stored, added]: [string, string | null] = [val, null]
-  if (append) {
-    // `a+=x` appends onto element 0 (key "0" of a map); `n+=3` on an
-    // integer name adds: `declare -i n=5; n+=3` stores 8.
-    ;[stored, added] = appended(heldMap ?? heldArr ?? session.env[key] ?? null, val, integer)
+  // `a=x` writes element 0 of an array and the key "0" of a map, keeping the
+  // rest; `a+=x` appends onto it, and `n+=3` on an integer name adds
+  // (`declare -i n=5; n+=3` stores 8).
+  const status = await landed(
+    assignElement(session, policies, key, subscript, val, append, context.frame.diagnostics),
+  )
+  if (status === 'readonly') {
+    throw new DiscardSignal(encodeText(`${shellVoice()}${key}: readonly variable\n`))
   }
-  if (heldMap !== undefined) {
-    // `m=x` on an associative array writes the literal key "0" and
-    // keeps every other key, as bash does.
-    const newMap = { ...heldMap }
-    newMap['0'] = stored
-    await assignVar(view, key, newMap, new Set(['0']), added)
-  } else if (heldArr !== undefined) {
-    // `a=x` writes element 0 and keeps the rest.
-    const newArr = heldArr.copy()
-    arraySet(newArr, 0, stored)
-    await assignVar(view, key, newArr, new Set([0n]), added)
-  } else {
-    await assignVar(view, key, stored, null, added)
-  }
+  if (status === 'denied') throw new DiscardSignal(encodeText(`${key}: permission denied\n`))
+  if (status === 'subscript' && subscriptNode !== null) throw badSubscript(subscriptNode)
   // Reassigning OPTIND (even to its current value) restarts the getopts
   // scan at the first letter of the word it names, as bash 5.2 does
   // (`OPTIND=1` midway through `-ab` makes getopts read `a` again).
