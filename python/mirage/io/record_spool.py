@@ -1,8 +1,7 @@
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.io.spool import MEMORY_LIMIT, ByteSpool
-from mirage.io.types import ByteSource
 
 
 class RecordSpool:
@@ -72,24 +71,3 @@ class RecordSpool:
 
     async def __aexit__(self, *exc: Any) -> None:
         await self.close()
-
-
-async def delimited(
-    sources: Iterable[ByteSource], separator: bytes
-) -> RecordSpool:
-    """The records ``separator`` ends across ``sources`` read back to back,
-    byte for byte; the last one may lack it.
-
-    Args:
-        sources (Iterable[ByteSource]): the inputs, consumed in order.
-        separator (bytes): the one-byte record terminator.
-    """
-    records = RecordSpool()
-    try:
-        for source in sources:
-            await records.data.fill(source)
-        await records.index_delimited(separator)
-    except BaseException:
-        await records.close()
-        raise
-    return records

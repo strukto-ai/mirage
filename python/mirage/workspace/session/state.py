@@ -30,7 +30,6 @@ from mirage.rs.session import raw_value, var_of
 from mirage.shell.array import ShellArray, array_get
 from mirage.shell.bytes import join_bytes
 from mirage.shell.call_stack import CallStack
-from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellValue, VarAttr
 from mirage.view.types import SessionView
 from mirage.workspace.session.budget import (
@@ -304,20 +303,6 @@ async def subscript_index(session: SessionState, subscript: str) -> int:
     if plain is not None:
         return plain
     return run_write(session, lambda shell: shell.index(subscript))
-
-
-async def fatal_subscript_index(session: SessionState, subscript: str) -> int:
-    """``subscript_index`` whose failure ends the line, in bash's words:
-    ``unset 'a[1/0]'`` aborts with ``1/0: division by 0``.
-
-    Args:
-        session (SessionState): the session the subscript reads.
-        subscript (str): the raw subscript text.
-    """
-    try:
-        return await subscript_index(session, subscript)
-    except ArithError as exc:
-        raise exc.signal(fatal=True) from exc
 
 
 async def session_arith(

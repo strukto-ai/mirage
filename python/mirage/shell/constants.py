@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from collections.abc import Mapping
 
 from mirage.shell.types import (
@@ -21,8 +20,6 @@ from mirage.shell.types import (
     NodeType,
     ShellBuiltin,
 )
-
-PARAMETER_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-]")
 
 # How deep the shell may re-enter itself: function calls, sourced files, `eval`
 # lines and nested shells (`bash -c`, a script) together. bash limits none of

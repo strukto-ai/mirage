@@ -308,19 +308,6 @@ def scan_values(
     )
 
 
-def indicator_flag(fl: FlagView) -> LsIndicator:
-    """The indicator style a line asks for.
-
-    The last of ``-F``/``--classify[=WHEN]``, ``-p``, ``--file-type`` and
-    ``--indicator-style`` wins, and every one is checked on the way, as
-    GNU checks each value while it reads the options (coreutils 9.7).
-
-    Args:
-        fl (FlagView): the ls flag view.
-    """
-    return scan_values(fl, _INDICATOR_DESTS).indicator
-
-
 def link_mode(fl: FlagView, values: LsValues | None = None) -> LsLinkMode:
     """Which command-line links ls resolves before it lists them.
 

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from enum import Enum
 
 
@@ -36,10 +35,6 @@ FILE_HEADER_BYTES = 512
 # Unicode decimal digits.
 UINTMAX = 2**64 - 1
 
-# gnulib appends `strerror(EOVERFLOW)` when a value did not fit the type
-# it was scanned into. Measured under LC_ALL=C on glibc; the string here
-# most likely to read differently under another libc or locale.
-EOVERFLOW_TEXT = "Value too large for defined data type"
 
 # The bytes C `isspace` accepts, which every gnulib scanner skips before
 # the sign. Spelled out rather than written `\s`: python's `\s` also
@@ -47,13 +42,6 @@ EOVERFLOW_TEXT = "Value too large for defined data type"
 # refuses both, so a shorthand would accept more than the C library does.
 C_SPACE = r"[ \t\n\v\f\r]*"
 
-# strtoumax base 0: after the whitespace and sign above, 0x… is hex, a leading
-# 0 is octal, else decimal; the unconsumed remainder is the suffix. The sign
-# stays outside group 1 so the radix is picked from the digits alone
-# (`-N +0x10` is hex, `-N +010` is octal).
-SUFFIXED_COUNT_PATTERN = re.compile(
-    rf"^{C_SPACE}\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)(.*)$"
-)
 
 # gzip 1.13's file naming. The suffix gzip writes and looks for unless -S
 # names another; the suffixes it always recognizes on a name it

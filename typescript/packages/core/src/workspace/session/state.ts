@@ -21,7 +21,6 @@ import type { Item, Outcome, Shell } from '../../rs/shell.ts'
 import { arrayGet, ShellArray } from '../../shell/array.ts'
 import { joinBytes } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
-import { ArithError } from '../../shell/errors.ts'
 import type { ShellValue, VarAttr } from '../../shell/variable.ts'
 import type { SessionView } from '../../view/types.ts'
 import {
@@ -242,23 +241,6 @@ export async function subscriptIndex(session: SessionState, subscript: string): 
   const plain = session.vars.shell.plainIndex(subscript)
   if (plain !== null) return plain
   return runWrite(session, (shell) => shell.index(subscript))
-}
-
-/**
- * `subscriptIndex` whose failure ends the line, in bash's words: `unset
- * 'a[1/0]'` aborts with `1/0: division by 0`. Mirrors Python's
- * fatal_subscript_index.
- */
-export async function fatalSubscriptIndex(
-  session: SessionState,
-  subscript: string,
-): Promise<bigint> {
-  try {
-    return await subscriptIndex(session, subscript)
-  } catch (err) {
-    if (err instanceof ArithError) throw err.signal('', true)
-    throw err
-  }
 }
 
 /**
