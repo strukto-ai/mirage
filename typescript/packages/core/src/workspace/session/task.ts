@@ -192,6 +192,7 @@ export async function drive(
     let answer = (): void => {
       task.answerFailed()
     }
+    let heard: boolean | null = null
     try {
       switch (ask[0]) {
         case 'substitute': {
@@ -244,6 +245,9 @@ export async function drive(
             task.answerResumed()
           }
       }
+      // Asked while the lent copy stands in for the session, so a policy
+      // reading the session to answer finds one to read.
+      heard = await host.listens()
     } catch (err) {
       failure = err
       failed = true
@@ -255,7 +259,7 @@ export async function drive(
     // write the task lands shares its records with none and copies nothing;
     // a policy added while the host answered hears what comes next.
     try {
-      task.listen(await host.listens())
+      if (heard !== null) task.listen(heard)
       answer()
     } catch (err) {
       failure = err

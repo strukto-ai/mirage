@@ -15,6 +15,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import type { Action, Policy, SessionContext } from '../../policy/index.ts'
+import { SESSION_SCOPED } from '../../policy/mixin.ts'
+import type { PolicyMethod } from '../../policy/types.ts'
 import { ShellTask } from '../../rs/shell.ts'
 import { DEFAULT_VISIBILITY } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -101,6 +103,30 @@ describe('drive', () => {
       const result = await ws.shell('echo "${Y-unset}"')
       expect(added).toBe(true)
       expect(DEC.decode(result.stdout)).toBe('unset\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('lets a policy read the session while a task waits', async () => {
+    const ws = new Workspace({}, { maxEnv: null })
+    const session = ws.getSession(ws.defaultSessionId)
+    const flagged = {
+      [SESSION_SCOPED]: true as const,
+      wantsFor(_method: PolicyMethod, sessionId: string): Promise<boolean> {
+        return Promise.resolve(ws.getSession(sessionId).env.FLAG === 'on')
+      },
+      preSession(): Action | null {
+        return null
+      },
+    }
+    ws.registry.policies.add(flagged)
+    try {
+      await ws.shell('shopt -s extglob')
+      seedVar(session, 'X', 'a'.repeat(50_000))
+      const result = await ws.shell(': "${Y:=${X//+(?)/x}}"; echo "${#Y}"')
+      expect(DEC.decode(result.stderr)).toBe('')
+      expect(DEC.decode(result.stdout)).toBe('1\n')
     } finally {
       await ws.close()
     }

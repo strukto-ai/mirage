@@ -245,6 +245,7 @@ async def drive(
             ask[-1] if ask[0] in ("gate", "pause") else ask[1].fork()
         )
         answer: Callable[[], None] = task.answer_failed
+        heard: bool | None = None
         try:
             match ask:
                 case ("substitute", _, body, node, span, read):
@@ -267,6 +268,9 @@ async def drive(
                 case ("pause", _):
                     await task_turn()
                     answer = task.answer_resumed
+            # Asked while the lent copy stands in for the session, so a
+            # policy reading the session to answer finds one to read.
+            heard = await host.listens()
         except BaseException as exc:
             failure = exc
             answer = task.answer_failed
@@ -277,7 +281,8 @@ async def drive(
         # a policy added while the host answered hears what comes next.
         del ask
         try:
-            task.listen(await host.listens())
+            if heard is not None:
+                task.listen(heard)
             answer()
         except BaseException as exc:
             failure = exc

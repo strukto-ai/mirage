@@ -17,6 +17,7 @@ import asyncio
 import pytest
 
 from mirage.policy import Policy
+from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import Deny, SessionContext
 from mirage.types import HiddenVars, Visibility
 from mirage.workspace import Workspace
@@ -114,5 +115,31 @@ async def test_a_policy_added_mid_task_hears_the_writes_after_it(monkeypatch):
         result = await ws.shell('echo "${Y-unset}"')
         assert added
         assert await result.stdout_str() == "unset\n"
+    finally:
+        await ws.close()
+
+
+class _FlaggedSessions(Policy, SessionScopedMixin):
+    def __init__(self, ws: Workspace) -> None:
+        self.ws = ws
+
+    async def wants_for(self, method: str, session_id: str) -> bool:
+        return self.ws.get_session(session_id).env.get("FLAG") == "on"
+
+    async def pre_session(self, ctx: SessionContext) -> Deny | None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_policy_reads_the_session_while_a_task_waits():
+    ws = Workspace({}, max_env=None)
+    ws.registry.policies.add(_FlaggedSessions(ws))
+    session = ws.get_session(ws.default_session_id)
+    try:
+        await ws.shell("shopt -s extglob")
+        seed_var(session, "X", "a" * 50_000)
+        result = await ws.shell(': "${Y:=${X//+(?)/x}}"; echo "${#Y}"')
+        assert await result.stderr_str() == ""
+        assert await result.stdout_str() == "1\n"
     finally:
         await ws.close()
