@@ -33,6 +33,7 @@ from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.context.session_context import current_caller, with_caller
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
 from mirage.utils.path import gnu_basename
@@ -139,7 +140,7 @@ async def run_ls(
             readdir,
             stat_fn,
         )
-    return await generic_ls(
+    out, io = await generic_ls(
         flat_scopes(scopes),
         readdir=readdir,
         stat=stat_fn,
@@ -151,3 +152,8 @@ async def run_ls(
             None if session_view is None else session_view.snapshot(),
         ),
     )
+    if isinstance(out, bytes):
+        return out, io
+    # A listing that streams keeps this line's caller for its walk, however
+    # late its reader pulls it.
+    return with_caller(out, current_caller()), io

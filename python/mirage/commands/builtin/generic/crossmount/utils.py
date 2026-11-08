@@ -16,7 +16,7 @@ import asyncio
 import dataclasses
 import functools
 from collections import deque
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
 from typing import Any
 
@@ -43,6 +43,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
+from mirage.context.session_context import current_caller, with_caller
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eisdir
 from mirage.errors.render import fs_error_line
@@ -54,7 +55,7 @@ from mirage.io.stream import (
     ensure_stream,
     materialize,
 )
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, PathRecord
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, PathSpec, PrimitiveCopy
@@ -121,6 +122,34 @@ async def _relay_copy(
     await dispatched_call(dispatch, "copy", src, dst=dst)
 
 
+async def operand_output(
+    cmd_name: str, scope: PathSpec, out: ByteSource | None, io: IOResult
+) -> AsyncGenerator[bytes, None]:
+    """One operand's run output, a bounded chunk at a time.
+
+    A lazy stream can fail on first pull (head/tail opening the operand
+    mid-drain); that is reported on the run as the native run would
+    report it, and the remaining operands go on.
+
+    Args:
+        cmd_name (str): the command the run ran.
+        scope (PathSpec): its operand.
+        out (ByteSource | None): its output.
+        io (IOResult): its result, amended when the output fails.
+    """
+    try:
+        async with aclosing(byte_chunks(out or b"")) as source:
+            async for data in source:
+                yield data
+    except FS_ERRORS as exc:
+        existing = await materialize(io.stderr)
+        io.stderr = existing + encode_text(fs_error_line(cmd_name, scope, exc))
+        # The command's own code for a failed read, not the catch-all: a
+        # lazy operand that fails here is the same failure the single-mount
+        # run reports eagerly, and it must answer the same number.
+        io.exit_code = read_fail_exit_code(cmd_name, exc)
+
+
 async def run_operands(
     run_single: RunSingle,
     cmd_name: str,
@@ -144,23 +173,9 @@ async def run_operands(
     results: list[OperandRun] = []
     for scope in scopes:
         out, io = await run_single(cmd_name, [scope], texts, flag_kwargs)
-        chunks: list[bytes] = []
-        try:
-            async for chunk in ensure_stream(out or b""):
-                chunks.append(chunk)
-        except FS_ERRORS as exc:
-            # A lazy stream can fail on first pull (head/tail opening the
-            # operand mid-drain); report it like the native run would and
-            # keep the remaining operands, GNU-style.
-            existing = await materialize(io.stderr) if io.stderr else b""
-            io.stderr = existing + encode_text(
-                fs_error_line(cmd_name, scope, exc)
-            )
-            # The command's own code for a failed read, not the catch-all:
-            # a lazy operand that fails here is the same failure the
-            # single-mount run reports eagerly, and it must answer the
-            # same number.
-            io.exit_code = read_fail_exit_code(cmd_name, exc)
+        chunks = [
+            chunk async for chunk in operand_output(cmd_name, scope, out, io)
+        ]
         results.append(OperandRun(scope, b"".join(chunks), io))
     return results
 
@@ -287,7 +302,9 @@ async def stream_operands(
     Closing or cancelling the consumer cancels preparations and discards every
     opened stream, including one that finished preparing during cancellation.
     The returned result settles as the stream drains, as any lazy command's
-    does: its exit code is final once the stream is exhausted.
+    does: its exit code is final once the stream is exhausted, and the runs'
+    records (find's matches) join, in operand order, once the last has
+    drained.
 
     Args:
         run_single (RunSingle): Executor-injected single-mount runner.
@@ -304,6 +321,7 @@ async def stream_operands(
         pending: deque[tuple[PathSpec, asyncio.Task[CrossResult]]] = deque()
         operands = iter(scopes)
         printed = False
+        records: list[list[PathRecord] | None] = []
 
         async def execute(scope: PathSpec) -> CrossResult:
             return await run_single(cmd_name, [scope], texts, flags)
@@ -327,9 +345,12 @@ async def stream_operands(
             while pending:
                 scope, task = pending[0]
                 out, branch = await task
+                pending.popleft()
                 first = True
                 try:
-                    async with aclosing(byte_chunks(out or b"")) as source:
+                    async with aclosing(
+                        operand_output(cmd_name, scope, out, branch)
+                    ) as source:
                         async for data in source:
                             if not data:
                                 continue
@@ -338,20 +359,26 @@ async def stream_operands(
                             first = False
                             printed = True
                             yield data
-                except FS_ERRORS as exc:
-                    existing = await materialize(branch.stderr)
-                    branch.stderr = existing + encode_text(
-                        fs_error_line(cmd_name, scope, exc)
-                    )
-                    branch.exit_code = read_fail_exit_code(cmd_name, exc)
-                io.stderr = await materialize(io.stderr) + await materialize(
-                    branch.stderr
-                )
-                io.exit_code = max(io.exit_code, branch.exit_code)
-                if branch.refusal is not None:
-                    io.refusal = branch.refusal
-                pending.popleft()
+                finally:
+                    # Merged even when the reader stops inside this run, so
+                    # what the run reported is not lost.
+                    io.stderr = await materialize(
+                        io.stderr
+                    ) + await materialize(branch.stderr)
+                    io.exit_code = max(io.exit_code, branch.exit_code)
+                    if branch.refusal is not None:
+                        io.refusal = branch.refusal
+                    records.append(branch.records)
                 start()
+            io.records = (
+                [
+                    dataclasses.replace(record, run=position)
+                    for position, found in enumerate(records)
+                    for record in found or []
+                ]
+                if all(found is not None for found in records)
+                else None
+            )
         finally:
             for _, task in pending:
                 if not task.done():
@@ -364,4 +391,4 @@ async def stream_operands(
                     out, branch = result
                     await discard_streams(out, branch.stderr)
 
-    return stream(), io
+    return with_caller(stream(), current_caller()), io

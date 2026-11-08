@@ -25,9 +25,13 @@ from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
 
+# Read bytes past which a mostly read buffer keeps only what is left.
+RELEASE = 1 << 16
 
-def char_width(data: bytes) -> int:
-    """How many bytes ``data``'s first character spans, decoded as UTF-8.
+
+def char_width(data: bytes | bytearray, at: int = 0) -> int:
+    """How many bytes the character at ``at`` in ``data`` spans, decoded
+    as UTF-8.
 
     Always at least one and never more than what is there, so a caller
     stepping by this never splits a character and never stalls. Bytes
@@ -37,16 +41,19 @@ def char_width(data: bytes) -> int:
     byte that cannot continue it.
 
     Args:
-        data (bytes): the buffer, at least one byte.
+        data (bytes | bytearray): the buffer, at least one byte past
+            ``at``.
+        at (int): where the character starts.
     """
-    lead = data[0]
+    lead = data[at]
     if lead < 0xC2 or lead >= 0xF5:
         return 1
     width = 2 if lead < 0xE0 else 3 if lead < 0xF0 else 4
-    for i in range(1, min(width, len(data))):
-        if not 0x80 <= data[i] < 0xC0:
+    limit = min(width, len(data) - at)
+    for i in range(1, limit):
+        if not 0x80 <= data[at + i] < 0xC0:
             return i
-    return min(width, len(data))
+    return limit
 
 
 class PipeInput:
@@ -88,7 +95,10 @@ class AsyncLineIterator:
             source if isinstance(source, PipeInput) else chunks(source)
         )
         self._budget = YieldBudget()
-        self._buf = b""
+        # What was pulled and not yet read is ``_buf[_pos:]``: a read moves
+        # the offset, so a line never copies the rest of its chunk.
+        self._buf = bytearray()
+        self._pos = 0
         self._loaded = 0
         self._exhausted = False
         self.holders = 0
@@ -98,11 +108,29 @@ class AsyncLineIterator:
 
     @property
     def position(self) -> int:
-        return self._loaded - len(self._buf)
+        return self._loaded - (len(self._buf) - self._pos)
 
     def unread(self, data: bytes) -> None:
         """Return a lookahead suffix to a seekable descriptor."""
-        self._buf = data + self._buf
+        self._buf[: self._pos] = data
+        self._pos = 0
+
+    def _trim(self) -> None:
+        """Let go of what reads have consumed once it is most of a large
+        buffer, so a kept descriptor does not hold a loaded rest it read."""
+        if self._pos >= len(self._buf):
+            self._buf, self._pos = bytearray(), 0
+        elif self._pos >= RELEASE and self._pos * 2 >= len(self._buf):
+            del self._buf[: self._pos]
+            self._pos = 0
+
+    def _append(self, chunk: bytes) -> None:
+        """Put a pulled chunk after what is still unread, dropping what was
+        read once it is most of the buffer, so appends stay linear."""
+        if self._pos * 2 >= len(self._buf):
+            del self._buf[: self._pos]
+            self._pos = 0
+        self._buf += chunk
 
     @property
     def loaded(self) -> int:
@@ -163,32 +191,33 @@ class AsyncLineIterator:
         """
         if not delim:
             raise ValueError("empty separator")
-        parts: list[bytes] = []
+        parts: list[bytes | bytearray] = []
         held = 0
         try:
             await self._budget.run()
             while True:
-                index = self._buf.find(delim)
+                index = self._buf.find(delim, self._pos)
                 if index >= 0:
-                    check_memory(held + index)
-                    parts.append(self._buf[:index])
-                    self._buf = self._buf[index + len(delim) :]
+                    check_memory(held + index - self._pos)
+                    parts.append(self._buf[self._pos : index])
+                    self._pos = index + len(delim)
+                    self._trim()
                     return b"".join(parts), True
                 if self._exhausted:
-                    check_memory(held + len(self._buf))
-                    parts.append(self._buf)
-                    self._buf = b""
+                    rest = self._buf[self._pos :]
+                    check_memory(held + len(rest))
+                    parts.append(rest)
+                    self._buf, self._pos = bytearray(), 0
                     return b"".join(parts), False
                 # Retain a possible delimiter prefix across source chunks.
-                keep = min(len(delim) - 1, len(self._buf))
+                keep = min(len(delim) - 1, len(self._buf) - self._pos)
                 split = len(self._buf) - keep
-                parts.append(self._buf[:split])
-                held += split
+                parts.append(self._buf[self._pos : split])
+                held += split - self._pos
                 check_memory(held)
-                self._buf = self._buf[split:]
+                self._pos = split
                 try:
-                    chunk = await self._next_chunk()
-                    self._buf += chunk
+                    self._append(await self._next_chunk())
                 except StopAsyncIteration:
                     self._exhausted = True
         except BaseException as exc:
@@ -207,7 +236,8 @@ class AsyncLineIterator:
         if isinstance(self._source, PipeInput) and isinstance(
             exc, asyncio.CancelledError
         ):
-            self._buf = taken + self._buf
+            self._buf[: self._pos] = taken
+            self._pos = 0
             return
         await self.discard()
 
@@ -220,13 +250,12 @@ class AsyncLineIterator:
         Returns:
             bool: False at end of input.
         """
-        while not self._buf:
+        while self._pos >= len(self._buf):
             if self._exhausted:
                 return False
             try:
                 await self._budget.run()
-                chunk = await self._next_chunk()
-                self._buf += chunk
+                self._append(await self._next_chunk())
             except StopAsyncIteration:
                 self._exhausted = True
             except BaseException as exc:
@@ -241,19 +270,19 @@ class AsyncLineIterator:
             bytes | None: the bytes, or None at end of input.
         """
         try:
-            while not self._buf:
+            while self._pos >= len(self._buf):
                 if self._exhausted:
                     return None
                 await self._budget.run()
-                chunk = await self._next_chunk()
-                self._buf += chunk
+                self._append(await self._next_chunk())
         except StopAsyncIteration:
             self._exhausted = True
             return None
         except BaseException as exc:
             await self._failed(exc)
             raise
-        data, self._buf = self._buf, b""
+        data = bytes(memoryview(self._buf)[self._pos :])
+        self._buf, self._pos = bytearray(), 0
         return data
 
     async def read1(self, size: int) -> bytes:
@@ -278,7 +307,7 @@ class AsyncLineIterator:
         line abandoned. A pull in flight keeps the source until it
         settles and closes it then; a close already running is left to
         finish."""
-        self._buf = b""
+        self._buf, self._pos = bytearray(), 0
         self._exhausted = True
         if self._pull_lock.locked():
             self._closing = True
@@ -315,19 +344,21 @@ class AsyncLineIterator:
 
     async def load_rest(self) -> None:
         """Read what the source has left into the buffer, for a descriptor
-        that outlives its pipe: reads go on from memory."""
+        that outlives its pipe: reads go on from memory. Each chunk lands
+        as it arrives, so a reader of the same pipe never waits on the
+        rest."""
         while not self._exhausted:
             try:
                 await self._budget.run()
                 chunk = await self._next_chunk()
-                check_memory(len(self._buf) + len(chunk))
+                check_memory(len(self._buf) - self._pos + len(chunk))
             except StopAsyncIteration:
                 self._exhausted = True
             except BaseException as exc:
                 await self._failed(exc)
                 raise
             else:
-                self._buf += chunk
+                self._append(chunk)
 
     async def read_chars(
         self, count: int, delim: bytes | None
@@ -367,24 +398,28 @@ class AsyncLineIterator:
                 # One pull can split a character or a multibyte delimiter
                 # across chunks, so top the buffer up to the widest either
                 # could be before reading its first byte as a whole one.
-                if len(self._buf) < need and not self._exhausted:
+                if len(self._buf) - self._pos < need and not self._exhausted:
                     try:
-                        chunk = await self._next_chunk()
-                        self._buf += chunk
+                        self._append(await self._next_chunk())
                     except StopAsyncIteration:
                         self._exhausted = True
                     continue
-                if not self._buf:
+                if self._pos >= len(self._buf):
+                    self._trim()
                     return bytes(out), False
-                if delim is not None and self._buf.startswith(delim):
-                    self._buf = self._buf[len(delim) :]
+                if delim is not None and self._buf.startswith(
+                    delim, self._pos
+                ):
+                    self._pos += len(delim)
+                    self._trim()
                     return bytes(out), True
-                width = char_width(self._buf)
+                width = char_width(self._buf, self._pos)
                 if room is not None and len(out) + width > room:
                     raise MemoryExhausted()
-                out += self._buf[:width]
-                self._buf = self._buf[width:]
+                out += self._buf[self._pos : self._pos + width]
+                self._pos += width
                 taken += 1
+            self._trim()
             return bytes(out), True
         except BaseException as exc:
             await self._failed(exc, bytes(out))

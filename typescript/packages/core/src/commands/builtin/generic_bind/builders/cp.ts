@@ -17,6 +17,7 @@ import type { FileStat, NativeCopy, PathSpec, PrimitiveCopy } from '../../../../
 import { treeWalk } from '../../utils/tree.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { stripSlash } from '../../../../utils/slash.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 import { cpGeneric, facts, parseFlags } from '../../generic/cp.ts'
 import { serves, typedLink, linksOf, mountsOf, dispatchOf, mountRoot } from '../../utils/links.ts'
 import type { GenericCommand } from '../adapter.ts'
@@ -65,13 +66,16 @@ export const BUILDER: GenericCommand = {
     )
     const findFn: NativeCopy['find'] = async (src, options) => {
       const refused: string[] = []
-      const found = await walkFind(
+      const found: string[] = []
+      for await (const row of walkFind(
         src,
         { readdir, stat, ...(options.unreadable === undefined ? {} : { unreadable: refused }) },
         { type: options.type },
-      )
+      )) {
+        found.push(row)
+      }
       options.unreadable?.push(...refused.map((path) => `/${stripSlash(path)}`))
-      return found
+      return found.sort(compareCodePoints)
     }
     const parsed = parseFlags(new FlagView(ctx.flags, specOf('cp')))
     // A native copy moves a tree in one backend call and readTree lists

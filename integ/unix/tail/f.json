@@ -505,6 +505,47 @@
       ]
     },
     {
+      "id": "tail_f_first_print_counts_from_the_start_or_the_end_then_follows",
+      "seq": 15400020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\nc\\n' > /data/fcD_S; tail -f -s 0.1 -n +2 /data/fcD_S | { head -n 2; printf 'd\\n' >> /data/fcD_S; head -n 1; }; tail -f -s 0.1 -c 4 /data/fcD_S | { head -c 4; printf 'e\\n' >> /data/fcD_S; head -c 2; }; echo rc=$?; rm -f /data/fcD_S",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\nc\nd\nc\nd\ne\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f",
+        "s",
+        "n",
+        "c"
+      ]
+    },
+    {
       "id": "tail_f_reads_a_piped_dash_operand_once",
       "seq": 15400011,
       "targets": [

@@ -19,7 +19,8 @@ import {
 } from '../../../../commands/builtin/utils/paths.ts'
 import { effectivePathMode, sessionAccess } from '../../../../context/session_context.ts'
 import { isEfbig, isRefusal } from '../../../../errors/fs.ts'
-import { materialize, type ByteSource } from '../../../../io/types.ts'
+import { readPrefix } from '../../../../io/cooperative.ts'
+import type { ByteSource } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { SET_OPTION_DEFAULTS, SET_OPTION_NAMES } from '../../../../shell/constants.ts'
 import { ArithError } from '../../../../shell/errors.ts'
@@ -184,18 +185,17 @@ export async function applyUnary(
       if (kind !== 'file' || stat === null) return false
       if (stat.size !== null) return stat.size > 0
       // API backends (dropbox, gdrive, box) stat freshly written empty
-      // files as size-unknown; only a read can answer, and the
-      // prefetch TTL cache keeps repeat tests cheap.
-      let data: unknown
+      // files as size-unknown; only a read can answer, and its first
+      // byte does.
       try {
-        data = (await ctx.dispatch('read', operandScope(ctx, val)))[0]
+        const [data] = await ctx.dispatch('read', operandScope(ctx, val), [], { stream: true })
+        return (await readPrefix((data as ByteSource | null) ?? new Uint8Array(), 1)).length > 0
       } catch (err) {
         // a file its mount refuses to render whole (an airtable table past
         // maxReadRecords) is certainly not empty
         if (isEfbig(err)) return true
         throw err
       }
-      return (await materialize(data as ByteSource | null)).length > 0
     }
     if (op === '-r') {
       // Mirage has no per-user access model: whatever exists in a

@@ -24,7 +24,7 @@ from mirage.context.session_context import (
     session_access,
 )
 from mirage.errors.types import FileTooLargeError
-from mirage.io.types import materialize
+from mirage.io.cooperative import read_prefix
 from mirage.policy import PolicyDenied
 from mirage.shell.constants import SET_OPTION_DEFAULTS, SET_OPTION_NAMES
 from mirage.shell.errors import ArithError
@@ -236,14 +236,16 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
                 return stat.size > 0
             # API backends (dropbox, gdrive, box) stat freshly written
             # empty files as size-unknown; only a read can answer, and
-            # the prefetch TTL cache keeps repeat tests cheap.
+            # its first byte does.
             try:
-                data, _ = await ctx.dispatch("read", operand_scope(ctx, val))
+                data, _ = await ctx.dispatch(
+                    "read", operand_scope(ctx, val), stream=True
+                )
+                return len(await read_prefix(data, 1)) > 0
             except FileTooLargeError:
                 # a file its mount refuses to render whole (an airtable
                 # table past max_read_records) is certainly not empty
                 return True
-            return len(await materialize(data)) > 0
         if op == "-r":
             # Mirage has no per-user access model: whatever exists in a
             # mount is readable through it.

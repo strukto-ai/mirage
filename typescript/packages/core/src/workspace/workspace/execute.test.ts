@@ -14,7 +14,7 @@
 import { CLIHandler } from '../../commands/cli/types.ts'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CLI } from '../../commands/cli/types.ts'
+import { CLI, type CLIVerbFn } from '../../commands/cli/types.ts'
 import { Command } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
@@ -408,6 +408,111 @@ describe('same-session lines run one at a time', () => {
     await ws.shell('echo "echo deep" > /ram/f.sh')
     const io = await ws.shell('eval "source /ram/f.sh"; echo $(echo sub)')
     expect(stdoutStr(io)).toBe('deep\nsub\n')
+  })
+
+  it('a line saves its session once, at its end', async () => {
+    const ws = makeWs()
+    await ws.shell('x=0')
+    const casSet = vi.spyOn(ws.stateStore.sessions(ws.workspaceId), 'casSet')
+    await ws.shell("for i in 1 2 3; do x=$(echo $i); eval 'y=$x'; done")
+    expect(casSet).toHaveBeenCalledTimes(1)
+    expect(casSet.mock.calls[0]?.[1].env).toMatchObject({ x: '3', y: '3' })
+  })
+
+  it('a line that outlives its caller saves its session', async () => {
+    const ws = makeWs()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const later: Promise<unknown>[] = []
+    ws.registerCli(
+      'spawn',
+      new CLI({
+        spec: new CommandSpec({ name: 'spawn' }),
+        handlers: {
+          '': new CLIHandler({
+            fn: () => {
+              later.push(gate.then(() => ws.shell('X=late', { record: false })))
+              return null
+            },
+          }),
+        },
+      }),
+    )
+    await ws.shell('spawn')
+    release()
+    await later[0]
+    const saved = await ws.stateStore.sessions(ws.workspaceId).load()
+    expect(saved.get(ws.defaultSessionId)?.env).toMatchObject({ X: 'late' })
+  })
+
+  it('a task a substitution left runs in a subshell', async () => {
+    const ws = makeWs()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const later: Promise<{ stdout: Uint8Array }>[] = []
+    const handlers: Record<string, CLIVerbFn> = {
+      spawn: () => {
+        const line = 'echo "v=$V"; J=joined; echo "j=$J"; echo late & wait'
+        later.push(gate.then(() => ws.shell(line, { record: false })))
+        return null
+      },
+      await_late: async () => {
+        release()
+        return [(await later[0])?.stdout ?? new Uint8Array(), new IOResult()]
+      },
+    }
+    for (const [name, fn] of Object.entries(handlers)) {
+      ws.registerCli(
+        name,
+        new CLI({ spec: new CommandSpec({ name }), handlers: { '': new CLIHandler({ fn }) } }),
+      )
+    }
+    ws.createSession('s')
+    await ws.shell('V=outer', { sessionId: 's' })
+    const io = await ws.shell('echo $(spawn); await_late; echo "J=$J"', { sessionId: 's' })
+    expect(stdoutStr(io)).toBe('\nv=outer\nj=joined\nlate\nJ=\n')
+  })
+
+  it("a subshell task leaves the session jobs' output alone", async () => {
+    const ws = makeWs()
+    let release!: () => void
+    let resume!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const hold = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    const later: Promise<{ stdout: Uint8Array }>[] = []
+    const handlers: Record<string, CLIVerbFn> = {
+      spawn: () => {
+        later.push(gate.then(() => ws.shell('release; sleep 0.2; echo cb', { record: false })))
+        return null
+      },
+      held: async () => {
+        await hold
+        return null
+      },
+      release: () => {
+        resume()
+        return null
+      },
+    }
+    for (const [name, fn] of Object.entries(handlers)) {
+      ws.registerCli(
+        name,
+        new CLI({ spec: new CommandSpec({ name }), handlers: { '': new CLIHandler({ fn }) } }),
+      )
+    }
+    await ws.shell('{ held; echo job; } &')
+    await ws.shell('echo $(spawn)')
+    release()
+    expect(new TextDecoder().decode((await later[0])?.stdout)).toBe('cb\n')
+    expect(stdoutStr(await ws.shell('echo next'))).toBe('job\nnext\n')
   })
 
   it('a host callback re-entering its own session runs inline', async () => {

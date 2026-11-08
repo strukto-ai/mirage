@@ -218,7 +218,7 @@ async def _finish_find(
     session = context.session
     stdout, action_err, action_exit = await _apply_find_actions(
         stdout,
-        io.records,
+        io,
         expr,
         registry,
         session.cwd,

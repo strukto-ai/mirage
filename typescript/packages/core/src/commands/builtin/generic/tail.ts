@@ -164,18 +164,44 @@ async function pause(seconds: number, signal: AbortSignal | undefined): Promise<
   })
 }
 
+// What a size-unknown file gained past `pos`, read from there, and where
+// the next poll starts. A read that finds nothing at a position the file no
+// longer reaches, its byte before `pos` gone too, means it was truncated,
+// which is noted and read from the start. Mirrors Python's `_gained`.
+async function gained(
+  readRange: ReadStreamFn<[PathSpec, number, number | null]>,
+  io: IOResult,
+  p: PathSpec,
+  pos: number,
+): Promise<[Uint8Array, number]> {
+  let start = pos
+  let data = await materialize(readRange(p, start, null))
+  if (
+    data.byteLength === 0 &&
+    start > 0 &&
+    (await materialize(readRange(p, start - 1, 1))).byteLength === 0
+  ) {
+    note(io, `tail: ${p.rawPath}: file truncated\n`)
+    start = 0
+    data = await materialize(readRange(p, 0, null))
+  }
+  return [data, start + data.byteLength]
+}
+
 // What a followed file gained past `pos`, and where the next poll
-// starts: a size-unknown file is read whole and measured, and a file
+// starts: a size-unknown file is read from `pos` where the backend reads
+// windows (`gained`) and otherwise read whole and measured, and a file
 // shorter than `pos` was truncated, which is noted and read from the
 // start.
 async function catchUp(
   stream: ReadStreamFn,
-  readRange: ReadStreamFn<[PathSpec, number, number]> | null,
+  readRange: ReadStreamFn<[PathSpec, number, number | null]> | null,
   io: IOResult,
   p: PathSpec,
   size: number | null,
   pos: number,
 ): Promise<[Uint8Array, number]> {
+  if (size === null && readRange !== null) return gained(readRange, io, p, pos)
   let whole: Uint8Array | null = null
   let length = size
   if (length === null) {
@@ -221,7 +247,7 @@ async function* polledWindow(
 }
 
 async function* tailRange(
-  read: ReadStreamFn<[PathSpec, number, number]>,
+  read: ReadStreamFn<[PathSpec, number, number | null]>,
   path: PathSpec,
   offset: number,
   end: number,
@@ -238,9 +264,10 @@ async function* tailFile(
   path: PathSpec,
   read: ReadStreamFn,
   stat: StatFn,
-  readRange: ReadStreamFn<[PathSpec, number, number]> | null,
+  readRange: ReadStreamFn<[PathSpec, number, number | null]> | null,
   lastLines: ((p: PathSpec, n: number) => Promise<Uint8Array | null>) | undefined,
   counts: TailCounts,
+  box?: { end: number },
 ): AsyncGenerator<Uint8Array> {
   const n = counts.lines ?? 10
   const fromEnd = counts.fromLine === null && counts.fromByte === null
@@ -256,6 +283,7 @@ async function* tailFile(
       const info = await stat(path)
       if (info.type === FileType.FILE && info.size !== null && info.size > 0) {
         const size = info.size
+        if (box !== undefined) box.end = size
         if (counts.byteCount !== null) {
           const offset = Math.max(0, size - Math.abs(counts.byteCount))
           yield* tailRange(readRange, path, offset, size)
@@ -308,7 +336,24 @@ async function* tailFile(
       }
     }
   }
-  yield* tail(read(path), counts)
+  if (box !== undefined && fromEnd && Math.abs(counts.byteCount ?? n) === 0) {
+    // Nothing to print, but the follow starts at the file's end.
+    for await (const chunk of counted(read(path), box)) void chunk
+    return
+  }
+  yield* tail(box === undefined ? read(path) : counted(read(path), box), counts)
+}
+
+// A source passed through, with how many bytes it gave left in `box`.
+async function* counted(
+  source: AsyncIterable<Uint8Array>,
+  box: { end: number },
+): AsyncIterable<Uint8Array> {
+  box.end = 0
+  for await (const chunk of source) {
+    box.end += chunk.byteLength
+    yield chunk
+  }
 }
 
 async function* tail(source: ByteSource, rawCounts: TailCounts): AsyncIterable<Uint8Array> {
@@ -419,7 +464,7 @@ async function* tailMulti(
 
 async function window(
   stream: ReadStreamFn,
-  readRange: ReadStreamFn<[PathSpec, number, number]> | null,
+  readRange: ReadStreamFn<[PathSpec, number, number | null]> | null,
   p: PathSpec,
   offset: number,
   size: number,
@@ -444,11 +489,16 @@ async function window(
 // (`no files remaining`, exit 1), when --pid's process is gone (a poll that
 // finds nothing new looks, and once it is gone one more poll reads what it
 // wrote last), or when the caller's signal fires, which is how `timeout` and
-// a killed job end it. A file whose stat carries no
-// size (a backend that cannot know one without reading reports null,
-// never a guess) is polled by reading it whole every interval and
-// measuring that: one read per poll, rather than a follow that never
-// prints. State is per operand, not per path: `tail -f f f` prints what
+// a killed job end it. The first print is a plain tail's (`tailFile`),
+// printed as it is read, so a count from the end reads only the end where
+// the backend reads windows; the polls go on from where it ended. Its first
+// bytes are the open: a read that fails before them is a failed open, and
+// one that fails later is reported and the file dropped the same way. A file
+// whose stat carries no size (a backend that cannot know one without reading
+// reports null, never a guess) is polled by reading from where the last poll
+// ended, where the backend reads windows, and otherwise by reading it whole
+// every interval and measuring that, rather than a follow that never prints.
+// State is per operand, not per path: `tail -f f f` prints what
 // f gains twice, under a header each time, as GNU does. Standard input is
 // printed once and never followed: POSIX has tail ignore -f on a pipe, and
 // GNU extends that to every `-` operand; a line that named nothing else has
@@ -463,10 +513,10 @@ async function window(
 async function* follow(
   paths: readonly PathSpec[],
   pending: readonly [PathSpec, string][],
-  stream: ReadStreamFn,
+  firstPrint: (p: PathSpec, box: { end: number }) => AsyncGenerator<Uint8Array>,
   pollStream: ReadStreamFn,
   stat: StatFn,
-  readRange: ReadStreamFn<[PathSpec, number, number]> | null,
+  readRange: ReadStreamFn<[PathSpec, number, number | null]> | null,
   counts: TailCounts,
   showHeaders: boolean,
   flags: FollowFlags,
@@ -492,6 +542,11 @@ async function* follow(
     how,
   ])
   let last: number | null = null
+  const lost = async (entry: [number, PathSpec], err: unknown): Promise<void> => {
+    await reportFsError(io, 'tail', entry[1], err)
+    active.splice(active.indexOf(entry), 1)
+    if (flags.retry) waiting.push([entry[0], entry[1], APPEARED])
+  }
   try {
     for (const entry of [...active]) {
       const [slot, p] = entry
@@ -501,7 +556,9 @@ async function* follow(
         active.splice(active.indexOf(entry), 1)
         continue
       }
-      let raw: Uint8Array | null = null
+      const box = { end: 0 }
+      let printed: AsyncGenerator<Uint8Array> | null = null
+      let head: IteratorResult<Uint8Array> | null = null
       try {
         if (
           followOp !== undefined &&
@@ -515,27 +572,43 @@ async function* follow(
           added = await followOp(p, followLines, flags.interval)
         }
         // A follow's stream holds the first print too.
-        if (added === null) raw = await materialize(stream(p))
+        if (added === null) {
+          printed = firstPrint(p, box)
+          head = await printed.next()
+        }
       } catch (err) {
         await closeQuietly(added)
         added = null
+        await printed?.return(undefined)
         if (!isFsError(err)) throw err
         // There is no handle to hold, so this first read is the open: one
         // that fails after the operand's stat passed is GNU's failed open,
         // reported the way the stat's failure would have been, and under
         // --retry waited for like a file that was never there (this is the
         // initial open that a descriptor follow's --retry covers).
-        await reportFsError(io, 'tail', p, err)
-        active.splice(active.indexOf(entry), 1)
-        if (flags.retry) waiting.push([slot, p, APPEARED])
+        await lost(entry, err)
         continue
       }
-      if (showHeaders) yield operandHeader(p, last !== null)
+      const header = showHeaders ? operandHeader(p, last !== null) : null
       last = slot
-      if (raw !== null) {
-        yield* tail(raw, counts)
-        positions.set(slot, raw.byteLength)
+      if (printed === null) {
+        if (header !== null) yield header
+        continue
       }
+      // The header goes out inside the scope that closes the opened read, so
+      // a reader that stops at the header closes it too.
+      try {
+        if (header !== null) yield header
+        if (head !== null && head.done !== true) yield head.value
+        for await (const chunk of printed) yield chunk
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        await lost(entry, err)
+        continue
+      } finally {
+        await printed.return(undefined)
+      }
+      positions.set(slot, box.end)
     }
     if (added !== null) {
       // A stream waits for the next line, so an abort ends the wait rather
@@ -790,7 +863,7 @@ export async function tailGeneric(
   ctx: Context,
   stream: ReadStreamFn,
   stat: StatFn,
-  readRange: ReadStreamFn<[PathSpec, number, number]> | null = null,
+  readRange: ReadStreamFn<[PathSpec, number, number | null]> | null = null,
   lastLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
   followOp?: (
     p: PathSpec,
@@ -885,14 +958,14 @@ export async function tailGeneric(
         : {
             stream: (p: PathSpec) => polledWindow(dispatch, p),
             stat: (p: PathSpec) => polledStat(dispatch, p),
-            readRange: (p: PathSpec, offset: number, size: number) =>
+            readRange: (p: PathSpec, offset: number, size: number | null) =>
               polledWindow(dispatch, p, offset, size),
           }
     return [
       follow(
         opened,
         pending,
-        first,
+        (p, box) => tailFile(p, first, stat, readRange, undefined, counts, box),
         polled.stream,
         polled.stat,
         polled.readRange,

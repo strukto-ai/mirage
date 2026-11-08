@@ -14,10 +14,12 @@
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
 
 import pytest
 
 from mirage.io.async_line_iterator import (
+    RELEASE,
     AsyncLineIterator,
     SharedInput,
     char_width,
@@ -159,6 +161,19 @@ async def test_read_chars_spanning_a_chunk_boundary():
 
 
 @pytest.mark.asyncio
+async def test_reads_of_every_kind_share_one_offset_into_a_chunk():
+    it = AsyncLineIterator(_chunks([b"ab\ncd\xc3\xa9\nrest", b"!\n"]))
+    assert await it.readline() == b"ab"
+    assert await it.read_chars(3, None) == (b"cd\xc3\xa9", True)
+    assert it.position == 7
+    it.unread(b"Z")
+    assert await it.peek()
+    assert await it.read_until(b"\n") == (b"Z", True)
+    assert await it.read_chunk() == b"rest"
+    assert await it.readline() == b"!"
+
+
+@pytest.mark.asyncio
 async def test_read_chars_stops_at_the_delimiter():
     it = AsyncLineIterator(_chunks([b"ab:cd"]))
     data, complete = await it.read_chars(4, b":")
@@ -213,6 +228,26 @@ async def test_load_rest_ends_the_source_and_reads_on_from_memory():
     await lines.load_rest()
     assert ended == [True]
     assert [line async for line in lines] == [b"b", b"c"]
+
+
+@pytest.mark.asyncio
+async def test_a_reader_sees_each_chunk_a_load_takes():
+    marker = asyncio.Event()
+
+    async def source() -> AsyncIterator[bytes]:
+        yield b"a\n"
+        await marker.wait()
+        yield b"b\n"
+
+    reader = AsyncLineIterator(source())
+
+    async def background() -> None:
+        assert await reader.readline() == b"a"
+        marker.set()
+
+    load = asyncio.create_task(reader.load_rest())
+    await asyncio.wait_for(asyncio.gather(load, background()), 1)
+    assert [line async for line in reader] == [b"b"]
 
 
 @pytest.mark.asyncio
@@ -443,3 +478,14 @@ async def test_a_second_discard_during_the_close_leaves_it_to_finish():
     await reader.discard()
     closed.set()
     assert await pending == b"b"
+
+
+@pytest.mark.asyncio
+async def test_a_kept_descriptor_lets_go_of_the_rest_it_read():
+    reader = AsyncLineIterator(_chunks([b"x" * (RELEASE * 2) + b"\nend\n"]))
+    await reader.load_rest()
+    assert await reader.readline() == b"x" * (RELEASE * 2)
+    assert len(reader._buf) - reader._pos == 4
+    assert len(reader._buf) < RELEASE
+    assert await reader.readline() == b"end"
+    assert len(reader._buf) == 0

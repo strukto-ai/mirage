@@ -16,6 +16,7 @@ use crate::vars::{Value, Var};
 pub struct Held {
     shell: Option<Shell>,
     parked: usize,
+    closed: bool,
 }
 
 impl Held {
@@ -23,6 +24,7 @@ impl Held {
         Self {
             shell: Some(shell),
             parked: 0,
+            closed: false,
         }
     }
 
@@ -45,6 +47,19 @@ impl Held {
     /// The shell back from the task that ran on it.
     pub fn give_back(&mut self, shell: Shell) {
         self.shell = Some(shell);
+    }
+
+    /// Drop the shell for good, as its owner ends it: nothing runs on it
+    /// again and it holds no bytes.
+    pub fn close(&mut self) {
+        self.shell = None;
+        self.parked = 0;
+        self.closed = true;
+    }
+
+    /// Whether `close` ended the shell.
+    pub fn closed(&self) -> bool {
+        self.closed
     }
 
     /// The bytes every record holds, names and values; while a task runs,

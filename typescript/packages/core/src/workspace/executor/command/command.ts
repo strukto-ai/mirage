@@ -143,7 +143,7 @@ async function finishFind(
   const session = context.session
   const [newStdout, actionErr, actionExit] = await applyFindActions(
     stdout,
-    io.records,
+    io,
     expr,
     registry,
     session.cwd,

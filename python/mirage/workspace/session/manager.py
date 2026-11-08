@@ -159,6 +159,8 @@ class SessionManager(SessionOwner):
         self._sessions: dict[str, SessionState] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._line_locks: dict[str, asyncio.Lock] = {}
+        # The top-level lines running on each session id.
+        self._running: dict[str, int] = {}
         # What the store last saw from us, per session id. Flush
         # compares against this to skip clean sessions without a
         # network read, and to avoid clobbering other writers.
@@ -485,6 +487,35 @@ class SessionManager(SessionOwner):
             async with lock:
                 if self._sessions.get(session.session_id) is session:
                     await self._flush_one(session)
+
+    def begin_line(self, session_id: str) -> None:
+        """Count a top-level line running on ``session_id``.
+
+        Args:
+            session_id (str): the session the line runs on.
+        """
+        self._running[session_id] = self._running.get(session_id, 0) + 1
+
+    async def end_line(self, session_id: str, top_level: bool) -> None:
+        """Persist a session as a line on it ends. A line run inside a
+        top-level one still running on it (`$( )`, `eval`) leaves that to
+        the top-level line's end, which writes the same record; once no
+        top-level line runs (a host task that outlived its line), the
+        line persists its own write.
+
+        Args:
+            session_id (str): the session the line ran on.
+            top_level (bool): whether ``begin_line`` counted the line.
+        """
+        if top_level:
+            left = self._running[session_id] - 1
+            if left:
+                self._running[session_id] = left
+            else:
+                del self._running[session_id]
+        elif session_id in self._running:
+            return
+        await self.flush(session_id)
 
     async def settle(self) -> None:
         """Wait for admitted session writes before their store closes."""

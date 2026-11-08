@@ -592,6 +592,19 @@ impl Shell {
         Ok(Self::wrap(self.shell()?.subshell()))
     }
 
+    /// Free the shell now rather than when it is collected, so a shell
+    /// that has ended shares its records with no other.
+    fn close(&mut self) {
+        self.0.close();
+        self.1 = None;
+    }
+
+    /// Whether `close` freed the shell.
+    #[getter]
+    fn closed(&self) -> bool {
+        self.0.closed()
+    }
+
     /// Expand `node` as `mode` (`fields`, `text`, `assignment`, `pattern`,
     /// `regex` or `arith`) says.
     fn expand(slf: &Bound<'_, Self>, node: &ShellNode, mode: &str) -> PyResult<ShellTask> {

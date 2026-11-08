@@ -61,8 +61,10 @@ async def run_fanout(
         ):
             flags["verbose"] = True
 
+    # The commands that change a mount run every operand before their
+    # output is read, so a reader that stops early leaves none undone;
+    # the rest stream, find's records joining once the last run drains.
     if cmd_name not in (
-        Cmd.FIND,
         Cmd.RM,
         Cmd.RMDIR,
         Cmd.UNLINK,

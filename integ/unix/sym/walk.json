@@ -281,6 +281,41 @@
       }
     },
     {
+      "id": "sym_ls_RL_names_a_missing_operand_before_what_the_walk_meets",
+      "seq": 17000031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/syw30/d/sub && printf 'hi\\n' > /data/syw30/d/f && printf 'hi\\n' > /data/syw30/d/sub/b && cd /data/syw30 && ln -s . d/sub/self && { ls -RL d nope; echo rc=$?; })",
+      "expect": {
+        "exit": 0,
+        "stdout": "d:\nf\nsub\n\nd/sub:\nb\nself\nrc=2\n",
+        "stderr": "ls: cannot access 'nope': No such file or directory\nls: d/sub/self: not listing already-listed directory\n"
+      }
+    },
+    {
       "id": "sym_grep_R_follows_every_link",
       "seq": 17000012,
       "targets": [

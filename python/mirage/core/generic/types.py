@@ -273,14 +273,11 @@ class PendingPrune:
 class Prune:
     """``-prune``: true, and a directory it reaches loses its contents.
 
-    Every backend evaluates the tree entry by entry with no say over its
-    own walk, and a flat listing meets a child before its parent, so the
-    node keeps the ledger of pruned directory keys and ``drop_pruned``
-    applies it to what the walk returned. ``bind_tree`` hands every
-    start point a fresh ledger. A prune reached past a time test the
-    entry could not answer lands in ``pending``; until ``settle_prunes``
-    evaluates the directory again with its mtime, it counts as pruned,
-    the most a walk without times can say.
+    The node keeps the ledger of pruned directory keys, which the walk
+    reads before it enters a directory. ``bind_tree`` hands every start
+    point a fresh ledger. A prune reached past a time test the entry
+    could not answer lands in ``pending`` and counts as pruned, the most
+    a walk without that time can say.
     """
 
     pruned: list[str] = field(default_factory=list)

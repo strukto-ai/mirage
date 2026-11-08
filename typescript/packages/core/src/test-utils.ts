@@ -37,6 +37,13 @@ import type { DispatchFn } from './runtime/types.ts'
 import type { RAMAccessor } from './accessor/ram.ts'
 import type { StorageUsage } from './vfs/capacity.ts'
 
+/** Every value an async iterable yields, in order. */
+export async function collected<T>(values: AsyncIterable<T>): Promise<T[]> {
+  const out: T[] = []
+  for await (const value of values) out.push(value)
+  return out
+}
+
 /** A RAM accessor whose store holds at most `cap` bytes. */
 export function capped(
   cap: number,

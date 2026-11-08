@@ -283,7 +283,7 @@ async def run_handler(
     io.producer = producer
     if stream is None or (isinstance(stream, bytes) and not voice.splits):
         return stream, io
-    pulled = _framed(stream, io, voice)
+    pulled = framed(stream, io, voice)
     lazy = not isinstance(stream, bytes)
 
     async def close() -> None:
@@ -324,7 +324,7 @@ async def _rendered(
     return await rows.render(items), io
 
 
-async def _framed(
+async def framed(
     source: ByteSource, io: IOResult, voice: HandlerVoice
 ) -> AsyncIterator[bytes]:
     """Keep a deferred failure on its command, after any emitted bytes.

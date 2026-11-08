@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
-import { materialize } from '../../../io/types.ts'
+import { type ByteSource, materialize } from '../../../io/types.ts'
 import type { Context } from '../../config.ts'
 import { PipeErrors, parseFlags, teeGeneric, writeOutput } from './tee.ts'
 
@@ -49,15 +49,14 @@ describe('writeOutput', () => {
 
   function sink(fail = new Set<string>()): {
     written: Record<string, string>
-    write: (p: PathSpec, d: Uint8Array) => Promise<void>
+    write: (p: PathSpec, d: ByteSource) => Promise<void>
   } {
     const written: Record<string, string> = {}
     return {
       written,
-      write: (p, d) => {
-        if (fail.has(p.mountPath)) return Promise.reject(new Error('disk full'))
-        written[p.mountPath] = DEC.decode(d)
-        return Promise.resolve()
+      write: async (p, d) => {
+        if (fail.has(p.mountPath)) throw new Error('disk full')
+        written[p.mountPath] = DEC.decode(await materialize(d))
       },
     }
   }

@@ -29,7 +29,7 @@ import { printfKind, treeHas, treeHasTime } from '../../core/generic/find_eval.t
 import { enoent, isFsError, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 import { ensureStream, SharedStdin } from '../../io/stream.ts'
-import { type ByteSource, IOResult, materialize, type PathRecord } from '../../io/types.ts'
+import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { FindExpr } from '../../rs/find.ts'
 import type { OpenStream } from '../../rs/stream.ts'
@@ -487,7 +487,10 @@ export async function runListedFind(
  */
 export async function applyFindActions(
   stdout: ByteSource | null,
-  records: readonly PathRecord[] | null,
+  // The selection's result, whose `records` are the matches before rendering;
+  // a selection that streams settles them as its rows drain, so they are read
+  // after.
+  io: IOResult,
   expr: FindExpr,
   registry: MountRegistry,
   cwd: string,
@@ -539,6 +542,7 @@ export async function applyFindActions(
   const once =
     options.stdin === undefined || options.stdin === null ? null : new SharedStdin(options.stdin)
   await materialize(stdout)
+  const records = io.records
   if (records === null) {
     return [null, encodeText('find: actions require structured matches\n'), 1]
   }

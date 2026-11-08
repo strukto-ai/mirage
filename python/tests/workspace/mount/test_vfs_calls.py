@@ -113,10 +113,14 @@ async def test_a_zero_length_read_asks_the_vfs_nothing(reads_ranges):
 
 @pytest.mark.asyncio
 async def test_append_is_a_rewrite_where_the_vfs_only_writes():
-    write = AsyncMock()
-    mount = _mount(write=write)
+    written = []
+
+    async def collect(path, data, **_):
+        written.append(await materialize(data))
+
+    mount = _mount(write=AsyncMock(side_effect=collect))
     await mount.call("append", PATH, b"new")
-    assert _written(write) == [b"datanew"]
+    assert written == [b"datanew"]
     assert mount.vfs.read.await_args.kwargs == {"index": mount.index}
 
 

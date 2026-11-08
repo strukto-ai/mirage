@@ -59,13 +59,14 @@ async def _walk_find(
     unreadable: list[str] | None = None,
 ) -> list[str]:
     refused: list[str] | None = None if unreadable is None else []
-    results = await walk_find(
+    rows = walk_find(
         src,
         readdir=readdir,
         stat=stat,
         args=parse_find_args((), type=type),
         unreadable=refused,
     )
+    results = sorted([row async for row in rows])
     if unreadable is not None and refused is not None:
         unreadable.extend("/" + path.strip("/") for path in refused)
     return ["/" + path.strip("/") for path in results]

@@ -31,7 +31,7 @@ from mirage.context.session_context import (
     reset_caller,
 )
 from mirage.core.generic.rewrite import (
-    append_by_rewrite,
+    append_by_spooled_rewrite,
     append_by_streamed_rewrite,
     expect_offset,
     pwrite_by_streamed_rewrite,
@@ -67,15 +67,15 @@ async def _stream(*parts):
 
 @pytest.mark.asyncio
 async def test_append_reads_current_bytes_and_creates_missing():
-    read = AsyncMock(side_effect=[b"old", b"oldnew", FileNotFoundError()])
-    write = AsyncMock()
+    read = _reads(b"old", b"oldnew", FileNotFoundError())
+    bodies = []
+
+    async def write(request):
+        bodies.append(await materialize(request.body))
+
     for data in (b"new", b"!", b"created"):
-        await append_by_rewrite(read, write, AsyncMock(), PATH, data)
-    assert [call.args[0].body for call in write.await_args_list] == [
-        b"oldnew",
-        b"oldnew!",
-        b"created",
-    ]
+        await append_by_spooled_rewrite(read, write, AsyncMock(), PATH, data)
+    assert bodies == [b"oldnew", b"oldnew!", b"created"]
 
 
 @pytest.mark.asyncio
@@ -83,16 +83,13 @@ async def test_append_reads_current_bytes_and_creates_missing():
 @pytest.mark.parametrize("data", [b"new", b""])
 async def test_append_returns_confirmed_write_metadata(existing, data):
     row = _file()
-    read = AsyncMock(
-        return_value=existing,
-        side_effect=FileNotFoundError() if existing is None else None,
-    )
+    read = _reads(FileNotFoundError() if existing is None else existing)
     stat = AsyncMock(
         return_value=row,
         side_effect=FileNotFoundError() if existing is None else None,
     )
     write = AsyncMock(return_value=row)
-    result = await append_by_rewrite(read, write, stat, PATH, data)
+    result = await append_by_spooled_rewrite(read, write, stat, PATH, data)
     assert result == (None if not data and existing is not None else row)
 
 
@@ -101,7 +98,7 @@ async def test_append_does_not_overwrite_after_a_failed_read():
     read = AsyncMock(side_effect=PermissionError(PATH.virtual))
     write = AsyncMock()
     with pytest.raises(PermissionError):
-        await append_by_rewrite(read, write, AsyncMock(), PATH, b"new")
+        await append_by_spooled_rewrite(read, write, AsyncMock(), PATH, b"new")
     write.assert_not_awaited()
 
 
@@ -120,7 +117,7 @@ async def test_an_empty_write_stats_instead_of_rewriting(by_rewrite):
 
     async def run() -> None:
         if by_rewrite == "append":
-            await append_by_rewrite(read, write, stat, PATH, b"")
+            await append_by_spooled_rewrite(read, write, stat, PATH, b"")
         else:
             await pwrite_by_streamed_rewrite(read, write, stat, PATH, b"", 0)
 
@@ -312,7 +309,9 @@ async def test_a_completed_own_read_replaces_the_saved_condition(
     token = bind_caller(current_caller().changed({"write_context": context}))
     try:
         if kind == "append":
-            await append_by_rewrite(read, write, stat, PATH, b"new")
+            await append_by_spooled_rewrite(
+                spooled_read, write, stat, PATH, b"new"
+            )
         elif kind == "streamed_append":
             await append_by_streamed_rewrite(
                 streamed_read, write, stat, PATH, b"new"

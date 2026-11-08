@@ -16,6 +16,10 @@ from mirage.core.generic.types import FindArgs
 from mirage.types import FileStat, FileType, PathSpec
 
 
+async def _rows(*args, **kwargs):
+    return [row async for row in walk_find(*args, **kwargs)]
+
+
 async def _children(path: PathSpec) -> list[str]:
     return ["/entry"] if path.virtual == "/" else []
 
@@ -39,7 +43,7 @@ async def test_walk_does_not_read_cached_bytes_for_non_files(
 
     previous = bind_caller(replace(current_caller(), cache_manager=manager))
     try:
-        result = await walk_find(
+        result = await _rows(
             PathSpec.from_str_path("/"),
             readdir=_children,
             stat=stat,
@@ -71,7 +75,7 @@ async def test_walk_backfills_an_unknown_file_size_from_cached_bytes(
 
     previous = bind_caller(replace(current_caller(), cache_manager=manager))
     try:
-        result = await walk_find(
+        result = await _rows(
             PathSpec.from_str_path("/"),
             readdir=_children,
             stat=stat,

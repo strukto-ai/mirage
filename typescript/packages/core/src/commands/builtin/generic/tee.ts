@@ -14,7 +14,8 @@
 
 import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 
-import { type ClosedPipe, IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { type ClosedPipe, IOResult, type ByteSource } from '../../../io/types.ts'
+import { ByteSpool } from '../../../io/spool.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { ByteWriter } from '../../../io/writer.ts'
 import { PipeClosed } from '../../../io/errors.ts'
@@ -161,7 +162,7 @@ async function writeOne(
   raw: Uint8Array,
   parsed: TeeFlags,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  write: (p: PathSpec, data: ByteSource) => Promise<void>,
   append: ((p: PathSpec, data: Uint8Array) => Promise<void>) | undefined,
 ): Promise<void> {
   if (!parsed.append) {
@@ -172,20 +173,38 @@ async function writeOne(
     await append(path, raw)
     return
   }
-  let existing: Uint8Array = new Uint8Array(0)
+  await rewritten(path, stream, write, raw)
+}
+
+/**
+ * Append with no native append: the file is written back whole, its old
+ * bytes then `source`. They are spooled first, so the write that replaces
+ * them never reads its own path, and memory holds a chunk of them at a time.
+ * Mirrors Python's `_rewritten`.
+ */
+async function rewritten(
+  path: PathSpec,
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  write: (p: PathSpec, data: ByteSource) => Promise<void>,
+  source: ByteSource,
+): Promise<void> {
+  const spool = new ByteSpool()
   try {
-    existing = await materialize(stream(path))
-  } catch (err) {
-    // GNU tee -a creates a missing file: append to empty. This used to test
-    // the message for /not found/i, which never matched — `enoent()` puts the
-    // *path* in the message — so `tee -a missing` threw on every backend, and
-    // s3/gridfs grew bespoke wrappers with an exists() pre-check to dodge it.
-    if (!isEnoent(err)) throw err
+    try {
+      await spool.fill(stream(path))
+    } catch (err) {
+      // tee -a creates a missing file: append to empty.
+      if (!isEnoent(err)) throw err
+      console.debug(`appending to a new file at ${path.virtual}: ${String(err)}`)
+    }
+    async function* joined(): AsyncIterable<Uint8Array> {
+      yield* spool.stream()
+      yield* chunks(source)
+    }
+    await write(path, joined())
+  } finally {
+    await spool.close()
   }
-  const data = new Uint8Array(existing.byteLength + raw.byteLength)
-  data.set(existing, 0)
-  data.set(raw, existing.byteLength)
-  await write(path, data)
 }
 
 /**
@@ -236,7 +255,7 @@ export async function writeOutput(
   raw: Uint8Array,
   parsed: TeeFlags,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  write: (p: PathSpec, data: ByteSource) => Promise<void>,
   append?: (p: PathSpec, data: Uint8Array) => Promise<void>,
   stat?: StatFn,
   openedPaths?: PathSpec[],
@@ -348,19 +367,7 @@ async function consumeOutput(
 ): Promise<void> {
   if (!parsed.append) await write(path, source)
   else if (append !== undefined) await append(path, source)
-  else {
-    let existing: Uint8Array = new Uint8Array()
-    try {
-      existing = await materialize(stream(path))
-    } catch (error) {
-      if (!isEnoent(error)) throw error
-    }
-    async function* joined(): AsyncIterable<Uint8Array> {
-      yield existing
-      yield* chunks(source)
-    }
-    await write(path, joined())
-  }
+  else await rewritten(path, stream, write, source)
 }
 
 async function* teeStream(

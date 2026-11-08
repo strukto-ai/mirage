@@ -5,6 +5,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
+from contextlib import aclosing
 from dataclasses import dataclass
 from functools import partial
 
@@ -43,7 +44,6 @@ from mirage.types import (
     LineFacts,
     PathSpec,
 )
-from mirage.utils.dates import in_mtime_window
 from mirage.utils.path import respell_one, respell_raw
 from mirage.view.types import LinkView, StatPath
 
@@ -379,99 +379,6 @@ def start_point_results(
     return results
 
 
-def root_dir_results(
-    search_path: PathSpec,
-    args: find_types.FindArgs,
-    tree: find_types.PredNode,
-    *,
-    is_empty: bool | None,
-    mtime: float | None = None,
-    stat: FileStat | None = None,
-) -> list[str]:
-    """Results for the directory start point itself, at depth 0.
-
-    GNU lists a directory start point before descending into it, so
-    ``find <dir>`` names the directory even when it holds nothing. The
-    start point was already statted to get here, so this row needs no
-    walk. The time window is not applied here; ``mtime`` answers the
-    tree's own time tests.
-
-    Args:
-        search_path (PathSpec): the start point, as the operand named it.
-        args (FindArgs): parsed find expression.
-        tree (PredNode): the predicate tree bound to the start point.
-        is_empty (bool | None): whether the directory holds nothing, None
-            when no listing was taken (``-empty`` then cannot match it).
-        mtime (float | None): the start point's epoch-second mtime, None
-            when unknown.
-        stat (FileStat | None): the start point's stat, for the tests
-            that read one.
-    """
-    results: list[str] = []
-    find_eval.emit_start_path(
-        results,
-        "/" + search_path.virtual.strip("/"),
-        find_eval.start_basename(search_path),
-        kind="d",
-        is_empty=is_empty,
-        exists=True,
-        tree=tree,
-        maxdepth=args.maxdepth,
-        mindepth=args.mindepth,
-        min_size=args.min_size,
-        max_size=args.max_size,
-        mtime=mtime,
-        stat=stat,
-    )
-    return results
-
-
-async def early_root(
-    search: PathSpec,
-    args: find_types.FindArgs,
-    start: StartPoint,
-) -> list[str]:
-    """Emit an independently known start point before asking for descendants.
-
-    The walk must not delay the directory row the dispatcher already
-    resolved, so a closing pipe can stop here before any listing. Under
-    a time test the row is answered from the start point's own mtime,
-    and left to the walk when that is unknown.
-
-    Args:
-        search (PathSpec): the start point, as the operand named it.
-        args (FindArgs): parsed find expression, shared across operands.
-        start (StartPoint): the start point as resolve_start found it.
-
-    Returns:
-        list[str]: the start point's own row, or nothing when it cannot
-            be answered before the walk.
-    """
-    if args.empty or start.stat is None:
-        return []
-    tree = find_eval.bind_tree(
-        find_eval.args_to_tree(args), "", search.virtual, search.raw_path
-    )
-    # A -quit on the root ends the walk before it begins, which only the
-    # walk can tell its caller; -xtype reads past a link it may be.
-    if find_eval.tree_has(tree, (find_types.Quit, find_types.XType)):
-        return []
-    await find_eval.prime_regexes(tree, ["/" + search.virtual.strip("/")])
-    ts = None
-    windowed = args.mtime_min is not None or args.mtime_max is not None
-    if windowed or find_eval.tree_has_time(tree):
-        # Only a known time answers early; otherwise the walk stats it.
-        ts = modified_ts(start.stat.modified)
-        if ts is None or not in_mtime_window(
-            ts, args.mtime_min, args.mtime_max
-        ):
-            return []
-    rows = root_dir_results(
-        search, args, tree, is_empty=None, mtime=ts, stat=start.stat
-    )
-    return respell_raw(rows, search.virtual, search.raw_path)
-
-
 @dataclass(frozen=True, slots=True)
 class FindFlags:
     name: str | None = None
@@ -576,18 +483,13 @@ async def find_walk_generic(
                 is_link=is_link(links, search),
                 follow=link_follow(links),
             )
-            first = await early_root(
-                search,
-                args,
-                start,
-            )
-            for row in first:
-                yield (row + "\n").encode()
             if start.missing:
                 missing.append(missing_start_line(search, start.detail))
                 continue
             if not start.walk:
-                rows = start.results
+                for row in start.results:
+                    yield (row + "\n").encode()
+                    records.append(PathRecord(_matched_path(row, search), run))
                 if start.quit:
                     stopped.append(search.virtual)
             else:
@@ -607,7 +509,7 @@ async def find_walk_generic(
                     )
 
                 budget = WalkBudget(search, mounts)
-                walked = await walk_find(
+                walked = walk_find(
                     search,
                     readdir=readdir,
                     stat=stat,
@@ -622,7 +524,13 @@ async def find_walk_generic(
                     links=links,
                     stopped=stopped,
                 )
-                rows = respell_raw(walked, search.virtual, search.raw_path)
+                async with aclosing(walked) as rows:
+                    async for key in rows:
+                        row = respell_one(key, search.virtual, search.raw_path)
+                        yield (row + "\n").encode()
+                        records.append(
+                            PathRecord(_matched_path(row, search), run)
+                        )
                 # GNU names a directory it may not open in the walk's own
                 # order, lists the directory itself, and exits 1 like a
                 # start point it could not read.
@@ -643,12 +551,6 @@ async def find_walk_generic(
                         f"'{respell_one(above, search.virtual, search.raw_path)}'."
                     )
                 missing.extend(f"find: {line}" for line in budget.stopped)
-            for row in rows:
-                if row not in first:
-                    yield (row + "\n").encode()
-            records.extend(
-                PathRecord(_matched_path(row, search), run) for row in rows
-            )
         if missing:
             io.stderr = ("\n".join(missing) + "\n").encode()
             io.exit_code = 1

@@ -37,7 +37,7 @@ import { chunks } from '../../../../io/cooperative.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
 import { SharedStdin, yieldBytes } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
-import { IOResult } from '../../../../io/types.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
@@ -1281,9 +1281,20 @@ export async function handleXargs(
     let stopped: number | null = null
     let failed = false
     const torn: IOResult[] = []
+    // Each run's stderr, joined onto `merged` only before the output that
+    // follows it, so a trace still precedes its command's output and a run of
+    // stderr with no output between costs one join.
+    let said = encodeText(plan.notes)
+    const pending: Uint8Array[] = []
+    const publish = (): void => {
+      const joined = concat(pending.splice(0))
+      if (joined.byteLength === 0) return
+      said = concat([said, joined])
+      merged.stderr = said
+    }
     async function record(io: IOResult): Promise<boolean> {
       if (io.exitCode === 255 && stopped === null) stopped = 124
-      merged.stderr = (await merged.merge(new IOResult({ stderr: io.stderr }))).stderr
+      pending.push(await materialize(io.stderr))
       return io.exitCode !== 0
     }
     try {
@@ -1297,7 +1308,10 @@ export async function handleXargs(
       })) {
         stopped = stop
         for (const io of ios) {
-          yield* chunks(io.stdout ?? new Uint8Array())
+          for await (const chunk of chunks(io.stdout ?? new Uint8Array())) {
+            publish()
+            yield chunk
+          }
           failed = (await record(io)) || failed
         }
       }
@@ -1307,11 +1321,12 @@ export async function handleXargs(
       if (stopped !== null) merged.exitCode = stopped
       else if (sink.failure !== null) {
         const [text, code] = sink.failure
-        merged.stderr = (await merged.merge(new IOResult({ stderr: encodeText(text) }))).stderr
+        pending.push(encodeText(text))
         // A command that failed outranks xargs's own error: GNU 4.10 exits
         // 123 on `X1 'c` when X1 fails.
         merged.exitCode = failed ? 123 : code
       } else merged.exitCode = failed ? 123 : 0
+      publish()
       node.exitCode = merged.exitCode
     }
   }

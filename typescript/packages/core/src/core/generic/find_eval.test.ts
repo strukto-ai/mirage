@@ -19,13 +19,10 @@ import {
   bindTree,
   buildTree,
   displayPath,
-  dropPruned,
   emitStartPath,
   evaluate,
   keep,
-  pendingPrunes,
   prunedKeys,
-  settlePrunes,
   treeHasAction,
   treeHasPrune,
   treeHasTime,
@@ -40,6 +37,14 @@ function effects(): Effects {
 
 function entry(over: Partial<FindEntry> = {}): FindEntry {
   return { key: '/data/a.txt', name: 'a.txt', kind: 'f', depth: 1, ...over }
+}
+
+// The keys every `-prune` in the tree holds pending.
+function pending(node: PredNode): string[] {
+  if (node.op === 'prune') return node.pending.map((p) => p.entry.key)
+  if (node.op === 'not') return pending(node.kid)
+  if (node.op === 'and' || node.op === 'or') return node.kids.flatMap(pending)
+  return []
 }
 
 describe('size', () => {
@@ -273,7 +278,7 @@ describe('actions and -prune', () => {
     expect(keep(entry({ key: '/skip', name: 'skip', kind: 'd' }), plain, null)).toBe(true)
   })
 
-  it('records pruned directories and dropPruned keeps the directory itself', () => {
+  it('records the directories a prune reaches', () => {
     const tree = bindTree(
       {
         op: 'or',
@@ -301,7 +306,6 @@ describe('actions and -prune', () => {
     )
     expect(kept).toEqual(['/', '/keep', '/keep/f', '/skip/inner', '/skip/inner/d', '/skipped'])
     expect(prunedKeys(tree)).toEqual(['/skip'])
-    expect(dropPruned(kept, tree)).toEqual(['/', '/keep', '/keep/f', '/skipped'])
     // A pruned file (an object store key that is also a directory prefix)
     // drops nothing.
     const fileTree = bindTree(
@@ -316,17 +320,6 @@ describe('actions and -prune', () => {
     )
     keep(entry({ key: '/data', name: 'data', kind: 'f' }), fileTree, null)
     expect(prunedKeys(fileTree)).toEqual([])
-    // Rows under a mount prefix compare as display paths.
-    const under = bindTree({ op: 'prune', pruned: [], pending: [] }, '/m')
-    keep(entry({ key: '/skip', name: 'skip', kind: 'd' }), under, null)
-    expect(dropPruned(['/m/skip', '/m/skip/a', '/m/other'], under, '/m')).toEqual([
-      '/m/skip',
-      '/m/other',
-    ])
-    // The pruned root itself stays, though every row starts with its stem.
-    const root = bindTree({ op: 'prune', pruned: [], pending: [] }, '')
-    keep(entry({ key: '/', name: '', kind: 'd', depth: 0 }), root, null)
-    expect(dropPruned(['/', '/a', '/a/b'], root)).toEqual(['/'])
   })
 
   it('-mindepth prunes nothing above its level', () => {
@@ -419,24 +412,13 @@ describe('time tests and -prune', () => {
     )
   })
 
-  it('a prune past an undecided time test is pending until settled', () => {
+  it('a prune past an undecided time test is pending and counts', () => {
     const tree = gated()
     for (const key of ['/old', '/new']) {
       expect(keep(entry({ key, name: key.slice(1), kind: 'd' }), tree, null)).toBe(true)
     }
-    // Pending counts as pruned until the caller learns the mtimes.
     expect(prunedKeys(tree)).toEqual(['/old', '/new'])
-    expect(pendingPrunes(tree).map((p) => p.entry.key)).toEqual(['/old', '/new'])
-    const rows = ['/old', '/old/f', '/new', '/new/g']
-    expect(dropPruned(rows, tree)).toEqual(['/old', '/new'])
-    // A key the map does not name stays pending.
-    settlePrunes(tree, new Map([['/old', 50]]))
-    expect(prunedKeys(tree)).toEqual(['/new'])
-    expect(pendingPrunes(tree).map((p) => p.entry.key)).toEqual(['/new'])
-    settlePrunes(tree, new Map([['/new', 150]]))
-    expect(prunedKeys(tree)).toEqual(['/new'])
-    expect(pendingPrunes(tree)).toEqual([])
-    expect(dropPruned(rows, tree)).toEqual(['/old', '/old/f', '/new'])
+    expect(pending(tree)).toEqual(['/old', '/new'])
     // bindTree hands out a fresh pending ledger too.
     const bound = bindTree(
       {
@@ -462,7 +444,7 @@ describe('time tests and -prune', () => {
     )
     expect(keep(entry({ key: '/old', name: 'old', kind: 'd' }), tree, null)).toBe(true)
     expect(prunedKeys(tree)).toEqual(['/old'])
-    expect(pendingPrunes(tree)).toEqual([])
+    expect(pending(tree)).toEqual([])
   })
 
   it('a prune with a known mtime needs no settling', () => {
@@ -470,36 +452,7 @@ describe('time tests and -prune', () => {
     expect(keep(entry({ key: '/old', name: 'old', kind: 'd', mtime: 50 }), tree, null)).toBe(false)
     expect(keep(entry({ key: '/new', name: 'new', kind: 'd', mtime: 150 }), tree, null)).toBe(true)
     expect(prunedKeys(tree)).toEqual(['/new'])
-    expect(pendingPrunes(tree)).toEqual([])
-  })
-
-  it('settling needs every deferred test to hold', () => {
-    const two = (): PredNode =>
-      bindTree(
-        {
-          op: 'and',
-          kids: [
-            { op: 'mtime', lo: 100, hi: null },
-            { op: 'mtime', lo: null, hi: 200 },
-            { op: 'prune', pruned: [], pending: [] },
-          ],
-        },
-        '',
-      )
-    let tree = two()
-    keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)
-    expect(pendingPrunes(tree).map((p) => p.entry.key)).toEqual(['/d'])
-    settlePrunes(tree, new Map([['/d', 250]]))
-    expect(prunedKeys(tree)).toEqual([])
-    tree = two()
-    keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)
-    settlePrunes(tree, new Map([['/d', 150]]))
-    expect(prunedKeys(tree)).toEqual(['/d'])
-    // A directory without a reported mtime never passes a time test.
-    tree = gated()
-    keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)
-    settlePrunes(tree, new Map([['/d', null]]))
-    expect(prunedKeys(tree)).toEqual([])
+    expect(pending(tree)).toEqual([])
   })
 
   it('deferred tests stay with the branch that needs them', () => {
@@ -529,7 +482,7 @@ describe('time tests and -prune', () => {
       '',
     )
     expect(keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)).toBe(true)
-    expect(pendingPrunes(tree)).toEqual([])
+    expect(pending(tree)).toEqual([])
     expect(prunedKeys(tree)).toEqual(['/d'])
     // `( ! -mtime +N -type d ) -o -prune`: the failing factor's own test is
     // the one that may flip, so the prune waits on it.
@@ -552,13 +505,7 @@ describe('time tests and -prune', () => {
       )
     tree = negated()
     expect(keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)).toBe(true)
-    expect(pendingPrunes(tree).map((p) => p.entry.key)).toEqual(['/d'])
-    settlePrunes(tree, new Map([['/d', 150]]))
-    expect(prunedKeys(tree)).toEqual([])
-    tree = negated()
-    keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)
-    settlePrunes(tree, new Map([['/d', 50]]))
-    expect(prunedKeys(tree)).toEqual(['/d'])
+    expect(pending(tree)).toEqual(['/d'])
   })
 
   it('a time test steering past every prune leaves the directory pending', () => {
@@ -577,20 +524,14 @@ describe('time tests and -prune', () => {
       )
     let tree = either()
     expect(keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)).toBe(true)
-    expect(pendingPrunes(tree).map((p) => p.entry.key)).toEqual(['/d'])
-    expect(prunedKeys(tree)).toEqual(['/d'])
-    settlePrunes(tree, new Map([['/d', 150]]))
-    expect(prunedKeys(tree)).toEqual([])
-    tree = either()
-    keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)
-    settlePrunes(tree, new Map([['/d', 50]]))
+    expect(pending(tree)).toEqual(['/d'])
     expect(prunedKeys(tree)).toEqual(['/d'])
     // A file has nothing to prune, a known mtime decides at once, and a
     // tree without -prune has nothing to wait for.
     tree = either()
     expect(keep(entry({ key: '/f', name: 'f', kind: 'f' }), tree, null)).toBe(true)
     expect(keep(entry({ key: '/d', name: 'd', kind: 'd', mtime: 150 }), tree, null)).toBe(true)
-    expect(pendingPrunes(tree)).toEqual([])
+    expect(pending(tree)).toEqual([])
     tree = bindTree(
       {
         op: 'or',
@@ -602,57 +543,7 @@ describe('time tests and -prune', () => {
       '',
     )
     expect(keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)).toBe(true)
-    expect(pendingPrunes(tree)).toEqual([])
-  })
-
-  it('settling evaluates the expression again', () => {
-    // `( -mtime 1 -o -type d ) -prune`: a directory failing the time test
-    // still reaches the prune through -type d, as GNU's does.
-    const either = (): PredNode =>
-      bindTree(
-        {
-          op: 'and',
-          kids: [
-            {
-              op: 'or',
-              kids: [
-                { op: 'mtime', lo: 100, hi: null },
-                { op: 'type', kind: 'd' },
-              ],
-            },
-            { op: 'prune', pruned: [], pending: [] },
-          ],
-        },
-        '',
-      )
-    let tree = either()
-    expect(keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)).toBe(true)
-    expect(pendingPrunes(tree).map((p) => p.entry.key)).toEqual(['/d'])
-    settlePrunes(tree, new Map([['/d', 50]]))
-    expect(pendingPrunes(tree)).toEqual([])
-    expect(prunedKeys(tree)).toEqual(['/d'])
-    // Without a reported mtime every time test is false; the prune is still
-    // reached here, and not past a bare test.
-    tree = either()
-    keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)
-    settlePrunes(tree, new Map([['/d', null]]))
-    expect(prunedKeys(tree)).toEqual(['/d'])
-    // An action reached again while settling changes nothing: the rows were
-    // decided at the walk.
-    tree = bindTree(
-      {
-        op: 'and',
-        kids: [
-          { op: 'mtime', lo: 100, hi: null },
-          { op: 'prune', pruned: [], pending: [] },
-          { op: 'action', kind: 'print' },
-        ],
-      },
-      '',
-    )
-    expect(keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)).toBe(true)
-    settlePrunes(tree, new Map([['/d', 150]]))
-    expect(prunedKeys(tree)).toEqual(['/d'])
+    expect(prunedKeys(tree)).toEqual([])
   })
 })
 

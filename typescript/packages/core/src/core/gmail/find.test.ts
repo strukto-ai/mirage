@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import type { FindOptions } from '../generic/find.ts'
 import { walkFind } from '../generic/find.ts'
+import { collected } from '../../test-utils.ts'
 
 function enoent(p: string): Error {
   const e = new Error(`ENOENT: ${p}`) as Error & { code: string }
@@ -73,15 +74,15 @@ function statOf(spec: PathSpec): Promise<FileStat> {
 }
 
 async function find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {
-  return walkFind(path, { readdir: readdirOf, stat: statOf }, options)
+  return collected(walkFind(path, { readdir: readdirOf, stat: statOf }, options))
 }
 
 describe('gmail core find', () => {
   it('classifies messages and attachments as files, attachment dirs as dirs', async () => {
     const files = await find(ROOT, { type: 'f' })
     expect(files).toEqual([
-      '/INBOX/2026-06-01/Hello__m1.gmail.json',
       '/INBOX/2026-06-01/Hello__m1/report.pdf',
+      '/INBOX/2026-06-01/Hello__m1.gmail.json',
     ])
     const dirs = await find(ROOT, { type: 'd' })
     expect(dirs).toEqual(['/INBOX', '/INBOX/2026-06-01', '/INBOX/2026-06-01/Hello__m1'])
@@ -97,8 +98,8 @@ describe('gmail core find', () => {
     expect(await find(ROOT, { maxDepth: 2 })).toEqual(['/INBOX', '/INBOX/2026-06-01'])
     expect(await find(ROOT, { minDepth: 3 })).toEqual([
       '/INBOX/2026-06-01/Hello__m1',
-      '/INBOX/2026-06-01/Hello__m1.gmail.json',
       '/INBOX/2026-06-01/Hello__m1/report.pdf',
+      '/INBOX/2026-06-01/Hello__m1.gmail.json',
     ])
   })
 })

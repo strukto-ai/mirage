@@ -20,7 +20,7 @@ import type { ByteSpool } from '../../io/spool.ts'
 import { ANY_WRITE, type ReplaceRequest, type WriteContext } from '../../cache/types.ts'
 import { publishRead, runWithWriteContext } from '../../cache/context.ts'
 import {
-  appendByRewrite,
+  appendBySpooledRewrite,
   appendByStreamedRewrite,
   pwriteByStreamedRewrite,
   truncateByRewrite,
@@ -28,7 +28,7 @@ import {
 
 const PATH = PathSpec.fromStrPath('/m/f')
 
-describe('appendByRewrite', () => {
+describe('appendBySpooledRewrite', () => {
   it.each([
     [true, 'new'],
     [false, 'new'],
@@ -36,11 +36,20 @@ describe('appendByRewrite', () => {
     [true, ''],
   ] as const)('returns confirmed write metadata, existing %s, data %j', async (existing, data) => {
     const row = new FileStat({ name: 'f', type: FileType.FILE })
-    const read = () =>
-      existing ? Promise.resolve(new TextEncoder().encode('old')) : Promise.reject(enoent(PATH))
+    const read = async (_path: PathSpec, spool: ByteSpool): Promise<string | null> => {
+      if (!existing) throw enoent(PATH)
+      await spool.append(new TextEncoder().encode('old'))
+      return null
+    }
     const stat = () => (existing ? Promise.resolve(row) : Promise.reject(enoent(PATH)))
     const write = () => Promise.resolve(row)
-    const result = await appendByRewrite(read, write, stat, PATH, new TextEncoder().encode(data))
+    const result = await appendBySpooledRewrite(
+      read,
+      write,
+      stat,
+      PATH,
+      new TextEncoder().encode(data),
+    )
     expect(result).toEqual(existing && data === '' ? undefined : row)
   })
 })
@@ -152,7 +161,7 @@ describe('a completed operation-owned read', () => {
     }
     const incoming = new TextEncoder().encode('new')
     await runWithWriteContext('/m/', context, async () => {
-      if (kind === 'append') await appendByRewrite(read, write, stat, PATH, incoming)
+      if (kind === 'append') await appendBySpooledRewrite(spooledRead, write, stat, PATH, incoming)
       else if (kind === 'streamed_append')
         await appendByStreamedRewrite(streamedRead, write, stat, PATH, incoming)
       else if (kind === 'pwrite')

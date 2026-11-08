@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../../io/types.ts'
+import { currentCaller, withCaller } from '../../../../../context/session_context.ts'
 import type { SessionView } from '../../../../../view/types.ts'
 import type { Files } from '../../../../../workspace/files.ts'
 import type { FileStat, PathSpec } from '../../../../../types.ts'
@@ -93,5 +94,10 @@ export async function runLs(
     ctx.signal,
   )
   const result = await lsGeneric(flatScopes(scopes), ctx, readdir, stat, null)
-  return result ?? [null, new IOResult()]
+  if (result === null) return [null, new IOResult()]
+  const [out, io] = result
+  if (out === null || out instanceof Uint8Array) return [out, io]
+  // A listing that streams keeps this line's caller for its walk, however
+  // late its reader pulls it.
+  return [withCaller(out, currentCaller()), io]
 }

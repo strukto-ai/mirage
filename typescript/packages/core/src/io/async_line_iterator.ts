@@ -21,6 +21,9 @@ import { checkMemory, memoryRoom } from './memory.ts'
 import { type ByteSource, DeviceInput, type PipeEnd, PipeStream } from './types.ts'
 import type { PathSpec } from '../types.ts'
 
+// Read bytes past which a mostly read buffer keeps only what is left.
+const RELEASE = 1 << 16
+
 /**
  * The read end an `exec` keeps on a live pipe (`exec 3<"$1"`). It holds the
  * pipe, not the name it was opened by. Each read takes a stream of its own
@@ -117,6 +120,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
       if (idx >= 0) {
         const line = this.buf.subarray(0, idx)
         this.buf = this.buf.subarray(idx + 1)
+        this.trim()
         return line
       }
     } catch (error) {
@@ -162,15 +166,39 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
    * outlives its pipe: reads go on from memory. Mirrors Python's load_rest.
    */
   async loadRest(): Promise<void> {
+    // `buf` grows in the room left at the end of `store` while it still ends
+    // there, else in a store twice the size, so a long load copies each byte
+    // a bounded number of times. The store lives only as long as the load
+    // and what `buf` still views of it.
+    let store = new Uint8Array(0)
+    let stored = 0
     try {
       while (!this.exhausted) {
         const pending = this.check()
         if (pending !== undefined) await pending
         const result = await this.pull()
-        if (result.done === true) this.exhausted = true
-        else {
-          checkMemory(this.buf.byteLength + result.value.byteLength)
-          this.buf = concat([this.buf, result.value])
+        if (result.done === true) {
+          this.exhausted = true
+          continue
+        }
+        const chunk = result.value
+        const buf = this.buf
+        checkMemory(buf.byteLength + chunk.byteLength)
+        const end = stored + chunk.byteLength
+        if (
+          buf.buffer === store.buffer &&
+          buf.byteOffset + buf.byteLength === stored &&
+          end <= store.byteLength
+        ) {
+          store.set(chunk, stored)
+          stored = end
+          this.buf = store.subarray(buf.byteOffset, end)
+        } else {
+          store = new Uint8Array(2 * (buf.byteLength + chunk.byteLength))
+          store.set(buf)
+          store.set(chunk, buf.byteLength)
+          stored = buf.byteLength + chunk.byteLength
+          this.buf = store.subarray(0, stored)
         }
       }
     } catch (error) {
@@ -191,6 +219,17 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
       return
     }
     await this.close()
+  }
+
+  /**
+   * Let go of what reads have consumed once it is most of a large buffer, so
+   * a kept descriptor does not hold a loaded rest it read. Mirrors Python's
+   * `_trim`.
+   */
+  private trim(): void {
+    const buf = this.buf
+    if (buf.byteLength === 0) this.buf = new Uint8Array(0)
+    else if (buf.byteOffset >= RELEASE && buf.byteOffset >= buf.byteLength) this.buf = buf.slice()
   }
 
   private check(signal?: AbortSignal): Promise<void> | undefined {
@@ -243,6 +282,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
           checkMemory(held + idx)
           const tail = this.buf.subarray(0, idx)
           this.buf = this.buf.subarray(idx + width)
+          this.trim()
           return [parts.length === 0 ? tail : concat([...parts, tail]), true]
         }
         if (this.exhausted) {
@@ -357,6 +397,8 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     delim: number | null,
     signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
+    // What a batch takes leaves `buf` before the next wait, so no other
+    // reader of the descriptor takes it meanwhile.
     const out: Uint8Array[] = []
     let size = 0
     const room = memoryRoom()
@@ -374,7 +416,10 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
           else this.buf = concat([this.buf, result.value])
           continue
         }
-        if (this.buf.byteLength === 0) return [joined(), false]
+        if (this.buf.byteLength === 0) {
+          this.trim()
+          return [joined(), false]
+        }
         const buf = this.buf
         const whole = this.exhausted ? buf.byteLength : buf.byteLength - 3
         let at = 0
@@ -391,9 +436,11 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         }
         if (taken < count && delim !== null && this.buf[0] === delim) {
           this.buf = this.buf.subarray(1)
+          this.trim()
           return [joined(), true]
         }
       }
+      this.trim()
       return [joined(), true]
     } catch (error) {
       await this.failed(error, out)
@@ -476,7 +523,7 @@ export function lineBuffer(stdin: ByteSource): AsyncLineIterator {
 }
 
 /**
- * How many bytes `data`'s first character spans, decoded as UTF-8.
+ * How many bytes the character at `at` in `data` spans, decoded as UTF-8.
  *
  * Always at least one and never more than what is there, so a caller
  * stepping by this never splits a character and never stalls. Bytes that

@@ -55,7 +55,7 @@ from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
 from mirage.secrets.types import ResolvedSource
 from mirage.shell.bytes import encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import Channel, JobConsole, Terminal
+from mirage.shell.console import Channel, JobConsole, JobOutput, Terminal
 from mirage.shell.constants import (
     FORK_FAILED,
     FORK_FAILED_STATUS,
@@ -574,10 +574,24 @@ async def execute_line(
     # Only this workspace's own binding counts: a session carries one
     # workspace's cwd, env and mount grants, so a callback reaching a
     # second workspace must resolve that workspace's session instead.
+    # A substitution's shell ends with it. A host task still bound to one
+    # (started in it, run after it) runs as a process a substitution
+    # leaves behind does: in a subshell of the session as it is now,
+    # beside the session's lines, and nothing it changes reaches them but
+    # what its jobs write, which goes on to the session's terminal through
+    # a job output of its own, so a statement of its never takes the
+    # session's jobs' output.
     ambient = get_current_session_for(ws.sessions)
     if ambient is not None and session_id in (None, ambient.session_id):
         session = ambient
         session_id = ambient.session_id
+        if ambient.vars.shell.closed:
+            source = ws.sessions.get(session_id)
+            session = source.fork()
+            session.process_id = None
+            session.job_table = ws.job_table.child()
+            session.tty = source.tty
+            session.job_output = JobOutput(source.tty.jobs)
     else:
         if session_id is None:
             session_id = ws.sessions.default_id
@@ -873,6 +887,8 @@ async def run_prepared_line(
     # whitespace-only or comment-only line is kept.
     recorded = is_line and bool(command.strip("\n"))
     history: LineHistory | None = None
+    if parent is None:
+        ws.sessions.begin_line(session_id)
     try:
         aliases = expanding_aliases(effective_session)
         ast = (
@@ -1408,7 +1424,7 @@ async def run_prepared_line(
             effective_session._alias_marks.clear()
             effective_session._expand_aliases_marks.clear()
         reset_current_session(session_token)
-        await ws.sessions.flush(session.session_id)
+        await ws.sessions.end_line(session_id, parent is None)
         ws.records.extend(scope.records)
         if history is not None:
             await history.end(io, scope.records)

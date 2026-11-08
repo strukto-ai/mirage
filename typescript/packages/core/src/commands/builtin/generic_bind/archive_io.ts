@@ -18,6 +18,7 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileType, type PathSpec, type StatFn } from '../../../types.ts'
 import { isEnotdir, isMissingPath } from '../../../errors/fs.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 import { readdirOp, statOp } from '../generic/crossmount/utils.ts'
 import type { DirProbe, WalkFn } from '../generic/archive/walk.ts'
 import type { CommandFiles } from './files.ts'
@@ -33,8 +34,11 @@ function walkWith(
   return async (p, findType) => {
     if (findType === 'f') await beforeFullWalk(dispatch, p, command)
     const unreadable: string[] = []
-    const paths = await walkFind(p, { unreadable, readdir, stat }, { type: findType })
-    return { paths, unreadable }
+    const paths: string[] = []
+    for await (const row of walkFind(p, { unreadable, readdir, stat }, { type: findType })) {
+      paths.push(row)
+    }
+    return { paths: paths.sort(compareCodePoints), unreadable }
   }
 }
 
