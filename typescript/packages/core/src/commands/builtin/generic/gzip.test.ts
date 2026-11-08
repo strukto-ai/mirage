@@ -72,15 +72,11 @@ it.each([false, true])('compression skips suffixes or reports late errors: %s', 
 it('compression stores the input time and keeps its attributes', async () => {
   const writes = new Map<string, Uint8Array>()
   const attrs: [string, unknown][] = []
-  async function* read(): AsyncIterable<Uint8Array> {
-    await Promise.resolve()
-    yield new TextEncoder().encode('hello\n')
-  }
   for (const flags of [{}, { no_name: true }]) {
     const result = await gzipGeneric(
       [PathSpec.fromStrPath('/f')],
       { flags, stdin: null, cwd: PathSpec.fromStrPath('/') },
-      read,
+      hello,
       async (path, data) => {
         writes.set(path.virtual, await materialize(data))
       },

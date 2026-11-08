@@ -317,6 +317,16 @@ describe('tree -L', () => {
   })
 })
 
+async function* readGitignore(p: PathSpec): AsyncGenerator<Uint8Array> {
+  await Promise.resolve()
+  expect(p.virtual).toBe('/r/.gitignore')
+  yield new TextEncoder().encode('*.log\n')
+}
+
+function lineFlags(argv: string[]): TreeFlags | IOResult {
+  return parseFlags(parseLineFlags(argv, specOf('tree'), 'tree', '/').flagKwargs)
+}
+
 describe('tree sizes, orders and JSON', () => {
   const sized: Record<string, FileStat> = {
     '/r': new FileStat({ name: 'r', type: FileType.DIRECTORY }),
@@ -339,14 +349,6 @@ describe('tree sizes, orders and JSON', () => {
         (path) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'),
       ),
     )
-  }
-  async function* readGitignore(p: PathSpec): AsyncGenerator<Uint8Array> {
-    await Promise.resolve()
-    expect(p.virtual).toBe('/r/.gitignore')
-    yield new TextEncoder().encode('*.log\n')
-  }
-  function lineFlags(argv: string[]): TreeFlags | IOResult {
-    return parseFlags(parseLineFlags(argv, specOf('tree'), 'tree', '/').flagKwargs)
   }
 
   it.each([

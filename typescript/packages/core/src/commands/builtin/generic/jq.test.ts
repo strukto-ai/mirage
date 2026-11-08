@@ -125,6 +125,10 @@ async function ranLine(words: readonly string[], stream: typeof read = read): Pr
   }
 }
 
+function bigModule(): Promise<Uint8Array> {
+  return Promise.resolve(ENC.encode(`def f: 1;${' '.repeat(4096)}`))
+}
+
 describe('modules', () => {
   it.each([
     [['-L', '/d/lib', 'import "m" as m; m::f'], '"m"\n'],
@@ -162,11 +166,9 @@ describe('modules', () => {
   })
 
   it('keeps what a program imports inside the memory room', async () => {
-    const read = (): Promise<Uint8Array> =>
-      Promise.resolve(new TextEncoder().encode(`def f: 1;${' '.repeat(4096)}`))
     await expect(
       runWithMemory(new MemoryBudget(1024, () => 0), () =>
-        linkModules('import "m" as m; m::f', {}, '/', '/', null, read),
+        linkModules('import "m" as m; m::f', {}, '/', '/', null, bigModule),
       ),
     ).rejects.toBeInstanceOf(MemoryExhausted)
   })

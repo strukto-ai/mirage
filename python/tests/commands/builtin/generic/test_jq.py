@@ -152,7 +152,7 @@ async def test_a_module_jq_cannot_load_refuses_the_program(
     assert await _line("-n", *words) == (b"", stderr, 3)
 
 
-async def _unread(path: PathSpec) -> bytes:
+async def _unread_module(path: PathSpec) -> bytes:
     raise AssertionError(f"{path.virtual} should not be read")
 
 
@@ -180,7 +180,7 @@ async def test_a_library_path_with_no_value_is_refused(word: str):
 
 @pytest.mark.asyncio
 async def test_a_program_that_imports_nothing_reads_no_module():
-    assert await link_modules(".a", {}, "/", "/", None, _unread) is None
+    assert await link_modules(".a", {}, "/", "/", None, _unread_module) is None
 
 
 @pytest.mark.asyncio
