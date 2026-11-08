@@ -14,6 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { YieldBudget } from '../../io/yield_budget.ts'
+import type { Action, Policy, SessionContext } from '../../policy/index.ts'
 import { ShellTask } from '../../rs/shell.ts'
 import { DEFAULT_VISIBILITY } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -69,6 +70,36 @@ describe('drive', () => {
       })
       const result = await ws.shell('x=${X//+(?)/x}; echo "${TOKEN-unset}"')
       expect(session.visibility).toBe(hidden)
+      expect(DEC.decode(result.stdout)).toBe('unset\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('asks a policy added mid-task about the writes after it', async () => {
+    const ws = new Workspace({}, { maxEnv: null })
+    const session = ws.getSession(ws.defaultSessionId)
+    const denyY: Policy = {
+      preSession(ctx: SessionContext): Action | null {
+        return ctx.key === 'Y' ? { kind: 'deny', reason: 'Y refused' } : null
+      },
+    }
+    let added = false
+    try {
+      await ws.shell('shopt -s extglob')
+      seedVar(session, 'X', 'a'.repeat(50_000))
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      const run = YieldBudget.prototype.run
+      vi.spyOn(YieldBudget.prototype, 'run').mockImplementation(function (this: YieldBudget) {
+        if (!added) {
+          added = true
+          ws.registry.policies.add(denyY)
+        }
+        return run.call(this)
+      })
+      await ws.shell(': "${Y:=${X//+(?)/x}}"')
+      const result = await ws.shell('echo "${Y-unset}"')
+      expect(added).toBe(true)
       expect(DEC.decode(result.stdout)).toBe('unset\n')
     } finally {
       await ws.close()

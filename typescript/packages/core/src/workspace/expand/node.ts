@@ -145,6 +145,10 @@ export class ExpandHost implements TaskHost {
   ): Promise<void> {
     return this.gates.gate(post, verb, key, value, old)
   }
+
+  listens(): Promise<boolean> {
+    return this.gates.listens()
+  }
 }
 
 function literal(node: TSNodeLike): string {

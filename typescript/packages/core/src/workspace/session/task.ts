@@ -66,6 +66,8 @@ export interface TaskHost {
     value: string | null,
     old: string | null,
   ): Promise<void>
+  /** Whether a policy hears the session's writes now, told to a task again each time the host answers it. */
+  listens(): Promise<boolean>
 }
 
 /**
@@ -112,6 +114,10 @@ export class SessionGate implements TaskHost {
     const ctx: SessionContext = { verb, key, value, sessionId: this.session.sessionId }
     if (post) await postSessionGate(this.policies, ctx, old)
     else await preSessionGate(this.policies, ctx)
+  }
+
+  listens(): Promise<boolean> {
+    return listens(this.policies, this.session.sessionId)
   }
 }
 
@@ -246,8 +252,10 @@ export async function drive(
       lent.close()
     }
     // The copies the request lent are dropped ahead of the answer, so a
-    // write the task lands shares its records with none and copies nothing.
+    // write the task lands shares its records with none and copies nothing;
+    // a policy added while the host answered hears what comes next.
     try {
+      task.listen(await host.listens())
       answer()
     } catch (err) {
       failure = err

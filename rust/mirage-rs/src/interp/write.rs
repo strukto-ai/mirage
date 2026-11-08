@@ -406,11 +406,11 @@ impl<G: Gate> Writer<'_, G> {
     /// (`a+=(x y)`): each lands in place as `set_element` writes it, as
     /// bash's do, so an `-i` word's own write to the array stands
     /// (`b+=(2 'b[1]=9,1')` leaves `b[1]` at 9). A word refused takes back
-    /// what the append stored before it: every slot, or under `-i`, whose
-    /// words may write the array, each that still holds what it stored.
-    /// With a policy listening, the whole value lands through `set` as one
-    /// write, but under `-i` each word is a write of its own, in order, and
-    /// a word refused leaves the last value the policy passed.
+    /// the slots the append filled before it, but under `-i`, where the
+    /// words before it are evaluated and may write the array, the array
+    /// stays as they left it, as bash's does. With a policy listening, the
+    /// whole value lands through `set` as one write, but under `-i` each
+    /// word is a write of its own, in order.
     pub async fn push(&mut self, name: &str, words: Vec<Vec<u8>>) -> Result<(), Fault> {
         let name = self.store.target(name);
         self.writable(&name)?;
@@ -440,32 +440,21 @@ impl<G: Gate> Writer<'_, G> {
                 .set(&name, Value::Indexed(array), false, Some(&assigned), None)
                 .await;
         }
-        let mut stored: Vec<(Slot, Option<Vec<u8>>)> = Vec::new();
+        let mut filled = Vec::new();
         for (index, word) in slots {
             let slot = Slot::Index(index);
             if let Err(fault) = self
                 .set_element(&name, slot.clone(), Some(word), None)
                 .await
             {
-                let unheard = if self.gate.listens() {
-                    Vec::new()
-                } else {
-                    stored
-                };
-                for (slot, text) in unheard.into_iter().rev() {
-                    if text.is_none_or(|text| self.store.element(&name, &slot) == Some(&text[..])) {
+                if !integer {
+                    for slot in filled.into_iter().rev() {
                         self.store.put_element(&name, &slot, None, false);
                     }
                 }
                 return Err(fault);
             }
-            let text = integer.then(|| {
-                self.store
-                    .element(&name, &slot)
-                    .unwrap_or_default()
-                    .to_vec()
-            });
-            stored.push((slot, text));
+            filled.push(slot);
         }
         Ok(())
     }
@@ -1264,10 +1253,10 @@ mod tests {
             .store
             .seed("n", Value::Indexed(Indexed::dense([b"1".to_vec()])));
         writer.store.set_attr("n", Some(INTEGER), true);
-        let failed = run(writer.push("n", vec![b"2".to_vec(), b"n[1]=9,1/0".to_vec()]));
+        let failed = run(writer.push("n", vec![b"2".to_vec(), b"n[1]=2,1/0".to_vec()]));
         assert!(matches!(failed, Err(Fault::Arith(_))));
         let kept: Vec<_> = writer.store.indexed("n").unwrap().iter().collect();
-        assert_eq!(kept, [(0, &b"1"[..]), (1, &b"9"[..])]);
+        assert_eq!(kept, [(0, &b"1"[..]), (1, &b"2"[..])]);
         let counted: usize = writer
             .store
             .records()

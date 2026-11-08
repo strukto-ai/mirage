@@ -846,6 +846,11 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         }
         return Ok(Item::list([fields, Item::Bool(more)]));
     }
+    if op == "listen" {
+        let listens = args.flag()?;
+        engine.job(handle)?.job.listen(listens);
+        return Ok(Item::Nil);
+    }
     let answer = match op {
         "answer_substituted" => Answer::Substituted(Substitution {
             stdout: args.bytes()?,

@@ -1096,6 +1096,12 @@ impl ShellTask {
         self.answer(py, Answer::Resumed)
     }
 
+    /// Whether a policy hears the session's writes from now on, told
+    /// before each answer.
+    fn listen(&mut self, listens: bool) {
+        self.job.listen(listens);
+    }
+
     /// The host could not do what was asked; the operation stops.
     fn answer_failed(&mut self, py: Python<'_>) -> PyResult<()> {
         self.answer(py, Answer::Failed(Fault::Host("the host failed")))

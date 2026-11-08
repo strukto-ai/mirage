@@ -16,6 +16,8 @@ import asyncio
 
 import pytest
 
+from mirage.policy import Policy
+from mirage.policy.types import Deny, SessionContext
 from mirage.types import HiddenVars, Visibility
 from mirage.workspace import Workspace
 from mirage.workspace.session import task as task_module
@@ -82,6 +84,35 @@ async def test_a_profile_changed_mid_task_hides_its_names(monkeypatch):
         monkeypatch.setattr(task_module, "task_turn", turn)
         result = await ws.shell('x=${X//+(?)/x}; echo "${TOKEN-unset}"')
         assert session.visibility is hidden
+        assert await result.stdout_str() == "unset\n"
+    finally:
+        await ws.close()
+
+
+class _DenyY(Policy):
+    async def pre_session(self, ctx: SessionContext) -> Deny | None:
+        return Deny("Y refused") if ctx.key == "Y" else None
+
+
+@pytest.mark.asyncio
+async def test_a_policy_added_mid_task_hears_the_writes_after_it(monkeypatch):
+    ws = Workspace({}, max_env=None)
+    session = ws.get_session(ws.default_session_id)
+    added: list[Policy] = []
+
+    async def turn() -> None:
+        if not added:
+            added.append(_DenyY())
+            ws.registry.policies.add(added[0])
+        await asyncio.sleep(0)
+
+    try:
+        await ws.shell("shopt -s extglob")
+        seed_var(session, "X", "a" * 50_000)
+        monkeypatch.setattr(task_module, "task_turn", turn)
+        await ws.shell(': "${Y:=${X//+(?)/x}}"')
+        result = await ws.shell('echo "${Y-unset}"')
+        assert added
         assert await result.stdout_str() == "unset\n"
     finally:
         await ws.close()

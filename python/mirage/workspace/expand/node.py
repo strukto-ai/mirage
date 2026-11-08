@@ -184,6 +184,9 @@ class ExpandHost:
     ) -> None:
         await self.gates.gate(post, verb, key, value, old)
 
+    async def listens(self) -> bool:
+        return await self.gates.listens()
+
 
 def _literal(node: LiteralNode) -> str:
     while node.type != "raw_string" and node.children:

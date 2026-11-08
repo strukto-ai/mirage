@@ -1220,6 +1220,11 @@ export class ShellTask {
     this.land(this.call('answer_resumed'))
   }
 
+  /** Whether a policy hears the session's writes from now on, told before each answer. */
+  listen(listens: boolean): void {
+    this.call('listen', listens)
+  }
+
   /** The host could not do what was asked; the operation stops. */
   answerFailed(): void {
     this.land(this.call('answer_failed'))

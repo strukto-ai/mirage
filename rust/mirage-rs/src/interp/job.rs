@@ -59,6 +59,14 @@ impl Job {
         Some(self.run())
     }
 
+    /// Whether a policy hears the session's writes from now on.
+    pub fn listen(&mut self, listens: bool) {
+        match &mut self.running {
+            Running::Expand(task) => task.listen(listens),
+            Running::Write(task) => task.listen(listens),
+        }
+    }
+
     /// Whether slices of the result are left to take.
     pub fn more(&self) -> bool {
         self.rest.len() > 0

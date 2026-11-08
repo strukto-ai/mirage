@@ -98,6 +98,11 @@ class TaskHost(Protocol):
         """
         ...
 
+    async def listens(self) -> bool:
+        """Whether a policy hears the session's writes now, which a task
+        is told again each time the host answers it."""
+        ...
+
 
 async def listens(policies: Policies | None, session_id: str) -> bool:
     """Whether a session write asks anyone: a policy that hears this
@@ -163,6 +168,9 @@ class SessionGate:
             await post_session_gate(self.policies, ctx, old)
         else:
             await pre_session_gate(self.policies, ctx)
+
+    async def listens(self) -> bool:
+        return await listens(self.policies, self.session.session_id)
 
 
 def fault_error(
@@ -265,9 +273,11 @@ async def drive(
         finally:
             records.shell = held
         # The copies the request lent go before the task goes on, so a
-        # write it lands shares its records with none and copies nothing.
+        # write it lands shares its records with none and copies nothing;
+        # a policy added while the host answered hears what comes next.
         del ask
         try:
+            task.listen(await host.listens())
             answer()
         except BaseException as exc:
             failure = exc
