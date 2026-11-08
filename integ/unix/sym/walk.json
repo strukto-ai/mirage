@@ -308,10 +308,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw30/d/sub && cd /data/syw30 && printf 'hi\\n' > d/f && ln -s . d/sub/self && { ls -RL d nope; echo rc=$?; })",
+      "command": "(mkdir -p /data/syw30/d/sub && printf 'hi\\n' > /data/syw30/d/f && printf 'hi\\n' > /data/syw30/d/sub/b && cd /data/syw30 && ln -s . d/sub/self && { ls -RL d nope; echo rc=$?; })",
       "expect": {
         "exit": 0,
-        "stdout": "d:\nf\nsub\n\nd/sub:\nself\nrc=2\n",
+        "stdout": "d:\nf\nsub\n\nd/sub:\nb\nself\nrc=2\n",
         "stderr": "ls: cannot access 'nope': No such file or directory\nls: d/sub/self: not listing already-listed directory\n"
       }
     },
