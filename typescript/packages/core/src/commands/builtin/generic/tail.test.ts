@@ -303,6 +303,58 @@ describe('tail -f', () => {
     expect(fs.ranged).toBeLessThan(1 << 20)
   })
 
+  it.each([{ lines: '0' }, { bytes: '0' }])(
+    'prints only what the file gains under a zero count %o',
+    async (count) => {
+      const fs = new Growing(new Map(), false)
+      fs.set('/d/log', 'old\n')
+      const abort = new AbortController()
+      const [stream] = (await tailGeneric(
+        [spec('/d/log')],
+        [],
+        followOpts(abort, count),
+        fs.stream,
+        fs.stat,
+        fs.readRange,
+      )) as [AsyncIterable<Uint8Array>, IOResult]
+      const grower = (async () => {
+        await sleep(60)
+        fs.append('/d/log', 'new\n')
+      })()
+      const text = await drainFor(stream, 200, abort)
+      await grower
+      expect(text).toBe('new\n')
+    },
+  )
+
+  it('closes the first read when its reader stops at the header', async () => {
+    const fs = new Growing(new Map())
+    fs.set('/d/log', 'a\nb\n')
+    const closed: string[] = []
+    async function* read(p: PathSpec): AsyncIterable<Uint8Array> {
+      try {
+        await Promise.resolve()
+        yield ENC.encode('a\n')
+        yield ENC.encode('b\n')
+      } finally {
+        closed.push(p.virtual)
+      }
+    }
+    const abort = new AbortController()
+    const [stream] = (await tailGeneric(
+      [spec('/d/log')],
+      [],
+      followOpts(abort, { lines: '+1', verbose: true }),
+      read,
+      fs.stat,
+    )) as [AsyncIterable<Uint8Array>, IOResult]
+    const output = stream[Symbol.asyncIterator]()
+    const first = await output.next()
+    expect(DEC.decode(first.value as Uint8Array)).toMatch(/^==> /)
+    await output.return?.()
+    expect(closed).toEqual(['/d/log'])
+  })
+
   it('reports a first print that fails partway', async () => {
     const fs = new Growing(new Map())
     fs.set('/d/log', 'a\n')

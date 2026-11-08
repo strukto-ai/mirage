@@ -26,7 +26,7 @@ from mirage.types import PathSpec
 logger = logging.getLogger(__name__)
 
 
-def char_width(data: bytes, at: int = 0) -> int:
+def char_width(data: bytes | bytearray, at: int = 0) -> int:
     """How many bytes the character at ``at`` in ``data`` spans, decoded
     as UTF-8.
 
@@ -38,7 +38,8 @@ def char_width(data: bytes, at: int = 0) -> int:
     byte that cannot continue it.
 
     Args:
-        data (bytes): the buffer, at least one byte past ``at``.
+        data (bytes | bytearray): the buffer, at least one byte past
+            ``at``.
         at (int): where the character starts.
     """
     lead = data[at]
@@ -93,7 +94,7 @@ class AsyncLineIterator:
         self._budget = YieldBudget()
         # What was pulled and not yet read is ``_buf[_pos:]``: a read moves
         # the offset, so a line never copies the rest of its chunk.
-        self._buf = b""
+        self._buf = bytearray()
         self._pos = 0
         self._loaded = 0
         self._exhausted = False
@@ -108,13 +109,16 @@ class AsyncLineIterator:
 
     def unread(self, data: bytes) -> None:
         """Return a lookahead suffix to a seekable descriptor."""
-        self._buf = data + self._buf[self._pos :]
+        self._buf[: self._pos] = data
         self._pos = 0
 
     def _append(self, chunk: bytes) -> None:
-        """Put a pulled chunk after what is still unread."""
-        self._buf = self._buf[self._pos :] + chunk
-        self._pos = 0
+        """Put a pulled chunk after what is still unread, dropping what was
+        read once it is most of the buffer, so appends stay linear."""
+        if self._pos * 2 >= len(self._buf):
+            del self._buf[: self._pos]
+            self._pos = 0
+        self._buf += chunk
 
     @property
     def loaded(self) -> int:
@@ -175,7 +179,7 @@ class AsyncLineIterator:
         """
         if not delim:
             raise ValueError("empty separator")
-        parts: list[bytes] = []
+        parts: list[bytes | bytearray] = []
         held = 0
         try:
             await self._budget.run()
@@ -190,7 +194,7 @@ class AsyncLineIterator:
                     rest = self._buf[self._pos :]
                     check_memory(held + len(rest))
                     parts.append(rest)
-                    self._buf, self._pos = b"", 0
+                    self._buf, self._pos = bytearray(), 0
                     return b"".join(parts), False
                 # Retain a possible delimiter prefix across source chunks.
                 keep = min(len(delim) - 1, len(self._buf) - self._pos)
@@ -219,7 +223,7 @@ class AsyncLineIterator:
         if isinstance(self._source, PipeInput) and isinstance(
             exc, asyncio.CancelledError
         ):
-            self._buf = taken + self._buf[self._pos :]
+            self._buf[: self._pos] = taken
             self._pos = 0
             return
         await self.discard()
@@ -264,8 +268,8 @@ class AsyncLineIterator:
         except BaseException as exc:
             await self._failed(exc)
             raise
-        data = self._buf[self._pos :]
-        self._buf, self._pos = b"", 0
+        data = bytes(memoryview(self._buf)[self._pos :])
+        self._buf, self._pos = bytearray(), 0
         return data
 
     async def read1(self, size: int) -> bytes:
@@ -290,7 +294,7 @@ class AsyncLineIterator:
         line abandoned. A pull in flight keeps the source until it
         settles and closes it then; a close already running is left to
         finish."""
-        self._buf, self._pos = b"", 0
+        self._buf, self._pos = bytearray(), 0
         self._exhausted = True
         if self._pull_lock.locked():
             self._closing = True
@@ -327,36 +331,21 @@ class AsyncLineIterator:
 
     async def load_rest(self) -> None:
         """Read what the source has left into the buffer, for a descriptor
-        that outlives its pipe: reads go on from memory.
-
-        The chunks are joined once, under the pull lock, so a reader that
-        needs more meanwhile waits for the whole rest instead of pulling
-        a chunk ahead of it."""
-        parts: list[bytes] = []
-        held = len(self._buf) - self._pos
-        try:
-            async with self._pull_lock:
-                self._started = True
-                try:
-                    while not self._exhausted:
-                        await self._budget.run()
-                        try:
-                            data = await self._source.__anext__()
-                        except StopAsyncIteration:
-                            self._exhausted = True
-                            break
-                        held += len(data)
-                        check_memory(held)
-                        parts.append(data)
-                finally:
-                    self._loaded += sum(len(part) for part in parts)
-                    self._append(b"".join(parts))
-                    if self._closing:
-                        self._closing = False
-                        await self._close_after_pull()
-        except BaseException as exc:
-            await self._failed(exc)
-            raise
+        that outlives its pipe: reads go on from memory. Each chunk lands
+        as it arrives, so a reader of the same pipe never waits on the
+        rest."""
+        while not self._exhausted:
+            try:
+                await self._budget.run()
+                chunk = await self._next_chunk()
+                check_memory(len(self._buf) - self._pos + len(chunk))
+            except StopAsyncIteration:
+                self._exhausted = True
+            except BaseException as exc:
+                await self._failed(exc)
+                raise
+            else:
+                self._append(chunk)
 
     async def read_chars(
         self, count: int, delim: bytes | None

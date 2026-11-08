@@ -163,7 +163,8 @@ export function findGeneric(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-  find: (root: PathSpec, options: FindOptions) => AsyncIterable<string>,
+  // The walk of one start point, given its stat when this already has it.
+  find: (root: PathSpec, options: FindOptions, start: FileStat | null) => AsyncIterable<string>,
   unreadable?: () => string[],
   unstatted?: () => [string, unknown][],
   // A walker already evaluates times in its predicate tree. Its raw stat is
@@ -276,6 +277,7 @@ export function findGeneric(
       // reports the link and stops there. The dispatcher's stat would follow
       // it, so the start point's checks below leave it alone.
       const rootIsLink = (linksOf(ctx) ?? null)?.statAt(root.virtual) != null
+      let known: FileStat | null = null
       // What the start point is decides which walk is even possible, so it
       // is resolved once, ahead of all of them: a symlink is walked as
       // itself, a non-directory has no subtree, and nothing at all is GNU's
@@ -335,6 +337,7 @@ export function findGeneric(
           missing.push(`find: '${root.rawPath}': Not a directory`)
           continue
         }
+        known = start
         if (start.type !== FileType.DIRECTORY) {
           const rows = startPointResults(
             root,
@@ -362,7 +365,7 @@ export function findGeneric(
       // behavior is decided once for every backend.
       const reader = ctx.vfs === undefined ? null : readerOf(ctx.vfs)
       try {
-        for await (const key of find(root, rootOptions)) {
+        for await (const key of find(root, rootOptions, known)) {
           const display =
             root.virtual === '/'
               ? key

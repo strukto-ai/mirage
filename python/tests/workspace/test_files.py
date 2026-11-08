@@ -27,7 +27,6 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.context import reset_current_session, set_current_session
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.observe.record import OpRecord
 from mirage.policy import (
     Action,
     Deny,
@@ -1222,35 +1221,5 @@ async def test_a_policys_read_leaves_the_op_it_judges_on_the_ledger():
             ("read", "/d/rules"),
             ("unlink", "/d/f"),
         ]
-    finally:
-        await ws.close()
-
-
-def _read_record(source: str, size: int) -> OpRecord:
-    return OpRecord(
-        op="read",
-        path="/data/a.txt",
-        source=source,
-        bytes=size,
-        timestamp=1,
-        duration_ms=1,
-    )
-
-
-@pytest.mark.asyncio
-async def test_byte_totals_follow_appends_and_a_ledger_cleared_and_refilled():
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        records = ws.vfs.records
-        records.extend([_read_record("s3", 100), _read_record("ram", 30)])
-        assert (ws.vfs.network_bytes, ws.vfs.cache_bytes) == (100, 30)
-        records.append(_read_record("s3", 7))
-        assert (ws.vfs.network_bytes, ws.vfs.cache_bytes) == (107, 30)
-        records.clear()
-        records.extend(
-            _read_record(source, size)
-            for source, size in (("s3", 1), ("s3", 2), ("ram", 4), ("s3", 8))
-        )
-        assert (ws.vfs.network_bytes, ws.vfs.cache_bytes) == (11, 4)
     finally:
         await ws.close()

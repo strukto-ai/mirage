@@ -97,6 +97,9 @@ export interface WalkFindDeps {
   // Receives the entry a -quit was reached on; the walk evaluates nothing
   // after it.
   stopped?: string[]
+  // The start point's stat when the caller has it, which is how a directory
+  // only a mount below it makes still reports itself; absent stats it.
+  root?: FileStat | null
 }
 
 export function modifiedTs(modified: string | null): number | null {
@@ -268,11 +271,13 @@ export async function* walkFind(
     }
     return [...children].sort((a, b) => compareCodePoints(rstripSlash(a), rstripSlash(b)))
   }
-  let start: FileStat | null = null
-  try {
-    start = await deps.stat(path)
-  } catch (err) {
-    if (!isEnoent(err)) throw err
+  let start: FileStat | null = found.root ?? null
+  if (start === null) {
+    try {
+      start = await deps.stat(path)
+    } catch (err) {
+      if (!isEnoent(err)) throw err
+    }
   }
   const chain: readonly (readonly [string, string])[] =
     links != null ? [[rootPath, links.resolve(rootPath)]] : []

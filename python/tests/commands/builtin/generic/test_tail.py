@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import suppress
+from contextlib import aclosing, suppress
 
 import pytest
 
@@ -532,6 +532,53 @@ async def test_follow_reads_only_the_end_of_a_file_for_its_first_print():
     assert b"".join(chunks) == b"last\nmore\n"
     assert fs.whole_reads == 0
     assert fs.ranged < 1 << 20
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [{"lines": "0"}, {"bytes": "0"}])
+async def test_a_zero_count_follow_prints_only_what_the_file_gains(count):
+    fs = _Growing({"/d/log": b"old\n"}, sized=False)
+    stream, _ = await _tail_generic(
+        _paths("/d/log"),
+        [],
+        _follow_opts(**count),
+        fs.stat,
+        fs.read,
+        fs.read_range,
+    )
+
+    async def grow() -> None:
+        await asyncio.sleep(0.06)
+        fs.data["/d/log"] += b"new\n"
+
+    grower = asyncio.create_task(grow())
+    chunks = await _drain_for(stream, 0.2)
+    await grower
+    assert b"".join(chunks) == b"new\n"
+
+
+@pytest.mark.asyncio
+async def test_a_reader_that_stops_at_the_header_closes_the_first_read():
+    closed: list[str] = []
+
+    async def read(p: PathSpec) -> AsyncIterator[bytes]:
+        try:
+            yield b"a\n"
+            yield b"b\n"
+        finally:
+            closed.append(p.virtual)
+
+    fs = _Growing({"/d/log": b"a\nb\n"})
+    stream, _ = await _tail_generic(
+        _paths("/d/log"),
+        [],
+        _follow_opts(lines="+1", verbose=True),
+        fs.stat,
+        read,
+    )
+    async with aclosing(stream) as output:
+        assert (await anext(output)).startswith(b"==> ")
+    assert closed == ["/d/log"]
 
 
 @pytest.mark.asyncio

@@ -53,9 +53,6 @@ export class PipeInput implements AsyncIterableIterator<Uint8Array> {
 export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private readonly source: AsyncIterator<Uint8Array>
   private buf: Uint8Array<ArrayBuffer> = new Uint8Array(0)
-  /** The store `loadRest` grows `buf` in, and where its bytes end. */
-  private store: Uint8Array<ArrayBuffer> = new Uint8Array(0)
-  private stored = 0
   private pulled = 0
   private exhausted = false
   private readonly budget = new YieldBudget()
@@ -165,46 +162,45 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
    * outlives its pipe: reads go on from memory. Mirrors Python's load_rest.
    */
   async loadRest(): Promise<void> {
+    // `buf` grows in the room left at the end of `store` while it still ends
+    // there, else in a store twice the size, so a long load copies each byte
+    // a bounded number of times. The store lives only as long as the load
+    // and what `buf` still views of it.
+    let store = new Uint8Array(0)
+    let stored = 0
     try {
       while (!this.exhausted) {
         const pending = this.check()
         if (pending !== undefined) await pending
         const result = await this.pull()
-        if (result.done === true) this.exhausted = true
-        else {
-          checkMemory(this.buf.byteLength + result.value.byteLength)
-          this.extend(result.value)
+        if (result.done === true) {
+          this.exhausted = true
+          continue
+        }
+        const chunk = result.value
+        const buf = this.buf
+        checkMemory(buf.byteLength + chunk.byteLength)
+        const end = stored + chunk.byteLength
+        if (
+          buf.buffer === store.buffer &&
+          buf.byteOffset + buf.byteLength === stored &&
+          end <= store.byteLength
+        ) {
+          store.set(chunk, stored)
+          stored = end
+          this.buf = store.subarray(buf.byteOffset, end)
+        } else {
+          store = new Uint8Array(2 * (buf.byteLength + chunk.byteLength))
+          store.set(buf)
+          store.set(chunk, buf.byteLength)
+          stored = buf.byteLength + chunk.byteLength
+          this.buf = store.subarray(0, stored)
         }
       }
     } catch (error) {
       await this.failed(error)
       throw error
     }
-  }
-
-  /**
-   * Put `chunk` after `buf` in the room left at the end of `store` while
-   * `buf` still ends there, else in a store twice the size, so a long load
-   * copies each byte a bounded number of times.
-   */
-  private extend(chunk: Uint8Array): void {
-    const buf = this.buf
-    const end = this.stored + chunk.byteLength
-    if (
-      buf.buffer === this.store.buffer &&
-      buf.byteOffset + buf.byteLength === this.stored &&
-      end <= this.store.byteLength
-    ) {
-      this.store.set(chunk, this.stored)
-      this.stored = end
-      this.buf = this.store.subarray(buf.byteOffset, end)
-      return
-    }
-    this.store = new Uint8Array(2 * (buf.byteLength + chunk.byteLength))
-    this.store.set(buf)
-    this.store.set(chunk, buf.byteLength)
-    this.stored = buf.byteLength + chunk.byteLength
-    this.buf = this.store.subarray(0, this.stored)
   }
 
   /**

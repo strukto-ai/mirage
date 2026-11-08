@@ -63,7 +63,7 @@ export function findWalk(
     resolved,
     texts,
     ctx,
-    async function* (root, options) {
+    async function* (root, options, start) {
       // A walk -maxdepth bounds reads its own levels, not the whole tree.
       const whole = files.answers('read_tree') && (options.maxDepth ?? null) === null
       const [readdir, stat] = treeWalk<string[], FileStat>(
@@ -90,6 +90,7 @@ export function findWalk(
           stopped: quit,
           loops,
           listing: (p) => budget.listing(readdir, p),
+          root: start,
         },
         options,
       )

@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
 
 import pytest
 
@@ -229,22 +230,23 @@ async def test_load_rest_ends_the_source_and_reads_on_from_memory():
 
 
 @pytest.mark.asyncio
-async def test_a_line_read_during_a_load_waits_for_the_whole_rest():
-    gate, waiting = asyncio.Event(), asyncio.Event()
-    reader = AsyncLineIterator(_gated(gate, waiting, [b"b\nc", b"\nd\n"]))
-    assert await reader.readline() == b"a"
+async def test_a_reader_sees_each_chunk_a_load_takes():
+    marker = asyncio.Event()
+
+    async def source() -> AsyncIterator[bytes]:
+        yield b"a\n"
+        await marker.wait()
+        yield b"b\n"
+
+    reader = AsyncLineIterator(source())
+
+    async def background() -> None:
+        assert await reader.readline() == b"a"
+        marker.set()
+
     load = asyncio.create_task(reader.load_rest())
-    await waiting.wait()
-    line = asyncio.create_task(reader.readline())
-    for _ in range(100):
-        if reader._pull_lock._waiters:
-            break
-        await asyncio.sleep(0)
-    assert reader._pull_lock._waiters
-    gate.set()
-    await load
-    assert await line == b"b"
-    assert [rest async for rest in reader] == [b"c", b"d"]
+    await asyncio.wait_for(asyncio.gather(load, background()), 1)
+    assert [line async for line in reader] == [b"b"]
 
 
 @pytest.mark.asyncio

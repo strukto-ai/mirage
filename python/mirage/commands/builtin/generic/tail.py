@@ -30,7 +30,7 @@ from mirage.errors.fs import enoent, fs_strerror
 from mirage.execution.process.view import ProcessView
 from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.io.memory import check_memory
-from mirage.io.stream import async_chain, close_quietly, ensure_stream
+from mirage.io.stream import async_chain, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.io.yield_budget import YieldBudget
 from mirage.observe.context import revision_for
@@ -371,7 +371,7 @@ def _note(io: IOResult, message: str) -> None:
     io.stderr = prior + encode_text(message)
 
 
-async def _counted(source: Any, box: list[int]) -> AsyncIterator[bytes]:
+async def _counted(source: Any, box: list[int]) -> AsyncGenerator[bytes, None]:
     """Pass a source through, adding up the bytes it yields.
 
     Args:
@@ -380,9 +380,10 @@ async def _counted(source: Any, box: list[int]) -> AsyncIterator[bytes]:
     """
     if inspect.isawaitable(source):
         source = await source
-    async for chunk in ensure_stream(source):
-        box[0] += len(chunk)
-        yield chunk
+    async with aclosing(chunks(source)) as stream:
+        async for chunk in stream:
+            box[0] += len(chunk)
+            yield chunk
 
 
 async def _window(
@@ -536,6 +537,14 @@ async def _tail_file(
                         window = min(window * 2, 1 << 20)
                 finally:
                     await close_stream(selector)
+    count = counts.byte_count if counts.byte_count is not None else n
+    if box is not None and from_end and count == 0:
+        # Nothing to print, but the follow starts at the file's end.
+        box[0] = 0
+        async with aclosing(_counted(read(path), box)) as drained:
+            async for _ in drained:
+                pass
+        return
     raw = read(path)
     if box is not None:
         box[0] = 0
@@ -829,13 +838,20 @@ async def _follow(
                 # a descriptor follow's --retry covers).
                 await lost(slot, p, exc)
                 continue
-            if show_headers:
-                yield operand_header(p, last is not None)
+            header = (
+                operand_header(p, last is not None) if show_headers else b""
+            )
             last = slot
             if printed is None:
+                if header:
+                    yield header
                 continue
+            # The header goes out inside the scope that closes the opened
+            # read, so a reader that stops at the header closes it too.
             async with aclosing(printed):
                 try:
+                    if header:
+                        yield header
                     if head is not None:
                         yield head
                     async for chunk in printed:

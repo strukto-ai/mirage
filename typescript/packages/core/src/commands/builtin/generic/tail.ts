@@ -336,6 +336,11 @@ async function* tailFile(
       }
     }
   }
+  if (box !== undefined && fromEnd && Math.abs(counts.byteCount ?? n) === 0) {
+    // Nothing to print, but the follow starts at the file's end.
+    for await (const chunk of counted(read(path), box)) void chunk
+    return
+  }
   yield* tail(box === undefined ? read(path) : counted(read(path), box), counts)
 }
 
@@ -572,10 +577,16 @@ async function* follow(
         await lost(entry, err)
         continue
       }
-      if (showHeaders) yield operandHeader(p, last !== null)
+      const header = showHeaders ? operandHeader(p, last !== null) : null
       last = slot
-      if (printed === null) continue
+      if (printed === null) {
+        if (header !== null) yield header
+        continue
+      }
+      // The header goes out inside the scope that closes the opened read, so
+      // a reader that stops at the header closes it too.
       try {
+        if (header !== null) yield header
         if (head !== null && head.done !== true) yield head.value
         for await (const chunk of printed) yield chunk
       } catch (err) {
