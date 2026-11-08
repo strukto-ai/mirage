@@ -463,7 +463,9 @@ impl<G: Gate> Writer<'_, G> {
     /// indexes after it, as one write. An associative subscript is the key
     /// verbatim, and a key not there clears nothing; an indexed one is
     /// arithmetic, its writes landed first; a scalar's element 0 is the
-    /// whole scalar. A hidden or unset name clears nothing, quietly.
+    /// whole scalar. A hidden or unset name clears nothing, quietly, but a
+    /// subscript of an array the shell computes (`PIPESTATUS`) is still
+    /// read, so its writes land and an index before the first refuses.
     pub async fn unset_element(&mut self, name: &str, subscript: &[u8]) -> Result<Element, Fault> {
         let name = self.store.target(name);
         if self.store.hidden(&name) {
@@ -492,7 +494,17 @@ impl<G: Gate> Writer<'_, G> {
                 self.unset(&name, false).await?;
                 return Ok(Element::Landed);
             }
-            None => return Ok(Element::Landed),
+            None => {
+                let Some(array) = self.store.special(&name) else {
+                    return Ok(Element::Landed);
+                };
+                let index = array.back(self.subscript_index(subscript).await?);
+                return Ok(if index < 0 {
+                    Element::Subscript
+                } else {
+                    Element::Landed
+                });
+            }
         };
         self.set_element(&name, slot, None, None).await?;
         Ok(Element::Landed)
@@ -1239,6 +1251,11 @@ mod tests {
         writer
             .store
             .set_specials(vec![1], None, 1, 1, b"bash: ".to_vec());
+        let read = run(writer.unset_element("PIPESTATUS", b"z=4")).unwrap();
+        assert_eq!(read, Element::Landed);
+        assert_eq!(text(writer.store, "z").as_deref(), Some("4"));
+        let before = run(writer.unset_element("PIPESTATUS", b"-5")).unwrap();
+        assert_eq!(before, Element::Subscript);
         let special = run(writer.element("PIPESTATUS", Some(b"-1"), b"0", false)).unwrap();
         assert_eq!(special, Element::Landed);
         writer.limit = Some(writer.store.held() + 4);

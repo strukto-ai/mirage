@@ -251,6 +251,9 @@ export async function drive(
     } catch (err) {
       failure = err
       failed = true
+      answer = () => {
+        task.answerFailed()
+      }
     } finally {
       records.shell = held
       lent.close()

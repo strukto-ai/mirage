@@ -63,11 +63,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "false; echo ${PIPESTATUS[@]} $PIPESTATUS ${#PIPESTATUS[@]}; false; PIPESTATUS[-1]=0; echo \"after $?\"; f() { FUNCNAME[-1]=x; echo \"in $?\"; }; f",
+      "command": "false; echo ${PIPESTATUS[@]} $PIPESTATUS ${#PIPESTATUS[@]}; false; PIPESTATUS[-1]=0; echo \"after $?\"; f() { FUNCNAME[-1]=x; echo \"in $?\"; }; f; true | false; unset 'PIPESTATUS[-5]'; echo \"rc=$?\"; unset 'FUNCNAME[i=3]'; echo \"i=$i\"",
       "expect": {
         "exit": 0,
-        "stdout": "1 1 1\nafter 0\nin 0\n",
-        "stderr": ""
+        "stdout": "1 1 1\nafter 0\nin 0\nrc=1\ni=3\n",
+        "stderr": "bash: line 1: unset: [-5]: bad array subscript\n"
       }
     },
     {
