@@ -513,9 +513,9 @@ class SessionProfile(BaseModel):
     hide, is read by anchor depth: the deeper entry wins, ties break by
     verb.
 
-    A profile may also state a ``policy``: for each ``pre_`` method it
-    answers at (``pre_execute``, ``pre_command``, ``pre_vfs``,
-    ``pre_session``), a list of programs, each with the runtime it runs
+    A profile may also state a ``policy``: for each method it answers at
+    (``pre_execute``, ``pre_command``, ``pre_vfs``, ``pre_network`` and
+    their ``post_`` twins), a list of programs, each with the runtime it runs
     on (``ProfilePolicy``, the shape a ``clis`` entry has). A program's
     function for the method takes its context and returns its answer:
     None for no opinion, a deny, an ask, or at ``pre_execute`` a route.

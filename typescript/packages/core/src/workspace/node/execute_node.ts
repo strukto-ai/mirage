@@ -111,7 +111,6 @@ import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { sessionEntry } from '../session/session.ts'
 import { bindLastWord, positionalParams, sessionArith, sessionView } from '../session/state.ts'
-import type { Policies } from '../../policy/index.ts'
 import { ExecutionNode } from '../types.ts'
 import { type Admitted, admitTest } from './admission.ts'
 import { executeAssignment } from './assignment.ts'
@@ -204,7 +203,6 @@ async function slotText(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
-  policies: Policies | null = null,
 ): Promise<string> {
   const first = exprs[0]
   const last = exprs[exprs.length - 1]
@@ -218,9 +216,7 @@ async function slotText(
     const start = expr.startIndex ?? at
     parts.push(source.slice(at - base, start - base))
     parts.push(
-      expr.isNamed === true
-        ? await expandArith(expr, context, executeFn, callStack, policies)
-        : expr.text,
+      expr.isNamed === true ? await expandArith(expr, context, executeFn, callStack) : expr.text,
     )
     at = expr.endIndex ?? start + expr.text.length
   }
@@ -243,12 +239,11 @@ async function evalCforExpr(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
-  policies: Policies | null = null,
 ): Promise<number> {
   if (exprs.length === 0) return dflt
-  const text = await slotText(exprs, context, executeFn, callStack, policies)
+  const text = await slotText(exprs, context, executeFn, callStack)
   try {
-    return Number(await sessionArith(context.session, text, policies, callStack))
+    return Number(await sessionArith(context.session, text, callStack))
   } catch (err) {
     if (err instanceof ReadonlyVariableError && err.inSubscript) throw err.signal()
     throw err
@@ -627,7 +622,6 @@ async function runRedirected(
         executeFn,
         registry,
         callStack,
-        registry.policies,
         forkedNow,
         namespace.sessionLinks(context.session),
       )
@@ -1433,10 +1427,10 @@ async function executeNodeBody(
 
   if (kind === NodeKind.ARITH) {
     const text = getText(node)
-    const expr = await expandArith(node, context, executeFn, callStack, registry.policies)
+    const expr = await expandArith(node, context, executeFn, callStack)
     let value: bigint
     try {
-      value = await sessionArith(session, expr, registry.policies, callStack)
+      value = await sessionArith(session, expr, callStack)
     } catch (err) {
       if (err instanceof PolicyDenied) return fail(text, `${shellVoice()}${err.message}\n`)
       if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
@@ -1470,8 +1464,7 @@ async function executeNodeBody(
 
   if (kind === NodeKind.CFOR) {
     const [exprs, body] = getCforParts(node)
-    const evalExpr: CforEval = (e, d) =>
-      evalCforExpr(e, d, context, executeFn, callStack, registry.policies)
+    const evalExpr: CforEval = (e, d) => evalCforExpr(e, d, context, executeFn, callStack)
     return callStack.loop(() => handleCfor(run, exprs, body, evalExpr, session))
   }
 
@@ -1490,7 +1483,6 @@ async function executeNodeBody(
               registry,
               session.cwd,
               callStack,
-              registry.policies,
             )
             // The loop word list is consumed by the shell (WordPolicy.SHELL):
             // globs resolve to matches before iteration starts.
@@ -1505,22 +1497,10 @@ async function executeNodeBody(
     if (kind === NodeKind.SELECT) {
       const signal = mergeSignals(deps.signal, context.frame.abortSignal)
       return callStack.loop(() =>
-        handleSelect(
-          run,
-          variable,
-          resolved,
-          body,
-          context,
-          stdin,
-          registry.policies,
-          signal,
-          sink,
-        ),
+        handleSelect(run, variable, resolved, body, context, stdin, signal, sink),
       )
     }
-    return callStack.loop(() =>
-      handleFor(run, variable, resolved, body, context, registry.policies),
-    )
+    return callStack.loop(() => handleFor(run, variable, resolved, body, context))
   }
 
   if (kind === NodeKind.WHILE || kind === NodeKind.UNTIL) {
@@ -1529,15 +1509,9 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.CASE) {
-    const word = await expandNode(
-      getCaseWord(node),
-      context,
-      executeFn,
-      callStack,
-      registry.policies,
-    )
+    const word = await expandNode(getCaseWord(node), context, executeFn, callStack)
     return handleCase(run, word, getCaseItems(node), session, (pattern) =>
-      expandPattern(pattern, context, executeFn, callStack, registry.policies),
+      expandPattern(pattern, context, executeFn, callStack),
     )
   }
 
@@ -1592,9 +1566,8 @@ async function executeNodeBody(
     const unset = await handleUnset(
       args,
       session,
-      sessionView(session, registry.policies, context.frame.diagnostics),
-      registry.policies,
-      (text) => expandSubscript(text, context, executeFn, callStack, registry.policies),
+      sessionView(session, context.frame.diagnostics),
+      (text) => expandSubscript(text, context, executeFn, callStack),
     )
     bindLastWord(session, ['unset', ...args])
     return unset
@@ -1607,7 +1580,7 @@ async function executeNodeBody(
     const claimant = claimantFor(node, deps.handed)
     const admitted = (words: string[]): Promise<Admitted> =>
       admitTest('[[', words, session, registry, deps.namespace, signal, claimant)
-    const tree = await expandDoubleBracket(node, context, executeFn, callStack, registry.policies)
+    const tree = await expandDoubleBracket(node, context, executeFn, callStack)
     return handleTest(dispatch, deps.namespace, tree, session, '[[', admitted, signal)
   }
 

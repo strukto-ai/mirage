@@ -125,14 +125,9 @@ export async function run(factory: (policy: Policy) => Workspace) {
   }
   let calls = 0
   let vfsCalls = 0
-  let sessionCalls = 0
   const ws = factory({
     preVfs() {
       vfsCalls++
-      return null
-    },
-    preSession() {
-      sessionCalls++
       return null
     },
     preCommand(ctx) {
@@ -153,14 +148,12 @@ export async function run(factory: (policy: Policy) => Workspace) {
       await measure(`shell_${index}`, 20, async () => {
         const before = calls
         const vfsBefore = vfsCalls
-        const sessionBefore = sessionCalls
         const result = await ws.shell(command, { sessionId: 'bench' })
         check(
           result.exitCode === code && result.stdoutText === stdout && result.stderrText === stderr,
         )
         if (index !== 2) check(calls > before)
         if (index === 0) check(vfsCalls > vfsBefore)
-        if (index === 2) check(sessionCalls > sessionBefore)
       })
     }
   } finally {

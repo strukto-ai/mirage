@@ -165,9 +165,9 @@ export interface SessionProfile {
   readonly vars?: VarsBlock | null
   readonly commands?: CommandsBlock | null
   /**
-   * The profile's policy: for each `pre` method it answers at
-   * (`preExecute`, `preCommand`, `preVfs`, `preSession`; `pre_execute`,
-   * ... in the document), a list of programs, each with the runtime it
+   * The profile's policy: for each method it answers at (`preExecute`,
+   * `preCommand`, `preVfs`, `preNetwork` and their `post` twins;
+   * `pre_execute`, ... in the document), a list of programs, each with the runtime it
    * runs on, the shape a `clis` entry has. A program's function for the
    * method takes its context and returns its answer: None for no opinion,
    * a deny, an ask, or at `preExecute` a route. They are asked in order and

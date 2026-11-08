@@ -157,9 +157,7 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
         else:
             expanded = False
         try:
-            return await element_is_set(
-                ctx.session, text, ctx.namespace.registry.policies, expanded
-            )
+            return await element_is_set(ctx.session, text, expanded)
         except ArithError as exc:
             # bash aborts the line on `[[ -v a[1/0] ]]` with `1/0:
             # division by 0`, a test's grammar error being the only

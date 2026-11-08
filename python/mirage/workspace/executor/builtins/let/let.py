@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.policy import PolicyDenied
-from mirage.policy.policies import Policies
 from mirage.shell.errors import ArithError, ReadonlyVariableError
 from mirage.shell.voice import shell_voice
 from mirage.workspace.executor.builtins.shared import (
@@ -30,7 +29,6 @@ from mirage.workspace.session.state import session_arith
 async def handle_let(
     args: list[str],
     session: SessionState,
-    policies: Policies | None = None,
 ) -> Result:
     """Evaluate each operand as an arithmetic expression.
 
@@ -48,14 +46,13 @@ async def handle_let(
     Args:
         args (list[str]): the words after ``let``, one expression each.
         session (SessionState): shell session state.
-        policies (Policies | None): the policies its writes clear.
     """
     if not args:
         return fail("let", f"{shell_voice()}let: expression expected\n")
     value = 0
     for expr in args:
         try:
-            value = await session_arith(session, expr, policies, expand=True)
+            value = await session_arith(session, expr, expand=True)
         except PolicyDenied as exc:
             return refusal("let", exc)
         except (ArithError, ReadonlyVariableError) as exc:
@@ -76,5 +73,4 @@ async def let_builtin(call: BuiltinCall) -> Result:
     return await handle_let(
         list(call.argv.args),
         call.context.session,
-        call.namespace.registry.policies,
     )

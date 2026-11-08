@@ -198,13 +198,10 @@ export async function expandOperands(
 }
 
 /**
- * The gated session view this builtin writes through.
+ * The session view this builtin writes through.
  *
- * Every session write goes through the workspace's gated view, which is
- * what makes `preSession` rules enforceable; this used to fall back to
- * an ungated view over the same session, so a caller that forgot to
- * thread one silently wrote past every policy. A write reached without
- * a view is a wiring bug, not a mode, so it throws.
+ * Every session write goes through the view the line threads; a write
+ * reached without one is a wiring bug, not a mode, so it throws.
  */
 export function requireView(state: SessionView | null): SessionView {
   if (state === null) {
@@ -328,6 +325,5 @@ export function recordDelimiter(text: string | null): number {
  * (`unset 'a[$i]'`), in the call's session and frame.
  */
 export function subscriptExpansion(call: BuiltinCall): SubscriptFn {
-  return (text) =>
-    expandSubscript(text, call.context, call.executeFn, call.callStack, call.registry.policies)
+  return (text) => expandSubscript(text, call.context, call.executeFn, call.callStack)
 }

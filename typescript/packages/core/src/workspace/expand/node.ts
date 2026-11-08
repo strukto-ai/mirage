@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IOResult } from '../../io/types.ts'
-import type { Policies } from '../../policy/index.ts'
 import { ShellVars } from '../../rs/session.ts'
 import type { Item, Shell, ShellTreeNode } from '../../rs/shell.ts'
 import { CallStack } from '../../shell/call_stack.ts'
@@ -26,7 +25,7 @@ import { recordStatus } from '../executor/statement.ts'
 import type { ProcessSubLine } from '../frame.ts'
 import type { SessionState } from '../session/session.ts'
 import { frame } from '../session/state.ts'
-import { SessionGate, drive, listens, type TaskHost } from '../session/task.ts'
+import { drive, type TaskHost } from '../session/task.ts'
 import type { ExecuteFn } from './types.ts'
 
 /**
@@ -67,11 +66,10 @@ export async function childLine(
 
 /**
  * What a word's expansion asks of the shell running it: a command
- * substitution's line, a process substitution's pipe, and the session
- * policies on the writes it makes. Mirrors Python's ExpandHost.
+ * substitution's line and a process substitution's pipe. Mirrors Python's
+ * ExpandHost.
  */
 export class ExpandHost implements TaskHost {
-  private readonly gates: SessionGate
   private readonly program: ParsedProgram | null
   readonly session: SessionState
 
@@ -79,11 +77,9 @@ export class ExpandHost implements TaskHost {
     readonly context: EvaluationContext,
     readonly executeFn: ExecuteFn,
     readonly callStack: CallStack | null,
-    policies: Policies | null,
     word: TSNodeLike,
   ) {
     this.session = context.session
-    this.gates = new SessionGate(context.session, policies)
     this.program = word instanceof ProgramNode ? word.program : null
   }
 
@@ -135,20 +131,6 @@ export class ExpandHost implements TaskHost {
       childLine(child, this.executeFn, text, named, this.callStack, null, options),
     )
   }
-
-  gate(
-    post: boolean,
-    verb: string,
-    key: string,
-    value: string | null,
-    old: string | null,
-  ): Promise<void> {
-    return this.gates.gate(post, verb, key, value, old)
-  }
-
-  listens(): Promise<boolean> {
-    return this.gates.listens()
-  }
 }
 
 function literal(node: TSNodeLike): string {
@@ -169,7 +151,6 @@ export async function expand(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
-  policies: Policies | null = null,
 ): Promise<Item> {
   const node = shellNode(word)
   if (node === null) {
@@ -178,10 +159,9 @@ export async function expand(
     return mode === 'pattern' ? [[text, true]] : text
   }
   const session = context.session
-  const heard = await listens(policies, session.sessionId)
   frame(session, callStack)
-  const task = session.vars.shell.expand(node, mode, heard)
-  const host = new ExpandHost(context, executeFn, callStack, policies, word)
+  const task = session.vars.shell.expand(node, mode)
+  const host = new ExpandHost(context, executeFn, callStack, word)
   return drive(task, host, context.frame.diagnostics)
 }
 
@@ -195,9 +175,8 @@ export async function expandNode(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
-  policies: Policies | null = null,
 ): Promise<string> {
-  return (await expand(tsNode, 'text', context, executeFn, callStack, policies)) as string
+  return (await expand(tsNode, 'text', context, executeFn, callStack)) as string
 }
 
 /**
@@ -209,9 +188,8 @@ export async function expandAssignment(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
-  policies: Policies | null = null,
 ): Promise<string> {
-  return (await expand(tsNode, 'assignment', context, executeFn, callStack, policies)) as string
+  return (await expand(tsNode, 'assignment', context, executeFn, callStack)) as string
 }
 
 /**
@@ -224,9 +202,8 @@ export async function expandArith(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
-  policies: Policies | null = null,
 ): Promise<string> {
-  return (await expand(tsNode, 'arith', context, executeFn, callStack, policies)) as string
+  return (await expand(tsNode, 'arith', context, executeFn, callStack)) as string
 }
 
 /**
@@ -240,9 +217,8 @@ export async function expandSubscript(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
-  policies: Policies | null = null,
 ): Promise<string> {
   if (!/[$`'"\\]/.test(text)) return text
   const word = parse('${x[' + text + ']}')
-  return (await expand(word, 'subscript', context, executeFn, callStack, policies)) as string
+  return (await expand(word, 'subscript', context, executeFn, callStack)) as string
 }

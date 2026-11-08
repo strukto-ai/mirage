@@ -79,10 +79,6 @@ flowchart LR
         PV["pre_vfs"] --> Op["call runs or cache serves"] --> PoV["post_vfs"]
     end
     Run -. file operations .-> PV
-    subgraph write["A variable write"]
-        direction LR
-        PS["pre_session"] --> Land["write lands"] --> PoS["post_session"]
-    end
     subgraph connection["A connection"]
         direction LR
         PN["pre_network"] --> Send["bytes flow"] --> PoN["post_network"]
@@ -98,8 +94,6 @@ flowchart LR
 | `post_execute` | `postExecute` | once per line, after it ends | Deny, Ask, Limit |
 | `pre_vfs` | `preVfs` | before each VFS call, including command and runtime file operations | Deny, Ask |
 | `post_vfs` | `postVfs` | after each VFS call | Deny, Ask |
-| `pre_session` | `preSession` | before each variable write | Deny, Ask |
-| `post_session` | `postSession` | after the write lands | Deny, Ask |
 | `pre_network` | `preNetwork` | before a connection the workspace opens carries any byte | Deny, Ask, Limit |
 | `post_network` | `postNetwork` | once that connection is over, however it ended | nothing; it observes |
 | `pre_workspace` | `preWorkspace` | on a server, before a create, clone or load builds anything | Deny |
@@ -109,14 +103,13 @@ flowchart LR
 | A line | `cat /data/a.txt && rm /data/b` | `pre_execute`, `post_execute` |
 | A command or CLI | `rm /data/b` | `pre_command`, `post_command` |
 | A VFS call | `session.vfs.read("/data/a.txt")` | `pre_vfs`, `post_vfs` |
-| A variable write | `export X=1`, `X=1`, `unset X` | `pre_session`, `post_session` |
 | A connection | `curl https://api.example.com/x`, a CLI's API call, a mount's read | `pre_network`, `post_network` |
 
 | Entry point | Sends |
 | --- | --- |
-| `ws.shell`, `session.shell` | a line, with its commands, file operations and variable writes |
-| the `shell`, `ls` and `grep` tools | a line, with its commands, file operations and variable writes |
-| `mirage shell`, HTTP `/shell`, RPC `shell`, SSH | a line, with its commands, file operations and variable writes |
+| `ws.shell`, `session.shell` | a line, with its commands and file operations |
+| the `shell`, `ls` and `grep` tools | a line, with its commands and file operations |
+| `mirage shell`, HTTP `/shell`, RPC `shell`, SSH | a line, with its commands and file operations |
 | `session.vfs` | a VFS call |
 | the `read`, `write`, `edit` and `glob` tools | a VFS call |
 | `mirage workspace vfs`, HTTP `/vfs/<call>`, RPC `vfs/<call>` | a VFS call |
@@ -139,7 +132,6 @@ TypeScript spells the fields in camelCase (`ctx.sessionId`, `ctx.exitCode`).
 | `pre_execute`, `post_execute` | `line` and `commands`: every command of the line | `exit_code`, `output`, `results` |
 | `pre_command`, `post_command` | `line` and the command: `command`, `words`, `paths`, `walks` | `exit_code`, `stderr`, `records` |
 | `pre_vfs`, `post_vfs` | `call`, `path`, `write` | `result` |
-| `pre_session`, `post_session` | `verb`, `key`, `value` | `old` |
 | `pre_network`, `post_network` | `host`, `address`, `port`, and who opened it: `command`, `program`, `words`, `line`, `mount` | `bytes_sent`, `bytes_received`, `seconds`, `ended` |
 | `pre_workspace` | `config`: the config as the caller wrote it, secrets still pointers | |
 
@@ -199,9 +191,8 @@ claim to check, not as a credential:
 | `line`, `command`, `words`, `argv`, `paths`, `walks` | the line it types, after expansion |
 | `cwd`, `session.cwd()`, `caller.session.cwd` | `cd` |
 | `env`, `session.get()`, `session.snapshot()` | `export` and assignments, except a name `session.is_readonly()` reports |
-| `key`, `value` at `pre_session` | the write it asked for |
 | `call`, `path`, `write` at `pre_vfs` | the file call it made |
-| `exit_code`, `stderr`, `output`, `records`, `result`, `old` | what its own command or call produced |
+| `exit_code`, `stderr`, `output`, `records`, `result` | what its own command or call produced |
 
 The host sets `session_id` (`caller.session.session_id` too), `profile`,
 `mounts`, `prefix` and `mode`, and what `vfs` shows: the agent cannot
@@ -369,34 +360,12 @@ value again. Bytes already delivered to a program remain in its memory.
 back whole or not at all. To cap how much a command prints, use
 `post_execute`.
 
-### pre_session
+### Variables
 
-<CodeGroup>
-
-```python Python
-from mirage.policy import Deny, Policy, SessionContext
-
-class NoCredentials(Policy):
-    async def pre_session(self, ctx: SessionContext) -> Deny | None:
-        if ctx.key.startswith("AWS_"):
-            return Deny("credentials are set by the operator")
-        return None
-```
-
-```typescript TypeScript
-const noCredentials: Policy = {
-  preSession(ctx) {
-    return ctx.key.startsWith('AWS_')
-      ? { kind: 'deny', reason: 'credentials are set by the operator' }
-      : null
-  },
-}
-```
-
-</CodeGroup>
-
-`export AWS_SECRET=x` gets `AWS_SECRET: permission denied`, exit 1. A
-Deny at `post_session` gives the same answer and puts the old value back.
+A variable write reaches no method: a variable does nothing until a
+command, a file call or a connection uses it, and each of those methods
+reads the session (`ctx.session`, and a command's `env`), so a rule about
+a value goes in the method that uses it.
 
 ### pre_network and post_network
 
@@ -578,4 +547,4 @@ held, and the approved retry runs it again.
 [policy.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/policy/policy.py)
 and
 [policy.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/policy/policy.ts)
-run a coded policy beside a profile's script.
+run a profile's scripts.

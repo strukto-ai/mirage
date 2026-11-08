@@ -27,7 +27,6 @@ from mirage.context.session_context import (
     Caller,
     CallerToken,
     current_caller,
-    explaining,
     reset_explaining,
     set_explaining,
 )
@@ -66,8 +65,6 @@ from mirage.policy.types import (
     PolicyCaller,
     Route,
     RouteContext,
-    SessionContext,
-    SessionResultContext,
     VfsContext,
     VfsExplanation,
     VfsResultContext,
@@ -91,7 +88,6 @@ MethodContext = (
     | VfsContext
     | VfsResultContext
     | ExecuteResultContext
-    | SessionContext
     | WorkspaceContext
     | NetworkContext
 )
@@ -664,36 +660,6 @@ async def post_network_gate(
     await _apart(policies.post_network(ctx, passed))
 
 
-async def pre_session_gate(
-    policies: "Policies | None", ctx: SessionContext
-) -> None:
-    """Fire pre_session on the session plane; a Deny, or an Ask the host
-    has not approved, becomes EACCES.
-
-    The one seam helper the session view calls, so a refusal
-    is identical however the state is reached: shell builtin, command
-    view, or a later tier. None policies (a view constructed outside a
-    workspace) gate nothing. An Ask goes to the workspace's ledger
-    (``Policies.decisions``), inside a line too.
-
-    Args:
-        policies (Policies | None): the workspace's admission policies.
-        ctx (SessionContext): the mutation, built by the session view so
-            the verb, rendering and session identity are stated in
-            exactly one place.
-
-    Raises:
-        PermissionError: a write a method makes while it decides
-            (``ctx.session``), which may read the session but not change
-            it.
-    """
-    if explaining() is DryRun.DECIDING:
-        raise eacces(ctx.key)
-    if policies is None or not policies.wants("pre_session"):
-        return
-    await _session_refused(policies, ctx, await policies.pre_session(ctx))
-
-
 async def post_execute_gate(
     policies: "Policies",
     ctx: ExecuteResultContext,
@@ -761,43 +727,6 @@ async def post_command_gate(
     if isinstance(said, Abandoned):
         raise MirageAbortError()
     return said
-
-
-async def post_session_gate(
-    policies: "Policies | None", ctx: SessionContext, old: str | None
-) -> None:
-    """Fire post_session once a session write landed; a Deny, or an Ask
-    the host has not approved, becomes EACCES, for the writer to put the
-    old value back before it reports.
-
-    Args:
-        policies (Policies | None): the workspace's policies; None gates
-            nothing.
-        ctx (SessionContext): the write, as pre_session saw it.
-        old (str | None): the value it replaced, rendered as ``value``
-            is; None when the name was unset.
-    """
-    if policies is None or not await policies.wants_for(
-        "post_session", ctx.session_id
-    ):
-        return
-    facts = {f.name: getattr(ctx, f.name) for f in fields(ctx)}
-    landed = SessionResultContext(**facts, old=old)
-    await _session_refused(
-        policies, landed, await policies.post_session(landed)
-    )
-
-
-async def _session_refused(
-    policies: "Policies", ctx: SessionContext, answer: Deny | Ask | None
-) -> None:
-    refused = (
-        await policies.decisions.resolve_op(ctx, answer)
-        if isinstance(answer, Ask)
-        else answer
-    )
-    if refused is not None:
-        raise policy_denied(refused, ctx.key, f"{ctx.key}: permission denied")
 
 
 def agreed(routes: list[Route]) -> Deny | Route | None:
@@ -957,13 +886,12 @@ class Policies:
         The per-session refinement of ``wants``: a policy that overrides
         the method counts, unless it speaks per session
         (``SessionScopedMixin``) and says this is not one of its. For
-        a seam that pays ahead for a method rather than gating on it: the
-        secret fill drops its masks under a session-write gate, and a
+        a seam that pays ahead for a method rather than gating on it, a
         profile's policy at that entry point is one profile's, not every
         session's.
 
         Args:
-            method (str): method name (pre_command, pre_vfs, pre_session).
+            method (str): method name (pre_command, pre_vfs, pre_network).
             session_id (str): the session, empty when none is bound.
             coded_only (bool): leave the profile's rules out, for a
                 caller whose line's gate already answers for them.
@@ -1274,16 +1202,6 @@ class Policies:
         action, _, _ = await self._fire("pre_vfs", ctx, rules_only=rules_only)
         return action
 
-    async def pre_session(self, ctx: SessionContext) -> Deny | Ask | None:
-        """Fire pre_session across the policies; first Deny wins, else
-        the first Ask.
-
-        Args:
-            ctx (SessionContext): the mutation about to land.
-        """
-        action, _, _ = await self._fire("pre_session", ctx)
-        return action
-
     async def pre_workspace(self, ctx: WorkspaceContext) -> Deny | None:
         """Fire pre_workspace across the policies; the first Deny wins.
 
@@ -1292,19 +1210,6 @@ class Policies:
         """
         action, _, _ = await self._fire("pre_workspace", ctx)
         return action if isinstance(action, Deny) else None
-
-    async def post_session(
-        self, ctx: SessionResultContext
-    ) -> Deny | Ask | None:
-        """Fire post_session across the policies; first Deny wins, else
-        the first Ask.
-
-        Args:
-            ctx (SessionResultContext): the write and the value it
-                replaced.
-        """
-        action, _, _ = await self._fire("post_session", ctx)
-        return action
 
     async def post_vfs(self, ctx: VfsResultContext) -> Deny | Ask | None:
         """Fire post_vfs; a Deny or an Ask holds the result back.

@@ -1180,7 +1180,6 @@ async function runParsedLine(
   // spend. A deny only the value gate can see still follows the fetch,
   // because expansion is what consumes the values. A SecretsError
   // folds like any failed line: the line exits 1 and never runs.
-  const writesGated = await env.registry.policies.wantsFor('preSession', effectiveSession.sessionId)
   const fillManaged = async (
     nodes: TSNodeLike[],
     whole: boolean,
@@ -1191,7 +1190,7 @@ async function runParsedLine(
       let planNodes = nodes
       let planWhole = whole
       let planCli = lineCliEnvNames
-      let names = fillNames(effectiveSession, planNodes, planWhole, planCli, writesGated)
+      let names = fillNames(effectiveSession, planNodes, planWhole, planCli)
       if (names.size > 0 && probeText) {
         const served = await unrefusedNodes(
           nodes,
@@ -1209,7 +1208,7 @@ async function runParsedLine(
           names =
             served.length === 0
               ? new Set<string>()
-              : fillNames(effectiveSession, planNodes, planWhole, planCli, writesGated)
+              : fillNames(effectiveSession, planNodes, planWhole, planCli)
         }
       }
       // A fetched value can name another managed variable (the
@@ -1229,7 +1228,7 @@ async function runParsedLine(
         // the loop's later passes cost one await.
         const sources = await abortable(env.secretSources(), killed)
         await fillEnv(effectiveSession, names, sources, killed)
-        names = fillNames(effectiveSession, planNodes, planWhole, planCli, writesGated)
+        names = fillNames(effectiveSession, planNodes, planWhole, planCli)
       }
       return null
     } catch (err) {

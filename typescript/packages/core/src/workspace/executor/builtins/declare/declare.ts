@@ -15,7 +15,6 @@
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import type { Policies } from '../../../../policy/index.ts'
 import {
   arraySet,
   buildAssocLiteral,
@@ -345,7 +344,6 @@ export async function storeStagedArrays(
   shaping: AttrMarks = [],
   globalScope = false,
   inherit = false,
-  policies: Policies | null = null,
 ): Promise<RedirectResult | null> {
   const shell = session.vars.shell
   const scoped = !globalScope && !VISIBLE_SCOPE_BUILTINS.has(cmd) && shell.inFunction()
@@ -396,7 +394,7 @@ export async function storeStagedArrays(
           indexed = scalar === null ? null : makeArray([scalar])
         }
         base = await buildIndexedLiteral(indexed, items, append, (sub) =>
-          subscriptIndex(session, sub, policies),
+          subscriptIndex(session, sub),
         )
       }
       await view.set(name, base)
@@ -702,7 +700,6 @@ export async function markNames(
   state: SessionView | null,
   attr: VarAttr,
   parser?: ParseScope,
-  policies: Policies | null = null,
 ): Promise<RedirectResult> {
   const exporting = attr === VarAttr.Export
   const cmd = exporting ? 'export' : 'readonly'
@@ -718,7 +715,7 @@ export async function markNames(
   const kind = declaredKind(flags)
   if (flags.has('f')) {
     const marked = exporting ? session.exportedFunctions : session.readonlyFunctions
-    return markFunctions(cmd, session, marked, names, on, state, parser, kind, policies)
+    return markFunctions(cmd, session, marked, names, on, state, parser, kind)
   }
   if (names.length === 0) {
     const temporaries = prefixTemporaries(session)
@@ -734,7 +731,7 @@ export async function markNames(
       .filter((line) => line !== null)
     return ok(cmd, encodeText(lines.map((line) => `${line}\n`).join('')))
   }
-  return markVariables(cmd, session, requireView(state), names, attr, on, kind, policies)
+  return markVariables(cmd, session, requireView(state), names, attr, on, kind)
 }
 
 /**
@@ -756,7 +753,6 @@ export async function markFunctions(
   state: SessionView | null = null,
   parser?: ParseScope,
   kind: VarKind | null = null,
-  policies: Policies | null = null,
 ): Promise<RedirectResult> {
   const errors: string[] = []
   const warnings: string[] = []
@@ -774,7 +770,6 @@ export async function markFunctions(
       [],
       false,
       false,
-      policies,
     )
     if (refused !== null) return refused
   }
@@ -814,7 +809,6 @@ export async function markVariables(
   attr: VarAttr,
   on: boolean,
   kind: VarKind | null,
-  policies: Policies | null = null,
 ): Promise<RedirectResult> {
   const errors: string[] = []
   const warnings: string[] = []
@@ -832,7 +826,6 @@ export async function markVariables(
     [],
     false,
     false,
-    policies,
   )
   const traced = kind === null && session.shellOptions.xtrace === true
   let failed = false

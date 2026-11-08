@@ -21,7 +21,6 @@ import { checkMemory } from '../../../../io/memory.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import type { Policies } from '../../../../policy/index.ts'
 import { makeArray } from '../../../../shell/array.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { endsEscaped } from '../../../../shell/escapes.ts'
@@ -285,7 +284,6 @@ export async function handleRead(
   session: SessionState,
   stdin: ByteSource | null,
   state: SessionView | null = null,
-  policies: Policies | null = null,
   signal?: AbortSignal,
   subscripts: SubscriptFn | null = null,
 ): Promise<RedirectResult> {
@@ -396,7 +394,7 @@ export async function handleRead(
     // bash stops at the first name it cannot assign, the ones before it
     // assigned.
     if (!TARGET_RE.test(name)) return invalidName(name)
-    const refused = await readStore(session, view, name, parts[i] ?? '', policies, subscripts)
+    const refused = await readStore(session, view, name, parts[i] ?? '', subscripts)
     if (refused !== null) return refused
   }
   const code = complete ? 0 : 1
@@ -421,7 +419,6 @@ async function readStore(
   view: SessionView,
   varName: string,
   value: string,
-  policies: Policies | null = null,
   subscripts: SubscriptFn | null = null,
 ): Promise<RedirectResult | null> {
   const match = TARGET_RE.exec(varName)
@@ -440,7 +437,7 @@ async function readStore(
   if (subscripts !== null) subscript = await subscripts(subscript)
   let status: string
   try {
-    status = await assignElement(session, policies, base, subscript, value)
+    status = await assignElement(session, base, subscript, value)
   } catch (err) {
     if (err instanceof PolicyDenied) return refusal('read', err)
     throw err
@@ -471,8 +468,7 @@ export async function readBuiltin(call: BuiltinCall): Promise<RedirectResult> {
     [...call.argv.args],
     call.context.session,
     call.stdin,
-    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
-    call.registry.policies,
+    sessionView(call.context.session, call.context.frame.diagnostics),
     call.signal,
     subscriptExpansion(call),
   )

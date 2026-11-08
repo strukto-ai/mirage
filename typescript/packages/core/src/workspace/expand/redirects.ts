@@ -14,7 +14,6 @@
 
 import { sessionAccess, voiceName } from '../../context/session_context.ts'
 import type { EvaluationContext } from '../evaluation.ts'
-import type { Policies } from '../../policy/index.ts'
 import type { NamespaceLinks } from '../../view/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { encodeText, utf8Locale } from '../../shell/bytes.ts'
@@ -40,7 +39,6 @@ export async function expandRedirect(
   executeFn: ExecuteFn,
   registry: MountRegistry,
   callStack: CallStack | null = null,
-  policies: Policies | null = null,
   forked = false,
   links: NamespaceLinks | null = null,
   // The target's words when another shell expanded them already (`$(< file)`),
@@ -48,16 +46,7 @@ export async function expandRedirect(
   words: readonly string[] | null = null,
 ): Promise<Redirect> {
   try {
-    return await expandTarget(
-      redirect,
-      context,
-      executeFn,
-      registry,
-      callStack,
-      policies,
-      links,
-      words,
-    )
+    return await expandTarget(redirect, context, executeFn, registry, callStack, links, words)
   } catch (error) {
     if (!(error instanceof ExitSignal) || !forked) throw error
     return new Redirect({ fd: redirect.fd, target: error, kind: RedirectKind.UNEXPANDED })
@@ -71,7 +60,6 @@ async function expandTarget(
   executeFn: ExecuteFn,
   registry: MountRegistry,
   callStack: CallStack | null,
-  policies: Policies | null,
   links: NamespaceLinks | null,
   expanded: readonly string[] | null,
 ): Promise<Redirect> {
@@ -88,7 +76,7 @@ async function expandTarget(
     let body: unknown = r.target
     const heredocNode = r.targetNode as TSNodeLike | null
     if (r.expandVars && heredocNode !== null) {
-      body = await expandNode(heredocNode, context, executeFn, callStack, policies)
+      body = await expandNode(heredocNode, context, executeFn, callStack)
     }
     return new Redirect({
       fd: r.fd,
@@ -104,8 +92,7 @@ async function expandTarget(
   const targetNode = r.targetNode as TSNodeLike | null
   let targetScope: unknown = r.target
   if (targetNode !== null) {
-    const words =
-      expanded ?? (await expandWords([targetNode], context, executeFn, callStack, policies))
+    const words = expanded ?? (await expandWords([targetNode], context, executeFn, callStack))
     const targets = await resolveGlobs(
       words.map((word) => classifyBarePath(word, registry, session.cwd, sessionAccess(session))),
       registry,

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import type { Policies } from '../../../../policy/index.ts'
 import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import { VarAttr } from '../../../../shell/variable.ts'
 import type { SessionView } from '../../../../view/types.ts'
@@ -36,9 +35,8 @@ export async function handleExport(
   session: SessionState,
   state: SessionView | null = null,
   parser?: ParseScope,
-  policies: Policies | null = null,
 ): Promise<RedirectResult> {
-  return markNames(assignments, session, state, VarAttr.Export, parser, policies)
+  return markNames(assignments, session, state, VarAttr.Export, parser)
 }
 
 /** The `export` arm. */
@@ -46,8 +44,7 @@ export async function exportBuiltin(call: BuiltinCall): Promise<RedirectResult> 
   return handleExport(
     [...call.argv.args],
     call.context.session,
-    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
+    sessionView(call.context.session, call.context.frame.diagnostics),
     call.parser,
-    call.registry.policies,
   )
 }

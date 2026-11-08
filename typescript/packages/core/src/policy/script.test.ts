@@ -40,7 +40,6 @@ import {
   type ProfileScript,
   type ProfileScripts,
   type RouteContext,
-  type SessionContext,
   type VfsContext,
   type VfsResultContext,
 } from './types.ts'
@@ -253,10 +252,6 @@ function opsCtx(op = 'write', virtual = '/scratch/frozen/f', write = true): VfsC
   }
 }
 
-function sessionCtx(key = 'AWS_KEY'): SessionContext {
-  return { verb: 'set', key, value: 'v', sessionId: 's' }
-}
-
 function line(): RouteContext {
   return { line: 'python3 job.py', commands: [], sessionId: 's' }
 }
@@ -414,15 +409,13 @@ describe('scriptContext', () => {
     expect(data.cwd).toBe('/data')
   })
 
-  it('reads an op and a variable write as their fields', () => {
+  it('reads an op as its fields', () => {
     const op = scriptContext(opsCtx())
     expect((op.call as Record<string, unknown>).name).toBe('write')
     expect((op.call as Record<string, unknown>).effect).toBe('write')
     expect(op.path).toBe('/scratch/frozen/f')
     expect(op.write).toBe(true)
     expect([op.cwd, op.env, op.mounts]).toEqual(['/', {}, []])
-    const written = scriptContext(sessionCtx())
-    expect([written.verb, written.key, written.value]).toEqual(['set', 'AWS_KEY', 'v'])
   })
 
   it('keeps the keys of what a backend returned', () => {
@@ -485,7 +478,6 @@ describe('ScriptPolicy', () => {
     const engine = new FakeProgram(answer({ kind: 'deny' }))
     const policy = policyWith('preCommand', engine)
     expect(await policy.preVfs(opsCtx())).toBeNull()
-    expect(await policy.preSession(sessionCtx())).toBeNull()
     expect(engine.requests).toEqual([])
   })
 
@@ -840,8 +832,8 @@ describe('ScriptPolicy', () => {
     expect(await policy.wantsFor('preCommand', 't')).toBe(false)
     expect(await policy.wantsFor('postVfs', 's')).toBe(false)
     const policies = new Policies([policy])
-    expect(policies.wants('preSession')).toBe(true)
-    expect(await policies.wantsFor('preSession', 's')).toBe(false)
+    expect(policies.wants('preNetwork')).toBe(true)
+    expect(await policies.wantsFor('preNetwork', 's')).toBe(false)
     expect(await policies.wantsFor('preCommand', 's')).toBe(true)
   })
 

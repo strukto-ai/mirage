@@ -242,7 +242,7 @@ describe('Shell', () => {
     expect(() => shell.has('x')).toThrow('out of range')
     shell.frame(frame)
     const count = (): unknown =>
-      run(shell.expand(word('echo $#'), 'fields', false), () => {
+      run(shell.expand(word('echo $#'), 'fields'), () => {
         throw new Error('nothing to ask')
       })[0]
     expect(count()).toEqual(['ok', ['2']])
@@ -257,7 +257,7 @@ describe('Shell', () => {
     const shell = Shell.create(() => 7)
     shell.seed('x', 'a b')
     const asked: string[] = []
-    const task = shell.expand(word('echo $x$(c)'), 'fields', false)
+    const task = shell.expand(word('echo $x$(c)'), 'fields')
     const [result, diagnostics] = run(task, (ask) => {
       if (ask[0] !== 'substitute') throw new Error(ask[0])
       asked.push(ask[2])
@@ -270,29 +270,18 @@ describe('Shell', () => {
     expect(diagnostics).toEqual([new TextEncoder().encode('w\n')])
   })
 
-  it('asks the gate before a write lands, and stops on a refusal', () => {
+  it('lands a write at once, and refuses a hidden name', () => {
     const shell = Shell.create(() => 7)
-    const gates: string[] = []
-    const allowed = shell.set('y', '1', { listens: true })
-    run(allowed, (ask) => {
-      if (ask[0] !== 'gate') throw new Error(ask[0])
-      gates.push(`${ask[1] ? 'post' : 'pre'} ${ask[2]} ${ask[3]}=${String(ask[4])}`)
-      ask[6].close()
-      allowed.answerGate(null)
-    })
-    expect(gates).toEqual(['pre set y=1', 'post set y=1'])
+    expect(shell.set('y', '1')).toEqual([['ok', 0n], []])
     expect(shell.get('y')).toEqual(['1', '', null])
-    const refused = shell.set('z', '2', { listens: true })
-    const [result] = run(refused, () => {
-      refused.answerGate(['z', 1])
-    })
-    expect(result).toEqual(['denied', 'z', 1])
+    shell.hide(['z'], [])
+    expect(shell.set('z', '2')).toEqual([['hidden', 'z'], []])
     expect(shell.get('z')).toBeNull()
   })
 
   it('refuses a read while a task holds the shell', () => {
     const shell = Shell.create(() => 7)
-    const task = shell.expand(word('echo $(c)'), 'text', false)
+    const task = shell.expand(word('echo $(c)'), 'text')
     expect(task.step()?.[0]).toBe('substitute')
     expect(() => shell.get('x')).toThrow('the shell is running a task')
     task.answerFailed()

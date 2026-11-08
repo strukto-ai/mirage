@@ -1,13 +1,10 @@
-//! The session plane's writes: a variable set, unset or marked through the
-//! policy gate, its value shaped by its attributes first, so a rule judges
-//! the value that will land (`declare -l p; p=ADMIN` is shown `admin`). A
-//! write a policy refuses after it landed is put back, the generator a
-//! `RANDOM=` seeded included, so a refusal never leaves a write half done.
-//! The assignments an `-i` value or a subscript makes land the same way,
-//! each gated, before the write they were made for.
+//! The session plane's writes: a variable set, unset or marked, its value
+//! shaped by its attributes first, a name the session may not write
+//! refused before anything lands. The assignments an `-i` value or a
+//! subscript makes land the same way, each before the write they were
+//! made for.
 
 use std::collections::HashSet;
-use std::future::Future;
 use std::sync::Arc;
 
 use super::shell::Shell;
@@ -21,21 +18,6 @@ use crate::vars::{
 
 /// bash's own exit when it cannot allocate.
 const ENV_EXHAUSTED_STATUS: i32 = 2;
-
-/// What a write is to the gate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Verb {
-    Set,
-    Unset,
-}
-
-/// A policy refused a write; `record` is the host's own record of the
-/// refusal, which it words and reports.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Denied {
-    pub name: String,
-    pub record: u32,
-}
 
 /// What an element write a builtin asks for comes to, short of a fault.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,40 +48,12 @@ pub fn element_reference(reference: &[u8]) -> Option<(&str, Option<&[u8]>)> {
     }
 }
 
-/// The host's side of a session write: the `pre_session` policy before it
-/// lands and `post_session` after, each shown the value rendered, and
-/// before both whether any policy listens, so a session none governs pays
-/// nothing per write.
-pub trait Gate {
-    fn listens(&self) -> bool;
-
-    /// `store` is the session as the write finds it, for a policy that
-    /// reads it.
-    fn pre(
-        &mut self,
-        verb: Verb,
-        key: &str,
-        value: Option<&[u8]>,
-        store: &Store,
-    ) -> impl Future<Output = Result<(), Fault>>;
-
-    fn post(
-        &mut self,
-        verb: Verb,
-        key: &str,
-        value: Option<&[u8]>,
-        old: Option<&[u8]>,
-        store: &Store,
-    ) -> impl Future<Output = Result<(), Fault>>;
-}
-
 /// Why a write did not land.
 #[derive(Debug)]
 pub enum Fault {
     /// The name is hidden for this session: EACCES, the variables twin of
     /// a create into hidden path space.
     Hidden(String),
-    Denied(Denied),
     Readonly {
         name: String,
         subscript: bool,
@@ -138,9 +92,8 @@ fn fatal(voice: &[u8], error: arith::Error) -> Fault {
 }
 
 /// The session as one line writes it.
-pub struct Writer<'a, G: Gate> {
+pub struct Writer<'a> {
     pub store: &'a mut Store,
-    pub gate: &'a mut G,
     /// `set -a`: every name assigned while it is on is exported.
     pub allexport: bool,
     /// `set -u`, which a subscript's reads obey.
@@ -153,21 +106,16 @@ pub struct Writer<'a, G: Gate> {
     pub outside: usize,
 }
 
-impl<'a, G: Gate> Writer<'a, G> {
-    /// A writer over a shell's variables with its options and bounds,
-    /// asking `gate`, its warnings landing in `diagnostics`.
-    pub fn of(
-        shell: &'a mut Shell,
-        gate: &'a mut G,
-        diagnostics: Option<&'a mut Vec<Diagnostic>>,
-    ) -> Self {
+impl<'a> Writer<'a> {
+    /// A writer over a shell's variables with its options and bounds, its
+    /// warnings landing in `diagnostics`.
+    pub fn of(shell: &'a mut Shell, diagnostics: Option<&'a mut Vec<Diagnostic>>) -> Self {
         Writer {
             allexport: shell.option("allexport"),
             nounset: shell.option("nounset"),
             limit: shell.env_limit,
             outside: shell.outside,
             store: &mut shell.vars,
-            gate,
             diagnostics,
         }
     }
@@ -243,13 +191,12 @@ impl<'a, G: Gate> Writer<'a, G> {
         )
     }
 
-    /// Write one variable through the gate: a reference's target unless
-    /// `follow_ref` is off (`declare -n r=w` re-aims `r`), refused when
-    /// hidden or readonly, its value shaped by the name's attributes
-    /// (`assigned` naming the elements an array write assigns, `added` an
-    /// integer `+=`'s text, evaluated after the held one), a `RANDOM=`
-    /// seeding the generator.
-    pub async fn set(
+    /// Write one variable: a reference's target unless `follow_ref` is off
+    /// (`declare -n r=w` re-aims `r`), refused when hidden or readonly, its value shaped by the name's attributes (`assigned`
+    /// naming the elements an array write assigns, `added` an integer
+    /// `+=`'s text, evaluated after the held one), a `RANDOM=` seeding the
+    /// generator.
+    pub fn set(
         &mut self,
         name: &str,
         value: Value,
@@ -266,13 +213,11 @@ impl<'a, G: Gate> Writer<'a, G> {
             self.store.record(&name).and_then(|var| var.value.as_ref()),
         ) {
             (Value::Scalar(text), Some(Value::Indexed(_))) => {
-                return self
-                    .set_element(&name, Slot::Index(0), Some(text), added)
-                    .await;
+                return self.set_element(&name, Slot::Index(0), Some(text), added);
             }
             (Value::Scalar(text), Some(Value::Assoc(_))) => {
                 let slot = Slot::Key(b"0".to_vec());
-                return self.set_element(&name, slot, Some(text), added).await;
+                return self.set_element(&name, slot, Some(text), added);
             }
             (value, _) => value,
         };
@@ -286,7 +231,7 @@ impl<'a, G: Gate> Writer<'a, G> {
             {
                 Ok(shaped) => value = shaped,
                 Err(error) => {
-                    self.land_coercion(&mut coercion).await?;
+                    self.land_coercion(&mut coercion)?;
                     return Err(fatal(self.store.voice(), error));
                 }
             }
@@ -301,18 +246,11 @@ impl<'a, G: Gate> Writer<'a, G> {
             {
                 Ok(shaped) => value = shaped,
                 Err(error) => {
-                    self.land_coercion(&mut coercion).await?;
+                    self.land_coercion(&mut coercion)?;
                     return Err(fatal(self.store.voice(), error));
                 }
             }
         }
-        let rendering = self.gate.listens().then(|| value.rendering());
-        if let Some(rendering) = &rendering {
-            self.gate
-                .pre(Verb::Set, &name, Some(rendering), self.store)
-                .await?;
-        }
-        let generator = self.store.generator();
         let seeding = match &value {
             Value::Scalar(word) if self.store.seeds_random(&name) => Some(word),
             _ => None,
@@ -324,7 +262,7 @@ impl<'a, G: Gate> Writer<'a, G> {
                     self.store.seed_random(word.clone(), state);
                 }
                 Err(error) => {
-                    self.land_coercion(&mut coercion).await?;
+                    self.land_coercion(&mut coercion)?;
                     let subscript = matches!(
                         error,
                         arith::Error::Readonly {
@@ -349,7 +287,7 @@ impl<'a, G: Gate> Writer<'a, G> {
             }
         }
         self.store.note_kind(&name, &value);
-        self.land_coercion(&mut coercion).await?;
+        self.land_coercion(&mut coercion)?;
         let unaimed = existing.as_ref().is_some_and(|var| var.has(NAMEREF));
         if unaimed && value.is_array() {
             if let Some(diagnostics) = self.diagnostics.as_deref_mut() {
@@ -363,28 +301,7 @@ impl<'a, G: Gate> Writer<'a, G> {
             .as_ref()
             .map_or(0, |var| entry_bytes(&name, var.value.as_ref()));
         self.check(before, entry_bytes(&name, Some(&value)))?;
-        let old = self.store.land(&name, value, self.allexport);
-        if let Some(rendering) = &rendering {
-            let old_rendering = old
-                .as_ref()
-                .and_then(|var| var.value.as_ref())
-                .map(Value::rendering);
-            if let Err(fault) = self
-                .gate
-                .post(
-                    Verb::Set,
-                    &name,
-                    Some(rendering),
-                    old_rendering.as_deref(),
-                    self.store,
-                )
-                .await
-            {
-                self.store.place(&name, old);
-                self.store.set_generator(generator);
-                return Err(fault);
-            }
-        }
+        self.store.land(&name, value, self.allexport);
         Ok(())
     }
 
@@ -393,10 +310,9 @@ impl<'a, G: Gate> Writer<'a, G> {
     /// target already. The element is shaped by the name's attributes
     /// first, so what an `-i` value assigns lands before it, as bash
     /// evaluates an element in place (`a[0]='a[1]=9,5'` leaves `a[1]` at
-    /// 9). With no policy listening it then lands in place, costing the
-    /// element rather than the array; a listening policy is shown the whole
-    /// value, which lands through `set`.
-    async fn set_element(
+    /// 9). It then lands in place, costing the element rather than the
+    /// array.
+    fn set_element(
         &mut self,
         name: &str,
         slot: Slot,
@@ -410,19 +326,11 @@ impl<'a, G: Gate> Writer<'a, G> {
             Some(text) => {
                 let mut coercion = Coercion::default();
                 let shaped = self.store.coerce_text(&mut coercion, text, attrs, added);
-                self.land_coercion(&mut coercion).await?;
+                self.land_coercion(&mut coercion)?;
                 Some(shaped.map_err(|error| fatal(self.store.voice(), error))?)
             }
             None => None,
         };
-        if self.gate.listens() {
-            // Shaped already, it shapes to itself again in `set`.
-            let assigned = slot.assigned(text.is_some());
-            let var = self.store.record(name).ok_or_else(none)?;
-            let mut value = var.value.clone().ok_or_else(none)?;
-            value.put(&slot, text).ok_or_else(none)?;
-            return Box::pin(self.set(name, value, false, Some(&assigned), None)).await;
-        }
         if let Some(text) = &text {
             let old = self
                 .store
@@ -446,11 +354,9 @@ impl<'a, G: Gate> Writer<'a, G> {
     /// the slots the append filled before it, with what they held when
     /// it wrapped onto them, but under `-i`, where the
     /// words before it are evaluated and may write the array, the array
-    /// stays as they left it, as bash's does. With a policy listening, the
-    /// whole value lands through `set` as one write, but under `-i` each
-    /// word is a write of its own, in order. An index past the largest
+    /// stays as they left it, as bash's does. An index past the largest
     /// wraps to the most negative, as bash's does.
-    pub async fn push(&mut self, name: &str, words: Vec<Vec<u8>>) -> Result<(), Fault> {
+    pub fn push(&mut self, name: &str, words: Vec<Vec<u8>>) -> Result<(), Fault> {
         let name = self.store.target(name);
         self.writable(&name)?;
         let Some(var) = self.store.record(&name) else {
@@ -466,24 +372,16 @@ impl<'a, G: Gate> Writer<'a, G> {
             .zip(array.extent()..)
             .map(|(word, index)| (index as i64, word))
             .collect::<Vec<_>>();
-        if slots.is_empty() || (self.gate.listens() && !integer) {
-            let mut array = array.clone();
-            let assigned = Assigned::Indexes(slots.iter().map(|(index, _)| *index).collect());
-            for (index, word) in slots {
-                array.set(index, word);
-            }
-            return self
-                .set(&name, Value::Indexed(array), false, Some(&assigned), None)
-                .await;
+        if slots.is_empty() {
+            let assigned = Assigned::Indexes(HashSet::new());
+            let array = Value::Indexed(array.clone());
+            return self.set(&name, array, false, Some(&assigned), None);
         }
         let mut filled = Vec::new();
         for (index, word) in slots {
             let slot = Slot::Index(index);
             let replaced = self.store.element(&name, &slot).map(<[u8]>::to_vec);
-            if let Err(fault) = self
-                .set_element(&name, slot.clone(), Some(word), None)
-                .await
-            {
+            if let Err(fault) = self.set_element(&name, slot.clone(), Some(word), None) {
                 if !integer {
                     for (slot, replaced) in filled.into_iter().rev() {
                         self.store.put_element(&name, &slot, replaced, false);
@@ -519,7 +417,7 @@ impl<'a, G: Gate> Writer<'a, G> {
     /// indexed array is emptied, its marks kept, a scalar refuses as `x[1]`
     /// does, and an associative one takes it as the key it spells, as
     /// bash's does.
-    pub async fn unset_element(
+    pub fn unset_element(
         &mut self,
         name: &str,
         subscript: &[u8],
@@ -533,7 +431,7 @@ impl<'a, G: Gate> Writer<'a, G> {
             if every {
                 return Ok(Element::Landed);
             }
-            let index = array.back(self.subscript_index(subscript).await?);
+            let index = array.back(self.subscript_index(subscript)?);
             return Ok(if index < 0 {
                 Element::Subscript
             } else {
@@ -548,7 +446,7 @@ impl<'a, G: Gate> Writer<'a, G> {
                     let empty = Value::Indexed(Indexed::default());
                     let assigned = Assigned::Indexes(HashSet::new());
                     let allexport = std::mem::replace(&mut self.allexport, false);
-                    let cleared = self.set(&name, empty, false, Some(&assigned), None).await;
+                    let cleared = self.set(&name, empty, false, Some(&assigned), None);
                     self.allexport = allexport;
                     cleared?;
                 }
@@ -563,7 +461,7 @@ impl<'a, G: Gate> Writer<'a, G> {
             }
             Some(Value::Assoc(_)) => Slot::Key(subscript.to_vec()),
             Some(Value::Indexed(_)) => {
-                let index = self.subscript_index(subscript).await?;
+                let index = self.subscript_index(subscript)?;
                 let index = self
                     .store
                     .indexed(&name)
@@ -574,67 +472,35 @@ impl<'a, G: Gate> Writer<'a, G> {
                 Slot::Index(index)
             }
             Some(Value::Scalar(_)) => {
-                if self.subscript_index(subscript).await? != 0 {
+                if self.subscript_index(subscript)? != 0 {
                     return Ok(Element::NotArray);
                 }
-                self.unset(&name, false).await?;
+                self.unset(&name, false)?;
                 return Ok(Element::Landed);
             }
             None => return Ok(Element::Landed),
         };
-        self.set_element(&name, slot, None, None).await?;
+        self.set_element(&name, slot, None, None)?;
         Ok(Element::Landed)
     }
 
-    /// Drop one variable through the gate; a missing or hidden name is
-    /// quiet, as bash's unset of a missing name is. An unset that revealed
-    /// an enclosing scope's value and is then refused gives that value back
-    /// to the scope.
-    pub async fn unset(&mut self, name: &str, follow_ref: bool) -> Result<(), Fault> {
+    /// Drop one variable; a missing or hidden name is quiet, as bash's
+    /// unset of a missing name is.
+    pub fn unset(&mut self, name: &str, follow_ref: bool) -> Result<(), Fault> {
         let name = self.aim(name, follow_ref);
         if self.store.hidden(&name) {
             return Ok(());
         }
-        if self.store.is_readonly(&name, false) {
-            return Err(Fault::Readonly {
-                name,
-                subscript: false,
-            });
-        }
-        if self.gate.listens() {
-            self.gate.pre(Verb::Unset, &name, None, self.store).await?;
-        }
-        let marks = self.store.marks();
-        let (old, frame) = self.store.drop_var(&name);
-        if self.gate.listens() {
-            let old_rendering = old
-                .as_ref()
-                .and_then(|var| var.value.as_ref())
-                .map(Value::rendering);
-            if let Err(fault) = self
-                .gate
-                .post(
-                    Verb::Unset,
-                    &name,
-                    None,
-                    old_rendering.as_deref(),
-                    self.store,
-                )
-                .await
-            {
-                self.store.undrop(&name, old, frame, marks);
-                return Err(fault);
-            }
-        }
+        self.writable(&name)?;
+        self.store.drop_var(&name);
         Ok(())
     }
 
-    /// Turn one attribute on or off through the gate, or with None only
-    /// declare the name: the no-value writer beside `set`, since
-    /// `export Z` on a fresh name leaves it unset, not empty. The gate
-    /// sees it with no value, which is how a rule tells a mark from an
-    /// assignment. `-n` itself marks the reference's own record.
-    pub async fn mark(
+    /// Turn one attribute on or off, or with None only declare the name:
+    /// the no-value writer beside `set`, since `export Z` on a fresh name
+    /// leaves it unset, not empty. `-n` itself marks the reference's own
+    /// record.
+    pub fn mark(
         &mut self,
         name: &str,
         attr: Option<u8>,
@@ -643,30 +509,10 @@ impl<'a, G: Gate> Writer<'a, G> {
     ) -> Result<(), Fault> {
         let name = self.aim(name, follow_ref && attr != Some(NAMEREF));
         self.visible(&name)?;
-        if self.gate.listens() {
-            self.gate.pre(Verb::Set, &name, None, self.store).await?;
-        }
-        let old = self.store.share(&name);
-        let generator = self.store.generator();
-        if old.is_none() {
+        if self.store.record(&name).is_none() {
             self.check(0, entry_bytes(&name, None))?;
         }
         self.store.set_attr(&name, attr, on);
-        if self.gate.listens() {
-            let old_rendering = old
-                .as_ref()
-                .and_then(|var| var.value.as_ref())
-                .map(Value::rendering);
-            if let Err(fault) = self
-                .gate
-                .post(Verb::Set, &name, None, old_rendering.as_deref(), self.store)
-                .await
-            {
-                self.store.place(&name, old);
-                self.store.set_generator(generator);
-                return Err(fault);
-            }
-        }
         Ok(())
     }
 
@@ -676,12 +522,9 @@ impl<'a, G: Gate> Writer<'a, G> {
     /// n='A=9'` keeps `keep`), naming the element so an `-i` array never
     /// evaluates its others again. A readonly name ends the shell in both
     /// contexts that make them, a subscript and an `-i` value.
-    async fn land_writes(&mut self, writes: Vec<arith::Write>) -> Result<(), Fault> {
+    fn land_writes(&mut self, writes: Vec<arith::Write>) -> Result<(), Fault> {
         for write in writes {
-            match self
-                .land_element(&write.name, write.key, write.value.into_bytes())
-                .await
-            {
+            match self.land_element(&write.name, write.key, write.value.into_bytes()) {
                 Err(Fault::Readonly { name, .. }) => {
                     return Err(Signal::readonly(self.store.voice(), &name, true).into());
                 }
@@ -693,7 +536,7 @@ impl<'a, G: Gate> Writer<'a, G> {
 
     /// Land one assignment as the whole variable it makes: an element
     /// write for a key, and a bare name over an array at element 0.
-    pub async fn land_element(
+    pub fn land_element(
         &mut self,
         name: &str,
         key: Option<Vec<u8>>,
@@ -704,11 +547,11 @@ impl<'a, G: Gate> Writer<'a, G> {
         match self.store.record(&name).and_then(|var| var.value.as_ref()) {
             Some(Value::Assoc(_)) => {
                 let key = key.unwrap_or_else(|| b"0".to_vec());
-                Box::pin(self.set_element(&name, Slot::Key(key), Some(text), None)).await
+                self.set_element(&name, Slot::Key(key), Some(text), None)
             }
             Some(Value::Indexed(_)) => {
                 let slot = Slot::Index(index(key.as_deref()));
-                Box::pin(self.set_element(&name, slot, Some(text), None)).await
+                self.set_element(&name, slot, Some(text), None)
             }
             _ if key.is_some() => {
                 let index = index(key.as_deref());
@@ -719,17 +562,17 @@ impl<'a, G: Gate> Writer<'a, G> {
                 );
                 array.set(index, text);
                 let assigned = Assigned::Indexes(HashSet::from([index]));
-                Box::pin(self.set(&name, Value::Indexed(array), true, Some(&assigned), None)).await
+                self.set(&name, Value::Indexed(array), true, Some(&assigned), None)
             }
-            _ => Box::pin(self.set(&name, Value::Scalar(text), true, None, None)).await,
+            _ => self.set(&name, Value::Scalar(text), true, None, None),
         }
     }
 
     /// Land what a coercion assigned, in the scope it read (inside a
     /// `declare -g`, the function's), then replay its `RANDOM` draws.
-    async fn land_coercion(&mut self, coercion: &mut Coercion) -> Result<(), Fault> {
+    fn land_coercion(&mut self, coercion: &mut Coercion) -> Result<(), Fault> {
         let globals = self.store.step_back();
-        let landed = self.land_writes(std::mem::take(&mut coercion.writes)).await;
+        let landed = self.land_writes(std::mem::take(&mut coercion.writes));
         self.store.step_forward(globals);
         landed?;
         self.settle(&mut coercion.draws)
@@ -747,7 +590,7 @@ impl<'a, G: Gate> Writer<'a, G> {
     /// `a[i]=v`, `unset 'a[i]'`): it may assign (`a[x=3]`) and seed, and
     /// those land before the index is used; one that fails lands what it
     /// assigned first, then stops the line.
-    pub async fn subscript_index(&mut self, subscript: &[u8]) -> Result<i64, Fault> {
+    pub fn subscript_index(&mut self, subscript: &[u8]) -> Result<i64, Fault> {
         if let Some(index) = plain_decimal(subscript) {
             return Ok(index);
         }
@@ -759,7 +602,7 @@ impl<'a, G: Gate> Writer<'a, G> {
             Ok(index) => (index, None),
             Err(error) => (0, Some(error)),
         };
-        self.land_writes(outcome.writes).await?;
+        self.land_writes(outcome.writes)?;
         self.settle(&mut draws)?;
         match error {
             None => Ok(index),
@@ -787,7 +630,7 @@ impl<'a, G: Gate> Writer<'a, G> {
     /// (`[[ -v a[x=2] ]]` leaves x at 2).
     /// `array` is the indexed array the name reads as, `PIPESTATUS` and
     /// `FUNCNAME` included.
-    pub async fn is_set(
+    pub fn is_set(
         &mut self,
         reference: &[u8],
         array: Option<Indexed>,
@@ -815,7 +658,7 @@ impl<'a, G: Gate> Writer<'a, G> {
             }
             Some(_) => {}
         }
-        let index = self.subscript_index(subscript.unwrap_or_default()).await?;
+        let index = self.subscript_index(subscript.unwrap_or_default())?;
         let held = match array {
             Some(array) => array,
             None if scalar => Indexed::dense([Vec::new()]),
@@ -827,14 +670,12 @@ impl<'a, G: Gate> Writer<'a, G> {
     /// Write one element (`a[k]=v`, `read 'a[k]'`, `printf -v 'a[k]'`),
     /// or a bare name as element 0 of an array and a scalar otherwise,
     /// `append` concatenating onto what it holds, or adding under `-i`.
-    /// It lands as one write of the whole value it makes, so a rule sees
-    /// `a[k]=v` as a write to `a` and a refusal leaves nothing half done.
     /// An associative subscript is the key verbatim, an indexed one
     /// arithmetic whose writes land first, even on a readonly name, as
     /// bash's `read 'a[x=3]'` leaves x at 3. A name hidden, readonly or
     /// given a subscript that names no element comes back as its
     /// [`Element`] for the caller to voice.
-    pub async fn element(
+    pub fn element(
         &mut self,
         name: &str,
         subscript: Option<&[u8]>,
@@ -867,7 +708,7 @@ impl<'a, G: Gate> Writer<'a, G> {
                     });
                 }
                 let index = match subscript {
-                    Some(subscript) => self.subscript_index(subscript).await?,
+                    Some(subscript) => self.subscript_index(subscript)?,
                     None => 0,
                 };
                 let index = match (&converted, self.store.indexed(&name)) {
@@ -902,17 +743,13 @@ impl<'a, G: Gate> Writer<'a, G> {
             (true, false) => ([held.unwrap_or_default(), value].concat(), None),
         };
         match (slot, converted) {
-            (None, _) => {
-                self.set(&name, Value::Scalar(text), true, None, added)
-                    .await?
-            }
+            (None, _) => self.set(&name, Value::Scalar(text), true, None, added)?,
             (Some(Slot::Index(index)), Some(mut array)) => {
                 array.set(index, text);
                 let assigned = Assigned::Indexes(HashSet::from([index]));
-                self.set(&name, Value::Indexed(array), true, Some(&assigned), added)
-                    .await?;
+                self.set(&name, Value::Indexed(array), true, Some(&assigned), added)?;
             }
-            (Some(slot), _) => self.set_element(&name, slot, Some(text), added).await?,
+            (Some(slot), _) => self.set_element(&name, slot, Some(text), added)?,
         }
         Ok(Element::Landed)
     }
@@ -924,7 +761,7 @@ impl<'a, G: Gate> Writer<'a, G> {
     /// way, and an unset name under `set -u` stops the line only after the
     /// writes before it. An error comes back unworded, for the command to
     /// voice. `expand` for a `let` operand, whose subscripts expand first.
-    pub async fn arith(&mut self, text: &[u8], expand: bool) -> Result<i64, Fault> {
+    pub fn arith(&mut self, text: &[u8], expand: bool) -> Result<i64, Fault> {
         let mut draws = Draws::default();
         let outcome = self
             .store
@@ -936,10 +773,7 @@ impl<'a, G: Gate> Writer<'a, G> {
                 landed = Err(Fault::Hidden(write.name));
                 break;
             }
-            match self
-                .land_element(&write.name, write.key, write.value.into_bytes())
-                .await
-            {
+            match self.land_element(&write.name, write.key, write.value.into_bytes()) {
                 Ok(()) | Err(Fault::Readonly { .. }) => {}
                 Err(fault) => {
                     landed = Err(fault);
@@ -958,113 +792,28 @@ impl<'a, G: Gate> Writer<'a, G> {
 
     /// Evaluate `text` as an `-i` write would, landing what it assigns: a
     /// `declare -ni r=M` value, evaluated before the reference refuses it.
-    pub async fn evaluate_integer(
+    pub fn evaluate_integer(
         &mut self,
         text: &[u8],
         added: Option<&[u8]>,
     ) -> Result<Vec<u8>, Fault> {
         let mut coercion = Coercion::default();
         let value = self.store.evaluate_integer(&mut coercion, text, added);
-        self.land_coercion(&mut coercion).await?;
+        self.land_coercion(&mut coercion)?;
         value.map_err(|error| fatal(self.store.voice(), error))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::pin::pin;
     use std::sync::Arc;
-    use std::task::{Context, Poll, Waker};
 
     use super::*;
     use crate::vars::{EXPORT, RANDOM, READONLY, UNASSIGNED};
 
-    #[derive(Default)]
-    struct Recorder {
-        heard: Vec<(Verb, String, Option<Vec<u8>>)>,
-        refuse_post: Option<String>,
-    }
-
-    impl Gate for Recorder {
-        fn listens(&self) -> bool {
-            true
-        }
-
-        async fn pre(
-            &mut self,
-            verb: Verb,
-            key: &str,
-            value: Option<&[u8]>,
-            _: &Store,
-        ) -> Result<(), Fault> {
-            self.heard
-                .push((verb, key.to_owned(), value.map(<[u8]>::to_vec)));
-            Ok(())
-        }
-
-        async fn post(
-            &mut self,
-            _: Verb,
-            key: &str,
-            _: Option<&[u8]>,
-            _: Option<&[u8]>,
-            _: &Store,
-        ) -> Result<(), Fault> {
-            if self.refuse_post.as_deref() == Some(key) {
-                return Err(Fault::Denied(Denied {
-                    name: key.to_owned(),
-                    record: 1,
-                }));
-            }
-            Ok(())
-        }
-    }
-
-    fn run<T>(future: impl Future<Output = T>) -> T {
-        let mut future = pin!(future);
-        match future
-            .as_mut()
-            .poll(&mut Context::from_waker(Waker::noop()))
-        {
-            Poll::Ready(value) => value,
-            Poll::Pending => panic!("a gate that answers at once never pends"),
-        }
-    }
-
-    /// A host no policy of which hears session writes.
-    struct Deaf;
-
-    impl Gate for Deaf {
-        fn listens(&self) -> bool {
-            false
-        }
-
-        async fn pre(
-            &mut self,
-            _: Verb,
-            _: &str,
-            _: Option<&[u8]>,
-            _: &Store,
-        ) -> Result<(), Fault> {
-            Ok(())
-        }
-
-        async fn post(
-            &mut self,
-            _: Verb,
-            _: &str,
-            _: Option<&[u8]>,
-            _: Option<&[u8]>,
-            _: &Store,
-        ) -> Result<(), Fault> {
-            Ok(())
-        }
-    }
-
-    fn writer<'a>(store: &'a mut Store, gate: &'a mut Recorder) -> Writer<'a, Recorder> {
+    fn writer(store: &mut Store) -> Writer<'_> {
         Writer {
             store,
-            gate,
             allexport: false,
             nounset: false,
             diagnostics: None,
@@ -1084,32 +833,14 @@ mod tests {
     }
 
     #[test]
-    fn integer_writes_land_gated_before_their_value() {
+    fn integer_writes_land_before_their_value() {
         let mut store = Store::new(Arc::new(|| 1));
         store.set_attr("n", Some(INTEGER), true);
-        let mut gate = Recorder::default();
-        run(writer(&mut store, &mut gate).set("n", scalar("x=5, x+1"), true, None, None)).unwrap();
+        writer(&mut store)
+            .set("n", scalar("x=5, x+1"), true, None, None)
+            .unwrap();
         assert_eq!(text(&store, "x").as_deref(), Some("5"));
         assert_eq!(text(&store, "n").as_deref(), Some("6"));
-        let keys: Vec<_> = gate.heard.iter().map(|(_, key, _)| key.as_str()).collect();
-        assert_eq!(keys, ["n", "x"]);
-        assert_eq!(gate.heard[0].2.as_deref(), Some(&b"6"[..]));
-    }
-
-    #[test]
-    fn a_refusal_after_landing_puts_the_old_record_back() {
-        let mut store = Store::new(Arc::new(|| 1));
-        store.seed("v", scalar("old"));
-        let mut gate = Recorder {
-            refuse_post: Some("v".to_owned()),
-            ..Recorder::default()
-        };
-        let landed = run(writer(&mut store, &mut gate).set("v", scalar("new"), true, None, None));
-        assert!(matches!(landed, Err(Fault::Denied(_))));
-        assert_eq!(text(&store, "v").as_deref(), Some("old"));
-        let unset = run(writer(&mut store, &mut gate).unset("v", true));
-        assert!(matches!(unset, Err(Fault::Denied(_))));
-        assert_eq!(text(&store, "v").as_deref(), Some("old"));
     }
 
     #[test]
@@ -1117,11 +848,10 @@ mod tests {
         let mut store = Store::new(Arc::new(|| 1));
         store.seed("R", scalar("1"));
         store.set_attr("R", Some(READONLY), true);
-        let mut gate = Recorder::default();
-        let refused = run(writer(&mut store, &mut gate).set("R", scalar("2"), true, None, None));
+        let refused = writer(&mut store).set("R", scalar("2"), true, None, None);
         assert!(matches!(refused, Err(Fault::Readonly { .. })));
         store.set_attr("n", Some(INTEGER), true);
-        let fatal = run(writer(&mut store, &mut gate).set("n", scalar("R=3"), true, None, None));
+        let fatal = writer(&mut store).set("n", scalar("R=3"), true, None, None);
         match fatal {
             Err(Fault::Signal(Signal::Exit { status, stderr, .. })) => {
                 assert_eq!(status, 1);
@@ -1134,17 +864,19 @@ mod tests {
     #[test]
     fn a_seed_restarts_the_generator() {
         let mut store = Store::new(Arc::new(|| 1));
-        let mut gate = Recorder::default();
-        run(writer(&mut store, &mut gate).set(RANDOM, scalar("42"), true, None, None)).unwrap();
+        writer(&mut store)
+            .set(RANDOM, scalar("42"), true, None, None)
+            .unwrap();
         assert_eq!(store.next_random().unwrap(), Some(17772));
     }
 
     #[test]
     fn an_element_seeding_random_lands_what_it_assigns() {
         let mut store = Store::new(Arc::new(|| 1));
-        let mut gate = Recorder::default();
         let seeded = Value::Indexed(Indexed::dense([b"x=1+2".to_vec()]));
-        run(writer(&mut store, &mut gate).set(RANDOM, seeded, true, None, None)).unwrap();
+        writer(&mut store)
+            .set(RANDOM, seeded, true, None, None)
+            .unwrap();
         assert_eq!(text(&store, "x").as_deref(), Some("3"));
         assert_eq!(store.indexed(RANDOM).unwrap().get(0), Some(&b"3"[..]));
     }
@@ -1157,8 +889,9 @@ mod tests {
             Value::Indexed(Indexed::dense([b"old".to_vec(), b"keep".to_vec()])),
         );
         store.set_attr("n", Some(INTEGER), true);
-        let mut gate = Recorder::default();
-        run(writer(&mut store, &mut gate).set("n", scalar("A=9"), true, None, None)).unwrap();
+        writer(&mut store)
+            .set("n", scalar("A=9"), true, None, None)
+            .unwrap();
         let array = store.indexed("A").unwrap();
         assert_eq!(array.get(0), Some(&b"9"[..]));
         assert_eq!(array.get(1), Some(&b"keep"[..]));
@@ -1167,20 +900,19 @@ mod tests {
     #[test]
     fn a_subscript_lands_what_it_assigns() {
         let mut store = Store::new(Arc::new(|| 1));
-        let mut gate = Recorder::default();
-        let index = run(writer(&mut store, &mut gate).subscript_index(b"x=3")).unwrap();
+        let index = writer(&mut store).subscript_index(b"x=3").unwrap();
         assert_eq!(index, 3);
         assert_eq!(text(&store, "x").as_deref(), Some("3"));
-        let failed = run(writer(&mut store, &mut gate).subscript_index(b"y=2, 1/0"));
+        let failed = writer(&mut store).subscript_index(b"y=2, 1/0");
         assert!(matches!(failed, Err(Fault::Arith(_))));
         assert_eq!(text(&store, "y").as_deref(), Some("2"));
-        let mut strict = writer(&mut store, &mut gate);
+        let mut strict = writer(&mut store);
         strict.nounset = true;
-        let failed = run(strict.subscript_index(b"z=4, nope"));
+        let failed = strict.subscript_index(b"z=4, nope");
         assert!(matches!(failed, Err(Fault::Signal(_))));
-        let mut strict = writer(&mut store, &mut gate);
+        let mut strict = writer(&mut store);
         strict.nounset = true;
-        let failed = run(strict.arith(b"w=5, nope", false));
+        let failed = strict.arith(b"w=5, nope", false);
         assert!(matches!(failed, Err(Fault::Signal(_))));
         assert_eq!(text(&store, "z").as_deref(), Some("4"));
         assert_eq!(text(&store, "w").as_deref(), Some("5"));
@@ -1189,15 +921,14 @@ mod tests {
     #[test]
     fn a_write_past_max_env_ends_the_shell() {
         let mut store = Store::new(Arc::new(|| 1));
-        let mut gate = Recorder::default();
-        let mut writer = writer(&mut store, &mut gate);
+        let mut writer = writer(&mut store);
         writer.limit = Some(8);
-        run(writer.set("AB", scalar("xyz"), true, None, None)).unwrap();
-        match run(writer.set("CD", scalar("long"), true, None, None)) {
+        writer.set("AB", scalar("xyz"), true, None, None).unwrap();
+        match writer.set("CD", scalar("long"), true, None, None) {
             Err(Fault::Signal(Signal::Exit { status, .. })) => assert_eq!(status, 2),
             other => panic!("expected max_env to refuse, got {other:?}"),
         }
-        run(writer.set("AB", scalar("x"), true, None, None)).unwrap();
+        writer.set("AB", scalar("x"), true, None, None).unwrap();
     }
 
     #[test]
@@ -1206,22 +937,21 @@ mod tests {
         store.seed("s", scalar("v"));
         let map = [(b"a".to_vec(), b"1".to_vec())].into_iter().collect();
         store.seed("m", Value::Assoc(Box::new(map)));
-        let mut gate = Recorder::default();
-        let mut writer = writer(&mut store, &mut gate);
+        let mut writer = writer(&mut store);
         let arr = || Some(Indexed::dense([b"p".to_vec(), b"q".to_vec()]));
-        assert!(run(writer.is_set(b"s", None, false)).unwrap());
-        assert!(run(writer.is_set(b"s[0]", None, false)).unwrap());
-        assert!(!run(writer.is_set(b"s[1]", None, false)).unwrap());
-        assert!(run(writer.is_set(b"m[\"a\"]", None, false)).unwrap());
-        assert!(!run(writer.is_set(b"m[\"a\"]", None, true)).unwrap());
-        assert!(run(writer.is_set(b"m[a]", None, true)).unwrap());
-        assert!(!run(writer.is_set(b"m[1+1]", None, false)).unwrap());
-        assert!(run(writer.is_set(b"m[@]", None, false)).unwrap());
-        assert!(run(writer.is_set(b"arr[-1]", arr(), false)).unwrap());
-        assert!(!run(writer.is_set(b"arr[x=2]", arr(), false)).unwrap());
+        assert!(writer.is_set(b"s", None, false).unwrap());
+        assert!(writer.is_set(b"s[0]", None, false).unwrap());
+        assert!(!writer.is_set(b"s[1]", None, false).unwrap());
+        assert!(writer.is_set(b"m[\"a\"]", None, false).unwrap());
+        assert!(!writer.is_set(b"m[\"a\"]", None, true).unwrap());
+        assert!(writer.is_set(b"m[a]", None, true).unwrap());
+        assert!(!writer.is_set(b"m[1+1]", None, false).unwrap());
+        assert!(writer.is_set(b"m[@]", None, false).unwrap());
+        assert!(writer.is_set(b"arr[-1]", arr(), false).unwrap());
+        assert!(!writer.is_set(b"arr[x=2]", arr(), false).unwrap());
         assert_eq!(text(writer.store, "x").as_deref(), Some("2"));
-        assert!(!run(writer.is_set(b"1x", None, false)).unwrap());
-        assert!(!run(writer.is_set(b"m[]", None, false)).unwrap());
+        assert!(!writer.is_set(b"1x", None, false).unwrap());
+        assert!(!writer.is_set(b"m[]", None, false).unwrap());
     }
 
     #[test]
@@ -1232,100 +962,95 @@ mod tests {
         store.set_attr("R", Some(READONLY), true);
         let map = [(b"a".to_vec(), b"1".to_vec())].into_iter().collect();
         store.seed("m", Value::Assoc(Box::new(map)));
-        let mut gate = Recorder::default();
-        let mut writer = writer(&mut store, &mut gate);
-        let landed = run(writer.element("m", Some(b"a"), b"2", true)).unwrap();
+        let mut writer = writer(&mut store);
+        let landed = writer.element("m", Some(b"a"), b"2", true).unwrap();
         assert_eq!(landed, Element::Landed);
         assert_eq!(writer.store.assoc("m").unwrap().get(b"a"), Some(&b"12"[..]));
-        run(writer.element("s", Some(b"2"), b"w", false)).unwrap();
+        writer.element("s", Some(b"2"), b"w", false).unwrap();
         let array = writer.store.indexed("s").unwrap();
         assert_eq!(
             (array.get(0), array.get(2)),
             (Some(&b"v"[..]), Some(&b"w"[..]))
         );
-        run(writer.element("s", Some(b"-1"), b"!", true)).unwrap();
+        writer.element("s", Some(b"-1"), b"!", true).unwrap();
         assert_eq!(writer.store.indexed("s").unwrap().get(2), Some(&b"w!"[..]));
-        run(writer.element("t", None, b"x", true)).unwrap();
+        writer.element("t", None, b"x", true).unwrap();
         assert_eq!(text(writer.store, "t").as_deref(), Some("x"));
-        let refused = |w: &mut Writer<'_, Recorder>, name: &str, sub: &[u8]| {
-            run(w.element(name, Some(sub), b"x", false)).unwrap()
+        let refused = |w: &mut Writer<'_>, name: &str, sub: &[u8]| {
+            w.element(name, Some(sub), b"x", false).unwrap()
         };
         assert_eq!(refused(&mut writer, "R", b"0"), Element::Readonly);
         assert_eq!(refused(&mut writer, "m", b""), Element::Subscript);
         assert_eq!(refused(&mut writer, "s", b"-9"), Element::Subscript);
-        let keys: Vec<_> = gate.heard.iter().map(|(_, key, _)| key.as_str()).collect();
-        assert_eq!(keys, ["m", "s", "s", "t"]);
     }
 
     #[test]
-    fn a_heard_integer_element_keeps_what_its_value_assigned() {
+    fn an_integer_element_keeps_what_its_value_assigned() {
         let mut store = Store::new(Arc::new(|| 1));
         store.seed("b", Value::Indexed(Indexed::dense([b"1".to_vec()])));
         store.set_attr("b", Some(INTEGER), true);
-        let mut gate = Recorder::default();
-        let mut writer = writer(&mut store, &mut gate);
-        run(writer.push("b", vec![b"2".to_vec(), b"b[1]=9,1".to_vec()])).unwrap();
-        run(writer.element("b", Some(b"0"), b"b[2]=7,5", false)).unwrap();
+        let mut writer = writer(&mut store);
+        writer
+            .push("b", vec![b"2".to_vec(), b"b[1]=9,1".to_vec()])
+            .unwrap();
+        writer.element("b", Some(b"0"), b"b[2]=7,5", false).unwrap();
         let held: Vec<_> = writer.store.indexed("b").unwrap().iter().collect();
         assert_eq!(held, [(0, &b"5"[..]), (1, &b"9"[..]), (2, &b"7"[..])]);
-        let failed = run(writer.push("b", vec![b"2".to_vec(), b"b[0]=4,1/0".to_vec()]));
+        let failed = writer.push("b", vec![b"2".to_vec(), b"b[0]=4,1/0".to_vec()]);
         assert!(matches!(failed, Err(Fault::Arith(_))));
-        let left = Value::Indexed(writer.store.indexed("b").unwrap().clone()).rendering();
-        assert_eq!(left, b"4 9 7 2");
+        let left: Vec<_> = writer.store.indexed("b").unwrap().iter().collect();
         assert_eq!(
-            gate.heard.last().and_then(|(_, _, seen)| seen.clone()),
-            Some(left)
+            left,
+            [
+                (0, &b"4"[..]),
+                (1, &b"9"[..]),
+                (2, &b"7"[..]),
+                (3, &b"2"[..])
+            ]
         );
     }
 
     #[test]
-    fn unheard_element_writes_land_in_place_as_bash_orders_them() {
+    fn element_writes_land_in_place_as_bash_orders_them() {
         let mut store = Store::new(Arc::new(|| 1));
         store.seed("a", Value::Indexed(Indexed::dense([b"1".to_vec()])));
         store.seed("i", Value::Indexed(Indexed::dense([b"5".to_vec()])));
         store.set_attr("i", Some(INTEGER), true);
         store.seed("s", scalar("v"));
-        let mut gate = Deaf;
-        let mut writer = Writer {
-            store: &mut store,
-            gate: &mut gate,
-            allexport: false,
-            nounset: false,
-            diagnostics: None,
-            limit: None,
-            outside: 0,
-        };
-        run(writer.push("a", vec![b"2".to_vec(), b"3".to_vec()])).unwrap();
-        let landed = run(writer.element("a", Some(b"x=1"), b"!", true)).unwrap();
+        let mut writer = writer(&mut store);
+        writer
+            .push("a", vec![b"2".to_vec(), b"3".to_vec()])
+            .unwrap();
+        let landed = writer.element("a", Some(b"x=1"), b"!", true).unwrap();
         assert_eq!(landed, Element::Landed);
         assert_eq!(
-            run(writer.unset_element("a", b"0", false)).unwrap(),
+            writer.unset_element("a", b"0", false).unwrap(),
             Element::Landed
         );
         assert_eq!(
-            run(writer.unset_element("a", b"-9", false)).unwrap(),
+            writer.unset_element("a", b"-9", false).unwrap(),
             Element::Subscript
         );
         let array: Vec<_> = writer.store.indexed("a").unwrap().iter().collect();
         assert_eq!(array, [(1, &b"2!"[..]), (2, &b"3"[..])]);
-        run(writer.element("i", Some(b"0"), b"3", true)).unwrap();
+        writer.element("i", Some(b"0"), b"3", true).unwrap();
         assert_eq!(writer.store.indexed("i").unwrap().get(0), Some(&b"8"[..]));
         writer.store.set_attr("i", Some(READONLY), true);
-        let refused = run(writer.element("i", Some(b"y=2"), b"0", false)).unwrap();
+        let refused = writer.element("i", Some(b"y=2"), b"0", false).unwrap();
         assert_eq!(refused, Element::Readonly);
         assert_eq!(
-            run(writer.unset_element("s", b"1", false)).unwrap(),
+            writer.unset_element("s", b"1", false).unwrap(),
             Element::NotArray
         );
         assert_eq!(
-            run(writer.unset_element("s", b"*", true)).unwrap(),
+            writer.unset_element("s", b"*", true).unwrap(),
             Element::NotArray
         );
         let pair = Indexed::dense([b"x".to_vec(), b"y".to_vec()]);
         writer.store.seed("e", Value::Indexed(pair));
-        let expanded = run(writer.unset_element("e", b"@", false));
+        let expanded = writer.unset_element("e", b"@", false);
         assert!(matches!(expanded, Err(Fault::Arith(_))));
-        run(writer.unset_element("e", b"@", true)).unwrap();
+        writer.unset_element("e", b"@", true).unwrap();
         assert_eq!(writer.store.indexed("e").map(Indexed::count), Some(0));
         let keyed = [
             (b"@".to_vec(), b"v".to_vec()),
@@ -1334,7 +1059,7 @@ mod tests {
         writer
             .store
             .seed("q", Value::Assoc(Box::new(keyed.into_iter().collect())));
-        run(writer.unset_element("q", b"@", true)).unwrap();
+        writer.unset_element("q", b"@", true).unwrap();
         let left: Vec<_> = writer
             .store
             .assoc("q")
@@ -1344,7 +1069,7 @@ mod tests {
             .collect();
         assert_eq!(left, [b"k".to_vec()]);
         assert_eq!(
-            run(writer.unset_element("s", b"0", false)).unwrap(),
+            writer.unset_element("s", b"0", false).unwrap(),
             Element::Landed
         );
         assert_eq!(text(writer.store, "s"), None);
@@ -1353,20 +1078,22 @@ mod tests {
         writer
             .store
             .set_specials(vec![1], None, Vec::new(), 1, 1, b"bash: ".to_vec());
-        let read = run(writer.unset_element("PIPESTATUS", b"z=4", false)).unwrap();
+        let read = writer.unset_element("PIPESTATUS", b"z=4", false).unwrap();
         assert_eq!(read, Element::Landed);
         assert_eq!(text(writer.store, "z").as_deref(), Some("4"));
-        let before = run(writer.unset_element("PIPESTATUS", b"-5", false)).unwrap();
+        let before = writer.unset_element("PIPESTATUS", b"-5", false).unwrap();
         assert_eq!(before, Element::Subscript);
-        let every = run(writer.unset_element("PIPESTATUS", b"@", true)).unwrap();
+        let every = writer.unset_element("PIPESTATUS", b"@", true).unwrap();
         assert_eq!(every, Element::Landed);
         writer.store.seed("PIPESTATUS", scalar("left"));
-        let shadowed = run(writer.unset_element("PIPESTATUS", b"*", true)).unwrap();
+        let shadowed = writer.unset_element("PIPESTATUS", b"*", true).unwrap();
         assert_eq!(shadowed, Element::Landed);
-        let special = run(writer.element("PIPESTATUS", Some(b"-1"), b"0", false)).unwrap();
+        let special = writer
+            .element("PIPESTATUS", Some(b"-1"), b"0", false)
+            .unwrap();
         assert_eq!(special, Element::Landed);
         writer.limit = Some(writer.store.held() + 4);
-        let refused = run(writer.push("a", vec![b"4".to_vec(), b"far too long".to_vec()]));
+        let refused = writer.push("a", vec![b"4".to_vec(), b"far too long".to_vec()]);
         assert!(matches!(
             refused,
             Err(Fault::Signal(Signal::Exit { status: 2, .. }))
@@ -1375,7 +1102,7 @@ mod tests {
         writer.store.seed("g", Value::Indexed(Indexed::default()));
         writer.store.set_attr("g", Some(UNASSIGNED), true);
         writer.allexport = true;
-        let fresh = run(writer.push("g", vec![b"1".to_vec(), b"far too long".to_vec()]));
+        let fresh = writer.push("g", vec![b"1".to_vec(), b"far too long".to_vec()]);
         assert!(fresh.is_err());
         let g = writer.store.record("g").unwrap();
         assert!(g.has(UNASSIGNED) && !g.has(EXPORT));
@@ -1385,23 +1112,23 @@ mod tests {
             .store
             .seed("n", Value::Indexed(Indexed::dense([b"1".to_vec()])));
         writer.store.set_attr("n", Some(INTEGER), true);
-        let failed = run(writer.push("n", vec![b"2".to_vec(), b"n[1]=2,1/0".to_vec()]));
+        let failed = writer.push("n", vec![b"2".to_vec(), b"n[1]=2,1/0".to_vec()]);
         assert!(matches!(failed, Err(Fault::Arith(_))));
         let kept: Vec<_> = writer.store.indexed("n").unwrap().iter().collect();
         assert_eq!(kept, [(0, &b"1"[..]), (1, &b"2"[..])]);
         let mut wrapped = Indexed::default();
         wrapped.set(i64::MAX, b"x".to_vec());
         writer.store.seed("w", Value::Indexed(wrapped));
-        run(writer.push("w", vec![b"a longer value".to_vec()])).unwrap();
+        writer.push("w", vec![b"a longer value".to_vec()]).unwrap();
         let grown = writer.store.held();
         writer.limit = Some(grown);
-        run(writer.push("w", vec![b"y".to_vec()])).unwrap();
+        writer.push("w", vec![b"y".to_vec()]).unwrap();
         writer.limit = None;
         assert!(writer.store.held() < grown);
         let kept: Vec<_> = writer.store.indexed("w").unwrap().iter().collect();
         assert_eq!(kept, [(i64::MIN, &b"y"[..]), (i64::MAX, &b"x"[..])]);
         writer.limit = Some(writer.store.held());
-        let failed = run(writer.push("w", vec![b"z".to_vec(), b"far too long".to_vec()]));
+        let failed = writer.push("w", vec![b"z".to_vec(), b"far too long".to_vec()]);
         writer.limit = None;
         assert!(failed.is_err());
         let kept: Vec<_> = writer.store.indexed("w").unwrap().iter().collect();

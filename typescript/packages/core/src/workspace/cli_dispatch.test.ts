@@ -17,10 +17,8 @@ import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import type { Context } from '../commands/config.ts'
 import { Argument, CommandSpec, WordKind } from '../commands/spec/types.ts'
 import { IOResult, type Rows } from '../io/types.ts'
-import type { Policy } from '../policy/base.ts'
 import { Outcome } from '../policy/index.ts'
 import { SessionProfile } from '../policy/profile.ts'
-import type { Action, SessionContext } from '../policy/types.ts'
 import type { Language } from '../runtime/types.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { MountMode, PathSpec } from '../types.ts'
@@ -546,13 +544,6 @@ const ABC = new CLI({
   handlers: { write: new CLIHandler({ fn: put }) },
 })
 
-class DenyAwsWrites implements Policy {
-  preSession(ctx: SessionContext): Action | null {
-    if (!ctx.key.startsWith('AWS_')) return null
-    return { kind: 'deny', reason: 'not yours to set' }
-  }
-}
-
 /** A leaf that writes the session plane through its entry point. */
 async function stash(
   _config: unknown,
@@ -587,26 +578,6 @@ describe('the session plane reaches a CLI leaf', () => {
     expect([result.exitCode, dec.decode(result.stdout)]).toEqual([0, 'TOKEN=abc\n'])
     const echoed = await ws.shell('echo $TOKEN')
     expect(dec.decode(echoed.stdout)).toBe('abc\n')
-  })
-
-  it("a leaf's session write clears the same gate the shell does", async () => {
-    // An entry point that skipped the gate would make an installed CLI the way around
-    // every preSession rule, which is the whole reason writes go through one
-    // entry point rather than to the session.
-    const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/data': ram },
-      {
-        mode: MountMode.WRITE,
-        policies: [new DenyAwsWrites()],
-      },
-    )
-    ws.registerCli('stash', STASH)
-    const denied = await ws.shell('stash AWS_PROFILE prod')
-    expect(denied.exitCode).not.toBe(0)
-    expect(denied.refusal?.reason).toContain('not yours to set')
-    expect(dec.decode((await ws.shell('echo $AWS_PROFILE')).stdout)).toBe('\n')
-    expect((await ws.shell('stash OTHER fine')).exitCode).toBe(0)
   })
 })
 

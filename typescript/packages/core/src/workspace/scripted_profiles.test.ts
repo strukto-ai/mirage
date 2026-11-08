@@ -46,7 +46,7 @@ def pre_command(ctx):
         }
 `
 
-type Method = 'preExecute' | 'preCommand' | 'preVfs' | 'preSession'
+type Method = 'preExecute' | 'preCommand' | 'preVfs'
 
 // One profile named release with a policy and nothing else, so what
 // runs is purely the policy's decision.
@@ -361,21 +361,16 @@ describe('profile policies', () => {
   })
 })
 
-// Programs at the op and session views and nowhere else: writes under
-// /data/frozen and AWS_* variables are refused, and no command is judged.
+// A program at the op view and nowhere else: writes under /data/frozen are
+// refused, and no command is judged.
 const FROZEN = `
 def pre_vfs(ctx):
     if ctx['write'] and ctx['path'].startswith('/data/frozen/'):
         return {'kind': 'deny', 'reason': 'frozen by ' + ctx['profile']}
 `
-const CREDENTIALS = `
-def pre_session(ctx):
-    if ctx['key'].startswith('AWS_'):
-        return {'kind': 'deny', 'reason': 'credentials are set by the operator'}
-`
-const GATES = { preVfs: FROZEN, preSession: CREDENTIALS }
+const GATES = { preVfs: FROZEN }
 
-describe('profile policies at the op and session views', () => {
+describe('profile policies at the op view', () => {
   it("judges its session's file calls with the facts of the op", async () => {
     const ws = build(scripted(GATES))
     try {
@@ -391,22 +386,6 @@ describe('profile policies at the op and session views', () => {
       expect(await ws.vfs.exists('/data/frozen/f')).toBe(false)
       // Another session is not judged by it.
       await ws.vfs.write('/data/frozen/g', 'x\n')
-    } finally {
-      await ws.close()
-    }
-  }, 120000)
-
-  it('judges the session view with the facts of the write', async () => {
-    const ws = build(scripted(GATES))
-    try {
-      ws.createSession('s', { profile: 'release' })
-      const refused = await ws.shell('export AWS_SECRET=x', { sessionId: 's' })
-      expect(refused.exitCode).toBe(1)
-      expect(refused.stderrText).toBe('AWS_SECRET: permission denied\n')
-      expect(refused.refusal?.reason).toBe('credentials are set by the operator')
-      const landed = await ws.shell('export SAFE=1 && echo $SAFE', { sessionId: 's' })
-      expect(landed.exitCode).toBe(0)
-      expect(landed.stdoutText).toBe('1\n')
     } finally {
       await ws.close()
     }

@@ -1,6 +1,5 @@
 //! The shell's evaluator, which both hosts run: it holds a session's
-//! variables and asks its host for what lies outside them, the policy gate
-//! a session write clears first of all.
+//! variables and asks its host for what lies outside them.
 
 pub mod brace;
 pub mod codec;

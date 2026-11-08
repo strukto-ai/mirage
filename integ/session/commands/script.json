@@ -256,20 +256,6 @@
       }
     },
     {
-      "id": "scriptops_env_write_is_refused_at_the_session_view",
-      "seq": 923276,
-      "targets": [
-        "ram-commands"
-      ],
-      "session": "scriptedops",
-      "command": "export AWS_SECRET=x",
-      "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "AWS_SECRET: permission denied\n"
-      }
-    },
-    {
       "id": "scriptops_other_env_writes_land",
       "seq": 923277,
       "targets": [
@@ -325,21 +311,6 @@
         "exit": 0,
         "stdout": "keep\n",
         "stderr": ""
-      }
-    },
-    {
-      "id": "scriptopswasm_env_write_is_refused_at_the_session_view",
-      "seq": 923282,
-      "targets": [
-        "ram-scripted",
-        "ram-scripted-pyodide"
-      ],
-      "session": "scriptedopswasm",
-      "command": "export AWS_SECRET=x",
-      "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "AWS_SECRET: permission denied\n"
       }
     },
     {

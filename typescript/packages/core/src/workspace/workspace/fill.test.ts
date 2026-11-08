@@ -23,7 +23,7 @@ import type { AskHandler } from '../../policy/decisions.ts'
 import type { Action, CommandContext, Policy } from '../../policy/index.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import type { RouteContext } from '../../policy/types.ts'
-import { Outcome, Scope, type Decision, type SessionContext } from '../../policy/types.ts'
+import { Outcome, Scope, type Decision } from '../../policy/types.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
@@ -1517,31 +1517,6 @@ describe('fillEnv through execute', () => {
     }
   })
 
-  it('a session-write policy disables masking', async () => {
-    // A preSession rule may refuse a write mid-line while later
-    // statements still run, so under one no assignment or unset is
-    // trusted to land: the fetch keeps today's shape and the output is
-    // unchanged.
-    const { calls, fetch } = countingSource({ TOKEN: 't0' })
-    registerSecrets('fake-gated', FakeConfig, fetch)
-    const gate: Policy = {
-      preSession(ctx: SessionContext): Action | null {
-        if (ctx.key === 'UNRELATED') {
-          return { kind: 'deny', reason: `no writing ${ctx.key}` }
-        }
-        return null
-      },
-    }
-    const ws = makeWs({ TOKEN: { from: 'fake-gated', ref: 'r' } }, [gate])
-    try {
-      const io = await ws.shell('TOKEN=local; printenv TOKEN')
-      expect(stdoutStr(io)).toBe('local\n')
-      expect(calls).toEqual(['r'])
-    } finally {
-      await ws.close()
-    }
-  })
-
   it.each([false, true])(
     'a cli fetches only the invoked verb path (mounted=%s)',
     async (mounted) => {
@@ -2202,20 +2177,7 @@ describe('declared source instances', () => {
   })
 })
 
-// A profile policy at the session view and one away from it: only the
-// first is a session-write gate, and only for the sessions under its
-// profile.
-const SESSION_GATE = `\
-def pre_session(ctx):
-    if ctx['key'].startswith('AWS_'):
-        return {'kind': 'deny'}
-`
-
-function scriptedWs(
-  env: EnvEntries,
-  method: 'preCommand' | 'preSession',
-  source: string,
-): Workspace {
+function scriptedWs(env: EnvEntries, method: 'preCommand', source: string): Workspace {
   return new Workspace(
     { '/': new RAMVFS() },
     {
@@ -2232,29 +2194,10 @@ function scriptedWs(
 }
 
 describe('fillEnv under a profile policy', () => {
-  it('a policy at the session view drops the masks', async () => {
-    // Its preSession may refuse the assignment mid-line, so the standing
-    // value is fetched, as under a coded preSession policy.
-    const { calls, fetch } = countingSource({ TOKEN: 't0' })
-    registerSecrets('fake-scripted-gate', FakeConfig, fetch)
-    const ws = scriptedWs(
-      { TOKEN: { from: 'fake-scripted-gate', ref: 'r' } },
-      'preSession',
-      SESSION_GATE,
-    )
-    try {
-      const io = await ws.shell('TOKEN=local; printenv TOKEN')
-      expect(stdoutStr(io)).toBe('local\n')
-      expect(calls).toEqual(['r'])
-    } finally {
-      await ws.close()
-    }
-  }, 120000)
-
-  it('a policy away from the session view keeps the masks', async () => {
+  it('a profile policy keeps the masks', async () => {
     // The script policy stands at every entry point of every workspace, but
-    // this program says nothing at the session view, so the fill's masks
-    // hold and no source is contacted.
+    // none of them refuses a session write, so the fill's masks hold and no
+    // source is contacted.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-scripted-judge', FakeConfig, fetch)
     const ws = scriptedWs(

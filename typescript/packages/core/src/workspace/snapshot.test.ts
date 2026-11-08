@@ -32,9 +32,6 @@ import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { ALL_COMMANDS } from '../policy/builtin/output_cap.ts'
-import { PolicyDenied } from '../policy/errors.ts'
-import type { Policy } from '../policy/index.ts'
-import type { Action, SessionContext } from '../policy/types.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { type JobResult } from '../execution/job/index.ts'
 import { DEFAULT_READ_TTL, Limit, MountMode, ReadPolicy } from '../types.ts'
@@ -937,58 +934,12 @@ describe('savedVfsBuild', () => {
   })
 })
 
-/** Refuse env writes to GATE_* names, the deployment's rule. */
-class DenyGate implements Policy {
-  preSession(ctx: SessionContext): Action | null {
-    if (ctx.key.startsWith('GATE_')) {
-      return { kind: 'deny', reason: 'GATE_* refused by policy' }
-    }
-    return null
-  }
-}
-
-/** Allow TASK only in /data, read off the session's own view. */
-class CwdGate implements Policy {
-  preSession(ctx: SessionContext): Action | null {
-    if (ctx.key === 'TASK' && ctx.session?.cwd() !== '/data') {
-      return { kind: 'deny', reason: 'TASK is set in /data' }
-    }
-    return null
-  }
-}
-
-function gatedWorkspace(prefix = '/data', sessionId?: string): Workspace {
-  const ram = new RAMVFS()
-  return new Workspace(
-    { [prefix]: ram },
-    {
-      mode: MountMode.WRITE,
-      policies: [new DenyGate()],
-      ...(sessionId !== undefined ? { sessionId } : {}),
-    },
-  )
-}
-
 describe('applyStateDict and the deployment', () => {
-  // The restore used to seed `session.vars` directly, past the gate a live
-  // `export GATE_X=1` clears (#1017); a snapshot is the one env input the
-  // deployment did not author, so this is the entry point where the rule matters.
-  it('a restored variable clears the session gate', async () => {
-    const source = buildWorkspace()
-    await source.shell('export GATE_X=1')
-    const state = await toStateDict(source)
-    await source.close()
-    const target = gatedWorkspace()
-    await expect(applyStateDict(target, state)).rejects.toBeInstanceOf(PolicyDenied)
-    expect(Object.hasOwn(target.env, 'GATE_X')).toBe(false)
-    await target.close()
-  })
-
-  // A workspace built for the state seats each table before the gate
-  // judges it, its cwd and variables included, so a program reading the
-  // session sees the session the snapshot recorded rather than a fresh one
-  // at /. Mirrors the Python test of the same name.
-  it('a built target judges each table as the session it records', async () => {
+  // A workspace built for the state seats each table as it is read, its
+  // cwd and variables included, so the session is the one the snapshot
+  // recorded rather than a fresh one at /. Mirrors the Python test of the
+  // same name.
+  it('a built target seats each table as the session it records', async () => {
     const source = buildWorkspace()
     expect((await source.shell('cd /data && TASK=1')).exitCode).toBe(0)
     const state = await toStateDict(source)
@@ -998,7 +949,6 @@ describe('applyStateDict and the deployment', () => {
       {
         mode: MountMode.WRITE,
         ...(state.default_session_id !== undefined ? { sessionId: state.default_session_id } : {}),
-        policies: [new CwdGate()],
       },
     )
     try {
@@ -1028,62 +978,9 @@ describe('applyStateDict and the deployment', () => {
     }
   })
 
-  it('a restore the gate allows lands every variable', async () => {
-    const source = buildWorkspace()
-    await source.shell('export PUBLIC_X=1')
-    const state = await toStateDict(source)
-    await source.close()
-    const target = gatedWorkspace()
-    await applyStateDict(target, state)
-    expect(target.env.PUBLIC_X).toBe('1')
-    await target.close()
-  })
-
-  // A snapshot holding several sessions used to land each one as its
-  // table cleared the gate, so a refusal on a later session left the
-  // earlier ones overwritten, the default identity adopted and every
-  // mount's state loaded: a workspace matching no snapshot, and one a
-  // close would then persist. Every table is vetted before anything lands.
-  it('a refused session table leaves the workspace untouched', async () => {
-    const ram = new RAMVFS()
-    const source = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, sessionId: 'src' })
-    expect((await source.shell('echo restored > /data/f.txt')).exitCode).toBe(0)
-    expect((await source.shell('export PUBLIC_A=1')).exitCode).toBe(0)
-    source.createSession('s2')
-    expect((await source.shell('export GATE_X=1', { sessionId: 's2' })).exitCode).toBe(0)
-    const state = await toStateDict(source)
-    await source.close()
-    const target = gatedWorkspace('/data', 'tgt')
-    expect((await target.shell('export KEEP=1')).exitCode).toBe(0)
-    await expect(applyStateDict(target, state)).rejects.toBeInstanceOf(PolicyDenied)
-    expect(Object.hasOwn(target.env, 'PUBLIC_A')).toBe(false)
-    expect(target.env.KEEP).toBe('1')
-    expect(target.listSessions().map((s) => s.sessionId)).toEqual(['tgt'])
-    expect((await target.shell('test -e /data/f.txt')).exitCode).toBe(1)
-    await target.close()
-  })
-
-  // The env template is vetted with the tables, so a refused template
-  // lands no session either.
-  it('a refused env template lands no session', async () => {
-    const ram = new RAMVFS()
-    const source = new Workspace({ '/data': ram }, { mode: MountMode.WRITE, env: { GATE_X: '1' } })
-    expect((await source.shell('unset GATE_X; export PUBLIC_A=1')).exitCode).toBe(0)
-    const state = await toStateDict(source)
-    await source.close()
-    const target = gatedWorkspace()
-    await expect(applyStateDict(target, state)).rejects.toBeInstanceOf(PolicyDenied)
-    expect(Object.hasOwn(target.env, 'PUBLIC_A')).toBe(false)
-    expect(Object.hasOwn(target.env, 'GATE_X')).toBe(false)
-    await target.close()
-  })
-
-  // A session the restore had to create was a bare one, under no
-  // profile, while its table had cleared the gate under the default
-  // profile's policy (`scriptsOf` for an id the manager does not know);
-  // the created session now runs under that profile, so what the gate
-  // judged is what lands, and a restored session no longer wakes
-  // unrestricted.
+  // A session the restore has to create runs under the default profile,
+  // as one created without a profile name does, so a restored session
+  // never wakes unrestricted.
   it('a session the restore creates runs under the default profile', async () => {
     const source = buildWorkspace()
     expect((await source.shell('echo kept > /data/f.txt')).exitCode).toBe(0)

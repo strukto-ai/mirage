@@ -27,7 +27,7 @@ use super::parameter::scan_parameter;
 use super::pattern::{Pattern, Replacement};
 use super::shell::Shell;
 pub(super) use super::voiced;
-use super::write::{Fault, Gate, Writer};
+use super::write::{Fault, Writer};
 use super::{Diagnostic, Signal};
 use crate::shell::Tree;
 
@@ -87,9 +87,9 @@ pub struct Substitution {
     pub status: i32,
 }
 
-/// The host as expansion sees it: the session gate its writes clear, and
-/// the shell that runs a command substitution's body.
-pub trait Host: Gate {
+/// The host as expansion sees it: the shell that runs a command
+/// substitution's body.
+pub trait Host {
     /// Run `body` in a child shell of `shell`, its output captured: the
     /// substitution `node` holds, or with `span` one backtick pair of it,
     /// its bytes within the node's text. `read` is the file of bash's
@@ -217,8 +217,8 @@ impl<H: Host> Expander<'_, H> {
         brace::spend(&mut self.room, bytes).map_err(|_| Fault::Memory)
     }
 
-    fn writer(&mut self) -> Writer<'_, H> {
-        Writer::of(self.shell, self.host, Some(self.diagnostics))
+    fn writer(&mut self) -> Writer<'_> {
+        Writer::of(self.shell, Some(self.diagnostics))
     }
 
     fn text(&self, node: usize) -> &[u8] {

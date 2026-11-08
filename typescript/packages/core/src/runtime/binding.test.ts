@@ -37,8 +37,6 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { context } from '../../tests/workspace/fixtures/context.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import type { Policy } from '../policy/base.ts'
-import type { Action, SessionContext } from '../policy/types.ts'
 
 function required<T>(value: T | null | undefined): T {
   if (value === null || value === undefined) throw new Error('Expected a bound workspace view')
@@ -80,18 +78,11 @@ class ShellProbe extends Runtime {
     }
   }
 }
-class DenySecret implements Policy {
-  preSession(ctx: SessionContext): Action | null {
-    return ctx.key === 'SECRET' ? { kind: 'deny', reason: 'protected' } : null
-  }
-}
-
 function world(runtimes?: Runtime[]): Workspace {
   return new Workspace(
     { '/data': new RAMVFS(), '/secret': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      policies: [new DenySecret()],
       ...(runtimes === undefined ? {} : { runtimes }),
     },
   )
@@ -173,9 +164,6 @@ describe('execution bindings', () => {
       expect(required(context.ctx.session).get('PUBLIC')).toBe('agent')
       expect(required(other.ctx.session).get('PUBLIC')).toBeNull()
       expect(context.ctx.env?.PUBLIC).toBeUndefined()
-      await expect(required(context.ctx.session).set('SECRET', 'no')).rejects.toMatchObject({
-        refusal: { reason: 'protected' },
-      })
       const reads = await Promise.all([
         runWithCaller(context.caller, async () => {
           await Promise.resolve()

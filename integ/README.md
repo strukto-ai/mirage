@@ -72,7 +72,7 @@ runs conformance before the regular CLI and project batteries.
   explain, pinning what each refuses, asks or lets through: the allow list,
   command and path rules, anchor depth, asks and their answers, the VFS
   entry point, hide and show, mount modes and sections, coded policies at
-  each of the eight hooks, script policies at each of their three, and
+  each of the six hooks, script policies at each of their three, and
   placement. `lifecycle/run.py` and `lifecycle/run.ts` run
   it, given its path.
 - `prisma/`: one schema per kit fake.

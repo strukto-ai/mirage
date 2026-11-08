@@ -20,8 +20,6 @@ from mirage.policy.types import (
     NetworkContext,
     NetworkResultContext,
     RouteContext,
-    SessionContext,
-    SessionResultContext,
     VfsContext,
     VfsResultContext,
     WorkspaceContext,
@@ -41,8 +39,8 @@ class Policy:
     The methods come in pairs, one per surface: the line
     (``pre_execute`` / ``post_execute``), each command or CLI
     (``pre_command`` / ``post_command``), each ``ws.vfs`` /
-    ``session.vfs`` call (``pre_vfs`` / ``post_vfs``) and each session
-    write (``pre_session`` / ``post_session``). Every method may answer
+    ``session.vfs`` call (``pre_vfs`` / ``post_vfs``) and each
+    connection (``pre_network`` / ``post_network``). Every method may answer
     Deny or Ask; a Limit only at ``post_execute``, where a line's output
     comes back to cap, a Route only at ``pre_execute``. One more,
     ``pre_workspace``, answers on a server before a workspace is built,
@@ -160,35 +158,6 @@ class Policy:
         Args:
             ctx (NetworkResultContext): what ``pre_network`` saw, plus
                 how it ended.
-        """
-        return None
-
-    async def pre_session(
-        self, ctx: SessionContext
-    ) -> Action | tuple[Action, ...] | None:
-        """Admit, hold or refuse one session write (set, unset, mark).
-
-        Fires on the session plane, so an ``export`` from the shell, a
-        ``SessionView.set`` from a command, and any later writer clear
-        the same gate. Not path-scoped on purpose: the context carries
-        a key, never a pseudo-path.
-
-        Args:
-            ctx (SessionContext): the mutation about to land.
-        """
-        return None
-
-    async def post_session(
-        self, ctx: SessionResultContext
-    ) -> Action | tuple[Action, ...] | None:
-        """Judge one session write once it landed.
-
-        A Deny, or an Ask the host has not approved, puts the old value
-        back and refuses the write.
-
-        Args:
-            ctx (SessionResultContext): what ``pre_session`` saw, plus the
-                value it replaced.
         """
         return None
 

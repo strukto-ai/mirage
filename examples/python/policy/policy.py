@@ -14,41 +14,18 @@
 
 import asyncio
 
-from mirage import (
-    CommandExplanation,
-    Deny,
-    MountMode,
-    Policy,
-    SessionContext,
-    Workspace,
-)
+from mirage import CommandExplanation, MountMode, Workspace
 from mirage.runtime.types import ScriptSource
 from mirage.vfs.ram import RAMVFS
 
-# A release workspace under two policies, one through each entry point code
-# has, and the point of the example is what each entry point is for:
-#
-#   a coded Policy     a class passed as ``policies=[...]``. It runs in
-#                      this process, needs no engine, may define any of
-#                      the eight methods, and speaks for every session:
-#                      the operator's own rule.
-#   a profile policy   programs passed as a profile's ``policy`` block,
-#                      a list per pre_ method, each with the runtime that
-#                      runs it. They run sandboxed on that runtime, read
-#                      the same ctx as JSON, print their answer, and
-#                      speak only for the sessions under that profile.
+# A release workspace under a profile policy: programs passed as a
+# profile's ``policy`` block, a list per pre_ method, each with the
+# runtime that runs it. They run sandboxed on that runtime, read the same
+# ctx a coded policy reads, as JSON, print their answer, and speak only
+# for the sessions under that profile.
 #
 # The same block spelled as a document is policy_yaml.py, beside this
 # file.
-
-
-class OperatorOwnsCredentials(Policy):
-    """Refuse an env write that would set a credential, for everyone."""
-
-    async def pre_session(self, ctx: SessionContext) -> Deny | None:
-        if ctx.key.startswith("AWS_"):
-            return Deny("credentials are set by the operator")
-        return None
 
 
 # The reviewer's programs: python source, run on monty, one for each
@@ -84,7 +61,7 @@ SEED = [
 ]
 
 # "host" runs the line with no session, which is the workspace's own
-# unrestricted view: no profile, so no program, but every coded policy.
+# unrestricted view: no profile, so no program.
 LINES = [
     (
         "reviewer",
@@ -98,20 +75,10 @@ LINES = [
     ),
     (
         "reviewer",
-        "export AWS_SECRET=x",
-        "the coded policy, at the session view",
-    ),
-    (
-        "reviewer",
         "export SAFE=1 && echo $SAFE",
         "silence where no method objects",
     ),
     ("host", "cat /repo/flagged.txt", "no profile, so no program"),
-    (
-        "host",
-        "export AWS_SECRET=x",
-        "the coded policy speaks for every session",
-    ),
 ]
 
 
@@ -135,7 +102,6 @@ async def main() -> None:
             "/scratch/": RAMVFS(),
         },
         mode=MountMode.WRITE,
-        policies=[OperatorOwnsCredentials()],
         profiles={
             "reviewer": {
                 "policy": {

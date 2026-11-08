@@ -112,18 +112,18 @@ export interface MountView {
 // The `LinkView` pattern on the session plane: every method answers
 // through the plane's own writers (`workspace/session/state.ts`), so
 // reads arrive exactly as the shell sees them and writes clear readonly
-// plus the `preSession` policy gate. The plain `env` opts field every
+// plus the hidden names. The plain `env` opts field every
 // command already receives stays the frozen process-view snapshot; this
-// view is the live, gated handle for the command that needs one, and it
-// is the whole capability: no member reaches the raw session behind it.
-// Reads are sync ($X expansion grade); writes are async because they
-// clear the gate.
+// view is the live handle for the command that needs one, and it is the
+// whole capability: no member reaches the raw session behind it. Reads
+// are sync ($X expansion grade); writes are async, as Python's are.
 export interface SessionView {
   // One variable's value, null when unset.
   get: EnvGet
   // A process-view copy of the whole environment.
   snapshot: EnvSnapshot
-  // Write one variable through the session plane (readonly + preSession).
+  // Write one variable through the session plane (readonly and hidden
+  // names refused).
   // General over variable shapes: a string stores a scalar, a ShellArray
   // stores a whole array, and the session view keeps the two storages exclusive.
   // Writers with richer mechanics (subscripts, appends, holes) compute
@@ -144,10 +144,9 @@ export interface SessionView {
   // null attribute declare the name and change nothing. Separate from
   // `set` because it writes no value: `export NAME`, `readonly NAME`
   // and a bare `local NAME` on a fresh name leave it *unset* and merely
-  // declared, which is a state `set` cannot express. Gated all the same
-  // -- a mark is a session write, so a hidden name refuses and
-  // `preSession` rules. `followRef` is `set`'s: `declare -rn r` marks the
-  // reference itself.
+  // declared, which is a state `set` cannot express. Checked all the same
+  // -- a mark is a session write, so a hidden name refuses.
+  // `followRef` is `set`'s: `declare -rn r` marks the reference itself.
   mark: EnvMark
   // Whether `readonly` has marked the name; `followRef` false asks about
   // a `declare -n` reference itself rather than its target.

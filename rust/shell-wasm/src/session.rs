@@ -12,10 +12,10 @@ use mirage_rs::arith;
 use mirage_rs::interp::codec::{Args, Item, one};
 use mirage_rs::interp::expand::Substitution;
 use mirage_rs::interp::host::{self, Held};
-use mirage_rs::interp::job::{Job, Running, Step};
+use mirage_rs::interp::job::{Job, Step};
 use mirage_rs::interp::shell::{Frame, Shell as Inner};
-use mirage_rs::interp::task::{self, Answer, Ask, Mode, Write};
-use mirage_rs::interp::write::{Denied, Fault};
+use mirage_rs::interp::task::{self, Answer, Ask, Ended, Expanded, Mode, Task, Write};
+use mirage_rs::interp::write::Fault;
 use mirage_rs::interp::{listing, quote};
 use mirage_rs::vars::{self, Assigned, Indexed, Kind, Managed, Store, Value, Var};
 
@@ -77,7 +77,7 @@ impl Shell {
     }
 }
 
-/// A running operation and the shell it gives back when it ends.
+/// A running expansion and the shell it gives back when it ends.
 struct Owned {
     job: Job,
     owner: u32,
@@ -118,9 +118,9 @@ impl Engine {
             .ok_or_else(|| format!("no task {handle}"))
     }
 
-    /// Hand a shell to an operation and run it to its first request or
-    /// its end: the task's handle and where it stopped.
-    fn start(&mut self, owner: u32, run: impl FnOnce(Inner) -> Running) -> Reply {
+    /// Hand a shell to an expansion and run it to its first request or its
+    /// end: the task's handle and where it stopped.
+    fn start(&mut self, owner: u32, run: impl FnOnce(Inner) -> Task<Ended<Expanded>>) -> Reply {
         let shell = self.shell(owner)?;
         let inner = shell.0.take().ok_or_else(running)?;
         let (job, step) = Job::start(run(inner));
@@ -156,10 +156,14 @@ impl Engine {
         ])
     }
 
-    fn write(&mut self, owner: u32, write: Write, listens: bool, warns: bool) -> Reply {
-        self.start(owner, |inner| {
-            Running::Write(task::write(inner, write, listens, warns))
-        })
+    /// Run a write on a shell at once: `[result, diagnostics]`.
+    fn write(&mut self, owner: u32, write: Write, warns: bool) -> Reply {
+        let shell = self.shell(owner)?.shell_mut()?;
+        let (result, diagnostics) = task::write(shell, write, warns);
+        Ok(Item::list([
+            host::wrote_out(&result),
+            host::diagnostics_out(&diagnostics),
+        ]))
     }
 }
 
@@ -299,11 +303,8 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let tree = args.handle()?;
             let node = size(args.int()?)?;
             let mode: Mode = args.string()?.parse()?;
-            let listens = args.flag()?;
             let tree = shell_tree(tree).ok_or_else(|| format!("no tree {tree}"))?;
-            return engine.start(handle, |inner| {
-                Running::Expand(task::expand(inner, tree, node, mode, listens))
-            });
+            return engine.start(handle, |inner| task::expand(inner, tree, node, mode));
         }
         "set" => {
             let name = args.string()?;
@@ -326,7 +327,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .maybe()?
                 .map(|item| one(item, Args::bytes))
                 .transpose()?;
-            let listens = args.flag()?;
             let warns = args.flag()?;
             let write = Write::Set {
                 name,
@@ -335,45 +335,41 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 assigned,
                 added,
             };
-            return engine.write(handle, write, listens, warns);
+            return engine.write(handle, write, warns);
         }
         "unset" => {
             let name = args.string()?;
             let follow_ref = args.flag()?;
-            let listens = args.flag()?;
-            return engine.write(handle, Write::Unset { name, follow_ref }, listens, true);
+            return engine.write(handle, Write::Unset { name, follow_ref }, true);
         }
         "mark" => {
             let name = args.string()?;
             let attr = letter(args.maybe()?)?;
             let on = args.flag()?;
             let follow_ref = args.flag()?;
-            let listens = args.flag()?;
             let write = Write::Mark {
                 name,
                 attr,
                 on,
                 follow_ref,
             };
-            return engine.write(handle, write, listens, true);
+            return engine.write(handle, write, true);
         }
         "plain_index" => {
             return Ok(Item::opt(arith::plain_decimal(&args.bytes()?), Item::Big));
         }
         "index" => {
             let subscript = args.bytes()?;
-            let listens = args.flag()?;
-            return engine.write(handle, Write::Index { subscript }, listens, true);
+            return engine.write(handle, Write::Index { subscript }, true);
         }
         "is_set" => {
             let reference = args.bytes()?;
             let expanded = args.flag()?;
-            let listens = args.flag()?;
             let write = Write::IsSet {
                 reference,
                 expanded,
             };
-            return engine.write(handle, write, listens, true);
+            return engine.write(handle, write, true);
         }
         "element" => {
             let name = args.string()?;
@@ -383,7 +379,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .transpose()?;
             let value = args.bytes()?;
             let append = args.flag()?;
-            let listens = args.flag()?;
             let warns = args.flag()?;
             let write = Write::Element {
                 name,
@@ -391,31 +386,28 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 value,
                 append,
             };
-            return engine.write(handle, write, listens, warns);
+            return engine.write(handle, write, warns);
         }
         "push" => {
             let name = args.string()?;
             let words = texts(args.list()?)?;
-            let listens = args.flag()?;
-            return engine.write(handle, Write::Push { name, words }, listens, true);
+            return engine.write(handle, Write::Push { name, words }, true);
         }
         "unset_element" => {
             let name = args.string()?;
             let subscript = args.bytes()?;
             let every = args.flag()?;
-            let listens = args.flag()?;
             let write = Write::UnsetElement {
                 name,
                 subscript,
                 every,
             };
-            return engine.write(handle, write, listens, true);
+            return engine.write(handle, write, true);
         }
         "arith" => {
             let text = args.bytes()?;
-            let listens = args.flag()?;
             let expand = args.flag()?;
-            return engine.write(handle, Write::Arith { text, expand }, listens, true);
+            return engine.write(handle, Write::Arith { text, expand }, true);
         }
         "integer" => {
             let text = args.bytes()?;
@@ -423,8 +415,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .maybe()?
                 .map(|item| one(item, Args::bytes))
                 .transpose()?;
-            let listens = args.flag()?;
-            return engine.write(handle, Write::Integer { text, added }, listens, true);
+            return engine.write(handle, Write::Integer { text, added }, true);
         }
         _ => {}
     }
@@ -464,13 +455,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "indexed" => Item::opt(shell.shell()?.indexed(&args.string()?), |array| {
             host::value_out(&Value::Indexed(array.into_owned()))
         }),
-        "rendered" => Item::opt(
-            shell
-                .store()?
-                .record(&args.string()?)
-                .and_then(|var| var.value.as_ref()),
-            |value| Item::text(value.rendering()),
-        ),
         "names" => Item::list(shell.store()?.records().map(|(name, _)| Item::text(name))),
         "records" => Item::list(
             shell
@@ -684,22 +668,6 @@ fn ask_out(engine: &mut Engine, ask: Ask) -> Item {
             Item::int(engine.adopt(shell)),
             Item::int(node),
         ]),
-        Ask::Gate {
-            post,
-            verb,
-            key,
-            value,
-            old,
-            view,
-        } => Item::list([
-            Item::text("gate"),
-            Item::Bool(post),
-            Item::text(host::verb_name(verb)),
-            Item::text(key),
-            Item::opt(value, Item::text),
-            Item::opt(old, Item::text),
-            Item::int(engine.adopt(Inner::new(view))),
-        ]),
         Ask::Pause { view } => Item::list([
             Item::text("pause"),
             Item::int(engine.adopt(Inner::new(view))),
@@ -725,11 +693,6 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         }
         return Ok(Item::list([fields, Item::Bool(more)]));
     }
-    if op == "listen" {
-        let listens = args.flag()?;
-        engine.job(handle)?.job.listen(listens);
-        return Ok(Item::Nil);
-    }
     let answer = match op {
         "answer_substituted" => Answer::Substituted(Substitution {
             stdout: args.bytes()?,
@@ -737,15 +700,6 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             status: status(args.int()?)?,
         }),
         "answer_path" => Answer::Path(args.bytes()?),
-        "answer_gate" => Answer::Gate(match args.maybe()? {
-            None => Ok(()),
-            Some(item) => {
-                let mut denied = Args::new(one(item, Args::list)?);
-                let name = denied.string()?;
-                let record = id(denied.int()?)?;
-                Err(Denied { name, record })
-            }
-        }),
         "answer_resumed" => Answer::Resumed,
         "answer_failed" => Answer::Failed(Fault::Host("the host failed")),
         other => return Err(format!("no task operation {other}")),

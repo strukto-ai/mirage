@@ -48,7 +48,7 @@ from mirage.policy import (
 from mirage.policy.composition import Composition
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.policies import agreed, settled
-from mirage.policy.types import RouteContext, SessionContext
+from mirage.policy.types import RouteContext
 from mirage.types import (
     FileStat,
     Limit,
@@ -654,9 +654,9 @@ def test_describe_refusal_carries_the_reason_the_stderr_line_dropped():
 
 
 class ForSomeSessions(Policy, SessionScopedMixin):
-    """Overrides the session view, but speaks only for session ``a``."""
+    """Overrides connections, but speaks only for session ``a``."""
 
-    async def pre_session(self, ctx: SessionContext) -> Action | None:
+    async def pre_network(self, ctx: NetworkContext) -> Action | None:
         return None
 
     async def wants_for(self, method: str, session_id: str) -> bool:
@@ -664,7 +664,7 @@ class ForSomeSessions(Policy, SessionScopedMixin):
 
 
 class ForEveryone(Policy):
-    async def pre_session(self, ctx: SessionContext) -> Action | None:
+    async def pre_network(self, ctx: NetworkContext) -> Action | None:
         return None
 
 
@@ -674,13 +674,13 @@ async def test_wants_for_refines_wants_per_session():
     # and the entry points keep gating on it; the per-session answer asks a
     # session-scoped policy whether this session is one of its.
     scoped = Policies([ForSomeSessions()])
-    assert scoped.wants("pre_session")
-    assert await scoped.wants_for("pre_session", "a") is True
-    assert await scoped.wants_for("pre_session", "b") is False
+    assert scoped.wants("pre_network")
+    assert await scoped.wants_for("pre_network", "a") is True
+    assert await scoped.wants_for("pre_network", "b") is False
     assert await scoped.wants_for("pre_vfs", "a") is False
     # A policy speaking for every session settles it, wherever it stands.
     both = Policies([ForSomeSessions(), ForEveryone()])
-    assert await both.wants_for("pre_session", "b") is True
+    assert await both.wants_for("pre_network", "b") is True
 
 
 @pytest.mark.asyncio
@@ -717,8 +717,6 @@ async def test_remove_by_identity_refreshes_methods_and_keeps_admission_order():
         "post_execute",
         "pre_vfs",
         "post_vfs",
-        "pre_session",
-        "post_session",
     ],
 )
 async def test_composition_stops_before_an_invalid_later_action(method: str):

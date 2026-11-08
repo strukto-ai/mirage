@@ -55,8 +55,6 @@ from mirage.policy.types import (
     ProfileScript,
     Route,
     RouteContext,
-    SessionContext,
-    SessionResultContext,
     SessionScriptsQuery,
     VfsContext,
     VfsResultContext,
@@ -144,7 +142,6 @@ def script_context(
     ctx: CommandContext
     | RouteContext
     | VfsContext
-    | SessionContext
     | WorkspaceContext
     | NetworkContext,
 ) -> dict[str, JsonValue]:
@@ -158,9 +155,9 @@ def script_context(
     ``NAME=value`` prefix included.
 
     Args:
-        ctx (CommandContext | RouteContext | VfsContext | SessionContext |
-            WorkspaceContext): the context a method was handed, a
-            ``post_`` one included.
+        ctx (CommandContext | RouteContext | VfsContext |
+            WorkspaceContext | NetworkContext): the context a method was
+            handed, a ``post_`` one included.
     """
     data = _plain(ctx)
     assert isinstance(data, dict)
@@ -540,11 +537,6 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             return None
         return await self._judge("pre_vfs", ctx)
 
-    async def pre_session(
-        self, ctx: SessionContext
-    ) -> tuple[Deny | Ask | Route, ...] | None:
-        return await self._judge("pre_session", ctx)
-
     async def pre_network(
         self, ctx: NetworkContext
     ) -> tuple[Deny | Ask | Route, ...] | None:
@@ -572,11 +564,6 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             return None
         return await self._judge("post_vfs", ctx)
 
-    async def post_session(
-        self, ctx: SessionResultContext
-    ) -> tuple[Deny | Ask | Route, ...] | None:
-        return await self._judge("post_session", ctx)
-
     async def pre_workspace(
         self, ctx: WorkspaceContext
     ) -> tuple[Deny | Ask | Route, ...] | None:
@@ -595,7 +582,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         self,
         entry: ProfileScript,
         method: str,
-        ctx: CommandContext | RouteContext | VfsContext | SessionContext,
+        ctx: CommandContext | RouteContext | VfsContext,
     ) -> Deny | Ask | Route | None:
         """One program's answer at one method, outside any profile: the
         workspace's ``route_policy``.
@@ -603,8 +590,8 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         Args:
             entry (ProfileScript): the program.
             method (str): the method it answers at.
-            ctx (CommandContext | RouteContext | VfsContext |
-                SessionContext): its context.
+            ctx (CommandContext | RouteContext | VfsContext): its
+                context.
 
         Raises:
             ValueError: the program failed: it exited non-zero, ran past
@@ -633,7 +620,6 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         ctx: CommandContext
         | RouteContext
         | VfsContext
-        | SessionContext
         | WorkspaceContext
         | NetworkContext,
     ) -> tuple[Deny | Ask | Route, ...] | None:
@@ -643,7 +629,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         Args:
             method (str): the method the entry point fired.
             ctx (CommandContext | RouteContext | VfsContext |
-                SessionContext | WorkspaceContext): its context.
+                WorkspaceContext | NetworkContext): its context.
         """
         session_id = (
             "" if isinstance(ctx, WorkspaceContext) else ctx.session_id
@@ -670,7 +656,6 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         ctx: CommandContext
         | RouteContext
         | VfsContext
-        | SessionContext
         | WorkspaceContext
         | NetworkContext,
     ) -> str:
@@ -680,7 +665,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
 
         Args:
             ctx (CommandContext | RouteContext | VfsContext |
-                SessionContext | WorkspaceContext): the method's context.
+                WorkspaceContext | NetworkContext): the method's context.
         """
         if isinstance(ctx, WorkspaceContext):
             return "/"

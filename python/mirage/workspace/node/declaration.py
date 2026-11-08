@@ -17,8 +17,6 @@ from typing import Any, Callable, TypeVar
 
 from mirage.io import IOResult
 from mirage.policy import PolicyDenied
-from mirage.policy.policies import pre_session_gate
-from mirage.policy.types import SessionContext
 from mirage.shell.array import ShellArray, make_array
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -203,9 +201,8 @@ async def execute_declaration(
         registry (MountRegistry): mount registry for glob resolution.
         namespace (Namespace): addressing authority holding the links.
         cs (CallStack | None): function-call scope, if any.
-        view (SessionView): the gated session view, bound once
-            for the line so a pre_session rule governs an
-            expansion-time write exactly as it governs `X=d`.
+        view (SessionView): the session view, bound once for the
+            line.
         declared (ExpandedWords | None): filled with the words the
             statement expanded to, its keyword first.
     """
@@ -239,9 +236,7 @@ async def execute_declaration(
                 )
                 traced.append(key.removesuffix("+"))
                 continue
-            expanded = await expand_node(
-                child, context, execute_fn, cs, registry.policies
-            )
+            expanded = await expand_node(child, context, execute_fn, cs)
             operands.append(expanded)
             traced.append(expanded)
         elif child.type in (
@@ -258,9 +253,7 @@ async def execute_declaration(
             # A bare `readonly NAME` / `export NAME` operand parses as
             # a variable_name, not a word, and a quoted assignment
             # (`export 'FOO=bar'`) as a plain string operand.
-            expanded = await expand_node(
-                child, context, execute_fn, cs, registry.policies
-            )
+            expanded = await expand_node(child, context, execute_fn, cs)
             if not expanded and child.type in (
                 NT.SIMPLE_EXPANSION,
                 NT.EXPANSION,
@@ -322,9 +315,7 @@ async def execute_declaration(
         # only expands and stages. The flags pass through so -p, the bare
         # listing and bad options work.
         attr = VarAttr.READONLY if keyword == "readonly" else VarAttr.EXPORT
-        return await mark_names(
-            [*flag_words, *operands], session, view, attr, registry.policies
-        )
+        return await mark_names([*flag_words, *operands], session, view, attr)
     refused = _declare_option_refusal(cmd_word, flag_chars, plus_chars)
     if refused is not None:
         return refused
@@ -370,10 +361,9 @@ async def execute_declaration(
             if "=" in bare or want is None:
                 continue
             want_assoc = want is VarKind.ASSOC
-            # A hidden name refuses like any assignment spelling
-            # before anything lands, and the array both branches below
-            # write (the top-level one migrates an existing scalar)
-            # goes through the gate as any write does.
+            # A hidden name refuses like any assignment spelling before
+            # anything lands, the readonly conversion below included,
+            # which writes past the writer's checks.
             try:
                 ensure_var_visible(session, bare)
             except PolicyDenied as exc:
@@ -417,23 +407,8 @@ async def execute_declaration(
                 else make_array([] if scalar is None else [scalar])
             )
             if view.is_readonly(bare, False):
-                # bash converts a readonly name all the same, which a
-                # gated write refuses, so the rule is asked on its own
-                # before the ungated one lands it.
-                try:
-                    await pre_session_gate(
-                        registry.policies,
-                        SessionContext(
-                            verb="set",
-                            key=bare,
-                            value=scalar or "",
-                            session_id=session.session_id,
-                        ),
-                    )
-                except PolicyDenied as exc:
-                    raise DiscardSignal(
-                        encode_text(f"{exc.strerror}\n")
-                    ) from exc
+                # bash converts a readonly name all the same, which the
+                # writer refuses, so it lands past the writer's checks.
                 seed_var(session, bare, fill)
             else:
                 try:
@@ -467,13 +442,11 @@ async def execute_declaration(
         session,
         view,
         decl,
-        registry.policies,
         partial(
             expand_subscript,
             context=context,
             execute_fn=execute_fn,
             call_stack=cs,
-            policies=registry.policies,
         ),
     )
     return _merge_conversion_errors(result, conversion_errors)

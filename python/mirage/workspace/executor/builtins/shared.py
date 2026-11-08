@@ -202,13 +202,10 @@ async def expand_operands(
 
 
 def require_view(state: SessionView | None) -> SessionView:
-    """The gated session view this builtin writes through.
+    """The session view this builtin writes through.
 
-    Every session write goes through the workspace's gated view, which
-    is what makes ``pre_session`` rules enforceable; this used to fall
-    back to an ungated view over the same session, so a caller that
-    forgot to thread one silently wrote past every policy. A write
-    reached without a view is a wiring bug, not a mode, so it raises.
+    Every session write goes through the view the line threads; a write
+    reached without one is a wiring bug, not a mode, so it raises.
 
     Args:
         state (SessionView | None): the caller's view, if threaded.
@@ -396,5 +393,4 @@ def subscript_expansion(call: BuiltinCall) -> SubscriptFn:
         context=call.context,
         execute_fn=call.execute_fn,
         call_stack=call.call_stack,
-        policies=call.namespace.registry.policies,
     )

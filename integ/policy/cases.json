@@ -242,14 +242,12 @@
     {"op": "exec", "command": "echo open > /data/open", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "register_policy", "id": "cmd", "pre_command": {"touch": {"deny": "no touching"}}},
     {"op": "register_policy", "id": "path", "pre_vfs": {"/data/locked": {"deny": "locked file"}}},
-    {"op": "register_policy", "id": "var", "pre_session": {"MODE": {"deny": "mode is fixed"}}},
     {"op": "register_policy", "id": "line", "pre_execute": {"blocked": {"deny": "blocked line"}}},
     {"op": "exec", "command": "touch /data/t", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "touch: Permission denied\n", "refusal": "no touching"}}},
     {"op": "exec", "command": "cat /data/locked", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/locked: Permission denied\n", "refusal": "locked file"}}},
     {"op": "exec", "command": "cat /data/locked /data/open", "expect": {"value": {"exit_code": 1, "stdout": "open\n", "stderr": "cat: /data/locked: Permission denied\n", "refusal": "locked file"}}},
     {"op": "exec", "command": "cp /data/locked /data/copy", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cp: cannot stat '/data/locked': Permission denied\n", "refusal": "locked file"}}},
     {"op": "exec", "command": "mv /data/locked /data/moved", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "mv: cannot stat '/data/locked': Permission denied\n", "refusal": "locked file"}}},
-    {"op": "exec", "command": "export MODE=fast", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "MODE: permission denied\n", "refusal": "mode is fixed"}}},
     {"op": "exec", "command": "echo blocked", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "refusal": "blocked line"}}},
     {"op": "explain", "command": "touch /data/t", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [], "refusal": null, "exit_code": 0, "stderr": "", "commands": [{"command": "touch", "outcome": "deny", "answers": [{"kind": "deny", "policy": "RulePolicy", "reason": "no touching"}], "runtime": ""}]}}},
     {"op": "explain", "command": "echo blocked", "expect": {"value": {"outcome": "deny", "reason": "blocked line", "answers": [{"kind": "deny", "policy": "RulePolicy", "reason": "blocked line"}], "refusal": "deny", "exit_code": 126, "stderr": "echo: Permission denied\n", "commands": [{"command": "echo", "outcome": "allow", "answers": [], "runtime": ""}]}}},
@@ -329,26 +327,6 @@
    ]
   },
   {
-   "id": "pre_session_and_post_session_answer_for_each_session_write",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
-   "steps": [
-    {"op": "session", "id": "agent", "profile": {"env": {"KEPT": "old"}}},
-    {"op": "register_policy", "id": "vars", "pre_session": {"HELD": {"ask": "HELD needs a nod"}}, "post_session": {"KEPT": {"deny": "KEPT stays"}, "LATER": {"ask": "LATER needs review"}, "RANDOM": {"deny": "RANDOM stays"}}},
-    {"op": "exec", "session": "agent", "command": "export KEPT=new; echo $KEPT", "expect": {"value": {"exit_code": 0, "stdout": "old\n", "stderr": "KEPT: permission denied\n", "refusal": "KEPT stays"}}},
-    {"op": "exec", "session": "agent", "command": "export HELD=1", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "HELD: permission denied\n", "refusal": "HELD needs a nod"}}},
-    {"op": "asks", "expect": {"value": [{"command": "", "paths": [], "reason": "HELD needs a nod"}]}},
-    {"op": "answer", "outcome": "allow", "scope": "once"},
-    {"op": "exec", "session": "agent", "command": "export HELD=1; echo $HELD", "expect": {"value": {"exit_code": 0, "stdout": "1\n", "stderr": "", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "export LATER=2; echo ${LATER:-unset}", "expect": {"value": {"exit_code": 0, "stdout": "unset\n", "stderr": "LATER: permission denied\n", "refusal": "LATER needs review"}}},
-    {"op": "asks", "expect": {"value": [{"command": "", "paths": [], "reason": "LATER needs review"}]}},
-    {"op": "answer", "outcome": "allow", "scope": "once"},
-    {"op": "exec", "session": "agent", "command": "export LATER=2; echo ${LATER:-unset}", "expect": {"value": {"exit_code": 0, "stdout": "2\n", "stderr": "", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "KEPT=new printenv KEPT", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: KEPT: permission denied\n", "refusal": "KEPT stays"}}},
-    {"op": "exec", "session": "agent", "command": "RANDOM=(1 2)", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "RANDOM: permission denied\n", "refusal": "RANDOM stays"}}},
-    {"op": "exec", "session": "agent", "command": "[ \"$RANDOM\" != \"$RANDOM\" ] && echo draws", "expect": {"value": {"exit_code": 0, "stdout": "draws\n", "stderr": "", "refusal": null}}}
-   ]
-  },
-  {
    "id": "a_hook_answering_outside_its_kinds_fails_the_line",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
@@ -393,7 +371,7 @@
    "id": "a_profile_policy_answers_at_each_pre_method",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
    "steps": [
-    {"op": "session", "id": "agent", "profile": {"env": {"MODE": "safe"}, "policy": {"pre_command": [{"script": {"source": "def pre_command(ctx):\n    name = ctx['command']\n    if name == 'touch':\n        return {'kind': 'deny', 'reason': 'script says no'}\n    if name == 'mkdir':\n        return {'kind': 'ask', 'reason': 'mkdir needs a nod'}\n    if name == 'rm' and ctx['env'].get('MODE') == 'safe':\n        return {'kind': 'deny', 'reason': 'safe mode'}\n", "language": "python"}, "runtime": "monty"}], "pre_vfs": [{"script": {"source": "def pre_vfs(ctx):\n    if ctx['path'] == '/data/s':\n        return {'kind': 'deny', 'reason': 'script guards s'}\n    if ctx['path'] == '/data/held':\n        return {'kind': 'ask', 'reason': 'held needs a nod'}\n", "language": "python"}, "runtime": "monty"}], "pre_session": [{"script": {"source": "def pre_session(ctx):\n    if ctx['key'] == 'MODE':\n        return {'kind': 'deny', 'reason': 'mode is fixed'}\n    if ctx['key'] == 'HELD':\n        return {'kind': 'ask', 'reason': 'HELD needs a nod'}\n", "language": "python"}, "runtime": "monty"}]}}},
+    {"op": "session", "id": "agent", "profile": {"env": {"MODE": "safe"}, "policy": {"pre_command": [{"script": {"source": "def pre_command(ctx):\n    name = ctx['command']\n    if name == 'touch':\n        return {'kind': 'deny', 'reason': 'script says no'}\n    if name == 'mkdir':\n        return {'kind': 'ask', 'reason': 'mkdir needs a nod'}\n    if name == 'rm' and ctx['env'].get('MODE') == 'safe':\n        return {'kind': 'deny', 'reason': 'safe mode'}\n", "language": "python"}, "runtime": "monty"}], "pre_vfs": [{"script": {"source": "def pre_vfs(ctx):\n    if ctx['path'] == '/data/s':\n        return {'kind': 'deny', 'reason': 'script guards s'}\n    if ctx['path'] == '/data/held':\n        return {'kind': 'ask', 'reason': 'held needs a nod'}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "command": "echo s > /data/s", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "touch /data/t", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "touch: Permission denied\n", "refusal": "script says no"}}},
     {"op": "exec", "session": "agent", "command": "cat /data/s", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/s: Permission denied\n", "refusal": "script guards s"}}},
@@ -406,11 +384,6 @@
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "exec", "session": "agent", "command": "mkdir /data/m", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "rm /data/r", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "refusal": "safe mode"}}},
-    {"op": "exec", "session": "agent", "command": "export MODE=fast", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "MODE: permission denied\n", "refusal": "mode is fixed"}}},
-    {"op": "exec", "session": "agent", "command": "export HELD=1", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "HELD: permission denied\n", "refusal": "HELD needs a nod"}}},
-    {"op": "asks", "session": "agent", "expect": {"value": [{"command": "", "paths": [], "reason": "HELD needs a nod"}]}},
-    {"op": "answer", "outcome": "allow", "scope": "once"},
-    {"op": "exec", "session": "agent", "command": "export HELD=1; echo $HELD", "expect": {"value": {"exit_code": 0, "stdout": "1\n", "stderr": "", "refusal": null}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/held"}, "expect": {"errno": "EACCES", "reason": "held needs a nod"}},
     {"op": "asks", "session": "agent", "expect": {"value": [{"command": "", "paths": ["/data/held"], "reason": "held needs a nod"}]}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
@@ -422,14 +395,12 @@
    "id": "a_profile_policy_runs_each_program_with_the_session",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
    "steps": [
-    {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "def pre_execute(ctx):\n    names = [c['command'] for c in ctx['commands']]\n    if 'false' in names and ctx['cwd'] == '/data':\n        reason = 'no false in /data: ' + ' '.join(names)\n        return {'kind': 'deny', 'reason': reason}\n", "language": "python"}, "runtime": "monty"}], "pre_command": [{"script": {"source": "import os\n\ndef pre_command(ctx):\n    if ctx['command'] == 'hostname':\n        reason = 'cwd ' + os.getcwd() + ' team ' + str(ctx['env'].get('TEAM')) + ' env ' + ','.join(sorted(os.environ))\n        return {'kind': 'deny', 'reason': reason}\n", "language": "python"}, "runtime": "monty"}, {"script": {"source": "def pre_command(ctx):\n    if ctx['command'] in ('hostname', 'whoami'):\n        return {'kind': 'ask', 'reason': ctx['command'] + ' needs a nod'}\n", "language": "python"}, "runtime": "monty"}], "pre_vfs": [{"script": {"source": "def pre_vfs(ctx):\n    if ctx['call']['name'] == 'read' and 'secret' in open(ctx['path']).read():\n        return {'kind': 'deny', 'reason': 'secret text'}\n", "language": "python"}, "runtime": "monty"}], "pre_session": [{"script": {"source": "def pre_session(ctx):\n    team = ctx['env'].get('TEAM')\n    if ctx['key'] == 'TEAM' and team is not None:\n        return {'kind': 'deny', 'reason': 'TEAM was ' + team}\n", "language": "python"}, "runtime": "monty"}]}}},
+    {"op": "session", "id": "agent", "profile": {"policy": {"pre_execute": [{"script": {"source": "def pre_execute(ctx):\n    names = [c['command'] for c in ctx['commands']]\n    if 'false' in names and ctx['cwd'] == '/data':\n        reason = 'no false in /data: ' + ' '.join(names)\n        return {'kind': 'deny', 'reason': reason}\n", "language": "python"}, "runtime": "monty"}], "pre_command": [{"script": {"source": "import os\n\ndef pre_command(ctx):\n    if ctx['command'] == 'hostname':\n        reason = 'cwd ' + os.getcwd() + ' team ' + str(ctx['env'].get('TEAM')) + ' env ' + ','.join(sorted(os.environ))\n        return {'kind': 'deny', 'reason': reason}\n", "language": "python"}, "runtime": "monty"}, {"script": {"source": "def pre_command(ctx):\n    if ctx['command'] in ('hostname', 'whoami'):\n        return {'kind': 'ask', 'reason': ctx['command'] + ' needs a nod'}\n", "language": "python"}, "runtime": "monty"}], "pre_vfs": [{"script": {"source": "def pre_vfs(ctx):\n    if ctx['call']['name'] == 'read' and 'secret' in open(ctx['path']).read():\n        return {'kind': 'deny', 'reason': 'secret text'}\n", "language": "python"}, "runtime": "monty"}]}}},
     {"op": "exec", "command": "echo secret > /data/x; echo plain > /data/y", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "cd /data && export TEAM=core", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "hostname", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "hostname: Permission denied\n", "refusal": "cwd /data team core env MIRAGE_POLICY_CTX"}}},
     {"op": "exec", "session": "agent", "command": "whoami", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "whoami: Permission denied\n", "refusal": "whoami needs a nod"}}},
     {"op": "exec", "session": "agent", "command": "true && false", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "true: Permission denied\n", "refusal": "no false in /data: true false"}}},
-    {"op": "exec", "session": "agent", "command": "export TEAM=ops", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "TEAM: permission denied\n", "refusal": "TEAM was core"}}},
-    {"op": "exec", "session": "agent", "command": "echo $TEAM", "expect": {"value": {"exit_code": 0, "stdout": "core\n", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "echo ${MIRAGE_POLICY_CTX:-unset}", "expect": {"value": {"exit_code": 0, "stdout": "unset\n", "stderr": "", "refusal": null}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/x"}, "expect": {"errno": "EACCES", "reason": "secret text"}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/y"}, "expect": {"value": "cGxhaW4K"}},
@@ -524,32 +495,6 @@
     {"op": "exec", "session": "agent", "command": "echo hi", "expect": {"value": {"exit_code": 126, "stdout": "hi\n", "stderr": "echo: Permission denied\n", "refusal": "no echo after 0"}}},
     {"op": "exec", "session": "agent", "command": "printf x", "expect": {"value": {"exit_code": 0, "stdout": "x", "stderr": "", "refusal": null}}},
     {"op": "exec", "command": "echo hi", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "", "refusal": null}}}
-   ]
-  },
-  {
-   "id": "a_held_line_keeps_the_nods_for_its_writes",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
-   "steps": [
-    {"op": "session", "id": "agent"},
-    {"op": "register_policy", "id": "writes", "pre_session": {"B": {"ask": "B before"}, "C": {"ask": "C before"}}, "post_session": {"B": {"ask": "B after"}}},
-    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "\n", "stderr": "bash: line 1: B: permission denied\nC: permission denied\n", "refusal": "C before"}}},
-    {"op": "answer", "outcome": "allow", "scope": "once"},
-    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "2\n", "stderr": "bash: line 1: B: permission denied\n", "refusal": "B after"}}},
-    {"op": "answer", "outcome": "allow", "scope": "once"},
-    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "1\n2\n", "stderr": "", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "2\n", "stderr": "bash: line 1: B: permission denied\nC: permission denied\n", "refusal": "C before"}}}
-   ]
-  },
-  {
-   "id": "a_killed_job_spends_the_nods_it_held",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
-   "steps": [
-    {"op": "session", "id": "agent"},
-    {"op": "register_policy", "id": "vars", "pre_session": {"A": {"ask": "A needs a nod"}, "B": {"ask": "B needs a nod"}}},
-    {"op": "exec", "session": "agent", "command": "export A=1", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "A: permission denied\n", "refusal": "A needs a nod"}}},
-    {"op": "answer", "outcome": "allow", "scope": "once"},
-    {"op": "exec", "session": "agent", "command": "{ export A=1; export B=2; touch /data/m; sleep 30; } & until [ -e /data/m ]; do sleep 0.1; done; kill %1; wait", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "B: permission denied\n", "refusal": "B needs a nod"}}},
-    {"op": "exec", "session": "agent", "command": "export A=1", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "A: permission denied\n", "refusal": "A needs a nod"}}}
    ]
   },
   {

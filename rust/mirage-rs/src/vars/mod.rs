@@ -7,9 +7,8 @@
 //!
 //! The store is the one place a record changes (`place`), so the bytes the
 //! records hold, which `max_env` caps, are counted as they change. A write
-//! the line asks for is gated by the host before and after it lands; the
-//! steps here are its synchronous parts, each handing back what it replaced
-//! so a refusal can put it back.
+//! the line asks for lands through the writer (`interp/write.rs`), which
+//! refuses a hidden or readonly name first; the steps here are its parts.
 //!
 //! Forks share what they hold: the table and each record are counted
 //! references, so a subshell or a command substitution copies nothing until
@@ -577,8 +576,8 @@ impl Store {
         env
     }
 
-    /// Write a record without the gate: a session being seeded, or the
-    /// shell's own bookkeeping (`PWD`, `BASH_REMATCH`).
+    /// Write a record past the writer's checks: a session being seeded, or
+    /// the shell's own bookkeeping (`PWD`, `BASH_REMATCH`).
     pub fn seed(&mut self, name: &str, value: Value) {
         let var = match self.vars.get(name) {
             Some(existing) => existing.holding(Some(value)),
@@ -615,11 +614,10 @@ impl Store {
         }
     }
 
-    /// Store a write the gate passed: the coerced value on the name's
+    /// Store a write the writer allowed: the coerced value on the name's
     /// record, a managed pointer dropped (an agent write shadows it for
-    /// this session only), exported under `set -a`. The record it replaced
-    /// comes back for an undo.
-    pub fn land(&mut self, name: &str, value: Value, allexport: bool) -> Option<Arc<Var>> {
+    /// this session only), exported under `set -a`.
+    pub fn land(&mut self, name: &str, value: Value, allexport: bool) {
         let mut var = match self.vars.get(name) {
             Some(existing) => existing.holding(Some(value)),
             None => Var {
@@ -634,7 +632,7 @@ impl Store {
         if let Some(value) = &var.value {
             self.note_kind(name, value);
         }
-        self.place(name, Some(Arc::new(var)))
+        self.place(name, Some(Arc::new(var)));
     }
 
     /// The element `slot` of the array `name` holds, None when the record
@@ -729,7 +727,7 @@ impl Store {
     /// arithmetic context does: drawing through `draws`, stopping at a
     /// write to a readonly name, its subscripts expanding first when
     /// `expand` (a `let` operand, an `-i` value). The writes come back for
-    /// the caller to land through the gate.
+    /// the caller to land.
     pub fn arith(
         &mut self,
         draws: &mut Draws,
@@ -869,7 +867,7 @@ fn recase(text: &[u8], convert: fn(&str) -> String) -> Vec<u8> {
 }
 
 /// An `-i` coercion's evaluations: their `RANDOM` reads and the writes they
-/// made, which land through the gate before the value they were made for.
+/// made, which land before the value they were made for.
 #[derive(Debug, Default)]
 pub struct Coercion {
     pub draws: Draws,
@@ -965,9 +963,6 @@ mod tests {
             ]
         );
         assert_eq!((map.len(), map.get(&keys[19])), (4, Some(&b"v"[..])));
-        map.remove(&keys[18]);
-        map.remove(&keys[19]);
-        assert_eq!(Value::Assoc(Box::new(map)).rendering(), b"3 4");
     }
 
     #[test]
@@ -1302,12 +1297,6 @@ mod tests {
         store.leave(outer);
         assert_eq!(store.dynamic(LINENO), Some(b"7".to_vec()));
         assert_eq!(store.dynamic(BASHPID), Some(b"42".to_vec()));
-
-        let marks = store.marks();
-        let (old, frame) = store.drop_var(LINENO);
-        assert_eq!(store.fork().dynamic(LINENO), None);
-        store.undrop(LINENO, old, frame, marks);
-        assert_eq!(store.dynamic(LINENO), Some(b"7".to_vec()));
 
         store.drop_var(LINENO);
         let outer = store.enter();

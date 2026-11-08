@@ -15,7 +15,6 @@
 import functools
 
 from mirage.policy import PolicyDenied
-from mirage.policy.policies import Policies
 from mirage.shell.array import (
     ShellArray,
     array_set,
@@ -382,7 +381,6 @@ async def store_staged_arrays(
     shaping: AttrMarks = (),
     global_scope: bool = False,
     inherit: bool = False,
-    policies: Policies | None = None,
 ) -> Result | None:
     """Store a declaration's array literals through the session view,
     the first of bash's two passes over a declaration.
@@ -446,8 +444,6 @@ async def store_staged_arrays(
             there does not).
         inherit (bool): the declaration carried ``-I``, so a new local
             starts from the value it shadows.
-        policies (Policies | None): the policies a subscript's
-            assignments clear.
 
     Returns:
         The refusal result, or None when every literal stored.
@@ -514,9 +510,7 @@ async def store_staged_arrays(
                     indexed,
                     items,
                     append,
-                    functools.partial(
-                        subscript_index, session, policies=policies
-                    ),
+                    functools.partial(subscript_index, session),
                 )
             await view.set(name, base)
         except PolicyDenied as exc:
@@ -862,7 +856,6 @@ async def mark_names(
     session: SessionState,
     state: SessionView | None,
     attr: VarAttr,
-    policies: Policies | None = None,
 ) -> Result:
     """Run ``export`` or ``readonly``: mark names, or print them.
 
@@ -882,8 +875,6 @@ async def mark_names(
         session (SessionState): shell session state.
         state (SessionView | None): the gated session view.
         attr (VarAttr): EXPORT or READONLY.
-        policies (Policies | None): the policies a subscript's
-            assignments clear.
     """
     exporting = attr is VarAttr.EXPORT
     cmd = "export" if exporting else "readonly"
@@ -904,7 +895,7 @@ async def mark_names(
             else session.readonly_functions
         )
         return await mark_functions(
-            cmd, session, marked, names, on, state, kind, policies
+            cmd, session, marked, names, on, state, kind
         )
     if not names:
         temporaries = prefix_temporaries(session)
@@ -917,7 +908,7 @@ async def mark_names(
         )
         return ok(cmd, encode_text("".join(f"{x}\n" for x in lines if x)))
     return await mark_variables(
-        cmd, session, require_view(state), names, attr, on, kind, policies
+        cmd, session, require_view(state), names, attr, on, kind
     )
 
 
@@ -929,7 +920,6 @@ async def mark_functions(
     on: bool,
     state: SessionView | None = None,
     kind: VarKind | None = None,
-    policies: Policies | None = None,
 ) -> Result:
     """Run ``readonly -f`` or ``export -f``: mark functions, or list them.
 
@@ -952,8 +942,6 @@ async def mark_functions(
         state (SessionView | None): the gated session view, for
             the array literals.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
-        policies (Policies | None): the policies a subscript's
-            assignments clear.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -967,7 +955,6 @@ async def mark_functions(
             warnings,
             fatal=True,
             kind=kind,
-            policies=policies,
         )
         if refused is not None:
             return refused
@@ -994,7 +981,6 @@ async def mark_variables(
     attr: VarAttr,
     on: bool,
     kind: VarKind | None,
-    policies: Policies | None = None,
 ) -> Result:
     """Run ``export`` or ``readonly`` over its operands: assign each
     value and put the keyword's mark on, or with ``on`` False take it
@@ -1019,8 +1005,6 @@ async def mark_variables(
         attr (VarAttr): EXPORT or READONLY.
         on (bool): set the mark rather than clear it.
         kind (VarKind | None): the kind ``-a`` / ``-A`` declared.
-        policies (Policies | None): the policies a subscript's
-            assignments clear.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -1035,7 +1019,6 @@ async def mark_variables(
         fatal=True,
         stored=stored,
         kind=kind,
-        policies=policies,
     )
     traced = kind is None and session.shell_options.get("xtrace")
     failed = False

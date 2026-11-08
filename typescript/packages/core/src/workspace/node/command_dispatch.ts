@@ -39,8 +39,6 @@ import {
   type HandOff,
   PolicyDenied,
   postCommandGate,
-  postSessionGate,
-  preSessionGate,
   refusalOf,
   renderDeny,
   resolveProducer,
@@ -306,56 +304,28 @@ export async function executeCommand(
     const firstVal = valNodes[0]
     const v =
       firstVal !== undefined
-        ? await ownWords(
-            node,
-            expandAssignment(firstVal, context, executeFn, callStack, registry.policies),
-          )
+        ? await ownWords(node, expandAssignment(firstVal, context, executeFn, callStack))
         : rawVal
     prefixAssignments.push([key, v])
   }
 
-  for (const [given, v] of prefixAssignments) {
+  for (const [given] of prefixAssignments) {
     // Each check is of the name the write lands on, a reference's target
     // (`r=new cmd` over `declare -n r=T` writes T).
     const k = deref(session, given)
-    // The hidden gate runs first, as in setVar: calling a hidden name
+    // The hidden check runs first, as in setVar: calling a hidden name
     // "readonly" would leak that it exists. Both branches below write
-    // session.env raw (an `export` inside a function keeps its prefix
-    // past the call), so ungated they would let a narrowed session
-    // clobber the host's value.
+    // through `seedVar`, past the writer's checks (an `export` inside a
+    // function keeps its prefix past the call), so this loop is the only
+    // place a narrowed session is kept from clobbering the host's value.
     try {
       ensureVarVisible(session, k)
-      // ...and `preSession` right after, with the value, because a
-      // prefix assignment is a session write like any other and the form
-      // exports it for the command. Only the hidden half was checked
-      // here, so a deployment refusing `SECRET_*` still saw
-      // `SECRET_K=leak printenv SECRET_K` print the secret: the seeding
-      // below goes through `seedVar`, which is the ungated entry point, so this
-      // loop is the only place the rule can be asked.
-      await preSessionGate(registry.policies, {
-        verb: 'set',
-        key: k,
-        value: v,
-        sessionId: session.sessionId,
-      })
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
       return writeRefused(err, name !== '' ? name : k)
     }
     if (session.readonlyVars.has(k)) {
       throw new DiscardSignal(encodeText(`${shellVoice()}${given}: readonly variable\n`))
-    }
-  }
-
-  // `postSession` asks about each prefix write once it landed.
-  const judgeLanded = async (renderings: ReadonlyMap<string, string | null>): Promise<void> => {
-    for (const [given, v] of prefixAssignments) {
-      const k = deref(session, given)
-      await postSessionGate(
-        registry.policies,
-        { verb: 'set', key: k, value: v, sessionId: session.sessionId },
-        renderings.get(k) ?? renderings.get(given) ?? null,
-      )
     }
   }
 
@@ -374,16 +344,7 @@ export async function executeCommand(
   }
 
   if (prefixAssignments.length > 0 && name === '') {
-    const olds = new Map(prefixAssignments.map(([k]) => [k, session.vars.get(k) ?? null]))
-    const renderings = new Map(prefixAssignments.map(([k]) => [k, session.vars.shell.rendered(k)]))
     for (const [k, v] of prefixAssignments) seedVar(session, k, v)
-    try {
-      await judgeLanded(renderings)
-    } catch (err) {
-      if (!(err instanceof PolicyDenied)) throw err
-      restore(olds)
-      return writeRefused(err, name)
-    }
     const cmdLabel = prefixAssignments.map(([k, v]) => `${k}=${v}`).join(' ')
     const landed: [null, IOResult, ExecutionNode] = [
       null,
@@ -399,7 +360,6 @@ export async function executeCommand(
   }
 
   const savedEnvOverrides = new Map<string, ShellVar | null>()
-  const savedRenderings = new Map<string, string | null>()
   // A function's prefix is its temporary environment, a scope the shell
   // keeps under the function's locals: `unset` inside reveals the caller's
   // value and `export` keeps the name.
@@ -407,7 +367,7 @@ export async function executeCommand(
   // Seeded once the command's words are expanded, since bash expands them
   // with the values from before the assignment: `x=new echo $x` prints the
   // old x and `IFS=, cmd $v` splits on the old IFS.
-  const seedPrefix = async (command: string): Promise<void> => {
+  const seedPrefix = (command: string): void => {
     const shell = session.vars.shell
     if (session.functions[command] !== undefined) temp = shell.openTemp()
     // A function's prefix scope keeps the records it saves, and the shell
@@ -423,7 +383,6 @@ export async function executeCommand(
       if (!savedEnvOverrides.has(k)) {
         const held = session.vars.get(k) ?? null
         savedEnvOverrides.set(k, held)
-        savedRenderings.set(k, shell.rendered(k))
         if (held !== null && shell.isUnassigned(k)) unassigned.set(k, held)
       }
       if (temp !== null) shell.saveTemp(temp, k)
@@ -438,9 +397,6 @@ export async function executeCommand(
       // saved record is put back below, so neither outlives the command.
       session.vars.set(k, makeVar(v, new Set([VarAttr.Export])))
     }
-    // Judged before the command reads them; on a refusal the restore
-    // below puts the old values back.
-    await judgeLanded(savedRenderings)
   }
 
   if (refused !== '' && sink !== undefined) {
@@ -552,7 +508,7 @@ function rmUnseen(
   return { kept, hidden }
 }
 
-/** A prefix assignment a session policy refused: bash's line, exit 1. */
+/** A prefix assignment to a hidden name: bash's line, exit 1. */
 function writeRefused(err: PolicyDenied, command: string): RedirectResult {
   const stderr = encodeText(`${shellVoice()}${err.message}\n`)
   return [
@@ -581,7 +537,7 @@ async function runCommandBody(
   jobTable: JobTable | null,
   signalIn?: AbortSignal,
   handed?: HandOff,
-  seedPrefix?: (command: string) => Promise<void>,
+  seedPrefix?: (command: string) => void,
   sink?: JobConsole,
   parser?: ParseScope,
   expanded?: ExpandedWords,
@@ -602,15 +558,7 @@ async function runCommandBody(
 
   const argv = await ownWords(
     node,
-    expandArgv(
-      parts,
-      context,
-      executeFn,
-      callStack,
-      registry,
-      namespace.sessionLinks(session),
-      registry.policies,
-    ),
+    expandArgv(parts, context, executeFn, callStack, registry, namespace.sessionLinks(session)),
   )
   if (expanded !== undefined) expanded.words = [argv.name, ...argv.args]
 
@@ -707,7 +655,7 @@ async function runArgv(
   // Applies ordered redirects after command word expansion.
   runner: RedirectRunner | null = null,
   parser?: ParseScope,
-  seedPrefix?: (name: string) => Promise<void>,
+  seedPrefix?: (name: string) => void,
   assigned: ReadonlySet<string> = new Set(),
 ): Promise<RedirectResult> {
   const session = context.session
@@ -804,12 +752,7 @@ async function runArgv(
     output: JobConsole | undefined,
     paths: readonly PathSpec[],
   ): Promise<RedirectResult> => {
-    try {
-      await seedPrefix?.(name)
-    } catch (err) {
-      if (!(err instanceof PolicyDenied)) throw err
-      return writeRefused(err, name)
-    }
+    seedPrefix?.(name)
     const refusal = await guard(paths, given)
     if (refusal !== null) return refusal
     // The admitted command's gate is bound for its run and handed back

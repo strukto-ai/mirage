@@ -292,7 +292,6 @@ impl<H: Host> Expander<'_, H> {
     pub(super) async fn expansion_index(&mut self, subscript: &[u8]) -> Result<i64, Fault> {
         self.writer()
             .subscript_index(subscript)
-            .await
             .map_err(|fault| write_refusal(self.shell.vars.voice(), fault))
     }
 }

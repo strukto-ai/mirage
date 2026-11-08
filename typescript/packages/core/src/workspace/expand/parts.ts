@@ -14,7 +14,6 @@
 
 import { callerSignal, sessionAccess } from '../../context/session_context.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
-import type { Policies } from '../../policy/index.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { PathSpec } from '../../types.ts'
@@ -38,14 +37,13 @@ export async function expandWords(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
-  policies: Policies | null = null,
 ): Promise<string[]> {
   const result: string[] = []
   // Each word expands in one step; the line yields between words, so a
   // cancel or its deadline lands before the last.
   const budget = new YieldBudget(callerSignal())
   for (const part of parts) {
-    const fields = await expand(part, 'fields', context, executeFn, callStack, policies)
+    const fields = await expand(part, 'fields', context, executeFn, callStack)
     for (const field of fields as readonly string[]) result.push(field)
     await budget.run()
   }
@@ -67,9 +65,8 @@ export async function expandAndClassify(
   registry: MountRegistry,
   cwd: string,
   callStack: CallStack | null = null,
-  policies: Policies | null = null,
 ): Promise<(string | PathSpec)[]> {
-  const expanded = await expandWords(words, context, executeFn, callStack, policies)
+  const expanded = await expandWords(words, context, executeFn, callStack)
   // One word can expand to a million (`a=($x)`), so classifying them
   // yields too.
   const budget = new YieldBudget(callerSignal())

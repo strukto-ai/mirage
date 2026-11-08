@@ -180,7 +180,7 @@ export async function mapfileBuiltin(call: BuiltinCall): Promise<RedirectResult>
     call.context.session,
     call.stdin,
     call.executeFn,
-    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
+    sessionView(call.context.session, call.context.frame.diagnostics),
     call.argv.name,
     call.signal,
   )

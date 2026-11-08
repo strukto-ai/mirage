@@ -15,7 +15,6 @@ from mirage.policy.types import (
     CommandContext,
     CommandRule,
     Deny,
-    SessionContext,
     VfsContext,
 )
 from mirage.rs.policy import admission_matcher, units
@@ -26,7 +25,6 @@ class Counter(Policy):
     def __init__(self) -> None:
         self.calls = 0
         self.vfs_calls = 0
-        self.session_calls = 0
 
     async def pre_command(self, ctx: CommandContext) -> Deny | None:
         self.calls += 1
@@ -34,9 +32,6 @@ class Counter(Policy):
 
     async def pre_vfs(self, ctx: VfsContext) -> None:
         self.vfs_calls += 1
-
-    async def pre_session(self, ctx: SessionContext) -> None:
-        self.session_calls += 1
 
 
 async def run() -> dict:
@@ -176,7 +171,6 @@ async def run() -> dict:
             async def shell() -> None:
                 before = callback.calls
                 vfs_before = callback.vfs_calls
-                session_before = callback.session_calls
                 result = await ws.shell(command, session_id="bench")
                 assert (
                     result.exit_code,
@@ -192,8 +186,6 @@ async def run() -> dict:
                     assert callback.calls > before
                 if index == 0:
                     assert callback.vfs_calls > vfs_before
-                if index == 2:
-                    assert callback.session_calls > session_before
 
             await measure(f"shell_{index}", 20, shell)
     finally:

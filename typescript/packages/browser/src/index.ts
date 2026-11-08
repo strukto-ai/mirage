@@ -123,7 +123,6 @@ export {
   type Deny,
   type Explanation,
   type RouteContext,
-  type SessionContext,
   type ShellExplanation,
   type ShellNode,
   type VfsExplanation,

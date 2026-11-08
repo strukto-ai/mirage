@@ -54,8 +54,6 @@ import {
   type Route,
   type RouteContext,
   type ScriptMethod,
-  type SessionContext,
-  type SessionResultContext,
   type SessionScriptsQuery,
   type VfsContext,
   type VfsResultContext,
@@ -143,13 +141,7 @@ function plain(value: unknown, data = false): JsonValue {
  * Python `script_context`.
  */
 export function scriptContext(
-  ctx:
-    | CommandContext
-    | RouteContext
-    | VfsContext
-    | SessionContext
-    | WorkspaceContext
-    | NetworkContext,
+  ctx: CommandContext | RouteContext | VfsContext | WorkspaceContext | NetworkContext,
 ): Record<string, JsonValue> {
   // A config is data as its writer spelled it: no field it holds is a
   // live handle or a camelCase name.
@@ -503,10 +495,6 @@ export class ScriptPolicy implements Policy, SessionScopedMixin {
     return this.judge('preVfs', ctx)
   }
 
-  async preSession(ctx: SessionContext): Promise<(Deny | Ask | Route)[] | null> {
-    return this.judge('preSession', ctx)
-  }
-
   async preWorkspace(ctx: WorkspaceContext): Promise<(Deny | Ask | Route)[] | null> {
     return this.judge('preWorkspace', ctx)
   }
@@ -532,10 +520,6 @@ export class ScriptPolicy implements Policy, SessionScopedMixin {
     return this.judge('postVfs', ctx)
   }
 
-  async postSession(ctx: SessionResultContext): Promise<(Deny | Ask | Route)[] | null> {
-    return this.judge('postSession', ctx)
-  }
-
   /** Whether this session's profile names a program at `method`. */
   wantsFor(method: PolicyMethod, sessionId: string): Promise<boolean> {
     const programs = Object.hasOwn(METHODS, method)
@@ -556,7 +540,7 @@ export class ScriptPolicy implements Policy, SessionScopedMixin {
   async run(
     entry: ProfileScript,
     method: ScriptMethod,
-    ctx: CommandContext | RouteContext | VfsContext | SessionContext | NetworkContext,
+    ctx: CommandContext | RouteContext | VfsContext | NetworkContext,
   ): Promise<Deny | Ask | Route | null> {
     const payload = JSON.stringify(scriptContext(ctx))
     try {
@@ -581,13 +565,7 @@ export class ScriptPolicy implements Policy, SessionScopedMixin {
    */
   private async judge(
     method: PolicyMethod,
-    ctx:
-      | CommandContext
-      | RouteContext
-      | VfsContext
-      | SessionContext
-      | WorkspaceContext
-      | NetworkContext,
+    ctx: CommandContext | RouteContext | VfsContext | WorkspaceContext | NetworkContext,
   ): Promise<(Deny | Ask | Route)[] | null> {
     const programs =
       this.sessions.scriptsOf('config' in ctx ? '' : (ctx.sessionId ?? ''))[method] ?? []
@@ -614,13 +592,7 @@ export class ScriptPolicy implements Policy, SessionScopedMixin {
    * in a directory that is not there.
    */
   private async cwd(
-    ctx:
-      | CommandContext
-      | RouteContext
-      | VfsContext
-      | SessionContext
-      | WorkspaceContext
-      | NetworkContext,
+    ctx: CommandContext | RouteContext | VfsContext | WorkspaceContext | NetworkContext,
   ): Promise<string> {
     if ('config' in ctx) return '/'
     const cwd = ctx.session?.cwd() ?? '/'

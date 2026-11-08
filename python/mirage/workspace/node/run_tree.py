@@ -135,7 +135,6 @@ async def run_command_tree(
             execute_fn,
             registry,
             links=namespace.session_links(session),
-            policies=registry.policies,
             words=read,
         )
         # Bash's implicit file read has cat's policy identity, without

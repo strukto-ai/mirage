@@ -1026,7 +1026,7 @@ class SessionState:
         Read-only, so an assignment into it raises instead of landing in
         a throwaway dict. A writer goes through `SessionView.set` (or
         `seed_var` when seeding a session before it is narrowed), so a
-        `pre_session` policy sees every write.
+        hidden or readonly name refuses every write.
         """
         return _Records(self.vars, str)
 

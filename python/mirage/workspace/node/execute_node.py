@@ -49,7 +49,6 @@ from mirage.io.async_line_iterator import share
 from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
-from mirage.policy.policies import Policies
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import decode_text, encode_text
@@ -174,7 +173,6 @@ async def _eval_cfor_expr(
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     call_stack: CallStack | None,
-    policies: Policies | None = None,
 ) -> int:
     """Evaluate one C-style for expression slot.
 
@@ -187,7 +185,6 @@ async def _eval_cfor_expr(
             land in its session's env.
         execute_fn (Callable): recursive execute for substitutions.
         call_stack (CallStack | None): function-call scope, if any.
-        policies (Policies | None): the policies its writes clear.
 
     Raises:
         ArithError: the slot did not evaluate; the loop prints it as
@@ -196,13 +193,13 @@ async def _eval_cfor_expr(
             which aborts the loop the same way an invalid expression
             does; the writes before it have landed.
         ExitSignal: that assignment was inside a subscript.
-        PolicyDenied: a pre_session rule refused one of the writes.
+        PolicyDenied: one of the writes named a hidden name.
     """
     if not exprs:
         return default
-    text = await _slot_text(exprs, context, execute_fn, call_stack, policies)
+    text = await _slot_text(exprs, context, execute_fn, call_stack)
     try:
-        return await session_arith(context.session, text, policies, call_stack)
+        return await session_arith(context.session, text, call_stack)
     except ReadonlyVariableError as exc:
         if exc.in_subscript:
             raise exc.signal() from exc
@@ -214,7 +211,6 @@ async def _slot_text(
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     call_stack: CallStack | None,
-    policies: Policies | None,
 ) -> str:
     """A C-style for slot's text as bash evaluates it: its source up to
     the ``;`` or ``))`` that ends it, each node's expansions substituted.
@@ -224,7 +220,6 @@ async def _slot_text(
         context (EvaluationContext): the evaluation.
         execute_fn (Callable): recursive execute for substitutions.
         call_stack (CallStack | None): function-call scope, if any.
-        policies (Policies | None): the policies its writes clear.
     """
     first, last = exprs[0], exprs[-1]
     parent = first.parent
@@ -242,7 +237,7 @@ async def _slot_text(
     for expr in exprs:
         parts.append(decode_text(raw[at - base : expr.start_byte - base]))
         parts.append(
-            await expand_arith(expr, context, execute_fn, call_stack, policies)
+            await expand_arith(expr, context, execute_fn, call_stack)
             if expr.is_named
             else get_text(expr)
         )
@@ -775,7 +770,6 @@ async def _run_redirected(
         execute_fn=execute_fn,
         registry=registry,
         call_stack=call_stack,
-        policies=registry.policies,
         forked=forked,
         links=namespace.session_links(context.session),
     )
@@ -1502,11 +1496,9 @@ async def _execute_node(
 
     if kind == NodeKind.ARITH:
         text = get_text(node)
-        expr = await expand_arith(
-            node, context, execute_fn, cs, registry.policies
-        )
+        expr = await expand_arith(node, context, execute_fn, cs)
         try:
-            value = await session_arith(session, expr, registry.policies, cs)
+            value = await session_arith(session, expr, cs)
         except PolicyDenied as exc:
             return fail(text, f"{shell_voice()}{exc.strerror}\n")
         except (ArithError, ReadonlyVariableError) as exc:
@@ -1543,7 +1535,6 @@ async def _execute_node(
             context=context,
             execute_fn=execute_fn,
             call_stack=cs,
-            policies=registry.policies,
         )
         with cs.loop():
             return await handle_cfor(run_body, exprs, body, eval_expr, session)
@@ -1567,7 +1558,6 @@ async def _execute_node(
                     registry,
                     session.cwd,
                     cs,
-                    registry.policies,
                 )
                 # The loop word list is consumed by the shell
                 # (WordPolicy.SHELL): globs resolve to matches before
@@ -1579,7 +1569,6 @@ async def _execute_node(
                     links=namespace.session_links(session),
                     options=glob_options(session),
                 )
-        policies = namespace.registry.policies
         with cs.loop():
             if kind == NodeKind.SELECT:
                 return await handle_select(
@@ -1589,12 +1578,9 @@ async def _execute_node(
                     body,
                     context,
                     stdin,
-                    policies=policies,
                     sink=sink,
                 )
-            return await handle_for(
-                run_body, var, classified, body, context, policies=policies
-            )
+            return await handle_for(run_body, var, classified, body, context)
 
     if kind in (NodeKind.WHILE, NodeKind.UNTIL):
         test, body = get_while_parts(node)
@@ -1605,9 +1591,7 @@ async def _execute_node(
 
     if kind == NodeKind.CASE:
         word_node = get_case_word(node)
-        word = await expand_node(
-            word_node, context, execute_fn, cs, registry.policies
-        )
+        word = await expand_node(word_node, context, execute_fn, cs)
         return await handle_case(
             run_body,
             word,
@@ -1618,7 +1602,6 @@ async def _execute_node(
                 context=context,
                 execute_fn=execute_fn,
                 call_stack=cs,
-                policies=registry.policies,
             ),
         )
 
@@ -1670,7 +1653,6 @@ async def _execute_node(
                 cs,
                 session_view(
                     session,
-                    registry.policies,
                     diagnostics=context.frame.diagnostics,
                 ),
                 declared,
@@ -1685,16 +1667,13 @@ async def _execute_node(
             session,
             session_view(
                 session,
-                namespace.registry.policies,
                 diagnostics=context.frame.diagnostics,
             ),
-            namespace.registry.policies,
             partial(
                 expand_subscript,
                 context=context,
                 execute_fn=execute_fn,
                 call_stack=cs,
-                policies=namespace.registry.policies,
             ),
         )
         bind_last_word(session, ["unset", *args])
@@ -1712,9 +1691,7 @@ async def _execute_node(
             cancel=cancel,
             claimant=claimant_for(node, handed),
         )
-        tree = await expand_double_bracket(
-            node, context, execute_fn, cs, registry.policies
-        )
+        tree = await expand_double_bracket(node, context, execute_fn, cs)
         return await handle_test(
             dispatch,
             namespace,

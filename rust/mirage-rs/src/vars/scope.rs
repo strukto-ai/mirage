@@ -21,12 +21,9 @@ impl Store {
     /// local stays unset until it returns; a name an enclosing scope
     /// shadows is that scope's to lose: the unset reveals the value it
     /// saved, which the name holds from then on (`x=old; x=pre f` where f
-    /// runs `unset x` reads `old` inside f and after it). Returns the
-    /// record dropped and the scope it emptied, for an undo.
-    pub fn drop_var(&mut self, name: &str) -> (Option<Arc<Var>>, Option<usize>) {
-        let frame = self.shadowing(name);
-        let old = self.vars.get(name).cloned();
-        match frame {
+    /// runs `unset x` reads `old` inside f and after it).
+    pub fn drop_var(&mut self, name: &str) {
+        match self.shadowing(name) {
             Some(index) if Some(index) != self.local && name != RANDOM => {
                 let saved = self.frames[index].saved.remove(name).flatten();
                 self.place(name, saved);
@@ -39,33 +36,6 @@ impl Store {
             self.random_seed = Seed::Off;
         }
         self.make_plain(name);
-        (old, frame)
-    }
-
-    /// What makes `RANDOM`, `LINENO` and `BASHPID` special as it stands,
-    /// for an undo.
-    pub fn marks(&self) -> (Seed, Vec<String>) {
-        (self.random_seed.clone(), self.plain.clone())
-    }
-
-    /// Put back what `drop_var` dropped, after a refusal: the value the
-    /// unset revealed goes back to its scope before the name's own record.
-    pub fn undrop(
-        &mut self,
-        name: &str,
-        old: Option<Arc<Var>>,
-        frame: Option<usize>,
-        marks: (Seed, Vec<String>),
-    ) {
-        let unsaved = frame.filter(|&index| {
-            index < self.frames.len() && !self.frames[index].saved.contains_key(name)
-        });
-        if let Some(index) = unsaved {
-            let revealed = self.vars.get(name).cloned();
-            self.frames[index].saved.insert(name.to_owned(), revealed);
-        }
-        self.place(name, old);
-        (self.random_seed, self.plain) = marks;
     }
 
     /// Open a function's scope; returns the caller's, for `leave`.

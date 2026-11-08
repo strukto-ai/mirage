@@ -30,9 +30,8 @@ export const SESSION_SCOPED: unique symbol = Symbol.for('mirage.policy.sessionSc
  * the sessions under that profile), and says so through `wantsFor`.
  * `Policies.wants` is the static answer, true as soon as any policy
  * defines the method, and every entry point keeps gating on it; a seam that pays
- * ahead for a method (the secret fill drops its masks under a
- * session-write gate) asks `Policies.wantsFor` instead, which consults
- * this brand so one profile's entry point does not charge every session.
+ * ahead for a method asks `Policies.wantsFor` instead, which consults this
+ * brand so one profile's entry point does not charge every session.
  */
 export interface SessionScopedMixin {
   readonly [SESSION_SCOPED]: true
@@ -40,11 +39,9 @@ export interface SessionScopedMixin {
   /**
    * Whether this policy's `method` will speak for one session. The answer
    * follows what the host sets on the session (its profile, the policies
-   * added), never what a line writes: a running task asks it again each time
-   * it waits on its host, not between two of its own writes. A policy that
-   * turns on a session's variables (`ARMED=1`) decides in `preSession`
-   * itself, which every write reaches while the policy speaks for the
-   * session.
+   * added), never what a line writes. A policy that turns on a session's
+   * variables (`ARMED=1`) reads them in the method itself, from the session
+   * its context carries.
    */
   wantsFor(method: PolicyMethod, sessionId: string): Promise<boolean>
 }

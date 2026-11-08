@@ -90,8 +90,6 @@ import type { SessionManager } from '../session/manager.ts'
 import { narrow, narrowingOf, stricterModes } from '../session/resolve.ts'
 import { SessionState, varsFromFields, varsToFields } from '../session/session.ts'
 import { setCwd } from '../session/shell_dirs.ts'
-import { gateRestoredVars } from '../session/state.ts'
-import { ShellVars } from '../../rs/session.ts'
 import type { MountArgs } from './config.ts'
 import { indexConfigDump, restoreIndexConfig } from './config.ts'
 import { MCPKey } from './keys.ts'
@@ -668,17 +666,17 @@ export async function withRebuiltMounts(
 /**
  * Restore post-construction state into an already-built Workspace.
  *
- * Every session table and the env template clear the target's
- * `preSession` gate first (`gateRestoredState`), before any mount,
- * session or template lands, so a refusal aborts the load with the
- * workspace as it was. A snapshot mount with no mount at that exact
- * prefix here is not restored and is reported. `replaceCache` drops
- * the live cache once the gate has passed, ahead of the mounts'
- * loadState, so the snapshot's entries are all that is left: a
- * checkout onto a running workspace asks for it, a workspace built for
- * the state has nothing to drop. It sits behind the gate because the
- * callers used to clear before calling, and a refused checkout then
- * still sent every cached read back to an origin that may have moved.
+ * Every session table and the env template are read first
+ * (`readRestoredState`), and each table checked against `max_env`, before
+ * any mount, session or template lands, so a failure aborts the load with
+ * the workspace as it was. A snapshot mount with no mount at that exact
+ * prefix here is not restored and is reported. `replaceCache` drops the
+ * live cache once the tables are read, ahead of the mounts' loadState, so
+ * the snapshot's entries are all that is left: a checkout onto a running
+ * workspace asks for it, a workspace built for the state has nothing to
+ * drop. It sits after the tables because the callers used to clear before
+ * calling, and a failed checkout then still sent every cached read back to
+ * an origin that may have moved.
  * `builtForState` says the workspace was just built from this state,
  * under its profile table, and has run nothing: each session then lands
  * the narrowing and ask decisions its table recorded, as a stored record
@@ -700,7 +698,7 @@ export async function applyStateDict(
   } = {},
 ): Promise<void> {
   checkFormatVersion(state)
-  const [sessions, seed] = await gateRestoredState(ws, state, options.builtForState === true)
+  const [sessions, seed] = readRestoredState(ws, state, options.builtForState === true)
   for (const session of sessions) checkEnvFits(session, ws.registry.maxEnv)
   // A snapshot holds no document bindings, so a load into a live
   // workspace drops its own: one left in place would shadow a file the
@@ -764,32 +762,19 @@ async function restoreNodes(ws: WorkspaceLike, state: WorkspaceStateDict): Promi
 }
 
 /**
- * Vet every env input the snapshot carries before any of it lands.
- *
- * Each session table and the env template fire the `preSession` gate
- * (`gateRestoredVars`) here, ahead of the mounts' loadState and the
- * session writes: a refusal that arrived once an earlier session had
- * already been overwritten left the workspace in a state no snapshot
- * describes, and one its close then persisted. The template is gated
- * under the id the restore makes the default session, which is the
- * session a live write of it would land in. On a checkout each table is
- * judged under the policy the target gives its session, never the one
- * the snapshot's own profile compiled, which was the source deployment's
- * and does not land: the live session's for an id the target already
- * has, and the default profile's for one the restore will create, which
- * is what `scriptsOf` answers for an id the manager does not know and
- * the profile `restoreSessions` then puts the created session under. A
- * workspace built for the state seats every table first, its narrowing,
- * ask decisions, cwd and variables, so each is judged as the session it
- * records, under the policy it then runs under.
- * Returns the parsed session tables and the template, null when the
- * snapshot carries none. Mirrors Python `_gate_restored_state`.
+ * Read every session table and the env template the snapshot carries,
+ * before any of it lands. A workspace built for the state seats every
+ * table here, its narrowing, ask decisions, cwd and variables, as a stored
+ * record hydrates; a checkout onto a running workspace keeps its own
+ * sessions' narrowing and decisions. Returns the parsed session tables and
+ * the template, null when the snapshot carries none. Mirrors Python
+ * `_read_restored_state`.
  */
-async function gateRestoredState(
+function readRestoredState(
   ws: WorkspaceLike,
   state: WorkspaceStateDict,
   builtForState = false,
-): Promise<[SessionState[], Record<string, ShellVar> | null]> {
+): [SessionState[], Record<string, ShellVar> | null] {
   const sessions = state.sessions.map((s) => SessionState.fromDict(s))
   if (builtForState) {
     const manager = ws.sessionManager
@@ -802,22 +787,8 @@ async function gateRestoredState(
       session.vars = fields.vars
     }
   }
-  for (const fields of sessions) {
-    await gateRestoredVars(ws.registry.policies, fields.sessionId, fields.vars)
-  }
   if (state.env === undefined || Object.keys(state.env).length === 0) return [sessions, null]
-  const seed = varsFromFields(state.env)
-  const seeded = ShellVars.of(seed)
-  try {
-    await gateRestoredVars(
-      ws.registry.policies,
-      state.default_session_id ?? ws.defaultSessionId,
-      seeded,
-    )
-  } finally {
-    seeded.shell.close()
-  }
-  return [sessions, seed]
+  return [sessions, varsFromFields(state.env)]
 }
 
 async function restoreSessions(
@@ -841,9 +812,8 @@ async function restoreSessions(
       : ws.sessionManager.create(fields.sessionId)
     if (!exists) {
       // A session the restore creates is one created without a profile
-      // name, so it runs under the document's default: the policy
-      // `gateRestoredState` judged its table under, where a bare session
-      // ran under none.
+      // name, so it runs under the document's default, where a bare
+      // session ran under none.
       const compiled = ws.sessionManager.defaultProfile
       if (compiled !== null) narrow(session, compiled)
     }

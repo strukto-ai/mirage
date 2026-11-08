@@ -21,7 +21,6 @@ import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
-import { type Policies } from '../../policy/index.ts'
 import type { HandOff } from '../../policy/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -390,12 +389,11 @@ export async function handleFor(
   values: readonly (string | PathSpec)[],
   body: readonly TSNodeLike[],
   context: EvaluationContext,
-  policies: Policies | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
-  const view = sessionView(session, policies, context.frame.diagnostics)
+  const view = sessionView(session, context.frame.diagnostics)
   // The loop variable is the shell's own write: readonly is bash's
   // rule, checked up front so the loop never starts, exactly as bash
   // refuses `for x` on a readonly x before the first iteration.
@@ -633,14 +631,13 @@ export async function handleSelect(
   body: readonly TSNodeLike[],
   context: EvaluationContext,
   stdin: ByteSource | null = null,
-  policies: Policies | null = null,
   signal?: AbortSignal,
   sink?: JobConsole,
 ): Promise<RedirectResult> {
   const session = context.session
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
-  const view = sessionView(session, policies, context.frame.diagnostics)
+  const view = sessionView(session, context.frame.diagnostics)
   const lines = stdin !== null ? lineBuffer(stdin) : null
   const bound = fd0Binding(session)
   const words = values.map((v) => wordText(v))

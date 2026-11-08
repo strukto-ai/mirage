@@ -15,7 +15,6 @@
 from typing import Any, Callable
 
 from mirage.context import voice_name
-from mirage.policy.policies import Policies
 from mirage.shell.bytes import encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
@@ -39,7 +38,6 @@ async def expand_redirect(
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     call_stack: CallStack | None = None,
-    policies: Policies | None = None,
     forked: bool = False,
     links: NamespaceLinks | None = None,
     words: list[str] | None = None,
@@ -52,7 +50,6 @@ async def expand_redirect(
         execute_fn (Callable): recursive execute for substitutions.
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
-        policies (Policies | None): the policies its writes clear.
         forked (bool): retain an expansion error for the child command.
         links (NamespaceLinks | None): namespace links for pathname expansion.
         words (list[str] | None): the target's words when another shell
@@ -66,7 +63,6 @@ async def expand_redirect(
             execute_fn,
             registry,
             call_stack,
-            policies,
             links,
             words,
         )
@@ -84,7 +80,6 @@ async def _expand_target(
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     call_stack: CallStack | None,
-    policies: Policies | None,
     links: NamespaceLinks | None,
     words: list[str] | None = None,
 ) -> Redirect:
@@ -96,7 +91,6 @@ async def _expand_target(
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
-        policies (Policies | None): the policies its writes clear.
         links (NamespaceLinks | None): namespace links for pathname expansion.
         words (list[str] | None): the target's words, expanded already;
             None expands them here.
@@ -114,7 +108,7 @@ async def _expand_target(
         body = r.target
         if r.target_node is not None and r.expand_vars:
             body = await expand_node(
-                r.target_node, context, execute_fn, call_stack, policies
+                r.target_node, context, execute_fn, call_stack
             )
         return Redirect(
             fd=r.fd,
@@ -131,7 +125,7 @@ async def _expand_target(
     if r.target_node is not None:
         if words is None:
             words = await expand_words(
-                [r.target_node], context, execute_fn, call_stack, policies
+                [r.target_node], context, execute_fn, call_stack
             )
         targets = await resolve_globs(
             [

@@ -14,16 +14,19 @@
 
 import errno
 import functools
-from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
-from typing import ParamSpec
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from typing import Any
 
-from mirage._rs import ShellTask
-from mirage.context.session_context import session_access, session_voice
+from mirage._rs import Shell
+from mirage.context.session_context import (
+    explaining,
+    session_access,
+    session_voice,
+)
 from mirage.io.memory import memory_room
 from mirage.policy.errors import PolicyDenied
-from mirage.policy.policies import Policies, pre_session_gate
-from mirage.policy.types import HandOff, SessionContext
-from mirage.rs.session import ShellVars, raw_value, var_of
+from mirage.policy.types import DryRun
+from mirage.rs.session import raw_value, var_of
 from mirage.shell.array import ShellArray, array_get
 from mirage.shell.bytes import join_bytes
 from mirage.shell.call_stack import CallStack
@@ -40,14 +43,7 @@ from mirage.workspace.session.budget import (
     positional_bytes,
 )
 from mirage.workspace.session.session import SessionState
-from mirage.workspace.session.task import (
-    SessionGate,
-    drive,
-    fault_error,
-    listens,
-)
-
-P = ParamSpec("P")
+from mirage.workspace.session.task import fault_error
 
 
 def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
@@ -91,26 +87,40 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
     )
 
 
-async def run_write(
+def _refuse_deciding(name: str) -> None:
+    """Refuse a write a policy makes while it decides: a method may read
+    the session it is handed but not change it.
+
+    Args:
+        name (str): the variable written.
+    """
+    if explaining() is DryRun.DECIDING:
+        raise PolicyDenied(errno.EACCES, f"{name}: permission denied", name)
+
+
+def run_write(
     session: SessionState,
-    policies: Policies | None,
-    start: Callable[[bool], ShellTask],
+    write: Callable[[Shell], tuple[Any, list[str | bytes]]],
     diagnostics: list[str | bytes] | None = None,
+    call_stack: CallStack | None = None,
 ) -> int:
-    """Run one gated write on the session's shell to its end.
+    """Run one write on the session's shell; a hidden name refuses with
+    EACCES.
 
     Args:
         session (SessionState): the session written.
-        policies (Policies | None): the policies its writes clear.
-        start (Callable[[bool], ShellTask]): the task, given whether a
-            policy listens.
+        write (Callable[[Shell], tuple[Any, list[str | bytes]]]): the
+            shell's write, which answers its result and its warnings.
         diagnostics (list[str | bytes] | None): where its warnings go.
+        call_stack (CallStack | None): function-call scope, if any.
     """
-    heard = await listens(policies, session.session_id)
-    frame(session)
-    task = start(heard)
-    sink: list[str | bytes] = [] if diagnostics is None else diagnostics
-    return int(await drive(task, SessionGate(session, policies), sink))
+    frame(session, call_stack)
+    result, said = write(session.vars.shell)
+    if diagnostics is not None:
+        diagnostics.extend(said)
+    if result[0] != "ok":
+        raise fault_error(result)
+    return int(result[1])
 
 
 def env_snapshot(session: SessionState) -> dict[str, str]:
@@ -274,49 +284,38 @@ def visible_assocs(session: SessionState) -> Mapping[str, dict[str, str]]:
     return _Visible(session, "assoc", read)
 
 
-async def subscript_index(
-    session: SessionState, subscript: str, policies: Policies | None = None
-) -> int:
+async def subscript_index(session: SessionState, subscript: str) -> int:
     """An indexed subscript resolved outside an arithmetic expression:
     ``a[i]=v``, ``unset 'a[i]'``. It is arithmetic, so it may assign
-    (``a[x=3]``) and seed (``a[RANDOM=42]``); each lands through the gate.
+    (``a[x=3]``) and seed (``a[RANDOM=42]``); each lands as it is made.
     One that fails lands what it assigned before failing, then raises.
 
     Args:
         session (SessionState): the session the subscript reads.
         subscript (str): the raw subscript text.
-        policies (Policies | None): the policies its writes clear.
 
     Raises:
-        PolicyDenied: the gate refused an assignment.
+        PolicyDenied: an assignment named a hidden name.
         ExitSignal: an assignment named a readonly variable, which ends
             the shell wherever a subscript is.
         ArithError: the subscript does not evaluate.
     """
-    shell = session.vars.shell
-    plain = shell.plain_index(subscript)
+    plain = session.vars.shell.plain_index(subscript)
     if plain is not None:
         return plain
-    return await run_write(
-        session,
-        policies,
-        lambda heard: shell.index(subscript, listens=heard),
-    )
+    return run_write(session, lambda shell: shell.index(subscript))
 
 
-async def fatal_subscript_index(
-    session: SessionState, subscript: str, policies: Policies | None = None
-) -> int:
+async def fatal_subscript_index(session: SessionState, subscript: str) -> int:
     """``subscript_index`` whose failure ends the line, in bash's words:
     ``unset 'a[1/0]'`` aborts with ``1/0: division by 0``.
 
     Args:
         session (SessionState): the session the subscript reads.
         subscript (str): the raw subscript text.
-        policies (Policies | None): the policies its writes clear.
     """
     try:
-        return await subscript_index(session, subscript, policies)
+        return await subscript_index(session, subscript)
     except ArithError as exc:
         raise exc.signal(fatal=True) from exc
 
@@ -324,26 +323,23 @@ async def fatal_subscript_index(
 async def session_arith(
     session: SessionState,
     text: str,
-    policies: Policies | None = None,
     call_stack: CallStack | None = None,
     expand: bool = False,
 ) -> int:
     """Evaluate an arithmetic command, a ``let`` operand or a test's
-    integer operand against the session, its writes landed through the
-    gate in order.
+    integer operand against the session, its writes landed in order.
 
     Args:
         session (SessionState): the session.
         text (str): the expression, already expanded.
-        policies (Policies | None): the policies its writes clear.
         call_stack (CallStack | None): function-call scope, if any.
         expand (bool): a ``let`` operand, whose subscripts expand first.
     """
-    shell = session.vars.shell
-    heard = await listens(policies, session.session_id)
-    frame(session, call_stack)
-    task = shell.arith(text, listens=heard, expand=expand)
-    return int(await drive(task, SessionGate(session, policies), []))
+    return run_write(
+        session,
+        lambda shell: shell.arith(text, expand=expand),
+        call_stack=call_stack,
+    )
 
 
 def conversion_scalar(session: SessionState, name: str) -> str | None:
@@ -357,15 +353,12 @@ def conversion_scalar(session: SessionState, name: str) -> str | None:
     """
     answer = session.vars.shell.conversion_scalar(name)
     if isinstance(answer, tuple):
-        raise fault_error(("arith", answer[1]), {})
+        raise fault_error(("arith", answer[1]))
     return answer
 
 
 async def evaluate_integer(
-    session: SessionState,
-    policies: Policies | None,
-    text: str,
-    added: str | None = None,
+    session: SessionState, text: str, added: str | None = None
 ) -> str:
     """Evaluate ``text`` as an ``-i`` write coerces it, land what it
     assigns, and give back the value: a ``declare -ni r=M`` value, which
@@ -373,18 +366,11 @@ async def evaluate_integer(
 
     Args:
         session (SessionState): shell session state.
-        policies (Policies | None): the policies its writes clear.
         text (str): the value, the held one for a ``r+=M``.
         added (str | None): a ``r+=M``'s added text, evaluated after
             ``text`` in the same evaluation and added to it.
     """
-    shell = session.vars.shell
-    value = await run_write(
-        session,
-        policies,
-        lambda heard: shell.integer(text, added, listens=heard),
-    )
-    return str(value)
+    return str(run_write(session, lambda shell: shell.integer(text, added)))
 
 
 def appended(
@@ -422,40 +408,6 @@ def ensure_var_visible(session: SessionState, name: str) -> None:
         raise PolicyDenied(errno.EACCES, f"{name}: permission denied", name)
 
 
-# The names the shell maintains itself (`seed_var`'s second caller): a
-# `cd` writes the first two and `[[ =~ ]]` the third, ungated, because
-# they are the shell's to keep current rather than the session's to admit.
-SHELL_BOOKKEEPING = frozenset({"PWD", "OLDPWD", "BASH_REMATCH"})
-
-
-async def gate_restored_vars(
-    policies: Policies | None, session_id: str, table: ShellVars
-) -> None:
-    """Vet a variable table a snapshot restores through the session gate:
-    every variable fires ``pre_session`` as a ``set`` of its rendered
-    value before any of them lands, and a refusal aborts the load. The
-    shell's own bookkeeping is exempt here as it is live.
-
-    Args:
-        policies (Policies | None): the target workspace's policies.
-        session_id (str): the session the table is restored into.
-        table (ShellVars): the restored variables.
-    """
-    shell = table.shell
-    for name in shell.names():
-        if name in SHELL_BOOKKEEPING:
-            continue
-        await pre_session_gate(
-            policies,
-            SessionContext(
-                verb="set",
-                key=name,
-                value=shell.rendered(name),
-                session_id=session_id,
-            ),
-        )
-
-
 _ELEMENT_STATUS = ("ok", "denied", "readonly", "subscript", "notarray")
 
 
@@ -471,75 +423,51 @@ def var_kind(session: SessionState, name: str) -> str | None:
     return session.vars.shell.kind(name)
 
 
-async def _element_write(
+def _element_write(
     session: SessionState,
-    policies: Policies | None,
-    start: Callable[[bool], ShellTask],
+    write: Callable[[Shell], tuple[Any, list[str | bytes]]],
     diagnostics: list[str | bytes] | None = None,
 ) -> str:
-    """Run one element write as one call, so a ONCE answer to its
-    ``pre_session`` question stands until its ``post_session`` one is
-    answered too, and name the status it came to.
+    """Run one element write and name the status it came to.
 
     Args:
         session (SessionState): the session written.
-        policies (Policies | None): the policies the write clears.
-        start (Callable[[bool], ShellTask]): the task, given whether a
-            policy listens.
+        write (Callable[[Shell], tuple[Any, list[str | bytes]]]): the
+            shell's write.
         diagnostics (list[str | bytes] | None): where its warnings go.
     """
-
-    async def write(_: HandOff | None = None) -> int:
-        return await run_write(session, policies, start, diagnostics)
-
-    if policies is None:
-        return _ELEMENT_STATUS[await write()]
-    code = await policies.decisions.within_call(session.session_id, write)
-    return _ELEMENT_STATUS[code]
+    return _ELEMENT_STATUS[run_write(session, write, diagnostics)]
 
 
 async def push_words(
-    session: SessionState,
-    policies: Policies | None,
-    name: str,
-    words: list[str],
+    session: SessionState, name: str, words: list[str]
 ) -> None:
     """Append words at the extent of the indexed array a name holds
-    (``a+=(x y)``), as one gated write; with no policy listening it lands
-    in place, so a loop building an array costs each word once.
+    (``a+=(x y)``), each in place, so a loop building an array costs each
+    word once.
 
     Args:
         session (SessionState): shell session state.
-        policies (Policies | None): the policies the write clears.
         name (str): the array's name.
         words (list[str]): the words appended.
 
     Raises:
         ReadonlyVariableError: the name is readonly.
-        PolicyDenied: the name is hidden, or a policy refused the write.
+        PolicyDenied: the name is hidden.
     """
-    shell = session.vars.shell
-    await _element_write(
-        session, policies, lambda heard: shell.push(name, words, listens=heard)
-    )
+    _element_write(session, lambda shell: shell.push(name, words))
 
 
 async def unset_element(
-    session: SessionState,
-    policies: Policies | None,
-    name: str,
-    subscript: str,
-    every: bool = False,
+    session: SessionState, name: str, subscript: str, every: bool = False
 ) -> str:
-    """Clear one element (``unset 'a[i]'``) as one gated write, keeping
-    the indexes after it: an associative subscript is the key verbatim, an
-    indexed one arithmetic whose writes land first, and a scalar's
-    element 0 the whole scalar. A hidden or unset name clears nothing.
+    """Clear one element (``unset 'a[i]'``), keeping the indexes after
+    it: an associative subscript is the key verbatim, an indexed one
+    arithmetic whose writes land first, and a scalar's element 0 the whole
+    scalar. A hidden or unset name clears nothing.
 
     Args:
         session (SessionState): shell session state.
-        policies (Policies | None): the policies the write and the
-            subscript's assignments clear.
         name (str): the base variable name.
         subscript (str): the subscript, already expanded.
         every (bool): the subscript was typed as ``@`` or ``*``, which
@@ -552,23 +480,16 @@ async def unset_element(
 
     Raises:
         ArithError: the subscript does not evaluate.
-        PolicyDenied: a policy refused the write.
+        PolicyDenied: the name is protected.
     """
-    shell = session.vars.shell
-    return await _element_write(
+    return _element_write(
         session,
-        policies,
-        lambda heard: shell.unset_element(
-            name, subscript, every=every, listens=heard
-        ),
+        lambda shell: shell.unset_element(name, subscript, every=every),
     )
 
 
 async def element_is_set(
-    session: SessionState,
-    ref: str,
-    policies: Policies | None = None,
-    expanded: bool = False,
+    session: SessionState, ref: str, expanded: bool = False
 ) -> bool:
     """Whether a ``name`` / ``name[sub]`` reference names a set value,
     what ``test -v`` asks: a bare name over an array checks element 0,
@@ -578,27 +499,19 @@ async def element_is_set(
     Args:
         session (SessionState): shell session state.
         ref (str): the reference as the operand spelled it.
-        policies (Policies | None): the policies the subscript's
-            assignments clear; None outside a workspace.
         expanded (bool): the subscript was expanded already, so an
             associative key is taken verbatim, its quotes its own.
 
     Raises:
         ArithError: the subscript does not evaluate.
     """
-    shell = session.vars.shell
     return bool(
-        await run_write(
-            session,
-            policies,
-            lambda heard: shell.is_set(ref, expanded=expanded, listens=heard),
-        )
+        run_write(session, lambda shell: shell.is_set(ref, expanded=expanded))
     )
 
 
 async def assign_element(
     session: SessionState,
-    policies: Policies | None,
     name: str,
     subscript: str | None,
     value: str,
@@ -607,16 +520,13 @@ async def assign_element(
     diagnostics: list[str | bytes] | None = None,
 ) -> str:
     """Assign one element (or a bare name resolved as element 0 of an
-    array, a scalar otherwise) as one gated write, so a ``pre_session``
-    rule sees ``m[k]=v`` as a write to ``m``; with no policy listening it
-    lands in place. The subscript arrives already expanded: an
-    associative name takes it as the key verbatim, an indexed one
-    evaluates it as arithmetic, even when the name is readonly.
+    array, a scalar otherwise) in place. The subscript arrives already
+    expanded: an associative name takes it as the key verbatim, an
+    indexed one evaluates it as arithmetic, even when the name is
+    readonly.
 
     Args:
         session (SessionState): shell session state.
-        policies (Policies | None): the policies the write and the
-            subscript's assignments clear.
         name (str): the target's base variable name.
         subscript (str | None): the ``[...]`` text, None for a bare
             target.
@@ -630,20 +540,18 @@ async def assign_element(
         str: ``"ok"``, ``"denied"``, ``"readonly"``, or ``"subscript"``.
 
     Raises:
-        PolicyDenied: a pre_session rule refused the write.
+        PolicyDenied: an assignment the subscript made named a hidden
+            name.
         ArithError: the name carries ``-i`` and the text does not
             evaluate.
     """
-    shell = session.vars.shell
-    return await _element_write(
+    return _element_write(
         session,
-        policies,
-        lambda heard: shell.element(
+        lambda shell: shell.element(
             name,
             subscript,
             value,
             append=append,
-            listens=heard,
             warns=diagnostics is not None,
         ),
         diagnostics,
@@ -652,7 +560,6 @@ async def assign_element(
 
 async def set_var(
     session: SessionState,
-    policies: Policies | None,
     name: str,
     value: ShellValue,
     follow_ref: bool = True,
@@ -661,18 +568,16 @@ async def set_var(
     added: str | None = None,
     diagnostics: list[str | bytes] | None = None,
 ) -> None:
-    """Write one variable through the session plane's gate.
+    """Write one variable through the session plane.
 
     A string stores a scalar, a ShellArray an indexed array, a dict an
-    associative one. Readonly and hidden names refuse; the value is
-    shaped by the name's attributes (``-i -l -u``) before the
-    ``pre_session`` policy judges it, lands, and is put back when
-    ``post_session`` refuses. Writers with richer mechanics compute the
-    resulting value on a copy and hand it here.
+    associative one. Readonly and hidden names refuse; the
+    value is shaped by the name's attributes (``-i -l -u``) before it
+    lands. Writers with richer mechanics compute the resulting value on a
+    copy and hand it here.
 
     Args:
         session (SessionState): the session being written.
-        policies (Policies | None): admission policies the write clears.
         name (str): variable name.
         value (ShellValue): the value to store.
         follow_ref (bool): resolve a ``declare -n`` reference to its
@@ -686,22 +591,20 @@ async def set_var(
 
     Raises:
         ReadonlyVariableError: the name is readonly.
-        PolicyDenied: the name is hidden, or a policy refused the write.
+        PolicyDenied: the name is hidden.
     """
+    _refuse_deciding(name)
     raw, assoc = raw_value(value)
-    shell = session.vars.shell
     keys = None if assigned is None else list(assigned)
-    await run_write(
+    run_write(
         session,
-        policies,
-        lambda heard: shell.set(
+        lambda shell: shell.set(
             name,
             raw,
             assoc=assoc,
             follow_ref=follow_ref,
             assigned=keys,
             added=added,
-            listens=heard,
             warns=diagnostics is not None,
         ),
         diagnostics,
@@ -709,49 +612,39 @@ async def set_var(
 
 
 async def unset_var(
-    session: SessionState,
-    policies: Policies | None,
-    name: str,
-    follow_ref: bool = True,
+    session: SessionState, name: str, follow_ref: bool = True
 ) -> None:
-    """Drop one variable through the session plane's gate; a missing or
-    hidden name is quiet. A name an enclosing scope shadows is that
-    scope's to lose: the unset reveals the value it saved.
+    """Drop one variable through the session plane; a missing or hidden
+    name is quiet. A name an enclosing scope shadows is that scope's to
+    lose: the unset reveals the value it saved.
 
     Args:
         session (SessionState): the session being written.
-        policies (Policies | None): admission policies the write clears.
         name (str): variable name.
         follow_ref (bool): resolve a ``declare -n`` reference to its
             target; ``unset -n r`` drops the reference and passes False.
 
     Raises:
         ReadonlyVariableError: the name is readonly.
-        PolicyDenied: a pre_session policy refused the write.
+        PolicyDenied: the name is protected.
     """
-    shell = session.vars.shell
-    await run_write(
-        session,
-        policies,
-        lambda heard: shell.unset(name, follow_ref=follow_ref, listens=heard),
-    )
+    _refuse_deciding(name)
+    run_write(session, lambda shell: shell.unset(name, follow_ref=follow_ref))
 
 
 async def mark_var(
     session: SessionState,
-    policies: Policies | None,
     name: str,
     attr: VarAttr | None,
     on: bool = True,
     follow_ref: bool = True,
 ) -> None:
-    """Turn one attribute on or off through the session plane's gate,
-    writing no value: ``export NAME`` on a fresh name leaves it unset.
-    A None attribute declares the name and changes no attribute.
+    """Turn one attribute on or off through the session plane, writing
+    no value: ``export NAME`` on a fresh name leaves it unset. A None
+    attribute declares the name and changes no attribute.
 
     Args:
         session (SessionState): the session being written.
-        policies (Policies | None): admission policies the mark clears.
         name (str): variable name.
         attr (VarAttr | None): the attribute to change, None to declare
             the name only.
@@ -760,16 +653,13 @@ async def mark_var(
             at; ``declare -rn r`` marks the reference itself.
 
     Raises:
-        PolicyDenied: the name is hidden, or a policy refused the mark.
+        PolicyDenied: the name is hidden.
     """
-    shell = session.vars.shell
+    _refuse_deciding(name)
     letter = None if attr is None else attr.value
-    await run_write(
+    run_write(
         session,
-        policies,
-        lambda heard: shell.mark(
-            name, letter, on, follow_ref=follow_ref, listens=heard
-        ),
+        lambda shell: shell.mark(name, letter, on, follow_ref=follow_ref),
     )
 
 
@@ -882,14 +772,13 @@ def shadow_local(
 
 
 def seed_var(session: SessionState, name: str, value: ShellValue) -> None:
-    """Write a variable without consulting the gate.
+    """Write a variable past the writer's checks.
 
     Two kinds of caller: seeding a session before it is handed out, and
     the shell's own bookkeeping (``$PWD``/``$OLDPWD`` after a ``cd``,
     ``BASH_REMATCH`` after ``[[ =~ ]]``). A variable the line named goes
     through `SessionView.set` instead. A prefix assignment
-    (``FOO=bar cmd``) lands here too, after asking ``ensure_var_visible``
-    and ``pre_session`` with the value.
+    (``FOO=bar cmd``) lands here too, after asking ``ensure_var_visible``.
 
     Nor does it count against max_env: a caller that grows a value a
     line chose, as that prefix assignment does, calls ``check_env``
@@ -919,7 +808,7 @@ def bind_last_word(session: SessionState, words: Sequence[str]) -> None:
 def set_attr(
     session: SessionState, name: str, attr: VarAttr | None, on: bool = True
 ) -> None:
-    """Turn one attribute on or off without the gate, creating the name
+    """Turn one attribute on or off past the writer's checks, creating the name
     unset if needed, as ``readonly NAME`` on a fresh name does; a None
     attribute only declares the name.
 
@@ -935,67 +824,26 @@ def set_attr(
     session.vars.shell.set_attr(name, None if attr is None else attr.value, on)
 
 
-def _one_call(
-    session: SessionState,
-    policies: Policies | None,
-    write: Callable[P, Awaitable[None]],
-) -> Callable[P, Awaitable[None]]:
-    """A session write as one call, so a ONCE answer to its
-    ``pre_session`` question stands until its ``post_session`` one is
-    answered too.
-
-    Args:
-        session (SessionState): the session written.
-        policies (Policies | None): the workspace's policies; None asks
-            nothing.
-        write (Callable[P, Awaitable[None]]): the write.
-    """
-    if policies is None:
-        return write
-
-    async def call(*args: P.args, **kwargs: P.kwargs) -> None:
-        await policies.decisions.within_call(
-            session.session_id, lambda _: write(*args, **kwargs)
-        )
-
-    return call
-
-
 def session_view(
-    session: SessionState,
-    policies: Policies | None = None,
-    *,
-    diagnostics: list[str | bytes] | None = None,
+    session: SessionState, *, diagnostics: list[str | bytes] | None = None
 ) -> SessionView:
     """The session plane's view: ten facts bound to one session.
 
-    The one constructor every tier uses, so the gate cannot be skipped by
-    picking a different entry point. The view carries no handle back to
-    the raw session.
+    The one constructor every tier uses, so its checks cannot be skipped
+    by picking a different entry point. The view carries no handle back
+    to the raw session.
 
     Args:
         session (SessionState): the session the view fronts.
-        policies (Policies | None): admission policies writes clear;
-            None gates nothing (a view constructed outside a workspace).
         diagnostics (list[str | bytes] | None): the evaluator's warning
             sink.
     """
     return SessionView(
         get=functools.partial(env_get, session),
         snapshot=functools.partial(env_snapshot, session),
-        set=_one_call(
-            session,
-            policies,
-            functools.partial(
-                set_var, session, policies, diagnostics=diagnostics
-            ),
-        ),
-        unset=_one_call(
-            session, policies, functools.partial(unset_var, session, policies)
-        ),
-        mark=_one_call(
-            session, policies, functools.partial(mark_var, session, policies)
-        ),
+        set=functools.partial(set_var, session, diagnostics=diagnostics),
+        unset=functools.partial(unset_var, session),
+        mark=functools.partial(mark_var, session),
         is_readonly=functools.partial(env_is_readonly, session),
         profile=lambda: session.profile,
         cwd=lambda: session.cwd,

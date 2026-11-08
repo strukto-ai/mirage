@@ -41,7 +41,6 @@ import type {
   Occurrence,
   VfsContext,
   Pending,
-  SessionContext,
   SessionDecisionsQuery,
 } from './types.ts'
 import { DryRun, Scope } from './types.ts'
@@ -128,21 +127,14 @@ export async function decisionId(
 /**
  * The rule an Ask is keyed on: the document's, or for a coded Ask one
  * synthesized over what was asked about (the program, the path, the
- * line, the variable), so a session answer reads "stop asking me about
+ * line, the host), so a session answer reads "stop asking me about
  * this".
  */
 export function askRule(
-  ctx:
-    | CommandContext
-    | RouteContext
-    | VfsContext
-    | ExecuteResultContext
-    | SessionContext
-    | NetworkContext,
+  ctx: CommandContext | RouteContext | VfsContext | ExecuteResultContext | NetworkContext,
   ask: Ask,
 ): CommandRule {
   if (ask.rule != null) return ask.rule
-  if ('verb' in ctx) return { reason: ask.reason, commands: [ctx.key] }
   if ('address' in ctx)
     return { reason: ask.reason, commands: [ctx.host === '' ? ctx.address : ctx.host] }
   if ('call' in ctx) return { reason: ask.reason, paths: [ctx.path.virtual] }
@@ -202,7 +194,7 @@ export function isPending(refusal: Refusal | null | undefined): boolean {
 }
 
 export function opQuestion(
-  ctx: VfsContext | SessionContext | RouteContext | ExecuteResultContext,
+  ctx: VfsContext | RouteContext | ExecuteResultContext,
   ask: Ask,
 ): [CommandContext, Ask] {
   const rules = ask.rules ?? [askRule(ctx, ask)]
@@ -214,8 +206,6 @@ export function opQuestion(
   if ('call' in ctx) {
     words = [ctx.path.virtual]
     paths = [ctx.path]
-  } else if ('verb' in ctx) {
-    words = ctx.value === null ? [ctx.key] : [ctx.key, ctx.value]
   } else {
     words = [ctx.line]
     cwd = ctx.session?.cwd() ?? ''
@@ -333,21 +323,12 @@ export class Decisions extends DecisionOwner {
     this.applyClaim(sessionId, claimant, facts.claim(claimant.line, once))
   }
 
-  async resolveOp(
-    ctx: VfsContext | SessionContext,
-    ask: Ask,
-    caller?: Caller,
-  ): Promise<Deny | Pending | null> {
+  async resolveOp(ctx: VfsContext, ask: Ask, caller?: Caller): Promise<Deny | Pending | null> {
     const trace = caller === undefined ? explaining() : caller.explaining
     if (trace === DryRun.DECIDING) return this.heldOp(ctx, ask)
     const [asked, keyed] = opQuestion(ctx, ask)
     const sessionId = ctx.sessionId ?? ''
-    const call =
-      caller !== undefined
-        ? callOf(caller, this, sessionId)
-        : asyncContextIsolatesTasks || !('verb' in ctx)
-          ? getOpCall(this, sessionId)
-          : null
+    const call = caller !== undefined ? callOf(caller, this, sessionId) : getOpCall(this, sessionId)
     const claimant: Claimant | null =
       call === null
         ? null
@@ -359,7 +340,7 @@ export class Decisions extends DecisionOwner {
     return said?.kind === 'abandoned' ? { kind: 'deny', reason: ask.reason } : said
   }
 
-  heldOp(ctx: VfsContext | SessionContext, ask: Ask): Promise<Deny | Pending | null> {
+  heldOp(ctx: VfsContext, ask: Ask): Promise<Deny | Pending | null> {
     const [asked, keyed] = opQuestion(ctx, ask)
     return this.held(asked, keyed)
   }

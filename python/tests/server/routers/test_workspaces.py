@@ -42,7 +42,6 @@ from mirage.policy.base import Policy
 from mirage.policy.types import (
     CommandContext,
     Deny,
-    SessionContext,
     WorkspaceContext,
 )
 from mirage.secrets.errors import SecretsError
@@ -497,44 +496,6 @@ async def test_a_posted_config_keeps_its_variables_as_written():
             json={"command": 'echo "$GREETING"'},
         )
         assert r.json()["stdout"] == "${HOME}\n"
-
-
-class NoSecretVar(Policy):
-    async def pre_session(self, ctx: SessionContext) -> Deny | None:
-        return Deny("SECRET is the server's") if ctx.key == "SECRET" else None
-
-
-@pytest.mark.asyncio
-async def test_a_load_meets_the_server_policies_with_its_saved_values(
-    monkeypatch,
-):
-    closed: list[Workspace] = []
-    real_close = Workspace.close
-
-    async def spy(self: Workspace) -> None:
-        closed.append(self)
-        await real_close(self)
-
-    free = build_app(idle_grace_seconds=10.0)
-    held = build_app(idle_grace_seconds=10.0, policies=[NoSecretVar()])
-    async with AsyncClient(
-        transport=ASGITransport(app=free), base_url="http://test"
-    ) as client:
-        r = await client.post("/v1/workspaces", json=_minimal_config())
-        wid = r.json()["id"]
-        r = await client.post(
-            f"/v1/workspaces/{wid}/shell", json={"command": "export SECRET=1"}
-        )
-        assert r.json()["exit_code"] == 0
-        tar = await _download(client, wid)
-        assert (await _upload(client, tar)).status_code == 201
-    monkeypatch.setattr(Workspace, "close", spy)
-    async with AsyncClient(
-        transport=ASGITransport(app=held), base_url="http://test"
-    ) as client:
-        r = await _upload(client, tar)
-        assert r.status_code == 403, r.text
-    assert len(closed) == 1
 
 
 @pytest.mark.asyncio

@@ -136,48 +136,6 @@ describe('a method without task isolation', () => {
     }
   }, 30_000)
 
-  it("spends a write's approval with that write, while another waits", async () => {
-    // A's write waits on the host while B's is approved: B's nod is spent
-    // with B's write, not left standing on A's call.
-    let entered!: () => void
-    let release!: () => void
-    const reached = new Promise<void>((resolve) => (entered = resolve))
-    const held = new Promise<void>((resolve) => (release = resolve))
-    const askedB: string[] = []
-    const asker: Policy = {
-      preSession: (ctx) => (ctx.key === 'X' ? { kind: 'ask', reason: 'x' } : null),
-    }
-    const ws = new Workspace(
-      { '/data/': new RAMVFS() },
-      {
-        mode: MountMode.WRITE,
-        policies: [asker],
-        onAsk: async (record: Decision) => {
-          if (record.sessionId === 'a') {
-            entered()
-            await held
-          } else {
-            askedB.push(record.sessionId)
-          }
-          return { ...record, outcome: Outcome.ALLOW }
-        },
-      },
-    )
-    ws.createSession('a')
-    ws.createSession('b')
-    try {
-      const a = ws.shell('export X=1', { sessionId: 'a' })
-      await reached
-      expect((await ws.shell('export X=2', { sessionId: 'b' })).exitCode).toBe(0)
-      expect((await ws.shell('export X=2', { sessionId: 'b' })).exitCode).toBe(0)
-      expect(askedB).toEqual(['b', 'b'])
-      release()
-      expect((await a).exitCode).toBe(0)
-    } finally {
-      await ws.close()
-    }
-  })
-
   it("keeps one session's file nod off another session's call", async () => {
     // A's read waits on the host while B's is approved: B's nod is spent
     // with B's call, not claimed on A's.

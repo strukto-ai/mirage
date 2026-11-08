@@ -19,7 +19,6 @@ from mirage.io.async_line_iterator import AsyncLineIterator, line_buffer
 from mirage.io.memory import check_memory
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
-from mirage.policy.policies import Policies
 from mirage.shell.array import make_array
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.escapes import ends_escaped
@@ -57,7 +56,6 @@ async def _read_store(
     view: SessionView,
     var: str,
     value: str,
-    policies: Policies | None = None,
     subscripts: SubscriptFn | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode] | None:
     """Store one ``read`` target, scalar or ``name[sub]`` element.
@@ -70,8 +68,6 @@ async def _read_store(
     Args:
         session (SessionState): shell session state.
         view (SessionView): the gated session view.
-        policies (Policies | None): the policies a subscript's
-            assignments clear.
         var (str): the target as the operand spelled it.
         value (str): the split word to store.
         subscripts (SubscriptFn | None): expands a subscript given as
@@ -94,9 +90,7 @@ async def _read_store(
     if subscripts is not None:
         subscript = await subscripts(subscript)
     try:
-        status = await assign_element(
-            session, policies, base, subscript, value
-        )
+        status = await assign_element(session, base, subscript, value)
     except PolicyDenied as exc:
         return refusal("read", exc)
     if status == "readonly":
@@ -403,7 +397,6 @@ async def handle_read(
     session: SessionState,
     stdin: ByteSource | None = None,
     state: SessionView | None = None,
-    policies: Policies | None = None,
     subscripts: SubscriptFn | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Read one line (or delimited record, or character count) into
@@ -427,8 +420,6 @@ async def handle_read(
         session (SessionState): shell session state.
         stdin (ByteSource | None): line source.
         state (SessionView | None): the gated session view.
-        policies (Policies | None): the policies a subscript's
-            assignments clear.
         subscripts (SubscriptFn | None): expands a target's subscript
             given as text; None keeps it as typed.
     """
@@ -555,7 +546,6 @@ async def handle_read(
             view,
             var,
             parts[i] if i < len(parts) else "",
-            policies,
             subscripts,
         )
         if refused is not None:
@@ -580,9 +570,7 @@ async def read_builtin(call: BuiltinCall) -> Result:
         call.stdin,
         session_view(
             call.context.session,
-            call.namespace.registry.policies,
             diagnostics=call.context.frame.diagnostics,
         ),
-        call.namespace.registry.policies,
         subscript_expansion(call),
     )

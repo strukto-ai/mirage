@@ -123,8 +123,8 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
   })
 
   it('export write without a threaded view is a wiring bug', async () => {
-    // The old fallback built an ungated view here, so `export
-    // AWS_SECRET_ACCESS_KEY=x` cleared every preSession rule.
+    // A write reached without the line's session view raises rather than
+    // writing past the view.
     const s = new SessionState({ sessionId: 'test' })
     await expect(handleExport(['SECRET=x'], s)).rejects.toThrow(/gated session view/)
   })

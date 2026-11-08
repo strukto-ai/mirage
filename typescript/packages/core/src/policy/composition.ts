@@ -28,12 +28,11 @@ import type {
   NetworkContext,
   Route,
   RouteContext,
-  SessionContext,
   VfsContext,
 } from './types.ts'
 
 type Answer = Deny | Ask | Route
-type Context = CommandContext | RouteContext | VfsContext | SessionContext | NetworkContext
+type Context = CommandContext | RouteContext | VfsContext | NetworkContext
 export const PACKET_BYTES = 8 * 1024 * 1024
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()

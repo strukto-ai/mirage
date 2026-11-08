@@ -36,8 +36,8 @@ pub(super) fn draw(mut state: u32, last: u32) -> (u32, u32) {
 
 /// An arithmetic evaluation's reads of `$RANDOM`. A read before the
 /// expression assigns `RANDOM` draws from the session; once it assigns one,
-/// the assignment is still pending at the gate, so reads draw from a
-/// scratch generator seeded the way the gate will seed the session, and
+/// the assignment is still pending, so reads draw from a scratch generator
+/// seeded the way the writer will seed the session, and
 /// `Store::settle` replays them once it has.
 #[derive(Debug, Default)]
 pub struct Draws {
@@ -92,7 +92,7 @@ impl Store {
         outcome.value.map(|value| value as u32)
     }
 
-    /// Seed the generator at a gated `RANDOM=` write: the word's value
+    /// Seed the generator at a `RANDOM=` write: the word's value
     /// modulo 2^32, the sequence restarting.
     pub fn seed_random(&mut self, word: Vec<u8>, state: u32) {
         self.random_state = Some(state);
@@ -100,26 +100,13 @@ impl Store {
         self.random_last = 0;
     }
 
-    /// The generator as it stands, for an undo.
-    pub fn generator(&self) -> (Option<u32>, Seed, u32) {
-        (
-            self.random_state,
-            self.random_seed.clone(),
-            self.random_last,
-        )
-    }
-
-    pub fn set_generator(&mut self, generator: (Option<u32>, Seed, u32)) {
-        (self.random_state, self.random_seed, self.random_last) = generator;
-    }
-
     /// Whether a write to RANDOM seeds it now.
     pub fn seeds_random(&self, name: &str) -> bool {
         name == RANDOM && self.random_seed != Seed::Off
     }
 
-    /// Replay an evaluation's scratch draws on the generator, once the gate
-    /// landed the seed it assigned: the session ends seeded and advanced by
+    /// Replay an evaluation's scratch draws on the generator, once the
+    /// writer landed the seed it assigned: the session ends seeded and advanced by
     /// every read since, as bash's does.
     pub fn settle(&mut self, draws: &mut Draws) -> Result<(), arith::Error> {
         let Some(seeded) = draws.seeded.take() else {

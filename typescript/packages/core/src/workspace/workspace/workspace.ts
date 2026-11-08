@@ -569,7 +569,7 @@ export class Workspace {
         kept = {
           session,
           policies: this.policies,
-          view: Object.freeze(sessionView(session, this.policies)),
+          view: Object.freeze(sessionView(session)),
         }
       const view = kept.view
       // A method decides: its files say so on each op's own caller, so its
@@ -974,7 +974,7 @@ export class Workspace {
             null,
             { clock: this.clock },
           ),
-          session: sessionView(session, this.policies),
+          session: sessionView(session),
           processes: this.processView(session),
           cwd: PathSpec.fromStrPath(session.cwd),
           env: envSnapshot(session),
@@ -1075,7 +1075,7 @@ export class Workspace {
           const { process: runner } = currentCaller()
           const bound = { ...caller, process: runner }
           const result = await runWithCaller(bound, async () => {
-            const view = sessionView(child, this.policies)
+            const view = sessionView(child)
             for (const [name, value] of Object.entries(env ?? {})) {
               await view.set(name, value)
               await view.mark(name, VarAttr.Export, true)

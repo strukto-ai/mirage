@@ -61,8 +61,7 @@ from mirage.policy import (
     render_deny,
     resolve_producer,
 )
-from mirage.policy.policies import post_session_gate, pre_session_gate
-from mirage.policy.types import Claimant, HandOff, SessionContext
+from mirage.policy.types import Claimant, HandOff
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import routed
 from mirage.runtime.types import DispatchFn, OutputFn, RunResult
@@ -388,7 +387,6 @@ async def execute_command(
                     context,
                     execute_fn,
                     call_stack,
-                    registry.policies,
                 ),
             )
         else:
@@ -399,50 +397,19 @@ async def execute_command(
         # Each check is of the name the write lands on, a reference's
         # target (`r=new cmd` over `declare -n r=T` writes T).
         k = deref(session, given)
-        # The hidden gate runs first, as in set_var: calling a hidden
-        # name "readonly" would leak that it exists. Both branches
-        # below write session.env raw (an `export` inside a function
-        # keeps its prefix past the call), so ungated they would let a
-        # narrowed session clobber the host's value.
+        # The hidden check runs first, as in set_var: calling a hidden
+        # name "readonly" would leak that it exists. Both branches below
+        # write through `seed_var`, past the writer's checks (an `export`
+        # inside a function keeps its prefix past the call), so this loop
+        # is the only place a narrowed session is kept from clobbering the
+        # host's value.
         try:
             ensure_var_visible(session, k)
-            # ...and `pre_session` right after, with the value, because a
-            # prefix assignment is a session write like any other and the
-            # form exports it for the command. Only the hidden half was
-            # checked here, so a deployment refusing `SECRET_*` still saw
-            # `SECRET_K=leak printenv SECRET_K` print the secret: the
-            # seeding below goes through `seed_var`, which is the ungated
-            # entry point, so this loop is the only place the rule can be
-            # asked.
-            await pre_session_gate(
-                registry.policies,
-                SessionContext(
-                    verb="set",
-                    key=k,
-                    value=v,
-                    session_id=session.session_id,
-                ),
-            )
         except PolicyDenied as exc:
             return _write_refused(exc, name or k)
         if k in session.readonly_vars:
             raise DiscardSignal(
                 encode_text(f"{shell_voice()}{given}: readonly variable\n")
-            )
-
-    async def judge_landed(renderings: Mapping[str, str | None]) -> None:
-        # `post_session` asks about each prefix write once it landed.
-        for given, v in prefix_assignments:
-            k = deref(session, given)
-            await post_session_gate(
-                registry.policies,
-                SessionContext(
-                    verb="set",
-                    key=k,
-                    value=v,
-                    session_id=session.session_id,
-                ),
-                renderings.get(k, renderings.get(given)),
             )
 
     # The saved records of arrays declared and never assigned, which a
@@ -461,17 +428,8 @@ async def execute_command(
         saves[:] = [s for s in saves if s is not saved]
 
     if prefix_assignments and not name:
-        olds = {k: session.vars.get(k) for k, _ in prefix_assignments}
-        renderings = {
-            k: session.vars.shell.rendered(k) for k, _ in prefix_assignments
-        }
         for k, v in prefix_assignments:
             seed_var(session, k, v)
-        try:
-            await judge_landed(renderings)
-        except PolicyDenied as exc:
-            restore(olds)
-            return _write_refused(exc, name)
         landed: RedirectResult = (
             None,
             IOResult(),
@@ -497,13 +455,12 @@ async def execute_command(
         return await runner(assigned_only, None, "", ())
 
     saved_env_overrides: dict[str, ShellVar | None] = {}
-    saved_renderings: dict[str, str | None] = {}
     # A function's prefix is its temporary environment, a scope the
     # shell keeps under the function's locals: `unset` inside reveals
     # the caller's value and `export` keeps the name.
     temp: int | None = None
 
-    async def seed_prefix(command: str) -> None:
+    def seed_prefix(command: str) -> None:
         nonlocal temp
         shell = session.vars.shell
         if command in session.functions:
@@ -529,7 +486,6 @@ async def execute_command(
             )
             if k not in saved_env_overrides:
                 held = saved_env_overrides[k] = session.vars.get(k)
-                saved_renderings[k] = shell.rendered(k)
                 if held is not None and shell.is_unassigned(k):
                     unassigned[k] = held
             if temp is not None:
@@ -545,9 +501,6 @@ async def execute_command(
             # and `declare -p n` there prints `declare -x`. The saved
             # record is put back below, so neither outlives the command.
             session.vars[k] = ShellVar(v, frozenset({VarAttr.EXPORT}))
-        # Judged before the command reads them; on a refusal the
-        # restore below puts the old values back.
-        await judge_landed(saved_renderings)
 
     if refused and sink is not None:
         await sink.emit(Channel.STDERR, refused)
@@ -674,7 +627,7 @@ def _rm_unseen(
 def _write_refused(
     exc: PolicyDenied, command: str
 ) -> tuple[None, IOResult, ExecutionNode]:
-    """A prefix assignment a session policy refused: bash's line, exit 1.
+    """A prefix assignment to a hidden name: bash's line, exit 1.
 
     Args:
         exc (PolicyDenied): the refusal.
@@ -700,7 +653,7 @@ async def _run_command_body(
     stdin: ByteSource | None,
     call_stack: CallStack | None,
     job_table: JobTable,
-    seed_prefix: Callable[[str], Awaitable[None]],
+    seed_prefix: Callable[[str], None],
     cancel: asyncio.Event | None = None,
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
@@ -725,7 +678,6 @@ async def _run_command_body(
             call_stack,
             registry,
             namespace,
-            registry.policies,
         ),
     )
     if expanded is not None:
@@ -801,7 +753,7 @@ async def _run_argv(
     row: int = 0,
     redirects: tuple[PathSpec, ...] = (),
     runner: RedirectRunner | None = None,
-    seed_prefix: Callable[[str], Awaitable[None]] | None = None,
+    seed_prefix: Callable[[str], None] | None = None,
     claimant: Claimant | None = None,
     sink: JobConsole | None = None,
     assigned: frozenset[str] = frozenset(),
@@ -917,10 +869,7 @@ async def _run_argv(
         paths: tuple[PathSpec, ...],
     ) -> RedirectResult:
         if seed_prefix is not None:
-            try:
-                await seed_prefix(name)
-            except PolicyDenied as exc:
-                return _write_refused(exc, name)
+            seed_prefix(name)
         refusal = await guard(paths, given)
         if refusal is not None:
             return refusal

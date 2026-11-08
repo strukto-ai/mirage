@@ -21,7 +21,6 @@ from mirage.context import program_invocation
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
-from mirage.policy.policies import Policies
 from mirage.shell.bytes import decode_text, encode_text, utf8_locale
 from mirage.shell.errors import ArithError
 from mirage.shell.voice import shell_voice
@@ -52,7 +51,6 @@ from mirage.workspace.types import ExecutionNode
 async def handle_printf(
     args: list[str],
     session: SessionState,
-    policies: Policies | None = None,
     subscripts: SubscriptFn | None = None,
     diagnostics: list[str | bytes] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -85,9 +83,6 @@ async def handle_printf(
         args (list[str]): the format followed by its arguments, optionally
             preceded by ``-v NAME``.
         session (SessionState): shell session, for the ``-v`` assignment.
-        policies (Policies | None): the policies the ``-v`` write clears,
-            so a ``pre_session`` refusal is reported in the rule's own
-            words.
         subscripts (SubscriptFn | None): expands the ``-v`` target's
             subscript given as text; None keeps it as typed.
         diagnostics (list[str | bytes] | None): where the ``-v`` write's
@@ -158,7 +153,7 @@ async def handle_printf(
     text = decode_text(output).partition("\0")[0]
     try:
         status = await assign_element(
-            session, policies, base, subscript, text, diagnostics=diagnostics
+            session, base, subscript, text, diagnostics=diagnostics
         )
     except PolicyDenied as exc:
         return fail("printf", errors + f"{shell_voice()}{exc.strerror}\n")
@@ -221,7 +216,6 @@ async def printf_builtin(call: BuiltinCall) -> Result:
     return await handle_printf(
         list(call.argv.args),
         call.context.session,
-        call.namespace.registry.policies,
         subscript_expansion(call),
         call.context.frame.diagnostics,
     )

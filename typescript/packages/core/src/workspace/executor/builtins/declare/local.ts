@@ -20,7 +20,6 @@ import { ShellArray } from '../../../../shell/array.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { VarAttr, VarKind } from '../../../../shell/variable.ts'
 import type { SessionView } from '../../../../view/types.ts'
-import type { Policies } from '../../../../policy/index.ts'
 import type { SubscriptFn } from '../../../expand/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import {
@@ -78,7 +77,6 @@ export async function handleLocal(
   session: SessionState,
   state: SessionView | null = null,
   options: Partial<Declaration> = {},
-  policies: Policies | null = null,
   subscripts: SubscriptFn | null = null,
 ): Promise<RedirectResult> {
   const decl: Declaration = {
@@ -123,7 +121,6 @@ export async function handleLocal(
       view,
       decl,
       !decl.globalScope && session.vars.shell.inFunction(),
-      policies,
       subscripts,
     )
   } finally {
@@ -142,7 +139,6 @@ async function declareOperands(
   view: SessionView,
   decl: Declaration,
   scoped: boolean,
-  policies: Policies | null = null,
   subscripts: SubscriptFn | null = null,
 ): Promise<RedirectResult> {
   const { cmd, kind, shaping, marks, plus, nameref, inherit } = decl
@@ -163,7 +159,6 @@ async function declareOperands(
       shaping,
       !scoped,
       inherit,
-      policies,
     )
     for (const [position, operand] of operands.entries()) {
       let line: string | null
@@ -171,7 +166,7 @@ async function declareOperands(
         line =
           refused !== null
             ? null
-            : await declareOperand(session, view, operand, decl, scoped, policies, subscripts)
+            : await declareOperand(session, view, operand, decl, scoped, subscripts)
       } else {
         // A literal takes its marks at its place, against the target its
         // own write cleared, even when a policy refused a later literal;
@@ -238,13 +233,12 @@ async function declareOperand(
   assign: string,
   decl: Declaration,
   scoped: boolean,
-  policies: Policies | null = null,
   subscripts: SubscriptFn | null = null,
 ): Promise<string | null> {
   const { cmd, kind, plus, nameref, inherit } = decl
   const [key, append, given] = operandParts(assign)
   if (given !== null && SUBSCRIPT_RE.test(key)) {
-    return declareElement(session, view, key, append, given, decl, scoped, policies, subscripts)
+    return declareElement(session, view, key, append, given, decl, scoped, subscripts)
   }
   // The reference's own `-i -l -u` come off unless asked for, as bash's do
   // (`declare -l x=T; declare -n x=U` aims at `U`); its target's stay.
@@ -298,7 +292,7 @@ async function declareOperand(
     plusRefusal(cmd, session, view, key, plus)
   if (line !== null) return line
   if (nameref) {
-    return aimReference(session, view, cmd, key, append, given, shaping, marks, creates, policies)
+    return aimReference(session, view, cmd, key, append, given, shaping, marks, creates)
   }
   // A new local holds nothing of the caller's but what `startLocal` kept;
   // otherwise the value lands as any declaration's does (`scalarValue`),
@@ -333,7 +327,6 @@ async function declareElement(
   given: string,
   decl: Declaration,
   scoped: boolean,
-  policies: Policies | null,
   subscripts: SubscriptFn | null,
 ): Promise<string | null> {
   const { cmd, kind, shaping, marks, plus, nameref, inherit } = decl
@@ -360,7 +353,7 @@ async function declareElement(
   }
   const subscript = subscripts === null ? raw : await subscripts(raw)
   await premark(view, name, shaping)
-  const status = await assignElement(session, policies, name, subscript, given, append)
+  const status = await assignElement(session, name, subscript, given, append)
   if (status === 'readonly') return readonlyLine(cmd, name)
   if (status === 'denied') return deniedLine(name)
   if (status !== 'ok') return `${shellVoice()}${key}: bad array subscript`
@@ -402,13 +395,12 @@ async function aimReference(
   shaping: AttrMarks,
   marks: AttrMarks,
   creates: boolean,
-  policies: Policies | null = null,
 ): Promise<string | null> {
   const held = append ? visibleRecord(session, key)?.value : undefined
   const old = typeof held === 'string' ? held : ''
   let value = old + given
   if (shaping.some(([attr, on]) => attr === VarAttr.Integer && on)) {
-    await evaluateInteger(session, policies, append ? old : given, append ? given : null)
+    await evaluateInteger(session, append ? old : given, append ? given : null)
     value = ''
   }
   if (isValidName(value) || SUBSCRIPT_RE.test(value)) {
@@ -466,8 +458,7 @@ export async function localBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleLocal(
     [...call.argv.args],
     call.context.session,
-    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
+    sessionView(call.context.session, call.context.frame.diagnostics),
     {},
-    call.registry.policies,
   )
 }

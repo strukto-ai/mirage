@@ -24,11 +24,9 @@ export {
   postCommandGate,
   postExecuteGate,
   postNetworkGate,
-  postSessionGate,
   postVfsGate,
   preNetworkGate,
   preVfsGate,
-  preSessionGate,
   describeRefusal,
   policyDenied,
   refusalOf,
@@ -68,6 +66,4 @@ export {
   Scope,
   type SessionDecisionsQuery,
   type SessionCommandsQuery,
-  type SessionContext,
-  type SessionResultContext,
 } from './types.ts'

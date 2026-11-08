@@ -201,9 +201,9 @@ under `rm`/`mv`/`mkdir`/... and refuses it as a source of `tar -c`, `zip`,
 `workspace/expand/` expands and classifies words; `workspace/lookup/` holds
 the one precedence list (builtin, namespace command, function, CLI, mount);
 `workspace/executor/` runs pipes, redirects, jobs and control flow.
-Follow tables live in `workspace/lookup/constants.py`. Every session write goes through
-`SessionView.set`, so a `pre_session` rule is enforced; only shell
-bookkeeping and `seed_var` are exempt.
+Follow tables live in `workspace/lookup/constants.py`. Every session write
+lands through the Rust store's writer, which refuses a hidden or readonly
+name; only shell bookkeeping and `seed_var` are exempt.
 
 ### CommandSpec
 
@@ -232,7 +232,7 @@ serde_json-faithful scanner, exit 1 for a bad body and 5 for a bad line).
 `workspace/session/`: env, cwd, functions, jobs, persisted in a
 `NamespaceStore` (`workspace/mount/namespace/store`), the one store the
 node table uses too: RAM, disk, redis, or s3 through a record client.
-`policy/`: `pre_command`, `pre_session`, profiles and scripts;
+`policy/`: `pre_command`, `pre_vfs`, `pre_network`, profiles and scripts;
 builtins `mount_root`, `output_cap`, `permissions`. `observe/`: a hidden
 `Observer` records every top-level command; `/.bash_history` and the
 `history` builtin are two views of that one recording.
@@ -284,7 +284,7 @@ flowchart TD
     Parse --> Expand["expansion + classification<br/>workspace/expand"]
     Expand --> Lookup["lookup<br/>builtin › namespace command › function › CLI › mount"]
     Lookup --> Exec["executor<br/>workspace/executor"]
-    Exec --> Policy["policy<br/>pre_command · pre_session"]
+    Exec --> Policy["policy<br/>pre_command · pre_vfs"]
     Exec --> Runtime["runtime routing<br/>workspace · process · remote"]
     Exec --> Handler["command handler<br/>(accessor, paths, texts, ctx)"]
     Spec["Argument · CommandSpec · CLI · FlagView"] -.-> Handler

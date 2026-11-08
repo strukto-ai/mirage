@@ -31,12 +31,7 @@ import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
-import type {
-  CommandContext,
-  Deny,
-  SessionContext,
-  WorkspaceContext,
-} from '@struktoai/mirage-core/policy/types'
+import type { CommandContext, Deny, WorkspaceContext } from '@struktoai/mirage-core/policy/types'
 
 const limits = vi.hoisted(() => ({
   snapshot: undefined as number | undefined,
@@ -544,39 +539,6 @@ describe('workspaces router', () => {
       expect(ran.json<{ stdout: string }>().stdout).toBe('${HOME}\n')
     } finally {
       await app.close()
-    }
-  })
-
-  it("refuses a snapshot whose saved values the server's policies refuse", async () => {
-    const noSecret: Policy = {
-      preSession(ctx: SessionContext) {
-        return ctx.key === 'SECRET' ? { kind: 'deny', reason: "SECRET is the server's" } : null
-      },
-    }
-    const free = buildApp()
-    const held = buildApp({ policies: [noSecret] })
-    try {
-      const made = await free.inject({
-        method: 'POST',
-        url: '/v1/workspaces',
-        payload: { config: RAM },
-      })
-      const id = made.json<{ id: string }>().id
-      const ran = await free.inject({
-        method: 'POST',
-        url: `/v1/workspaces/${id}/shell`,
-        payload: { command: 'export SECRET=1' },
-      })
-      expect(ran.json<{ exit_code: number }>().exit_code).toBe(0)
-      const tar = await download(free, id)
-      const close = vi.spyOn(Workspace.prototype, 'close')
-      expect((await upload(held, tar)).statusCode).toBe(403)
-      expect(close).toHaveBeenCalledTimes(1)
-      close.mockRestore()
-      expect((await upload(free, tar)).statusCode).toBe(201)
-    } finally {
-      await free.close()
-      await held.close()
     }
   })
 

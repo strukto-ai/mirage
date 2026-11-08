@@ -195,7 +195,7 @@ def test_an_expansion_asks_the_host_for_a_substitution() -> None:
     shell = Shell(lambda: 7)
     shell.seed("x", "a b")
     asked: list[str] = []
-    task = shell.expand(_word("echo $x$(c)"), "fields", False)
+    task = shell.expand(_word("echo $x$(c)"), "fields")
 
     def answer(ask: tuple[Any, ...]) -> None:
         assert ask[0] == "substitute"
@@ -208,30 +208,18 @@ def test_an_expansion_asks_the_host_for_a_substitution() -> None:
     assert diagnostics == [b"w\n"]
 
 
-def test_a_write_asks_the_gate_and_stops_on_a_refusal() -> None:
+def test_a_write_lands_at_once_and_a_hidden_name_refuses() -> None:
     shell = Shell(lambda: 7)
-    gates: list[str] = []
-    allowed = shell.set("y", "1", listens=True)
-
-    def allow(ask: tuple[Any, ...]) -> None:
-        assert ask[0] == "gate"
-        gates.append(
-            f"{'post' if ask[1] else 'pre'} {ask[2]} {ask[3]}={ask[4]}"
-        )
-        allowed.answer_gate(None)
-
-    _run(allowed, allow)
-    assert gates == ["pre set y=1", "post set y=1"]
+    assert shell.set("y", "1") == (("ok", 0), [])
     assert shell.get("y") == ("1", "", None)
-    refused = shell.set("z", "2", listens=True)
-    result, _ = _run(refused, lambda ask: refused.answer_gate(("z", 1)))
-    assert result == ("denied", "z", 1)
+    shell.hide(["z"], [])
+    assert shell.set("z", "2") == (("hidden", "z"), [])
     assert shell.get("z") is None
 
 
 def test_a_running_task_holds_the_shell() -> None:
     shell = Shell(lambda: 7)
-    task = shell.expand(_word("echo $(c)"), "text", False)
+    task = shell.expand(_word("echo $(c)"), "text")
     assert task.step()[0] == "substitute"
     with pytest.raises(RuntimeError, match="the shell is running a task"):
         shell.get("x")

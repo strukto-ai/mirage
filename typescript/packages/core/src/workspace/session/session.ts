@@ -966,7 +966,8 @@ export class SessionState {
    *
    * A live read-only projection of `vars`, not a container: a writer
    * goes through `SessionView.set` (or `seedVar` when seeding a session
-   * before it is narrowed), so a `pre_session` policy sees every write.
+   * before it is narrowed), so a hidden or readonly name refuses every
+   * write.
    * `state.ts` has always documented that rule; refusing writes to the
    * projection is what stops it being walked around by assigning into
    * storage, and an assignment into a plain object would land in a

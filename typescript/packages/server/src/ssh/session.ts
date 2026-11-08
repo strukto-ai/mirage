@@ -143,8 +143,8 @@ export function loginEntry(
  * Create the session a channel runs as, under `profile` (the login key's),
  * else the workspace's default profile; a profile the workspace does not
  * define is refused. The login environment is exported by an unrecorded
- * line, so every name clears the session's `pre_session` gate like any
- * `export` would, and a name the profile already set keeps its value. A
+ * line, so a hidden or protected name is refused as any `export` of it
+ * would be, and a name the profile already set keeps its value. A
  * server shutting down, or a workspace at the server's `maxSessions`,
  * refuses it with EAGAIN.
  */

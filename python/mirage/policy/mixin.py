@@ -24,8 +24,7 @@ class SessionScopedMixin(ABC):
     sessions under that profile), and says so through ``wants_for``.
     ``Policies.wants`` is the static answer, true as soon as any policy
     overrides the method, and every entry point keeps gating on it; a seam that
-    pays ahead for a method (the secret fill drops its masks under a
-    session-write gate) asks ``Policies.wants_for`` instead, which
+    pays ahead for a method asks ``Policies.wants_for`` instead, which
     consults this mixin so one profile's entry point does not charge every
     session.
     """
@@ -35,14 +34,12 @@ class SessionScopedMixin(ABC):
         """Whether this policy's ``method`` will speak for one session.
 
         The answer follows what the host sets on the session (its
-        profile, the policies added), never what a line writes: a
-        running task asks it again each time it waits on its host, not
-        between two of its own writes. A policy that turns on a session's
-        variables (``ARMED=1``) decides in ``pre_session`` itself, which
-        every write reaches while the policy speaks for the session.
+        profile, the policies added), never what a line writes. A policy
+        that turns on a session's variables (``ARMED=1``) reads them in
+        the method itself, from the session its context carries.
 
         Args:
             method (str): the method name (``pre_command``, ``pre_vfs``,
-                ``pre_session``, ...).
+                ``pre_network``, ...).
             session_id (str): the session, empty when none is bound.
         """

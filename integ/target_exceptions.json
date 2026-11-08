@@ -134,9 +134,6 @@
     "integ/session/commands/script.json :: scriptopswasm_read_passes_the_dispatcher": {
       "ram-commands": "This case drives a profile whose programs run on Python on wasm, which is a different runtime per host (wasi on python, pyodide on typescript), so ram-scripted carries it on the python host and ram-scripted-pyodide on the typescript one; ram-commands names no wasm runtime. The script_* and scriptops_* monty twins in this same file run on ram-commands, so a profile policy is still judged on the modal target and only the second runtime rides the narrower ones."
     },
-    "integ/session/commands/script.json :: scriptopswasm_env_write_is_refused_at_the_session_view": {
-      "ram-commands": "This case drives a profile whose programs run on Python on wasm, which is a different runtime per host (wasi on python, pyodide on typescript), so ram-scripted carries it on the python host and ram-scripted-pyodide on the typescript one; ram-commands names no wasm runtime. The script_* and scriptops_* monty twins in this same file run on ram-commands, so a profile policy is still judged on the modal target and only the second runtime rides the narrower ones."
-    },
     "integ/session/commands/script.json :: scriptopswasm_other_env_writes_land": {
       "ram-commands": "This case drives a profile whose programs run on Python on wasm, which is a different runtime per host (wasi on python, pyodide on typescript), so ram-scripted carries it on the python host and ram-scripted-pyodide on the typescript one; ram-commands names no wasm runtime. The script_* and scriptops_* monty twins in this same file run on ram-commands, so a profile policy is still judged on the modal target and only the second runtime rides the narrower ones."
     },

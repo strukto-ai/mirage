@@ -80,14 +80,12 @@ Explain stops before anything runs, evaluating only pre-execution checks:
 
 | Explained | Evaluates | Never evaluates |
 | --- | --- | --- |
-| A line | the profile's rules, `pre_execute`, `pre_command` | `pre_session`, `pre_vfs`, every `post_` method |
+| A line | the profile's rules, `pre_execute`, `pre_command` | `pre_vfs`, every `post_` method |
 | A VFS call | the profile's rules, `pre_vfs` | every `post_` method |
 
-The `post_` methods need a result, and `pre_session` fires only as a line
-runs. So `export AWS_SECRET=x` explains as `allow` even when a
-`pre_session` policy refuses it. A line's file calls reach `pre_vfs` only
-when the line runs; explain a specific VFS call to see its admission
-result without executing the line.
+The `post_` methods need a result. A line's file calls reach `pre_vfs` only
+when the line runs; explain a specific VFS call to see its admission result
+without executing the line.
 
 ### What comes back
 

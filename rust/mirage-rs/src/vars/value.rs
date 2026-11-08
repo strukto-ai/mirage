@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use super::{Assigned, NAMEREF, UNASSIGNED, letters};
+use super::{NAMEREF, UNASSIGNED, letters};
 
 /// An indexed array as bash keeps one: only its assigned elements, by
 /// index. `a[1000000000]=x` holds one element, and an index no write
@@ -195,15 +195,6 @@ impl Slot {
             Slot::Key(key) => key.len() + text.len() + 1,
         }
     }
-
-    /// What a write of this slot assigns, for an `-i` array's coercion:
-    /// the slot when it `put` a value, nothing when it cleared one.
-    pub fn assigned(&self, put: bool) -> Assigned {
-        match self {
-            Slot::Index(index) => Assigned::Indexes(put.then_some(*index).into_iter().collect()),
-            Slot::Key(key) => Assigned::Keys(put.then(|| key.clone()).into_iter().collect()),
-        }
-    }
 }
 
 /// A value; the rare associative one is boxed so every record stays small.
@@ -222,23 +213,6 @@ impl Value {
             Value::Scalar(text) => text.len(),
             Value::Indexed(array) => array.iter().map(|(_, v)| v.len() + 1).sum(),
             Value::Assoc(map) => map.iter().map(|(k, v)| k.len() + v.len() + 1).sum(),
-        }
-    }
-
-    /// What a `pre_session` rule is shown for it: a scalar as itself, an
-    /// indexed array's elements joined by spaces, an associative one's in
-    /// sorted-key order. One rendering, so a rule reads the same text
-    /// whether the write came from a typed line or a restore.
-    pub fn rendering(&self) -> Vec<u8> {
-        match self {
-            Value::Scalar(text) => text.clone(),
-            Value::Indexed(array) => array.iter().map(|(_, v)| v).collect::<Vec<_>>().join(&b' '),
-            Value::Assoc(map) => map
-                .sorted()
-                .into_iter()
-                .map(|(_, v)| v)
-                .collect::<Vec<_>>()
-                .join(&b' '),
         }
     }
 
