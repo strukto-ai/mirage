@@ -36,7 +36,6 @@ interface PolicyName {
   name: string
 }
 
-/** The program `--source` names: `@FILE` reads a file, anything else is the program itself. */
 /**
  * Run `rebase`, which turns a config's relative script paths into absolute
  * ones, keeping each profile program whose `script` names a saved policy,
@@ -64,6 +63,7 @@ export function keepPolicyNames(config: Record<string, unknown>, rebase: () => v
   for (const [program, script] of kept) program.script = script
 }
 
+/** The program `--source` names: `@FILE` reads a file, anything else is the program itself. */
 export function readSource(given: string): string {
   if (!given.startsWith('@')) return given
   const path = given.slice(1)

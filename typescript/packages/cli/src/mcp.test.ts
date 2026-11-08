@@ -96,6 +96,45 @@ describe('mirage mcp over stdio', () => {
     }
   }, 60_000)
 
+  it('sends a saved policy name in its config as written', async () => {
+    const posted: unknown[] = []
+    const stub = createHttpServer((req, res) => {
+      const chunks: Buffer[] = []
+      req.on('data', (c: Buffer) => chunks.push(c))
+      req.on('end', () => {
+        if (req.method === 'POST' && req.url === '/v1/workspaces') {
+          posted.push(JSON.parse(Buffer.concat(chunks).toString('utf-8')))
+        }
+        const refused = req.url?.endsWith('/sessions') === true
+        res.writeHead(refused ? 500 : req.method === 'POST' ? 201 : 200, {
+          'content-type': 'application/json',
+        })
+        res.end(JSON.stringify(refused ? { detail: 'no sessions' } : { id: 'minted' }))
+      })
+    })
+    await new Promise<void>((resolve) => stub.listen(0, '127.0.0.1', resolve))
+    try {
+      const { port } = stub.address() as AddressInfo
+      const path = join(mkTempDir(), 'workspace.yaml')
+      writeFileSync(
+        path,
+        'mounts:\n  /:\n    vfs: ram\n' +
+          'profiles:\n  reviewer:\n    policy:\n      pre_command:\n        - script: guard.py\n',
+      )
+      const child = spawn(process.execPath, [BIN, 'mcp', path, '-s', 'agent'], {
+        env: daemonEnv(port),
+      })
+      child.stdin.end()
+      await new Promise<number | null>((resolve) => child.on('close', resolve))
+      expect(posted).toHaveLength(1)
+      expect(posted[0]).toMatchObject({
+        config: { profiles: { reviewer: { policy: { pre_command: [{ script: 'guard.py' }] } } } },
+      })
+    } finally {
+      await new Promise((resolve) => stub.close(resolve))
+    }
+  }, 60_000)
+
   it('takes a config or a workspace, not both', async () => {
     const child = spawn(process.execPath, [BIN, 'mcp', writeConfig(), '-w', 'ws_1'])
     const code = await new Promise<number | null>((resolve) => child.on('close', resolve))

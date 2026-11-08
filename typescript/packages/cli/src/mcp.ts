@@ -17,6 +17,7 @@ import type { Command } from 'commander'
 import { DaemonClient, makeClient } from './client.ts'
 import { LoginError } from './credentials.ts'
 import { fail, handleResponse } from './output.ts'
+import { resolveConfig } from './workspace.ts'
 
 export const MCP_ENV_NAMES = ['MIRAGE_MCP_CONFIG', 'MIRAGE_CONFIG']
 
@@ -139,8 +140,7 @@ export async function relayWorkspace(
   let workspaceId: string
   let minted = false
   if (path !== undefined) {
-    const { checkWorkspaceConfigFile } = await import('@struktoai/mirage-node/config')
-    const loaded = checkWorkspaceConfigFile(path)
+    const loaded = await resolveConfig(path)
     const body = JSON.stringify({ config: loaded })
     const created = await handleResponse(await client.request('POST', '/v1/workspaces', { body }))
     workspaceId = (created as { id: string }).id

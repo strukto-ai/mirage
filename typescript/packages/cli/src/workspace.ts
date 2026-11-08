@@ -56,6 +56,28 @@ async function loadConfigArgument(path: string): Promise<JsonValue> {
   return config
 }
 
+/**
+ * A workspace config file, checked and env-interpolated here (the user's
+ * shell env is the source of truth, and a missing var must fail before the
+ * round trip), but sent in the file's own spelling: the server runs the same
+ * check. Relative script paths are rebased onto the file's folder, except a
+ * policy script that names a saved policy. Mirrors `resolve_config` in the
+ * Python CLI; throws for a config that fails its check.
+ */
+export async function resolveConfig(path: string): Promise<Record<string, unknown>> {
+  const { absolutizeScripts, checkWorkspaceConfig } = await import('@struktoai/mirage-node/config')
+  const { parse: yamlParse } = await import('yaml')
+  const parsed: unknown = yamlParse(readFileSync(path, 'utf-8'))
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('config source must be a mapping')
+  }
+  const config = checkWorkspaceConfig(parsed as Record<string, unknown>)
+  keepPolicyNames(config, () => {
+    absolutizeScripts(config, dirname(resolve(path)))
+  })
+  return config
+}
+
 // A profile document handed to `set-profile` or `session update
 // --profile-file`, read the way a config file's `profiles` entry is read:
 // env-interpolated, and with a relative policy `script` rebased onto the
@@ -358,24 +380,8 @@ export function registerWorkspaceCommands(program: Command): Command {
         if (opts.template !== undefined) {
           body.template = opts.template
         } else if (configPath !== undefined) {
-          // Checked and env-interpolated here (the user's shell env is the
-          // source of truth, and a missing var must fail before the round
-          // trip), but sent in the file's own spelling: the daemon runs the
-          // same check, and it speaks snake_case like the Python one.
-          // checkWorkspaceConfigFile's steps, with a saved policy's name kept.
-          const { absolutizeScripts, checkWorkspaceConfig } =
-            await import('@struktoai/mirage-node/config')
-          const { parse: yamlParse } = await import('yaml')
           try {
-            const parsed: unknown = yamlParse(readFileSync(configPath, 'utf-8'))
-            if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-              throw new Error('config source must be a mapping')
-            }
-            const config = checkWorkspaceConfig(parsed as Record<string, unknown>)
-            keepPolicyNames(config, () => {
-              absolutizeScripts(config, dirname(resolve(configPath)))
-            })
-            body.config = config
+            body.config = await resolveConfig(configPath)
           } catch (err: unknown) {
             fail(err instanceof Error ? err.message : String(err), 2)
           }
