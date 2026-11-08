@@ -250,6 +250,8 @@ interface Supervision {
   // The command ignores the signal (a shell's QUIT), which stops only the
   // program it runs right now: timeout waits for it as for one it goes on.
   ignored: boolean
+  // The command is a program on a machine, which got the signal as sent.
+  onMachine: () => boolean
   preserve: boolean
   verbose: boolean
   name: string
@@ -413,6 +415,7 @@ export async function handleTimeout(
     killAfter,
     foreground,
     ignored: process.ignores.has(signal),
+    onMachine: () => process.record.runtime !== null,
     preserve: parse.flags.p === true,
     verbose: parse.flags.v === true,
     name,
@@ -564,15 +567,15 @@ async function supervise(
       return await ended(sink, held, said, how.preserve ? late.exitCode : TIMEOUT_STATUS, true)
     }
     // A program on a machine got the signal as sent and may outlive it:
-    // -k's KILL then ends the wait.
-    if (kill.at !== null) {
-      const late = await Promise.race([
-        run.then(
-          () => null,
-          () => null,
-        ),
-        kill.at,
-      ])
+    // only -k's KILL then ends the wait.
+    const onMachine = how.onMachine()
+    let late: IOResult | typeof TIMED_OUT | null = null
+    if (kill.at !== null || onMachine) {
+      const ending = run.then(
+        (result) => result,
+        () => null,
+      )
+      late = await (kill.at === null ? ending : Promise.race([ending, kill.at]))
       if (late === TIMED_OUT) {
         say(SIGKILL)
         return await stop(said, 137)
@@ -580,6 +583,9 @@ async function supervise(
     }
     if (SELF_KILLING_SIGNALS.has(signal) && (!foreground || signal === SIGKILL)) {
       return await stop(said, 128 + signal)
+    }
+    if (onMachine && late !== null) {
+      return await ended(sink, held, said, how.preserve ? late.exitCode : TIMEOUT_STATUS, true)
     }
     return await stop(said, how.preserve ? 128 + signal : TIMEOUT_STATUS)
   } finally {

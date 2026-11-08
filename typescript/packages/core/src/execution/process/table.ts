@@ -103,7 +103,9 @@ export class ProcessTable {
    * instead of joining its parent's. `machine` is where its program runs,
    * the table's when absent, and `runtime` what Mirage runs it with, none
    * for Mirage itself. `oneCommand` marks a runner that runs exactly one
-   * command, whose program it is (`ProcessHandle.take`).
+   * command, whose program it is (`ProcessHandle.take`), and
+   * `programIgnores` what that program ignores as well, where `ignores` is
+   * more than a shell's.
    */
   start(init: {
     sessionId: string
@@ -121,6 +123,7 @@ export class ProcessTable {
     machine?: MachineId | null
     runtime?: string | null
     oneCommand?: boolean
+    programIgnores?: ReadonlySet<number>
   }): ProcessHandle {
     if (this.stopped) throw new Error('process table is stopped')
     const limit = underCeiling(init.limit ?? null, this.ceiling)
@@ -185,6 +188,7 @@ export class ProcessTable {
       this.now,
     )
     handle.oneCommand = init.oneCommand === true
+    handle.programIgnores = init.programIgnores ?? new Set()
     const eager = init.started !== undefined && !this.queued()
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
     this.ancestors.set(pid, ancestry)

@@ -118,6 +118,7 @@ class ProcessTable:
         machine: MachineId | None = None,
         runtime: str | None = None,
         one_command: bool = False,
+        program_ignores: frozenset[int] = frozenset(),
     ) -> ProcessHandle:
         """Track a runner; its caller owns admission before command effects.
 
@@ -158,6 +159,8 @@ class ProcessTable:
                 for Mirage itself.
             one_command (bool): it runs exactly one command, whose
                 program it is (``ProcessHandle.take``).
+            program_ignores (frozenset[int]): what that program ignores
+                as well, where ``ignores`` is more than a shell's.
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -224,6 +227,7 @@ class ProcessTable:
                 self._now,
             )
             handle.one_command = one_command
+            handle.program_ignores = program_ignores
             eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
             self._ancestors[pid] = ancestry

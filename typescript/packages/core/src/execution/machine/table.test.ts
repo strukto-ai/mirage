@@ -557,6 +557,46 @@ describe('MachineTable scans', () => {
     }
   }, 5000)
 
+  it.each(['', '--foreground '])(
+    'waits past the grace for a program that handles QUIT %s',
+    async (how) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+      const box = new Handler('a', 0)
+      const ws = sleepers({ a: box })
+      try {
+        let done = false
+        const run = ws.shell(`timeout ${how}-s QUIT 0.1 train 1`).finally(() => {
+          done = true
+        })
+        const turn = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
+        while (box.rows.length === 0) await turn()
+        await vi.advanceTimersByTimeAsync(12_000)
+        for (let left = 20; left > 0; left--) await turn()
+        expect(done).toBe(false)
+        expect(new Set(box.sent.map(([, signum]) => signum))).toEqual(new Set([3]))
+        box.finish()
+        vi.useRealTimers()
+        expect((await run).exitCode).toBe(124)
+      } finally {
+        vi.useRealTimers()
+        box.finish()
+        await ws.close()
+      }
+    },
+  )
+
+  it('keeps the status of a program that handled a timeout signal', async () => {
+    const box = new Handler('a', 10)
+    const ws = sleepers({ a: box })
+    try {
+      const said = await ws.shell('timeout -p --foreground -s USR1 0.1 train 1')
+      expect(said.exitCode).toBe(143)
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  })
+
   it.each(['', '--foreground '])('forwards a kept timeout signal %s', async (how) => {
     const box = new Handler('a', 28)
     const ws = sleepers({ a: box })

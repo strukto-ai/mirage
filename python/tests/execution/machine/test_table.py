@@ -507,6 +507,37 @@ async def test_a_foreground_timeout_leaves_a_shell_s_background_program():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("how", ["", "--foreground "])
+async def test_a_program_that_handles_quit_outlives_a_timeout(how):
+    box = _Handler("a", 0)
+    ws = _sleepers(a=box)
+    try:
+        run = asyncio.ensure_future(
+            ws.shell(f"timeout {how}-s QUIT 0.1 train 1")
+        )
+        await asyncio.sleep(0.4)
+        assert not run.done()
+        assert {signum for _, signum in box.sent} == {3}
+        box.ended.set()
+        assert (await run).exit_code == 124
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_keeps_the_status_of_a_program_that_handled_it():
+    box = _Handler("a", 10)
+    ws = _sleepers(a=box)
+    try:
+        said = await ws.shell("timeout -p --foreground -s USR1 0.1 train 1")
+        assert said.exit_code == 143
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("how", ["", "--foreground "])
 async def test_a_timeout_forwards_a_kept_signal_to_the_program(how):
     box = _Handler("a", 28)
     ws = _sleepers(a=box)
