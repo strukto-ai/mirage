@@ -17,6 +17,7 @@ import { dirname, resolve } from 'node:path'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
+import { keepPolicyNames } from './policy.ts'
 import { header, useWorkspace } from './settings.ts'
 import { emit, fail, formatAge, formatTable, handleResponse } from './output.ts'
 
@@ -47,8 +48,33 @@ async function loadConfigArgument(path: string): Promise<JsonValue> {
     fail(`invalid config YAML/JSON at ${path}: ${String(err)}`, 2)
   }
   if (typeof config === 'object' && config !== null && !Array.isArray(config)) {
-    absolutizeScripts(config as Record<string, unknown>, dirname(resolve(path)))
+    const raw = config as Record<string, unknown>
+    keepPolicyNames(raw, () => {
+      absolutizeScripts(raw, dirname(resolve(path)))
+    })
   }
+  return config
+}
+
+/**
+ * A workspace config file, checked and env-interpolated here (the user's
+ * shell env is the source of truth, and a missing var must fail before the
+ * round trip), but sent in the file's own spelling: the server runs the same
+ * check. Relative script paths are rebased onto the file's folder, except a
+ * policy script that names a saved policy. Mirrors `resolve_config` in the
+ * Python CLI; throws for a config that fails its check.
+ */
+export async function resolveConfig(path: string): Promise<Record<string, unknown>> {
+  const { absolutizeScripts, checkWorkspaceConfig } = await import('@struktoai/mirage-node/config')
+  const { parse: yamlParse } = await import('yaml')
+  const parsed: unknown = yamlParse(readFileSync(path, 'utf-8'))
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('config source must be a mapping')
+  }
+  const config = checkWorkspaceConfig(parsed as Record<string, unknown>)
+  keepPolicyNames(config, () => {
+    absolutizeScripts(config, dirname(resolve(path)))
+  })
   return config
 }
 
@@ -78,6 +104,7 @@ export async function loadProfileArgument(path: string): Promise<JsonValue> {
 
 interface WorkspaceBrief {
   id: string
+  status?: string
   mode: string
   mount_count: number
   session_count: number
@@ -126,14 +153,17 @@ function formatWorkspaceExplanation(said: {
 
 function formatWorkspaceList(items: WorkspaceBrief[]): string {
   if (items.length === 0) return 'No active workspaces.'
+  // The daemon lists only the workspaces it holds, so a brief without a
+  // status is running.
   const rows = items.map((w) => [
     w.id,
+    w.status ?? 'running',
     w.mode,
     String(w.mount_count),
     String(w.session_count),
     formatAge(w.created_at),
   ])
-  return formatTable(['ID', 'MODE', 'MOUNTS', 'SESSIONS', 'AGE'], rows)
+  return formatTable(['ID', 'STATUS', 'MODE', 'MOUNTS', 'SESSIONS', 'AGE'], rows)
 }
 
 function formatWorkspaceDetail(d: WorkspaceDetail): string {
@@ -350,13 +380,8 @@ export function registerWorkspaceCommands(program: Command): Command {
         if (opts.template !== undefined) {
           body.template = opts.template
         } else if (configPath !== undefined) {
-          // Checked and env-interpolated here (the user's shell env is the
-          // source of truth, and a missing var must fail before the round
-          // trip), but sent in the file's own spelling: the daemon runs the
-          // same check, and it speaks snake_case like the Python one.
-          const { checkWorkspaceConfigFile } = await import('@struktoai/mirage-node/config')
           try {
-            body.config = checkWorkspaceConfigFile(configPath)
+            body.config = await resolveConfig(configPath)
           } catch (err: unknown) {
             fail(err instanceof Error ? err.message : String(err), 2)
           }
@@ -430,11 +455,12 @@ export function registerWorkspaceCommands(program: Command): Command {
     .action(async (id: string) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
+      // The hosted API answers 204 with no body, so the id is the one given.
       const deleted = (await handleResponse(
         await c.request('DELETE', `/v1/workspaces/${encodeURIComponent(id)}`),
-      )) as { id: string }
+      )) as Record<string, unknown>
       header(`deleted ${id}`)
-      emit(deleted, (d) => `Deleted workspace ${d.id}.`)
+      emit({ id, ...deleted }, () => `Deleted workspace ${id}.`)
     })
 
   ws.command('stop')

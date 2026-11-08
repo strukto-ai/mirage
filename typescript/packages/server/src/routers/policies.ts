@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
+import { POLICY_NAME } from '@struktoai/mirage-core/resources/constants'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
 import type { Policy } from '@struktoai/mirage-core/resources/types'
 import type { WorkspaceRegistry } from '../registry.ts'
-import { POLICY_NAME } from '../resources/policies.ts'
 import type { RouteApp, RouteReply } from '../routes.ts'
 import { storeRefusal } from './templates.ts'
 

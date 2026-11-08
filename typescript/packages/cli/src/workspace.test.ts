@@ -49,6 +49,68 @@ describe('mirage workspace create', () => {
     expect(code).toBe(2)
     expect(stderr).toContain('MIRAGE_TEST_UNSET_VARIABLE')
   })
+
+  it('sends a saved policy name as written and rebases a relative script', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-workspace-'))
+    tempDirs.push(dir)
+    const config = join(dir, 'ws.yaml')
+    writeFileSync(
+      config,
+      'mounts:\n  /:\n    vfs: ram\n' +
+        'clis:\n  tally:\n    script: ./tally.py\n' +
+        'profiles:\n  reviewer:\n    policy:\n      pre_command:\n' +
+        '        - script: guard.py\n        - script: ./local.py\n',
+    )
+    const { url, seen, server } = await fakeServer()
+    try {
+      expect(await mirage(url, dir, 'create', config)).toBe(0)
+      const body = JSON.parse(seen[0]?.body ?? '') as { config: unknown }
+      expect(body.config).toEqual({
+        mounts: { '/': { vfs: 'ram' } },
+        clis: { tally: { script: join(dir, 'tally.py') } },
+        profiles: {
+          reviewer: {
+            policy: { pre_command: [{ script: 'guard.py' }, { script: join(dir, 'local.py') }] },
+          },
+        },
+      })
+    } finally {
+      server.close()
+    }
+  })
+})
+
+describe('mirage workspace delete', () => {
+  it('names the workspace it was given when the server answers with no body', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-workspace-'))
+    tempDirs.push(dir)
+    const server = createServer((req, res) => {
+      if (req.url === '/v1/health') {
+        res.writeHead(200, { 'content-type': 'application/json' }).end('{"status":"ok"}')
+        return
+      }
+      res.writeHead(204).end()
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    try {
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        MIRAGE_HOME: dir,
+        MIRAGE_DAEMON_URL: `http://127.0.0.1:${String(port)}`,
+      }
+      const child = spawn(process.execPath, [BIN, 'workspace', 'delete', 'my-ws'], { env })
+      let stdout = ''
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString()
+      })
+      const code = await new Promise<number | null>((resolve) => child.on('close', resolve))
+      expect(code).toBe(0)
+      expect(JSON.parse(stdout)).toEqual({ id: 'my-ws' })
+    } finally {
+      server.close()
+    }
+  })
 })
 
 interface Seen {

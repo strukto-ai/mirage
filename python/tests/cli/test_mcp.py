@@ -112,7 +112,7 @@ def test_a_refused_session_check_deletes_the_workspace(tree, tmp_path):
         stub.shutdown()
         stub.server_close()
     assert result.exit_code == 2
-    assert "daemon error 500: sessions on fire" in result.output
+    assert "error 500: sessions on fire" in result.output
     assert "DELETE /v1/workspaces/minted" in calls
 
 

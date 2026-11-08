@@ -22,6 +22,9 @@ export const DEFAULT_SCOPE = 'local'
 /** A saved config's name, which is also safe as a file name. */
 export const NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/
 
+/** A saved policy's name: a file name mirage reads as Python. */
+export const POLICY_NAME = /^[a-z0-9][a-z0-9._-]{0,59}\.py$/
+
 /** The source a config names a saved field through: `{from: strukto, ref, key}`. */
 export const STRUKTO = 'strukto'
 

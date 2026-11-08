@@ -16,9 +16,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict
 
+from mirage.resources.constants import POLICY_NAME
 from mirage.resources.errors import ResourceError
 from mirage.resources.types import Policy
-from mirage.server.resources.policies import POLICY_NAME
 from mirage.server.routers.templates import store_refusal
 
 # A policy is a script, not a project, so its source is at most 64 KiB.

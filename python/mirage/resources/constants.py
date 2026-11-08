@@ -25,6 +25,9 @@ DEFAULT_SCOPE = "local"
 # A saved config's name, which is also safe as a file name.
 NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}")
 
+# A saved policy's name: a file name mirage reads as Python.
+POLICY_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,59}\.py")
+
 # The source a config names a saved field through: {from: strukto, ref, key}.
 STRUKTO = "strukto"
 

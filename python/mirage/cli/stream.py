@@ -232,9 +232,7 @@ async def stream_shell(
                         else:
                             if isinstance(answer, dict):
                                 detail = answer.get("detail", text)
-                    raise RuntimeError(
-                        f"daemon error {response.status}: {detail}"
-                    )
+                    raise RuntimeError(f"error {response.status}: {detail}")
                 terminal = await consume_stream(
                     response.content.iter_chunked(CHUNK_SIZE), stdout, stderr
                 )
