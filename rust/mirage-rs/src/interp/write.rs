@@ -353,10 +353,12 @@ impl<G: Gate> Writer<'_, G> {
 
     /// Write one element of the array `name` holds, or clear it with None,
     /// as `set` writes the whole value it makes; `name` is a reference's
-    /// target already. With no policy listening it lands in place, shaped
-    /// by the name's attributes, so a write costs the element rather than
-    /// the array; a listening policy is shown the whole value, which then
-    /// lands through `set`.
+    /// target already. The element is shaped by the name's attributes
+    /// first, so what an `-i` value assigns lands before it, as bash
+    /// evaluates an element in place (`a[0]='a[1]=9,5'` leaves `a[1]` at
+    /// 9). With no policy listening it then lands in place, costing the
+    /// element rather than the array; a listening policy is shown the whole
+    /// value, which lands through `set`.
     async fn set_element(
         &mut self,
         name: &str,
@@ -366,32 +368,34 @@ impl<G: Gate> Writer<'_, G> {
     ) -> Result<(), Fault> {
         self.writable(name)?;
         let none = || Fault::Host("an element of no array");
-        let var = self.store.record(name).ok_or_else(none)?;
-        if self.gate.listens() {
-            let assigned = slot.assigned(text.is_some());
-            let mut value = var.value.clone().ok_or_else(none)?;
-            value.put(&slot, text).ok_or_else(none)?;
-            return Box::pin(self.set(name, value, false, Some(&assigned), added)).await;
-        }
-        let attrs = var.attrs;
+        let attrs = self.store.record(name).ok_or_else(none)?.attrs;
         let text = match text {
             Some(text) => {
                 let mut coercion = Coercion::default();
                 let shaped = self.store.coerce_text(&mut coercion, text, attrs, added);
                 self.land_coercion(&mut coercion).await?;
-                let text = shaped.map_err(|error| fatal(self.store.voice(), error))?;
-                let old = self
-                    .store
-                    .element(name, &slot)
-                    .map_or(0, |old| slot.bytes(old));
-                let new = slot.bytes(&text);
-                if !self.fits(old, new) {
-                    return Err(self.exhausted(self.entry(name) + new - old));
-                }
-                Some(text)
+                Some(shaped.map_err(|error| fatal(self.store.voice(), error))?)
             }
             None => None,
         };
+        if self.gate.listens() {
+            // Shaped already, it shapes to itself again in `set`.
+            let assigned = slot.assigned(text.is_some());
+            let var = self.store.record(name).ok_or_else(none)?;
+            let mut value = var.value.clone().ok_or_else(none)?;
+            value.put(&slot, text).ok_or_else(none)?;
+            return Box::pin(self.set(name, value, false, Some(&assigned), None)).await;
+        }
+        if let Some(text) = &text {
+            let old = self
+                .store
+                .element(name, &slot)
+                .map_or(0, |old| slot.bytes(old));
+            let new = slot.bytes(text);
+            if !self.fits(old, new) {
+                return Err(self.exhausted(self.entry(name) + new - old));
+            }
+        }
         if !self.store.put_element(name, &slot, text, self.allexport) {
             return Err(none());
         }
@@ -405,7 +409,7 @@ impl<G: Gate> Writer<'_, G> {
     /// what the append stored before it: every slot, or under `-i`, whose
     /// words may write the array, each that still holds what it stored.
     /// With a policy listening, the whole value lands through `set` as one
-    /// write.
+    /// write, but under `-i` each word is a write of its own, in order.
     pub async fn push(&mut self, name: &str, words: Vec<Vec<u8>>) -> Result<(), Fault> {
         let name = self.store.target(name);
         self.writable(&name)?;
@@ -425,7 +429,7 @@ impl<G: Gate> Writer<'_, G> {
                     .map_err(|_| Fault::Host("an index past the largest"))
             })
             .collect::<Result<Vec<_>, Fault>>()?;
-        if slots.is_empty() || self.gate.listens() {
+        if slots.is_empty() || (self.gate.listens() && !integer) {
             let mut array = array.clone();
             let assigned = Assigned::Indexes(slots.iter().map(|(index, _)| *index).collect());
             for (index, word) in slots {
@@ -1168,6 +1172,19 @@ mod tests {
         assert_eq!(refused(&mut writer, "s", b"-9"), Element::Subscript);
         let keys: Vec<_> = gate.heard.iter().map(|(_, key, _)| key.as_str()).collect();
         assert_eq!(keys, ["m", "s", "s", "t"]);
+    }
+
+    #[test]
+    fn a_heard_integer_element_keeps_what_its_value_assigned() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.seed("b", Value::Indexed(Indexed::dense([b"1".to_vec()])));
+        store.set_attr("b", Some(INTEGER), true);
+        let mut gate = Recorder::default();
+        let mut writer = writer(&mut store, &mut gate);
+        run(writer.push("b", vec![b"2".to_vec(), b"b[1]=9,1".to_vec()])).unwrap();
+        run(writer.element("b", Some(b"0"), b"b[2]=7,5", false)).unwrap();
+        let held: Vec<_> = writer.store.indexed("b").unwrap().iter().collect();
+        assert_eq!(held, [(0, &b"5"[..]), (1, &b"9"[..]), (2, &b"7"[..])]);
     }
 
     #[test]

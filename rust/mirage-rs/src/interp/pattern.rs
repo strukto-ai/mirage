@@ -77,8 +77,8 @@ const RECASE_SLICE: usize = 2048;
 /// The compiled patterns a shell keeps for the next expansion that asks.
 const COMPILED_KEPT: usize = 16;
 /// The units fed to the matcher at a time, so a long subject is never
-/// copied into bytes whole; a matcher that read more is not kept, since it
-/// keeps the room its subject took.
+/// copied into bytes whole; a matcher whose pattern or subject ran longer
+/// is not kept, so what the shell keeps stays small.
 const FEED_UNITS: usize = 4096;
 
 /// A compiled pattern kept: its units, whether extglob read them, and the
@@ -112,6 +112,9 @@ fn lend(pattern: &Pattern, extglob: bool, operation: &Json) -> Option<Box<dyn St
 
 /// Keep a matcher an operation finished with for the next that asks.
 fn keep(pattern: &Pattern, extglob: bool, glob: Box<dyn Stream>) {
+    if pattern.0.len() > FEED_UNITS {
+        return;
+    }
     COMPILED.with_borrow_mut(|kept| {
         kept.insert(0, (pattern.0.clone(), extglob, glob));
         kept.truncate(COMPILED_KEPT);
