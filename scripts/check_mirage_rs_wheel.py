@@ -214,7 +214,10 @@ def main() -> None:
     checks["merge"] = (settle(merge, merged + merge.finish()), b"a\nb\nc\nd\n")
 
     for mode in ("builtin", "program"):
-        printf = stream("printf", {"mode": mode, "argument_count": 5})
+        printf = stream(
+            "printf",
+            {"mode": mode, "argument_count": 5, "voice": "bash: "},
+        )
         for index, value in enumerate(
             (b"%+.1f|%+.1a|%s|%d%b", b"nan", b"-nan", b"\xff", b"bad", b"\\c")
         ):
