@@ -259,8 +259,10 @@ async function drainToSink(sink: JobConsole, result: ExecuteResult): Promise<Exe
  * `Workspace.serializeLine` runs it inline. Only with task-local storage:
  * the browser fallback's newest binding may belong to an unrelated call. A
  * substitution's shell ends with it, so a host task still bound to one
- * (started in it, run after it) is a line of its own on that session's id:
- * it waits its turn and resolves the session as a host call naming it does.
+ * (started in it, run after it) continues in the nearest shell around it
+ * whose line still runs, as a callback fired mid-line does, and once none
+ * runs it is a line of its own on that session's id: it waits its turn and
+ * resolves the session as a host call naming it does.
  */
 export function reentry(
   sessions: SessionManager,
@@ -270,8 +272,15 @@ export function reentry(
   if (ambient === null || (sessionId !== undefined && sessionId !== ambient.sessionId)) {
     return [null, sessionId]
   }
-  if (ambient.vars.shell.closed) return [null, ambient.sessionId]
-  return [ambient, ambient.sessionId]
+  if (!ambient.vars.shell.closed) return [ambient, ambient.sessionId]
+  let context = getCurrentEvaluation()
+  while (context?.session.vars.shell.closed) context = context.parent
+  let line = context
+  while (line?.parent) line = line.parent
+  if (context !== null && line !== null && sessions.runs(line)) {
+    return [context.session, ambient.sessionId]
+  }
+  return [null, ambient.sessionId]
 }
 
 /**
@@ -525,7 +534,7 @@ async function runPreparedLine(
     lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits),
     env.registry.ceilings.maxLineSeconds,
   )
-  if (parent === null) env.sessions.beginLine(targetSession.sessionId)
+  if (parent === null) env.sessions.beginLine(context)
   try {
     // The outermost line, recorded or not, runs under its `@line` deadline,
     // which a nested one shares: past it the tree is stopped like an abort
@@ -1092,7 +1101,7 @@ async function runPreparedLine(
     // under the grace like the tree: a stalled store finishes in the
     // background instead of holding an aborted caller.
     await runCancellable(
-      env.sessions.endLine(targetSession.sessionId, parent === null),
+      env.sessions.endLine(targetSession.sessionId, parent === null ? context : null),
       options.signal,
     )
   }

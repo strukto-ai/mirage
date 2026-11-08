@@ -14,7 +14,7 @@
 import { CLIHandler } from '../../commands/cli/types.ts'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CLI } from '../../commands/cli/types.ts'
+import { CLI, type CLIVerbFn } from '../../commands/cli/types.ts'
 import { Command } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
@@ -450,6 +450,33 @@ describe('same-session lines run one at a time', () => {
       expect(saved.get('s')?.env).toMatchObject({ X: 'late' })
     },
   )
+
+  it('a task its line waits on runs in the line', async () => {
+    const ws = makeWs()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const later: Promise<{ stdout: Uint8Array }>[] = []
+    const handlers: Record<string, CLIVerbFn> = {
+      spawn: () => {
+        later.push(gate.then(() => ws.shell('J=joined', { record: false })))
+        return null
+      },
+      await_late: async () => {
+        release()
+        return [(await later[0])?.stdout ?? new Uint8Array(), new IOResult()]
+      },
+    }
+    for (const [name, fn] of Object.entries(handlers)) {
+      ws.registerCli(
+        name,
+        new CLI({ spec: new CommandSpec({ name }), handlers: { '': new CLIHandler({ fn }) } }),
+      )
+    }
+    const io = await ws.shell('echo $(spawn); await_late; echo $J')
+    expect(stdoutStr(io)).toBe('\njoined\n')
+  })
 
   it('a host callback re-entering its own session runs inline', async () => {
     const ws = makeWs()

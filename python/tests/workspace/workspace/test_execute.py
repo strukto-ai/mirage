@@ -536,6 +536,36 @@ async def test_a_line_that_outlives_its_caller_saves_its_session(line):
 
 
 @pytest.mark.asyncio
+async def test_a_task_its_line_waits_on_runs_in_the_line():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    gate = asyncio.Event()
+    later: list[asyncio.Task[IOResult]] = []
+
+    async def late() -> IOResult:
+        await gate.wait()
+        return await ws.shell("J=joined", record=False)
+
+    async def spawn(config, paths, texts, ctx):
+        later.append(asyncio.create_task(late()))
+        return None, IOResult()
+
+    async def await_late(config, paths, texts, ctx):
+        gate.set()
+        return (await later[0]).stdout, IOResult()
+
+    for name, fn in (("spawn", spawn), ("await_late", await_late)):
+        ws.register_cli(
+            name,
+            CLI(spec=CommandSpec(name=name), handlers={"": CLIHandler(fn=fn)}),
+        )
+    io = await asyncio.wait_for(
+        ws.shell("echo $(spawn); await_late; echo $J"), 5
+    )
+    assert io.stdout == b"\njoined\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_abort_on_the_history_record_restores_status():
     ws = Workspace(
         {"/": RAMVFS()}, mode=MountMode.WRITE, observe=_StalledObserverStore()

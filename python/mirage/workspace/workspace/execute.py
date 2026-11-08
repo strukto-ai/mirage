@@ -525,8 +525,10 @@ def reentry(
     session unless it names another: ``execute_line`` runs it there and
     ``Workspace._serialize_line`` runs it inline. A substitution's shell
     ends with it, so a host task still bound to one (started in it, run
-    after it) is a line of its own on that session's id: it waits its
-    turn and resolves the session as a host call naming it does.
+    after it) continues in the nearest shell around it whose line still
+    runs, as a callback fired mid-line does, and once none runs it is a
+    line of its own on that session's id: it waits its turn and resolves
+    the session as a host call naming it does.
 
     Args:
         sessions (SessionManager): the workspace's sessions.
@@ -535,9 +537,17 @@ def reentry(
     ambient = get_current_session_for(sessions)
     if ambient is None or session_id not in (None, ambient.session_id):
         return None, session_id
-    if ambient.vars.shell.closed:
-        return None, ambient.session_id
-    return ambient, ambient.session_id
+    if not ambient.vars.shell.closed:
+        return ambient, ambient.session_id
+    context = get_current_evaluation()
+    while context is not None and context.session.vars.shell.closed:
+        context = context.parent
+    line = context
+    while line is not None and line.parent is not None:
+        line = line.parent
+    if context is not None and line is not None and sessions.runs(line):
+        return context.session, ambient.session_id
+    return None, ambient.session_id
 
 
 async def execute_line(
@@ -894,7 +904,7 @@ async def run_prepared_line(
     recorded = is_line and bool(command.strip("\n"))
     history: LineHistory | None = None
     if parent is None:
-        ws.sessions.begin_line(session_id)
+        ws.sessions.begin_line(context)
     try:
         aliases = expanding_aliases(effective_session)
         ast = (
@@ -1435,7 +1445,9 @@ async def run_prepared_line(
             effective_session._alias_marks.clear()
             effective_session._expand_aliases_marks.clear()
         reset_current_session(session_token)
-        await ws.sessions.end_line(session_id, parent is None)
+        await ws.sessions.end_line(
+            session_id, context if parent is None else None
+        )
         ws.records.extend(scope.records)
         if history is not None:
             await history.end(io, scope.records)
