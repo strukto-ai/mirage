@@ -20,6 +20,12 @@ import { ENV_WORKER_TOKEN } from '../env.ts'
 import { type WorkerPoolOptions, WorkerType } from './types.ts'
 import { ProcessWorker, ThreadWorker, type Worker } from './worker.ts'
 
+/** The worker an id being created goes to, and how many requests claim it. */
+interface Claim {
+  worker: Worker
+  claims: number
+}
+
 /**
  * The workers and which holds each workspace. A workspace's worker
  * outlives its stop, so a create or start of its id reaches the worker that
@@ -42,7 +48,7 @@ export class WorkerPool {
    * The worker each id being created goes to, and how many requests claim
    * it, until the last of them ends.
    */
-  private readonly pending = new Map<string, { worker: Worker; claims: number }>()
+  private readonly pending = new Map<string, Claim>()
   private readonly directory: string
   private stopping = false
 

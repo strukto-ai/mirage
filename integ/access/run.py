@@ -924,15 +924,18 @@ async def lifecycle(
             await asyncio.sleep(0.2)
         return True
 
-    def ids() -> list[str]:
+    def listed() -> dict[str, str]:
         token = (home / "auth_token").read_text().strip()
-        return sorted(
-            w["id"]
+        return {
+            w["id"]: w["status"]
             for w in httpx.get(
                 f"{url}/v1/workspaces",
                 headers={"Authorization": f"Bearer {token}"},
             ).json()
-        )
+        }
+
+    def ids() -> list[str]:
+        return sorted(i for i, s in listed().items() if s == "running")
 
     code, _, _ = await cli("daemon", "status")
     got["status_without_daemon"] = str(code)
@@ -971,7 +974,9 @@ async def lifecycle(
     await cli("daemon", "restart")
     got["restart_stops"] = "running" if alive() else "stopped"
     await cli("workspace", "create", str(config), "--id", "b")
-    got["restart_drops_workspaces"] = " ".join(ids())
+    got["restart_stops_workspaces"] = " ".join(
+        f"{i}:{s}" for i, s in sorted(listed().items())
+    )
     await cli("daemon", "restart", "--eager")
     got["restart_eager"] = (
         f"{'running' if alive() else 'stopped'} {len(ids()) if alive() else '-'}"
