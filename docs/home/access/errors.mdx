@@ -49,7 +49,7 @@ Each surface carries the condition its own way:
 | Python | An `OSError` with `errno` set, raised as the builtin class for it (`FileNotFoundError`, `PermissionError`, ...). A path no mount owns raises `NoMountError`, a `ValueError`. `mirage.errors.classify(exc)` names the condition for either. |
 | TypeScript | An `Error` whose `code` is the condition's name (`ENODATA` for `NO_XATTR`), as Node's `fs` does. A path no mount owns sets `noMount`. `classify(err)` from `@struktoai/mirage-core/errors/classify` names either. |
 | Shell | A line on stderr, `cat: /data/x: No such file or directory`, and the command's exit status. |
-| [HTTP](/home/access/http#errors) | `{detail, errno}` with the status above, plus a `refusal` record when a policy refused the call. |
+| [HTTP](/api/errors) | `{detail, errno}` with the status above, plus a `refusal` record when a policy refused the call. |
 | [RPC](/home/access/rpc#errors) | `-32004` for `ENOENT` and `-32603` for the rest, with `{detail, errno}` in `data`. |
 | [MCP](/home/access/mcp#tools) | The tool result with `isError` set: `Error: /data/x: No such file or directory`. |
 | [FUSE](/home/setup/fuse) | The host's errno number. A failure with no errno reads as `EIO`. |

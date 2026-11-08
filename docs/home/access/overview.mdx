@@ -89,4 +89,4 @@ When authentication is configured, every way in proves who is calling. `GET /v1/
 | SSH on the SSH port | A public key |
 | SSH through `mirage ssh-proxy` | The CLI's token |
 
-A server you start directly in `local` mode, with no token configured, accepts requests without one. In `jwt` mode a token's `sub` is an [account](/home/access/http#accounts) that reaches only its own workspaces, and an SSH key names its account with `mirage-account`. See [Auth](/home/access/http#auth).
+A server you start directly in `local` mode, with no token configured, accepts requests without one. In `jwt` mode a token's `sub` is an [account](/home/access/http#accounts) that reaches only its own workspaces, and an SSH key names its account with `mirage-account`. See [Auth](/home/access/http#configure-authentication).

@@ -40,30 +40,14 @@ TAG_ORDER = (
     "Saved runtimes",
     "Policies",
     "Asks",
-    "Server",
+    "Lines",
+    "Jobs",
+    "Processes",
+    "Service",
+    "Daemon",
     "Auth",
 )
 METHOD_ORDER = ("get", "post", "put", "patch", "delete")
-HEADER = """---
-title: API reference
-description: "Find an endpoint by resource, path, parameter or response field."
-icon: list
----
-
-import { ApiExplorer, Operation } from "/snippets/api-explorer.jsx"
-
-{/* Regenerate with scripts/gen_api_reference.py. */}
-
-Browse the resource groups in the sidebar, or search the operations below.
-Each endpoint page includes authentication, request fields, examples and responses.
-
-Use the [quickstart](/api/quickstart) for your first request. Both the local daemon
-and hosted API serve the routes labeled **Daemon and hosted**. Routes labeled
-**Daemon only** require a local server.
-
-Readiness and shutdown control a server you run yourself, so they are
-documented with [launching a server](/home/access/http#server).
-"""
 
 
 def attr(text: str) -> str:
@@ -143,7 +127,10 @@ def resource_name(doc: dict[str, Any], tag: str) -> str:
 
 
 def operation(
-    doc: dict[str, Any], path: str, method: str, op: dict[str, Any]
+    doc: dict[str, Any],
+    path: str,
+    method: str,
+    op: dict[str, Any],
 ) -> list[str]:
     """The searchable link to one complete endpoint page.
 
@@ -153,14 +140,13 @@ def operation(
         method (str): its lower-case method.
         op (dict[str, Any]): the operation object.
     """
-    hosts = ", ".join(op.get("x-hosts", ["daemon"]))
     page = f"/api/operations/{slug(op['tags'][0])}/{slug(op['summary'])}"
     anchor = re.sub(r"[^a-z0-9]+", "-", f"{method} {path}".lower()).strip("-")
     search = " ".join(sorted(search_terms(doc, op, set())))
     return [
         f'<Operation resource="{attr(resource_name(doc, op["tags"][0]))}" '
         f'method="{method.upper()}" path="{attr(path)}" '
-        f'summary="{attr(op["summary"])}" hosts="{attr(hosts)}" '
+        f'summary="{attr(op["summary"])}" '
         f'href="{page}" anchor="{anchor}" search="{attr(search)}" />',
         "",
     ]
@@ -204,7 +190,21 @@ def render(doc: dict[str, Any]) -> str:
     Args:
         doc (dict[str, Any]): the OpenAPI document.
     """
-    lines = [HEADER, "<ApiExplorer>", ""]
+    header = """---
+title: API reference
+description: Find endpoints by resource, path, parameter, or response field.
+icon: list
+---
+
+import { ApiExplorer, Operation } from "/snippets/api-explorer.jsx"
+
+{/* Regenerate with scripts/gen_api_reference.py. */}
+
+Browse the resource groups in the sidebar, or search the operations below.
+Each endpoint includes request fields, response schemas, and examples from the
+[OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml).
+"""
+    lines = [header, "<ApiExplorer>", ""]
     for path, method, op in operations(doc):
         lines += operation(doc, path, method, op)
     lines.append("</ApiExplorer>")
@@ -307,13 +307,7 @@ def render_overlay(doc: dict[str, Any]) -> str:
         doc (dict[str, Any]): the OpenAPI document.
     """
     actions: list[dict[str, Any]] = []
-    secondary_codes: set[str] = set()
     for path, method, op in operations(doc):
-        secondary_codes.update(
-            code
-            for code in op.get("responses", {})
-            if not code.startswith("2")
-        )
         content = response_content(doc, op)
         if content:
             actions.append(
@@ -322,11 +316,15 @@ def render_overlay(doc: dict[str, Any]) -> str:
                     "update": {"x-mint": {"content": content}},
                 }
             )
-    if secondary_codes:
-        codes = ",".join(json.dumps(code) for code in sorted(secondary_codes))
-        actions.append(
-            {"target": f"$.paths.*.*.responses[{codes}]", "remove": True}
-        )
+        for code in op.get("responses", {}):
+            if not code.startswith("2"):
+                actions.append(
+                    {
+                        "target": f"$.paths[{json.dumps(path)}].{method}"
+                        f".responses[{json.dumps(code)}]",
+                        "remove": True,
+                    }
+                )
     return (
         json.dumps(
             {
@@ -430,7 +428,7 @@ def selftest() -> None:
     assert "201 Created" in content and "Conflicting configuration" in content
     assert '<Accordion title="Errors">' in content
     assert overlay["actions"][-1] == {
-        "target": '$.paths.*.*.responses["409"]',
+        "target": '$.paths["/visible"].get.responses["409"]',
         "remove": True,
     }
     empty_response = response_content(
