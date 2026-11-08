@@ -701,6 +701,14 @@ impl Shell {
         Ok(Self::wrap(self.shell()?.subshell()))
     }
 
+    /// Free the shell now rather than when it is collected, so a shell
+    /// that has ended shares its records with no other.
+    fn close(&mut self) {
+        self.inner = None;
+        self.parked = 0;
+        self.framed = None;
+    }
+
     /// Expand `node` as `mode` (`fields`, `text`, `assignment`, `pattern`,
     /// `regex` or `arith`) says; `listens` when a session policy hears writes.
     fn expand(

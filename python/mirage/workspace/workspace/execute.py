@@ -1409,7 +1409,10 @@ async def run_prepared_line(
             effective_session._alias_marks.clear()
             effective_session._expand_aliases_marks.clear()
         reset_current_session(session_token)
-        await ws.sessions.flush(session.session_id)
+        # A line run inside another on its session (`$( )`, `eval`) leaves
+        # the flush to that line's end, which saves the same record once.
+        if parent is None:
+            await ws.sessions.flush(session.session_id)
         ws.records.extend(scope.records)
         if history is not None:
             await history.end(io, scope.records)

@@ -410,6 +410,15 @@ describe('same-session lines run one at a time', () => {
     expect(stdoutStr(io)).toBe('deep\nsub\n')
   })
 
+  it('a line saves its session once, at its end', async () => {
+    const ws = makeWs()
+    await ws.shell('x=0')
+    const casSet = vi.spyOn(ws.stateStore.sessions(ws.workspaceId), 'casSet')
+    await ws.shell("for i in 1 2 3; do x=$(echo $i); eval 'y=$x'; done")
+    expect(casSet).toHaveBeenCalledTimes(1)
+    expect(casSet.mock.calls[0]?.[1].env).toMatchObject({ x: '3', y: '3' })
+  })
+
   it('a host callback re-entering its own session runs inline', async () => {
     const ws = makeWs()
     ws.registerCli(

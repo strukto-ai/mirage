@@ -16,6 +16,7 @@ import asyncio
 import logging
 import threading
 from collections.abc import AsyncIterator
+from unittest.mock import patch
 
 import pytest
 
@@ -491,6 +492,17 @@ async def test_abort_on_the_flush_restores_status():
     store.stall = None
     r = await ws.shell("echo next")
     assert r.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_a_line_saves_its_session_once_at_its_end():
+    store = RAMNamespaceStore()
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, session_store=store)
+    await ws.shell("x=0")
+    with patch.object(store, "cas_set", wraps=store.cas_set) as cas_set:
+        await ws.shell("for i in 1 2 3; do x=$(echo $i); eval 'y=$x'; done")
+    assert [c.args[1]["env"]["y"] for c in cas_set.call_args_list] == ["3"]
+    await ws.close()
 
 
 @pytest.mark.asyncio
