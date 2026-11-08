@@ -14,8 +14,7 @@ pub const IFS_DEFAULT: &[u8] = b" \t\n";
 #[derive(Clone, Debug)]
 pub struct Shell {
     pub vars: Store,
-    /// The shell's own positional parameters, shared with every child
-    /// shell rather than copied into each.
+    /// The shell's own positional parameters.
     pub positional: Arc<Vec<Vec<u8>>>,
     /// Each running function's positional parameters, innermost last;
     /// a function sees its own, even none (`f` run bare has `$#` of 0).
@@ -49,8 +48,6 @@ pub struct Shell {
 /// options, the bounds and what the shell keeps of its own, all as the
 /// session holds them now.
 pub struct Frame {
-    /// None keeps the parameters the shell holds, which a host sends only
-    /// when they change.
     pub positional: Option<Vec<Vec<u8>>>,
     pub calls: Option<Vec<Vec<Vec<u8>>>>,
     pub status: i32,
@@ -72,7 +69,9 @@ pub struct Frame {
 }
 
 impl Shell {
-    /// Take on what the host hands the shell (`Frame`).
+    /// Take on what the host hands the shell (`Frame`). A host sends the
+    /// positional parameters only when they change, so `None` keeps the
+    /// ones held, which the shell's clones share rather than copy.
     pub fn apply(&mut self, frame: Frame) {
         if let Some(positional) = frame.positional {
             self.positional = Arc::new(positional);
