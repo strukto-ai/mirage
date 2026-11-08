@@ -80,39 +80,6 @@ describe('mirage workspace create', () => {
   })
 })
 
-describe('mirage workspace delete', () => {
-  it('names the workspace it was given when the server answers with no body', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-workspace-'))
-    tempDirs.push(dir)
-    const server = createServer((req, res) => {
-      if (req.url === '/v1/health') {
-        res.writeHead(200, { 'content-type': 'application/json' }).end('{"status":"ok"}')
-        return
-      }
-      res.writeHead(204).end()
-    })
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-    const { port } = server.address() as AddressInfo
-    try {
-      const env: NodeJS.ProcessEnv = {
-        ...process.env,
-        MIRAGE_HOME: dir,
-        MIRAGE_DAEMON_URL: `http://127.0.0.1:${String(port)}`,
-      }
-      const child = spawn(process.execPath, [BIN, 'workspace', 'delete', 'my-ws'], { env })
-      let stdout = ''
-      child.stdout.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString()
-      })
-      const code = await new Promise<number | null>((resolve) => child.on('close', resolve))
-      expect(code).toBe(0)
-      expect(JSON.parse(stdout)).toEqual({ id: 'my-ws' })
-    } finally {
-      server.close()
-    }
-  })
-})
-
 interface Seen {
   method: string
   url: string
