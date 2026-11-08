@@ -10,6 +10,7 @@ mod reverse;
 mod tests;
 
 use crate::{Stream, StreamError, parse_config};
+pub(crate) use compile::quote;
 use compile::{Compiler, Dialect, Program, is};
 use evaluate::Evaluator;
 use flat::Flat;

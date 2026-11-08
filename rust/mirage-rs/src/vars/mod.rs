@@ -19,6 +19,7 @@
 mod reading;
 mod value;
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -500,6 +501,16 @@ impl Store {
         match self.visible(name)?.value.as_ref()? {
             Value::Indexed(array) => Some(array),
             _ => None,
+        }
+    }
+
+    /// An indexed array as a read finds it: `PIPESTATUS`, `FUNCNAME` and
+    /// `BASH_LINENO` from the shell's own bookkeeping (`special`), else the
+    /// variable's.
+    pub fn array(&self, name: &str) -> Option<Cow<'_, Indexed>> {
+        match self.special(name) {
+            Some(array) => Some(Cow::Owned(array)),
+            None => self.indexed(name).map(Cow::Borrowed),
         }
     }
 

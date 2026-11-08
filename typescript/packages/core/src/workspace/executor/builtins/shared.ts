@@ -245,6 +245,14 @@ export function identifierLine(cmd: string, name: string): string {
   return `${shellVoice()}${cmd}: \`${name}': not a valid identifier`
 }
 
+/**
+ * The refusal of a write to a name the session hides, in the assignment's
+ * voice (`bash: SECRET: permission denied`). Mirrors Python's denied_line.
+ */
+export function deniedLine(name: string): string {
+  return `${shellVoice()}${name}: permission denied`
+}
+
 /** Render the readonly refusal (`readonlyLine`) as the result. */
 export function readonlyRefusal(cmd: string, name: string): RedirectResult {
   const encoded = encodeText(`${readonlyLine(cmd, name)}\n`)

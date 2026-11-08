@@ -17,6 +17,7 @@ use super::Diagnostic;
 use super::expand::{Expander, Field, Host, Substitution};
 use super::shell::Shell;
 use super::write::{Denied, Fault, Gate, Verb, Writer, element_reference};
+use crate::integer::parse_decimal;
 use crate::shell::Tree;
 use crate::vars::{Assigned, Store, Value};
 
@@ -94,9 +95,26 @@ impl Line {
         .await
     }
 
-    /// A gate question's answer: the policy's refusal as a denial, a host
-    /// that failed answering as its own fault.
-    async fn gated(&self, ask: Ask) -> Result<(), Fault> {
+    /// Ask the gate about a write, before it lands or once it has
+    /// (`post`): the policy's refusal as a denial, a host that failed
+    /// answering as its own fault.
+    async fn gated(
+        &self,
+        post: bool,
+        verb: Verb,
+        key: &str,
+        value: Option<&[u8]>,
+        old: Option<&[u8]>,
+        store: &Store,
+    ) -> Result<(), Fault> {
+        let ask = Ask::Gate {
+            post,
+            verb,
+            key: key.to_owned(),
+            value: value.map(<[u8]>::to_vec),
+            old: old.map(<[u8]>::to_vec),
+            view: store.fork(),
+        };
         match self.ask(ask).await {
             Answer::Gate(answer) => answer.map_err(Fault::Denied),
             Answer::Failed(fault) => Err(fault),
@@ -117,15 +135,7 @@ impl Gate for Line {
         value: Option<&[u8]>,
         store: &Store,
     ) -> Result<(), Fault> {
-        let ask = Ask::Gate {
-            post: false,
-            verb,
-            key: key.to_owned(),
-            value: value.map(<[u8]>::to_vec),
-            old: None,
-            view: store.fork(),
-        };
-        self.gated(ask).await
+        self.gated(false, verb, key, value, None, store).await
     }
 
     async fn post(
@@ -136,15 +146,7 @@ impl Gate for Line {
         old: Option<&[u8]>,
         store: &Store,
     ) -> Result<(), Fault> {
-        let ask = Ask::Gate {
-            post: true,
-            verb,
-            key: key.to_owned(),
-            value: value.map(<[u8]>::to_vec),
-            old: old.map(<[u8]>::to_vec),
-            view: store.fork(),
-        };
-        self.gated(ask).await
+        self.gated(true, verb, key, value, old, store).await
     }
 }
 
@@ -439,15 +441,7 @@ pub fn write(shell: Shell, write: Write, listens: bool, warns: bool) -> Task<End
             _ => None,
         };
         let result = {
-            let mut writer = Writer {
-                allexport: shell.option("allexport"),
-                nounset: shell.option("nounset"),
-                limit: shell.env_limit,
-                outside: shell.outside,
-                store: &mut shell.vars,
-                gate: &mut line,
-                diagnostics: warns.then_some(&mut diagnostics),
-            };
+            let mut writer = Writer::of(&mut shell, &mut line, warns.then_some(&mut diagnostics));
             match write {
                 Write::Set {
                     name,
@@ -495,12 +489,7 @@ pub fn write(shell: Shell, write: Write, listens: bool, warns: bool) -> Task<End
                 Write::Integer { text, added } => writer
                     .evaluate_integer(&text, added.as_deref())
                     .await
-                    .map(|value| {
-                        std::str::from_utf8(&value)
-                            .ok()
-                            .and_then(|value| value.parse().ok())
-                            .unwrap_or(0)
-                    }),
+                    .map(|value| parse_decimal(&value).unwrap_or(0)),
             }
         };
         Ended {

@@ -59,26 +59,10 @@ from mirage.workspace.session.state import (
     appended,
     conversion_scalar,
     deref,
+    fatal_subscript_index,
     session_view,
     subscript_index,
 )
-
-
-async def _fatal_index(
-    context: EvaluationContext, subscript: str, policies: Policies | None
-) -> int:
-    """``subscript_index`` whose failure ends the line, in bash's words.
-
-    Args:
-        context (EvaluationContext): the session the subscript reads.
-        subscript (str): the raw subscript text.
-        policies (Policies | None): the policies its writes clear.
-    """
-    session = context.session
-    try:
-        return await subscript_index(session, subscript, policies)
-    except ArithError as exc:
-        raise exc.signal(fatal=True) from exc
 
 
 async def _fatal_index_literal(
@@ -404,7 +388,7 @@ async def execute_assignment(
         if arr is None:
             scalar = conversion_scalar(session, key)
             arr = make_array([] if scalar is None else [scalar])
-        idx = await _fatal_index(context, sub_text, policies)
+        idx = await fatal_subscript_index(context.session, sub_text, policies)
         if idx < 0:
             idx += array_extent(arr)
         if idx < 0:

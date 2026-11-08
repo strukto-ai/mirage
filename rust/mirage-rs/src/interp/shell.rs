@@ -195,10 +195,22 @@ impl Shell {
         if self.vars.hidden(name) {
             return None;
         }
-        match self.vars.special(name) {
-            Some(array) => Some(Cow::Owned(array)),
-            None => self.vars.indexed(name).map(Cow::Borrowed),
+        self.vars.array(name)
+    }
+
+    /// What `$name` reads: element 0 of an array, a map's key `0`, the
+    /// live `LINENO` or `BASHPID`, else the scalar; None when it holds
+    /// none. Drawing `$RANDOM` is the caller's.
+    pub fn zero(&self, name: &str) -> Option<Vec<u8>> {
+        if let Some(array) = self.indexed(name) {
+            return array.get(0).map(<[u8]>::to_vec);
         }
+        if let Some(map) = self.vars.assoc(name) {
+            return map.get(b"0").map(<[u8]>::to_vec);
+        }
+        self.vars
+            .dynamic(name)
+            .or_else(|| self.vars.scalar(name).map(<[u8]>::to_vec))
     }
 
     /// The IFS in scope, None when it is unset, which splits as the

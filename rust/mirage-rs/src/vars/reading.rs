@@ -2,6 +2,7 @@
 //! questions, `RANDOM` drawing through an evaluation's scratch generator.
 
 use super::*;
+use crate::integer::parse_decimal;
 
 /// The session as arithmetic reads it.
 pub(super) struct Reading<'s> {
@@ -91,9 +92,7 @@ impl Vars for Reading<'_> {
     }
 
     fn holds_array(&mut self, name: &str) -> Result<bool, Halt> {
-        Ok(self.store.special(name).is_some()
-            || self.store.indexed(name).is_some()
-            || self.store.assoc(name).is_some())
+        Ok(self.store.array(name).is_some() || self.store.assoc(name).is_some())
     }
 
     fn assoc(&mut self, name: &str) -> Result<bool, Halt> {
@@ -104,14 +103,9 @@ impl Vars for Reading<'_> {
         if self.store.assoc(name).is_some() {
             return Ok(strip_key_quotes(subscript).to_vec());
         }
-        let mut index: i64 = std::str::from_utf8(subscript)
-            .ok()
-            .and_then(|text| text.parse().ok())
-            .unwrap_or(0);
+        let mut index: i64 = parse_decimal(subscript).unwrap_or(0);
         if index < 0 {
-            if let Some(array) = self.store.special(name) {
-                index = array.back(index);
-            } else if let Some(array) = self.store.indexed(name) {
+            if let Some(array) = self.store.array(name) {
                 index = array.back(index);
             } else if self.store.scalar(name).is_some() {
                 index += 1;
@@ -133,18 +127,12 @@ impl Vars for Reading<'_> {
     }
 
     fn element(&mut self, name: &str, key: &[u8]) -> Result<Option<Vec<u8>>, Halt> {
-        let index: i64 = std::str::from_utf8(key)
-            .ok()
-            .and_then(|text| text.parse().ok())
-            .unwrap_or(0);
-        if let Some(array) = self.store.special(name) {
+        let index: i64 = parse_decimal(key).unwrap_or(0);
+        if let Some(array) = self.store.array(name) {
             return Ok(array.get(index).map(<[u8]>::to_vec));
         }
         if let Some(map) = self.store.assoc(name) {
             return Ok(map.get(key).map(<[u8]>::to_vec));
-        }
-        if let Some(array) = self.store.indexed(name) {
-            return Ok(array.get(index).map(<[u8]>::to_vec));
         }
         Ok(self
             .store

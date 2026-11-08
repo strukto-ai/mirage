@@ -265,6 +265,16 @@ def identifier_line(cmd: str, name: str) -> str:
     return f"{shell_voice()}{cmd}: `{name}': not a valid identifier"
 
 
+def denied_line(name: str) -> str:
+    """The refusal of a write to a name the session hides, in the
+    assignment's voice (``bash: SECRET: permission denied``).
+
+    Args:
+        name (str): the hidden variable.
+    """
+    return f"{shell_voice()}{name}: permission denied"
+
+
 def readonly_refusal(cmd: str, name: str) -> Result:
     """Render the readonly refusal (``readonly_line``) as the result.
 

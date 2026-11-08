@@ -32,6 +32,7 @@ from mirage.workspace.executor.builtins.read.constants import (
 from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
     count_operand,
+    denied_line,
     identifier_line,
     is_valid_name,
     readonly_refusal,
@@ -101,7 +102,7 @@ async def _read_store(
     if status == "readonly":
         return readonly_refusal("read", base)
     if status == "denied":
-        err = encode_text(f"{shell_voice()}{base}: permission denied\n")
+        err = encode_text(f"{denied_line(base)}\n")
         return (
             None,
             IOResult(exit_code=1, stderr=err),

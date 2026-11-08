@@ -1,3 +1,9 @@
+/// A decimal word as a number: None when it is no UTF-8 or does not
+/// parse as one.
+pub(crate) fn parse_decimal<T: std::str::FromStr>(text: &[u8]) -> Option<T> {
+    std::str::from_utf8(text).ok()?.parse().ok()
+}
+
 /// A signed magnitude rendered into caller-owned storage, including i64::MIN.
 pub(crate) fn decimal_bytes(mut n: u64, negative: bool, text: &mut [u8; 21]) -> &[u8] {
     let mut at = text.len();

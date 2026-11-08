@@ -18,14 +18,13 @@ import { PolicyDenied } from '../../../../policy/errors.ts'
 import { arrayExtent, arrayUnset } from '../../../../shell/array.ts'
 import type { Policies } from '../../../../policy/index.ts'
 import { BASH_LINENO, FUNCNAME } from '../../../../shell/constants.ts'
-import { ArithError } from '../../../../shell/errors.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { type SessionState, sessionEntry } from '../../../session/session.ts'
 import {
   deref,
   envGet,
+  fatalSubscriptIndex,
   sessionView,
-  subscriptIndex,
   visibleArrays,
   visibleAssocs,
 } from '../../../session/state.ts'
@@ -52,23 +51,6 @@ import type { BuiltinCall } from '../types.ts'
 function unsetVariable(session: SessionState, name: string): void {
   if (name === 'OPTIND') session.getoptsOptind = null
   if (name === FUNCNAME) session.functionNames = null
-}
-
-/**
- * `subscriptIndex` whose failure ends the line, in bash's words: `unset
- * 'a[1/0]'` aborts with `1/0: division by 0`.
- */
-async function fatalIndex(
-  session: SessionState,
-  subscript: string,
-  policies: Policies | null,
-): Promise<bigint> {
-  try {
-    return await subscriptIndex(session, subscript, policies)
-  } catch (err) {
-    if (err instanceof ArithError) throw err.signal('', true)
-    throw err
-  }
 }
 
 /**
@@ -116,11 +98,11 @@ async function unsetElement(
     // branch's silent no-op instead of a denial that would leak the
     // name's existence.
     if (envGet(session, base) === null) return 'ok'
-    if ((await fatalIndex(session, subscript, policies)) !== 0n) return 'notarray'
+    if ((await fatalSubscriptIndex(session, subscript, policies)) !== 0n) return 'notarray'
     await view.unset(base)
     return 'ok'
   }
-  let idx = await fatalIndex(session, subscript, policies)
+  let idx = await fatalSubscriptIndex(session, subscript, policies)
   if (idx < 0n) {
     idx += arrayExtent(arr)
     if (idx < 0n) return 'subscript'

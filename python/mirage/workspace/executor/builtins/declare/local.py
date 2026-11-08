@@ -44,6 +44,7 @@ from mirage.workspace.executor.builtins.declare.types import (
     DeclarationOperand,
 )
 from mirage.workspace.executor.builtins.shared import (
+    denied_line,
     fail,
     is_valid_name,
     ok,
@@ -465,7 +466,7 @@ async def _declare_element(
     if status == "readonly":
         return readonly_line(cmd, name)
     if status == "denied":
-        return f"{shell_voice()}{name}: permission denied"
+        return denied_line(name)
     if status != "ok":
         return f"{shell_voice()}{key}: bad array subscript"
     await stamp_marks(session, view, name, name, marks)

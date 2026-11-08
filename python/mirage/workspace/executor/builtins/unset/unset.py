@@ -16,7 +16,6 @@ from mirage.policy import PolicyDenied
 from mirage.policy.policies import Policies
 from mirage.shell.array import array_extent, array_unset
 from mirage.shell.constants import BASH_LINENO, FUNCNAME
-from mirage.shell.errors import ArithError
 from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
@@ -35,8 +34,8 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     deref,
     env_get,
+    fatal_subscript_index,
     session_view,
-    subscript_index,
     visible_arrays,
     visible_assocs,
 )
@@ -57,23 +56,6 @@ def _unset_variable(session: SessionState, name: str) -> None:
         session._getopts_optind = None
     if name == FUNCNAME:
         session.function_names = None
-
-
-async def _fatal_index(
-    session: SessionState, subscript: str, policies: Policies | None
-) -> int:
-    """``subscript_index`` whose failure ends the line, in bash's words:
-    ``unset 'a[1/0]'`` aborts with ``1/0: division by 0``.
-
-    Args:
-        session (SessionState): the session the subscript reads.
-        subscript (str): the raw subscript text.
-        policies (Policies | None): the policies its assignments clear.
-    """
-    try:
-        return await subscript_index(session, subscript, policies)
-    except ArithError as exc:
-        raise exc.signal(fatal=True) from exc
 
 
 async def _unset_element(
@@ -135,11 +117,11 @@ async def _unset_element(
         # the name's existence.
         if env_get(session, base) is None:
             return "ok"
-        if await _fatal_index(session, subscript, policies) != 0:
+        if await fatal_subscript_index(session, subscript, policies) != 0:
             return "notarray"
         await view.unset(base)
         return "ok"
-    idx = await _fatal_index(session, subscript, policies)
+    idx = await fatal_subscript_index(session, subscript, policies)
     if idx < 0:
         idx += array_extent(arr)
         if idx < 0:

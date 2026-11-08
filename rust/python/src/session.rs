@@ -3,14 +3,15 @@ use std::sync::Arc;
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
-use streams::arith;
-use streams::interp::expand::{Substitution, marked};
-use streams::interp::job::{Job, Output, Running, Step};
+use pyo3::types::{PyBool, PyBytes, PyDict, PyList, PyTuple};
+use streams::interp::codec::Item;
+use streams::interp::expand::Substitution;
+use streams::interp::host::{self, Held};
+use streams::interp::job::{Job, Running, Step};
 use streams::interp::shell::{Frame, Shell as Inner};
-use streams::interp::task::{self, Answer, Ask, Expanded, Mode, Write};
-use streams::interp::write::{Denied, Fault, Verb};
-use streams::interp::{Diagnostic, Signal, listing, quote};
+use streams::interp::task::{self, Answer, Ask, Mode, Write};
+use streams::interp::write::{Denied, Fault};
+use streams::interp::{listing, quote};
 use streams::shell::Tree;
 use streams::vars::{self, Assigned, Indexed, Kind, Managed, Store, Value, Var};
 
@@ -41,20 +42,27 @@ fn ids(source: Py<PyAny>) -> vars::Ids {
     })
 }
 
-fn value_out<'py>(py: Python<'py>, value: &Value) -> PyResult<Bound<'py, PyAny>> {
-    Ok(match value {
-        Value::Scalar(text) => text_of(py, text)?,
-        Value::Indexed(array) => {
+/// An engine answer as Python reads it: a list as a list, a tuple as a
+/// tuple, a map as a dict, text as shell text and raw bytes as bytes.
+fn py_of<'py>(py: Python<'py>, item: &Item) -> PyResult<Bound<'py, PyAny>> {
+    let items = |items: &[Item]| {
+        items
+            .iter()
+            .map(|item| py_of(py, item))
+            .collect::<PyResult<Vec<_>>>()
+    };
+    Ok(match item {
+        Item::Nil => py.None().into_bound(py),
+        Item::Bool(value) => PyBool::new(py, *value).to_owned().into_any(),
+        Item::Int(value) | Item::Big(value) => value.into_pyobject(py)?.into_any(),
+        Item::Text(text) => text_of(py, text)?,
+        Item::Raw(bytes) => PyBytes::new(py, bytes).into_any(),
+        Item::List(list) => PyList::new(py, items(list)?)?.into_any(),
+        Item::Tuple(tuple) => PyTuple::new(py, items(tuple)?)?.into_any(),
+        Item::Map(pairs) => {
             let out = PyDict::new(py);
-            for (index, element) in array.iter() {
-                out.set_item(index, text_of(py, element)?)?;
-            }
-            out.into_any()
-        }
-        Value::Assoc(map) => {
-            let out = PyDict::new(py);
-            for (key, element) in map.iter() {
-                out.set_item(text_of(py, key)?, text_of(py, element)?)?;
+            for (key, value) in pairs {
+                out.set_item(py_of(py, key)?, py_of(py, value)?)?;
             }
             out.into_any()
         }
@@ -81,22 +89,6 @@ fn value_in(value: &Bound<'_, PyAny>, assoc: bool) -> PyResult<Value> {
     Ok(Value::Indexed(array))
 }
 
-/// A record as Python reads it: the value, None for declared but unset,
-/// the cluster `declare -p` prints (`a`/`A` leading for an array), and a
-/// managed variable's pointer.
-fn record_out<'py>(py: Python<'py>, var: &Var) -> PyResult<Bound<'py, PyTuple>> {
-    let value = var.value.as_ref().map(|v| value_out(py, v)).transpose()?;
-    let managed = var.managed.as_ref().map(|managed| {
-        (
-            managed.source.clone(),
-            managed.reference.clone(),
-            managed.key.clone(),
-            managed.eager,
-        )
-    });
-    (value, var.cluster(), managed).into_pyobject(py)
-}
-
 fn record_in(
     value: Option<&Bound<'_, PyAny>>,
     cluster: &str,
@@ -120,128 +112,24 @@ fn record_in(
     })
 }
 
-fn arith_error<'py>(py: Python<'py>, error: &arith::Error) -> PyResult<Bound<'py, PyAny>> {
-    Ok(match error {
-        arith::Error::Arith {
-            reason,
-            expression,
-            token,
-            subscript,
-        } => {
-            let token = token.as_ref().map(|t| text_of(py, t)).transpose()?;
-            (
-                "arith",
-                reason.clone(),
-                text_of(py, expression)?,
-                token,
-                *subscript,
-            )
-                .into_pyobject(py)?
-                .into_any()
-        }
-        arith::Error::Readonly { name, subscript } => ("readonly", name.clone(), *subscript)
-            .into_pyobject(py)?
-            .into_any(),
-        arith::Error::Unbound(name) => ("unbound", name.clone()).into_pyobject(py)?.into_any(),
-        arith::Error::Halt { subscript } => ("halt", *subscript).into_pyobject(py)?.into_any(),
-    })
-}
-
-/// Why an operation stopped, as a tagged tuple the host maps to its own
-/// exceptions.
-fn fault_out<'py>(py: Python<'py>, fault: &Fault) -> PyResult<Bound<'py, PyAny>> {
-    let out = match fault {
-        Fault::Hidden(name) => ("hidden", name.clone()).into_pyobject(py)?.into_any(),
-        Fault::Denied(Denied { name, record }) => ("denied", name.clone(), *record)
-            .into_pyobject(py)?
-            .into_any(),
-        Fault::Readonly { name, subscript } => ("readonly", name.clone(), *subscript)
-            .into_pyobject(py)?
-            .into_any(),
-        Fault::Arith(error) => ("arith", arith_error(py, error)?)
-            .into_pyobject(py)?
-            .into_any(),
-        Fault::Signal(Signal::Exit {
-            status,
-            stderr,
-            contained,
-        }) => ("exit", *status, PyBytes::new(py, stderr), *contained)
-            .into_pyobject(py)?
-            .into_any(),
-        Fault::Signal(Signal::Discard { stderr, contained }) => {
-            ("discard", PyBytes::new(py, stderr), *contained)
-                .into_pyobject(py)?
-                .into_any()
-        }
-        Fault::Bad { text, fixed } => ("bad", text_of(py, text)?, *fixed)
-            .into_pyobject(py)?
-            .into_any(),
-        Fault::Memory => ("memory",).into_pyobject(py)?.into_any(),
-        Fault::Host(what) => ("host", *what).into_pyobject(py)?.into_any(),
-    };
-    Ok(out)
-}
-
-fn expanded_out<'py>(py: Python<'py>, expanded: &Expanded) -> PyResult<Bound<'py, PyAny>> {
-    Ok(match expanded {
-        Expanded::Fields(fields) => {
-            let out = PyList::empty(py);
-            for field in fields {
-                out.append(text_of(py, &marked(&field.0))?)?;
-            }
-            out.into_any()
-        }
-        Expanded::Text(text) => text_of(py, text)?,
-        Expanded::Runs(runs) => {
-            let out = PyList::empty(py);
-            for (text, quoted) in runs {
-                out.append((text_of(py, text)?, *quoted))?;
-            }
-            out.into_any()
-        }
-    })
-}
-
-fn diagnostics_out<'py>(
-    py: Python<'py>,
-    diagnostics: &[Diagnostic],
-) -> PyResult<Bound<'py, PyList>> {
-    let out = PyList::empty(py);
-    for diagnostic in diagnostics {
-        match diagnostic {
-            Diagnostic::Text(text) => out.append(text_of(py, text)?)?,
-            Diagnostic::Bytes(bytes) => out.append(PyBytes::new(py, bytes))?,
-        }
-    }
-    Ok(out)
-}
-
 /// One session's shell: its variables, the positional parameters, the
 /// special parameters and the options, held in mirage-rs. While a
 /// `ShellTask` runs on it the shell is the task's, and any read of it
 /// raises until the task finishes.
 #[pyclass(module = "mirage._rs")]
-pub struct Shell {
-    inner: Option<Inner>,
-    /// The bytes the records held when a task took the shell, which the
-    /// workspace's memory count reads while it runs.
-    parked: usize,
-}
+pub struct Shell(Held);
 
 impl Shell {
     fn wrap(inner: Inner) -> Self {
-        Self {
-            inner: Some(inner),
-            parked: 0,
-        }
+        Self(Held::new(inner))
     }
 
     fn shell(&self) -> PyResult<&Inner> {
-        self.inner.as_ref().ok_or_else(running)
+        self.0.shell().ok_or_else(running)
     }
 
     fn shell_mut(&mut self) -> PyResult<&mut Inner> {
-        self.inner.as_mut().ok_or_else(running)
+        self.0.shell_mut().ok_or_else(running)
     }
 
     fn store(&self) -> PyResult<&Store> {
@@ -280,19 +168,19 @@ impl Shell {
 
     /// The raw record a name holds, references not followed, hidden or
     /// not: `(value, cluster, managed)`.
-    fn get<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyTuple>>> {
+    fn get<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyAny>>> {
         self.store()?
             .record(name)
-            .map(|var| record_out(py, var))
+            .map(|var| py_of(py, &host::record_out(var)))
             .transpose()
     }
 
     /// The record a name stands for, references followed; None when
     /// unset or hidden.
-    fn visible<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyTuple>>> {
+    fn visible<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyAny>>> {
         self.store()?
             .visible(name)
-            .map(|var| record_out(py, var))
+            .map(|var| py_of(py, &host::record_out(var)))
             .transpose()
     }
 
@@ -304,14 +192,14 @@ impl Shell {
         py: Python<'py>,
         name: &str,
         record: Option<(Bound<'py, PyAny>, String, Option<ManagedTuple>)>,
-    ) -> PyResult<Option<Bound<'py, PyTuple>>> {
+    ) -> PyResult<Option<Bound<'py, PyAny>>> {
         let var = match record {
             Some((value, cluster, managed)) => Some(record_in(Some(&value), &cluster, managed)?),
             None => None,
         };
         self.store_mut()?
             .place(name, var.map(Arc::new))
-            .map(|old| record_out(py, &old))
+            .map(|old| py_of(py, &host::record_out(&old)))
             .transpose()
     }
 
@@ -337,7 +225,7 @@ impl Shell {
     fn indexed<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyAny>>> {
         self.shell()?
             .indexed(name)
-            .map(|array| value_out(py, &Value::Indexed(array.into_owned())))
+            .map(|array| py_of(py, &host::value_out(&Value::Indexed(array.into_owned()))))
             .transpose()
     }
 
@@ -363,7 +251,7 @@ impl Shell {
     fn records<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
         let out = PyList::empty(py);
         for (name, var) in self.store()?.records() {
-            out.append((name, record_out(py, var)?))?;
+            out.append((name, py_of(py, &host::record_out(var))?))?;
         }
         Ok(out)
     }
@@ -379,9 +267,7 @@ impl Shell {
     /// The bytes every record holds, names and values; while a task
     /// runs, what they held as it started.
     fn held(&self) -> usize {
-        self.inner
-            .as_ref()
-            .map_or(self.parked, |inner| inner.vars.held())
+        self.0.held()
     }
 
     /// Whether this shell holds the records `other` holds, value for
@@ -580,10 +466,7 @@ impl Shell {
     /// One `$RANDOM` read: the draw, None once RANDOM is not special;
     /// a seed that does not evaluate comes back as its error tuple.
     fn next_random<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        match self.store_mut()?.next_random() {
-            Ok(drawn) => Ok(drawn.into_pyobject(py)?.into_any()),
-            Err(error) => arith_error(py, &error),
-        }
+        py_of(py, &host::random_out(&self.store_mut()?.next_random()))
     }
 
     /// The state around a line that the shell reads: the positional
@@ -656,13 +539,10 @@ impl Shell {
         py: Python<'py>,
         name: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
-        match self.store_mut()?.conversion_scalar(name) {
-            Ok(Some(text)) => text_of(py, &text),
-            Ok(None) => Ok(py.None().into_bound(py)),
-            Err(error) => Ok(("error", arith_error(py, &error)?)
-                .into_pyobject(py)?
-                .into_any()),
-        }
+        py_of(
+            py,
+            &host::conversion_out(&self.store_mut()?.conversion_scalar(name)),
+        )
     }
 
     /// A copy for a fork of the session: the same records, a fresh
@@ -849,7 +729,7 @@ impl Shell {
 }
 
 /// What an ended task leaves: its result tuple and diagnostics.
-type Outcome = (Py<PyAny>, Py<PyList>);
+type Outcome = (Py<PyAny>, Py<PyAny>);
 
 /// An operation running on a shell, driven by the host. Started, it has
 /// run to its first request or its end: `step` returns the request it
@@ -876,8 +756,7 @@ impl ShellTask {
         run: impl FnOnce(Inner) -> Running,
     ) -> PyResult<Self> {
         let mut shell = slf.borrow_mut();
-        let inner = shell.inner.take().ok_or_else(running)?;
-        shell.parked = inner.vars.held();
+        let inner = shell.0.take().ok_or_else(running)?;
         drop(shell);
         let (job, step) = Job::start(run(inner));
         let mut task = Self {
@@ -917,13 +796,8 @@ impl ShellTask {
                 text_of(py, &body)?,
                 self.node(node)?,
                 span,
-                read.map(|fields| {
-                    fields
-                        .iter()
-                        .map(|field| text_of(py, &marked(&field.0)))
-                        .collect::<PyResult<Vec<_>>>()
-                })
-                .transpose()?,
+                read.map(|fields| py_of(py, &host::fields_out(&fields)))
+                    .transpose()?,
             )
                 .into_pyobject(py)?
                 .into_any(),
@@ -940,10 +814,7 @@ impl ShellTask {
                 old,
                 view,
             } => {
-                let verb = match verb {
-                    Verb::Set => "set",
-                    Verb::Unset => "unset",
-                };
+                let verb = host::verb_name(verb);
                 let value = value.map(|v| text_of(py, &v)).transpose()?;
                 let old = old.map(|v| text_of(py, &v)).transpose()?;
                 (
@@ -974,15 +845,9 @@ impl ShellTask {
             }
             Step::Ended(ended) => ended,
         };
-        let result = match &ended.result {
-            Ok(Output::Expanded(done)) => ("ok", expanded_out(py, done)?)
-                .into_pyobject(py)?
-                .into_any(),
-            Ok(Output::Wrote(value)) => ("ok", *value).into_pyobject(py)?.into_any(),
-            Err(fault) => fault_out(py, fault)?,
-        };
-        let diagnostics = diagnostics_out(py, &ended.diagnostics)?;
-        self.owner.borrow_mut(py).inner = Some(ended.shell);
+        let result = py_of(py, &host::result_out(&ended.result))?;
+        let diagnostics = py_of(py, &host::diagnostics_out(&ended.diagnostics))?;
+        self.owner.borrow_mut(py).0.give_back(ended.shell);
         self.asked = None;
         self.ended = Some((result.unbind(), diagnostics.unbind()));
         Ok(())
@@ -1064,13 +929,7 @@ impl ShellTask {
     }
 
     /// The next slice of a long list of fields.
-    fn slice<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
-        let fields = self
-            .job
-            .slice()
-            .iter()
-            .map(|field| text_of(py, &marked(&field.0)))
-            .collect::<PyResult<Vec<_>>>()?;
-        PyList::new(py, fields)
+    fn slice<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        py_of(py, &host::fields_out(&self.job.slice()))
     }
 }
