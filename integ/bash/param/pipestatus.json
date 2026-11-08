@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "false; echo ${PIPESTATUS[@]} $PIPESTATUS ${#PIPESTATUS[@]}",
+      "command": "false; echo ${PIPESTATUS[@]} $PIPESTATUS ${#PIPESTATUS[@]}; false; PIPESTATUS[-1]=0; echo \"after $?\"; f() { FUNCNAME[-1]=x; echo \"in $?\"; }; f",
       "expect": {
         "exit": 0,
-        "stdout": "1 1 1\n",
+        "stdout": "1 1 1\nafter 0\nin 0\n",
         "stderr": ""
       }
     },

@@ -678,9 +678,7 @@ export class Shell {
   // The frame `frame` set, sent with the next request rather than in one of
   // its own.
   private framed: ShellFrame | null = null
-  // The positional parameters the engine last took, the shell's and each
-  // call's: a frame holding the same arrays sends none of them again, since
-  // the host replaces an array rather than change it.
+  // The positional arrays the engine last took.
   private sent: Pick<ShellFrame, 'positional' | 'calls'> | null = null
 
   private constructor(readonly handle: number) {
@@ -715,7 +713,10 @@ export class Shell {
     ])
   }
 
-  /** A frame as the engine takes it, positional parameters it holds already left out. */
+  /**
+   * A frame as the engine takes it, positional parameters it holds already
+   * left out: the host replaces an array rather than change it.
+   */
   private frameItems(frame: ShellFrame): Item[] {
     const sent = this.sent
     this.sent = { positional: frame.positional, calls: frame.calls }

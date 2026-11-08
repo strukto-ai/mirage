@@ -399,8 +399,9 @@ impl<G: Gate> Writer<'_, G> {
     }
 
     /// Append `words` at the extent of the indexed array `name` holds
-    /// (`a+=(x y)`): each lands in place as `set_element` writes it, or,
-    /// with a policy listening, the whole value through `set` as one write.
+    /// (`a+=(x y)`): each lands in place as `set_element` writes it, a word
+    /// refused taking back the ones before it, or, with a policy listening,
+    /// the whole value through `set` as one write.
     pub async fn push(&mut self, name: &str, words: Vec<Vec<u8>>) -> Result<(), Fault> {
         let name = self.store.target(name);
         self.writable(&name)?;
@@ -428,9 +429,17 @@ impl<G: Gate> Writer<'_, G> {
                 .set(&name, Value::Indexed(array), false, Some(&assigned), None)
                 .await;
         }
+        let mut landed = Vec::new();
         for (index, word) in slots {
-            self.set_element(&name, Slot::Index(index), Some(word), None)
-                .await?;
+            let slot = Slot::Index(index);
+            if let Err(fault) = self.set_element(&name, slot, Some(word), None).await {
+                for index in landed {
+                    self.store
+                        .put_element(&name, &Slot::Index(index), None, false);
+                }
+                return Err(fault);
+            }
+            landed.push(index);
         }
         Ok(())
     }
@@ -742,7 +751,9 @@ impl<G: Gate> Writer<'_, G> {
             return Ok(Element::Hidden);
         }
         // An existing scalar becomes element 0, even when empty: bash
-        // resolves `x[-1]` against the length-1 array that makes.
+        // resolves `x[-1]` against the length-1 array that makes, and a
+        // name with no record against the one the shell computes
+        // (`PIPESTATUS[-1]=0`).
         let mut converted = None;
         let slot = match self.store.record(&name).and_then(|var| var.value.as_ref()) {
             Some(Value::Assoc(_)) => match subscript.unwrap_or(b"0") {
@@ -752,8 +763,13 @@ impl<G: Gate> Writer<'_, G> {
             Some(Value::Scalar(_)) | None if subscript.is_none() => None,
             held => {
                 if !matches!(held, Some(Value::Indexed(_))) {
-                    let scalar = self.store.conversion_scalar(&name).map_err(Fault::Arith)?;
-                    converted = Some(Indexed::dense(scalar));
+                    let special = held.is_none().then(|| self.store.special(&name)).flatten();
+                    converted = Some(match special {
+                        Some(array) => array,
+                        None => Indexed::dense(
+                            self.store.conversion_scalar(&name).map_err(Fault::Arith)?,
+                        ),
+                    });
                 }
                 let index = match subscript {
                     Some(subscript) => self.subscript_index(subscript).await?,
@@ -1184,6 +1200,18 @@ mod tests {
         assert_eq!(text(writer.store, "s"), None);
         assert_eq!(text(writer.store, "x").as_deref(), Some("1"));
         assert_eq!(text(writer.store, "y").as_deref(), Some("2"));
+        writer
+            .store
+            .set_specials(vec![1], None, 1, 1, b"bash: ".to_vec());
+        let special = run(writer.element("PIPESTATUS", Some(b"-1"), b"0", false)).unwrap();
+        assert_eq!(special, Element::Landed);
+        writer.limit = Some(writer.store.held() + 4);
+        let refused = run(writer.push("a", vec![b"4".to_vec(), b"far too long".to_vec()]));
+        assert!(matches!(
+            refused,
+            Err(Fault::Signal(Signal::Exit { status: 2, .. }))
+        ));
+        assert_eq!(writer.store.indexed("a").unwrap().count(), 2);
         let counted: usize = writer
             .store
             .records()

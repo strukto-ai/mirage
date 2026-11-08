@@ -147,10 +147,7 @@ pub struct Store {
     hidden: Option<Arc<VisibilityMatcher>>,
     ids: Ids,
     held: usize,
-    /// What the records and the names hidden from them are stamped with,
-    /// a fresh stamp on every change: a fork keeps its source's until it
-    /// changes, so a stamp names one view of the records, which a host
-    /// keys what it derives from them by (`exported`).
+    /// A fresh stamp on every change to the records or the hidden names.
     stamp: u64,
     /// `${PIPESTATUS[@]}`: each stage's status in the last pipeline.
     pipe_status: Vec<i32>,
@@ -313,7 +310,9 @@ impl Store {
         self.stamp = fresh_stamp();
     }
 
-    /// The stamp the records and the names hidden from them carry now.
+    /// The stamp the records and the names hidden from them carry now: a
+    /// fork keeps its source's until it changes, so a stamp names one view
+    /// of the records, which a host keys what it derives from them by.
     pub fn stamp(&self) -> u64 {
         self.stamp
     }

@@ -468,13 +468,11 @@ class SessionState:
     _prefix_saves: list[dict[str, ShellVar | None]] = field(
         default_factory=list, repr=False
     )
-    # The positional parameters' list and the bytes it holds, measured once
-    # per list (`positional_bytes`). Runtime only.
+    # Runtime memo of `positional_bytes`.
     _positional_held: tuple[list[str], int] | None = field(
         default=None, repr=False, compare=False
     )
-    # The exported scalars as the shell's records stamped them, read out
-    # once per change (`env_snapshot`). Runtime only.
+    # Runtime memo of `env_snapshot`.
     _env_held: tuple[int, dict[str, str]] | None = field(
         default=None, repr=False, compare=False
     )

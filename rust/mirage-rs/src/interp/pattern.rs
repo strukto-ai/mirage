@@ -77,7 +77,8 @@ const RECASE_SLICE: usize = 2048;
 /// The compiled patterns a shell keeps for the next expansion that asks.
 const COMPILED_KEPT: usize = 16;
 /// The units fed to the matcher at a time, so a long subject is never
-/// copied into bytes whole.
+/// copied into bytes whole; a matcher that read more is not kept, since it
+/// keeps the room its subject took.
 const FEED_UNITS: usize = 4096;
 
 /// A compiled pattern kept: its units, whether extglob read them, and the
@@ -158,7 +159,9 @@ async fn ask(
         }
         pause().await?;
     }
-    keep(pattern, extglob, glob);
+    if subject.len() <= FEED_UNITS {
+        keep(pattern, extglob, glob);
+    }
     Ok(serde_json::from_slice(&out).unwrap_or(Json::Null))
 }
 

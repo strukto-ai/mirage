@@ -226,9 +226,7 @@ pub struct Shell {
     /// The bytes the records held when a task took the shell, which the
     /// workspace's memory count reads while it runs.
     parked: usize,
-    /// The host's lists the positional parameters last came from, the
-    /// shell's and each call's: a frame handed the same lists again reads
-    /// none of them, since the host replaces a list rather than change it.
+    /// The host's positional lists the last frame read.
     framed: Option<(Py<PyAny>, Vec<Py<PyAny>>)>,
 }
 
@@ -636,6 +634,8 @@ impl Shell {
             positional.clone().unbind(),
             calls.iter().map(|call| call.clone().unbind()).collect(),
         ));
+        // The host replaces a list rather than change it, so one it handed
+        // over before is read already.
         let positional = if held == Some(positional.as_ptr()) {
             None
         } else {
@@ -1036,6 +1036,9 @@ impl ShellTask {
     }
 
     fn answer(&mut self, py: Python<'_>, answer: Answer) -> PyResult<()> {
+        // The request goes before the task resumes, so the copies it lent
+        // share no record with a write the task lands.
+        self.asked = None;
         let step = self
             .job
             .answer(answer)
