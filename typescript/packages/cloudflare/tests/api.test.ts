@@ -236,7 +236,8 @@ describe('the server API in workerd', () => {
     await call('POST', '/v1/workspaces/keep/sessions', { session_id: 'agent' })
     await call('POST', '/v1/workspaces/keep/shell?session_id=agent', { command: 'export N=7' })
     expect((await call('POST', '/v1/workspaces/keep/stop')).status).toBe(200)
-    expect((await call('GET', '/v1/workspaces/keep')).status).toBe(404)
+    const kept = await call('GET', '/v1/workspaces/keep')
+    expect([kept.status, (kept.json as { status: string }).status]).toEqual([200, 'stopped'])
     expect((await call('POST', '/v1/workspaces/keep/start')).status).toBe(200)
     const again = await call('POST', '/v1/workspaces/keep/shell?session_id=agent', {
       command: 'echo $N',

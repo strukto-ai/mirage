@@ -19,6 +19,7 @@ import io
 import json
 import lzma
 import os
+import shutil
 import tarfile
 import threading
 import time
@@ -57,6 +58,7 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.snapshot.tar_io import write_tar
 from mirage.workspace.snapshot.utils import BLOB_REF_KEY
+from mirage.workspace.store import DiskWorkspaceStateStore
 from tests.fixtures.mcp_server import TOKEN, TOOLS, served_mcp
 
 
@@ -1702,10 +1704,11 @@ async def test_a_stopped_workspace_starts_with_its_files_and_cwd(tmp_path):
         assert r.json()["exit_code"] == 0, r.text
         r = await client.post("/v1/workspaces/keep/stop")
         assert r.status_code == 200, r.text
-        assert (await client.get("/v1/workspaces/keep")).status_code == 404
+        r = await client.get("/v1/workspaces/keep")
+        assert r.json()["status"] == "stopped"
         r = await client.post("/v1/workspaces/keep/start")
         assert r.status_code == 200, r.text
-        assert r.json()["id"] == "keep"
+        assert (r.json()["id"], r.json()["status"]) == ("keep", "running")
         r = await client.post(
             "/v1/workspaces/keep/shell?session_id=s",
             json={"command": "pwd && cat f.txt"},
@@ -1728,7 +1731,10 @@ async def test_a_second_stop_answers_as_the_first(tmp_path):
             r = await client.post("/v1/workspaces/keep/stop")
             assert r.status_code == 200, r.text
             assert r.json()["id"] == "keep"
-        assert (await client.get("/v1/workspaces")).json() == []
+        listed = (await client.get("/v1/workspaces")).json()
+        assert [(w["id"], w["status"]) for w in listed] == [
+            ("keep", "stopped")
+        ]
         # State kept with no config, as a workspace created before configs
         # were saved: it stops again, and cannot be started.
         (tmp_path / "state" / "configs" / "keep.json").unlink()
@@ -1772,6 +1778,155 @@ async def test_a_clone_under_a_stopped_id_drops_its_config(tmp_path):
         assert r.status_code == 201, r.text
         await client.post("/v1/workspaces/w/stop")
         assert (await client.post("/v1/workspaces/w/start")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_workspace_is_listed_shown_and_deleted(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for wid in ("off", "on"):
+            body = {**_minimal_config(), "id": wid}
+            r = await client.post("/v1/workspaces", json=body)
+            assert r.status_code == 201, r.text
+        await client.post("/v1/workspaces/off/stop")
+        listed = (await client.get("/v1/workspaces")).json()
+        assert [
+            (w["id"], w["status"], w["mount_count"], w["session_count"])
+            for w in listed
+        ] == [("on", "running", 1, 1), ("off", "stopped", 1, 0)]
+        assert listed[1]["created_at"] > 0
+        got = (await client.get("/v1/workspaces/off")).json()
+        assert got["status"] == "stopped"
+        assert got["sessions"] == [] and got["internals"] is None
+        assert [(m["prefix"], m["vfs"], m["mode"]) for m in got["mounts"]] == [
+            ("/", "ram", "write")
+        ]
+        r = await client.delete("/v1/workspaces/off")
+        assert (r.status_code, r.json()["id"]) == (200, "off")
+        assert (await client.get("/v1/workspaces/off")).status_code == 404
+        r = await client.post("/v1/workspaces/off/start")
+        assert r.status_code == 404
+        listed = (await client.get("/v1/workspaces")).json()
+        assert [w["id"] for w in listed] == ["on"]
+        await client.delete("/v1/workspaces/on")
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_workspace_is_deleted_from_the_store_its_config_names(
+    tmp_path,
+):
+    own = tmp_path / "own"
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        body = {
+            "id": "mine",
+            "config": {
+                "mounts": {"/": {"vfs": "ram"}},
+                "store": {"type": "disk", "root": str(own)},
+            },
+        }
+        r = await client.post("/v1/workspaces", json=body)
+        assert r.status_code == 201, r.text
+        await client.post("/v1/workspaces/mine/stop")
+        got = (await client.get("/v1/workspaces/mine")).json()
+        assert (got["status"], got["mode"]) == ("stopped", "write")
+        assert got["created_at"] > 0
+        assert (own / "workspaces" / "mine").exists()
+        r = await client.delete("/v1/workspaces/mine")
+        assert r.status_code == 200, r.text
+        assert not (own / "workspaces" / "mine").exists()
+
+
+@pytest.mark.asyncio
+async def test_an_id_with_state_but_no_saved_config_answers_404(tmp_path):
+    # A rejected create can leave state but never saves a config.
+    store = DiskWorkspaceStateStore(str(tmp_path / "state"))
+    await store.replace_meta("orphan", {})
+    await store.close()
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        assert (await client.get("/v1/workspaces/orphan")).status_code == 404
+        assert (await client.get("/v1/workspaces")).json() == []
+        assert (
+            await client.delete("/v1/workspaces/orphan")
+        ).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_workspace_whose_store_cannot_be_read_is_listed(
+    tmp_path,
+):
+    own = tmp_path / "own"
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        body = {
+            "id": "mine",
+            "config": {
+                "mounts": {"/": {"vfs": "ram"}},
+                "store": {"type": "disk", "root": str(own)},
+            },
+        }
+        r = await client.post("/v1/workspaces", json=body)
+        assert r.status_code == 201, r.text
+        ram = {"mounts": {"/": {"vfs": "ram"}}}
+        r = await client.post(
+            "/v1/workspaces", json={"id": "on", "config": ram}
+        )
+        assert r.status_code == 201, r.text
+        await client.post("/v1/workspaces/mine/stop")
+        shutil.rmtree(own)
+        own.write_text("not a directory")
+        listed = await client.get("/v1/workspaces")
+        assert listed.status_code == 200, listed.text
+        rows = [
+            (
+                w["id"],
+                w["status"],
+                w["created_at"] if w["id"] == "mine" else None,
+            )
+            for w in listed.json()
+        ]
+        assert rows == [("on", "running", None), ("mine", "stopped", 0)]
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_workspace_shows_the_mode_and_mounts_it_ran_with(
+    tmp_path,
+):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        config = {
+            "mode": "rw",
+            "mounts": {
+                "/": {"vfs": "ram", "mode": "r"},
+                "/data": {"vfs": "ram"},
+            },
+        }
+        body = {"id": "w", "config": config}
+        assert (
+            await client.post("/v1/workspaces", json=body)
+        ).status_code == 201
+
+        async def view() -> tuple[str, list[tuple[str, str, str]]]:
+            d = (await client.get("/v1/workspaces/w")).json()
+            return d["mode"], [
+                (m["prefix"], m["vfs"], m["mode"]) for m in d["mounts"]
+            ]
+
+        running = await view()
+        assert running[0] == "write"
+        await client.post("/v1/workspaces/w/stop")
+        assert await view() == running
 
 
 @pytest.mark.asyncio

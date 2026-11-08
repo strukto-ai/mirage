@@ -277,6 +277,11 @@ function buildStoreGroup(block: StoreGroupBlock): WorkspaceStateStore {
   return new RAMWorkspaceStateStore()
 }
 
+/** The store a config's `store:` block names; undefined when it names none. */
+export function configStateStore(cfg: WorkspaceConfigRaw): WorkspaceStateStore | undefined {
+  return buildStateStore(cfg.store)
+}
+
 function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateStore | undefined {
   if (block === null || block === undefined) return undefined
   const overrides = {

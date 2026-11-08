@@ -206,10 +206,10 @@ a `workspace_id`.
 | `mirage workspace create CONFIG [-w ID]` | Create a workspace from a YAML or JSON config. `--id` is another name for `-w`. |
 | `mirage workspace create --template NAME [-w ID]` | Create a workspace from a saved [template](#from-a-template). |
 | `mirage workspace create CONFIG --explain` | Show what the [server policies](/home/access/http#server-policies) say of the config, and create nothing. |
-| `mirage workspace list` | List workspaces. |
+| `mirage workspace list` | List workspaces, running and stopped, with the status of each. |
 | `mirage workspace use ID` | Make it the current workspace of the [context](#log-in). |
-| `mirage workspace get ID [--verbose]` | Show mounts and sessions. |
-| `mirage workspace delete ID` | Stop a workspace and delete its state. |
+| `mirage workspace get ID [--verbose]` | Show its status, mounts and sessions. A stopped workspace shows the mounts its config names and no sessions. |
+| `mirage workspace delete ID` | Delete a workspace, running or stopped, with its state and config. |
 | `mirage workspace stop ID` | Stop a workspace and keep its state and config. Stopping a stopped workspace does nothing. |
 | `mirage workspace start ID` | Start a stopped workspace again from the config it was created with. Starting a running workspace does nothing. |
 | `mirage workspace set-profile ID NAME FILE` | Add a [profile](/home/policy/overview) from a YAML or JSON file, or replace what `NAME` means. Sessions keep their rules until `session update` moves them, and the workspace's config is not rewritten. |

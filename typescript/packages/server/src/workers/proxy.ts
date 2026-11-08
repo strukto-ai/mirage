@@ -170,7 +170,20 @@ export class WorkerProxy {
       return this.create(req, res, null, id)
     }
     const home = pool.home(id)
-    if (home === undefined || home.dead) return this.pass(first, req, res)
+    if (home === undefined || home.dead) {
+      // A stopped workspace no worker holds, as after a restart: its delete
+      // claims the id meanwhile, so a start of it goes to the same worker.
+      if (action === undefined && method === 'DELETE') {
+        const settle = pool.claim(id, first)
+        try {
+          await this.pass(first, req, res)
+          return
+        } finally {
+          settle()
+        }
+      }
+      return this.pass(first, req, res)
+    }
     if (action === 'clone' && parts.length === 4 && method === 'POST') {
       return this.create(req, res, home)
     }
@@ -291,10 +304,20 @@ export class WorkerProxy {
       sendAnswer(res, failed)
       return
     }
-    const items = answers.flatMap((answer) => JSON.parse(answer.body.toString()) as unknown[])
-    const key = (item: unknown): number =>
-      Number((item as Record<string, unknown> | null)?.created_at ?? 0)
-    items.sort((a, b) => key(a) - key(b))
+    // The workers share one state root, so each lists the workspaces the
+    // others run as stopped: the running one is listed, and each id once,
+    // the running ones first, as each worker lists them.
+    const byId = new Map<string, Record<string, unknown>>()
+    for (const answer of answers) {
+      for (const item of JSON.parse(answer.body.toString()) as Record<string, unknown>[]) {
+        const id = String(item.id)
+        if (byId.get(id)?.status !== 'running') byId.set(id, item)
+      }
+    }
+    const items = [...byId.values()]
+    const stopped = (item: Record<string, unknown>): number => (item.status === 'running' ? 0 : 1)
+    const key = (item: Record<string, unknown>): number => Number(item.created_at ?? 0)
+    items.sort((a, b) => stopped(a) - stopped(b) || key(a) - key(b))
     sendJson(res, 200, items)
   }
 
@@ -330,7 +353,10 @@ export class WorkerProxy {
     return false
   }
 
-  /** Whether `worker` still holds workspace `id`. */
+  /**
+   * Whether `worker` still holds workspace `id`: it answers for it, and not
+   * as stopped, since a worker answers for every workspace in the state root.
+   */
   private async holds(worker: Worker, req: IncomingMessage, id: string): Promise<boolean> {
     const headers = headersFor(req, this.client(req))
     delete headers['content-length']
@@ -338,7 +364,8 @@ export class WorkerProxy {
     headers[COUNTED_HEADER] = this.options.pool.token
     const probe = this.open(worker, 'GET', `/v1/workspaces/${encodeURIComponent(id)}`, headers)
     probe.end()
-    return (await answered(probe)).status !== 404
+    const answer = await answered(probe)
+    return answer.status !== 404 && !stoppedIn(answer.body)
   }
 
   /** Whether `extra` more workspaces fit under `max_workspaces`. */
@@ -477,4 +504,14 @@ export class WorkerProxy {
  */
 export function buildWorkerProxy(options: WorkerProxyOptions): WorkerProxy {
   return new WorkerProxy(options)
+}
+
+/** Whether a workspace answer says it is stopped. */
+function stoppedIn(body: Buffer): boolean {
+  try {
+    return (JSON.parse(body.toString()) as { status?: unknown }).status === 'stopped'
+  } catch (error) {
+    console.debug('mirage: a worker answered a workspace with no JSON:', error)
+    return false
+  }
 }

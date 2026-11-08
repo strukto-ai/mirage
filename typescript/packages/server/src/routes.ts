@@ -143,8 +143,11 @@ export interface ServerHost {
     sources?: Readonly<Record<string, ResolvedSource>>,
   ): Promise<Record<string, [string | CLI, Record<string, unknown> | null]>>
   loadProfile(profile: SessionProfile): SessionProfile
-  /** A fresh handle on the store workspaces keep their state in; the caller closes it. */
-  stateStore(): WorkspaceStateStore
+  /**
+   * A fresh handle on the store workspaces keep their state in, or on the
+   * one `cfg`'s `store:` block names; the caller closes it.
+   */
+  stateStore(cfg?: WorkspaceConfigRaw): WorkspaceStateStore
   /**
    * This daemon's id, which the lease of each workspace it runs names; a host
    * that keeps it on disk holds its workspaces again after a restart.

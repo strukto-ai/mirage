@@ -316,35 +316,51 @@ def test_create_sends_a_policy_name_as_written(fake, tmp_path):
     ]
 
 
-def test_delete_names_the_workspace_given_when_the_answer_is_empty(fake):
-    fake.answer = _FakeResponse(204, b"")
-    result = _invoke("delete", "my-ws")
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == {"id": "my-ws"}
-
-
-def test_the_list_shows_each_workspace_status():
-    brief = {"mode": "exec", "mount_count": 1, "session_count": 0}
-    out = _format_workspace_list(
-        [
-            {"id": "a", "status": "stopped", "created_at": 0, **brief},
-            {"id": "b", "created_at": 0, **brief},
-        ]
-    )
-    rows = [line.split() for line in unstyle(out).splitlines()]
-    assert rows[0][:2] == ["ID", "STATUS"]
-    assert [row[:2] for row in rows[1:]] == [
-        ["a", "stopped"],
-        ["b", "running"],
-    ]
-
-
 @pytest.mark.parametrize("verb", ["stop", "start"])
 def test_stop_and_start_post_to_the_workspace(fake, verb):
     fake.answer = _FakeResponse(200, b'{"id": "w", "closed_at": 0}')
     result = _invoke(verb, "w")
     assert result.exit_code == 0, result.output
     assert fake.calls[0][:2] == ("POST", f"/v1/workspaces/w/{verb}")
+
+
+def test_delete_names_the_workspace_when_the_answer_has_no_body(fake):
+    # The console answers a delete with 204 and no body.
+    fake.answer = _FakeResponse(204, b"")
+    result = _invoke("delete", "my-ws")
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0][:2] == ("DELETE", "/v1/workspaces/my-ws")
+    assert json.loads(result.output) == {"id": "my-ws"}
+
+
+def test_the_list_shows_each_workspace_status():
+    rows = unstyle(
+        _format_workspace_list(
+            [
+                {
+                    "id": "on",
+                    "status": "running",
+                    "mode": "write",
+                    "mount_count": 1,
+                    "session_count": 1,
+                    "created_at": 0,
+                },
+                {
+                    "id": "off",
+                    "status": "stopped",
+                    "mode": "read",
+                    "mount_count": 2,
+                    "session_count": 0,
+                    "created_at": 0,
+                },
+            ]
+        )
+    ).splitlines()
+    assert [row.split() for row in rows] == [
+        ["ID", "STATUS"],
+        ["on", "running"],
+        ["off", "stopped"],
+    ]
 
 
 @pytest.mark.parametrize("gone", ["close", "cancel", "kill"])

@@ -89,6 +89,7 @@ paths:
                     title: Policy explanation
               example:
                 id: demo
+                status: running
                 mode: write
                 created_at: 1794009600
                 fuse_mountpoints: {}
@@ -110,6 +111,7 @@ paths:
                 $ref: '#/components/schemas/WorkspaceDetail'
               example:
                 id: demo
+                status: running
                 mode: write
                 created_at: 1794009600
                 fuse_mountpoints: {}
@@ -165,10 +167,17 @@ paths:
                 title: Response List Workspaces V1 Workspaces Get
               example:
                 - id: demo
+                  status: running
                   mode: write
                   mount_count: 1
                   session_count: 1
                   created_at: 1794009600
+                - id: notes
+                  status: stopped
+                  mode: read
+                  mount_count: 1
+                  session_count: 0
+                  created_at: 1793923200
         '401':
           $ref: '#/components/responses/401'
         '429':
@@ -228,6 +237,8 @@ paths:
           $ref: '#/components/responses/401'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '422':
           description: Validation Error
           content:
@@ -7620,6 +7631,14 @@ components:
         id:
           type: string
           title: Id
+        status:
+          type: string
+          enum:
+            - running
+            - stopped
+          title: Status
+          description: running while the server holds the workspace in memory; stopped while
+            it keeps only its config and state, until a start.
         mode:
           type: string
           title: Mode
@@ -7639,6 +7658,7 @@ components:
       type: object
       required:
         - id
+        - status
         - mode
         - mount_count
         - session_count
@@ -7819,6 +7839,14 @@ components:
         id:
           type: string
           title: Id
+        status:
+          type: string
+          enum:
+            - running
+            - stopped
+          title: Status
+          description: running while the server holds the workspace in memory; stopped while
+            it keeps only its config and state, until a start.
         mode:
           type: string
           title: Mode
@@ -7856,6 +7884,7 @@ components:
       type: object
       required:
         - id
+        - status
         - mode
         - created_at
       title: WorkspaceDetail

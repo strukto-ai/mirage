@@ -19,6 +19,7 @@ import secrets
 import shutil
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from mirage.server.env import (
@@ -30,6 +31,20 @@ from mirage.server.workers.worker import (
     ThreadWorker,
     Worker,
 )
+
+
+@dataclass
+class _Claim:
+    """The worker an id being created goes to, and how many requests
+    claim it.
+
+    Args:
+        worker (Worker): the worker creating the id.
+        claims (int): the requests not yet settled.
+    """
+
+    worker: Worker
+    claims: int = 0
 
 
 class WorkerPool:
@@ -59,7 +74,7 @@ class WorkerPool:
         self._graceful_timeout = graceful_timeout
         self._directory = tempfile.mkdtemp(prefix="mirage-workers-")
         self._homes: dict[str, Worker] = {}
-        self._pending: dict[str, Worker] = {}
+        self._pending: dict[str, _Claim] = {}
         self._stopping = False
         # Creates being answered, each holding a slot under max_workspaces.
         self.reserved = 0
@@ -107,7 +122,8 @@ class WorkerPool:
 
     def building(self, workspace_id: str) -> Worker | None:
         """The worker now creating ``workspace_id``, else None."""
-        return self._pending.get(workspace_id)
+        claim = self._pending.get(workspace_id)
+        return claim.worker if claim is not None else None
 
     def home(self, workspace_id: str) -> Worker | None:
         """The worker holding, last holding or now creating
@@ -116,20 +132,34 @@ class WorkerPool:
         Args:
             workspace_id (str): the workspace.
         """
-        return self._homes.get(workspace_id) or self._pending.get(workspace_id)
+        return self._homes.get(workspace_id) or self.building(workspace_id)
 
     def claim(self, workspace_id: str, worker: Worker) -> Callable[[], None]:
         """Send the creates of ``workspace_id`` to ``worker`` until the
-        returned call.
+        returned call. Claims of one id on one worker overlap: it stays
+        claimed until each is settled.
 
         Args:
             workspace_id (str): the id being created.
             worker (Worker): the worker creating it.
         """
-        self._pending[workspace_id] = worker
+        held = self._pending.get(workspace_id)
+        claim = (
+            held
+            if held is not None and held.worker is worker
+            else _Claim(worker)
+        )
+        claim.claims += 1
+        self._pending[workspace_id] = claim
+        settled = False
 
         def settle() -> None:
-            if self._pending.get(workspace_id) is worker:
+            nonlocal settled
+            if settled:
+                return
+            settled = True
+            claim.claims -= 1
+            if claim.claims == 0 and self._pending.get(workspace_id) is claim:
                 del self._pending[workspace_id]
 
         return settle

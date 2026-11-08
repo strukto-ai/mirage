@@ -104,11 +104,7 @@ export async function loadProfileArgument(path: string): Promise<JsonValue> {
 
 interface WorkspaceBrief {
   id: string
-  status?: string
-  mode: string
-  mount_count: number
-  session_count: number
-  created_at: number
+  status: string
 }
 
 interface MountSummary {
@@ -131,6 +127,7 @@ interface Internals {
 
 interface WorkspaceDetail {
   id: string
+  status: string
   mode: string
   created_at: number
   mounts?: MountSummary[]
@@ -152,23 +149,15 @@ function formatWorkspaceExplanation(said: {
 }
 
 function formatWorkspaceList(items: WorkspaceBrief[]): string {
-  if (items.length === 0) return 'No active workspaces.'
-  // The daemon lists only the workspaces it holds, so a brief without a
-  // status is running.
-  const rows = items.map((w) => [
-    w.id,
-    w.status ?? 'running',
-    w.mode,
-    String(w.mount_count),
-    String(w.session_count),
-    formatAge(w.created_at),
-  ])
-  return formatTable(['ID', 'STATUS', 'MODE', 'MOUNTS', 'SESSIONS', 'AGE'], rows)
+  if (items.length === 0) return 'No workspaces.'
+  const rows = items.map((w) => [w.id, w.status])
+  return formatTable(['ID', 'STATUS'], rows)
 }
 
 function formatWorkspaceDetail(d: WorkspaceDetail): string {
   const lines: string[] = [
     `ID:        ${d.id}`,
+    `Status:    ${d.status}`,
     `Mode:      ${d.mode}`,
     `Created:   ${formatAge(d.created_at)} ago`,
   ]

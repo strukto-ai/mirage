@@ -24,8 +24,12 @@ export interface MountSummary {
   description: string
 }
 
+/** Running while the server holds it in memory; stopped while only its config and state are kept. */
+type WorkspaceStatus = 'running' | 'stopped'
+
 export interface WorkspaceBrief {
   id: string
+  status: WorkspaceStatus
   mode: string
   mount_count: number
   session_count: number
@@ -46,6 +50,7 @@ export interface WorkspaceInternals {
 
 export interface WorkspaceDetail {
   id: string
+  status: WorkspaceStatus
   mode: string
   created_at: number
   fuse_mountpoints: Record<string, string>

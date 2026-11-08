@@ -120,28 +120,15 @@ def load_profile_argument(path: Path) -> dict[str, Any]:
 
 def _format_workspace_list(items: list[dict[str, Any]]) -> str:
     if not items:
-        return "No active workspaces."
-    # The daemon lists only the workspaces it holds, so an item without a
-    # status is running.
-    rows = [
-        [
-            item["id"],
-            item.get("status", "running"),
-            item["mode"],
-            str(item["mount_count"]),
-            str(item["session_count"]),
-            format_age(item["created_at"]),
-        ]
-        for item in items
-    ]
-    return format_table(
-        ["ID", "STATUS", "MODE", "MOUNTS", "SESSIONS", "AGE"], rows
-    )
+        return "No workspaces."
+    rows = [[item["id"], item["status"]] for item in items]
+    return format_table(["ID", "STATUS"], rows)
 
 
 def _format_workspace_detail(detail: dict[str, Any]) -> str:
     lines = [
         f"ID:        {detail['id']}",
+        f"Status:    {detail['status']}",
         f"Mode:      {detail['mode']}",
         f"Created:   {format_age(detail['created_at'])} ago",
     ]
