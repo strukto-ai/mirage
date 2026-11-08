@@ -20,7 +20,6 @@ import type { CompiledProfile } from '../../policy/profile.ts'
 import type { Shell } from '../../rs/shell.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import type { EvaluationContext } from '../evaluation.ts'
 import { applyProfile, narrow } from './resolve.ts'
 import { checkEnvFits, entryBytes } from './budget.ts'
 import { VAR_KEYS } from './constants.ts'
@@ -100,9 +99,8 @@ function seedBytes(session: SessionState, seedVars: Record<string, ShellVar>): n
 export class SessionManager extends SessionOwner {
   private readonly sessions = new Map<string, SessionState>()
   private readonly persistLock = new KeyLock()
-  // The top-level lines running on each session id, by the evaluation each
-  // line runs.
-  private readonly running = new Map<string, Set<EvaluationContext>>()
+  // The top-level lines running on each session id.
+  private readonly running = new Map<string, number>()
   private readonly sessionStore: NamespaceStore
   private defaultIdInternal: string
   private loaded = false
@@ -418,16 +416,9 @@ export class SessionManager extends SessionOwner {
     }
   }
 
-  /** Count a top-level line running on its session. */
-  beginLine(line: EvaluationContext): void {
-    const lines = this.running.get(line.session.sessionId) ?? new Set<EvaluationContext>()
-    lines.add(line)
-    this.running.set(line.session.sessionId, lines)
-  }
-
-  /** Whether the top-level line evaluating `line` still runs. */
-  runs(line: EvaluationContext): boolean {
-    return this.running.get(line.session.sessionId)?.has(line) ?? false
+  /** Count a top-level line running on `sessionId`. */
+  beginLine(sessionId: string): void {
+    this.running.set(sessionId, (this.running.get(sessionId) ?? 0) + 1)
   }
 
   /**
@@ -435,13 +426,12 @@ export class SessionManager extends SessionOwner {
    * one still running on it (`$( )`, `eval`) leaves that to the top-level
    * line's end, which writes the same record; once no top-level line runs
    * (a host task that outlived its line), the line persists its own write.
-   * `line` is the evaluation `beginLine` counted, null for a nested line.
    */
-  async endLine(sessionId: string, line: EvaluationContext | null): Promise<void> {
-    if (line !== null) {
-      const lines = this.running.get(sessionId)
-      lines?.delete(line)
-      if (lines?.size === 0) this.running.delete(sessionId)
+  async endLine(sessionId: string, topLevel: boolean): Promise<void> {
+    if (topLevel) {
+      const left = (this.running.get(sessionId) ?? 1) - 1
+      if (left > 0) this.running.set(sessionId, left)
+      else this.running.delete(sessionId)
     } else if (this.running.has(sessionId)) {
       return
     }

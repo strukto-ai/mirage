@@ -516,49 +516,6 @@ async def _preflight(ws: ExecuteEnv) -> None:
         await ws.drift.drain(ws.registry.try_mount_for)
 
 
-def reentry(
-    sessions: SessionManager, processes: ProcessTable, session_id: str | None
-) -> tuple[SessionState | None, str | None]:
-    """The session a re-entrant line continues in, and the id it names.
-
-    A line run while this workspace's session is bound continues in that
-    session unless it names another: ``execute_line`` runs it there and
-    ``Workspace._serialize_line`` runs it inline. A substitution's shell
-    ends with it, so a host task still bound to one (started in it, run
-    after it) continues in the nearest shell around it while that shell
-    still runs (its line, or the process of its job or subshell), as a
-    callback fired mid-line does, and once it has ended is a line of its
-    own on that session's id: it waits its turn and resolves the session
-    as a host call naming it does.
-
-    Args:
-        sessions (SessionManager): the workspace's sessions.
-        processes (ProcessTable): the workspace's processes.
-        session_id (str | None): the session the caller named, if any.
-    """
-    ambient = get_current_session_for(sessions)
-    if ambient is None or session_id not in (None, ambient.session_id):
-        return None, session_id
-    if not ambient.vars.shell.closed:
-        return ambient, ambient.session_id
-    context = get_current_evaluation()
-    while context is not None and context.session.vars.shell.closed:
-        context = context.parent
-    if context is None:
-        return None, ambient.session_id
-    owner = context
-    while owner.parent is not None and owner.parent.session is owner.session:
-        owner = owner.parent
-    pid = owner.session.process_id
-    if (
-        sessions.runs(owner)
-        if owner.parent is None
-        else pid is not None and processes.runs(pid)
-    ):
-        return context.session, ambient.session_id
-    return None, ambient.session_id
-
-
 async def execute_line(
     ws: ExecuteEnv,
     command: str,
@@ -615,10 +572,19 @@ async def execute_line(
     # Only this workspace's own binding counts: a session carries one
     # workspace's cwd, env and mount grants, so a callback reaching a
     # second workspace must resolve that workspace's session instead.
-    ambient, session_id = reentry(ws.sessions, ws.processes, session_id)
-    if ambient is not None:
+    # A substitution's shell ends with it. A host task still bound to one
+    # (started in it, run after it) runs as a process a substitution
+    # leaves behind does: in a subshell of the session as it is now,
+    # beside the session's lines, and nothing it changes reaches them.
+    ambient = get_current_session_for(ws.sessions)
+    if ambient is not None and session_id in (None, ambient.session_id):
         session = ambient
         session_id = ambient.session_id
+        if ambient.vars.shell.closed:
+            session = ws.sessions.get(session_id).fork()
+            session.process_id = None
+            session.job_table = ws.job_table.child()
+            session.tty = Terminal()
     else:
         if session_id is None:
             session_id = ws.sessions.default_id
@@ -913,7 +879,7 @@ async def run_prepared_line(
     recorded = is_line and bool(command.strip("\n"))
     history: LineHistory | None = None
     if parent is None:
-        ws.sessions.begin_line(context)
+        ws.sessions.begin_line(session_id)
     try:
         aliases = expanding_aliases(effective_session)
         ast = (
@@ -1454,9 +1420,7 @@ async def run_prepared_line(
             effective_session._alias_marks.clear()
             effective_session._expand_aliases_marks.clear()
         reset_current_session(session_token)
-        await ws.sessions.end_line(
-            session_id, context if parent is None else None
-        )
+        await ws.sessions.end_line(session_id, parent is None)
         ws.records.extend(scope.records)
         if history is not None:
             await history.end(io, scope.records)

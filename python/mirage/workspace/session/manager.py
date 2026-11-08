@@ -27,7 +27,6 @@ from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
 from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.ids import IdSource, SystemIdSource, check_name
-from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.record.types import (
@@ -160,9 +159,8 @@ class SessionManager(SessionOwner):
         self._sessions: dict[str, SessionState] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._line_locks: dict[str, asyncio.Lock] = {}
-        # The top-level lines running on each session id, by the
-        # evaluation each line runs.
-        self._running: dict[str, set[EvaluationContext]] = {}
+        # The top-level lines running on each session id.
+        self._running: dict[str, int] = {}
         # What the store last saw from us, per session id. Flush
         # compares against this to skip clean sessions without a
         # network read, and to avoid clobbering other writers.
@@ -490,25 +488,15 @@ class SessionManager(SessionOwner):
                 if self._sessions.get(session.session_id) is session:
                     await self._flush_one(session)
 
-    def begin_line(self, line: EvaluationContext) -> None:
-        """Count a top-level line running on its session.
+    def begin_line(self, session_id: str) -> None:
+        """Count a top-level line running on ``session_id``.
 
         Args:
-            line (EvaluationContext): the evaluation the line runs.
+            session_id (str): the session the line runs on.
         """
-        self._running.setdefault(line.session.session_id, set()).add(line)
+        self._running[session_id] = self._running.get(session_id, 0) + 1
 
-    def runs(self, line: EvaluationContext) -> bool:
-        """Whether the top-level line evaluating ``line`` still runs.
-
-        Args:
-            line (EvaluationContext): a top-level line's evaluation.
-        """
-        return line in self._running.get(line.session.session_id, ())
-
-    async def end_line(
-        self, session_id: str, line: EvaluationContext | None
-    ) -> None:
+    async def end_line(self, session_id: str, top_level: bool) -> None:
         """Persist a session as a line on it ends. A line run inside a
         top-level one still running on it (`$( )`, `eval`) leaves that to
         the top-level line's end, which writes the same record; once no
@@ -517,13 +505,13 @@ class SessionManager(SessionOwner):
 
         Args:
             session_id (str): the session the line ran on.
-            line (EvaluationContext | None): the evaluation
-                ``begin_line`` counted, None for a nested line.
+            top_level (bool): whether ``begin_line`` counted the line.
         """
-        if line is not None:
-            lines = self._running[session_id]
-            lines.discard(line)
-            if not lines:
+        if top_level:
+            left = self._running[session_id] - 1
+            if left:
+                self._running[session_id] = left
+            else:
                 del self._running[session_id]
         elif session_id in self._running:
             return

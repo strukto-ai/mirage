@@ -246,7 +246,6 @@ from mirage.workspace.workspace.execute import (
     LineFrame,
     drain_to_sink,
     execute_line,
-    reentry,
 )
 from mirage.workspace.workspace.explainer import Explainer
 from mirage.workspace.workspace.failure import placement_refused
@@ -3229,9 +3228,9 @@ class Workspace:
         ``xargs``, a host callback fired mid-line) is the same shell
         continuing and runs inline: it already holds the session, and
         waiting on itself would deadlock. The ambient binding decides,
-        through ``reentry``, the rule ``execute_line`` uses to pick the
-        session a line runs as, so the lock key and the executed session
-        never disagree; a background job's fork keeps its parent's id and
+        by the same rule ``execute_line`` uses to pick the session a
+        line runs as, so the lock key and the executed session never
+        disagree; a background job's fork keeps its parent's id and
         continues inline too.
 
         Args:
@@ -3244,10 +3243,8 @@ class Workspace:
                 should it fail before it ends, as a line refused the
                 workspace's lease does.
         """
-        ambient, session_id = reentry(
-            self._session_mgr, self.process_table, session_id
-        )
-        if ambient is not None:
+        ambient = get_current_session_for(self._session_mgr)
+        if ambient is not None and session_id in (None, ambient.session_id):
             return await run()
         # Hydrate first: a workspace on a shared store adopts the
         # persisted default id there, and a key taken before that names
@@ -3321,10 +3318,8 @@ class Workspace:
                 the session whose ``$?`` its status becomes; None for a
                 nested line.
         """
-        ambient, session_id = reentry(
-            self._session_mgr, self.process_table, session_id
-        )
-        if ambient is not None:
+        ambient = get_current_session_for(self._session_mgr)
+        if ambient is not None and session_id in (None, ambient.session_id):
             return await run(), None
         await self.ensure_sessions_loaded()
         if self._shutting_down:

@@ -107,7 +107,6 @@ import {
 import { parseRows, refusedRow } from '../node/program.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
-import type { ProcessTable } from '../../execution/process/table.ts'
 import type { SessionManager } from '../session/manager.ts'
 import { type SessionState } from '../session/session.ts'
 import { type StatusWriter, ExecutionNode } from '../types.ts'
@@ -254,39 +253,6 @@ async function drainToSink(sink: JobConsole, result: ExecuteResult): Promise<Exe
 }
 
 /**
- * The session a re-entrant line continues in, and the id it names. A line
- * run while this workspace's session is bound continues in that session
- * unless it names another: `executeLine` runs it there and
- * `Workspace.serializeLine` runs it inline. Only with task-local storage:
- * the browser fallback's newest binding may belong to an unrelated call. A
- * substitution's shell ends with it, so a host task still bound to one
- * (started in it, run after it) continues in the nearest shell around it
- * while that shell still runs (its line, or the process of its job or
- * subshell), as a callback fired mid-line does, and once it has ended is a
- * line of its own on that session's id: it waits its turn and resolves the
- * session as a host call naming it does.
- */
-export function reentry(
-  sessions: SessionManager,
-  processes: ProcessTable,
-  sessionId: string | undefined,
-): [SessionState | null, string | undefined] {
-  const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(sessions) : null
-  if (ambient === null || (sessionId !== undefined && sessionId !== ambient.sessionId)) {
-    return [null, sessionId]
-  }
-  if (!ambient.vars.shell.closed) return [ambient, ambient.sessionId]
-  let context = getCurrentEvaluation()
-  while (context?.session.vars.shell.closed) context = context.parent
-  if (context === null) return [null, ambient.sessionId]
-  let owner = context
-  while (owner.parent !== null && owner.parent.session === owner.session) owner = owner.parent
-  const pid = owner.session.processId
-  const runs = owner.parent === null ? sessions.runs(owner) : pid !== null && processes.runs(pid)
-  return runs ? [context.session, ambient.sessionId] : [null, ambient.sessionId]
-}
-
-/**
  * The body of `Workspace.shell`; see its docstring for the argument
  * contract. Runs the line, then honors the sink contract for every path
  * `runLine` can answer on.
@@ -359,10 +325,24 @@ async function runLine(
   // the signal at once rather than holding the caller.
   await abortable(preflight(env), options.signal)
   // Evaluator calls carry their exact session, including ephemeral forks.
-  const [ambient, sessionId] = reentry(env.sessions, env.jobTable.processes, options.sessionId)
-  const inPlace = ambient !== null
-  const targetSession =
-    options.session ?? ambient ?? env.sessions.get(sessionId ?? env.sessions.defaultId)
+  // Ambient re-entry is safe only with task-local storage: the browser
+  // fallback's newest frame may belong to an unrelated shell call. A
+  // substitution's shell ends with it. A host task still bound to one
+  // (started in it, run after it) runs as a process a substitution leaves
+  // behind does: in a subshell of the session as it is now, beside the
+  // session's lines, and nothing it changes reaches them.
+  const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(env.sessions) : null
+  const inPlace =
+    ambient !== null && (options.sessionId === undefined || options.sessionId === ambient.sessionId)
+  let targetSession =
+    options.session ??
+    (inPlace ? ambient : env.sessions.get(options.sessionId ?? env.sessions.defaultId))
+  if (options.session === undefined && inPlace && ambient.vars.shell.closed) {
+    targetSession = env.sessions.get(ambient.sessionId).fork()
+    targetSession.processId = null
+    targetSession.jobTable = env.jobTable.child()
+    targetSession.tty = new Terminal()
+  }
   frame.session = targetSession
   // Whole-invocation policies must approve the result before bytes escape.
   if (await env.registry.policies.wantsFor('postExecute', targetSession.sessionId)) {
@@ -537,7 +517,7 @@ async function runPreparedLine(
     lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits),
     env.registry.ceilings.maxLineSeconds,
   )
-  if (parent === null) env.sessions.beginLine(context)
+  if (parent === null) env.sessions.beginLine(targetSession.sessionId)
   try {
     // The outermost line, recorded or not, runs under its `@line` deadline,
     // which a nested one shares: past it the tree is stopped like an abort
@@ -1105,7 +1085,7 @@ async function runPreparedLine(
     // under the grace like the tree: a stalled store finishes in the
     // background instead of holding an aborted caller.
     await runCancellable(
-      env.sessions.endLine(targetSession.sessionId, parent === null ? context : null),
+      env.sessions.endLine(targetSession.sessionId, parent === null),
       options.signal,
     )
   }

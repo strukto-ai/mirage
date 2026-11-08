@@ -419,67 +419,50 @@ describe('same-session lines run one at a time', () => {
     expect(casSet.mock.calls[0]?.[1].env).toMatchObject({ x: '3', y: '3' })
   })
 
-  it.each(['spawn', 'echo $(spawn)'])(
-    'a line that outlives its caller saves its session: %s',
-    async (line) => {
-      const ws = makeWs()
-      let release!: () => void
-      const gate = new Promise<void>((resolve) => {
-        release = resolve
-      })
-      const later: Promise<unknown>[] = []
-      ws.registerCli(
-        'spawn',
-        new CLI({
-          spec: new CommandSpec({ name: 'spawn' }),
-          handlers: {
-            '': new CLIHandler({
-              fn: () => {
-                later.push(gate.then(() => ws.shell('X=late', { record: false })))
-                return null
-              },
-            }),
-          },
-        }),
-      )
-      ws.createSession('s')
-      await ws.shell(line, { sessionId: 's' })
-      release()
-      expect(await later[0]).toMatchObject({ exitCode: 0 })
-      const saved = await ws.stateStore.sessions(ws.workspaceId).load()
-      expect(saved.get('s')?.env).toMatchObject({ X: 'late' })
-    },
-  )
-
-  it.each([
-    [['echo $(spawn); await_late; echo "J=$J"'], '\nJ=joined\n'],
-    [
-      ['{ held; echo $(spawn); await_late; echo "J=$J"; } &', 'wait; echo "R=$J"'],
-      '\nJ=joined\nR=\n',
-    ],
-  ])('a task its shell waits on runs in that shell: %j', async (lines, out) => {
+  it('a line that outlives its caller saves its session', async () => {
     const ws = makeWs()
     let release!: () => void
-    let resume!: () => void
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    const hold = new Promise<void>((resolve) => {
-      resume = resolve
+    const later: Promise<unknown>[] = []
+    ws.registerCli(
+      'spawn',
+      new CLI({
+        spec: new CommandSpec({ name: 'spawn' }),
+        handlers: {
+          '': new CLIHandler({
+            fn: () => {
+              later.push(gate.then(() => ws.shell('X=late', { record: false })))
+              return null
+            },
+          }),
+        },
+      }),
+    )
+    await ws.shell('spawn')
+    release()
+    await later[0]
+    const saved = await ws.stateStore.sessions(ws.workspaceId).load()
+    expect(saved.get(ws.defaultSessionId)?.env).toMatchObject({ X: 'late' })
+  })
+
+  it('a task a substitution left runs in a subshell', async () => {
+    const ws = makeWs()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
     })
     const later: Promise<{ stdout: Uint8Array }>[] = []
     const handlers: Record<string, CLIVerbFn> = {
       spawn: () => {
-        later.push(gate.then(() => ws.shell('J=joined', { record: false })))
+        const line = 'echo "v=$V"; J=joined; echo "j=$J"'
+        later.push(gate.then(() => ws.shell(line, { record: false })))
         return null
       },
       await_late: async () => {
         release()
         return [(await later[0])?.stdout ?? new Uint8Array(), new IOResult()]
-      },
-      held: async () => {
-        await hold
-        return null
       },
     }
     for (const [name, fn] of Object.entries(handlers)) {
@@ -488,10 +471,10 @@ describe('same-session lines run one at a time', () => {
         new CLI({ spec: new CommandSpec({ name }), handlers: { '': new CLIHandler({ fn }) } }),
       )
     }
-    for (const line of lines.slice(0, -1)) await ws.shell(line)
-    resume()
-    const io = await ws.shell(lines.at(-1) ?? '')
-    expect(stdoutStr(io)).toBe(out)
+    ws.createSession('s')
+    await ws.shell('V=outer', { sessionId: 's' })
+    const io = await ws.shell('echo $(spawn); await_late; echo "J=$J"', { sessionId: 's' })
+    expect(stdoutStr(io)).toBe('\nv=outer\nj=joined\nJ=\n')
   })
 
   it('a host callback re-entering its own session runs inline', async () => {

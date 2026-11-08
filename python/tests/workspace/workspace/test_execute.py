@@ -506,8 +506,7 @@ async def test_a_line_saves_its_session_once_at_its_end():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("line", ["spawn", "echo $(spawn)"])
-async def test_a_line_that_outlives_its_caller_saves_its_session(line):
+async def test_a_line_that_outlives_its_caller_saves_its_session():
     store = RAMNamespaceStore()
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, session_store=store)
     gate = asyncio.Event()
@@ -527,36 +526,25 @@ async def test_a_line_that_outlives_its_caller_saves_its_session(line):
             spec=CommandSpec(name="spawn"), handlers={"": CLIHandler(fn=spawn)}
         ),
     )
-    ws.create_session("s")
-    await ws.shell(line, session_id="s")
+    await ws.shell("spawn")
     gate.set()
-    assert (await later[0]).exit_code == 0
-    assert (await store.load())["s"]["env"]["X"] == "late"
+    await later[0]
+    saved = (await store.load())[ws._session_mgr.default_id]
+    assert saved["env"]["X"] == "late"
     await ws.close()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "lines, out",
-    [
-        (['echo $(spawn); await_late; echo "J=$J"'], b"\nJ=joined\n"),
-        (
-            [
-                '{ held; echo $(spawn); await_late; echo "J=$J"; } &',
-                'wait; echo "R=$J"',
-            ],
-            b"\nJ=joined\nR=\n",
-        ),
-    ],
-)
-async def test_a_task_its_shell_waits_on_runs_in_that_shell(lines, out):
+async def test_a_task_a_substitution_left_runs_in_a_subshell():
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    gate, hold = asyncio.Event(), asyncio.Event()
+    gate = asyncio.Event()
     later: list[asyncio.Task[IOResult]] = []
 
     async def late() -> IOResult:
         await gate.wait()
-        return await ws.shell("J=joined", record=False)
+        return await ws.shell(
+            'echo "v=$V"; J=joined; echo "j=$J"', record=False
+        )
 
     async def spawn(config, paths, texts, ctx):
         later.append(asyncio.create_task(late()))
@@ -566,24 +554,16 @@ async def test_a_task_its_shell_waits_on_runs_in_that_shell(lines, out):
         gate.set()
         return (await later[0]).stdout, IOResult()
 
-    async def held(config, paths, texts, ctx):
-        await hold.wait()
-        return None, IOResult()
-
-    for name, fn in (
-        ("spawn", spawn),
-        ("await_late", await_late),
-        ("held", held),
-    ):
+    for name, fn in (("spawn", spawn), ("await_late", await_late)):
         ws.register_cli(
             name,
             CLI(spec=CommandSpec(name=name), handlers={"": CLIHandler(fn=fn)}),
         )
-    for line in lines[:-1]:
-        await ws.shell(line)
-    hold.set()
-    io = await asyncio.wait_for(ws.shell(lines[-1]), 5)
-    assert io.stdout == out
+    ws.create_session("s")
+    await ws.shell("V=outer", session_id="s")
+    line = 'echo $(spawn); await_late; echo "J=$J"'
+    io = await asyncio.wait_for(ws.shell(line, session_id="s"), 5)
+    assert io.stdout == b"\nv=outer\nj=joined\nJ=\n"
     await ws.close()
 
 

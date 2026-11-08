@@ -185,7 +185,7 @@ import { MirageToolOperations } from '../tools/tool_operations.ts'
 import { resolveControlStores } from './build.ts'
 import { buildFileCache } from './cache.ts'
 import { EventManager } from './events.ts'
-import { type ExecuteEnv, executeLine, reentry } from './execute.ts'
+import { type ExecuteEnv, executeLine } from './execute.ts'
 import { Explainer } from './explainer.ts'
 import { placementRefused } from './failure.ts'
 import { fillEnv } from './fill.ts'
@@ -2376,15 +2376,16 @@ export class Workspace {
    * @param options the caller's options, with the `cwd` or `env`.
    */
   private async runBeside(command: string, options: ExecuteOptions): Promise<ExecuteResult> {
-    const [ambient, sessionId] = reentry(
-      this.sessionManager,
-      this.jobTable.processes,
-      options.sessionId,
-    )
-    if (ambient !== null) return executeLine(this.executeEnv(), command, options)
+    const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(this.sessionManager) : null
+    if (
+      ambient !== null &&
+      (options.sessionId === undefined || options.sessionId === ambient.sessionId)
+    ) {
+      return executeLine(this.executeEnv(), command, options)
+    }
     await abortable(this.ensureSessionsLoaded(), options.signal)
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    const source = this.sessionManager.get(sessionId ?? this.sessionManager.defaultId)
+    const source = this.sessionManager.get(options.sessionId ?? this.sessionManager.defaultId)
     const session = forkForCall(source, options.cwd, options.env)
     session.processId = null
     session.jobTable = this.jobTable.child()
@@ -2426,8 +2427,8 @@ export class Workspace {
    * callback fired mid-line) is the same shell continuing and runs
    * inline: it already holds the session, and waiting on itself would
    * deadlock. Evaluators carry their session explicitly. Ambient re-entry
-   * is decided by `reentry`, as in `executeLine`, so the lock key and the
-   * executed session never disagree. Host callbacks
+   * is accepted only with task-local storage, just as in `executeLine`:
+   * the fallback's newest binding may belong to another call. Host callbacks
    * use their invocation's explicitly bound shell entry point on the fallback.
    *
    * @param sessionId the session named by the caller, or undefined for
@@ -2442,13 +2443,15 @@ export class Workspace {
     line?: LineHandle,
   ): Promise<T> {
     if (session !== undefined) return run()
-    const [ambient, named] = reentry(this.sessionManager, this.jobTable.processes, sessionId)
-    if (ambient !== null) return run()
+    const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(this.sessionManager) : null
+    if (ambient !== null && (sessionId === undefined || sessionId === ambient.sessionId)) {
+      return run()
+    }
     // Hydrate first: a workspace on a shared store adopts the persisted
     // default id there, and a key taken before that names a session no
     // later line would wait on.
     await abortable(this.ensureSessionsLoaded(), signal)
-    const key = named ?? this.sessionManager.defaultId
+    const key = sessionId ?? this.sessionManager.defaultId
     // The line is listed as waiting from here, and ended as stopped, or
     // with the error, should it fail before it ends, as a line refused the
     // workspace's lease does.
