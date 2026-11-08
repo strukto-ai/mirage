@@ -100,7 +100,7 @@ def referenced_names(node: TSNodeLike) -> frozenset[str]:
 
 
 def command_words(
-    node: TSNodeLike, skip: frozenset[str] = frozenset()
+    node: TSNodeLike, skip: frozenset[str] = frozenset(), plain: bool = False
 ) -> frozenset[str]:
     """The first word of every command a parsed program runs.
 
@@ -116,10 +116,15 @@ def command_words(
         node (TSNodeLike): root node from parse().
         skip (frozenset[str]): further node types whose subtrees the
             caller walks on their own.
+        plain (bool): only the heads written as a bare word, the ones an
+            alias can expand (a quoted ``'echo'`` runs past an alias).
     """
     out: set[str] = set()
     for n in walk_named_outside_defs(node, skip):
         if n.type == "command_name":
+            inner = n.named_children
+            if plain and not (len(inner) == 1 and inner[0].type == "word"):
+                continue
             head = command_head(n)
             if head:
                 out.add(head)

@@ -130,6 +130,7 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
             for child in outer.named_children
             if child.type in nested
         )
+        plain = command_words(current, nested, plain=True)
         for word in command_words(current, nested):
             if (word, id(aliases)) in seen:
                 continue
@@ -154,7 +155,7 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
                 else []
             )
             found.extend((body, live) for body in defined.get(word) or ())
-            if word in aliases:
+            if word in aliases and word in plain:
                 # An alias is a textual prefix: dispatch appends the
                 # invocation's rest to the value, so the value's
                 # trailing command is parsed with a dynamic rest-word.

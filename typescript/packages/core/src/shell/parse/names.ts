@@ -106,15 +106,19 @@ export function referencedNames(node: TSNodeLike): ReadonlySet<string> {
  * anonymous token, so those are read directly. A function definition's
  * body is skipped: those commands run at invocation, where the fill
  * layer walks the stored body instead, and so is any `skip` type the
- * caller walks on its own.
+ * caller walks on its own. `plain` keeps only the heads written as a bare
+ * word, the ones an alias can expand (a quoted `'echo'` runs past an alias).
  */
 export function commandWords(
   node: TSNodeLike,
   skip: ReadonlySet<string> = new Set(),
+  plain = false,
 ): ReadonlySet<string> {
   const out = new Set<string>()
   for (const current of walkNamedOutsideDefs(node, skip)) {
     if (current.type === 'command_name') {
+      const inner = current.namedChildren
+      if (plain && !(inner.length === 1 && inner[0]?.type === 'word')) continue
       const head = commandHead(current)
       if (head !== '') out.add(head)
     } else if (constants.DECLARING_NODES.has(current.type)) {

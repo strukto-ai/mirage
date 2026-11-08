@@ -127,6 +127,7 @@ export function lineNodes(node: TSNodeLike, session: SessionState): TSNodeLike[]
       for (const child of outer.namedChildren)
         if (nested.has(child.type)) frontier.push([child, live])
     }
+    const plain = commandWords(current, nested, true)
     for (const word of commandWords(current, nested)) {
       if (done.has(word)) continue
       done.add(word)
@@ -140,7 +141,7 @@ export function lineNodes(node: TSNodeLike, session: SessionState): TSNodeLike[]
               (body) => [body, saved],
             )
       for (const body of defined.get(word) ?? []) found.push([body, live])
-      const aliased = sessionEntry(aliases, word)
+      const aliased = plain.has(word) ? sessionEntry(aliases, word) : undefined
       // An alias is a textual prefix: dispatch appends the
       // invocation's rest to the value, so the value's trailing
       // command is parsed with a dynamic rest-word. That keeps its

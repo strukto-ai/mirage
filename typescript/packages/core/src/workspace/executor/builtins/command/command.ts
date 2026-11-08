@@ -30,7 +30,7 @@ import { lastOf, scanOptions } from '../getopt.ts'
 import { classify, describe, programFile } from '../lookup/index.ts'
 import { NameKind } from '../lookup/types.ts'
 import { builtinUsage, result, written } from '../shared.ts'
-import { BASH_BUILTINS, SHELL_NAMES } from '../../../lookup/constants.ts'
+import { BASH_BUILTINS, KEYWORDS, SHELL_NAMES } from '../../../lookup/constants.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 
 /**
@@ -124,10 +124,11 @@ export async function handleCommandBuiltin(
 }
 
 /**
- * Run `words` past a shell function or alias of their head's name. A head an
- * alias would expand is single-quoted, which bash never expands as an alias,
- * so the alias table stays whole for the builtin to read (`builtin alias
- * alias`); any other head goes as typed. A shadowing function is masked in the session for the inner
+ * Run `words` past a shell function or alias of their head's name. A head the
+ * line would read as more than a name is single-quoted, as bash takes the word
+ * as it is: one an alias would expand, so the alias table stays whole for the
+ * builtin to read (`builtin alias alias`), a reserved word (`command time`) and
+ * an assignment (`command X=5`). Any other head goes as typed. A shadowing function is masked in the session for the inner
  * run while builtins and mount commands still resolve. `cmd` is the builtin
  * that runs them, named on the node. Mirrors Python's _past_functions.
  */
@@ -141,10 +142,11 @@ async function pastFunctions(
 ): Promise<RedirectResult> {
   const innerName = words[0] ?? ''
   const rest = shellJoin(words.slice(1))
-  const aliased = aliasesOn(session) && sessionEntry(session.aliases, innerName) !== undefined
-  const inner = aliased
-    ? singleQuote(innerName) + (rest === '' ? '' : ` ${rest}`)
-    : shellJoin(words)
+  const quoted =
+    innerName.includes('=') ||
+    KEYWORDS.has(innerName) ||
+    (aliasesOn(session) && sessionEntry(session.aliases, innerName) !== undefined)
+  const inner = quoted ? singleQuote(innerName) + (rest === '' ? '' : ` ${rest}`) : shellJoin(words)
   // A function never shadows a bash builtin mirage runs, so one of such a name
   // stays for the builtin to read or remove (`builtin unset -f unset`); an
   // interpreter's (`python3`) is still masked. Function bodies are never
