@@ -305,18 +305,23 @@ impl Layout<'_> {
     }
 
     /// `case W in`, then each pattern, body and terminator on a line of
-    /// its own, an empty body taking its line too, and `esac`.
+    /// its own, an empty body taking its line too, and `esac`: a `$( )`
+    /// in a pattern spans its own printing before the body.
     fn case_statement(&mut self, index: usize) {
         for child in self.children(index) {
             if self.kind(child) == "case_item" {
                 self.break_line();
                 self.starts[child] = Some(self.line);
-                let body: Vec<usize> = self
-                    .children(child)
-                    .into_iter()
-                    .skip_while(|&part| self.kind(part) != ")")
-                    .skip(1)
-                    .collect();
+                let mut parts = self.children(child).into_iter();
+                for part in parts.by_ref() {
+                    if self.kind(part) == ")" {
+                        break;
+                    }
+                    if self.named(part) {
+                        self.inline(part);
+                    }
+                }
+                let body: Vec<usize> = parts.collect();
                 self.break_line();
                 self.sequence(&body);
                 self.break_line();
@@ -460,6 +465,14 @@ mod tests {
         assert_eq!(
             echoed("case x in a) :;; b|x) echo $LINENO;; esac; echo $LINENO"),
             [6, 8]
+        );
+        assert_eq!(
+            echoed("case x in $(if true; then echo x; fi)) echo $LINENO;; esac; echo $LINENO"),
+            [5, 7]
+        );
+        assert_eq!(
+            echoed("case x in a) :;; \"$(if true; then echo x; fi)\") echo $LINENO;; esac"),
+            [8]
         );
         assert_eq!(
             echoed("{\necho $LINENO\necho $LINENO\n}\necho $LINENO"),

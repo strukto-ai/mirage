@@ -728,10 +728,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "f() { echo $?; }; true; f $(exit 5); unset -f f; echo $(if true; then echo $LINENO; fi; echo $LINENO) $(for i in 1; do echo $LINENO; done)\necho $({\necho $LINENO\n}\necho $LINENO) $(cat <<E\nx\nE\necho $LINENO) $(\n\neval 'echo $LINENO\necho $LINENO')\necho \"$(zlf(){ echo $LINENO; echo $LINENO; }; zlf; echo $LINENO)\"",
+      "command": "f() { echo $?; }; true; f $(exit 5); unset -f f; echo $(if true; then echo $LINENO; fi; echo $LINENO) $(for i in 1; do echo $LINENO; done)\necho $({\necho $LINENO\n}\necho $LINENO) $(cat <<E\nx\nE\necho $LINENO) $(\n\neval 'echo $LINENO\necho $LINENO')\necho \"$(zlf(){ echo $LINENO; echo $LINENO; }; zlf; echo $LINENO)\"\necho $(case x in $(if true; then echo x; fi)) echo $LINENO;; esac; echo $LINENO) \"$(case x in a) :;; \"$(if true; then echo x; fi)\") echo $LINENO;; esac)\"",
       "expect": {
         "exit": 0,
-        "stdout": "5\n2 3 3\n5 6 x 9 6 7\n14\n15\n16\n",
+        "stdout": "5\n2 3 3\n5 6 x 9 6 7\n14\n15\n16\n17 19 20\n",
         "stderr": ""
       }
     },

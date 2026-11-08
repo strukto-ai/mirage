@@ -61,13 +61,13 @@ async def printf_output(
         },
     )
     budget = YieldBudget()
+    errors: list[bytes] = []
 
     def said() -> None:
-        # Each drain writes one channel, so a diagnostic lands on io
-        # before the output that followed it is yielded.
-        if err := stream.take_stderr():
+        if errors:
             held = io.stderr if isinstance(io.stderr, bytes) else b""
-            io.stderr = held + err
+            io.stderr = held + b"".join(errors)
+            errors.clear()
 
     try:
         for index, text in enumerate([fmt, *args]):
@@ -77,16 +77,21 @@ async def printf_output(
             stream.end_input(index)
             await budget.run()
         output = stream.finish()
-        said()
+        if err := stream.take_stderr():
+            errors.append(err)
         if output:
+            said()
             yield output
         while stream.busy():
             output = stream.drain()
-            said()
+            if err := stream.take_stderr():
+                errors.append(err)
             if output:
+                said()
                 yield output
             await budget.run()
     finally:
+        said()
         if not io.exit_code:
             io.exit_code = stream.status()
         await close_stream(stream)

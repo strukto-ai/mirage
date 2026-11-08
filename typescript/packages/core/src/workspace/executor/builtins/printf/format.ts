@@ -48,11 +48,11 @@ export async function* printfOutput(
     voice,
   })
   const budget = new YieldBudget(signal)
-  // Each drain writes one channel, so a diagnostic lands on io before the
-  // output that followed it is yielded.
+  const errors: Uint8Array[] = []
   const said = (): void => {
-    const err = stream.takeStderr()
-    if (err.byteLength === 0) return
+    if (errors.length === 0) return
+    const err = concat(errors)
+    errors.length = 0
     io.stderr = io.stderr instanceof Uint8Array ? concat([io.stderr, err]) : err
   }
   try {
@@ -69,15 +69,24 @@ export async function* printfOutput(
       await budget.run()
     }
     const output = stream.finish()
-    said()
-    if (output.byteLength > 0) yield output
+    const first = stream.takeStderr()
+    if (first.byteLength > 0) errors.push(first)
+    if (output.byteLength > 0) {
+      said()
+      yield output
+    }
     while (stream.busy()) {
       const part = stream.drain()
-      said()
-      if (part.byteLength > 0) yield part
+      const more = stream.takeStderr()
+      if (more.byteLength > 0) errors.push(more)
+      if (part.byteLength > 0) {
+        said()
+        yield part
+      }
       await budget.run()
     }
   } finally {
+    said()
     if (stream.live && io.exitCode === 0) io.exitCode = stream.status()
     await closeStream(stream)
   }
