@@ -35,7 +35,7 @@ from mirage.errors.types import DotWalkError, DotWalkLoop, FsCondition
 from mirage.io.types import IOResult
 from mirage.rs import open_stream
 from mirage.rs.scan import scan, scanned
-from mirage.shell.bytes import text_view
+from mirage.shell.bytes import decode_text, encode_text, text_view
 from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
@@ -43,6 +43,7 @@ from mirage.types import (
     Follow,
     JsonValue,
     LineFacts,
+    LsFormat,
     LsIndicator,
     LsLinkMode,
     LsSortBy,
@@ -51,9 +52,10 @@ from mirage.types import (
     ReaddirFn,
     StatFn,
 )
+from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import mount_prefix_of, rekey, under_path
 from mirage.utils.path import respell_one
-from mirage.utils.quote import escape_name
+from mirage.utils.quote import quote_name
 from mirage.utils.stat_view import content_size
 from mirage.utils.width import text_width
 from mirage.view.namespace_view import followed_stat
@@ -64,11 +66,17 @@ logger = logging.getLogger(__name__)
 LS_OK = 0
 LS_MINOR_PROBLEM = 1
 LS_FAILURE = 2
+# The width and tab stops a listing in columns takes when nothing names
+# them.
+LINE_WIDTH = 80
+TAB_SIZE = 8
+# How a name prints under the line's quoting style.
+Quote = Callable[[str], str]
 
 
 @dataclass(frozen=True, slots=True)
 class LsFlags:
-    long: bool = False
+    layout: LsFormat = LsFormat.SINGLE_COLUMN
     all_files: bool = False
     show_dot_entries: bool = False
     human: bool = False
@@ -82,8 +90,13 @@ class LsFlags:
     time_kind: LsTimeKind = LsTimeKind.MTIME
     group_dirs_first: bool = False
     columns: formatting.LsColumns = formatting.DEFAULT_COLUMNS
-    escape: bool = False
+    quoting: str = "literal"
+    hide_control: bool = False
     hyperlink: bool = False
+    width: int | None = LINE_WIDTH
+    tabsize: int = TAB_SIZE
+    ignore: tuple[str, ...] = ()
+    notices: tuple[str, ...] = ()
 
 
 # The three spellings of a command-line link policy; the last one wins.
@@ -94,6 +107,20 @@ _DEREF_DESTS = (
 )
 # The four spellings of an indicator style; the last one typed wins.
 _INDICATOR_DESTS = ("classify", "file_type", "p", "indicator_style")
+# The spellings of a format; the last one typed wins, but -1 leaves a long
+# format long.
+_FORMAT_DESTS = (
+    "args_l",
+    "g",
+    "o",
+    "numeric_uid_gid",
+    "full_time",
+    "args_1",
+    "C",
+    "x",
+    "m",
+    "format",
+)
 # What mirage-rs reads: every option that carries a word, a size or a
 # style, in the order typed.
 _SCANNED = (
@@ -114,10 +141,34 @@ _SCANNED = (
     "file_type",
     "block_size",
     "human_readable",
+    "si",
     "time_style",
+    "f",
+    *_FORMAT_DESTS,
+    "quoting_style",
+    "escape",
+    "literal",
+    "quote_name",
+    "hide_control_chars",
+    "show_control_chars",
+    "width",
+    "tabsize",
 )
+# The environment ls reads where no option gives the value, and the name
+# the scan reads each one under.
+_ENVIRONMENT = (("QUOTING_STYLE", "quoting_env"), ("COLUMNS", "columns_env"))
+# The quoting styles that leave some names bare, under which a bare name
+# in columns or a long listing takes a space to line up with quoted ones.
+_ALIGNED_STYLES = frozenset(("shell", "shell-escape", "c-maybe"))
+_ALIGNED_LAYOUTS = frozenset(
+    (LsFormat.VERBOSE, LsFormat.VERTICAL, LsFormat.HORIZONTAL)
+)
+# What -B leaves out.
+_BACKUPS = ("*~", ".*~")
 # GNU reads a bare --classify, --hyperlink or --color as `always`.
 _BARE_ALWAYS = frozenset(("classify", "hyperlink", "color"))
+# What a quoted name opens with.
+_QUOTES = ("'", '"', "\u2018")
 
 _FOLLOWS = {
     LsLinkMode.ALL: Follow.LAST,
@@ -140,6 +191,13 @@ class LsValues:
             for bytes or when ``-h`` came after it.
         time_style (str): ``locale``, ``full-iso``, ``long-iso``, ``iso``
             or ``+FORMAT``.
+        layout (LsFormat): the format.
+        quoting (str): the ``--quoting-style`` word.
+        hide_control (bool): ``-q``, a control printed as ``?``.
+        width (int | None): the line width, None for no limit.
+        tabsize (int): the tab stops, 0 for spaces only.
+        warnings (tuple[str, ...]): an environment value ls ignored, each
+            in its words.
     """
 
     sort_by: LsSortBy | None
@@ -148,6 +206,12 @@ class LsValues:
     hyperlink: bool
     block_size: formatting.BlockSize | None
     time_style: str
+    layout: LsFormat
+    quoting: str
+    hide_control: bool
+    width: int | None
+    tabsize: int
+    warnings: tuple[str, ...]
 
 
 def _tape(fl: FlagView, names: Sequence[str]) -> list[tuple[str, str]]:
@@ -171,30 +235,53 @@ def _tape(fl: FlagView, names: Sequence[str]) -> list[tuple[str, str]]:
     ]
 
 
-def scan_values(fl: FlagView, names: Sequence[str] = _SCANNED) -> LsValues:
+def scan_values(
+    fl: FlagView,
+    names: Sequence[str] = _SCANNED,
+    env: Mapping[str, str] | None = None,
+) -> LsValues:
     """ls's option values, read by mirage-rs in one pass over the line.
 
     Args:
         fl (FlagView): the ls flag view.
         names (Sequence[str]): which options to read; the others keep
             their defaults.
+        env (Mapping[str, str] | None): the environment, whose
+            ``QUOTING_STYLE`` and ``COLUMNS`` stand in for an option the
+            line did not type.
 
     Raises:
         UsageError: the first value ls refuses, in its words and with its
             exit status.
     """
-    values = scanned("ls", _tape(fl, names))
+    tape = _tape(fl, names)
+    if env is not None:
+        tape += [(dest, env[var]) for var, dest in _ENVIRONMENT if var in env]
+    values = scanned("ls", tape)
     sort = values["sort"]
     time = values["time"]
     indicator = values["indicator"]
     hyperlink = values["hyperlink"]
     style = values["time_style"]
+    layout = values["format"]
+    quoting = values["quoting"]
+    hide_control = values["hide_control"]
+    width = values["width"]
+    tabsize = values["tabsize"]
+    warnings = values["warnings"]
     if not (
         (sort is None or isinstance(sort, str))
         and isinstance(time, str)
         and isinstance(indicator, str)
         and isinstance(hyperlink, bool)
         and isinstance(style, str)
+        and isinstance(layout, str)
+        and isinstance(quoting, str)
+        and isinstance(hide_control, bool)
+        and (width is None or type(width) is int)
+        and type(tabsize) is int
+        and isinstance(warnings, list)
+        and all(isinstance(w, str) for w in warnings)
     ):
         raise TypeError(f"ls: mirage-rs read the options as {values!r}")
     return LsValues(
@@ -204,6 +291,12 @@ def scan_values(fl: FlagView, names: Sequence[str] = _SCANNED) -> LsValues:
         hyperlink=hyperlink,
         block_size=formatting.block_size_of(values["block_size"]),
         time_style=text_view(style),
+        layout=LsFormat(layout),
+        quoting=quoting,
+        hide_control=hide_control,
+        width=width,
+        tabsize=tabsize,
+        warnings=tuple(text_view(w) for w in warnings if isinstance(w, str)),
     )
 
 
@@ -220,22 +313,20 @@ def indicator_flag(fl: FlagView) -> LsIndicator:
     return scan_values(fl, _INDICATOR_DESTS).indicator
 
 
-def link_mode(
-    fl: FlagView, indicator: LsIndicator | None = None
-) -> LsLinkMode:
-    """Which command-line links GNU ls resolves before it lists them.
+def link_mode(fl: FlagView, values: LsValues | None = None) -> LsLinkMode:
+    """Which command-line links ls resolves before it lists them.
 
-    GNU settles it once: the last of ``-L``, ``-H`` and
+    It is settled once: the last of ``-L``, ``-H`` and
     ``--dereference-command-line-symlink-to-dir`` wins, and with none of
     them ``-d``, a long format or the classify style resolve no link
     while anything else resolves one that leads to a directory
-    (coreutils 9.7). A value the command refuses leaves the style
-    unclassified, since that line fails before it lists anything.
+    (coreutils 9.7). A value the command refuses leaves the line neither
+    long nor classified, since that line fails before it lists anything.
 
     Args:
         fl (FlagView): the ls flag view.
-        indicator (LsIndicator | None): the style a scan of the whole
-            line already read; None reads the indicator options here.
+        values (LsValues | None): a scan of the whole line already read;
+            None reads the format and indicator options here.
     """
     typed = fl.typed_order(*_DEREF_DESTS)
     if typed:
@@ -244,15 +335,17 @@ def link_mode(
             if typed[-1] == "dereference_command_line_symlink_to_dir"
             else LsLinkMode.ALL
         )
-    long = any(
-        fl.as_bool(dest) for dest in ("args_l", "g", "o", "numeric_uid_gid")
-    )
     try:
-        style = indicator if indicator is not None else indicator_flag(fl)
-        classify = style is LsIndicator.CLASSIFY
+        read = (
+            values
+            if values is not None
+            else scan_values(fl, (*_INDICATOR_DESTS, *_FORMAT_DESTS))
+        )
+        long = read.layout is LsFormat.VERBOSE
+        classify = read.indicator is LsIndicator.CLASSIFY
     except UsageError as exc:
         logger.debug("ls: the command refuses this line itself: %s", exc)
-        classify = False
+        long = classify = False
     if fl.as_bool("directory") or long or classify:
         return LsLinkMode.NONE
     return LsLinkMode.DIRECTORY
@@ -274,35 +367,33 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     )
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> LsFlags:
+def parse_flags(
+    flags: Mapping[str, FlagValue], env: Mapping[str, str] | None = None
+) -> LsFlags:
     """Parse the ls flag bag once into a frozen struct.
 
-    GNU's rules that are easy to get wrong: ``-g``, ``-o`` and ``-n``
-    imply the long format, and ``-1`` never undoes it in either order
-    (GNU ignores ``-1`` beside ``-l``, and with no terminal there are
-    never columns, so ``-1`` has nothing else to do); ``-n`` prints the
-    same columns as ``-l``,
-    because a mirage owner is already the id (an agent, a profile) and
-    never a name looked up from one; and ``-c`` or ``-u`` with neither
-    ``-l`` nor a sort sorts by that time. The words, sizes and styles
-    (the last sort, time and indicator spelling, the later of ``-h`` and
+    The rules that are easy to get wrong: ``-g``, ``-o``, ``-n`` and
+    ``--full-time`` imply the long format, and ``-1`` never undoes it in
+    either order; ``-n`` prints the same columns as ``-l``, because a
+    mirage owner is already the id (an agent, a profile) and never a name
+    looked up from one; ``-c`` or ``-u`` with no sort sorts by that time
+    unless the format is long; ``-f`` lists every entry unsorted, and the
+    last of ``-a``, ``-A`` and ``-f`` says which dot entries show;
+    ``--hide`` leaves names out only where none of those three asked for
+    them. The words, sizes and styles (the last sort, time, format,
+    quoting and indicator spelling, the later of ``-h``, ``--si`` and
     ``--block-size``) are mirage-rs's, read in one pass. Raises
-    ``UsageError`` for a value GNU refuses, with GNU's exit status for
-    that option.
+    ``UsageError`` for a value ls refuses, with its exit status for that
+    option.
 
     Args:
         flags (Mapping[str, FlagValue]): flags for the shared ls spec.
+        env (Mapping[str, str] | None): the environment, for
+            ``QUOTING_STYLE`` and ``COLUMNS``.
     """
     fl = FlagView(flags, spec=SPECS["ls"])
-    values = scan_values(fl)
-    no_owner = fl.as_bool("g")
-    no_group = fl.as_bool("o")
-    long = (
-        fl.as_bool("args_l")
-        or no_owner
-        or no_group
-        or fl.as_bool("numeric_uid_gid")
-    )
+    values = scan_values(fl, env=env)
+    long = values.layout is LsFormat.VERBOSE
     sort_by = LsSortBy.NAME if values.sort_by is None else values.sort_by
     if (
         values.sort_by is None
@@ -311,18 +402,26 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> LsFlags:
     ):
         sort_by = LsSortBy.TIME
     columns = formatting.LsColumns(
-        owner=not no_owner,
-        group=not no_group,
+        owner=not fl.as_bool("g"),
+        group=not (fl.as_bool("o") or fl.as_bool("no_group")),
         inode=fl.as_bool("inode"),
+        blocks=fl.as_bool("size"),
         context=fl.as_bool("context"),
         time_kind=values.time_kind,
         time_style=values.time_style,
         block_size=values.block_size,
     )
+    shown = fl.typed_order("all", "almost_all", "f")[-1:]
+    all_files = bool(shown)
+    ignore = tuple(fl.as_list("ignore"))
+    if fl.as_bool("ignore_backups"):
+        ignore += _BACKUPS
+    if not all_files:
+        ignore += tuple(fl.as_list("hide"))
     return LsFlags(
-        long=long,
-        all_files=fl.as_bool("all") or fl.as_bool("almost_all"),
-        show_dot_entries=fl.as_bool("all"),
+        layout=values.layout,
+        all_files=all_files,
+        show_dot_entries=shown != ["almost_all"] and all_files,
         human=fl.as_bool("human_readable"),
         sort_by=sort_by,
         reverse=fl.as_bool("reverse"),
@@ -332,16 +431,23 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> LsFlags:
         # -L alone dereferences what a listing finds; -H and its sibling
         # stop at the command line, and the last of the three wins.
         deref=fl.typed_order(*_DEREF_DESTS)[-1:] == ["dereference"],
-        follow_args=link_mode(fl, values.indicator) is LsLinkMode.ALL,
+        follow_args=link_mode(fl, values) is LsLinkMode.ALL,
         time_kind=values.time_kind,
         group_dirs_first=fl.as_bool("group_directories_first"),
         columns=columns,
+        quoting=values.quoting,
+        hide_control=values.hide_control,
         hyperlink=values.hyperlink,
-        escape=fl.as_bool("escape"),
+        width=values.width,
+        tabsize=values.tabsize,
+        ignore=ignore,
+        notices=values.warnings,
     )
 
 
-def ls_options(flags: Mapping[str, FlagValue]) -> dict[str, Any]:
+def ls_options(
+    flags: Mapping[str, FlagValue], env: Mapping[str, str] | None = None
+) -> dict[str, Any]:
     """Parsed ls flags as the generic's own keyword arguments.
 
     ``LsFlags`` names every field after the ``ls`` parameter it feeds,
@@ -351,8 +457,10 @@ def ls_options(flags: Mapping[str, FlagValue]) -> dict[str, Any]:
 
     Args:
         flags (Mapping[str, FlagValue]): Flags for the shared ls spec.
+        env (Mapping[str, str] | None): the environment, for
+            ``QUOTING_STYLE`` and ``COLUMNS``.
     """
-    parsed = parse_flags(flags)
+    parsed = parse_flags(flags, env)
     return {f.name: getattr(parsed, f.name) for f in fields(parsed)}
 
 
@@ -565,6 +673,43 @@ def sort_by_version(names: Sequence[str]) -> list[int]:
     return [places[raw].popleft() for raw in bytes(out).split(b"\0")[:-1]]
 
 
+def ignored(patterns: Sequence[str], name: str) -> bool:
+    """Whether ``-I``, ``-B`` or ``--hide`` leaves a listed name out: a
+    pattern matches it whole, a leading dot only where the pattern spells
+    one.
+
+    Args:
+        patterns (Sequence[str]): the patterns.
+        name (str): the entry's own name.
+    """
+    return any(fnmatch(name, pattern, period=True) for pattern in patterns)
+
+
+def laid_out(
+    rows: list[str], layout: LsFormat, width: int | None, tabsize: int
+) -> list[str]:
+    """Short rows as their format lays them out: in ``-C`` or ``-x``
+    columns or ``-m``'s comma list by mirage-rs, else one to a line.
+
+    Args:
+        rows (list[str]): the rendered rows.
+        layout (LsFormat): the format.
+        width (int | None): the line width, None for no limit.
+        tabsize (int): the tab stops, 0 for spaces only.
+    """
+    if layout in (LsFormat.SINGLE_COLUMN, LsFormat.VERBOSE) or not rows:
+        return rows
+    stream = open_stream(
+        "ls_columns",
+        {"format": layout.value, "width": width, "tabsize": tabsize},
+    )
+    out = bytearray(
+        stream.feed(b"".join(encode_text(row) + b"\0" for row in rows))
+    )
+    out += stream.finish()
+    return decode_text(bytes(out)).split("\n")[:-1]
+
+
 def _extension_of(name: str) -> str:
     """The key ``ls -X`` compares first: the name from its last dot,
     empty for a name without one.
@@ -596,7 +741,7 @@ def _order_rows(
     *,
     time_kind: LsTimeKind = LsTimeKind.MTIME,
     group_dirs_first: bool = False,
-    escape: bool = False,
+    quote: Quote | None = None,
 ) -> list[int]:
     """Indices of ``rows`` in GNU ls order.
 
@@ -617,6 +762,8 @@ def _order_rows(
         reverse (bool): Whether `-r` is in effect.
         time_kind (LsTimeKind): Which timestamp `-t` compares.
         group_dirs_first (bool): `--group-directories-first`.
+        quote (Quote | None): how a name prints, whose
+            width `--sort=width` compares; None for as it is.
     """
     if sort_by is LsSortBy.NONE:
         order = list(range(len(rows)))
@@ -629,7 +776,7 @@ def _order_rows(
         elif sort_by is LsSortBy.WIDTH:
             order.sort(
                 key=lambda i: text_width(
-                    escape_name(rows[i].name) if escape else rows[i].name
+                    rows[i].name if quote is None else quote(rows[i].name)
                 )
             )
         elif sort_by is not LsSortBy.NAME:
@@ -654,7 +801,7 @@ def sort_stats(
     *,
     time_kind: LsTimeKind = LsTimeKind.MTIME,
     group_dirs_first: bool = False,
-    escape: bool = False,
+    quote: Quote | None = None,
 ) -> list[FileStat]:
     return [
         entries[i]
@@ -664,7 +811,7 @@ def sort_stats(
             reverse,
             time_kind=time_kind,
             group_dirs_first=group_dirs_first,
-            escape=escape,
+            quote=quote,
         )
     ]
 
@@ -805,6 +952,7 @@ async def _stat_entries(
     stat_path: StatPath | None = None,
     stat_needed: bool = True,
     spell: Callable[[str], str] = str,
+    ignore: Sequence[str] = (),
 ) -> tuple[list[FileStat], list[LsWarning]]:
     """Stat every name in a directory, plus the mounts below it.
 
@@ -842,6 +990,8 @@ async def _stat_entries(
             ``stat_needed``.
         spell (Callable[[str], str]): an entry's path as the operand
             spelled it, for a diagnostic.
+        ignore (Sequence[str]): the patterns of ``-I``, ``-B`` and
+            ``--hide``; a name one matches is left out unstatted.
     """
     stats: list[FileStat] = []
     warnings: list[LsWarning] = []
@@ -849,6 +999,8 @@ async def _stat_entries(
         followed_stat, stat, links if deref else None
     )
     for entry in names:
+        if ignore and ignored(ignore, entry.rstrip("/").rsplit("/", 1)[-1]):
+            continue
         entry_spec = PathSpec(
             virtual=entry,
             directory=entry,
@@ -897,6 +1049,8 @@ async def _stat_entries(
             continue
         if not all_files and name.startswith("."):
             continue
+        if ignored(ignore, name):
+            continue
         seen.add(name)
         stats.append(await _mount_row(path, name, stat_path))
     return stats, warnings
@@ -921,10 +1075,11 @@ async def probe_operand(
     time_kind: LsTimeKind = LsTimeKind.MTIME,
     group_dirs_first: bool = False,
     stat_needed: bool = True,
-    escape: bool = False,
+    quote: Quote | None = None,
     chain: tuple[str, ...] = (),
     spell: Callable[[str], str] | None = None,
     budget: WalkBudget | None = None,
+    ignore: Sequence[str] = (),
 ) -> tuple[Operand, list[LsWarning]]:
     """List one operand and report whether it turned out to be a directory.
 
@@ -960,6 +1115,8 @@ async def probe_operand(
         group_dirs_first (bool): ``--group-directories-first``.
         stat_needed (bool): report an entry whose stat failed. See
             ``stat_needed``.
+        quote (Quote | None): how a name prints, for
+            ``--sort=width``; None for as it is.
         chain (tuple[str, ...]): under ``-RL``, the directories open
             above this one, each as the path it resolves to.
         spell (Callable[[str], str] | None): a path below the operand as
@@ -967,6 +1124,8 @@ async def probe_operand(
         budget (WalkBudget | None): under ``-R``, the entries the walk
             may still list; a directory past it is listed in its parent
             but not opened.
+        ignore (Sequence[str]): the patterns a listed name is left out
+            by.
     """
     if spell is None:
         spell = functools.partial(
@@ -1074,6 +1233,7 @@ async def probe_operand(
         stat_path=stat_path,
         stat_needed=stat_needed,
         spell=spell,
+        ignore=ignore,
     )
     warnings.extend(entry_ws)
     entries = sort_stats(
@@ -1082,7 +1242,7 @@ async def probe_operand(
         reverse,
         time_kind=time_kind,
         group_dirs_first=group_dirs_first,
-        escape=escape,
+        quote=quote,
     )
     groups: list[tuple[PathSpec, list[FileStat]]] = [(path, entries)]
     if recursive:
@@ -1132,10 +1292,11 @@ async def probe_operand(
                 time_kind=time_kind,
                 group_dirs_first=group_dirs_first,
                 stat_needed=stat_needed,
-                escape=escape,
+                quote=quote,
                 chain=below,
                 spell=spell,
                 budget=budget,
+                ignore=ignore,
             )
             groups.extend(child.groups)
             warnings.extend(child_ws)
@@ -1206,7 +1367,7 @@ async def _sort_operands(
     reverse: bool,
     stat: StatFn,
     time_kind: LsTimeKind = LsTimeKind.MTIME,
-    escape: bool = False,
+    quote: Quote | None = None,
 ) -> list[Operand]:
     keys = [
         await _operand_key(o, sort_by=sort_by, stat=stat) for o in operands
@@ -1214,7 +1375,7 @@ async def _sort_operands(
     return [
         operands[i]
         for i in _order_rows(
-            keys, sort_by, reverse, time_kind=time_kind, escape=escape
+            keys, sort_by, reverse, time_kind=time_kind, quote=quote
         )
     ]
 
@@ -1248,26 +1409,46 @@ def uri_escape(path: str) -> str:
 
 
 def _decorated_names(
-    entries: list[FileStat], hrefs: list[str] | None, long: bool, escape: bool
+    entries: list[FileStat],
+    hrefs: list[str] | None,
+    long: bool,
+    quote: Quote | None,
+    align: bool,
 ) -> list[str] | None:
-    """The name column with escapes and hyperlinks, None when undecorated.
+    """The name column quoted, lined up and hyperlinked, None when every
+    name prints as it is.
+
+    Where ``align`` asks and a name of the group is quoted, every bare one
+    takes a space before it, so the names line up past the opening
+    quotes; a hyperlink goes inside a name's quotes.
 
     Args:
         entries (list[FileStat]): the rows.
         hrefs (list[str] | None): each row's virtual path, when linking.
         long (bool): whether the long format's ``-> target`` applies.
-        escape (bool): render names and targets with GNU ``-b`` escapes.
+        quote (Quote | None): how a name or a link target
+            prints; None for as it is.
+        align (bool): the quoting style and format line bare names up.
     """
-    if hrefs is None and not escape:
+    if hrefs is None and quote is None:
         return None
+    quoted = [e.name if quote is None else quote(e.name) for e in entries]
+    opened = [quote is not None and q.startswith(_QUOTES) for q in quoted]
+    spaced = align and any(opened)
     out: list[str] = []
     for i, e in enumerate(entries):
-        name = escape_name(e.name) if escape else e.name
+        name = quoted[i]
         if hrefs is not None:
-            name = _hyperlinked(name, hrefs[i])
+            name = (
+                name[0] + _hyperlinked(name[1:-1], hrefs[i]) + name[-1]
+                if opened[i]
+                else _hyperlinked(name, hrefs[i])
+            )
+        if spaced and not opened[i]:
+            name = " " + name
         target = e.extra.get(LINK_TARGET_KEY)
         if long and e.type is FileType.SYMLINK and isinstance(target, str):
-            name += " -> " + (escape_name(target) if escape else target)
+            name += " -> " + (target if quote is None else quote(target))
         out.append(name)
     return out
 
@@ -1285,7 +1466,7 @@ def stat_needed(
     """Whether GNU's ls would stat a listed entry to print this listing.
 
     That is when a failed stat reaches stderr: the long format, a time
-    or size sort, ``-i``, ``-Z`` and ``--hyperlink`` read the stat,
+    or size sort, ``-i``, ``-s``, ``-Z`` and ``--hyperlink`` read the stat,
     and ``-R``, ``-F`` and ``--group-directories-first`` read the type,
     which a mirage listing never carries, as a readdir without d_type
     does not. A plain listing prints the names readdir gave and nothing
@@ -1294,7 +1475,8 @@ def stat_needed(
     Args:
         long (bool): the long format (``-l``, ``-g``, ``-o``, ``-n``).
         sort_by (LsSortBy): the active sort key.
-        columns (formatting.LsColumns): ``-i`` and ``-Z`` ride here.
+        columns (formatting.LsColumns): ``-i``, ``-s`` and ``-Z`` ride
+            here.
         hyperlink (bool): ``--hyperlink``.
         recursive (bool): ``-R``.
         indicator (LsIndicator): the indicator style, which reads the
@@ -1305,6 +1487,7 @@ def stat_needed(
         long
         or sort_by in (LsSortBy.TIME, LsSortBy.SIZE)
         or columns.inode
+        or columns.blocks
         or columns.context
         or hyperlink
         or recursive
@@ -1317,16 +1500,20 @@ def _render_group(
     results: list[str],
     entries: list[FileStat],
     *,
-    long: bool,
+    layout: LsFormat,
     human: bool,
     indicator: LsIndicator,
     identity: Identity | None,
-    columns: formatting.LsColumns = formatting.DEFAULT_COLUMNS,
-    escape: bool = False,
+    columns: formatting.LsColumns,
+    quote: Quote | None,
+    align: bool,
+    width: int | None,
+    tabsize: int,
     hrefs: list[str] | None = None,
     targets: list[FileStat | None] | None = None,
 ) -> None:
-    names = _decorated_names(entries, hrefs, long, escape)
+    long = layout is LsFormat.VERBOSE
+    names = _decorated_names(entries, hrefs, long, quote, align)
     if long:
         results.extend(
             formatting.format_ls_long(
@@ -1340,17 +1527,18 @@ def _render_group(
             )
         )
     else:
-        results.extend(
-            format_simple(
-                entries, indicator=indicator, columns=columns, names=names
-            )
+        rows = format_simple(
+            entries, indicator=indicator, columns=columns, names=names
         )
+        results.extend(laid_out(rows, layout, width, tabsize))
 
 
 def _finish(
-    results: list[str], warnings: list[LsWarning]
+    results: list[str], warnings: list[LsWarning], notices: Sequence[str]
 ) -> tuple[bytes, IOResult]:
-    stderr = format_optional_records([w.message for w in warnings])
+    stderr = format_optional_records(
+        [*notices, *(w.message for w in warnings)]
+    )
     return format_records(results), IOResult(
         stderr=stderr, exit_code=exit_status_for(warnings)
     )
@@ -1361,7 +1549,7 @@ async def ls(
     *,
     readdir: ReaddirFn,
     stat: StatFn,
-    long: bool = False,
+    layout: LsFormat = LsFormat.SINGLE_COLUMN,
     all_files: bool = False,
     show_dot_entries: bool = False,
     human: bool = False,
@@ -1380,11 +1568,35 @@ async def ls(
     time_kind: LsTimeKind = LsTimeKind.MTIME,
     group_dirs_first: bool = False,
     columns: formatting.LsColumns = formatting.DEFAULT_COLUMNS,
-    escape: bool = False,
+    quoting: str = "literal",
+    hide_control: bool = False,
     hyperlink: bool = False,
+    width: int | None = LINE_WIDTH,
+    tabsize: int = TAB_SIZE,
+    ignore: Sequence[str] = (),
+    notices: Sequence[str] = (),
 ) -> tuple[bytes, IOResult]:
     results: list[str] = []
     warnings: list[LsWarning] = []
+    long = layout is LsFormat.VERBOSE
+    quote = (
+        None
+        if quoting == "literal" and not hide_control
+        else functools.partial(quote_name, style=quoting, hide=hide_control)
+    )
+    render = functools.partial(
+        _render_group,
+        results,
+        layout=layout,
+        human=human,
+        indicator=indicator,
+        identity=identity,
+        columns=columns,
+        quote=quote,
+        align=quoting in _ALIGNED_STYLES and layout in _ALIGNED_LAYOUTS,
+        width=width,
+        tabsize=tabsize,
+    )
 
     if list_dir:
         # -d turns every operand into a plain row, sorted together and
@@ -1405,25 +1617,18 @@ async def ls(
                 reverse,
                 time_kind=time_kind,
                 group_dirs_first=group_dirs_first,
-                escape=escape,
+                quote=quote,
             )
             rows = [rows[i] for i in order]
             row_hrefs = [row_hrefs[i] for i in order]
-        _render_group(
-            results,
+        render(
             rows,
-            long=long,
-            human=human,
-            indicator=indicator,
-            identity=identity,
-            columns=columns,
-            escape=escape,
             hrefs=row_hrefs if hyperlink else None,
             targets=await link_targets(
                 rows, row_hrefs, links, long, indicator
             ),
         )
-        return _finish(results, warnings)
+        return _finish(results, warnings, notices)
 
     needed = stat_needed(
         long=long,
@@ -1454,8 +1659,9 @@ async def ls(
             time_kind=time_kind,
             group_dirs_first=group_dirs_first,
             stat_needed=needed,
-            escape=escape,
+            quote=quote,
             budget=budget,
+            ignore=ignore,
         )
         warnings.extend(p_ws)
         if budget is not None:
@@ -1470,7 +1676,7 @@ async def ls(
             reverse=reverse,
             stat=stat,
             time_kind=time_kind,
-            escape=escape,
+            quote=quote,
         )
 
     # GNU names every listed directory once there is more than one operand
@@ -1478,15 +1684,8 @@ async def ls(
     headed = recursive or len(paths) > 1
     rows = [o.row for o in operands if o.row is not None]
     row_paths = [o.path.virtual for o in operands if o.row is not None]
-    _render_group(
-        results,
+    render(
         rows,
-        long=long,
-        human=human,
-        indicator=indicator,
-        identity=identity,
-        columns=columns,
-        escape=escape,
         hrefs=row_paths if hyperlink else None,
         targets=await link_targets(rows, row_paths, links, long, indicator),
     )
@@ -1497,6 +1696,8 @@ async def ls(
                 dots = []
                 prefix = mount_prefix_of(dir_spec.virtual, dir_spec.vfs_path)
                 for name in (".", ".."):
+                    if ignored(ignore, name):
+                        continue
                     target = posixpath.normpath(
                         posixpath.join(dir_spec.virtual, name)
                     )
@@ -1540,7 +1741,7 @@ async def ls(
                     reverse,
                     time_kind=time_kind,
                     group_dirs_first=group_dirs_first,
-                    escape=escape,
+                    quote=quote,
                 )
             if headed:
                 if printed:
@@ -1550,23 +1751,18 @@ async def ls(
                     operand.path.virtual,
                     operand.path.raw_path,
                 )
-                results.append(f"{escape_name(header) if escape else header}:")
-            # GNU 9.7 prints allocated blocks here; VFS has no allocation
+                results.append(
+                    f"{header if quote is None else quote(header)}:"
+                )
+            # ls prints allocated blocks here; VFS has no allocation
             # metadata, so report unknown instead of inventing a block count.
-            if long:
+            if long or columns.blocks:
                 results.append("total ?" if entries else "total 0")
             entry_paths = [
                 posixpath.join(dir_spec.virtual, e.name) for e in entries
             ]
-            _render_group(
-                results,
+            render(
                 entries,
-                long=long,
-                human=human,
-                indicator=indicator,
-                identity=identity,
-                columns=columns,
-                escape=escape,
                 hrefs=entry_paths if hyperlink else None,
                 targets=await link_targets(
                     entries, entry_paths, links, long, indicator
@@ -1574,7 +1770,7 @@ async def ls(
             )
             printed = True
 
-    return _finish(results, warnings)
+    return _finish(results, warnings, notices)
 
 
 async def ls_generic(
@@ -1615,7 +1811,7 @@ async def ls_generic(
         mounts=mounts_of(ctx),
         stat_path=vfs_stat_path(ctx.vfs),
         identity=identity_of(ctx),
-        **(ls_options(ctx.flags) if options is None else options),
+        **(ls_options(ctx.flags, ctx.env) if options is None else options),
     )
 
 
@@ -1628,6 +1824,8 @@ __all__ = [
     "exit_status_for",
     "facts",
     "format_simple",
+    "ignored",
+    "laid_out",
     "ls",
     "ls_generic",
     "probe_operand",

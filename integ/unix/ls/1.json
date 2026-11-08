@@ -28,14 +28,22 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "ls -1 /data/",
+      "command": "ls -1 /data/; ls -C /data/; ls -x -w 50 /data/; ls -m -w 60 /data/; ls -C -T 0 -w 70 /data/; ls --format=across -w 50 /data/ | head -2; COLUMNS=40 ls -C /data/; COLUMNS=x ls -m /data/ | head -1; ls -w 0 -x /data/ | wc -l; ls -w x /data/; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "a.txt\nabc.csv\nanchors.txt\nb.txt\nbinary.bin\nc.txt\nchat.jsonl\ncsv.csv\ndata.jsonl\ndisptree\ndup.txt\nempty.txt\nfields.txt\nguard\nmixed.txt\nmulti.txt\nno_nl.txt\nnumbers.txt\none_byte.txt\noooo.txt\npatterns.txt\npatterns2.txt\npoem.diff\npoem.txt\nprefix_dup.txt\nrepeats.txt\nsections.txt\nsorted_a.txt\nsorted_b.txt\nsorted_c.txt\nspaced.txt\nsub\ntabbed.txt\nuser.json\nusers.json\n",
-        "stderr": ""
+        "stdout": "a.txt\nabc.csv\nanchors.txt\nb.txt\nbinary.bin\nc.txt\nchat.jsonl\ncsv.csv\ndata.jsonl\ndisptree\ndup.txt\nempty.txt\nfields.txt\nguard\nmixed.txt\nmulti.txt\nno_nl.txt\nnumbers.txt\none_byte.txt\noooo.txt\npatterns.txt\npatterns2.txt\npoem.diff\npoem.txt\nprefix_dup.txt\nrepeats.txt\nsections.txt\nsorted_a.txt\nsorted_b.txt\nsorted_c.txt\nspaced.txt\nsub\ntabbed.txt\nuser.json\nusers.json\na.txt\t     chat.jsonl  fields.txt   one_byte.txt   prefix_dup.txt  spaced.txt\nabc.csv      csv.csv\t guard\t      oooo.txt\t     repeats.txt     sub\nanchors.txt  data.jsonl  mixed.txt    patterns.txt   sections.txt    tabbed.txt\nb.txt\t     disptree\t multi.txt    patterns2.txt  sorted_a.txt    user.json\nbinary.bin   dup.txt\t no_nl.txt    poem.diff      sorted_b.txt    users.json\nc.txt\t     empty.txt\t numbers.txt  poem.txt\t     sorted_c.txt\na.txt\t\tabc.csv       anchors.txt\nb.txt\t\tbinary.bin    c.txt\nchat.jsonl\tcsv.csv       data.jsonl\ndisptree\tdup.txt       empty.txt\nfields.txt\tguard\t      mixed.txt\nmulti.txt\tno_nl.txt     numbers.txt\none_byte.txt\toooo.txt      patterns.txt\npatterns2.txt\tpoem.diff     poem.txt\nprefix_dup.txt\trepeats.txt   sections.txt\nsorted_a.txt\tsorted_b.txt  sorted_c.txt\nspaced.txt\tsub\t      tabbed.txt\nuser.json\tusers.json\na.txt, abc.csv, anchors.txt, b.txt, binary.bin, c.txt,\nchat.jsonl, csv.csv, data.jsonl, disptree, dup.txt,\nempty.txt, fields.txt, guard, mixed.txt, multi.txt,\nno_nl.txt, numbers.txt, one_byte.txt, oooo.txt,\npatterns.txt, patterns2.txt, poem.diff, poem.txt,\nprefix_dup.txt, repeats.txt, sections.txt, sorted_a.txt,\nsorted_b.txt, sorted_c.txt, spaced.txt, sub, tabbed.txt,\nuser.json, users.json\na.txt        csv.csv     mixed.txt     patterns2.txt   sorted_b.txt\nabc.csv      data.jsonl  multi.txt     poem.diff       sorted_c.txt\nanchors.txt  disptree    no_nl.txt     poem.txt        spaced.txt\nb.txt        dup.txt     numbers.txt   prefix_dup.txt  sub\nbinary.bin   empty.txt   one_byte.txt  repeats.txt     tabbed.txt\nc.txt        fields.txt  oooo.txt      sections.txt    user.json\nchat.jsonl   guard       patterns.txt  sorted_a.txt    users.json\na.txt\t\tabc.csv       anchors.txt\nb.txt\t\tbinary.bin    c.txt\na.txt\t     one_byte.txt\nabc.csv      oooo.txt\nanchors.txt  patterns.txt\nb.txt\t     patterns2.txt\nbinary.bin   poem.diff\nc.txt\t     poem.txt\nchat.jsonl   prefix_dup.txt\ncsv.csv      repeats.txt\ndata.jsonl   sections.txt\ndisptree     sorted_a.txt\ndup.txt      sorted_b.txt\nempty.txt    sorted_c.txt\nfields.txt   spaced.txt\nguard\t     sub\nmixed.txt    tabbed.txt\nmulti.txt    user.json\nno_nl.txt    users.json\nnumbers.txt\na.txt, abc.csv, anchors.txt, b.txt, binary.bin, c.txt, chat.jsonl, csv.csv,\n1\nrc=2\n",
+        "stderr": "ls: ignoring invalid width in environment variable COLUMNS: 'x'\nls: invalid line width: 'x'\n"
       },
       "flags": [
-        "1"
+        "1",
+        "C",
+        "x",
+        "m",
+        "format",
+        "w",
+        "width",
+        "T",
+        "tabsize"
       ]
     }
   ]

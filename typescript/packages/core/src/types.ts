@@ -654,6 +654,10 @@ export type LsTimeKind = 'mtime' | 'atime' | 'ctime' | 'birth'
 // `slash`, `--file-type` is `file-type` and `-F` is `classify`.
 export type LsIndicator = 'none' | 'slash' | 'file-type' | 'classify'
 
+// How `ls` lays its rows out, `--format`'s words: `-l` is `verbose`, `-m`
+// `commas`, `-x` `horizontal`, `-C` `vertical` and `-1` `single-column`.
+export type LsFormat = 'verbose' | 'commas' | 'horizontal' | 'vertical' | 'single-column'
+
 // Which symlinks `cp` follows: every one (`-L`), only the command line's
 // (`-H`), or none, copying each link as a link (`-P`, `-d`, `-a`, and a
 // recursive copy's default).

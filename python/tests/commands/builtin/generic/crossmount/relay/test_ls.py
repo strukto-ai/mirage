@@ -123,6 +123,9 @@ class ProfileView:
     def profile(self) -> str:
         return "reviewer"
 
+    def snapshot(self) -> dict[str, str]:
+        return {"COLUMNS": "30"}
+
 
 def test_a_long_listing_across_mounts_names_the_sessions_profile():
     # An entry with no uid or gid takes the session's profile as owner
@@ -140,3 +143,28 @@ def test_a_long_listing_across_mounts_names_the_sessions_profile():
         "-rw-r--r-- 1 reviewer reviewer 3 - /a/z.txt\n"
         "-rw-r--r-- 1 reviewer reviewer 3 - /b/two/y.txt\n"
     )
+
+
+def test_a_listing_across_mounts_reads_the_sessions_columns():
+    # COLUMNS=30 holds both operands on one line of -C, the session's
+    # environment read as a single-mount line reads it.
+    out, _ = asyncio.run(
+        run_ls(
+            [scope("/a/z.txt"), scope("/b/two/y.txt")],
+            {"C": True},
+            make_dispatch(Calls()),
+            None,
+            ProfileView(),
+        )
+    )
+    assert out.decode() == "/a/z.txt  /b/two/y.txt\n"
+    out, _ = asyncio.run(
+        run_ls(
+            [scope("/a/z.txt"), scope("/b/two/y.txt")],
+            {"C": True, "width": "20"},
+            make_dispatch(Calls()),
+            None,
+            ProfileView(),
+        )
+    )
+    assert out.decode() == "/a/z.txt\n/b/two/y.txt\n"

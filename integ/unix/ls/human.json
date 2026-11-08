@@ -28,15 +28,18 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "ls -lh /data/a.txt | awk '{print $5}'",
+      "command": "ls -lh /data/a.txt | awk '{print $5}'; printf '%2000s' x > /data/lssi && ls -l --si /data/lssi | awk '{print $5}'; ls -l -h --si /data/lssi | awk '{print $5}'; ls -l --si -h /data/lssi | awk '{print $5}'; ls -lk /data/lssi | awk '{print $5}'; rm -f /data/lssi",
       "expect": {
         "exit": 0,
-        "stdout": "24\n",
+        "stdout": "24\n2.0k\n2.0k\n2.0K\n2000\n",
         "stderr": ""
       },
       "flags": [
         "l",
-        "h"
+        "h",
+        "si",
+        "k",
+        "kibibytes"
       ]
     },
     {

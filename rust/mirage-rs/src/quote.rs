@@ -2,24 +2,39 @@ use serde::Deserialize;
 
 use crate::{Stream, StreamError, parse_config};
 
+/// `shell` and `shell_always` are a diagnostic's shell-escape quoting, which
+/// quotes a `:` too; the `ls_` styles and the rest are ls's
+/// `--quoting-style` words, under which a `:` is ordinary.
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Style {
     Shell,
     ShellAlways,
     Escape,
+    Literal,
+    LsShell,
+    LsShellAlways,
+    LsShellEscape,
+    LsShellEscapeAlways,
+    C,
+    CMaybe,
+    Locale,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     style: Style,
+    /// `-q`: a control prints as `?` under the styles that print it raw.
+    #[serde(default)]
+    hide: bool,
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let Config { style } = parse_config(config)?;
+    let Config { style, hide } = parse_config(config)?;
     Ok(Box::new(Quote {
         style,
+        hide,
         text: Vec::new(),
         finished: false,
     }))
@@ -27,6 +42,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 
 struct Quote {
     style: Style,
+    hide: bool,
     text: Vec<u8>,
     finished: bool,
 }
@@ -46,7 +62,27 @@ impl Stream for Quote {
         let text = std::mem::take(&mut self.text);
         match self.style {
             Style::Shell => out.extend(shell_quoted(&text)),
-            Style::ShellAlways => out.extend(shell(&text, true)),
+            Style::ShellAlways => out.extend(shell(&text, true, true)),
+            Style::LsShellEscape => out.extend(shell(&text, false, false)),
+            Style::LsShellEscapeAlways => out.extend(shell(&text, true, false)),
+            Style::LsShell => out.extend(shell_raw(&text, false, self.hide)),
+            Style::LsShellAlways => out.extend(shell_raw(&text, true, self.hide)),
+            Style::Literal => raw(&text, self.hide, out),
+            Style::C => c_style(&text, b"\"", b"\"", true, out),
+            Style::CMaybe => {
+                if characters(&text).any(|(c, _)| escaped(c) || c == Some('"')) {
+                    c_style(&text, b"\"", b"\"", true, out);
+                } else {
+                    out.extend_from_slice(&text);
+                }
+            }
+            Style::Locale => c_style(
+                &text,
+                "\u{2018}".as_bytes(),
+                "\u{2019}".as_bytes(),
+                false,
+                out,
+            ),
             Style::Escape => {
                 for (c, bytes) in characters(&text) {
                     if matches!(c, Some(' ' | '\\')) {
@@ -76,7 +112,7 @@ fn characters(text: &[u8]) -> impl Iterator<Item = (Option<char>, &[u8])> {
 
 // Match the hosts' UTF-8 locale policy. Unassigned code points stay ordinary
 // so updating Unicode's assignments cannot change a diagnostic's spelling.
-fn escaped(c: Option<char>) -> bool {
+pub(crate) fn escaped(c: Option<char>) -> bool {
     c.is_some_and(|c| matches!(u32::from(c), 0..=0x1f | 0x7f..=0x9f | 0x2028 | 0x2029))
 }
 
@@ -96,17 +132,89 @@ fn escape(c: Option<char>, bytes: &[u8], out: &mut Vec<u8>) {
 }
 
 pub(crate) fn shell_quoted(text: &[u8]) -> Vec<u8> {
-    shell(text, false)
+    shell(text, false, true)
 }
 
-/// `text` in GNU's shell-escape quoting, as a diagnostic names a word: bare
+/// Each character as itself, a control as `?` when `hide` asks.
+fn raw(text: &[u8], hide: bool, out: &mut Vec<u8>) {
+    for (c, bytes) in characters(text) {
+        if hide && escaped(c) {
+            out.push(b'?');
+        } else {
+            out.extend_from_slice(bytes);
+        }
+    }
+}
+
+/// `"..."` (or `open` and `close`) around C escapes: a backslash doubled,
+/// a control as its escape, and a `"` escaped where `quote` says it ends
+/// the quotes.
+fn c_style(text: &[u8], open: &[u8], close: &[u8], quote: bool, out: &mut Vec<u8>) {
+    out.extend_from_slice(open);
+    for (c, bytes) in characters(text) {
+        if c == Some('\\') || (quote && c == Some('"')) {
+            out.push(b'\\');
+            out.extend_from_slice(bytes);
+        } else if escaped(c) {
+            escape(c, bytes, out);
+        } else {
+            out.extend_from_slice(bytes);
+        }
+    }
+    out.extend_from_slice(close);
+}
+
+/// ls's `shell` and `shell-always`: the shell-escape choice of bare,
+/// `"..."` or `'...'`, but a control stays itself, or `?` under `hide`,
+/// and of the controls only a tab, a newline and a carriage return call
+/// for quotes.
+fn shell_raw(text: &[u8], always: bool, hide: bool) -> Vec<u8> {
+    const ALWAYS: &[u8] = b" !\"$&'()*;<=>?[\\^`|\t\n\r";
+    const DOUBLE_BLOCKERS: &[u8] = b"!\"#$&()*;<=>?[\\^`{|}~";
+    let special =
+        |c: Option<char>, set: &[u8]| c.is_some_and(|c| c.is_ascii() && set.contains(&(c as u8)));
+    let mut out = Vec::new();
+    let bare = !always
+        && !text.is_empty()
+        && text != b"{"
+        && text != b"}"
+        && !matches!(text.first(), Some(b'#' | b'~'))
+        && characters(text).all(|(c, _)| !special(c, ALWAYS));
+    if bare {
+        raw(text, hide, &mut out);
+        return out;
+    }
+    if text.contains(&b'\'')
+        && characters(text).all(|(c, _)| !escaped(c) && !special(c, DOUBLE_BLOCKERS))
+    {
+        out.push(b'"');
+        out.extend_from_slice(text);
+        out.push(b'"');
+        return out;
+    }
+    out.push(b'\'');
+    for (c, bytes) in characters(text) {
+        if bytes == b"'" {
+            out.extend_from_slice(b"'\\''");
+        } else if hide && escaped(c) {
+            out.push(b'?');
+        } else {
+            out.extend_from_slice(bytes);
+        }
+    }
+    out.push(b'\'');
+    out
+}
+
+/// `text` in shell-escape quoting, as a diagnostic names a word (`colon`,
+/// which quotes a `:` too) or ls a name: bare
 /// when a shell reads it back as itself, else `'...'` with a quote as
 /// `'\''` and a run of controls as one `$'...'` group, or `"..."` for a
 /// word whose only trouble is a quote. A character past ASCII is ordinary,
 /// as under a UTF-8 locale, except the C1 controls and U+2028 and U+2029;
 /// a byte that is no UTF-8 is ordinary too.
-fn shell(text: &[u8], always: bool) -> Vec<u8> {
-    const ALWAYS: &[u8] = b" !\"$&'()*:;<=>?[\\^`|";
+fn shell(text: &[u8], always: bool, colon: bool) -> Vec<u8> {
+    const ALWAYS: &[u8] = b" !\"$&'()*;<=>?[\\^`|";
     const DOUBLE_BLOCKERS: &[u8] = b"!\"#$&()*;<=>?[\\^`{|}~";
     let special =
         |c: Option<char>, set: &[u8]| c.is_some_and(|c| c.is_ascii() && set.contains(&(c as u8)));
@@ -115,7 +223,8 @@ fn shell(text: &[u8], always: bool) -> Vec<u8> {
         && text != b"{"
         && text != b"}"
         && !matches!(text.first(), Some(b'#' | b'~'))
-        && characters(text).all(|(c, _)| !escaped(c) && !special(c, ALWAYS));
+        && characters(text)
+            .all(|(c, _)| !escaped(c) && !special(c, ALWAYS) && !(colon && c == Some(':')));
     if bare {
         return text.to_vec();
     }
@@ -195,6 +304,291 @@ mod tests {
             stream.finish(&mut out).unwrap();
             assert_eq!(out, expected.as_bytes());
         }
+    }
+
+    fn quoted(style: &str, hide: bool, text: &str) -> String {
+        let config = serde_json::json!({"style": style, "hide": hide}).to_string();
+        let mut stream = open("quote", config.as_bytes()).expect("quote style");
+        let mut out = Vec::new();
+        stream.feed(text.as_bytes(), &mut out).unwrap();
+        stream.finish(&mut out).unwrap();
+        String::from_utf8(out).expect("utf-8")
+    }
+
+    // ls --quoting-style over each name, pinned on debian:stable-slim
+    // under C.UTF-8.
+    #[test]
+    fn ls_styles_quote_each_name_as_ls_does() {
+        let names = [
+            "x", "{", "}", "#a", "a#", "a b", "it's", "it's$", "a\\b", "a\"b", "~x", "x~", "-3",
+            "a:b", "a=b", "a%b", "a{b", "\u{e9}", "a\tb", "a\u{1}b", "a\u{1}'b", "a\rb", "a\u{b}b",
+            "a\u{7f}b", "\u{85}x",
+        ];
+        let table: [(&str, bool, [&str; 25]); 9] = [
+            (
+                "literal",
+                true,
+                [
+                    "x", "{", "}", "#a", "a#", "a b", "it's", "it's$", "a\\b", "a\"b", "~x", "x~",
+                    "-3", "a:b", "a=b", "a%b", "a{b", "\u{e9}", "a?b", "a?b", "a?'b", "a?b", "a?b",
+                    "a?b", "?x",
+                ],
+            ),
+            (
+                "ls_shell",
+                false,
+                [
+                    "x",
+                    "'{'",
+                    "'}'",
+                    "'#a'",
+                    "a#",
+                    "'a b'",
+                    "\"it's\"",
+                    "'it'\\''s$'",
+                    "'a\\b'",
+                    "'a\"b'",
+                    "'~x'",
+                    "x~",
+                    "-3",
+                    "a:b",
+                    "'a=b'",
+                    "a%b",
+                    "a{b",
+                    "\u{e9}",
+                    "'a\tb'",
+                    "a\u{1}b",
+                    "'a\u{1}'\\''b'",
+                    "'a\rb'",
+                    "a\u{b}b",
+                    "a\u{7f}b",
+                    "\u{85}x",
+                ],
+            ),
+            (
+                "ls_shell",
+                true,
+                [
+                    "x",
+                    "'{'",
+                    "'}'",
+                    "'#a'",
+                    "a#",
+                    "'a b'",
+                    "\"it's\"",
+                    "'it'\\''s$'",
+                    "'a\\b'",
+                    "'a\"b'",
+                    "'~x'",
+                    "x~",
+                    "-3",
+                    "a:b",
+                    "'a=b'",
+                    "a%b",
+                    "a{b",
+                    "\u{e9}",
+                    "'a?b'",
+                    "a?b",
+                    "'a?'\\''b'",
+                    "'a?b'",
+                    "a?b",
+                    "a?b",
+                    "?x",
+                ],
+            ),
+            (
+                "ls_shell_always",
+                false,
+                [
+                    "'x'",
+                    "'{'",
+                    "'}'",
+                    "'#a'",
+                    "'a#'",
+                    "'a b'",
+                    "\"it's\"",
+                    "'it'\\''s$'",
+                    "'a\\b'",
+                    "'a\"b'",
+                    "'~x'",
+                    "'x~'",
+                    "'-3'",
+                    "'a:b'",
+                    "'a=b'",
+                    "'a%b'",
+                    "'a{b'",
+                    "'\u{e9}'",
+                    "'a\tb'",
+                    "'a\u{1}b'",
+                    "'a\u{1}'\\''b'",
+                    "'a\rb'",
+                    "'a\u{b}b'",
+                    "'a\u{7f}b'",
+                    "'\u{85}x'",
+                ],
+            ),
+            (
+                "ls_shell_escape",
+                false,
+                [
+                    "x",
+                    "'{'",
+                    "'}'",
+                    "'#a'",
+                    "a#",
+                    "'a b'",
+                    "\"it's\"",
+                    "'it'\\''s$'",
+                    "'a\\b'",
+                    "'a\"b'",
+                    "'~x'",
+                    "x~",
+                    "-3",
+                    "a:b",
+                    "'a=b'",
+                    "a%b",
+                    "a{b",
+                    "\u{e9}",
+                    "'a'$'\\t''b'",
+                    "'a'$'\\001''b'",
+                    "'a'$'\\001'\\''b'",
+                    "'a'$'\\r''b'",
+                    "'a'$'\\v''b'",
+                    "'a'$'\\177''b'",
+                    "''$'\\302\\205''x'",
+                ],
+            ),
+            (
+                "ls_shell_escape_always",
+                false,
+                [
+                    "'x'",
+                    "'{'",
+                    "'}'",
+                    "'#a'",
+                    "'a#'",
+                    "'a b'",
+                    "\"it's\"",
+                    "'it'\\''s$'",
+                    "'a\\b'",
+                    "'a\"b'",
+                    "'~x'",
+                    "'x~'",
+                    "'-3'",
+                    "'a:b'",
+                    "'a=b'",
+                    "'a%b'",
+                    "'a{b'",
+                    "'\u{e9}'",
+                    "'a'$'\\t''b'",
+                    "'a'$'\\001''b'",
+                    "'a'$'\\001'\\''b'",
+                    "'a'$'\\r''b'",
+                    "'a'$'\\v''b'",
+                    "'a'$'\\177''b'",
+                    "''$'\\302\\205''x'",
+                ],
+            ),
+            (
+                "c",
+                false,
+                [
+                    "\"x\"",
+                    "\"{\"",
+                    "\"}\"",
+                    "\"#a\"",
+                    "\"a#\"",
+                    "\"a b\"",
+                    "\"it's\"",
+                    "\"it's$\"",
+                    "\"a\\\\b\"",
+                    "\"a\\\"b\"",
+                    "\"~x\"",
+                    "\"x~\"",
+                    "\"-3\"",
+                    "\"a:b\"",
+                    "\"a=b\"",
+                    "\"a%b\"",
+                    "\"a{b\"",
+                    "\"\u{e9}\"",
+                    "\"a\\tb\"",
+                    "\"a\\001b\"",
+                    "\"a\\001'b\"",
+                    "\"a\\rb\"",
+                    "\"a\\vb\"",
+                    "\"a\\177b\"",
+                    "\"\\302\\205x\"",
+                ],
+            ),
+            (
+                "c_maybe",
+                false,
+                [
+                    "x",
+                    "{",
+                    "}",
+                    "#a",
+                    "a#",
+                    "a b",
+                    "it's",
+                    "it's$",
+                    "a\\b",
+                    "\"a\\\"b\"",
+                    "~x",
+                    "x~",
+                    "-3",
+                    "a:b",
+                    "a=b",
+                    "a%b",
+                    "a{b",
+                    "\u{e9}",
+                    "\"a\\tb\"",
+                    "\"a\\001b\"",
+                    "\"a\\001'b\"",
+                    "\"a\\rb\"",
+                    "\"a\\vb\"",
+                    "\"a\\177b\"",
+                    "\"\\302\\205x\"",
+                ],
+            ),
+            (
+                "locale",
+                false,
+                [
+                    "\u{2018}x\u{2019}",
+                    "\u{2018}{\u{2019}",
+                    "\u{2018}}\u{2019}",
+                    "\u{2018}#a\u{2019}",
+                    "\u{2018}a#\u{2019}",
+                    "\u{2018}a b\u{2019}",
+                    "\u{2018}it's\u{2019}",
+                    "\u{2018}it's$\u{2019}",
+                    "\u{2018}a\\\\b\u{2019}",
+                    "\u{2018}a\"b\u{2019}",
+                    "\u{2018}~x\u{2019}",
+                    "\u{2018}x~\u{2019}",
+                    "\u{2018}-3\u{2019}",
+                    "\u{2018}a:b\u{2019}",
+                    "\u{2018}a=b\u{2019}",
+                    "\u{2018}a%b\u{2019}",
+                    "\u{2018}a{b\u{2019}",
+                    "\u{2018}\u{e9}\u{2019}",
+                    "\u{2018}a\\tb\u{2019}",
+                    "\u{2018}a\\001b\u{2019}",
+                    "\u{2018}a\\001'b\u{2019}",
+                    "\u{2018}a\\rb\u{2019}",
+                    "\u{2018}a\\vb\u{2019}",
+                    "\u{2018}a\\177b\u{2019}",
+                    "\u{2018}\\302\\205x\u{2019}",
+                ],
+            ),
+        ];
+        for (style, hide, expected) in table {
+            for (name, want) in names.iter().zip(expected) {
+                assert_eq!(quoted(style, hide, name), want, "{style} {hide} {name:?}");
+            }
+        }
+        assert_eq!(quoted("shell", false, "a:b"), "'a:b'");
     }
 
     #[test]

@@ -59,14 +59,16 @@ export interface BlockSize {
 }
 
 /** Which columns an `ls` row carries and how its time is spelled: -g
- * drops the owner, -o the group; -i leads with the inode column and -Z
- * puts the context column before the size, both `?` since a VFS has
- * neither; timeKind picks the timestamp; timeStyle is `locale` (GNU's
- * six-month rule), `full-iso`, `long-iso`, `iso` or `+FORMAT`. */
+ * drops the owner, -o the group; -i leads with the inode column, -s with
+ * the block column after it, and -Z puts the context column before the
+ * size, each `?` since a VFS has no inode, allocation or context;
+ * timeKind picks the timestamp; timeStyle is `locale` (the six-month
+ * rule), `full-iso`, `long-iso`, `iso` or `+FORMAT`. */
 export interface LsColumns {
   readonly owner: boolean
   readonly group: boolean
   readonly inode: boolean
+  readonly blocks: boolean
   readonly context: boolean
   readonly timeKind: LsTimeKind
   readonly timeStyle: string
@@ -77,6 +79,7 @@ export const DEFAULT_COLUMNS: LsColumns = Object.freeze({
   owner: true,
   group: true,
   inode: false,
+  blocks: false,
   context: false,
   timeKind: 'mtime',
   timeStyle: 'locale',
@@ -270,13 +273,11 @@ export function timeOf(s: FileStat, kind: LsTimeKind): string | null {
   return s.modified ?? null
 }
 
-// What -i and -Z put in front of a short row: `?` for each, since a VFS
-// has neither an inode nor a security context.
+// What -i, -s and -Z put in front of a short row, in that order: `?` for
+// each, since a VFS has no inode, allocation or security context.
 export function lsPrefix(columns: LsColumns): string {
-  let out = ''
-  if (columns.inode) out += `${UNKNOWN_STAT_FIELD} `
-  if (columns.context) out += `${UNKNOWN_STAT_FIELD} `
-  return out
+  const count = Number(columns.inode) + Number(columns.blocks) + Number(columns.context)
+  return `${UNKNOWN_STAT_FIELD} `.repeat(count)
 }
 
 // The name column: GNU appends `-> target` for a symlink row.
@@ -364,7 +365,7 @@ export function formatLsLong(
       failed ? time.padStart(timeWidth) : time,
       opts.names?.[i] ?? lsName(s),
     )
-    const lead = columns.inode ? `${UNKNOWN_STAT_FIELD} ` : ''
+    const lead = `${UNKNOWN_STAT_FIELD} `.repeat(Number(columns.inode) + Number(columns.blocks))
     return lead + fields.join(' ')
   })
 }

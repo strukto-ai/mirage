@@ -293,15 +293,17 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "ls -iZ /data/lsf/a.txt",
+      "command": "ls -iZ /data/lsf/a.txt; ls -s /data/lsf/a.txt; ls -si /data/lsf/a.txt; ls -sZ /data/lsf/a.txt; ls -s /data/lsf/dir1; ls -go -s --time-style=long-iso /data/lsf/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "? ? /data/lsf/a.txt\n",
+        "stdout": "? ? /data/lsf/a.txt\n? /data/lsf/a.txt\n? ? /data/lsf/a.txt\n? ? /data/lsf/a.txt\ntotal ?\n? k\n? -rw-r--r-- 1 5 2025-01-15 10:30 /data/lsf/a.txt\n",
         "stderr": ""
       },
       "flags": [
         "i",
-        "Z"
+        "Z",
+        "s",
+        "size"
       ]
     },
     {
@@ -332,16 +334,18 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "ls -go --time-style=long-iso /data/lsf/a.txt",
+      "command": "ls -go --time-style=long-iso /data/lsf/a.txt; ls -lgG --time-style=long-iso /data/lsf/a.txt; ls -lG --time-style=long-iso /data/lsf/a.txt | cut -d' ' -f1,2,4-",
       "expect": {
         "exit": 0,
-        "stdout": "-rw-r--r-- 1 5 2025-01-15 10:30 /data/lsf/a.txt\n",
+        "stdout": "-rw-r--r-- 1 5 2025-01-15 10:30 /data/lsf/a.txt\n-rw-r--r-- 1 5 2025-01-15 10:30 /data/lsf/a.txt\n-rw-r--r-- 1 5 2025-01-15 10:30 /data/lsf/a.txt\n",
         "stderr": ""
       },
       "flags": [
         "g",
         "o",
-        "time-style"
+        "time-style",
+        "G",
+        "no-group"
       ]
     },
     {
@@ -372,16 +376,17 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "ls -go --time-style=full-iso /data/lsf/a.txt",
+      "command": "ls -go --time-style=full-iso /data/lsf/a.txt; ls -go --full-time /data/lsf/a.txt; ls --full-time -1 -go /data/lsf/a.txt; ls -go --full-time --time-style=long-iso /data/lsf/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "-rw-r--r-- 1 5 2025-01-15 10:30:00.000000000 +0000 /data/lsf/a.txt\n",
+        "stdout": "-rw-r--r-- 1 5 2025-01-15 10:30:00.000000000 +0000 /data/lsf/a.txt\n-rw-r--r-- 1 5 2025-01-15 10:30:00.000000000 +0000 /data/lsf/a.txt\n-rw-r--r-- 1 5 2025-01-15 10:30:00.000000000 +0000 /data/lsf/a.txt\n-rw-r--r-- 1 5 2025-01-15 10:30 /data/lsf/a.txt\n",
         "stderr": ""
       },
       "flags": [
         "g",
         "o",
-        "time-style"
+        "time-style",
+        "full-time"
       ]
     },
     {
@@ -621,7 +626,13 @@
         "stdout": "-rw-r--r-- 1 5 x /data/lsf/a.txt\n-rw-r--r-- 1 5 x /data/lsf/a.txt\n",
         "stderr": ""
       },
-      "flags": ["g", "o", "u", "time-style", "c"]
+      "flags": [
+        "g",
+        "o",
+        "u",
+        "time-style",
+        "c"
+      ]
     },
     {
       "id": "ls_n_prints_the_ids_as_they_are",

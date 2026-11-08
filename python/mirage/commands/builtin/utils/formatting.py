@@ -75,6 +75,8 @@ class LsColumns:
         group (bool): the group column; ``-o`` drops it.
         inode (bool): ``-i``; a VFS has no inode, so the column is ``?``,
             the answer ``stat %i`` already gives.
+        blocks (bool): ``-s``; nor does it know what a file allocates, so
+            ``?`` again.
         context (bool): ``-Z``; no security context here either, so ``?``
             as GNU prints it on a filesystem without one.
         time_kind (LsTimeKind): which timestamp the time column shows.
@@ -86,6 +88,7 @@ class LsColumns:
     owner: bool = True
     group: bool = True
     inode: bool = False
+    blocks: bool = False
     context: bool = False
     time_kind: LsTimeKind = LsTimeKind.MTIME
     time_style: str = "locale"
@@ -409,18 +412,15 @@ def _ls_size_and_time(
 
 
 def ls_prefix(columns: LsColumns) -> str:
-    """What ``-i`` and ``-Z`` put in front of a short row: ``?`` for
-    each, since a VFS has neither an inode nor a security context.
+    """What ``-i``, ``-s`` and ``-Z`` put in front of a short row, in that
+    order: ``?`` for each, since a VFS has no inode, allocation or
+    security context.
 
     Args:
         columns (LsColumns): the requested columns.
     """
-    parts = []
-    if columns.inode:
-        parts.append(UNKNOWN_STAT_FIELD)
-    if columns.context:
-        parts.append(UNKNOWN_STAT_FIELD)
-    return "".join(f"{p} " for p in parts)
+    count = columns.inode + columns.blocks + columns.context
+    return f"{UNKNOWN_STAT_FIELD} " * count
 
 
 def format_ls_long(
@@ -436,11 +436,11 @@ def format_ls_long(
     The owner is the entry's uid when a backend or the attr overlay
     reports one, else the workspace user; the group is the gid, else the
     session's profile; ``-`` when nothing names one. ``-g`` and ``-o``
-    drop a column, ``-i`` leads with the inode column and ``-Z`` puts the
-    context column before the size, both ``?`` as GNU prints them when
-    the filesystem has neither. A row whose stat failed is GNU's: the
-    type letter the listing gave, then ``?`` for every stat field, the
-    time right-aligned in its column.
+    drop a column, ``-i`` leads with the inode column, ``-s`` with the
+    block column after it, and ``-Z`` puts the context column before the
+    size, each ``?``, as a filesystem with none of them prints it. A row
+    whose stat failed prints the type letter the listing gave, then ``?``
+    for every stat field, the time right-aligned in its column.
 
     Args:
         stats (list[FileStat]): the rows to render.
@@ -483,7 +483,7 @@ def format_ls_long(
         fields.append(raw_size.rjust(width))
         fields.append(when.rjust(time_width) if failed else when)
         fields.append(names[i] if names is not None else ls_name(s))
-        lead = f"{UNKNOWN_STAT_FIELD} " if columns.inode else ""
+        lead = f"{UNKNOWN_STAT_FIELD} " * (columns.inode + columns.blocks)
         out.append(lead + " ".join(fields))
     return out
 
