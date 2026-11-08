@@ -28,11 +28,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "column -t /data/fields.txt; column -t /data/tabbed.txt /data/mixed.txt",
+      "command": "column -t /data/fields.txt; column -t /data/tabbed.txt /data/mixed.txt; column -t -N A,B,C -R 2 /data/fields.txt; column -t --table-columns A,B,C --table-hide B --table-order C /data/fields.txt; column -t -d -N A,B,C -l 2 /data/fields.txt; column -t -m -c 40 /data/fields.txt; column -J -n rows -N A,B,C /data/fields.txt; column -t -T 2 -W 3 -E 1 -e /data/fields.txt; column -t -c 0 /data/fields.txt; column -N A /data/fields.txt; column -t -R 9 /data/fields.txt; column -t -c x /data/fields.txt; column -t -l 0 /data/fields.txt; column -J /data/fields.txt; column -x -t /data/fields.txt; true",
       "expect": {
         "exit": 0,
-        "stdout": "alice  30  engineer\nbob    25  designer\ncarol  40  manager\na      1\nb      2\nc      3\nHello  World\nHELLO  world\nhello  WORLD\n",
-        "stderr": ""
+        "stdout": "alice  30  engineer\nbob    25  designer\ncarol  40  manager\na      1\nb      2\nc      3\nHello  World\nHELLO  world\nhello  WORLD\nA       B  C\nalice  30  engineer\nbob    25  designer\ncarol  40  manager\nC         A\nengineer  alice\ndesigner  bob\nmanager   carol\nalice  30 engineer  \nbob    25 designer  \ncarol  40 manager   \nalice         30         engineer       \nbob           25         designer       \ncarol         40         manager        \n{\n   \"rows\": [\n      {\n         \"a\": \"alice\",\n         \"b\": \"30\",\n         \"c\": \"engineer\"\n      },{\n         \"a\": \"bob\",\n         \"b\": \"25\",\n         \"c\": \"designer\"\n      },{\n         \"a\": \"carol\",\n         \"b\": \"40\",\n         \"c\": \"manager\"\n      }\n   ]\n}\nalice  30  engineer\nbob    25  designer\ncarol  40  manager\nalice  30  engineer\nbob    25  designer\ncarol  40  manager\n",
+        "stderr": "column: option --table required for all --table-*\ncolumn: undefined column name '9'\ncolumn: invalid columns argument: 'x'\ncolumn: columns limit must be greater than zero\ncolumn: option --table-columns or --table-column required for --json\ncolumn: mutually exclusive arguments: --table --fillrows\n"
       },
       "flags": [
         "t"

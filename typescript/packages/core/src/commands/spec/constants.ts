@@ -682,13 +682,14 @@ export const RG_FLAG_NAMES: readonly string[] = [
 export const STANDARD_BEFORE_SCAN: ReadonlySet<string> = new Set(['zgrep'])
 
 // The grep options zgrep refuses before grep sees them, since it reads one
-// stream per file and walks no directory: `zgrep -r` says
+// stream per file, walks no directory and reads its lines as lines (-z and
+// -Z, --null-data and --null): `zgrep -r` says
 // `zgrep: -r: option not supported` and exits 2, naming the letter in a
 // cluster (`-nr`) and a long one as typed, value included. A long one is
 // refused from the shortest prefix that names it alone among grep's options,
 // each mapped here to that length; a shorter one is grep's ambiguous option.
 // Measured on gzip 1.13.
-export const ZGREP_UNSUPPORTED_SHORT: ReadonlySet<string> = new Set(['r', 'R', 'd'])
+export const ZGREP_UNSUPPORTED_SHORT: ReadonlySet<string> = new Set(['r', 'R', 'd', 'z', 'Z'])
 export const ZGREP_UNSUPPORTED_LONG: ReadonlyMap<string, number> = new Map([
   ['recursive', 3],
   ['directories', 2],
@@ -696,6 +697,8 @@ export const ZGREP_UNSUPPORTED_LONG: ReadonlyMap<string, number> = new Map([
   ['exclude', 3],
   ['exclude-from', 3],
   ['exclude-dir', 3],
+  ['null', 2],
+  ['null-data', 2],
 ])
 
 // The spec-declared `choices` sets that GNU matches as word choices, so an

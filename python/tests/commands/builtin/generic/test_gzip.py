@@ -14,16 +14,63 @@
 
 import gzip
 import zlib
+from types import SimpleNamespace
 
 import pytest
 
+from mirage.commands.builtin.generic.decompress import input_info
 from mirage.commands.builtin.generic.gzip import extract_level
 from mirage.commands.builtin.generic.gzip import gzip as compress_inputs
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import materialize
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.workspace.executor.command.flags import parse_flags
+
+
+async def _hello(path):
+    yield b"hello\n"
+
+
+async def _no_unlink(path):
+    pass
+
+
+async def _dated_input(path):
+    if path.virtual == "/f.gz":
+        raise FileNotFoundError(path.virtual)
+    return FileStat(
+        name="f",
+        type=FileType.FILE,
+        mode=0o100640,
+        modified="2001-02-03T04:05:06Z",
+    )
+
+
+async def _walked_stat(path):
+    kind = FileType.DIRECTORY if path.virtual == "/d" else FileType.FILE
+    return FileStat(name="n", type=kind)
+
+
+async def _two_files(path):
+    return ["/d/a", "/d/b"]
+
+
+async def _refusing_walks(name, path):
+    assert (name, path.virtual) == ("before_full_walk", "/d")
+    raise ValueError(
+        "more than 1 files in scope (walk_limit); narrow the path"
+    )
+
+
+async def _no_follow(path):
+    return FileStat(name="link", type=FileType.SYMLINK)
+
+
+async def _link_target(virtual):
+    assert virtual == "/secret"
+    return FileStat(name="secret", type=FileType.FILE, mode=0o100600)
 
 
 def _level(argv: list[str]) -> int:
@@ -89,3 +136,142 @@ async def test_compression_skips_suffixed_streams_and_reports_late_errors(
     assert set(writes) == ({"/good.gz"} if skipped else set())
     if skipped:
         assert gzip.decompress(writes["/good.gz"]) == b"hello\n"
+
+
+@pytest.mark.asyncio
+async def test_compression_stores_the_input_time_and_keeps_its_attributes():
+    """The header stores the input's time unless -n, and the output
+    takes the input's mode and times."""
+    writes = {}
+    attrs = []
+
+    async def write(path, data):
+        writes[path.virtual] = await materialize(data)
+
+    async def set_attrs(path, fields):
+        attrs.append((path.virtual, fields))
+
+    for named in (None, False):
+        _, io = await compress_inputs(
+            [PathSpec.from_str_path("/f")],
+            read_bytes=_hello,
+            write_bytes=write,
+            unlink=_no_unlink,
+            stat=_dated_input,
+            set_attrs=set_attrs,
+            named=named,
+        )
+        assert io.exit_code == 0
+        header = writes["/f.gz"][:10]
+        assert header[4:8] == (
+            (981173106).to_bytes(4, "little") if named is None else bytes(4)
+        )
+    assert attrs[0] == (
+        "/f.gz",
+        {"mode": 0o640, "mtime": "2001-02-03T04:05:06Z"},
+    )
+
+
+UNDATED = "gzip: /f: warning: file timestamp out of range for gzip format\n"
+
+
+async def _dated(modified: str, *, taken: bool = False, **options):
+    writes = {}
+
+    async def write(path, data):
+        writes[path.virtual] = await materialize(data)
+
+    async def stat(path):
+        if path.virtual == "/f.gz" and not taken:
+            raise FileNotFoundError(path.virtual)
+        return FileStat(name="f", type=FileType.FILE, modified=modified)
+
+    body, io = await compress_inputs(
+        [PathSpec.from_str_path("/f")],
+        read_bytes=_hello,
+        write_bytes=write,
+        unlink=_no_unlink,
+        stat=stat,
+        **options,
+    )
+    if body is not None:
+        writes["/f.gz"] = await materialize(body)
+    return writes.get("/f.gz"), io.exit_code, await io.stderr_str()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "modified,options,stamp,code,stderr",
+    [
+        ("1960-01-01T00:00:00Z", {}, bytes(4), 2, UNDATED),
+        ("2200-01-01T00:00:00Z", {}, bytes(4), 2, UNDATED),
+        ("1970-01-01T00:00:00Z", {}, bytes(4), 2, UNDATED),
+        ("1970-01-01T00:00:00.5Z", {}, bytes(4), 2, UNDATED),
+        ("1960-01-01T00:00:00Z", {"quiet": True}, bytes(4), 2, ""),
+        ("1960-01-01T00:00:00Z", {"to_stdout": True}, bytes(4), 2, UNDATED),
+        ("1960-01-01T00:00:00Z", {"named": False}, bytes(4), 0, ""),
+        ("2106-02-07T06:28:15Z", {}, b"\xff\xff\xff\xff", 0, ""),
+        ("1970-01-01T00:00:01Z", {}, b"\x01\0\0\0", 0, ""),
+    ],
+)
+async def test_a_date_the_header_cannot_hold_stays_out_of_it(
+    modified, options, stamp, code, stderr
+):
+    written, status, said = await _dated(modified, **options)
+    assert (written[4:8], status, said) == (stamp, code, stderr)
+
+
+@pytest.mark.asyncio
+async def test_the_date_warning_lands_after_the_name_v_started():
+    _, status, said = await _dated("1960-01-01T00:00:00Z", verbose=True)
+    first, second, end = said.split("\n")
+    assert first == f"/f:\t{UNDATED.rstrip()}"
+    assert second.endswith("-- replaced with /f.gz")
+    assert (end, status) == ("", 2)
+
+
+@pytest.mark.asyncio
+async def test_an_output_already_there_is_refused_before_the_date_warning():
+    written, status, said = await _dated("1960-01-01T00:00:00Z", taken=True)
+    assert written is None
+    assert (status, said) == (
+        2,
+        "gzip: /f.gz already exists;\tnot overwritten\n",
+    )
+
+
+@pytest.mark.asyncio
+async def test_recursion_asks_the_mount_before_touching_a_file():
+    touched = []
+
+    async def read(path):
+        touched.append(path.virtual)
+        yield b"x"
+
+    async def write(path, data):
+        touched.append(path.virtual)
+
+    with pytest.raises(UsageError) as refused:
+        await compress_inputs(
+            [PathSpec.from_str_path("/d")],
+            read_bytes=read,
+            write_bytes=write,
+            unlink=write,
+            stat=_walked_stat,
+            readdir=_two_files,
+            recursive=True,
+            dispatch=_refusing_walks,
+        )
+    assert str(refused.value).startswith("gzip: more than 1 files")
+    assert touched == []
+
+
+@pytest.mark.asyncio
+async def test_a_followed_link_gives_what_it_leads_to():
+    resolver = SimpleNamespace(
+        target=lambda link: "/secret", stat=_link_target
+    )
+    info = await input_info(
+        _no_follow, PathSpec.from_str_path("/d/link"), "/d/link", resolver
+    )
+    assert info is not None and info.mode == 0o100600

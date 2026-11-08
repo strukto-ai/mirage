@@ -94,7 +94,7 @@ describe('diff', () => {
     const r = await runDiff(
       vfs,
       [PathSpec.fromStrPath('/tmp/a.txt'), PathSpec.fromStrPath('/tmp/b.txt')],
-      { i: true },
+      { ignore_case: true },
     )
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe('')
@@ -119,7 +119,7 @@ describe('diff', () => {
     const r = await runDiff(
       vfs,
       [PathSpec.fromStrPath('/tmp/a.txt'), PathSpec.fromStrPath('/tmp/b.txt')],
-      { w: true },
+      { ignore_all_space: true },
     )
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe('')
@@ -132,7 +132,7 @@ describe('diff', () => {
     const r = await runDiff(
       vfs,
       [PathSpec.fromStrPath('/tmp/a.txt'), PathSpec.fromStrPath('/tmp/b.txt')],
-      { b: true },
+      { ignore_space_change: true },
     )
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe('')

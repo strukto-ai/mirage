@@ -15,6 +15,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as rs from '../../../rs/stream.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
+import { MemoryExhausted } from '../../../io/errors.ts'
+import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
 import { ByteSpool } from '../../../io/spool.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { materialize, type ByteSource, type IOResult } from '../../../io/types.ts'
@@ -25,7 +27,7 @@ import { helpPage, versionLine } from '../../spec/standard.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { parseCommand, parseToKwargs } from '../../spec/parser.ts'
-import { inputName, jqGeneric, optionTape } from './jq.ts'
+import { inputName, jqGeneric, linkModules, optionTape } from './jq.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -42,11 +44,14 @@ const FILES: Record<string, string> = {
   '/d/-': '42\n',
   '/d/spelled.json': '{"b":1.000,"1":2}',
   '/d/origin.jq': '[get_prog_origin, get_jq_origin]',
+  '/d/lib/m.jq': 'def f: "m";',
+  '/d/lib/data.json': '1 2',
+  '/d/imports.jq': 'import "m" as m {search: "./lib"}; m::f',
 }
 
 async function* read(path: PathSpec): AsyncIterable<Uint8Array> {
   await Promise.resolve()
-  if (path.virtual === '/d/dir') throw eisdir(path)
+  if (path.virtual === '/d/dir' || path.virtual === '/d/lib/isdir.jq') throw eisdir(path)
   const text = FILES[path.virtual]
   if (text === undefined) throw enoent(path)
   const bytes = ENC.encode(text)
@@ -119,6 +124,64 @@ async function ranLine(words: readonly string[], stream: typeof read = read): Pr
     exitCode: io.exitCode,
   }
 }
+
+function bigModule(): Promise<Uint8Array> {
+  return Promise.resolve(ENC.encode(`def f: 1;${' '.repeat(4096)}`))
+}
+
+describe('modules', () => {
+  it.each([
+    [['-L', '/d/lib', 'import "m" as m; m::f'], '"m"\n'],
+    [['-L/d/lib', 'include "m"; f'], '"m"\n'],
+    [['--library-path', '/d/lib', 'include "m"; f'], '"m"\n'],
+    [['-c', '-L', '/d/lib', 'import "data" as $d; $d, $d::d'], '[1,2]\n[1,2]\n'],
+    [['-c', '-L', '/d/lib', 'get_search_list'], '["/d/lib"]\n'],
+    [['-f', '/d/imports.jq'], '"m"\n'],
+  ])('reads the modules of %j from the search list', async (words, stdout) => {
+    expect(await ranLine(['-n', ...words])).toEqual({ stdout, stderr: '', exitCode: 0 })
+  })
+
+  it.each([
+    [
+      ['-L', '/d/lib', 'import "nope" as m; 1'],
+      'jq: error: module not found: nope\n\njq: 1 compile error\n',
+    ],
+    [
+      ['-L', '/d/lib', 'import "isdir" as m; 1'],
+      "jq: error loading data file /d/lib/isdir.jq: Could not open /d/lib/isdir.jq: It's a directory\n\njq: 1 compile error\n",
+    ],
+  ])('refuses the program when %j cannot load', async (words, stderr) => {
+    expect(await ranLine(['-n', ...words])).toEqual({ stdout: '', stderr, exitCode: 3 })
+  })
+
+  it.each(['-L', '--library-path'])('refuses %s with no value', async (word) => {
+    const stderr = `-L takes a parameter: (e.g. -L /search/path or -L/search/path)\n${HINT}\n`
+    expect(await ranLine(['-n', word])).toEqual({ stdout: '', stderr, exitCode: 2 })
+  })
+
+  it('reads no module for a program that imports nothing', async () => {
+    const read = vi.fn()
+    await expect(linkModules('.a', {}, '/', '/', null, read)).resolves.toBeNull()
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('keeps what a program imports inside the memory room', async () => {
+    await expect(
+      runWithMemory(new MemoryBudget(1024, () => 0), () =>
+        linkModules('import "m" as m; m::f', {}, '/', '/', null, bigModule),
+      ),
+    ).rejects.toBeInstanceOf(MemoryExhausted)
+  })
+
+  it('takes the color options and keeps the output plain', async () => {
+    for (const word of ['-C', '--color-output'])
+      expect(await ranLine(['-n', '-c', word, '[1]'])).toEqual({
+        stdout: '[1]\n',
+        stderr: '',
+        exitCode: 0,
+      })
+  })
+})
 
 describe('optionTape', () => {
   it('takes bindings from the bag and names files as typed', () => {

@@ -311,11 +311,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "diff -U 2 -U x /data/nope /data/gone",
+      "command": "diff -U 2 -U x /data/nope /data/gone; diff -c -u /data/nope /data/gone; diff -y -W 0 /data/nope /data/gone; diff -C x /data/nope /data/gone; diff --label a --label b --label c /data/nope /data/gone; diff --color=bogus /data/nope /data/gone; diff -I '\\(' /data/nope /data/gone",
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "diff: invalid context length 'x'\ndiff: Try 'diff --help' for more information.\n"
+        "stderr": "diff: invalid context length 'x'\ndiff: Try 'diff --help' for more information.\ndiff: conflicting output style options\ndiff: Try 'diff --help' for more information.\ndiff: invalid width '0'\ndiff: Try 'diff --help' for more information.\ndiff: invalid context length 'x'\ndiff: Try 'diff --help' for more information.\ndiff: too many file label options\ndiff: invalid color 'bogus'\ndiff: Try 'diff --help' for more information.\ndiff: \\(: Unmatched ( or \\(\n"
       }
     }
   ]

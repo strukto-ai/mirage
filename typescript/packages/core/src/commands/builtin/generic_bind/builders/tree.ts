@@ -22,7 +22,7 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 
 const tree: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const parsed = parseFlags(ctx.flags)
-  if (parsed instanceof IOResult) return [null, parsed]
+  if (parsed instanceof IOResult) return [parsed.stdout, parsed]
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
   const readdir = files.readdir
@@ -47,6 +47,7 @@ const tree: CommandFn = async (_accessor, paths, _texts, ctx) => {
       files.answers('read_tree'),
       files.signal,
     ),
+    files.read,
   )
 }
 

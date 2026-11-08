@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use mirage_rs::arith;
 use mirage_rs::interp::codec::{Args, Item, one};
 use mirage_rs::interp::expand::Substitution;
 use mirage_rs::interp::host::{self, Held};
@@ -245,6 +246,14 @@ fn size(value: i64) -> Result<usize, String> {
     usize::try_from(value).map_err(|_| "a size is out of range".to_owned())
 }
 
+fn status(value: i64) -> Result<i32, String> {
+    i32::try_from(value).map_err(|_| "a status is out of range".to_owned())
+}
+
+fn id(value: i64) -> Result<u32, String> {
+    u32::try_from(value).map_err(|_| "an id is out of range".to_owned())
+}
+
 fn optional_size(item: Option<Item>) -> Result<Option<usize>, String> {
     item.map(|item| one(item, Args::int).and_then(size))
         .transpose()
@@ -345,6 +354,9 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 follow_ref,
             };
             return engine.write(handle, write, true);
+        }
+        "plain_index" => {
+            return Ok(Item::opt(arith::plain_decimal(&args.bytes()?), Item::Big));
         }
         "index" => {
             let subscript = args.bytes()?;
@@ -577,8 +589,8 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                         .collect::<Result<Vec<_>, String>>()
                 })
                 .transpose()?;
-            let status = i32::try_from(args.int()?).unwrap_or(1);
-            let pid = u32::try_from(args.int()?).unwrap_or(0);
+            let status = status(args.int()?)?;
+            let pid = id(args.int()?)?;
             let last_job = args
                 .maybe()?
                 .map(|item| one(item, Args::handle))
@@ -619,7 +631,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 paren: args.flag()?,
                 memory_room: optional_size(args.maybe()?)?,
                 line: size(args.int()?)?,
-                bash_pid: u32::try_from(args.int()?).unwrap_or(0),
+                bash_pid: id(args.int()?)?,
                 voice: args.bytes()?,
             };
             shell.shell_mut()?.apply(frame);
@@ -685,7 +697,7 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "answer_substituted" => Answer::Substituted(Substitution {
             stdout: args.bytes()?,
             stderr: args.bytes()?,
-            status: i32::try_from(args.int()?).unwrap_or(1),
+            status: status(args.int()?)?,
         }),
         "answer_path" => Answer::Path(args.bytes()?),
         "answer_resumed" => Answer::Resumed,

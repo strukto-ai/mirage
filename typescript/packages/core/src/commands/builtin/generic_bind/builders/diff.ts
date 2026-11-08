@@ -14,12 +14,13 @@
 
 import { diffGeneric, parseFlags } from '../../generic/diff.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { utf8Locale } from '../../../../shell/bytes.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, fileSize, resolveOrEmpty } from '../files.ts'
 
 const diff: CommandFn = async (_accessor, paths, _texts, ctx) => {
-  const parsed = parseFlags(ctx.flags)
+  const parsed = parseFlags(ctx.flags, utf8Locale(ctx.env))
   if (parsed instanceof IOResult) return [null, parsed]
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)

@@ -3,22 +3,45 @@ import { fsErrorLine } from '../../../errors/render.ts'
 import { ByteSpool, spooled } from '../../../io/spool.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
-import { PathSpec, type StatFn } from '../../../types.ts'
-import { gunzipStream, GzipDataError } from '../../../utils/compress.ts'
+import {
+  FileType,
+  PathSpec,
+  type FileStat,
+  type ReaddirFn,
+  type SetAttrFields,
+  type StatFn,
+} from '../../../types.ts'
+import {
+  gunzipStream,
+  GzipDataError,
+  readGzipFacts,
+  type GzipFacts,
+} from '../../../utils/compress.ts'
+import { systemNow } from '../../../utils/clock.ts'
+import { epochToIso, isoTimestamp } from '../../../utils/dates.ts'
 import { respelled } from '../../../utils/key_prefix.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import {
   GZIP_KNOWN_SUFFIXES,
+  GZIP_LIST_HEAD,
+  GZIP_LIST_VERBOSE_HEAD,
+  GZIP_LIST_VERBOSE_INDENT,
   GZIP_MAX_SUFFIX,
   GZIP_RETRY_SUFFIXES,
   GZIP_SUFFIX,
   GZIP_TAR_SUFFIXES,
 } from '../constants.ts'
-import { STDIN_OPERAND } from '../utils/constants.ts'
+import { MONTHS, STDIN_OPERAND } from '../utils/constants.ts'
 import { pathExists } from '../utils/copy.ts'
 import type { LinkResolver } from '../utils/links.ts'
+import { descendantPath, isImplicitDir } from '../utils/paths.ts'
 import { stdinStream } from '../utils/stream.ts'
+import { beforeFullWalk } from '../utils/tree.ts'
+
+export type SetAttrsFn = (path: PathSpec, fields: SetAttrFields) => Promise<unknown>
 
 function asciiLower(text: string): string {
   return text.replace(/[A-Z]/g, (c) => c.toLowerCase())
@@ -251,6 +274,175 @@ export function existsLine(name: string): string {
   return `gzip: ${name} already exists;\tnot overwritten\n`
 }
 
+/** gzip's ratio column: how far below `size` the deflated bytes come, the
+ * `header` bytes left out, none for empty data, written as printf's `%.1f`
+ * writes it: the double's exact value rounded half to even, where `toFixed`
+ * rounds a tie up. Mirrors Python's gzip_ratio. */
+export function gzipRatio(size: number, compressed: number, header: number): string {
+  const saved = size === 0 ? 0 : (100 * (size - (compressed - header))) / size
+  const [whole = '0', fraction = ''] = Math.abs(saved).toFixed(60).split('.')
+  const digit = Number(fraction[0] ?? '0')
+  const rest = fraction.slice(1).replace(/0+$/, '')
+  const up = rest > '5' || (rest === '5' && digit % 2 === 1)
+  const text = (BigInt(whole) * 10n + BigInt(digit) + (up ? 1n : 0n)).toString().padStart(2, '0')
+  const sign = saved < 0 ? '-' : ''
+  return `${`${sign}${text.slice(0, -1)}.${text.slice(-1)}`.padStart(5)}%`
+}
+
+/** What -v says once an input is done, `output` its result's name or
+ * `stdout`. Mirrors Python's verbose_line. */
+export function verboseLine(shown: string, ratio: string, keep: boolean, output: string): string {
+  return `${shown}:\t${ratio} -- ${keep ? 'created' : 'replaced with'} ${output}\n`
+}
+
+/** -l -v's date column, the month, day and minute in UTC. */
+function listDate(epoch: number): string {
+  const when = new Date(epoch * 1000)
+  const hh = String(when.getUTCHours()).padStart(2, '0')
+  const mm = String(when.getUTCMinutes()).padStart(2, '0')
+  return `${MONTHS[when.getUTCMonth()] ?? ''} ${String(when.getUTCDate()).padStart(2)} ${hh}:${mm}`
+}
+
+/** The stat of what the input opened, for the attributes its output takes:
+ * a link it followed gives what it leads to. Null when it cannot be had.
+ * Mirrors Python's input_info. */
+export async function inputInfo(
+  stat: StatFn | undefined,
+  path: PathSpec,
+  link: string | null = null,
+  resolver: LinkResolver | null = null,
+): Promise<FileStat | null> {
+  if (stat === undefined || path.rawPath === '-') return null
+  try {
+    if (link !== null && resolver !== null) return await resolver.stat(resolver.target(link))
+    return await stat(path)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    console.debug(`gzip: no stat for ${path.virtual}: ${String(err)}`)
+    return null
+  }
+}
+
+/** Give an in-place output its input's mode and times, as gzip does; a
+ * nonzero `mtime` is the time -N restores from the header. Mirrors Python's
+ * keep_attributes. */
+export async function keepAttributes(
+  setAttrs: SetAttrsFn | undefined,
+  out: PathSpec,
+  info: FileStat | null,
+  mtime = 0,
+): Promise<void> {
+  if (setAttrs === undefined) return
+  const fields: SetAttrFields = {}
+  if (info !== null) {
+    if (info.mode !== null) fields.mode = info.mode & 0o7777
+    if (info.modified !== null && info.modified !== '') fields.mtime = info.modified
+    if (info.atime !== null && info.atime !== '') fields.atime = info.atime
+  }
+  if (mtime !== 0) fields.mtime = epochToIso(mtime)
+  if (Object.keys(fields).length === 0) return
+  try {
+    await setAttrs(out, fields)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    console.debug(`gzip: attributes not kept on ${out.virtual}: ${String(err)}`)
+  }
+}
+
+/** Whether -r walks into `path`: a directory, or a prefix a keyed backend
+ * lists; a path that cannot be told is opened as a file, which reports why. */
+async function isDirectory(stat: StatFn, readdir: ReaddirFn, path: PathSpec): Promise<boolean> {
+  try {
+    return (await stat(path)).type === FileType.DIRECTORY
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    if (!isEnoent(err)) {
+      console.debug(`gzip: no stat for ${path.virtual}: ${String(err)}`)
+      return false
+    }
+  }
+  try {
+    return await isImplicitDir(readdir, path)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    console.debug(`gzip: no listing for ${path.virtual}: ${String(err)}`)
+    return false
+  }
+}
+
+/** Each operand in turn and, under -r, every file below a directory one,
+ * siblings in name order; true marks a file the walk found. Mirrors
+ * Python's walked. */
+export async function* walked(
+  paths: readonly PathSpec[],
+  report: (line: string, code: number, warning: boolean) => void,
+  options: { recursive?: boolean; stat?: StatFn | undefined; readdir?: ReaddirFn | undefined },
+): AsyncGenerator<[PathSpec, boolean]> {
+  async function* below(
+    stat: StatFn,
+    readdir: ReaddirFn,
+    root: PathSpec,
+    directory: PathSpec,
+  ): AsyncGenerator<PathSpec> {
+    let names: string[]
+    try {
+      names = [...(await readdir(directory))].sort(compareCodePoints)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      report(fsErrorLine('gzip', directory, err), 1, false)
+      return
+    }
+    for (const name of names) {
+      const child = descendantPath(root, name.replace(/\/+$/, ''))
+      if (await isDirectory(stat, readdir, child)) yield* below(stat, readdir, root, child)
+      else yield child
+    }
+  }
+  const { stat, readdir } = options
+  for (const path of paths) {
+    if (
+      options.recursive !== true ||
+      stat === undefined ||
+      readdir === undefined ||
+      path.rawPath === '-' ||
+      !(await isDirectory(stat, readdir, path))
+    ) {
+      yield [path, false]
+      continue
+    }
+    for await (const found of below(stat, readdir, path, path)) yield [found, true]
+  }
+}
+
+/** Let the mount under each directory -r reads refuse the walk, before any
+ * file is touched. Throws its refusal. Mirrors Python's ask_before_walks. */
+export async function askBeforeWalks(
+  paths: readonly PathSpec[],
+  stat: StatFn | undefined,
+  readdir: ReaddirFn | undefined,
+  dispatch: DispatchFn | undefined,
+): Promise<void> {
+  if (stat === undefined || readdir === undefined) return
+  for (const path of paths)
+    if (path.rawPath !== '-' && (await isDirectory(stat, readdir, path)))
+      await beforeFullWalk(dispatch, path, 'gzip')
+}
+
+/** The output -N names from the stored name: its last component, beside the
+ * input; null when it stores no usable one. */
+function named(path: PathSpec, stored: string | null): [string, PathSpec] | null {
+  const base = (stored ?? '').split('/').at(-1) ?? ''
+  if (base === '' || base === '.' || base === '..') return null
+  const cut = path.rawPath.lastIndexOf('/')
+  const typed = cut < 0 ? base : `${path.rawPath.slice(0, cut + 1)}${base}`
+  const here = `/${stripSlash(path.virtual)}`
+  return [typed, PathSpec.fromStrPath(`${here.slice(0, here.lastIndexOf('/') + 1)}${base}`)]
+}
+
+function decodedLine(shown: string, facts: GzipFacts, keep: boolean, out: string): string {
+  return verboseLine(shown, gzipRatio(facts.size, facts.compressed, facts.header), keep, out)
+}
+
 /**
  * Decode operands in order the way gzip 1.13 does, in its voice.
  *
@@ -264,8 +456,14 @@ export function existsLine(name: string): string {
  * An input stdin cannot open as gzip ends the run, as gzip exits there.
  *
  * With -f, an output already there is replaced, and when the input then
- * turns out corrupt GNU has already unlinked it: mirage keeps it. Mirrors
- * Python's decompress_inputs.
+ * turns out corrupt the reference has already unlinked it: mirage keeps it.
+ *
+ * Under -r a directory gives way to the files below it, and one found there
+ * with no known suffix is passed over, said only under -v, unless its bytes
+ * go to stdout. -v says each input's ratio once done (`OK` under -t), never
+ * for stdin's. -N names an in-place output from the stored name and gives it
+ * the stored time; any in-place output takes its input's mode and times.
+ * Mirrors Python's decompress_inputs.
  */
 export async function decompressInputs(
   paths: PathSpec[],
@@ -277,14 +475,21 @@ export async function decompressInputs(
     keep?: boolean
     force?: boolean
     quiet?: boolean
+    verbose?: boolean
+    restore?: boolean
+    recursive?: boolean
     suffix?: string
     write?: (path: PathSpec, data: ByteSource) => Promise<void>
     unlink?: (path: PathSpec) => Promise<void>
     stat?: StatFn
+    readdir?: ReaddirFn
+    setAttrs?: SetAttrsFn
     resolver?: LinkResolver | null
   },
 ): Promise<[ByteSource | null, IOResult]> {
   const suffix = options.suffix ?? GZIP_SUFFIX
+  const verbose = options.verbose === true
+  const keep = options.keep === true
   const refused = suffixRefusal(suffix)
   if (refused !== null) return [null, refused]
   const force = options.force === true
@@ -296,18 +501,19 @@ export async function decompressInputs(
   const stream = stdinStream(read, options.stdin)
   const io = new IOResult()
   let errors = ''
+  function note(line: string): void {
+    errors += line
+    io.stderr = encodeText(errors)
+  }
   function report(line: string, code: number, warning = false): void {
-    if (!(warning && quiet)) {
-      errors += line
-      io.stderr = encodeText(errors)
-    }
+    if (!(warning && quiet)) note(line)
     if (io.exitCode !== 1) io.exitCode = code
   }
-  function fail(err: GzipDataError, shown: string): void {
-    report(err.render(shown), err.exitCode, err.exitCode === 2)
+  function fail(err: GzipDataError, shown: string, started = ''): void {
+    report(started + err.render(shown), err.exitCode, err.exitCode === 2)
   }
   async function* run(): AsyncIterable<Uint8Array> {
-    for (const operand of operands) {
+    for await (const [operand, walk] of walked(operands, report, options)) {
       const onStdin = operand.rawPath === '-'
       const inPlace = !(options.toStdout === true || testOnly || onStdin)
       const found = onStdin
@@ -323,16 +529,20 @@ export async function decompressInputs(
       const link = found === null ? null : found.link
       const shown = onStdin ? 'stdin' : path.rawPath
       const output = inPlace ? decompressed(path, suffix) : null
-      if (inPlace && output === null) {
-        if (!quiet) report(`gzip: ${shown}: unknown suffix -- ignored\n`, 2)
+      const passed = walk && (inPlace || testOnly) && gzipSuffix(path.rawPath, suffix) === null
+      if (passed || (inPlace && output === null)) {
+        if (walk ? verbose : !quiet) report(`gzip: ${shown}: unknown suffix -- ignored\n`, 2)
         await closeQuietly(source)
         continue
       }
+      const facts: GzipFacts[] = []
       const spool = new ByteSpool()
       try {
         let failure: GzipDataError | null = null
         try {
-          for await (const chunk of gunzipStream(source, testOnly, force && !inPlace)) {
+          for await (const chunk of gunzipStream(source, testOnly, force && !inPlace, (f) =>
+            facts.push(f),
+          )) {
             if (inPlace) await spool.append(chunk)
             else if (!testOnly) yield chunk
           }
@@ -344,10 +554,15 @@ export async function decompressInputs(
             return
           }
         }
+        const stored = facts[0] ?? null
         if (output === null) {
           if (failure !== null) {
             fail(failure, shown)
             if (failure.fatal || (onStdin && failure.firstHeader)) return
+          } else if (verbose && testOnly) {
+            note(onStdin ? ' OK\n' : `${shown}:\t OK\n`)
+          } else if (verbose && stored !== null && !onStdin) {
+            note(decodedLine(shown, stored, keep, 'stdout'))
           }
           continue
         }
@@ -358,15 +573,18 @@ export async function decompressInputs(
         }
         if (options.write === undefined || options.unlink === undefined)
           throw new Error('in-place decompression requires write and unlink')
-        const outName = output[0]
-        const out = link === null ? output[1] : besideLink(link, outName)
+        const [outName, outPath] =
+          (options.restore === true && stored !== null ? named(path, stored.name) : null) ?? output
+        const out = link === null ? outPath : besideLink(link, outName)
         const existed = await outputTaken(out, options.stat, resolver)
         if (existed && !force) {
           report(existsLine(outName), 2)
           continue
         }
+        let started = ''
         if (failure !== null) {
-          fail(failure, shown)
+          if (verbose && failure.keepsOutput && stored !== null) started = `${shown}:\t`
+          fail(failure, shown, started)
           if (failure.fatal) return
           if (!failure.keepsOutput) continue
         }
@@ -380,7 +598,15 @@ export async function decompressInputs(
           if (existed) continue
           return
         }
-        if (options.keep !== true) await removeInput(path, link, options.unlink, resolver)
+        await keepAttributes(
+          options.setAttrs,
+          out,
+          await inputInfo(options.stat, path, link, resolver),
+          options.restore === true && stored !== null ? stored.mtime : 0,
+        )
+        if (verbose && stored !== null)
+          note(decodedLine(shown, stored, keep, outName).slice(started.length))
+        if (!keep) await removeInput(path, link, options.unlink, resolver)
       } finally {
         await spool.close()
         await closeQuietly(source)
@@ -392,4 +618,111 @@ export async function decompressInputs(
     return [await spooled(body), io]
   }
   return [body, io]
+}
+
+/**
+ * `gzip -l`: one row per input that decodes, checked whole.
+ *
+ * An input opens as for `-c` and one that fails to decode is reported in
+ * gzip's words and passed over. The head comes before the first row, and
+ * with more than one operand a totals row ends the table once any row was
+ * printed, its ratio leaving out the header bytes of the input tried last
+ * (none for one that failed), as the reference counts it; -q drops both. The
+ * name is the input's without its suffix, or the stored one under -N; -v adds
+ * the method, the CRC and the date: the file's own, or the stored one under
+ * -N. Mirrors Python's list_inputs.
+ */
+export async function listInputs(
+  paths: PathSpec[],
+  read: (path: PathSpec) => AsyncIterable<Uint8Array>,
+  options: {
+    stdin: ByteSource | null
+    quiet?: boolean
+    verbose?: boolean
+    restore?: boolean
+    recursive?: boolean
+    suffix?: string
+    stat?: StatFn
+    readdir?: ReaddirFn
+    resolver?: LinkResolver | null
+  },
+): Promise<[ByteSource | null, IOResult]> {
+  const suffix = options.suffix ?? GZIP_SUFFIX
+  const refused = suffixRefusal(suffix)
+  if (refused !== null) return [null, refused]
+  const quiet = options.quiet === true
+  const verbose = options.verbose === true
+  const restore = options.restore === true
+  const operands = paths.length > 0 ? paths : [STDIN_OPERAND]
+  const stream = stdinStream(read, options.stdin)
+  const io = new IOResult()
+  let errors = ''
+  const rows: string[] = []
+  let compressedTotal = 0
+  let sizeTotal = 0
+  let header = 0
+  function report(line: string, code: number, warning = false): void {
+    if (!(warning && quiet)) {
+      errors += line
+      io.stderr = encodeText(errors)
+    }
+    if (io.exitCode !== 1) io.exitCode = code
+  }
+  for await (const [operand, walk] of walked(operands, report, options)) {
+    const onStdin = operand.rawPath === '-'
+    const opened = onStdin
+      ? null
+      : await openGzipInput(operand, stream, report, {
+          suffix,
+          follow: true,
+          resolver: options.resolver ?? null,
+        })
+    if (opened === null && !onStdin) continue
+    const path = opened === null ? operand : opened.name
+    const source = opened === null ? stream(operand) : opened.stream
+    const shown = onStdin ? 'stdin' : path.rawPath
+    if (walk && gzipSuffix(path.rawPath, suffix) === null) {
+      await closeQuietly(source)
+      if (verbose) report(`gzip: ${shown}: unknown suffix -- ignored\n`, 2)
+      continue
+    }
+    let facts: GzipFacts
+    try {
+      facts = await readGzipFacts(source)
+    } catch (err) {
+      header = 0
+      if (err instanceof GzipDataError) {
+        report(err.render(shown), err.exitCode, err.exitCode === 2)
+        continue
+      }
+      if (!isFsError(err)) throw err
+      report('\n' + fsErrorLine('gzip', shown, err), 1)
+      continue
+    }
+    header = facts.header
+    compressedTotal += facts.compressed
+    sizeTotal += facts.size
+    const stripped = decompressed(path, suffix)
+    let name = onStdin ? 'stdout' : stripped === null ? path.rawPath : stripped[0]
+    if (restore && facts.name !== null && facts.name !== '') name = facts.name
+    let numbers = `${String(facts.compressed).padStart(19)} ${String(facts.size).padStart(19)} ${gzipRatio(facts.size, facts.compressed, facts.header)}`
+    if (rows.length === 0 && !quiet) rows.push(verbose ? GZIP_LIST_VERBOSE_HEAD : GZIP_LIST_HEAD)
+    if (verbose) {
+      let when: number
+      if (restore && facts.mtime !== 0) when = facts.mtime
+      else {
+        const info = await inputInfo(options.stat, path)
+        when = (info === null ? null : isoTimestamp(info.modified)) ?? systemNow()
+      }
+      numbers = `defla ${facts.crc.toString(16).padStart(8, '0')} ${listDate(when)} ${numbers}`
+    }
+    rows.push(`${numbers} ${name}`)
+  }
+  if (rows.length > 0 && operands.length > 1 && !quiet) {
+    const indent = verbose ? ' '.repeat(GZIP_LIST_VERBOSE_INDENT) : ''
+    rows.push(
+      `${indent}${String(compressedTotal).padStart(19)} ${String(sizeTotal).padStart(19)} ${gzipRatio(sizeTotal, compressedTotal, header)} (totals)`,
+    )
+  }
+  return [encodeText(rows.map((row) => `${row}\n`).join('')), io]
 }

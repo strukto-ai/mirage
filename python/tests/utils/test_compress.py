@@ -265,6 +265,17 @@ async def test_trailing_warning_follows_valid_output():
     assert not exc.value.fatal
 
 
+async def test_a_warning_that_keeps_the_output_still_tells_the_facts():
+    heard = []
+    data = gzip.compress(b"hello\n", mtime=981173106) + b"junk"
+    with pytest.raises(GzipDataError) as raised:
+        await materialize(
+            gunzip_stream(yield_bytes(data), on_facts=heard.append)
+        )
+    assert raised.value.keeps_output
+    assert [facts.mtime for facts in heard] == [981173106]
+
+
 async def test_large_member_preserves_buffered_output():
     data = b"x" * (GZIP_CHUNK_SIZE * 20 + 13)
     assert (await gunzip_partial(gzip.compress(data))) == (data, None)

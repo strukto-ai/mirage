@@ -18,7 +18,6 @@ import { PolicyDenied } from '../../policy/index.ts'
 import { DryRun } from '../../policy/types.ts'
 import { rawValue, varOf } from '../../rs/session.ts'
 import type { Item, Outcome, Shell } from '../../rs/shell.ts'
-import { plainDecimal } from '../../shell/arith.ts'
 import { arrayGet, ShellArray } from '../../shell/array.ts'
 import { joinBytes } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -240,7 +239,7 @@ export function visibleAssocs(
  */
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function subscriptIndex(session: SessionState, subscript: string): Promise<bigint> {
-  const plain = plainDecimal(subscript)
+  const plain = session.vars.shell.plainIndex(subscript)
   if (plain !== null) return plain
   return runWrite(session, (shell) => shell.index(subscript))
 }

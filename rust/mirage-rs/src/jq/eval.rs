@@ -6,6 +6,7 @@ use crate::{Stream, StreamError};
 use super::compile;
 use super::format::{self, Formatter};
 use super::host::{Host, Message, Reply, Request};
+use super::link::{DEFAULT_SEARCH, Linked};
 use super::meter::{self, Charge, Meter};
 use super::time::{Clock, Zone};
 use super::value::{Dumping, Key, Object, Parsing, Value, parse_json};
@@ -60,6 +61,12 @@ struct Config {
     /// which `get_prog_origin` answers.
     #[serde(default)]
     prog_origin: Option<String>,
+    /// What `-L` set `get_search_list` to, absolute; none for the default.
+    #[serde(default)]
+    search_list: Option<Vec<String>>,
+    /// The modules the program's imports found (link.rs).
+    #[serde(default)]
+    linked: Option<Linked>,
     /// The options jq prints its outputs by: each output
     /// then goes out printed, in a print frame, instead of as its dump.
     #[serde(default)]
@@ -308,6 +315,7 @@ pub(super) struct Eval {
     steps: u64,
     env: Value,
     origin: Value,
+    search_list: Value,
     position: Position,
     asking: Asking,
     clock: Clock,
@@ -362,7 +370,14 @@ pub(super) fn compile(config: &[u8]) -> Result<Eval, StreamError> {
     };
     // jq binds `$ENV` to the environment over an `--arg ENV` (compile.c).
     globals.insert("ENV".to_string(), env.clone());
-    let program = Arc::new(compile::compile(&config.program, &globals).map_err(StreamError::new)?);
+    let program = Arc::new(
+        compile::compile_linked(&config.program, &globals, config.linked.as_ref())
+            .map_err(StreamError::new)?,
+    );
+    let search_list = match config.search_list {
+        Some(paths) => paths.into_iter().map(Value::string).collect(),
+        None => DEFAULT_SEARCH.into_iter().map(Value::string).collect(),
+    };
     let clock = Clock {
         zone: Arc::new(Zone::parse(config.zone.as_deref().unwrap_or("UTC"))),
     };
@@ -379,6 +394,7 @@ pub(super) fn compile(config: &[u8]) -> Result<Eval, StreamError> {
         steps: config.steps.max(1),
         env,
         origin: config.prog_origin.map_or(Value::Null, Value::string),
+        search_list: Value::array(search_list),
         position: Position::default(),
         asking: Asking::No,
         clock,
@@ -889,6 +905,7 @@ impl Eval {
         let mut vm = Vm::start(self.compiled(), input, self.limits, Arc::clone(&self.meter));
         vm.host.env = self.env.clone();
         vm.host.origin = self.origin.clone();
+        vm.host.search_list = self.search_list.clone();
         place(&mut vm.host, std::mem::take(&mut self.position));
         vm.set_clock(self.clock.clone());
         Box::new(vm)

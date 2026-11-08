@@ -466,6 +466,23 @@ SPECS: dict[str, CommandSpec] = {
             # jq words its own refusal of a width it cannot read.
             Argument("--indent", help="Indent with n spaces (max 7)"),
             Argument(
+                "--stream-errors",
+                action="store_true",
+                help="Read as --stream does, a parse error as one more event",
+            ),
+            Argument(
+                "-L",
+                "--library-path",
+                action="append",
+                help="Add a directory to the module search list",
+            ),
+            Argument(
+                "-C",
+                "--color-output",
+                action="store_true",
+                help="Accepted; output stays plain",
+            ),
+            Argument(
                 "-M",
                 "--monochrome-output",
                 action="store_true",

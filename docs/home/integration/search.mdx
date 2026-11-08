@@ -297,7 +297,7 @@ field of [`command_limits`](/home/core/output-limits).
 | `find`, `ls -R`, `du`, `tree`, `getfattr -R` | Stops listing. It keeps what it printed, prints the same `stopped after` line and exits 1 (`tree`: 2). |
 | `git status`, `git add`, `git commit -a`, `git diff`, `git checkout`, `git reset`, `git rm` | Refused before it changes anything. It prints `fatal: more than <N> files in the work tree (walk_limit)` and exits 128. `git add`, `git diff` and `git rm` given paths walk only those, and a file named outright costs nothing. |
 | A glob, such as `cat /notes/*` | Refused, so the command does not run. It prints `cat: Argument list too long` and `cat: /notes/*: matches more than <N> files (walk_limit); narrow the path`, and exits 126. |
-| `tar -c`, `zip -r`, `cp -r`, `rm -r`, `chmod -R`, `chown -R`, `chgrp -R`, `mv` to another mount, `diff -r` | Refused before it touches anything (`before_full_walk`). It prints `tar: more than <N> files in scope (walk_limit); narrow the path` and exits 1. |
+| `tar -c`, `zip -r`, `cp -r`, `rm -r`, `chmod -R`, `chown -R`, `chgrp -R`, `mv` to another mount, `diff -r`, `gzip -r` | Refused before it touches anything (`before_full_walk`). It prints `tar: more than <N> files in scope (walk_limit); narrow the path` and exits 1. |
 
 A search counts only the files it reads, so a file `files_containing` rules out
 costs nothing. A listing counts every entry it lists, folders included. Each

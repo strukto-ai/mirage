@@ -27,7 +27,6 @@ from mirage.io.memory import memory_room
 from mirage.policy.errors import PolicyDenied
 from mirage.policy.types import DryRun
 from mirage.rs.session import raw_value, var_of
-from mirage.shell.arith import plain_decimal
 from mirage.shell.array import ShellArray, array_get
 from mirage.shell.bytes import join_bytes
 from mirage.shell.call_stack import CallStack
@@ -208,93 +207,67 @@ def env_is_readonly(
     return session.vars.shell.is_readonly(name, follow_ref)
 
 
-class _VisibleEnv(Mapping[str, str]):
-    """A live, read-only view of the session's scalars minus hidden
-    names, a lookup following references."""
+class _Visible[T](Mapping[str, T]):
+    """A live, read-only view of the session's values of one kind minus
+    hidden names, ``read`` answering a lookup.
 
-    __slots__ = ("_session",)
+    Args:
+        session (SessionState): the session holding the values.
+        kind (str): ``scalar``, ``indexed`` or ``assoc``.
+        read (Callable[[str], T | None]): what a name holds of that kind.
+    """
 
-    def __init__(self, session: SessionState) -> None:
+    __slots__ = ("_kind", "_read", "_session")
+
+    def __init__(
+        self,
+        session: SessionState,
+        kind: str,
+        read: Callable[[str], T | None],
+    ) -> None:
         self._session = session
+        self._kind = kind
+        self._read = read
 
-    def __getitem__(self, name: str) -> str:
-        value = env_get(self._session, name)
+    def __getitem__(self, name: str) -> T:
+        value = self._read(name)
         if value is None:
             raise KeyError(name)
         return value
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self._session.vars.shell.visible_names("scalar"))
+        return iter(self._session.vars.shell.visible_names(self._kind))
 
     def __len__(self) -> int:
-        return len(self._session.vars.shell.visible_names("scalar"))
+        return len(self._session.vars.shell.visible_names(self._kind))
 
 
 def visible_env(session: SessionState) -> Mapping[str, str]:
     """The env mapping a reader tier resolves names against: live,
-    read-only, hidden names left out.
+    read-only, hidden names left out, a lookup following references.
 
     Args:
         session (SessionState): the session holding the environment.
     """
-    return _VisibleEnv(session)
-
-
-class _VisibleArrays(Mapping[str, ShellArray]):
-    """A live, read-only view of the session's indexed arrays minus
-    hidden names. ``PIPESTATUS`` and ``FUNCNAME`` answer a lookup from
-    the shell's own bookkeeping, which the frame hands it, and never
-    list: bash's ``declare -p PIPESTATUS`` is ``not found``."""
-
-    __slots__ = ("_session",)
-
-    def __init__(self, session: SessionState) -> None:
-        self._session = session
-
-    def __getitem__(self, name: str) -> ShellArray:
-        session = self._session
-        frame(session)
-        raw = session.vars.shell.indexed(name)
-        if raw is None:
-            raise KeyError(name)
-        return ShellArray(raw)
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._session.vars.shell.visible_names("indexed"))
-
-    def __len__(self) -> int:
-        return len(self._session.vars.shell.visible_names("indexed"))
+    return _Visible(session, "scalar", functools.partial(env_get, session))
 
 
 def visible_arrays(session: SessionState) -> Mapping[str, ShellArray]:
     """The indexed arrays a reader tier resolves names against.
+    ``PIPESTATUS`` and ``FUNCNAME`` answer a lookup from the shell's own
+    bookkeeping, which the frame hands it, and never list: bash's
+    ``declare -p PIPESTATUS`` is ``not found``.
 
     Args:
         session (SessionState): the session holding the arrays.
     """
-    return _VisibleArrays(session)
 
+    def read(name: str) -> ShellArray | None:
+        frame(session)
+        raw = session.vars.shell.indexed(name)
+        return None if raw is None else ShellArray(raw)
 
-class _VisibleAssocs(Mapping[str, dict[str, str]]):
-    """A live, read-only view of the associative arrays minus hidden
-    names."""
-
-    __slots__ = ("_session",)
-
-    def __init__(self, session: SessionState) -> None:
-        self._session = session
-
-    def __getitem__(self, name: str) -> dict[str, str]:
-        value = _visible(self._session, name)
-        if not isinstance(value, dict):
-            raise KeyError(name)
-        return value
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._session.vars.shell.visible_names("assoc"))
-
-    def __len__(self) -> int:
-        return len(self._session.vars.shell.visible_names("assoc"))
+    return _Visible(session, "indexed", read)
 
 
 def visible_assocs(session: SessionState) -> Mapping[str, dict[str, str]]:
@@ -303,7 +276,12 @@ def visible_assocs(session: SessionState) -> Mapping[str, dict[str, str]]:
     Args:
         session (SessionState): the session holding the arrays.
     """
-    return _VisibleAssocs(session)
+
+    def read(name: str) -> dict[str, str] | None:
+        value = _visible(session, name)
+        return value if isinstance(value, dict) else None
+
+    return _Visible(session, "assoc", read)
 
 
 async def subscript_index(session: SessionState, subscript: str) -> int:
@@ -322,7 +300,7 @@ async def subscript_index(session: SessionState, subscript: str) -> int:
             the shell wherever a subscript is.
         ArithError: the subscript does not evaluate.
     """
-    plain = plain_decimal(subscript)
+    plain = session.vars.shell.plain_index(subscript)
     if plain is not None:
         return plain
     return run_write(session, lambda shell: shell.index(subscript))

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { zcatGeneric } from '../../generic/zcat.ts'
+import { facts, zcatGeneric } from '../../generic/zcat.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, dirAwareStream, resolveOrEmpty } from '../files.ts'
@@ -20,11 +20,12 @@ import { commandFiles, dirAwareStream, resolveOrEmpty } from '../files.ts'
 const zcat: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return zcatGeneric(resolved, ctx, dirAwareStream(files, ctx))
+  return zcatGeneric(resolved, ctx, dirAwareStream(files, ctx), files.stat, (p) => files.readdir(p))
 }
 
 export const BUILDER: GenericCommand = {
   name: 'zcat',
   read: true,
   fn: zcat,
+  facts: facts,
 }

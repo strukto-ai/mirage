@@ -64,11 +64,11 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/tl/d/e && printf x > /data/tl/d/e/f && cd /data/tl && for l in abc '' 0 -1; do tree -L \"$l\" d; echo rc=$?; done; tree -L 1x d; tree -L 0x2 d; cd /",
+      "command": "mkdir -p /data/tl/d/e && printf x > /data/tl/d/e/f && cd /data/tl && for l in abc '' 0 -1; do tree -L \"$l\" d; echo rc=$?; done; tree -L 1x d; tree -L 0x2 d; tree --sort=bogus d; echo rc=$?; tree --filelimit x d | tail -1; cd /",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nd\n`-- e\n\n2 directories, 0 files\nd\n`-- e\n    `-- f\n\n2 directories, 1 file\n",
-        "stderr": "tree: Invalid level, must be greater than 0.\ntree: Invalid level, must be greater than 0.\ntree: Invalid level, must be greater than 0.\ntree: Invalid level, must be greater than 0.\n"
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nd\n`-- e\n\n2 directories, 0 files\nd\n`-- e\n    `-- f\n\n2 directories, 1 file\nname,version,size,mtime,ctime,none\nrc=1\n2 directories, 1 file\n",
+        "stderr": "tree: Invalid level, must be greater than 0.\ntree: Invalid level, must be greater than 0.\ntree: Invalid level, must be greater than 0.\ntree: Invalid level, must be greater than 0.\ntree: Sort type 'bogus' not valid, should be one of: "
       },
       "flags": [
         "L"

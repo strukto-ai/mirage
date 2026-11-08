@@ -190,6 +190,10 @@ def test_walkers_are_read_off_the_parsed_line(words, walks):
         (["rg", "--one-file-system", "x", "/data"], True),
         (["find", "/data"], True),
         (["ls", "-l", "/data"], False),
+        (["gzip", "-r", "/data"], True),
+        (["gunzip", "-r", "/data"], True),
+        (["zcat", "-r", "/data"], True),
+        (["gzip", "/data/a"], False),
     ],
 )
 def test_subtree_readers_cover_the_archivers_and_recursive_copy(words, reads):

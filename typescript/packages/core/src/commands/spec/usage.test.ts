@@ -97,6 +97,10 @@ describe('unknownOptionError', () => {
     ['--inc', '--inc'],
     ['--exc', '--exc'],
     ['--exclude-dir=x', '--exclude-dir=x'],
+    ['z', '-z'],
+    ['Z', '-Z'],
+    ['--nu', '--nu'],
+    ['--null-data=x', '--null-data=x'],
   ])('zgrep refuses %s, a grep option it does not support', (token, shown) => {
     const [msg, code] = unknownOptionError('zgrep', token)
     expect([td.decode(msg), code]).toEqual([`zgrep: ${shown}: option not supported\n`, 2])

@@ -130,6 +130,10 @@ def test_unknown_short_option_reports_char():
         ("--inc", "--inc"),
         ("--exc", "--exc"),
         ("--exclude-dir=x", "--exclude-dir=x"),
+        ("z", "-z"),
+        ("Z", "-Z"),
+        ("--nu", "--nu"),
+        ("--null-data=x", "--null-data=x"),
     ],
 )
 def test_zgrep_refuses_a_grep_option_it_does_not_support(token, shown):

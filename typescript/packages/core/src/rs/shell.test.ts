@@ -178,6 +178,16 @@ describe('Shell', () => {
     return node
   }
 
+  it('reads only a plain decimal as a plain index', () => {
+    const shell = Shell.create(() => 7)
+    expect(shell.plainIndex(' 42\t')).toBe(42n)
+    expect(shell.plainIndex('99999999999999999999999')).toBe(200376420520689663n)
+    expect(shell.plainIndex('042')).toBeNull()
+    expect(shell.plainIndex('4+2')).toBeNull()
+    expect(shell.plainIndex(' ')).toBeNull()
+    shell.close()
+  })
+
   it('seeds a fresh generator from its own id source, a subshell too', () => {
     const drawn: number[] = []
     const source = (seed: number) => () => {
@@ -203,6 +213,43 @@ describe('Shell', () => {
     expect(shell.visible('m')).toEqual([new Map([['k', 'v']]), 'A', null])
     expect(shell.exported()).toEqual([['x', 'a b']])
     expect(shell.has('m') && !shell.has('y')).toBe(true)
+    shell.close()
+  })
+
+  it('sends its lists again after the engine refuses a frame', () => {
+    const shell = Shell.create(() => 7)
+    const frame = {
+      positional: ['a', 'b'],
+      calls: [],
+      status: 0,
+      pid: 1,
+      lastJob: null,
+      argv0: 'bash',
+      options: new Map<string, boolean>(),
+      shopts: new Map<string, boolean>(),
+      envLimit: null,
+      outside: 0,
+      pipeStatus: [],
+      functionNames: null,
+      callLines: [],
+      paren: false,
+      memoryRoom: null,
+      line: 1,
+      bashPid: 1,
+      voice: 'bash: ',
+    }
+    shell.frame({ ...frame, status: 2 ** 40 })
+    expect(() => shell.has('x')).toThrow('out of range')
+    shell.frame(frame)
+    const count = (): unknown =>
+      run(shell.expand(word('echo $#'), 'fields'), () => {
+        throw new Error('nothing to ask')
+      })[0]
+    expect(count()).toEqual(['ok', ['2']])
+    shell.frame({ ...frame, positional: ['c'] })
+    expect(() => shell.visibleNames('bogus' as 'scalar')).toThrow()
+    shell.frame(frame)
+    expect(count()).toEqual(['ok', ['2']])
     shell.close()
   })
 

@@ -216,8 +216,9 @@ describe('record paths name the virtual path (node backends)', () => {
     const vfs = new SSHVFS({ host: 'example.com', username: 'alice', password: 'secret' })
     ;(vfs as { accessor: SSHAccessor }).accessor = makeFakeAccessor(state, '/')
     // ssh caches reads: cat's read of k.txt reaches the server, and so does
-    // the in-mount cp's native copy, a read and a write over sftp; the later
-    // reads are served from the cache.
+    // the in-mount cp's native copy, a read and a write over sftp; gzip's read
+    // is served from the cache. The date gzip and gunzip restore on an output
+    // drops its cached copy, so the reads after them reach the server again.
     expect(await ledger(vfs, null)).toEqual([
       ['write', K],
       ['append', K],
@@ -229,7 +230,7 @@ describe('record paths name the virtual path (node backends)', () => {
       ['read', K],
       ['write', '/m/m/k2.txt'],
       ['write', '/m/m/d/f'],
-      ...GENERIC_OUT.filter(([op]) => op === 'write'),
+      ...GENERIC_OUT.slice(1),
       ['create', C],
       ['append', C],
     ])

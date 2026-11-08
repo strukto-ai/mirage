@@ -56,19 +56,10 @@ impl Signal {
     /// subscript or an `-i` value (`fatal`) ends the shell with 1, any
     /// other discards the line, as `$((R=3))` does.
     pub fn readonly(voice: &[u8], name: &str, fatal: bool) -> Self {
-        let stderr = voiced(voice, &format!("{name}: readonly variable\n"));
-        if fatal {
-            Signal::Exit {
-                status: 1,
-                stderr,
-                contained: 1,
-            }
-        } else {
-            Signal::Discard {
-                stderr,
-                contained: 1,
-            }
-        }
+        Self::stopping(
+            voiced(voice, &format!("{name}: readonly variable\n")),
+            fatal,
+        )
     }
 
     /// An arithmetic error where no status answers it, `lead` naming the
@@ -90,7 +81,13 @@ impl Signal {
         let mut stderr = voiced(voice, &lead);
         stderr.extend_from_slice(&arith_line(error));
         stderr.push(b'\n');
-        if fatal || subscript {
+        Self::stopping(stderr, fatal || subscript)
+    }
+
+    /// An error no status answers: the shell ended with 1 when `fatal`,
+    /// else the line discarded.
+    fn stopping(stderr: Vec<u8>, fatal: bool) -> Self {
+        if fatal {
             Signal::Exit {
                 status: 1,
                 stderr,

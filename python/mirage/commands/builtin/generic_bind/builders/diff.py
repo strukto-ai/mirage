@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic_bind.files import (
 )
 from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import utf8_locale
 from mirage.types import PathSpec
 
 
@@ -30,7 +31,7 @@ async def diff(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(ctx.flags)
+    parsed = parse_flags(ctx.flags, utf8_locale(ctx.env))
     if isinstance(parsed, IOResult):
         return None, parsed
     files = command_files(ctx, paths)

@@ -53,6 +53,9 @@ Example:\n\n\
 \t}\n\n\
 For listing the command options, use jq --help.";
 
+/// What jq says, with no name before it, for an `-L` the line ends at.
+const LIBRARY_PATH_TAKES: &str = "-L takes a parameter: (e.g. -L /search/path or -L/search/path)";
+
 /// What jq says for an option the line ends before the values of.
 const TAKES: [(&str, &str); 5] = [
     (
@@ -75,11 +78,12 @@ const TAKES: [(&str, &str); 5] = [
 ];
 
 /// The switches whose order does not matter, by tape name.
-const SWITCHES: [&str; 11] = [
+const SWITCHES: [&str; 12] = [
     "null_input",
     "raw_input",
     "slurp",
     "stream",
+    "stream_errors",
     "seq",
     "exit_status",
     "raw_output",
@@ -293,6 +297,10 @@ fn option_refusal(word: &[u8]) -> StreamError {
     if word == b"-f" || word == b"--from-file" {
         return StreamError::refusal(SHORT_USAGE.as_bytes(), ERROR_SYSTEM);
     }
+    if word == b"-L" || word == b"--library-path" {
+        let text = format!("{LIBRARY_PATH_TAKES}\n{USAGE_HINT}");
+        return StreamError::refusal(text.as_bytes(), ERROR_SYSTEM);
+    }
     match TAKES.iter().find(|(option, _)| option.as_bytes() == word) {
         Some((_, line)) => usage(line.as_bytes()),
         None => usage(&[b"Unknown option ".as_slice(), word].concat()),
@@ -369,6 +377,7 @@ struct Loop {
     compact: bool,
     tab: bool,
     indent: u8,
+    library_paths: Vec<String>,
     named: Vec<(Vec<u8>, String)>,
     positional: Vec<String>,
     answer: Option<&'static str>,
@@ -401,6 +410,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         compact: false,
         tab: false,
         indent: DEFAULT_INDENT,
+        library_paths: Vec::new(),
         named: Vec::new(),
         positional: Vec::new(),
         answer: None,
@@ -453,7 +463,9 @@ impl Loop {
                     self.indent = u8::try_from(width).unwrap_or(DEFAULT_INDENT);
                 }
                 "from_file" => self.program_file = Some(self.at - 1),
-                "monochrome_output" | "unbuffered" => {}
+                "library_path" => self.library_paths.push(lossy(&text)),
+                // Output is never colored, so -C and -M change nothing.
+                "color_output" | "monochrome_output" | "unbuffered" => {}
                 switch => match SWITCHES.iter().find(|known| **known == switch) {
                     Some(known) => self.switches.push(known),
                     None => return Err(crate::scan::unknown("jq", switch)),
@@ -553,7 +565,8 @@ impl Loop {
             null_input: on("null_input"),
             raw_input: on("raw_input"),
             slurp: on("slurp"),
-            stream: on("stream"),
+            stream: on("stream") || on("stream_errors"),
+            stream_errors: on("stream_errors"),
             seq: on("seq"),
             exit_status: on("exit_status"),
             raw_output: on("raw_output") || on("join_output") || on("raw_output0"),
@@ -564,6 +577,7 @@ impl Loop {
             compact: self.compact,
             tab: self.tab,
             indent: self.indent,
+            library_paths: self.library_paths.clone(),
             ..RunConfig::default()
         };
         json!({ "config": config, "program_file": self.program_file })

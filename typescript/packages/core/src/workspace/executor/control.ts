@@ -421,7 +421,7 @@ export async function handleFor(
     }
     try {
       const [stdout, io] = await run(body, bound)
-      allStdout.push(stdout)
+      keep(allStdout, stdout)
       mergedIo = await mergedIo.merge(io)
       if (session.errexitExiting) break
     } catch (sig) {
@@ -682,7 +682,7 @@ export async function handleSelect(
     }
     try {
       const [stdout, io] = await run(body, bound)
-      allStdout.push(stdout)
+      keep(allStdout, stdout)
       mergedIo = await mergedIo.merge(io)
       if (session.errexitExiting) break
     } catch (sig) {

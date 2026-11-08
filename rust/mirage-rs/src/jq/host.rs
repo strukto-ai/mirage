@@ -43,6 +43,8 @@ pub(crate) struct Host {
     /// What `get_prog_origin` answers: the directory of the program's
     /// file, else the working directory.
     pub(crate) origin: Value,
+    /// What `get_search_list` answers.
+    pub(crate) search_list: Value,
     pub(crate) filename: Value,
     pub(crate) line: f64,
     pub(crate) reply: Option<Reply>,
@@ -60,6 +62,7 @@ impl Default for Host {
         Self {
             env: Value::object(Object::default()),
             origin: Value::Null,
+            search_list: Value::Null,
             filename: Value::Null,
             line: 0.0,
             reply: None,
@@ -84,6 +87,7 @@ pub(crate) fn is_host(f: Cfunc) -> bool {
             | Cfunc::Stderr
             | Cfunc::Env
             | Cfunc::GetProgOrigin
+            | Cfunc::GetSearchList
             | Cfunc::InputFilename
             | Cfunc::InputLineNumber
     )
@@ -220,6 +224,7 @@ impl Host {
             }
             Cfunc::Env => Answer::Value(self.env.clone()),
             Cfunc::GetProgOrigin => Answer::Value(self.origin.clone()),
+            Cfunc::GetSearchList => Answer::Value(self.search_list.clone()),
             Cfunc::InputFilename => Answer::Value(self.filename.clone()),
             Cfunc::InputLineNumber => Answer::Value(Value::number(self.line)),
             _ => unreachable!("not a host builtin"),

@@ -60,18 +60,6 @@ impl ShellTree {
     fn source<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         PyBytes::new(py, &self.tree.source)
     }
-
-    /// The heredocs folded into `source`, in its order.
-    #[getter]
-    fn heredocs(&self) -> Vec<ShellHeredoc> {
-        self.tree
-            .heredocs
-            .iter()
-            .map(|heredoc| ShellHeredoc {
-                heredoc: heredoc.clone(),
-            })
-            .collect()
-    }
 }
 
 /// A heredoc folded into its line as a `<` redirect from a double-quoted
@@ -83,11 +71,6 @@ pub struct ShellHeredoc {
 
 #[pymethods]
 impl ShellHeredoc {
-    #[getter]
-    fn operator_start(&self) -> usize {
-        self.heredoc.operator
-    }
-
     #[getter]
     fn word_end(&self) -> usize {
         self.heredoc.word_end

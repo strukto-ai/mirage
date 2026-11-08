@@ -653,13 +653,14 @@ RG_FLAG_NAMES = (
 STANDARD_BEFORE_SCAN = frozenset({"zgrep"})
 
 # The grep options zgrep refuses before grep sees them, since it reads
-# one stream per file and walks no directory: `zgrep -r` says
+# one stream per file, walks no directory and reads its lines as lines
+# (-z and -Z, --null-data and --null): `zgrep -r` says
 # `zgrep: -r: option not supported` and exits 2, naming the letter in a
 # cluster (`-nr`) and a long one as typed, value included. A long one is
 # refused from the shortest prefix that names it alone among grep's
 # options, each mapped here to that length; a shorter one is grep's
 # ambiguous option. Measured on gzip 1.13.
-ZGREP_UNSUPPORTED_SHORT = frozenset("rRd")
+ZGREP_UNSUPPORTED_SHORT = frozenset("rRdzZ")
 ZGREP_UNSUPPORTED_LONG = {
     "recursive": 3,
     "directories": 2,
@@ -667,6 +668,8 @@ ZGREP_UNSUPPORTED_LONG = {
     "exclude": 3,
     "exclude-from": 3,
     "exclude-dir": 3,
+    "null": 2,
+    "null-data": 2,
 }
 
 # The spec-declared `choices` sets that GNU matches as word choices, so

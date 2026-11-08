@@ -19,7 +19,7 @@ from mirage.commands.builtin.generic.program import (
     program_file_refusal,
     read_program_file,
 )
-from mirage.commands.builtin.utils.links import dispatch_of
+from mirage.commands.builtin.utils.links import dispatch_of, links_of
 from mirage.commands.builtin.utils.stream import is_stdin, stdin_stream
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -48,8 +48,9 @@ from mirage.rs.stream import (
 )
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view
-from mirage.types import JsonValue, PathSpec, ReadStreamFn
+from mirage.types import LINK_TARGET_KEY, JsonValue, PathSpec, ReadStreamFn
 from mirage.utils.clock import system_now
+from mirage.view.types import LinkView
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,10 @@ logger = logging.getLogger(__name__)
 # whose value is a file the option loop asks for.
 BINDINGS = ("arg", "argjson", "rawfile", "slurpfile")
 FILE_BINDINGS = ("rawfile", "slurpfile")
+
+# What a program that imports a module has to hold, so that any other
+# goes straight to its run.
+MODULE_WORDS = ("import", "include")
 
 # jq's exit status when it refuses the program itself, and when the
 # program file holds a NUL byte.
@@ -172,6 +177,128 @@ class FlagFiles:
                     "directory": isinstance(exc, IsADirectoryError),
                 }
             )
+
+
+class ModuleFiles:
+    """Serves the files jq's linker asks for. Reading is how it finds out
+    whether one is there: a file that is not answers ``missing``.
+
+    Args:
+        read (Callable): byte reader for one path.
+    """
+
+    def __init__(self, read: Callable[[PathSpec], Awaitable[bytes]]) -> None:
+        self._read = read
+        self.errors = ByteSpool()
+
+    async def serve(
+        self, request: Mapping[str, JsonValue], data: bytes
+    ) -> Served:
+        """Read one file, or say why it could not be read.
+
+        Args:
+            request (Mapping[str, JsonValue]): ``{"op": "read", "path": p}``.
+            data (bytes): unused; a read carries no bytes.
+        """
+        path = request.get("path")
+        if request.get("op") != "read" or not isinstance(path, str):
+            raise ValueError(f"jq: unknown linker request {request}")
+        try:
+            return Served(
+                {"kind": "data"},
+                await self._read(PathSpec.from_str_path(path)),
+            )
+        except (FileNotFoundError, NotADirectoryError):
+            return Served({"kind": "missing"})
+        except FS_ERRORS as exc:
+            return Served(
+                {
+                    "kind": "error",
+                    "message": fs_strerror(exc),
+                    "directory": isinstance(exc, IsADirectoryError),
+                }
+            )
+
+
+def _link_table(
+    expression: str,
+    options: Mapping[str, JsonValue],
+    links: LinkView | None,
+) -> dict[str, JsonValue]:
+    """Each symlink in the namespace and what it points at, which jq's
+    search paths resolve through; empty for a program with no search.
+
+    Args:
+        expression (str): jq program text.
+        options (Mapping[str, JsonValue]): what the option loop decided.
+        links (LinkView | None): the namespace's symlink facts.
+    """
+    if links is None or not (
+        options.get("library_paths")
+        or any(word in expression for word in MODULE_WORDS)
+    ):
+        return {}
+    return {
+        path: str(stat.extra.get(LINK_TARGET_KEY, ""))
+        for path, stat in links.subtree("/")
+    }
+
+
+async def link_modules(
+    expression: str,
+    options: Mapping[str, JsonValue],
+    origin: str | None,
+    cwd: str | None,
+    home: str | None,
+    read: Callable[[PathSpec], Awaitable[bytes]],
+    links: Mapping[str, JsonValue] | None = None,
+) -> JsonValue:
+    """The modules a program imports, read for the run to compile, or None
+    for a program that cannot import one.
+
+    Args:
+        expression (str): jq program text.
+        options (Mapping[str, JsonValue]): what the option loop decided.
+        origin (str | None): the directory of the program's file, else
+            the working directory.
+        cwd (str | None): the working directory.
+        home (str | None): the session's ``HOME``.
+        read (Callable): byte reader for one path.
+        links (Mapping[str, JsonValue] | None): each symlink and its
+            target.
+
+    Raises:
+        StreamRefusal: an import jq could not load, in jq's report.
+        MemoryExhausted: the files imported outgrew the workspace's room.
+    """
+    if not any(word in expression for word in MODULE_WORDS):
+        return None
+    limit = memory_room()
+    stream = open_stream(
+        "jq_link",
+        {
+            "program": expression,
+            "library_paths": options.get("library_paths", []),
+            "origin": origin,
+            "cwd": cwd,
+            "home": home,
+            "links": dict(links or {}),
+            **({} if limit is None else {"memory": limit}),
+        },
+    )
+    host = ModuleFiles(read)
+    try:
+        async with aclosing(serve_requests(stream, host)) as output:
+            reply = b"".join([chunk async for chunk in output])
+    except StreamRefusal as exc:
+        if exc.message != EXHAUSTED:
+            raise
+        raise MemoryExhausted() from exc
+    finally:
+        await host.errors.close()
+        await close_stream(stream)
+    linked: JsonValue = json.loads(reply)
+    return linked
 
 
 @dataclass(frozen=True)
@@ -424,6 +551,7 @@ async def jq_generic(
         dispatch_of(ctx),
         ctx.env,
         ctx.cwd,
+        links_of(ctx),
     )
 
 
@@ -449,6 +577,7 @@ async def _jq(
     dispatch: DispatchFn | None,
     env: Mapping[str, str] | None,
     cwd: PathSpec | None,
+    links: LinkView | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one jq invocation.
 
@@ -466,6 +595,8 @@ async def _jq(
             process environment, and whose `TZ` local time reads.
         cwd (PathSpec | None): the session's working directory, which
             `get_prog_origin` answers without -f.
+        links (LinkView | None): the namespace's symlink facts, which a
+            search path resolves through.
     """
     fl = FlagView(flags, spec=SPECS["jq"])
     read_input = stdin_stream(stream, stdin)
@@ -520,6 +651,22 @@ async def _jq(
         # reading the program as typed, so its lines and columns are jq's.
         # The run compiles it again when it starts, so nothing is held
         # open for a stream no one reads.
+        working = None if cwd is None else cwd.virtual
+        table = _link_table(expression, options, links)
+        options = {
+            **options,
+            "cwd": working,
+            "links": table,
+            "linked": await link_modules(
+                expression,
+                options,
+                origin,
+                working,
+                (env or {}).get("HOME"),
+                read_flag_file,
+                table,
+            ),
+        }
         checked = open_stream(
             "jq",
             run_config(expression, options, env_text, zone, origin, names),

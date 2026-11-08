@@ -277,3 +277,185 @@ fn rejects_invalid_configuration_and_input_lifecycle() {
     stream.drain(&mut out).unwrap();
     assert!(!stream.busy());
 }
+
+const TEN: &[u8] = b"a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n";
+const ELEVEN: &[u8] = b"a\nB\nc\nd\ne\nf\ng\nh\nI\nj\nk\n";
+
+#[test]
+fn context_and_rcs_formats_match_diffutils() {
+    let headed = r#"{"mode":"context","old_header":"o","new_header":"n"}"#;
+    let (output, _, status, _) = compare(headed, TEN, ELEVEN);
+    assert_eq!(
+        output,
+        b"*** o\n--- n\n***************\n*** 1,10 ****\n  a\n! b\n  c\n  d\n  e\n  f\n  g\n  h\n! i\n  j\n--- 1,11 ----\n  a\n! B\n  c\n  d\n  e\n  f\n  g\n  h\n! I\n  j\n+ k\n"
+    );
+    assert_eq!(status, 1);
+    let bare = r#"{"mode":"context","context":0,"old_header":"o","new_header":"n"}"#;
+    assert_eq!(
+        compare(bare, TEN, ELEVEN).0,
+        b"*** o\n--- n\n***************\n*** 2 ****\n! b\n--- 2 ----\n! B\n***************\n*** 9 ****\n! i\n--- 9 ----\n! I\n***************\n*** 10 ****\n--- 11 ----\n+ k\n"
+    );
+    assert_eq!(
+        compare(r#"{"mode":"rcs"}"#, TEN, ELEVEN).0,
+        b"d2 1\na2 1\nB\nd9 1\na9 1\nI\na10 1\nk\n"
+    );
+    assert_eq!(compare(r#"{"mode":"rcs"}"#, b"a", b"b").0, b"d1 1\na1 1\nb");
+}
+
+#[test]
+fn side_by_side_lays_out_columns_and_marks() {
+    let old = b"a\nb\nc\nd\nsame\n";
+    let new = b"a\nB\nc\nnew\nsame\nmore\n";
+    let sides = |extra: &str| format!(r#"{{"mode":"sides","widths":["40"]{extra}}}"#);
+    assert_eq!(
+        compare(&sides(""), old, new).0,
+        b"a\t\t\ta\nb\t\t   |\tB\nc\t\t\tc\nd\t\t   |\tnew\nsame\t\t\tsame\n\t\t   >\tmore\n"
+    );
+    assert_eq!(
+        compare(&sides(r#","suppress_common":true"#), old, new).0,
+        b"b\t\t   |\tB\nd\t\t   |\tnew\n\t\t   >\tmore\n"
+    );
+    assert_eq!(
+        compare(&sides(r#","left_column":true"#), old, new).0,
+        b"a\t\t   (\nb\t\t   |\tB\nc\t\t   (\nd\t\t   |\tnew\nsame\t\t   (\n\t\t   >\tmore\n"
+    );
+    assert_eq!(
+        compare(&sides(r#","expand_tabs":true"#), b"keep\ngone\n\nboth\n", b"keep\n\nboth\nadded\n").0,
+        b"keep                  keep\ngone               <\n\nboth                  both\n                   >  added\n"
+    );
+    let narrow = r#"{"mode":"sides","widths":["20"]}"#;
+    assert_eq!(compare(narrow, b"a", b"b\n").0, b"a     \\\tb\n");
+    assert_eq!(compare(narrow, b"b\n", b"a").0, b"b     /\ta\n");
+    let (output, _, status, _) = compare(narrow, b"same", b"same");
+    assert_eq!((output.as_slice(), status), (b"same\tsame".as_slice(), 0));
+}
+
+#[test]
+fn blank_and_matching_lines_set_whole_changes_aside() {
+    let blank = r#"{"ignore_blank_lines":true}"#;
+    assert_eq!(compare(blank, b"a\nb\nc\n", b"a\n\nb\nc\n\n").2, 0);
+    let brief = r#"{"ignore_blank_lines":true,"brief":true}"#;
+    assert_eq!(compare(brief, b"a\nb\nc\n", b"a\n\nb\nc\n\n").2, 0);
+    let old = b"x 1\nkeep\nx 2\n";
+    let new = b"x 9\nkeep\nx 8\nnew\n";
+    assert_eq!(
+        compare(r#"{"ignore_lines":["^x"]}"#, old, new).0,
+        b"3c3,4\n< x 2\n---\n> x 8\n> new\n"
+    );
+    assert_eq!(compare(r#"{"ignore_lines":["^x","^new"]}"#, old, new).2, 0);
+    assert_eq!(
+        compare(
+            r#"{"mode":"unified","ignore_lines":["^x"],"old_header":"a","new_header":"b"}"#,
+            old,
+            new
+        )
+        .0,
+        b"--- a\n+++ b\n@@ -1,3 +1,4 @@\n-x 1\n+x 9\n keep\n-x 2\n+x 8\n+new\n"
+    );
+    let crlf = r#"{"strip_trailing_cr":true,"brief":true}"#;
+    assert_eq!(compare(crlf, b"a\r\nb\n", b"a\nb\n").2, 0);
+}
+
+#[test]
+fn function_lines_and_tabs() {
+    let old = b"int main(void)\n{\n  a;\n  b;\n  c;\n  d;\n  e;\n  f;\n  g;\n}\nvoid helper_with_a_really_long_name_that_goes_on(int x)\n{\n  h;\n}\n";
+    let new = b"int main(void)\n{\n  a;\n  b;\n  c;\n  d;\n  e;\n  f;\n  G;\n}\nvoid helper_with_a_really_long_name_that_goes_on(int x)\n{\n  H;\n}\n";
+    assert_eq!(
+        compare(
+            r#"{"mode":"unified","show_c_function":true,"old_header":"o","new_header":"n"}"#,
+            old,
+            new
+        )
+        .0,
+        b"--- o\n+++ n\n@@ -6,9 +6,9 @@ int main(void)\n   d;\n   e;\n   f;\n-  g;\n+  G;\n }\n void helper_with_a_really_long_name_that_goes_on(int x)\n {\n-  h;\n+  H;\n }\n"
+    );
+    assert_eq!(
+        compare(
+            r#"{"initial_tab":true}"#,
+            b"keep\ngone\n\nboth\n",
+            b"keep\n\nboth\nadded\n"
+        )
+        .0,
+        b"2d1\n<\tgone\n4a4\n>\tadded\n"
+    );
+}
+
+#[test]
+fn widths_and_patterns_are_refused_as_typed() {
+    let refusal = |config: &str| match open("diff", config.as_bytes()) {
+        Ok(_) => panic!("{config} opened"),
+        Err(error) => (error.message, error.status),
+    };
+    assert_eq!(
+        refusal(r#"{"widths":["0"]}"#),
+        (
+            "diff: invalid width '0'\ndiff: Try 'diff --help' for more information.".into(),
+            2
+        )
+    );
+    assert_eq!(
+        refusal(r#"{"widths":["40","20"]}"#),
+        ("diff: conflicting width options".into(), 2)
+    );
+    assert_eq!(
+        refusal(r#"{"ignore_lines":["\\("]}"#),
+        ("diff: \\(: Unmatched ( or \\(".into(), 2)
+    );
+    assert_eq!(
+        refusal(r#"{"function_lines":["a["]}"#),
+        ("diff: a[: Invalid regular expression".into(), 2)
+    );
+}
+
+/// How many turns the host gets, and what the comparison prints.
+fn turns(config: &str, old: &[u8], new: &[u8]) -> (usize, Vec<u8>) {
+    let mut stream = open("diff", config.as_bytes()).expect("open diff");
+    let mut output = Vec::new();
+    for (index, input) in [old, new].into_iter().enumerate() {
+        stream.feed_input(index, input, &mut output).unwrap();
+        stream.end_input(index, &mut output).unwrap();
+    }
+    stream.finish(&mut output).unwrap();
+    let mut count = 0;
+    while stream.busy() {
+        count += 1;
+        stream.drain(&mut output).unwrap();
+    }
+    (count, output)
+}
+
+#[test]
+fn a_heavy_ignore_pattern_gives_the_host_turns() {
+    let line = format!("{}\n", "a".repeat(22));
+    let config = r#"{"ignore_lines":["\\(a*\\)*\\1b"]}"#;
+    let (count, output) = turns(config, line.as_bytes(), b"b\n");
+    assert!(count > 1, "{count} turns");
+    assert_eq!(output, format!("1c1\n< {line}---\n> b\n").into_bytes());
+}
+
+#[test]
+fn a_heavy_function_pattern_gives_the_host_turns() {
+    let line = "a".repeat(22);
+    let old = format!("{line}\nx\n");
+    let config = r#"{"mode":"unified","context":0,"old_label":"a","new_label":"b","function_lines":["\\(a*\\)*\\1b"]}"#;
+    let (count, output) = turns(config, old.as_bytes(), format!("{line}\ny\n").as_bytes());
+    assert!(count > 1, "{count} turns");
+    assert!(output.ends_with(b"@@ -2 +2 @@\n-x\n+y\n"), "{output:?}");
+}
+
+#[test]
+fn expanded_tabs_count_only_printable_ascii() {
+    for (line, expected) in [
+        (&b"X\tY\n"[..], &b"< X       Y\n"[..]),
+        (b"\xc3\xa9\tY\n", b"< \xc3\xa9        Y\n"),
+        (b"\xff\tY\n", b"< \xff        Y\n"),
+        (b"\x01\tY\n", b"< \x01        Y\n"),
+        (b"a\x08b\tY\n", b"< a\x08b       Y\n"),
+        (b"\x08\tY\n", b"<         Y\n"),
+        (b"ab\rc\tY\n", b"< ab\r< c       Y\n"),
+    ] {
+        let (output, ..) = compare(r#"{"expand_tabs":true}"#, line, b"z\n");
+        let printed = output.split_inclusive(|byte| *byte == b'\n').nth(1);
+        assert_eq!(printed, Some(expected), "{line:?}");
+    }
+}
