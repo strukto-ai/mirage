@@ -286,6 +286,19 @@ describe('MachineHandle', () => {
     }
   })
 
+  it('connects again when another workspace takes the handle', async () => {
+    const box = new RecordingSandbox({ captures: ['python3'] })
+    for (let round = 0; round < 2; round++) {
+      const ws = sandboxWorkspace(box)
+      try {
+        expect((await ws.shell('python3 x')).exitCode).toBe(0)
+      } finally {
+        await ws.close()
+      }
+    }
+    expect(box.connectedCount).toBe(2)
+  })
+
   it('passes cwd through verbatim and merges env', async () => {
     const box = new RecordingSandbox({ captures: ['@line'], config: { env: { BASE: '1' } } })
     const result = await machineRuntime(box).runLine(undefined, [], [], {

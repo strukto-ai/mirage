@@ -30,6 +30,7 @@ from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.types import MachineId, MachinePid
 from mirage.machine.handle import MachineHandle
 from mirage.machine.registry import build_machine
+from mirage.shell.constants import CONTINUE_SIGNALS, STOP_SIGNALS
 
 logger = logging.getLogger(__name__)
 
@@ -165,8 +166,9 @@ class MachineTable:
         """Bring ``processes`` in step with what each machine runs now.
 
         A machine is scanned while a run executes there or a process an
-        earlier scan found there still shows, and once more after a run
-        there ends, the host likewise. A run's first process is the
+        earlier scan found there still shows, and after a run there ends
+        until a scan of it answers, the host likewise. A run's first
+        process is the
         Mirage process the run is, when that process is the program (it
         has a runtime) and still runs, and its machine pid is recorded.
         Every other process the run started joins the table as a process
@@ -191,7 +193,7 @@ class MachineTable:
             }
             ended = {tag for tag in runs if tag not in live}
             fresh = ended - self._swept
-            self._swept = ended
+            swept = self._swept & ended
             held = {tag for _, _, tag in self._found.values()}
             shown = {machine for machine, _, _ in self._found}
             shown |= {
@@ -219,13 +221,18 @@ class MachineTable:
             found = await asyncio.gather(
                 *(scan for _, scan in scans), return_exceptions=True
             )
+            failed: set[str] = set()
             for (machine, _), rows in zip(scans, found, strict=True):
                 if isinstance(rows, Exception):
                     logger.debug("%s: scan failed: %s", machine, rows)
+                    failed.add(str(machine))
                     continue
                 if isinstance(rows, BaseException):
                     raise rows
                 self._settle(processes, machine, rows, live, runs)
+            self._swept = swept | {
+                tag for tag in fresh if str(runs[tag].machine) not in failed
+            }
 
     def send(
         self, processes: ProcessTable, handle: ProcessHandle, signum: int
@@ -236,7 +243,8 @@ class MachineTable:
 
         A program no scan has placed yet is the first process its run's
         tag marks. One its machine no longer shows (it has not started
-        yet, or just exited) is stopped by Mirage instead.
+        yet, or just exited) is stopped by Mirage instead, unless the
+        signal is one a process takes and goes on (WINCH, CONT, a stop).
 
         Args:
             processes (ProcessTable): the workspace's processes.
@@ -292,6 +300,8 @@ class MachineTable:
         if handle.record.runtime is None:
             self._end(handle)
             return False
+        if signum in CONTINUE_SIGNALS or signum in STOP_SIGNALS:
+            return True
         return handle.terminate(
             signum, children=handle.record.parent is not None
         )
@@ -321,7 +331,9 @@ class MachineTable:
         live: dict[str, ProcessHandle],
         runs: dict[str, Process],
     ) -> None:
-        """Bring the table in step with one machine's scan.
+        """Bring the table in step with one machine's scan. A run of
+        another machine entry is left out: two entries that reach one
+        machine both see its processes, which are the other run's.
 
         Args:
             processes (ProcessTable): the workspace's processes.
@@ -338,6 +350,8 @@ class MachineTable:
         for tag, run in tagged.items():
             handle = live.get(tag)
             owner = handle.record if handle is not None else runs.get(tag)
+            if owner is not None and owner.machine != machine:
+                continue
             pids = {row.pid for row in run}
             placed: dict[int, int] = {}
             if (

@@ -15,6 +15,7 @@
 import type { MachineHandle } from '../../machine/handle.ts'
 import { buildMachine } from '../../machine/registry.ts'
 import { MAX_PROCESSES } from '../process/constants.ts'
+import { CONTINUE_SIGNALS, STOP_SIGNALS } from '../../shell/constants.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import type { ProcessTable } from '../process/table.ts'
 import type { Process } from '../process/types.ts'
@@ -138,8 +139,8 @@ export class MachineTable {
   /**
    * Bring `processes` in step with what each machine runs now. A machine is
    * scanned while a run executes there or a process an earlier scan found
-   * there still shows, and once more after a run there ends, the host
-   * likewise. A run's first process is the Mirage process the run is, when
+   * there still shows, and after a run there ends until a scan of it
+   * answers, the host likewise. A run's first process is the Mirage process the run is, when
    * that process is the program (it has a runtime) and still runs, and its
    * machine pid is recorded. Every other process the run started joins the
    * table as a process of its own, with no runtime, under the process whose
@@ -169,7 +170,7 @@ export class MachineTable {
     )
     const ended = new Set([...runs.keys()].filter((tag) => !live.has(tag)))
     const fresh = new Set([...ended].filter((tag) => !this.swept.has(tag)))
-    this.swept = ended
+    const swept = new Set([...this.swept].filter((tag) => ended.has(tag)))
     const held = new Set([...this.found.values()].map((entry) => entry.tag))
     const shown = new Set([...this.found.values()].map((entry) => entry.machine))
     for (const tag of fresh) {
@@ -193,15 +194,22 @@ export class MachineTable {
         scans.push([processes.machine, this.hostStatus(groups)])
     }
     const found = await Promise.allSettled(scans.map(([, scan]) => scan))
+    const failed = new Set<string>()
     found.forEach((rows, at) => {
       const machine = scans[at]?.[0]
       if (machine === undefined) return
       if (rows.status === 'rejected') {
         console.debug(`${machine.toString()}: scan failed:`, rows.reason)
+        failed.add(machine.toString())
         return
       }
       this.settle(processes, machine, rows.value, live, runs)
     })
+    for (const tag of fresh) {
+      const machine = runs.get(tag)?.machine.toString()
+      if (machine === undefined || !failed.has(machine)) swept.add(tag)
+    }
+    this.swept = swept
   }
 
   /**
@@ -209,7 +217,8 @@ export class MachineTable {
    * found, as `kill` sent it: what it does with it is its own, and it ends
    * when it exits. A program no scan has placed yet is the first process its
    * run's tag marks. One its machine no longer shows (it has not started
-   * yet, or just exited) is stopped by Mirage instead. Answers whether it
+   * yet, or just exited) is stopped by Mirage instead, unless the signal is
+   * one a process takes and goes on (WINCH, CONT, a stop). Answers whether it
    * ran, once sent; null for a process Mirage stops itself. Mirrors Python's
    * `MachineTable.send`.
    *
@@ -253,6 +262,7 @@ export class MachineTable {
       this.end(handle)
       return false
     }
+    if (CONTINUE_SIGNALS.has(signum) || STOP_SIGNALS.has(signum)) return true
     return handle.terminate(signum, handle.record.parent !== null)
   }
 
@@ -268,7 +278,11 @@ export class MachineTable {
     return this.hostSignal(target, signum)
   }
 
-  /** Bring the table in step with one machine's scan. */
+  /**
+   * Bring the table in step with one machine's scan. A run of another
+   * machine entry is left out: two entries that reach one machine both see
+   * its processes, which are the other run's.
+   */
   private settle(
     processes: ProcessTable,
     machine: MachineId,
@@ -282,6 +296,7 @@ export class MachineTable {
     for (const [tag, run] of tagged) {
       const handle = live.get(tag) ?? null
       const owner = handle?.record ?? runs.get(tag) ?? null
+      if (owner !== null && owner.machine.toString() !== machine.toString()) continue
       const pids = new Set(run.map((row) => row.pid))
       const placed = new Map<number, number>()
       if (

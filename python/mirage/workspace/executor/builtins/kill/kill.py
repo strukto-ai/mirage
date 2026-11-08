@@ -125,7 +125,9 @@ async def handle_kill(
 
     The signal comes from ``-s``/``-n``, or from the first ``-sigspec``;
     ``0`` probes, a program on a machine gets any other as sent (it ends
-    when it exits), and every other runner is cancelled with it. A
+    when it exits), a signal a process takes and goes on (``KEPT_SIGNALS``)
+    leaves every other runner as it is, and every other runner is
+    cancelled with the rest. A
     number under ``FIRST_PID`` is a machine pid (``machine_process``).
     Every
     operand is tried and each failure is named in bash's words; the
@@ -220,7 +222,8 @@ async def handle_kill(
             continue
         try:
             if signal in KEPT_SIGNALS:
-                found = processes.probe(pid)
+                kept = None if signal == 0 else processes.send(pid, signal)
+                found = processes.probe(pid) if kept is None else await kept
             elif (sending := processes.send(pid, signal)) is not None:
                 found = await sending
             else:
@@ -263,7 +266,8 @@ async def _kill_group(
 ) -> bool:
     """Signal a process group as killpg(2) does, its jobs Mirage stops
     recorded as killed by the signal; a program on a machine gets it as
-    sent.
+    sent, a kept signal (``KEPT_SIGNALS``) too, which leaves Mirage's own
+    runners as they are.
 
     Args:
         job_table (JobTable): the session's jobs.
@@ -277,6 +281,14 @@ async def _kill_group(
         bool: whether the group had a runner the view sees.
     """
     if signal in KEPT_SIGNALS:
+        if signal != 0 and processes.probe_group(group):
+            await processes.scan()
+            sending = [
+                processes.send(record.pid, signal)
+                for record in processes.list()
+                if record.group == group
+            ]
+            await asyncio.gather(*(s for s in sending if s is not None))
         return processes.probe_group(group)
     if not processes.probe_group(group):
         return False

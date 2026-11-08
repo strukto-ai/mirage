@@ -141,6 +141,22 @@ async def test_failed_connect_retries_on_the_next_line():
 
 
 @pytest.mark.asyncio
+async def test_a_handle_another_workspace_takes_connects_again():
+    box = RecordingSandbox(captures=("python3",))
+    for _ in range(2):
+        ws = Workspace(
+            {"/data": RAMVFS()},
+            mode=MountMode.EXEC,
+            **on(box, "workspace"),
+        )
+        try:
+            assert (await ws.shell("python3 x")).exit_code == 0
+        finally:
+            await ws.close()
+    assert box.connected == 2
+
+
+@pytest.mark.asyncio
 async def test_cwd_passes_through_verbatim_and_env_merges():
     box = RecordingSandbox(captures=("@line",), config={"env": {"BASE": "1"}})
     cwd = PathSpec.from_str_path("/data/deep")

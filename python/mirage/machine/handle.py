@@ -476,9 +476,14 @@ class MachineHandle:
         )
 
     async def close(self) -> None:
-        """Unmount what the machine was served; the machine is the user's."""
-        if self._mounts is not None:
-            await self._mounts.close()
+        """Unmount what the machine was served; the machine is the user's.
+        The next run connects again, so a workspace that takes the handle
+        after this one reaches the machine anew."""
+        try:
+            if self._mounts is not None:
+                await self._mounts.close()
+        finally:
+            self._connected = False
 
 
 def _scanned(stdout: bytes | None) -> list[MachineProcess]:

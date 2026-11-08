@@ -146,6 +146,33 @@ class Leaver extends Sleeper {
   }
 }
 
+/** A leaver whose first scan loses the connection. */
+class Dropping extends Leaver {
+  private dropped = false
+
+  override status(workspace: string): Promise<MachineProcess[]> {
+    if (this.dropped) return super.status(workspace)
+    this.dropped = true
+    return Promise.reject(new Error('connection lost'))
+  }
+}
+
+/** A box that shares one container with every other `Shared`. */
+class Shared extends Sleeper {
+  static readonly boxes: Shared[] = []
+
+  constructor(name: string, base?: number) {
+    super(name, base)
+    Shared.boxes.push(this)
+  }
+
+  override status(workspace: string): Promise<MachineProcess[]> {
+    return Promise.resolve(
+      Shared.boxes.flatMap((box) => box.rows).filter((row) => row.tag.startsWith(`${workspace}:`)),
+    )
+  }
+}
+
 async function started(box: Sleeper): Promise<void> {
   const deadline = Date.now() + 5000
   while (box.rows.length === 0 && Date.now() < deadline)
@@ -334,6 +361,71 @@ describe('MachineTable scans', () => {
     } finally {
       box.finish()
       await ws.close()
+    }
+  })
+
+  it('reaches a program with a kept signal as sent', async () => {
+    const box = new Sleeper('a')
+    const ws = sleepers({ a: box })
+    try {
+      await ws.shell('train 1 &')
+      await started(box)
+      expect((await ws.shell('kill -WINCH %1')).exitCode).toBe(0)
+      expect(box.sent.map(([, signum]) => signum)).toEqual([28])
+      box.sent.length = 0
+      expect((await ws.shell('kill -WINCH -- -$$')).exitCode).toBe(0)
+      const sent = box.sent.map(([target, signum]) => [
+        typeof target === 'string' ? target : target.pid,
+        signum,
+      ])
+      expect(sent.sort()).toEqual([
+        [412, 28],
+        [413, 28],
+      ])
+      expect(DEC.decode((await ws.shell('jobs')).stdout)).toBe('[1] running train 1\n')
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  })
+
+  it('tries an ended run again after a failed scan', async () => {
+    const box = new Dropping('a')
+    const ws = sleepers({ a: box })
+    try {
+      expect((await ws.shell('train 1')).exitCode).toBe(0)
+      expect(DEC.decode((await ws.shell('ps -o args=')).stdout)).not.toContain('daemon')
+      expect(DEC.decode((await ws.shell('ps -o args=')).stdout)).toContain('daemon')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('lists each process once for two entries on one container', async () => {
+    const a = new Shared('a')
+    const b = new Shared('b', 512)
+    const ws = sleepers({ a, b })
+    try {
+      await ws.shell('train 1 &')
+      await ws.shell('train 2 &', { machine: 'b' })
+      await started(a)
+      await started(b)
+      const said = DEC.decode((await ws.shell('ps -o machine=,mpid=,args=')).stdout)
+      const found = said
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/).slice(0, 2))
+        .filter((row) => row.length === 2 && row[1] !== '-')
+      expect(found.sort()).toEqual([
+        ['box:a', '412'],
+        ['box:a', '413'],
+        ['box:b', '512'],
+        ['box:b', '513'],
+      ])
+    } finally {
+      a.finish()
+      b.finish()
+      await ws.close()
+      Shared.boxes.length = 0
     }
   })
 

@@ -447,9 +447,17 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     return this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, null, null, signal)
   }
 
-  /** Unmount what the machine was served; the machine itself is the user's. */
+  /**
+   * Unmount what the machine was served; the machine itself is the user's.
+   * The next run connects again, so a workspace that takes the handle after
+   * this one reaches the machine anew.
+   */
   async close(): Promise<void> {
-    await this.mounts?.close()
+    try {
+      await this.mounts?.close()
+    } finally {
+      this.disconnected()
+    }
   }
 }
 

@@ -320,6 +320,102 @@ async def test_a_group_signal_reaches_a_shells_program_as_sent():
 
 
 @pytest.mark.asyncio
+async def test_a_kept_signal_reaches_a_program_as_sent():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        await ws.shell("train 1 &")
+        await _started(box)
+        assert (await ws.shell("kill -WINCH %1")).exit_code == 0
+        assert [signum for _, signum in box.sent] == [28]
+        box.sent.clear()
+        assert (await ws.shell("kill -WINCH -- -$$")).exit_code == 0
+        assert set(box.sent) == {
+            (MachinePid(412, 100.0), 28),
+            (MachinePid(413, 101.0), 28),
+        }
+        said = await ws.shell("jobs")
+        assert said.stdout == b"[1] running train 1\n"
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+class _Dropping(_Leaver):
+    """A leaver whose first scan loses the connection."""
+
+    dropped = False
+
+    async def status(self, workspace):
+        if not self.dropped:
+            self.dropped = True
+            raise ConnectionError("connection lost")
+        return await super().status(workspace)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_scan_tries_an_ended_run_again():
+    box = _Dropping("a")
+    ws = _sleepers(a=box)
+    try:
+        assert (await ws.shell("train 1")).exit_code == 0
+        assert b"daemon" not in (await ws.shell("ps -o args=")).stdout
+        assert b"daemon" in (await ws.shell("ps -o args=")).stdout
+    finally:
+        await ws.close()
+
+
+class _Shared(_Sleeper):
+    """A box that shares one container with every other ``_Shared``."""
+
+    rows_of: "dict[str, list[MachineProcess]]" = {}
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        tag = env[PROCESS]
+        self.rows_of[self.name] = [
+            MachineProcess(tag, self.base, 1, 100.0, " ".join(argv)),
+            MachineProcess(tag, self.base + 1, self.base, 101.0, "child"),
+        ]
+        await self.ended.wait()
+        self.rows_of.pop(self.name, None)
+        return RunResult(stdout=b"", stderr=None, exit_code=143)
+
+    async def status(self, workspace):
+        return [
+            r
+            for rows in self.rows_of.values()
+            for r in rows
+            if r.tag.startswith(f"{workspace}:")
+        ]
+
+
+@pytest.mark.asyncio
+async def test_two_entries_on_one_container_list_each_process_once():
+    a, b = _Shared("a"), _Shared("b", 512)
+    ws = _sleepers(a=a, b=b)
+    try:
+        await ws.shell("train 1 &")
+        await ws.shell("train 2 &", machine="b")
+        async with asyncio.timeout(5):
+            while len(_Shared.rows_of) < 2:
+                await asyncio.sleep(0.01)
+        said = await ws.shell("ps -o machine=,mpid=,args=")
+        rows = [line.split()[:2] for line in said.stdout.decode().splitlines()]
+        found = [row for row in rows if row[1:] and row[1] != "-"]
+        assert sorted(found) == [
+            ["box:a", "412"],
+            ["box:a", "413"],
+            ["box:b", "512"],
+            ["box:b", "513"],
+        ]
+    finally:
+        a.ended.set()
+        b.ended.set()
+        await ws.close()
+        _Shared.rows_of.clear()
+
+
+@pytest.mark.asyncio
 async def test_a_handle_belongs_to_one_workspace_at_a_time():
     box = _Box("a", 0)
 
