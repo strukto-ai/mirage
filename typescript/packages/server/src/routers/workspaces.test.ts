@@ -1651,6 +1651,35 @@ describe('workspace cancel, kill, stop and start', () => {
     }
   })
 
+  it('shows a stopped workspace with the mode and mounts it ran with', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-same-view-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      const config = {
+        mode: 'rw',
+        mounts: { '/': { vfs: 'ram', mode: 'r' }, '/data': { vfs: 'ram' } },
+      }
+      expect((await post(app, '/v1/workspaces', { id: 'w', config })).statusCode).toBe(201)
+      const view = async () => {
+        const d = (await app.inject({ method: 'GET', url: '/v1/workspaces/w' })).json<{
+          mode: string
+          mounts: { prefix: string; vfs: string; mode: string }[]
+        }>()
+        return {
+          mode: d.mode,
+          mounts: d.mounts.map(({ prefix, vfs, mode }) => ({ prefix, vfs, mode })),
+        }
+      }
+      const running = await view()
+      expect(running.mode).toBe('write')
+      await post(app, '/v1/workspaces/w/stop')
+      expect(await view()).toEqual(running)
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('answers 404 for a start or stop of an unknown id', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ws-start-unknown-'))
     const app = buildApp({ stateRoot: join(root, 'state') })

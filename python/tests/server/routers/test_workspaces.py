@@ -1840,6 +1840,38 @@ async def test_a_stopped_workspace_is_deleted_from_the_store_its_config_names(
 
 
 @pytest.mark.asyncio
+async def test_a_stopped_workspace_shows_the_mode_and_mounts_it_ran_with(
+    tmp_path,
+):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        config = {
+            "mode": "rw",
+            "mounts": {
+                "/": {"vfs": "ram", "mode": "r"},
+                "/data": {"vfs": "ram"},
+            },
+        }
+        body = {"id": "w", "config": config}
+        assert (
+            await client.post("/v1/workspaces", json=body)
+        ).status_code == 201
+
+        async def view() -> tuple[str, list[tuple[str, str, str]]]:
+            d = (await client.get("/v1/workspaces/w")).json()
+            return d["mode"], [
+                (m["prefix"], m["vfs"], m["mode"]) for m in d["mounts"]
+            ]
+
+        running = await view()
+        assert running[0] == "write"
+        await client.post("/v1/workspaces/w/stop")
+        assert await view() == running
+
+
+@pytest.mark.asyncio
 async def test_start_of_an_unknown_id_is_not_found(tmp_path):
     app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
     async with AsyncClient(

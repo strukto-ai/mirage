@@ -15,7 +15,7 @@
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { BIN_PREFIX } from '@struktoai/mirage-core/shell/constants'
 import { HISTORY_PREFIX } from '@struktoai/mirage-core/vfs/history/history'
-import type { JsonValue } from '@struktoai/mirage-core/types'
+import { parseMountMode, type JsonValue } from '@struktoai/mirage-core/types'
 import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import { normDir } from '@struktoai/mirage-core/utils/slash'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -107,24 +107,39 @@ export async function makeDetail(entry: WorkspaceEntry, verbose = false): Promis
 
 /**
  * The mounts a stopped workspace's config names, as a running one's would
- * list them: a mount with no mode of its own takes the config's, write by
- * default, and a mode reads in lower case, as a config may write it in any.
+ * list them, longest prefix first: a mount with no mode of its own takes
+ * the config's, write by default.
  */
 function configMounts(config: Record<string, JsonValue> | null): MountSummary[] {
   const mounts = config?.mounts
   if (!isPlainObject(mounts)) return []
-  const mode = typeof config?.mode === 'string' ? config.mode.toLowerCase() : 'write'
+  const mode = modeOf(config?.mode, 'write')
   return Object.entries(mounts)
     .map(([prefix, mount]) => {
       const spec = isPlainObject(mount) ? mount : {}
       return {
         prefix: normDir(prefix),
         vfs: typeof spec.vfs === 'string' ? spec.vfs : '',
-        mode: typeof spec.mode === 'string' ? spec.mode.toLowerCase() : mode,
+        mode: modeOf(spec.mode, mode),
         description: '',
       }
     })
     .filter((m) => !isAutoPrefix(m.prefix))
+    .sort((a, b) => b.prefix.length - a.prefix.length)
+}
+
+/**
+ * A mode as a running workspace names it, an alias such as `rw` read as
+ * `write`; `fallback` when the config gives none.
+ */
+function modeOf(value: JsonValue | undefined, fallback: string): string {
+  if (typeof value !== 'string') return fallback
+  try {
+    return parseMountMode(value.toLowerCase())
+  } catch (e) {
+    console.debug(`mirage: a saved config's mount mode did not parse: ${(e as Error).message}`)
+    return value.toLowerCase()
+  }
 }
 
 /**

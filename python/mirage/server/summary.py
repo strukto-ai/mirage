@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+
 from mirage import Workspace
 from mirage.server.registry import WorkspaceEntry
 from mirage.server.schemas import (
@@ -22,11 +24,13 @@ from mirage.server.schemas import (
     WorkspaceInternals,
 )
 from mirage.shell.constants import BIN_PREFIX
-from mirage.types import JsonValue
+from mirage.types import JsonValue, parse_mount_mode
 from mirage.utils.path import norm_dir
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.workspace.mount.mount import MountEntry
+
+logger = logging.getLogger(__name__)
 
 _AUTO_PREFIXES = {
     "/dev/",
@@ -124,9 +128,8 @@ async def make_detail(
 
 def _config_mounts(config: dict[str, JsonValue] | None) -> list[MountSummary]:
     """The mounts a stopped workspace's config names, as a running one's
-    would list them: a mount with no mode of its own takes the config's,
-    write by default, and a mode reads in lower case, as a config may
-    write it in any.
+    would list them, longest prefix first: a mount with no mode of its own
+    takes the config's, write by default.
 
     Args:
         config (dict[str, JsonValue] | None): the config it starts from.
@@ -134,21 +137,40 @@ def _config_mounts(config: dict[str, JsonValue] | None) -> list[MountSummary]:
     mounts = (config or {}).get("mounts")
     if not isinstance(mounts, dict):
         return []
-    mode = (config or {}).get("mode")
-    fallback = mode.lower() if isinstance(mode, str) else "write"
+    fallback = _mode_of((config or {}).get("mode"), "write")
     out: list[MountSummary] = []
     for prefix, mount in mounts.items():
         spec = mount if isinstance(mount, dict) else {}
-        vfs, own = spec.get("vfs"), spec.get("mode")
+        vfs = spec.get("vfs")
         summary = MountSummary(
             prefix=norm_dir(prefix),
             vfs=vfs if isinstance(vfs, str) else "",
-            mode=own.lower() if isinstance(own, str) else fallback,
+            mode=_mode_of(spec.get("mode"), fallback),
             description="",
         )
         if not _is_auto_prefix(summary.prefix):
             out.append(summary)
+    out.sort(key=lambda m: len(m.prefix), reverse=True)
     return out
+
+
+def _mode_of(value: object, fallback: str) -> str:
+    """A mode as a running workspace names it, an alias such as ``rw``
+    read as ``write``; ``fallback`` when the config gives none.
+
+    Args:
+        value (object): the mode the config wrote, if any.
+        fallback (str): the mode when it wrote none.
+    """
+    if not isinstance(value, str):
+        return fallback
+    try:
+        return parse_mount_mode(value.lower()).value
+    except ValueError as exc:
+        logger.debug(
+            "mirage: a saved config's mount mode did not parse: %s", exc
+        )
+        return value.lower()
 
 
 def make_stopped_brief(
