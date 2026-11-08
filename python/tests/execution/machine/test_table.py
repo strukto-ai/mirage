@@ -456,13 +456,50 @@ class _Handler(_Sleeper):
 
 
 @pytest.mark.asyncio
-async def test_a_foreground_timeout_sends_to_the_program_under_its_shell():
+async def test_a_foreground_timeout_sends_to_the_program_it_runs():
     box = _Handler("a", 10)
     ws = _sleepers(a=box)
     try:
         said = await ws.shell("timeout --foreground -s USR1 0.1 train 1")
         assert said.exit_code == 124
         assert [signum for _, signum in box.sent] == [10]
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_foreground_timeout_ends_the_shell_it_runs():
+    box = _Handler("a", 10)
+    ws = _sleepers(a=box)
+    try:
+        said = await asyncio.wait_for(
+            ws.shell(
+                "timeout --foreground -s KILL 0.1 "
+                "sh -c 'train 1; echo after; sleep 30'"
+            ),
+            5,
+        )
+        assert said.exit_code == 137
+        assert b"after" not in (said.stdout or b"")
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_foreground_timeout_leaves_a_shell_s_background_program():
+    box = _Handler("a", 10)
+    ws = _sleepers(a=box)
+    try:
+        said = await asyncio.wait_for(
+            ws.shell(
+                "timeout --foreground -s USR1 0.2 sh -c 'train 1 & sleep 30'"
+            ),
+            5,
+        )
+        assert said.exit_code == 124
+        assert box.sent == []
     finally:
         box.ended.set()
         await ws.close()

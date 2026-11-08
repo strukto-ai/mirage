@@ -419,6 +419,7 @@ async def _supervise(
             started=forked,
             ignores=SHELL_IGNORED_SIGNALS,
             own_group=not foreground,
+            one_command=True,
         )
     except BlockingIOError:
         return _refuse(FORK_FAILED)
@@ -606,7 +607,7 @@ async def _forward(
     if not foreground:
         await processes.send_group(process.record.group, signal)
         return
-    sending = processes.send_program(process, signal)
+    sending = processes.send(process, signal)
     if sending is not None:
         await sending
 
@@ -625,7 +626,7 @@ async def _stop(
     # is waited for, and -k's KILL follows should it outlive kill_after:
     # True then.
     if foreground:
-        sending = processes.send_program(process, signal)
+        sending = processes.send(process, signal)
         if sending is None:
             deliver(process, signal)
         else:

@@ -516,7 +516,7 @@ describe('MachineTable scans', () => {
     }
   })
 
-  it('sends a foreground timeout to the program under its shell', async () => {
+  it('sends a foreground timeout to the program it runs', async () => {
     const box = new Handler('a', 10)
     const ws = sleepers({ a: box })
     try {
@@ -528,6 +528,34 @@ describe('MachineTable scans', () => {
       await ws.close()
     }
   })
+
+  it('ends the shell a foreground timeout runs', async () => {
+    const box = new Handler('a', 10)
+    const ws = sleepers({ a: box })
+    try {
+      const said = await ws.shell(
+        "timeout --foreground -s KILL 0.1 sh -c 'train 1; echo after; sleep 30'",
+      )
+      expect(said.exitCode).toBe(137)
+      expect(DEC.decode(said.stdout)).not.toContain('after')
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  }, 5000)
+
+  it("leaves a foreground timeout's shell's background program", async () => {
+    const box = new Handler('a', 10)
+    const ws = sleepers({ a: box })
+    try {
+      const said = await ws.shell("timeout --foreground -s USR1 0.2 sh -c 'train 1 & sleep 30'")
+      expect(said.exitCode).toBe(124)
+      expect(box.sent).toEqual([])
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  }, 5000)
 
   it.each(['', '--foreground '])('forwards a kept timeout signal %s', async (how) => {
     const box = new Handler('a', 28)

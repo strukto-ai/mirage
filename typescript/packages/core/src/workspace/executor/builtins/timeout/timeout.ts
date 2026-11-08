@@ -366,6 +366,7 @@ export async function handleTimeout(
       },
       ignores: SHELL_IGNORED_SIGNALS,
       ownGroup: !foreground,
+      oneCommand: true,
       run: async () => {
         // timeout execs its command, so a builtin that is also a program
         // answers as the program.
@@ -400,7 +401,7 @@ export async function handleTimeout(
       void processes.signalGroup(process.record.group, number)
       return
     }
-    const sending = processes.sendProgram(process, number)
+    const sending = processes.send(process, number)
     if (sending === null) deliver(process, number)
     else void sending
   }
@@ -463,7 +464,7 @@ function forward(
   foreground: boolean,
 ): void {
   if (number === 0) return
-  if (foreground) void processes.sendProgram(process, number)
+  if (foreground) void processes.send(process, number)
   else void processes.sendGroup(process.record.group, number)
 }
 
