@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.policies import Policies
 from mirage.shell.variable import VarAttr
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.declare import mark_names
@@ -28,7 +27,6 @@ async def handle_export(
     assignments: list[DeclarationOperand],
     session: SessionState,
     state: SessionView | None = None,
-    policies: Policies | None = None,
 ) -> Result:
     """Export names, or print them (``export -p`` / bare ``export``).
 
@@ -43,12 +41,8 @@ async def handle_export(
             the operands in order.
         session (SessionState): shell session state.
         state (SessionView | None): the gated session view.
-        policies (Policies | None): the policies a subscript's
-            assignments clear.
     """
-    return await mark_names(
-        assignments, session, state, VarAttr.EXPORT, policies
-    )
+    return await mark_names(assignments, session, state, VarAttr.EXPORT)
 
 
 async def export_builtin(call: BuiltinCall) -> Result:
@@ -62,8 +56,6 @@ async def export_builtin(call: BuiltinCall) -> Result:
         call.context.session,
         session_view(
             call.context.session,
-            call.namespace.registry.policies,
             diagnostics=call.context.frame.diagnostics,
         ),
-        call.namespace.registry.policies,
     )

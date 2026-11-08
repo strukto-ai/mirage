@@ -17,13 +17,14 @@ import pathlib
 
 SRC = pathlib.Path(__file__).resolve().parents[2] / "mirage"
 
-# `set_attr` is the *ungated* attribute entry point: it writes the record and
-# asks no policy. That is correct only where this operand's own path
-# already cleared `pre_session`, which is a per-call-site fact and not a
-# property of the function it sits in. Reading a nearby `view.set` and
-# assuming it covers the name at hand is how three separate bugs shipped:
-# `readonly NAME` froze a refused name, `declare -x NAME` exported a
-# host-seeded credential, and `SECRET=x cmd` handed one to the command.
+# `set_attr` is the *ungated* attribute entry point: it writes the record
+# past the writer's hidden, protected and readonly checks. That is correct
+# only where this operand's own path already passed them, which is a
+# per-call-site fact and not a property of the function it sits in.
+# Reading a nearby `view.set` and assuming it covers the name at hand is
+# how three separate bugs shipped: `readonly NAME` froze a refused name,
+# `declare -x NAME` exported a host-seeded credential, and `SECRET=x cmd`
+# handed one to the command.
 #
 # So every call site is written down here with the reason it is allowed.
 # A new one fails this test until someone states which gated write covers
@@ -42,7 +43,7 @@ ALLOWED = {
         "_seeded",
     ): "the line pass's preview of a command's own prefix, on a fork of "
     "the walked session that only policies read and nothing runs in; the "
-    "run seeds it again through execute_command's gated loop",
+    "run seeds it again through execute_command's checked loop",
     (
         "mirage/workspace/session/shell_dirs.py",
         "change_dir",
@@ -85,7 +86,7 @@ def test_every_ungated_attribute_write_is_accounted_for():
         "ungated set_attr call site with no stated reason: "
         f"{sorted(new)}. Either name the gated write that covers this "
         "operand and add it to ALLOWED, or route the mark through "
-        "`view.mark` so `pre_session` sees it."
+        "`view.mark` so the writer checks it."
     )
 
 

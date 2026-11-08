@@ -123,7 +123,7 @@ export async function applyUnary(
       expanded = true
     }
     try {
-      return await elementIsSet(ctx.session, ref, ctx.namespace.registry.policies, expanded)
+      return await elementIsSet(ctx.session, ref, expanded)
     } catch (err) {
       // bash aborts the line on `[[ -v a[1/0] ]]` with `1/0: division by
       // 0`, a test's grammar error being the only other thing that ends it.

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.policy import PolicyDenied
-from mirage.policy.policies import Policies
 from mirage.shell.constants import BASH_LINENO, FUNCNAME
 from mirage.shell.errors import ArithError
 from mirage.shell.voice import shell_voice
@@ -59,7 +58,6 @@ async def _unset_one(
     session: SessionState,
     base: str,
     subscript: str,
-    policies: Policies | None = None,
     every: bool = False,
 ) -> str:
     """Clear one array element, or a scalar addressed as ``base[0]``, as
@@ -77,8 +75,6 @@ async def _unset_one(
         session (SessionState): shell session state.
         base (str): the variable name without the subscript.
         subscript (str): the subscript text between the brackets.
-        policies (Policies | None): the policies the write and the
-            subscript's assignments clear.
         every (bool): the subscript was typed as ``@`` or ``*``, which
             names every element.
 
@@ -88,10 +84,10 @@ async def _unset_one(
             subscript outside an existing array.
 
     Raises:
-        PolicyDenied: a pre_session policy refused the write.
+        PolicyDenied: the name is protected.
     """
     try:
-        return await unset_element(session, policies, base, subscript, every)
+        return await unset_element(session, base, subscript, every)
     except ArithError as exc:
         raise exc.signal(fatal=True) from exc
 
@@ -110,7 +106,6 @@ async def handle_unset(
     args: list[str],
     session: SessionState,
     state: SessionView | None = None,
-    policies: Policies | None = None,
     subscripts: SubscriptFn | None = None,
 ) -> Result:
     """Unset shell variables, arrays, or functions, with bash's flags.
@@ -127,8 +122,6 @@ async def handle_unset(
     Args:
         args (list[str]): option words followed by names to unset.
         session (SessionState): shell session state.
-        policies (Policies | None): the policies an indexed subscript's
-            assignments clear.
         subscripts (SubscriptFn | None): expands an operand's subscript,
             which bash expands as one typed in ``${a[...]}``; None keeps
             it as typed.
@@ -211,10 +204,9 @@ async def handle_unset(
             or name in session.arrays
             or name in session.assocs
         )
-        # Both spellings clear the pre_session gate for the base name:
-        # the whole-variable unset through the view's env half, an
-        # element unset inside _unset_one, so `unset 'X[0]'` cannot
-        # sidestep a policy that vetoes `unset X`.
+        # Both spellings refuse a protected base name: the whole-variable
+        # unset through the view, an element unset inside _unset_one, so
+        # `unset 'X[0]'` cannot sidestep what refuses `unset X`.
         try:
             if subscript is not None:
                 # `@` and `*` name every element as typed, never once a
@@ -222,9 +214,7 @@ async def handle_unset(
                 every = subscript in ("@", "*")
                 if subscripts is not None:
                     subscript = await subscripts(subscript)
-                status = await _unset_one(
-                    session, base, subscript, policies, every
-                )
+                status = await _unset_one(session, base, subscript, every)
             else:
                 await view.unset(name)
                 _unset_variable(session, deref(session, name))
@@ -261,9 +251,7 @@ async def unset_builtin(call: BuiltinCall) -> Result:
         call.context.session,
         session_view(
             call.context.session,
-            call.namespace.registry.policies,
             diagnostics=call.context.frame.diagnostics,
         ),
-        call.namespace.registry.policies,
         subscript_expansion(call),
     )

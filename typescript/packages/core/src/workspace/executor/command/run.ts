@@ -256,7 +256,7 @@ export async function runOnMount(
         { follow: ctx.follow ?? null, ledger: false },
       ),
       env: envSnapshot(session),
-      session: sessionView(session, registry.policies, context.frame.diagnostics),
+      session: sessionView(session, context.frame.diagnostics),
       ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
       runtime: {
         execAllowed: registry.isExecAllowed(access),

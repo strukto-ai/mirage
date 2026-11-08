@@ -123,6 +123,7 @@ describe('shared policy compatibility cases', () => {
         names: row.vars.filter((name) => !isGlob(name)),
         patterns: row.vars.filter((name) => isGlob(name)),
       },
+      protected: null,
       processes: 'session',
     }
     for (const query of row.queries) {

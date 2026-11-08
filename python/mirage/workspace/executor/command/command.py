@@ -230,7 +230,6 @@ async def _finish_find(
         identity=identity_from(
             session_view(
                 session,
-                registry.policies,
                 diagnostics=context.frame.diagnostics,
             ),
         ),
@@ -366,9 +365,7 @@ async def handle_command(
         text_parts = [
             p.virtual if isinstance(p, PathSpec) else p for p in parts
         ]
-        view = session_view(
-            session, registry.policies, diagnostics=context.frame.diagnostics
-        )
+        view = session_view(session, diagnostics=context.frame.diagnostics)
         if cmd_name == "fg":
             # The one job builtin that writes before it blocks.
             return await handle_fg(job_table, text_parts, session, view, sink)
@@ -432,7 +429,6 @@ async def handle_command(
                 vfs=files,
                 session=session_view(
                     session,
-                    registry.policies,
                     diagnostics=context.frame.diagnostics,
                 ),
                 processes=registry.process_view(session)
@@ -491,7 +487,6 @@ async def handle_command(
                 vfs=files,
                 session=session_view(
                     session,
-                    registry.policies,
                     diagnostics=context.frame.diagnostics,
                 ),
                 processes=registry.process_view(session)
@@ -736,7 +731,6 @@ async def handle_command(
                 profile=identity_from(
                     session_view(
                         session,
-                        registry.policies,
                         diagnostics=context.frame.diagnostics,
                     )
                 ).profile,
@@ -881,7 +875,6 @@ async def handle_command(
             files,
             session_view(
                 session,
-                registry.policies,
                 diagnostics=context.frame.diagnostics,
             ),
             dispatch=dispatch,
@@ -901,7 +894,6 @@ async def handle_command(
             vfs=files,
             session_view=session_view(
                 session,
-                registry.policies,
                 diagnostics=context.frame.diagnostics,
             ),
             cwd=session.cwd,
@@ -1073,7 +1065,6 @@ async def handle_command(
             vfs=files,
             session_view=session_view(
                 session,
-                registry.policies,
                 diagnostics=context.frame.diagnostics,
             ),
             dispatch=dispatch,

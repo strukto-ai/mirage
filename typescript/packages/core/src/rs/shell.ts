@@ -648,8 +648,10 @@ export type Ask =
       readonly string[] | null,
     ]
   | readonly ['process', Shell, ShellTreeNode]
-  | readonly ['gate', boolean, 'set' | 'unset', string, string | null, string | null, Shell]
   | readonly ['pause', Shell]
+
+/** How an operation ended: `['ok', value]` or a fault, and its diagnostics. */
+export type Outcome = readonly [readonly Item[], (string | Uint8Array)[]]
 
 /** The state around a line that the shell reads, as `Shell.frame` takes it. */
 export interface ShellFrame {
@@ -671,11 +673,6 @@ export interface ShellFrame {
   readonly line: number
   readonly bashPid: number
   readonly voice: string
-}
-
-/** The options of a gated write: whether a session policy listens. */
-export interface Heard {
-  readonly listens?: boolean
 }
 
 const shells = new FinalizationRegistry<number>((handle) => {
@@ -772,9 +769,9 @@ export class Shell {
     ]
   }
 
-  private task(op: string, tree: ShellTree | null, ...args: Item[]): ShellTask {
-    const [handle, step] = this.call(op, ...args) as readonly [number, Item]
-    return new ShellTask(handle, step, tree)
+  /** Run a write on the shell at once: `[['ok', value] | fault, diagnostics]`. */
+  private write(op: string, ...args: Item[]): Outcome {
+    return this.call(op, ...args) as unknown as Outcome
   }
 
   /** Draw `$RANDOM`'s first seeds from `ids` from now on. */
@@ -812,11 +809,6 @@ export class Shell {
     return this.call('indexed', name) as ReadonlyMap<bigint, string> | null
   }
 
-  /** What a `pre_session` rule is shown for a name's record; null when it is unset. */
-  rendered(name: string): string | null {
-    return this.call('rendered', name) as string | null
-  }
-
   names(): string[] {
     return texts(this.call('names'))
   }
@@ -846,6 +838,18 @@ export class Shell {
 
   hidden(name: string): boolean {
     return this.call('hidden', name) as boolean
+  }
+
+  /**
+   * Protect the names a session's profile lists, exactly or by glob: they
+   * read as any name does, and a write to one is refused.
+   */
+  protect(names: readonly string[], patterns: readonly string[]): void {
+    this.call('protect', names, patterns)
+  }
+
+  protected(name: string): boolean {
+    return this.call('protected', name) as boolean
   }
 
   namerefTarget(name: string): string | null {
@@ -1026,120 +1030,109 @@ export class Shell {
     return new Shell(this.call('subshell') as number)
   }
 
-  /** Expand `node` as `mode` says; `listens` when a session policy hears writes. */
-  expand(node: ShellTreeNode, mode: string, listens: boolean): ShellTask {
-    return this.task('expand', node.tree, node.tree.handle, node.index, mode, listens)
+  /** Expand `node` as `mode` says. */
+  expand(node: ShellTreeNode, mode: string): ShellTask {
+    const [handle, step] = this.call('expand', node.tree.handle, node.index, mode) as readonly [
+      number,
+      Item,
+    ]
+    return new ShellTask(handle, step, node.tree)
   }
 
-  /** Set a variable through the gate. */
+  /** Set a variable. */
   set(
     name: string,
     value: RawValue,
-    options: Heard & {
+    options: {
       readonly assoc?: boolean
       readonly followRef?: boolean
       readonly assigned?: readonly (bigint | string)[] | null
       readonly added?: string | null
       readonly warns?: boolean
     } = {},
-  ): ShellTask {
-    return this.task(
+  ): Outcome {
+    return this.write(
       'set',
-      null,
       name,
       value as Item,
       options.assoc ?? false,
       options.followRef ?? true,
       options.assigned ?? null,
       options.added ?? null,
-      options.listens ?? false,
       options.warns ?? true,
     )
   }
 
-  unset(name: string, options: Heard & { readonly followRef?: boolean } = {}): ShellTask {
-    return this.task('unset', null, name, options.followRef ?? true, options.listens ?? false)
+  unset(name: string, options: { readonly followRef?: boolean } = {}): Outcome {
+    return this.write('unset', name, options.followRef ?? true)
   }
 
-  /** Set or clear an attribute through the gate; no letter declares the name only. */
+  /** Set or clear an attribute; no letter declares the name only. */
   mark(
     name: string,
     letter: string | null,
     on: boolean,
-    options: Heard & { readonly followRef?: boolean } = {},
-  ): ShellTask {
-    return this.task(
-      'mark',
-      null,
-      name,
-      letter,
-      on,
-      options.followRef ?? true,
-      options.listens ?? false,
-    )
+    options: { readonly followRef?: boolean } = {},
+  ): Outcome {
+    return this.write('mark', name, letter, on, options.followRef ?? true)
   }
 
   /** Resolve an indexed array's subscript, what it assigns landed. */
-  index(subscript: string, options: Heard = {}): ShellTask {
-    return this.task('index', null, subscript, options.listens ?? false)
+  index(subscript: string): Outcome {
+    return this.write('index', subscript)
   }
 
   /** Whether a `name` / `name[sub]` reference is set, as `test -v` asks; 1 or 0. */
-  isSet(reference: string, options: Heard & { expanded?: boolean } = {}): ShellTask {
-    return this.task('is_set', null, reference, options.expanded ?? false, options.listens ?? false)
+  isSet(reference: string, options: { expanded?: boolean } = {}): Outcome {
+    return this.write('is_set', reference, options.expanded ?? false)
   }
 
-  /** Write one element, or a bare name: 0 landed, 1 hidden, 2 readonly, 3 no element. */
+  /** Write one element, or a bare name: 0 landed, 1 denied, 2 readonly, 3 no element. */
   element(
     name: string,
     subscript: string | null,
     value: string,
-    options: Heard & { readonly append?: boolean; readonly warns?: boolean } = {},
-  ): ShellTask {
-    return this.task(
+    options: { readonly append?: boolean; readonly warns?: boolean } = {},
+  ): Outcome {
+    return this.write(
       'element',
-      null,
       name,
       subscript,
       value,
       options.append ?? false,
-      options.listens ?? false,
       options.warns ?? true,
     )
   }
 
   /** Append words at an indexed array's extent (`a+=(x y)`). */
-  push(name: string, words: readonly string[], options: Heard = {}): ShellTask {
-    return this.task('push', null, name, words, options.listens ?? false)
+  push(name: string, words: readonly string[]): Outcome {
+    return this.write('push', name, words)
   }
 
   /**
    * Clear one element (`unset 'a[i]'`), or every one when `every`, a subscript
    * typed as `@` or `*`: 0 cleared, 3 no element, 4 not an array.
    */
-  unsetElement(name: string, subscript: string, every = false, options: Heard = {}): ShellTask {
-    return this.task('unset_element', null, name, subscript, every, options.listens ?? false)
+  unsetElement(name: string, subscript: string, every = false): Outcome {
+    return this.write('unset_element', name, subscript, every)
   }
 
   /**
    * Evaluate an arithmetic command or `let` operand, its writes landed;
    * `expand` for a `let` operand, whose subscripts expand first.
    */
-  arith(text: string, expand = false, options: Heard = {}): ShellTask {
-    return this.task('arith', null, text, options.listens ?? false, expand)
+  arith(text: string, expand = false): Outcome {
+    return this.write('arith', text, expand)
   }
 
   /** Evaluate a value as an `-i` write coerces it; `added` is an integer `+=`'s text. */
-  integer(text: string, added: string | null = null, options: Heard = {}): ShellTask {
-    return this.task('integer', null, text, added, options.listens ?? false)
+  integer(text: string, added: string | null = null): Outcome {
+    return this.write('integer', text, added)
   }
 }
 
-/** How a task ended: `['ok', value]` or a fault, and its diagnostics. */
-export type Finished = readonly [readonly Item[], (string | Uint8Array)[]]
-
 /**
- * An operation running on a shell, driven by the host. Started, it has run to
+ * An expansion running on a shell, driven by the host. Started, it has run to
  * its first request or its end: `step` returns the request it waits on, which
  * one `answer*` call answers, running it to the next, or null once it has
  * ended, when the shell is its owner's again and `finish` returns the result.
@@ -1149,7 +1142,7 @@ export type Finished = readonly [readonly Item[], (string | Uint8Array)[]]
  */
 export class ShellTask {
   private asked: Ask | null = null
-  private ended: Finished | null = null
+  private ended: Outcome | null = null
   private left = false
   // Whether the engine still holds the task: until it ends, or until its
   // last slice is taken.
@@ -1158,7 +1151,7 @@ export class ShellTask {
   constructor(
     readonly handle: number,
     step: Item,
-    private readonly tree: ShellTree | null,
+    private readonly tree: ShellTree,
   ) {
     tasks.register(this, handle, this)
     this.land(step)
@@ -1169,7 +1162,6 @@ export class ShellTask {
   }
 
   private node(index: Item): ShellTreeNode {
-    if (this.tree === null) throw new Error('a write has no tree')
     return new ShellTreeNode(this.tree, index as number)
   }
 
@@ -1220,16 +1212,6 @@ export class ShellTask {
       }
       case 'process':
         return ['process', Shell.adopt(asked[1] as number), this.node(asked[2] ?? null)]
-      case 'gate':
-        return [
-          'gate',
-          asked[1] as boolean,
-          asked[2] as 'set' | 'unset',
-          asked[3] as string,
-          asked[4] as string | null,
-          asked[5] as string | null,
-          Shell.adopt(asked[6] as number),
-        ]
       default:
         return ['pause', Shell.adopt(asked[1] as number)]
     }
@@ -1248,19 +1230,9 @@ export class ShellTask {
     this.land(this.call('answer_path', path))
   }
 
-  /** The gate's answer: null to let the write through, or the refused name and its record. */
-  answerGate(denied: readonly [string, number] | null): void {
-    this.land(this.call('answer_gate', denied))
-  }
-
   /** The host has let others run; the operation goes on. */
   answerResumed(): void {
     this.land(this.call('answer_resumed'))
-  }
-
-  /** Whether a policy hears the session's writes from now on, told before each answer. */
-  listen(listens: boolean): void {
-    this.call('listen', listens)
   }
 
   /** The host could not do what was asked; the operation stops. */
@@ -1269,7 +1241,7 @@ export class ShellTask {
   }
 
   /** The result once `step` has returned null; the shell is the owner's again. */
-  finish(): Finished {
+  finish(): Outcome {
     if (this.ended === null) throw new Error('the task is running')
     return this.ended
   }

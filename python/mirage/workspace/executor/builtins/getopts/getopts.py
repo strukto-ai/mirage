@@ -46,8 +46,8 @@ async def _getopts_finish(
     # The name is assigned last, exactly as bash does: OPTIND/OPTARG and
     # the hidden cursor still advance, but a bad destination fails the
     # write and turns the call into a status-1 error. Writes go through
-    # the session view, so a pre_session policy or a readonly OPTARG /
-    # OPTIND refuses here too.
+    # the session view, so a protected or readonly OPTARG / OPTIND
+    # refuses here too.
     try:
         if not is_valid_name(name):
             stderr = encode_text(identifier_line("getopts", name) + "\n")
@@ -213,7 +213,6 @@ async def getopts_builtin(call: BuiltinCall) -> Result:
         call.call_stack,
         session_view(
             call.context.session,
-            call.namespace.registry.policies,
             diagnostics=call.context.frame.diagnostics,
         ),
     )

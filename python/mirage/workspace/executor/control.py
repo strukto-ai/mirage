@@ -22,7 +22,7 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, line_buffer
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
-from mirage.policy import Policies, PolicyDenied
+from mirage.policy import PolicyDenied
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.shell.bytes import encode_text
@@ -428,14 +428,11 @@ async def handle_for(
     values: list[str | PathSpec],
     body: list[TSNodeLike],
     context: EvaluationContext,
-    policies: Policies | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
-    view = session_view(
-        session, policies, diagnostics=context.frame.diagnostics
-    )
+    view = session_view(session, diagnostics=context.frame.diagnostics)
     # The loop variable is the shell's own write: readonly is bash's
     # rule, checked up front so the loop never starts, exactly as bash
     # refuses `for x` on a readonly x before the first iteration.
@@ -677,7 +674,6 @@ async def handle_select(
     body: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None = None,
-    policies: Policies | None = None,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run bash's select loop: menu to stderr, choice read from stdin.
@@ -696,16 +692,13 @@ async def handle_select(
         body (list[TSNodeLike]): loop body statements.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): line source for choices.
-        policies (Policies | None): the session view's policies.
         sink (JobConsole | None): where the body's statements write as
             they finish, so the loop's own newline lands in order.
     """
     session = context.session
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
-    view = session_view(
-        session, policies, diagnostics=context.frame.diagnostics
-    )
+    view = session_view(session, diagnostics=context.frame.diagnostics)
     lines = line_buffer(stdin) if stdin is not None else None
     bound = fd0_binding(session)
     words = [word_text(v) for v in values]

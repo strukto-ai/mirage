@@ -638,12 +638,10 @@ ScriptMethod = Literal[
     "pre_execute",
     "pre_command",
     "pre_vfs",
-    "pre_session",
     "pre_network",
     "post_execute",
     "post_command",
     "post_vfs",
-    "post_session",
     "post_network",
 ]
 
@@ -1053,49 +1051,6 @@ class ExecuteResultContext(RouteContext):
 
 
 @dataclass(frozen=True, slots=True)
-class SessionContext:
-    """Facts about one session-state mutation, as pre_session methods see it.
-
-    Fires on the session plane before the write lands, so it holds
-    whichever tier asked. Not an VfsContext: a session key is not a
-    path, and a path-scoped policy must never receive one dressed as a
-    path and match it by accident.
-
-    Args:
-        verb (str): the mutation (``set``, ``unset``, ``mark``).
-        key (str): the state key (a variable name).
-        value (str | None): the value being written, None for unset.
-        session_id (str): which session is writing, so a policy can
-            scope a rule to one agent (deny ``set`` for session X).
-        session (SessionView | None): the session, read only.
-        vfs (FileView | None): the session's files, read only.
-        caller (PolicyCaller | None): who makes the call, read only: its
-            ``session`` is the session above.
-    """
-
-    verb: str
-    key: str
-    value: str | None
-    session_id: str = ""
-    session: SessionView | None = None
-    vfs: FileView | None = None
-    caller: PolicyCaller | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class SessionResultContext(SessionContext):
-    """One session write that landed, as post_session methods see it: what
-    pre_session saw, plus the value it replaced.
-
-    Args:
-        old (str | None): the value before the write, rendered as
-            ``value`` is; None when the name was unset.
-    """
-
-    old: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class WorkspaceContext:
     """One workspace a server is about to build, as pre_workspace methods
     see it: before any of it is built or any secret it names is read.
@@ -1120,8 +1075,6 @@ VALIDITY: dict[str, frozenset[str]] = {
     "pre_vfs": frozenset({Deny.kind, Ask.kind}),
     "post_vfs": frozenset({Deny.kind, Ask.kind}),
     "post_execute": frozenset({Deny.kind, Ask.kind, Limit.kind}),
-    "pre_session": frozenset({Deny.kind, Ask.kind}),
-    "post_session": frozenset({Deny.kind, Ask.kind}),
     "pre_workspace": frozenset({Deny.kind}),
     "pre_network": frozenset({Deny.kind, Ask.kind, Limit.kind}),
     "post_network": frozenset(),

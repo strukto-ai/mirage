@@ -40,9 +40,7 @@ from mirage.cache.index import IndexConfig, RedisIndexConfig
 from mirage.errors.types import QuotaExceededError
 from mirage.execution.job.handle import JobHandle
 from mirage.io import IOResult
-from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
-from mirage.policy.types import SessionContext
 from mirage.secrets import registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
@@ -542,52 +540,11 @@ async def test_a_ref_this_process_cannot_resolve_is_not_guessed_from_the_type():
     assert "/s/" in str(exc.value)
 
 
-class DenyGate(Policy):
-    """Refuse env writes to GATE_* names, the deployment's rule."""
-
-    async def pre_session(self, ctx: SessionContext) -> Action | None:
-        if ctx.key.startswith("GATE_"):
-            return Deny("GATE_* refused by policy\n")
-        return None
-
-
-# The restore used to seed `session.vars` directly, past the gate a live
-# `export GATE_X=1` clears (#1017); a snapshot is the one env input the
-# deployment did not author, so this is the entry point where the rule matters.
+# A workspace built for the state seats each table as it is read, its cwd
+# and variables included, so the session is the one the snapshot recorded
+# rather than a fresh one at /.
 @pytest.mark.asyncio
-async def test_a_restored_variable_clears_the_session_gate():
-    source = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        assert (await source.shell("export GATE_X=1")).exit_code == 0
-        state = await to_state_dict(source)
-    finally:
-        await source.close()
-    target = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.WRITE, policies=[DenyGate()]
-    )
-    try:
-        with pytest.raises(PolicyDenied):
-            await apply_state_dict(target, state)
-        assert "GATE_X" not in target.env
-    finally:
-        await target.close()
-
-
-class CwdGate(Policy):
-    """Allow TASK only in /data, read off the session's own view."""
-
-    async def pre_session(self, ctx: SessionContext) -> Action | None:
-        assert ctx.session is not None
-        if ctx.key == "TASK" and ctx.session.cwd() != "/data":
-            return Deny("TASK is set in /data\n")
-        return None
-
-
-# A workspace built for the state seats each table before the gate judges
-# it, its cwd and variables included, so a program reading the session sees
-# the session the snapshot recorded rather than a fresh one at /.
-@pytest.mark.asyncio
-async def test_a_built_target_judges_each_table_as_the_session_it_records():
+async def test_a_built_target_seats_each_table_as_the_session_it_records():
     source = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     try:
         assert (await source.shell("cd /data && TASK=1")).exit_code == 0
@@ -598,7 +555,6 @@ async def test_a_built_target_judges_each_table_as_the_session_it_records():
         {"/data": RAMVFS()},
         mode=MountMode.WRITE,
         session_id=state["default_session_id"],
-        policies=[CwdGate()],
     )
     try:
         await apply_state_dict(target, state, built_for_state=True)
@@ -607,91 +563,9 @@ async def test_a_built_target_judges_each_table_as_the_session_it_records():
         await target.close()
 
 
-@pytest.mark.asyncio
-async def test_a_restore_the_gate_allows_lands_every_variable():
-    source = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        assert (await source.shell("export PUBLIC_X=1")).exit_code == 0
-        state = await to_state_dict(source)
-    finally:
-        await source.close()
-    target = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.WRITE, policies=[DenyGate()]
-    )
-    try:
-        await apply_state_dict(target, state)
-        assert target.env.get("PUBLIC_X") == "1"
-    finally:
-        await target.close()
-
-
-# A snapshot holding several sessions used to land each one as its table
-# cleared the gate, so a refusal on a later session left the earlier ones
-# overwritten, the default identity adopted and every mount's state
-# loaded: a workspace matching no snapshot, and one a close would then
-# persist. Every table is vetted before anything lands.
-@pytest.mark.asyncio
-async def test_a_refused_session_table_leaves_the_workspace_untouched():
-    source = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, session_id="src")
-    try:
-        assert (await source.shell("echo restored > /f.txt")).exit_code == 0
-        assert (await source.shell("export PUBLIC_A=1")).exit_code == 0
-        source.create_session("s2")
-        assert (
-            await source.shell("export GATE_X=1", session_id="s2")
-        ).exit_code == 0
-        state = await to_state_dict(source)
-    finally:
-        await source.close()
-    target = Workspace(
-        {"/": RAMVFS()},
-        mode=MountMode.WRITE,
-        session_id="tgt",
-        policies=[DenyGate()],
-    )
-    try:
-        assert (await target.shell("export KEEP=1")).exit_code == 0
-        with pytest.raises(PolicyDenied):
-            await apply_state_dict(target, state)
-        assert "PUBLIC_A" not in target.env
-        assert target.env.get("KEEP") == "1"
-        assert [s.session_id for s in target.list_sessions()] == ["tgt"]
-        assert (await target.shell("test -e /f.txt")).exit_code == 1
-    finally:
-        await target.close()
-
-
-# The env template is vetted with the tables, so a refused template
-# lands no session either.
-@pytest.mark.asyncio
-async def test_a_refused_env_template_lands_no_session():
-    source = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.WRITE, env={"GATE_X": "1"}
-    )
-    try:
-        assert (
-            await source.shell("unset GATE_X; export PUBLIC_A=1")
-        ).exit_code == 0
-        state = await to_state_dict(source)
-    finally:
-        await source.close()
-    target = Workspace(
-        {"/": RAMVFS()}, mode=MountMode.WRITE, policies=[DenyGate()]
-    )
-    try:
-        with pytest.raises(PolicyDenied):
-            await apply_state_dict(target, state)
-        assert "PUBLIC_A" not in target.env
-        assert "GATE_X" not in target.env
-    finally:
-        await target.close()
-
-
-# A session the restore had to create was a bare one, under no profile,
-# while its table had cleared the gate under the default profile's
-# policy (`script_of` for an id the manager does not know); the created
-# session now runs under that profile, so what the gate judged is what
-# lands, and a restored session no longer wakes unrestricted.
+# A session the restore has to create runs under the default profile, as
+# one created without a profile name does, so a restored session never
+# wakes unrestricted.
 @pytest.mark.asyncio
 async def test_a_session_the_restore_creates_runs_under_the_default_profile():
     source = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
@@ -784,20 +658,6 @@ async def test_a_load_keeps_the_ask_decisions_its_tables_recorded():
         assert loaded.decisions.list() == recorded
     finally:
         await loaded.close()
-
-
-# The loader took no policies, so a host's coded `pre_session` rule was
-# registered only after the gate had vetted every restored table.
-@pytest.mark.asyncio
-async def test_a_load_vets_the_tables_under_the_callers_policies():
-    source = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        assert (await source.shell("export GATE_X=1")).exit_code == 0
-        state = await to_state_dict(source)
-    finally:
-        await source.close()
-    with pytest.raises(PolicyDenied):
-        await Workspace.from_state(state, policies=[DenyGate()])
 
 
 # A caller's own profile table governs a load as it does a constructor,

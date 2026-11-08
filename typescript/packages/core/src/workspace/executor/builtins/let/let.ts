@@ -15,7 +15,6 @@
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import type { Policies } from '../../../../policy/index.ts'
 import { ArithError, ReadonlyVariableError } from '../../../../shell/errors.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { sessionArith } from '../../../session/state.ts'
@@ -30,16 +29,12 @@ import type { BuiltinCall } from '../types.ts'
  * way, after the writes the expression made before it (`let 'X=5, R=3'`
  * leaves X at 5); one inside a subscript ends the shell.
  */
-export async function handleLet(
-  args: string[],
-  session: SessionState,
-  policies: Policies | null = null,
-): Promise<RedirectResult> {
+export async function handleLet(args: string[], session: SessionState): Promise<RedirectResult> {
   if (args.length === 0) return fail('let', `${shellVoice()}let: expression expected\n`)
   let value = 0n
   for (const expr of args) {
     try {
-      value = await sessionArith(session, expr, policies, null, true)
+      value = await sessionArith(session, expr, null, true)
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal('let', err)
       if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
@@ -53,5 +48,5 @@ export async function handleLet(
 
 /** The `let` arm. */
 export async function letBuiltin(call: BuiltinCall): Promise<RedirectResult> {
-  return handleLet([...call.argv.args], call.context.session, call.registry.policies)
+  return handleLet([...call.argv.args], call.context.session)
 }

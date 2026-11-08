@@ -19,7 +19,6 @@ from typing import Any
 
 from mirage.commands.spec.types import CommandSpec, ValueType
 from mirage.policy.match import scopes_paths
-from mirage.policy.policies import Policies
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, word_text
@@ -117,7 +116,6 @@ async def expand_argv(
     call_stack: CallStack | None,
     registry: MountRegistry,
     namespace: Namespace | None = None,
-    policies: Policies | None = None,
 ) -> Argv:
     """Expand, classify, and glob-resolve a command's word nodes.
 
@@ -139,9 +137,7 @@ async def expand_argv(
             way a listing does.
     """
     session = context.session
-    expanded = await expand_words(
-        parts, context, execute_fn, call_stack, policies
-    )
+    expanded = await expand_words(parts, context, execute_fn, call_stack)
     if not expanded:
         return Argv(name="", args=(), operands=())
     # `set -f` turns pathname expansion off, which is the same word for

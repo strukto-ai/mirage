@@ -18,7 +18,6 @@ import type { RedirectResult } from '../../../../context/session_context.ts'
 import { isProgramInvocation } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import type { Policies } from '../../../../policy/index.ts'
 import { decodeText, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { concat } from '../../../../utils/bytes.ts'
@@ -67,7 +66,6 @@ import { printfOutput, runPrintf } from './format.ts'
 export async function handlePrintf(
   args: string[],
   session: SessionState,
-  policies: Policies | null = null,
   signal?: AbortSignal,
   subscripts: SubscriptFn | null = null,
   diagnostics: (string | Uint8Array)[] | null = null,
@@ -141,7 +139,7 @@ export async function handlePrintf(
   const text = decodeText(output).split('\0', 1)[0] ?? ''
   let status: string
   try {
-    status = await assignElement(session, policies, base, subscript, text, false, diagnostics)
+    status = await assignElement(session, base, subscript, text, false, diagnostics)
   } catch (err) {
     if (err instanceof ArithError) {
       // The target carries `-i` and the formatted text does not
@@ -191,7 +189,6 @@ export async function printfBuiltin(call: BuiltinCall): Promise<RedirectResult> 
   return handlePrintf(
     [...call.argv.args],
     call.context.session,
-    call.registry.policies,
     call.signal,
     subscriptExpansion(call),
     call.context.frame.diagnostics,

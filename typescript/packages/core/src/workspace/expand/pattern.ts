@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Policies } from '../../policy/index.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { escapeGlob } from '../../utils/glob_walk.ts'
@@ -29,9 +28,8 @@ export async function expandPattern(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
-  policies: Policies | null = null,
 ): Promise<string> {
-  const runs = await expand(tsNode, 'pattern', context, executeFn, callStack, policies)
+  const runs = await expand(tsNode, 'pattern', context, executeFn, callStack)
   return (runs as readonly (readonly [string, boolean])[])
     .map(([text, quoted]) => (quoted ? escapeGlob(text) : text))
     .join('')
@@ -46,7 +44,6 @@ export async function expandRegex(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
-  policies: Policies | null = null,
 ): Promise<string> {
-  return (await expand(tsNode, 'regex', context, executeFn, callStack, policies)) as string
+  return (await expand(tsNode, 'regex', context, executeFn, callStack)) as string
 }

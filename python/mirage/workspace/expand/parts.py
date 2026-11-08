@@ -16,7 +16,6 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.io.yield_budget import YieldBudget
-from mirage.policy.policies import Policies
 from mirage.shell.call_stack import CallStack
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext
@@ -30,7 +29,6 @@ async def expand_words(
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
-    policies: Policies | None = None,
 ) -> list[str]:
     """Expand parsed child nodes to words that still know their quoting.
 
@@ -45,7 +43,6 @@ async def expand_words(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        policies (Policies | None): the policies its writes clear.
     """
     result: list[str] = []
     # Each word expands in one step; the line yields between words, so a
@@ -53,9 +50,7 @@ async def expand_words(
     budget = YieldBudget()
     for part in parts:
         result.extend(
-            await expand(
-                part, "fields", context, execute_fn, call_stack, policies
-            )
+            await expand(part, "fields", context, execute_fn, call_stack)
         )
         await budget.run()
     return result
@@ -68,7 +63,6 @@ async def expand_and_classify(
     registry: MountRegistry,
     cwd: str,
     call_stack: CallStack | None = None,
-    policies: Policies | None = None,
 ) -> list[str | PathSpec]:
     """Expand words, classify as PathSpec or text.
 
@@ -78,9 +72,7 @@ async def expand_and_classify(
     off): `for f in '/data/*.txt'` iterates once over the name as typed,
     like bash, while `for f in '/data/*'?.txt` still globs on the `?`.
     """
-    expanded = await expand_words(
-        words, context, execute_fn, call_stack, policies
-    )
+    expanded = await expand_words(words, context, execute_fn, call_stack)
     # One word can expand to a million (`a=($x)`), so classifying them
     # yields too.
     budget = YieldBudget()

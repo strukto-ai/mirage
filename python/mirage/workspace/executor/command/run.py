@@ -289,7 +289,6 @@ async def run_on_mount(
                 env=env_snapshot(session),
                 session=session_view(
                     session,
-                    registry.policies,
                     diagnostics=context.frame.diagnostics,
                 ),
                 processes=registry.process_view(session)

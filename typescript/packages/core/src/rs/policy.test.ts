@@ -36,7 +36,13 @@ function path(virtual: string): PathSpec {
 }
 
 function hidden(paths: string[]): Visibility {
-  return { paths: { paths, patterns: [] }, shown: null, vars: null, processes: 'session' }
+  return {
+    paths: { paths, patterns: [] },
+    shown: null,
+    vars: null,
+    protected: null,
+    processes: 'session',
+  }
 }
 
 describe('policy stream', () => {
@@ -139,6 +145,7 @@ describe('policy stream', () => {
       paths: { paths: [], patterns: ['secret', '*.key'] },
       shown: { entries: [{ path: '/secret', mode: null }] },
       vars: null,
+      protected: null,
       processes: 'session',
     }
     expect(pathVisible(vis, '/secret/x')).toBe(true)

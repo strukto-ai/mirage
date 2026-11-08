@@ -221,10 +221,9 @@
   "rs/shell": {
    "typescript_only": {
     "Ask": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
-    "Finished": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
-    "Heard": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
     "Item": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
     "Managed": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
+    "Outcome": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
     "RawValue": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
     "SURROGATE": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
     "Shell": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",

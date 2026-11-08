@@ -18,7 +18,6 @@ from typing import Any
 from mirage._rs import Shell, ShellNode
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.policy.policies import Policies
 from mirage.rs.session import ShellVars
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
@@ -32,7 +31,7 @@ from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.statement import record_status
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.session.state import frame
-from mirage.workspace.session.task import SessionGate, drive, listens
+from mirage.workspace.session.task import drive
 
 
 async def child_line(
@@ -93,14 +92,12 @@ async def child_line(
 
 class ExpandHost:
     """What a word's expansion asks of the shell running it: a command
-    substitution's line, a process substitution's pipe, and the session
-    policies on the writes it makes.
+    substitution's line and a process substitution's pipe.
 
     Args:
         context (EvaluationContext): the evaluation the word is in.
         execute_fn (ExecuteFn): evaluator for nested lines.
         call_stack (CallStack | None): shell call stack.
-        policies (Policies | None): the policies its writes clear.
         word (TSNodeLike): the word, whose program the nodes it names
             belong to.
     """
@@ -110,14 +107,12 @@ class ExpandHost:
         context: EvaluationContext,
         execute_fn: ExecuteFn,
         call_stack: CallStack | None,
-        policies: Policies | None,
         word: TSNodeLike,
     ) -> None:
         self.context = context
         self.session = context.session
         self.execute_fn = execute_fn
         self.call_stack = call_stack
-        self.gates = SessionGate(context.session, policies)
         self.program = word.program if isinstance(word, ProgramNode) else None
 
     def _node(self, node: ShellNode) -> TSNodeLike:
@@ -174,19 +169,6 @@ class ExpandHost:
             ),
         )
 
-    async def gate(
-        self,
-        post: bool,
-        verb: str,
-        key: str,
-        value: str | None,
-        old: str | None,
-    ) -> None:
-        await self.gates.gate(post, verb, key, value, old)
-
-    async def listens(self) -> bool:
-        return await self.gates.listens()
-
 
 def _literal(node: LiteralNode) -> str:
     while node.type != "raw_string" and node.children:
@@ -201,7 +183,6 @@ async def expand(
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     call_stack: CallStack | None = None,
-    policies: Policies | None = None,
 ) -> Any:
     """Expand one word on the session's shell, as ``mode`` reads it:
     ``fields`` (argument words, each glob-ready with quoting as marks),
@@ -214,7 +195,6 @@ async def expand(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (ExecuteFn): evaluator for nested lines.
         call_stack (CallStack | None): shell call stack.
-        policies (Policies | None): the policies its writes clear.
     """
     node = shell_node(word)
     if node is None:
@@ -223,10 +203,9 @@ async def expand(
             return [mark_globs(text)]
         return [(text, True)] if mode == "pattern" else text
     session = context.session
-    heard = await listens(policies, session.session_id)
     frame(session, call_stack)
-    task = session.vars.shell.expand(node, mode, heard)
-    host = ExpandHost(context, execute_fn, call_stack, policies, word)
+    task = session.vars.shell.expand(node, mode)
+    host = ExpandHost(context, execute_fn, call_stack, word)
     return await drive(task, host, context.frame.diagnostics)
 
 
@@ -235,7 +214,6 @@ async def expand_node(
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     call_stack: CallStack | None = None,
-    policies: Policies | None = None,
 ) -> str:
     """Expand a parsed node to the string it stands for, where nothing
     splits: a splat reads as its elements joined (``$@`` on a space,
@@ -246,13 +224,8 @@ async def expand_node(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        policies (Policies | None): the policies its writes clear.
     """
-    return str(
-        await expand(
-            ts_node, "text", context, execute_fn, call_stack, policies
-        )
-    )
+    return str(await expand(ts_node, "text", context, execute_fn, call_stack))
 
 
 async def expand_assignment(
@@ -260,7 +233,6 @@ async def expand_assignment(
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     call_stack: CallStack | None = None,
-    policies: Policies | None = None,
 ) -> str:
     """An assignment's value, where nothing splits and a tilde prefix
     expands at its start and after each unquoted ``:``
@@ -271,12 +243,9 @@ async def expand_assignment(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        policies (Policies | None): the policies its writes clear.
     """
     return str(
-        await expand(
-            ts_node, "assignment", context, execute_fn, call_stack, policies
-        )
+        await expand(ts_node, "assignment", context, execute_fn, call_stack)
     )
 
 
@@ -285,7 +254,6 @@ async def expand_arith(
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     call_stack: CallStack | None,
-    policies: Policies | None = None,
 ) -> str:
     """An arithmetic command's expression text: ``$``-expansions
     substitute textually, as bash expands before it evaluates, while bare
@@ -296,13 +264,8 @@ async def expand_arith(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        policies (Policies | None): the policies its writes clear.
     """
-    return str(
-        await expand(
-            ts_node, "arith", context, execute_fn, call_stack, policies
-        )
-    )
+    return str(await expand(ts_node, "arith", context, execute_fn, call_stack))
 
 
 async def expand_subscript(
@@ -310,7 +273,6 @@ async def expand_subscript(
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     call_stack: CallStack | None = None,
-    policies: Policies | None = None,
 ) -> str:
     """A subscript a builtin was given as text (``unset 'a[$i]'``,
     ``read 'm[$k]'``), expanded as one typed in ``${a[...]}`` is: an
@@ -323,13 +285,10 @@ async def expand_subscript(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (ExecuteFn): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
-        policies (Policies | None): the policies its writes clear.
     """
     if not any(ch in "$`'\"\\" for ch in text):
         return text
     word = parse("${x[" + text + "]}")
     return str(
-        await expand(
-            word, "subscript", context, execute_fn, call_stack, policies
-        )
+        await expand(word, "subscript", context, execute_fn, call_stack)
     )

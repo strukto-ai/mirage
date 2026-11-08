@@ -20,6 +20,7 @@ workspace while seeing different files and using different commands.
 | `mounts` | Restrict a data source to `read`, `write` or `exec` access. |
 | `cwd` and `env` | Set the session's starting directory and environment; `env` takes the same literals and [credential pointers](/home/configuration#environment-and-credential-pointers) as the workspace's. |
 | `vars.hide` | Make matching variable names, or globs over names, read as unset. |
+| `vars.protect` | Let the session read matching variables but not set, unset or mark them. |
 | `processes` | Set whose processes `ps` lists and `kill` stops, and cap the live processes. |
 | `command_limits` | Override [output and execution limits](/home/core/output-limits) for the session. |
 | `network` | Narrow where the session's lines may connect, besides the workspace's [`network`](/home/configuration#network). |
@@ -31,7 +32,8 @@ Each of the last five keys takes this shape:
 profiles:
   worker:
     vars:
-      hide: [AWS_*, GITHUB_TOKEN]
+      hide: [AWS_*]
+      protect: [GITHUB_TOKEN]
     processes:
       list: workspace
       kill: session
@@ -44,6 +46,11 @@ profiles:
       pre_command:
         - {script: ./guard.py, runtime: monty}
 ```
+
+A `vars.protect` name stays the operator's: the profile's `env` seeds it,
+the session reads it, and a set, an `unset`, a `local` or an `export` of it
+fails with `GITHUB_TOKEN: permission denied`, exit 1, whether it is set
+yet or not.
 
 `processes.list` and `processes.kill` take `session`, the default, for the
 session's own processes, or `workspace`, for every session's.

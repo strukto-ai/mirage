@@ -1207,13 +1207,6 @@ async def run_prepared_line(
                 # value gate can see still follows the fetch, because
                 # expansion is what consumes the values.
                 nodes = line_nodes(ast, effective_session)
-                policies = ws.registry.policies
-                writes_gated = (
-                    policies is not None
-                    and await policies.wants_for(
-                        "pre_session", effective_session.session_id
-                    )
-                )
 
                 def plan_names(subset: Sequence[TSNodeLike]) -> frozenset[str]:
                     return fill_names(
@@ -1223,7 +1216,6 @@ async def run_prepared_line(
                         cli_env_names=cli_env_names(
                             subset, effective_session, ws.registry
                         ),
-                        writes_gated=writes_gated,
                     )
 
                 names = plan_names(nodes)

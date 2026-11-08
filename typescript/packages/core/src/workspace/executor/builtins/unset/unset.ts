@@ -15,7 +15,6 @@
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import type { Policies } from '../../../../policy/index.ts'
 import { BASH_LINENO, FUNCNAME } from '../../../../shell/constants.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import type { SessionView } from '../../../../view/types.ts'
@@ -62,11 +61,10 @@ async function unsetOne(
   session: SessionState,
   base: string,
   subscript: string,
-  policies: Policies | null = null,
   every = false,
 ): Promise<string> {
   try {
-    return await unsetElement(session, policies, base, subscript, every)
+    return await unsetElement(session, base, subscript, every)
   } catch (err) {
     if (err instanceof ArithError) throw err.signal('', true)
     throw err
@@ -92,7 +90,6 @@ export async function handleUnset(
   args: string[],
   session: SessionState,
   state: SessionView | null = null,
-  policies: Policies | null = null,
   subscripts: SubscriptFn | null = null,
 ): Promise<RedirectResult> {
   if (args[0] === '--help') {
@@ -180,10 +177,9 @@ export async function handleUnset(
     }
     const existed =
       isElement || name in session.env || name in session.arrays || name in session.assocs
-    // Both spellings clear the preSession gate for the base name: the
-    // whole-variable unset through the view's env half, an element
-    // unset inside unsetOne, so `unset 'X[0]'` cannot sidestep a
-    // policy that vetoes `unset X`.
+    // Both spellings refuse a protected base name: the whole-variable
+    // unset through the view, an element unset inside unsetOne, so
+    // `unset 'X[0]'` cannot sidestep what refuses `unset X`.
     let status: string
     try {
       if (subscript !== undefined) {
@@ -191,7 +187,7 @@ export async function handleUnset(
         // expands to them (`i=@; unset 'a[$i]'`).
         const every = subscript === '@' || subscript === '*'
         if (subscripts !== null) subscript = await subscripts(subscript)
-        status = await unsetOne(session, base, subscript, policies, every)
+        status = await unsetOne(session, base, subscript, every)
       } else {
         await view.unset(name)
         unsetVariable(session, deref(session, name) || name)
@@ -228,8 +224,7 @@ export async function unsetBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleUnset(
     [...call.argv.args],
     call.context.session,
-    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
-    call.registry.policies,
+    sessionView(call.context.session, call.context.frame.diagnostics),
     subscriptExpansion(call),
   )
 }

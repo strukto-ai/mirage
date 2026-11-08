@@ -72,9 +72,14 @@ export interface PathsBlock {
   readonly reasons?: readonly HideReason[]
 }
 
-/** `vars:` of a profile: names or globs over names the session reads as unset. */
+/**
+ * `vars:` of a profile: `hide` lists names or globs over names the session
+ * reads as unset, `protect` those it reads but cannot set, unset or mark:
+ * the operator's to set, through the profile's `env`.
+ */
 export interface VarsBlock {
   readonly hide: readonly string[]
+  readonly protect?: readonly string[]
 }
 
 /**
@@ -165,9 +170,9 @@ export interface SessionProfile {
   readonly vars?: VarsBlock | null
   readonly commands?: CommandsBlock | null
   /**
-   * The profile's policy: for each `pre` method it answers at
-   * (`preExecute`, `preCommand`, `preVfs`, `preSession`; `pre_execute`,
-   * ... in the document), a list of programs, each with the runtime it
+   * The profile's policy: for each method it answers at (`preExecute`,
+   * `preCommand`, `preVfs`, `preNetwork` and their `post` twins;
+   * `pre_execute`, ... in the document), a list of programs, each with the runtime it
    * runs on, the shape a `clis` entry has. A program's function for the
    * method takes its context and returns its answer: None for no opinion,
    * a deny, an ask, or at `preExecute` a route. They are asked in order and
@@ -257,7 +262,7 @@ export interface CompiledProfile {
   readonly profile: string | null
 }
 
-const VARS_FIELDS = ['hide'] as const
+const VARS_FIELDS = ['hide', 'protect'] as const
 const COMMANDS_FIELDS = ['allow', 'ask', 'deny'] as const
 const MOUNT_COMMANDS_FIELDS = ['ask', 'deny'] as const
 const PROFILE_MOUNT_FIELDS = ['mode', 'commands', 'paths'] as const
@@ -360,7 +365,10 @@ export function PathsBlock(raw: unknown, where = 'paths'): PathsBlock {
 export function VarsBlock(raw: unknown, where = 'vars'): VarsBlock {
   const obj = asObject(raw, where)
   rejectUnknownKeys(obj, VARS_FIELDS, where)
-  return { hide: stringList(obj.hide, `${where}.hide`) }
+  return {
+    hide: stringList(obj.hide, `${where}.hide`),
+    ...(obj.protect === undefined ? {} : { protect: stringList(obj.protect, `${where}.protect`) }),
+  }
 }
 
 export function CommandsBlock(raw: unknown, where = 'commands'): CommandsBlock {
@@ -662,7 +670,13 @@ export function profileToDict(profile: SessionProfile): Record<string, unknown> 
   const doc: Record<string, unknown> = {}
   if (profile.cwd != null) doc.cwd = profile.cwd
   if (profile.env != null) doc.env = { ...profile.env }
-  if (profile.vars != null) doc.vars = { hide: [...profile.vars.hide] }
+  if (profile.vars != null) {
+    const { hide, protect = [] } = profile.vars
+    doc.vars = {
+      ...(hide.length > 0 ? { hide: [...hide] } : {}),
+      ...(protect.length > 0 ? { protect: [...protect] } : {}),
+    }
+  }
   if (profile.policy != null) {
     doc.policy = Object.fromEntries(
       Object.entries(profile.policy).map(([method, programs]) => [

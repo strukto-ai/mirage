@@ -66,7 +66,6 @@ export async function runCommandTree(
       deps.executeFn,
       deps.registry,
       null,
-      deps.registry.policies,
       false,
       deps.namespace.sessionLinks(session),
       read,

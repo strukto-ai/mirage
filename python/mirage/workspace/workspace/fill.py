@@ -375,7 +375,6 @@ def _unset_masks(stmt: TSNodeLike) -> frozenset[str] | None:
 def masked_names(
     node: TSNodeLike,
     session: SessionState,
-    writes_gated: bool,
     in_body: bool = False,
     before: TSNodeLike | None = None,
 ) -> frozenset[str]:
@@ -388,7 +387,8 @@ def masked_names(
     observes the replacement. The prefix ends at the first statement
     that is anything else, that runs in the background (``&`` detaches
     it to a subshell, so nothing persists), or that touches a readonly
-    name (the write fails and the standing value stays observable). A
+    or protected name (the write fails and the standing value stays
+    observable). A
     name read while still unmasked (``TOKEN=$TOKEN``) stays fetched:
     within a statement the read precedes the write.
 
@@ -397,25 +397,17 @@ def masked_names(
     which, because ``local`` writes only inside a function and refuses
     at top level with the standing value still readable.
 
-    ``writes_gated`` empties the set: a ``pre_session`` policy may
-    refuse a write mid-line while later statements still run, and a
-    refused mask would leave the standing value readable, so under such
-    a policy nothing masks and the fetch keeps today's shape.
-
     Args:
         node (TSNodeLike): the unit's parsed tree -- the line's
             own, one defined body's, or a stored statement's parent
             container (with ``before`` naming the statement).
         session (SessionState): the session the line runs in.
-        writes_gated (bool): a policy overrides ``pre_session``.
         in_body (bool): the unit is a function body, where ``local``
             assigns.
         before (TSNodeLike | None): stop at this child, so a
             stored statement is discounted by exactly the prefix that
             runs before it and never by its own writes.
     """
-    if writes_gated:
-        return frozenset()
     masked: set[str] = set()
     needed: set[str] = set()
     children = node.children
@@ -441,12 +433,15 @@ def masked_names(
         following = children[idx + 1] if idx + 1 < len(children) else None
         if following is not None and following.type == "&":
             break
-        readonly = any(
-            name in session.vars
-            and VarAttr.READONLY in session.vars[name].attrs
+        refused = any(
+            (
+                name in session.vars
+                and VarAttr.READONLY in session.vars[name].attrs
+            )
+            or session.vars.shell.protected(name)
             for name in masks
         )
-        if readonly:
+        if refused:
             break
         for name in referenced_names(stmt):
             for target in (name, deref(session, name)):
@@ -461,9 +456,7 @@ def masked_names(
 _BODY_CONTAINERS = frozenset({"compound_statement", "subshell"})
 
 
-def _own_masks(
-    node: TSNodeLike, session: SessionState, writes_gated: bool
-) -> frozenset[str]:
+def _own_masks(node: TSNodeLike, session: SessionState) -> frozenset[str]:
     """A walked unit's own leading masks, discounting its own reads.
 
     A defined body's prefix masks the body's later reads exactly as the
@@ -481,18 +474,15 @@ def _own_masks(
     Args:
         node (TSNodeLike): one walked unit past the line itself.
         session (SessionState): the session the line runs in.
-        writes_gated (bool): a policy overrides ``pre_session``.
     """
     own: frozenset[str] = frozenset()
     if node.type in _BODY_CONTAINERS:
-        own = masked_names(node, session, writes_gated, in_body=True)
+        own = masked_names(node, session, in_body=True)
     elif node.type == "program":
-        own = masked_names(node, session, writes_gated)
+        own = masked_names(node, session)
     parent = node.parent
     if parent is not None and parent.type in _BODY_CONTAINERS:
-        own |= masked_names(
-            parent, session, writes_gated, in_body=True, before=node
-        )
+        own |= masked_names(parent, session, in_body=True, before=node)
     return own
 
 
@@ -580,7 +570,6 @@ def _wanted(
     pending: Mapping[str, ManagedRef],
     cli_env_names: frozenset[str],
     masked: frozenset[str],
-    writes_gated: bool,
 ) -> frozenset[str]:
     """The pending names the line's walked set is about to read.
 
@@ -612,8 +601,6 @@ def _wanted(
             CLIs read (``cli_env_names``).
         masked (frozenset[str]): names the line replaces before any
             read (``masked_names``).
-        writes_gated (bool): a policy overrides ``pre_session``, so no
-            unit's masks are trusted to land.
     """
     referenced: set[str] = set()
     printed: set[str] = set()
@@ -627,11 +614,7 @@ def _wanted(
             return frozenset(pending.keys() - masked)
         if any(head is None for head, _ in command_invocations(node)):
             return frozenset(pending.keys() - masked)
-        own = (
-            _own_masks(node, session, writes_gated)
-            if position
-            else frozenset()
-        )
+        own = _own_masks(node, session) if position else frozenset()
         if rendered:
             rendered_any = True
             rendered_excluded = (
@@ -684,7 +667,6 @@ def fill_names(
     *,
     whole: bool,
     cli_env_names: frozenset[str],
-    writes_gated: bool = False,
 ) -> frozenset[str]:
     """The managed names one line is about to read, without fetching.
 
@@ -704,20 +686,14 @@ def fill_names(
             runtime), so every managed name may be read.
         cli_env_names (frozenset[str]): env names the line's installed
             CLIs read (``cli_env_names``).
-        writes_gated (bool): a policy overrides ``pre_session``, so no
-            assignment or unset is trusted to land (``masked_names``).
     """
     pending = _pending_of(session)
     if not pending:
         return frozenset()
     if whole:
         return frozenset(pending)
-    masked = (
-        masked_names(nodes[0], session, writes_gated) if nodes else frozenset()
-    )
-    return _wanted(
-        session, nodes, pending, cli_env_names, masked, writes_gated
-    )
+    masked = masked_names(nodes[0], session) if nodes else frozenset()
+    return _wanted(session, nodes, pending, cli_env_names, masked)
 
 
 async def fill_env(

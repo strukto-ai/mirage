@@ -100,6 +100,9 @@
             "vars": {
               "hide": [
                 "AWS_*"
+              ],
+              "protect": [
+                "GITHUB_TOKEN"
               ]
             },
             "commands": {

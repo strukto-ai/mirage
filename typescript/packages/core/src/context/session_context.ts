@@ -634,6 +634,7 @@ export function sessionVisibility(access?: SessionAccess): Visibility | null {
     paths: hiding.length === 0 ? null : { paths, patterns },
     shown: shown.length === 0 ? null : { entries: shown },
     vars: names.length + varPatterns.length === 0 ? null : { names, patterns: varPatterns },
+    protected: null,
     processes: live.every((vis) => vis.processes === 'workspace') ? 'workspace' : 'session',
   }
 }

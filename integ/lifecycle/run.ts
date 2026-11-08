@@ -53,8 +53,6 @@ import {
   type VfsContext,
   type VfsResultContext,
   type Route,
-  type SessionContext,
-  type SessionResultContext,
   type ShellExplanation,
   type ShellNode,
   type VfsExplanation,
@@ -166,21 +164,14 @@ type RuleAnswer =
 
 type RuleHooks = Partial<
   Record<
-    | 'pre_execute'
-    | 'post_execute'
-    | 'pre_command'
-    | 'post_command'
-    | 'pre_vfs'
-    | 'post_vfs'
-    | 'pre_session'
-    | 'post_session',
+    'pre_execute' | 'post_execute' | 'pre_command' | 'post_command' | 'pre_vfs' | 'post_vfs',
     Record<string, RuleAnswer>
   >
 >
 
 /**
  * A host policy whose answers are supplied by JSON: per hook, the answer
- * for a word of the line, a command, a path or a variable. Mirrors
+ * for a word of the line, a command or a path. Mirrors
  * Python's `RulePolicy`.
  */
 class RulePolicy implements Policy {
@@ -222,14 +213,6 @@ class RulePolicy implements Policy {
 
   postVfs(ctx: VfsResultContext): Action | null {
     return this.answer('post_vfs', ctx.path.virtual)
-  }
-
-  preSession(ctx: SessionContext): Action | null {
-    return this.answer('pre_session', ctx.key)
-  }
-
-  postSession(ctx: SessionResultContext): Action | null {
-    return this.answer('post_session', ctx.key)
   }
 }
 
@@ -782,8 +765,7 @@ async function action(
       held.state = await toStateDict(ws)
       break
     case 'checkout': {
-      // A checkout onto the running workspace: the restored state wins,
-      // and every restored variable clears the session gate first.
+      // A checkout onto the running workspace: the restored state wins.
       if (held.state === undefined) throw new Error('checkout before snapshot')
       await applyStateDict(ws, held.state)
       break

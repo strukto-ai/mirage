@@ -657,7 +657,7 @@ class Workspace:
                 kept = (
                     session,
                     self.policies,
-                    session_view(session, self.policies),
+                    session_view(session),
                 )
             return (
                 kept[2],
@@ -1470,7 +1470,7 @@ class Workspace:
                         ),
                         clock=self._clock,
                     ),
-                    session=session_view(session, self.policies),
+                    session=session_view(session),
                     processes=self._process_view(session),
                     cwd=PathSpec.from_str_path(session.cwd),
                     env=env_snapshot(session),
@@ -1571,7 +1571,7 @@ class Workspace:
             token = set_current_session(child, self._session_mgr)
             program_token = set_program_invocation(child)
             try:
-                view = session_view(child, self.policies)
+                view = session_view(child)
                 for name, value in (env or {}).items():
                     await view.set(name, value)
                     await view.mark(name, VarAttr.EXPORT, True)

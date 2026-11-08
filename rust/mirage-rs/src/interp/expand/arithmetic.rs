@@ -227,8 +227,8 @@ impl<H: Host> Expander<'_, H> {
         }
     }
 
-    /// A `$((...))`'s value: evaluated, its writes landed through the gate
-    /// before an error is reported, as bash binds each as it is made.
+    /// A `$((...))`'s value: evaluated, its writes landed before an error
+    /// is reported, as bash binds each as it is made.
     pub(super) async fn arith_expansion(&mut self, node: usize) -> Result<Vec<u8>, Fault> {
         let text = match self.arith_text(node).await {
             Ok(text) => text,

@@ -4,31 +4,9 @@ use std::task::{Context, Poll, Waker};
 
 use super::patterns::regex_text;
 use super::*;
-use crate::interp::write::Verb;
 use crate::vars::{Assoc, Indexed, Store, Value};
 
 struct Fake;
-
-impl Gate for Fake {
-    fn listens(&self) -> bool {
-        false
-    }
-
-    async fn pre(&mut self, _: Verb, _: &str, _: Option<&[u8]>, _: &Store) -> Result<(), Fault> {
-        Ok(())
-    }
-
-    async fn post(
-        &mut self,
-        _: Verb,
-        _: &str,
-        _: Option<&[u8]>,
-        _: Option<&[u8]>,
-        _: &Store,
-    ) -> Result<(), Fault> {
-        Ok(())
-    }
-}
 
 impl Host for Fake {
     async fn process_substitution(&mut self, _: &mut Shell, node: usize) -> Result<Vec<u8>, Fault> {

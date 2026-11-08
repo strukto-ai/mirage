@@ -16,7 +16,6 @@ import { shellVoice } from '../../shell/voice.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import { IOResult } from '../../io/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
-import { preSessionGate } from '../../policy/index.ts'
 import { makeArray, ShellArray } from '../../shell/array.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -54,7 +53,7 @@ import { expandNode, expandSubscript } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { conversionScalar, ensureVarVisible, seedVar, sessionView } from '../session/state.ts'
+import { conversionScalar, ensureVarWritable, seedVar, sessionView } from '../session/state.ts'
 import type { ExpandedWords } from './types.ts'
 import { ExecutionNode } from '../types.ts'
 import { expandArrayItems } from './assignment.ts'
@@ -188,7 +187,7 @@ export async function executeDeclaration(
   const plusChars = new Set<string>()
   let optsDone = false
   const traced: string[] = []
-  const view = sessionView(session, registry.policies, context.frame.diagnostics)
+  const view = sessionView(session, context.frame.diagnostics)
   for (const child of node.namedChildren) {
     if (child.type === NT.VARIABLE_ASSIGNMENT) {
       const valNodes = child.namedChildren.filter((c) => c.type !== NT.VARIABLE_NAME)
@@ -214,7 +213,7 @@ export async function executeDeclaration(
         })
         continue
       }
-      const expanded = await expandNode(child, context, executeFn, callStack, registry.policies)
+      const expanded = await expandNode(child, context, executeFn, callStack)
       operands.push(expanded)
       traced.push(expanded)
     } else if (
@@ -231,7 +230,7 @@ export async function executeDeclaration(
       child.type === NT.ANSI_C_STRING ||
       child.type === NT.TRANSLATED_STRING
     ) {
-      const expanded = await expandNode(child, context, executeFn, callStack, registry.policies)
+      const expanded = await expandNode(child, context, executeFn, callStack)
       // An *unquoted* expansion that came back empty is removed by
       // word splitting, so `export $UNSET` is a bare `export` and
       // prints the listing. A quoted one is a real, empty operand:
@@ -287,14 +286,7 @@ export async function executeDeclaration(
     // only expands and stages. The flags pass through so -p, the bare
     // listing and bad options work.
     const attr = keyword === 'readonly' ? VarAttr.Readonly : VarAttr.Export
-    return await markNames(
-      [...flagWords, ...operands],
-      session,
-      view,
-      attr,
-      parser,
-      registry.policies,
-    )
+    return await markNames([...flagWords, ...operands], session, view, attr, parser)
   }
   const refused = declareOptionRefusal(cmdWord, flagChars, plusChars)
   if (refused !== null) return refused
@@ -337,12 +329,11 @@ export async function executeDeclaration(
       const want = kind ?? (elements.has(bare) ? VarKind.Indexed : null)
       if (bare.includes('=') || want === null) continue
       const wantAssoc = want === VarKind.Assoc
-      // A hidden name refuses like any assignment spelling before
-      // anything lands, and the array both branches below write (the
-      // top-level one migrates an existing scalar) goes through the gate
-      // as any write does.
+      // A hidden or protected name refuses like any assignment spelling
+      // before anything lands, the readonly conversion below included,
+      // which writes past the writer's checks.
       try {
-        ensureVarVisible(session, bare)
+        ensureVarWritable(session, bare)
       } catch (err) {
         if (!(err instanceof PolicyDenied)) throw err
         throw new DiscardSignal(encodeText(`${err.message}\n`))
@@ -375,20 +366,8 @@ export async function executeDeclaration(
           : { '0': scalar }
         : makeArray(scalar === null ? [] : [scalar])
       if (view.isReadonly(bare, false)) {
-        // bash converts a readonly name all the same, which a gated write
-        // refuses, so the rule is asked on its own before the ungated one
-        // lands it.
-        try {
-          await preSessionGate(registry.policies, {
-            verb: 'set',
-            key: bare,
-            value: scalar ?? '',
-            sessionId: session.sessionId,
-          })
-        } catch (err) {
-          if (!(err instanceof PolicyDenied)) throw err
-          throw new DiscardSignal(encodeText(`${err.message}\n`))
-        }
+        // bash converts a readonly name all the same, which the writer
+        // refuses, so it lands past the writer's checks.
         seedVar(session, bare, fill)
       } else {
         try {
@@ -423,8 +402,7 @@ export async function executeDeclaration(
       globalScope: flagChars.has('g'),
       inherit: flagChars.has('I'),
     },
-    registry.policies,
-    (text) => expandSubscript(text, context, executeFn, callStack, registry.policies),
+    (text) => expandSubscript(text, context, executeFn, callStack),
   )
   return mergeConversionErrors(result, conversionErrors)
 }

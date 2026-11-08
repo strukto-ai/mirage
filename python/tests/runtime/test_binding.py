@@ -39,7 +39,7 @@ from mirage.context.session_context import awaits_as, calls_as
 from mirage.io import IOResult
 from mirage.mount.core import MountCore
 from mirage.observe.context import RecordingScope, record, start_op
-from mirage.policy import Deny, Policy, PolicyDenied
+from mirage.policy import Policy, PolicyDenied
 from mirage.runtime.binding import WorkspaceBinding, capture_binding
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import parse_mode
@@ -87,11 +87,6 @@ class ShellProbe(Runtime, LineExecutorMixin):
         )
 
 
-class DenySecret(Policy):
-    async def pre_session(self, ctx):
-        return Deny("protected") if ctx.key == "SECRET" else None
-
-
 @pytest.mark.asyncio
 async def test_execute_capabilities_and_refusals():
     work = PathSpec.from_str_path("/work")
@@ -118,12 +113,16 @@ async def test_execute_capabilities_and_refusals():
 @pytest.mark.asyncio
 async def test_callbacks_retain_session_and_gate_after_capture():
     with Workspace(
-        {"/data": RAMVFS(), "/secret": RAMVFS()},
-        mode=MountMode.EXEC,
-        policies=[DenySecret()],
+        {"/data": RAMVFS(), "/secret": RAMVFS()}, mode=MountMode.EXEC
     ) as ws:
         await ws.shell("echo private > /secret/a")
-        ws.create_session("agent", profile={"paths": {"hide": ["/secret"]}})
+        ws.create_session(
+            "agent",
+            profile={
+                "paths": {"hide": ["/secret"]},
+                "vars": {"protect": ["SECRET"]},
+            },
+        )
         context = ws.runtime_context("agent")
         other = ws.runtime_context()
         assert context.ctx.session is not None
@@ -141,10 +140,8 @@ async def test_callbacks_retain_session_and_gate_after_capture():
         assert context.ctx.session.get("PUBLIC") == "agent"
         assert other.ctx.session.get("PUBLIC") is None
         assert "PUBLIC" not in context.ctx.env  # launch environment is a copy
-        with pytest.raises(PolicyDenied) as refused:
+        with pytest.raises(PolicyDenied, match="SECRET: permission denied"):
             await context.ctx.session.set("SECRET", "no")
-        assert refused.value.refusal is not None
-        assert "protected" in refused.value.refusal.reason
         # A captured caller carries the owner as well as the session.
         assert (
             calls_as(context.caller, get_current_session_for)(

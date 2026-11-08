@@ -22,14 +22,7 @@ import { Command, type Context } from '../commands/config.ts'
 import { Argument, CommandSpec } from '../commands/spec/types.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { IOResult } from '../io/types.ts'
-import type {
-  Action,
-  CommandContext,
-  Decision,
-  Policy,
-  SessionContext,
-  VfsContext,
-} from '../policy/index.ts'
+import type { Action, CommandContext, Decision, Policy, VfsContext } from '../policy/index.ts'
 import { Outcome, Scope, type AskHandler } from '../policy/index.ts'
 import { SessionProfile } from '../policy/profile.ts'
 import { Runtime } from '../runtime/base.ts'
@@ -73,14 +66,20 @@ class OverlayRAMVFS extends RAMVFS {
 
 const open: Workspace[] = []
 
-function makeWs(policies?: Policy[]): Workspace {
+function makeWs(policies?: Policy[], protect: readonly string[] = []): Workspace {
   const a = new RAMVFS()
   a.store.files.set('/x.txt', ENC.encode('public\n'))
   const b = new RAMVFS()
   b.store.files.set('/y.txt', ENC.encode('other\n'))
   const ws = new Workspace(
     { '/a': a, '/b': b },
-    { mode: MountMode.WRITE, ...(policies !== undefined ? { policies } : {}) },
+    {
+      mode: MountMode.WRITE,
+      ...(policies !== undefined ? { policies } : {}),
+      ...(protect.length > 0
+        ? { profiles: { default: SessionProfile({ vars: { protect: [...protect] } }) } }
+        : {}),
+    },
   )
   open.push(ws)
   return ws
@@ -264,61 +263,47 @@ describe('name-plane writes go through the dispatcher', () => {
   })
 })
 
-/** Veto env writes to SECRET_* names through the session view. */
-class DenySecretEnv implements Policy {
-  preSession(ctx: SessionContext): Action | null {
-    if (ctx.key.startsWith('SECRET')) {
-      return { kind: 'deny', reason: 'SECRET_* refused by policy' }
-    }
-    return null
-  }
-}
-
 const CMD_SPEC = new CommandSpec({
   arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
 })
 
 describe('session-state writes go through the view', () => {
-  it('export fires the state gate', async () => {
-    // The session plane's gate: an env write clears preSession exactly
-    // as a VFS write clears preVfs, whichever tier asked.
-    const ws = makeWs([new DenySecretEnv()])
+  it('export refuses a protected name', async () => {
+    // A protected name refuses an env write whichever tier asked.
+    const ws = makeWs(undefined, ['SECRET*'])
     const denied = await ws.shell('export SECRET_X=1')
     expect(denied.exitCode).not.toBe(0)
-    expect(voicedStderr(denied)).toContain('refused by policy')
+    expect(voicedStderr(denied)).toContain('permission denied')
     expect('SECRET_X' in ws.env).toBe(false)
     const allowed = await ws.shell('export PUBLIC_X=1')
     expect(allowed.exitCode).toBe(0)
     expect(ws.env.PUBLIC_X).toBe('1')
   })
 
-  it('a prefix assignment clears the gate', async () => {
+  it('a prefix assignment refuses a protected name', async () => {
     // `SECRET=leak cmd` is a session write like any other, and the form
-    // puts it in the command's environment, so a deployment refusing
-    // `SECRET_*` has to be asked. Only the hidden half was checked here,
-    // and the seeding goes through the ungated entry point, so the secret
-    // reached the command and printed.
-    const ws = makeWs([new DenySecretEnv()])
+    // puts it in the command's environment; its seeding goes past the
+    // writer's checks, so the prefix loop checks the name itself.
+    const ws = makeWs(undefined, ['SECRET*'])
     const denied = await ws.shell('SECRET_K=leak printenv SECRET_K')
     expect(denied.exitCode).not.toBe(0)
-    expect(voicedStderr(denied)).toContain('refused by policy')
+    expect(voicedStderr(denied)).toContain('permission denied')
     expect(stdoutStr(denied)).toBe('')
-    // A name no rule covers still reaches the command.
+    // A name the profile leaves alone still reaches the command.
     const allowed = await ws.shell('OPEN_K=fine printenv OPEN_K')
     expect(stdoutStr(allowed)).toBe('fine\n')
   })
 
-  it('declare -x on an existing name clears the gate', async () => {
-    // `declare -x NAME` on a name that already exists writes no value,
-    // so the handler reaches the gate on no other path and the export
-    // mark is the only session write there is. Stamping it directly let
-    // an agent export a host-seeded credential the deployment refused.
-    const ws = makeWs([new DenySecretEnv()])
+  it('declare -x on an existing name refuses a protected name', async () => {
+    // `declare -x NAME` on a name that already exists writes no value, so
+    // the export mark is the only session write there is; stamping it
+    // directly would let an agent export a credential the operator set.
+    const ws = makeWs(undefined, ['SECRET*'])
     const sess = ws.getSession(ws.defaultSessionId)
     seedVar(sess, 'SECRET_TOKEN', 'hunter2')
     const io = await ws.shell('declare -x SECRET_TOKEN')
     expect(io.exitCode).not.toBe(0)
-    expect(voicedStderr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('permission denied')
     expect(sess.vars.get('SECRET_TOKEN')?.attrs.has(VarAttr.Export)).toBe(false)
     expect(sess.vars.get('SECRET_TOKEN')?.value).toBe('hunter2')
   })
@@ -376,14 +361,14 @@ describe('session-state writes go through the view', () => {
   })
 })
 
-describe('the remaining session writers clear the same gate', () => {
-  it('bare export of a new name fires the gate', async () => {
+describe('the remaining session writers refuse a protected name', () => {
+  it('bare export of a new name refuses a protected name', async () => {
     // `export NAME` writes no value, but marking a name is still a
-    // session write, so it clears the same gate an assignment does.
-    const ws = makeWs([new DenySecretEnv()])
+    // session write, so it refuses as an assignment does.
+    const ws = makeWs(undefined, ['SECRET*'])
     const denied = await ws.shell('export SECRET_BARE')
     expect(denied.exitCode).not.toBe(0)
-    expect(voicedStderr(denied)).toContain('refused by policy')
+    expect(voicedStderr(denied)).toContain('permission denied')
     expect('SECRET_BARE' in ws.env).toBe(false)
     const allowed = await ws.shell('export PUBLIC_BARE')
     expect(allowed.exitCode).toBe(0)
@@ -395,20 +380,19 @@ describe('the remaining session writers clear the same gate', () => {
     expect(listed).not.toContain('SECRET_BARE')
   })
 
-  it('local fires the gate', async () => {
-    const ws = makeWs([new DenySecretEnv()])
+  it('local refuses a protected name', async () => {
+    const ws = makeWs(undefined, ['SECRET*'])
     const io = await ws.shell('f() { local SECRET_L=1; }; f')
     expect(io.exitCode).not.toBe(0)
-    expect(voicedStderr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('permission denied')
     expect('SECRET_L' in ws.env).toBe(false)
   })
 
-  it('every declaring spelling fires the gate', async () => {
-    // `readonly NAME` marked through `setAttr` and walked straight past
-    // it: a deployment refusing SECRET_* still saw the line exit 0,
-    // create the record, and freeze the name against every later write
-    // the deployment's own wiring would make.
-    const ws = makeWs([new DenySecretEnv()])
+  it('every declaring spelling refuses a protected name', async () => {
+    // A mark is a session write, so the no-value forms refuse too: a
+    // `readonly NAME` that walked past would create the record and freeze
+    // the name against every later write the operator's own wiring makes.
+    const ws = makeWs(undefined, ['SECRET*'])
     const session = ws.getSession(ws.defaultSessionId)
     for (const line of [
       'SECRET_A=1',
@@ -419,32 +403,30 @@ describe('the remaining session writers clear the same gate', () => {
     ]) {
       const io = await ws.shell(line)
       expect(io.exitCode, line).not.toBe(0)
-      expect(voicedStderr(io), line).toContain('refused by policy')
+      expect(voicedStderr(io), line).toContain('permission denied')
     }
     for (const name of ['SECRET_A', 'SECRET_B', 'SECRET_C', 'SECRET_D', 'SECRET_E']) {
       expect(session.vars.has(name), name).toBe(false)
     }
   })
 
-  it('a plain assignment fires the gate', async () => {
-    // The assignment path used to write session.env directly, so a
-    // policy that vetoed `export SECRET_X=1` still admitted
-    // `SECRET_X=1`. Denial mirrors the readonly case: a fatal
-    // variable-assignment error that abandons the rest of the line.
-    const ws = makeWs([new DenySecretEnv()])
+  it('a plain assignment refuses a protected name', async () => {
+    // A refusal mirrors the readonly case: a fatal variable-assignment
+    // error that abandons the rest of the line.
+    const ws = makeWs(undefined, ['SECRET*'])
     const denied = await ws.shell('SECRET_P=1; echo after')
     expect(denied.exitCode).not.toBe(0)
-    expect(voicedStderr(denied)).toContain('refused by policy')
+    expect(voicedStderr(denied)).toContain('permission denied')
     expect('SECRET_P' in ws.env).toBe(false)
     const allowed = await ws.shell('PUBLIC_P=1')
     expect(allowed.exitCode).toBe(0)
     expect(ws.env.PUBLIC_P).toBe('1')
   })
 
-  it('an append assignment fires the gate', async () => {
-    // An integer `+=` evaluates behind the gate, so what its sides assign
-    // waits for it, as a plain `SECRET_N=X=5`'s does.
-    const ws = makeWs([new DenySecretEnv()])
+  it('an append assignment refuses a protected name', async () => {
+    // An integer `+=` onto a protected name is refused before it
+    // evaluates, so nothing its sides assign lands.
+    const ws = makeWs(undefined, ['SECRET*'])
     const session = ws.getSession(ws.defaultSessionId)
     seedVar(session, 'SECRET_N', '1')
     setAttr(session, 'SECRET_N', VarAttr.Integer)
@@ -456,27 +438,27 @@ describe('the remaining session writers clear the same gate', () => {
     expect(ws.env.SECRET_N).toBe('1')
   })
 
-  it('an array assignment fires the gate', async () => {
-    // A denied name must not be writable by switching to array syntax:
-    // SECRET=(a b) lands on the same session plane as SECRET=x.
-    const ws = makeWs([new DenySecretEnv()])
+  it('an array assignment refuses a protected name', async () => {
+    // A protected name must not be writable by switching to array
+    // syntax: SECRET=(a b) lands on the same session plane as SECRET=x.
+    const ws = makeWs(undefined, ['SECRET*'])
     const io = await ws.shell('SECRET_V=(a b); echo after')
     expect(io.exitCode).not.toBe(0)
-    expect(voicedStderr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('permission denied')
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     expect('SECRET_V' in sess.arrays).toBe(false)
   })
 
-  it('an array append assignment fires the gate', async () => {
-    const ws = makeWs([new DenySecretEnv()])
+  it('an array append assignment refuses a protected name', async () => {
+    const ws = makeWs(undefined, ['SECRET*'])
     const io = await ws.shell('SECRET_VA+=(a)')
     expect(io.exitCode).not.toBe(0)
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     expect('SECRET_VA' in sess.arrays).toBe(false)
   })
 
-  it('a subscript assignment fires the gate', async () => {
-    const ws = makeWs([new DenySecretEnv()])
+  it('a subscript assignment refuses a protected name', async () => {
+    const ws = makeWs(undefined, ['SECRET*'])
     const io = await ws.shell('SECRET_S[0]=x')
     expect(io.exitCode).not.toBe(0)
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
@@ -484,11 +466,11 @@ describe('the remaining session writers clear the same gate', () => {
     expect('SECRET_S' in ws.env).toBe(false)
   })
 
-  it('a scalar append onto an existing array fires the gate', async () => {
+  it('a scalar append onto an existing array refuses a protected name', async () => {
     // SECRET+=x on a name that already holds an array appends to
     // element 0 through a branch of its own; it is still a session
     // write.
-    const ws = makeWs([new DenySecretEnv()])
+    const ws = makeWs(undefined, ['SECRET*'])
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     seedVar(sess, 'SECRET_E', makeArray(['a']))
     const io = await ws.shell('SECRET_E+=x')
@@ -496,33 +478,33 @@ describe('the remaining session writers clear the same gate', () => {
     expect(sess.arrays.SECRET_E).toEqual(makeArray(['a']))
   })
 
-  it('a declaration array assignment fires the gate', async () => {
+  it('a declaration array assignment refuses a protected name', async () => {
     // export/declare with an array literal store through the staged
-    // path, not handleExport, so the gate has to fire there too.
-    const ws = makeWs([new DenySecretEnv()])
+    // path, not handleExport, so it has to refuse there too.
+    const ws = makeWs(undefined, ['SECRET*'])
     const io = await ws.shell('export SECRET_D=(a)')
     expect(io.exitCode).not.toBe(0)
-    expect(voicedStderr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('permission denied')
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     expect('SECRET_D' in sess.arrays).toBe(false)
   })
 
-  it('a bare declare -a fires the gate', async () => {
+  it('a bare declare -a refuses a protected name', async () => {
     // `declare -a NAME` with no value stores an empty array (or converts
-    // the scalar it holds), a write the gate has to see like any other.
-    const ws = makeWs([new DenySecretEnv()])
+    // the scalar it holds), a write like any other.
+    const ws = makeWs(undefined, ['SECRET*'])
     const io = await ws.shell('declare -a SECRET_B; declare -A SECRET_M')
     expect(io.exitCode).not.toBe(0)
-    expect(voicedStderr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('permission denied')
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     expect('SECRET_B' in sess.arrays).toBe(false)
     expect('SECRET_M' in sess.assocs).toBe(false)
   })
 
-  it('a bare declare -a of a readonly name fires the gate', async () => {
+  it('a bare declare -a of a readonly name refuses a protected name', async () => {
     // bash converts a readonly scalar all the same, past the readonly
-    // refusal a gated write makes, so the rule is asked on its own.
-    const ws = makeWs([new DenySecretEnv()])
+    // refusal the writer makes, so the protected name is checked first.
+    const ws = makeWs(undefined, ['SECRET*'])
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     seedVar(sess, 'SECRET_R', 'v')
     setAttr(sess, 'SECRET_R', VarAttr.Readonly)
@@ -608,19 +590,19 @@ describe('the remaining session writers clear the same gate', () => {
     expect(stdoutStr(denied)).not.toContain('ran')
   })
 
-  it('a subscripted unset of a scalar fires the gate', async () => {
+  it('a subscripted unset of a scalar refuses a protected name', async () => {
     // `unset 'SECRET[0]'` on a scalar is the whole unset in element
     // clothing; the element branch used to skip the view entirely.
-    const ws = makeWs([new DenySecretEnv()])
+    const ws = makeWs(undefined, ['SECRET*'])
     seedVar(ws.getSession(ws.defaultSessionId), 'SECRET_U', 'v')
     const io = await ws.shell("unset 'SECRET_U[0]'")
     expect(io.exitCode).not.toBe(0)
-    expect(voicedStderr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('permission denied')
     expect(ws.env.SECRET_U).toBe('v')
   })
 
-  it('a subscripted unset of an array element fires the gate', async () => {
-    const ws = makeWs([new DenySecretEnv()])
+  it('a subscripted unset of an array element refuses a protected name', async () => {
+    const ws = makeWs(undefined, ['SECRET*'])
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     seedVar(sess, 'SECRET_W', makeArray(['a', 'b']))
     const io = await ws.shell("unset 'SECRET_W[1]'")
@@ -628,10 +610,10 @@ describe('the remaining session writers clear the same gate', () => {
     expect(sess.arrays.SECRET_W).toEqual(makeArray(['a', 'b']))
   })
 
-  it('the for-loop variable fires the gate', async () => {
-    // The loop variable is a session write per iteration; a denied
+  it('the for-loop variable refuses a protected name', async () => {
+    // The loop variable is a session write per iteration; a refused
     // write aborts the loop before its body runs.
-    const ws = makeWs([new DenySecretEnv()])
+    const ws = makeWs(undefined, ['SECRET*'])
     const denied = await ws.shell('for SECRET_I in a b; do echo ran; done')
     expect(denied.exitCode).not.toBe(0)
     expect(stdoutStr(denied)).not.toContain('ran')

@@ -31,7 +31,6 @@ import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import type { ShellValue } from '../../shell/variable.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 import { wordText } from '../../types.ts'
-import type { Policies } from '../../policy/index.ts'
 import type { SessionView } from '../../view/types.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { ok, result } from '../executor/builtins/shared.ts'
@@ -132,7 +131,6 @@ export async function expandArrayItems(
       registry,
       session.cwd,
       callStack,
-      registry.policies,
     )
     return resolveGlobs(
       classified,
@@ -162,7 +160,6 @@ async function subscriptKeyText(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
-  policies: Policies | null = null,
 ): Promise<string> {
   const inner = subscriptNode.namedChildren.filter((sc) => sc.type !== NT.VARIABLE_NAME)
   const raw = subscriptNode.text.slice(name.length + 1, -1)
@@ -171,7 +168,7 @@ async function subscriptKeyText(
   }
   const parts: string[] = []
   for (const sc of inner) {
-    parts.push(await expandNode(sc, context, executeFn, callStack, policies))
+    parts.push(await expandNode(sc, context, executeFn, callStack))
   }
   return parts.join('')
 }
@@ -211,8 +208,7 @@ export async function executeAssignment(
   const valNodes = node.namedChildren.filter(
     (c) => c.type !== NT.VARIABLE_NAME && c.type !== 'subscript',
   )
-  const policies = registry.policies
-  const view = sessionView(session, policies, context.frame.diagnostics)
+  const view = sessionView(session, context.frame.diagnostics)
   const firstVal = valNodes[0]
   // `set -x` traces the name as typed, before the store refuses it.
   const xtrace = session.shellOptions.xtrace === true
@@ -254,7 +250,7 @@ export async function executeAssignment(
     if (append && kind === 'indexed' && items.every((word) => keyedWord(word) === null)) {
       // `arr+=(...)` starts at the extent, so it fills the hole a trailing
       // `unset arr[last]` left but skips interior ones.
-      await landed(pushWords(session, policies, key, items))
+      await landed(pushWords(session, key, items))
       return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
     }
     let held: ShellArray | null = append ? (session.arrays[key] ?? null) : null
@@ -264,15 +260,13 @@ export async function executeAssignment(
     }
     // A `[i]=v` element places at i and the next plain word continues from
     // there.
-    const base = await fatalIndexLiteral(held, items, append, (sub) =>
-      subscriptIndex(session, sub, policies),
-    )
+    const base = await fatalIndexLiteral(held, items, append, (sub) => subscriptIndex(session, sub))
     await assignVar(view, key, base)
     return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
   }
   let val = text.slice(eq + 1)
   if (firstVal !== undefined) {
-    val = await expandAssignment(firstVal, context, executeFn, callStack, policies)
+    val = await expandAssignment(firstVal, context, executeFn, callStack)
   }
   if (xtrace) {
     const target = subscriptNode === null ? spelled : getText(subscriptNode)
@@ -286,20 +280,13 @@ export async function executeAssignment(
     // the first element. An indexed subscript that merely *expands* empty
     // stays legal (arithmetic on nothing is 0).
     if (subscriptNode.text.slice(spelled.length + 1, -1) === '') throw badSubscript(subscriptNode)
-    subscript = await subscriptKeyText(
-      subscriptNode,
-      spelled,
-      context,
-      executeFn,
-      callStack,
-      policies,
-    )
+    subscript = await subscriptKeyText(subscriptNode, spelled, context, executeFn, callStack)
   }
   // `a=x` writes element 0 of an array and the key "0" of a map, keeping the
   // rest; `a+=x` appends onto it, and `n+=3` on an integer name adds
   // (`declare -i n=5; n+=3` stores 8).
   const status = await landed(
-    assignElement(session, policies, key, subscript, val, append, context.frame.diagnostics),
+    assignElement(session, key, subscript, val, append, context.frame.diagnostics),
   )
   if (status === 'readonly') {
     throw new DiscardSignal(encodeText(`${shellVoice()}${key}: readonly variable\n`))

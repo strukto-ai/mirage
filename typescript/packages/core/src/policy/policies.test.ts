@@ -48,12 +48,9 @@ import type {
   Ask,
   CommandContext,
   CommandResultContext,
-  Decision,
   Deny,
   ExecuteResultContext,
   CommandRule,
-  SessionContext,
-  SessionResultContext,
   VfsContext,
   VfsResultContext,
   Route,
@@ -1070,110 +1067,7 @@ it('removes by identity, refreshes methods and preserves an admission in progres
   expect(await policies.preCommand(ctx('weird'))).toBeNull()
 })
 
-async function askedRounds(ws: Workspace, line: string, count: number): Promise<string[][]> {
-  const asked: string[][] = []
-  for (let i = 0; i < count; i++) {
-    const held = await ws.shell(line)
-    expect(held.refusal?.kind).toBe('pending')
-    const records = ws.decisions.pending()
-    asked.push(records.map((r) => [r.reason, ...r.argv].join(' ')).sort())
-    for (const record of records) await ws.decisions.answer(record.id, Outcome.ALLOW)
-  }
-  return asked
-}
-
 describe('every method answers Deny and Ask', () => {
-  class AskSecrets implements Policy {
-    preSession(ctx: SessionContext): Action | null {
-      return ctx.key.startsWith('SECRET') ? { kind: 'ask', reason: 'secret write' } : null
-    }
-  }
-
-  it('a preSession ask a host answers inline writes', async () => {
-    const asked: Decision[] = []
-    const ws = new Workspace(
-      { '/data/': new RAMVFS() },
-      {
-        policies: [new AskSecrets()],
-        onAsk: (record: Decision) => {
-          asked.push(record)
-          return Promise.resolve({ ...record, outcome: Outcome.ALLOW })
-        },
-      },
-    )
-    try {
-      expect((await ws.shell('export SECRET_A=1')).exitCode).toBe(0)
-      expect((await ws.shell('echo $SECRET_A')).stdoutText).toBe('1\n')
-      expect(asked.map((r) => r.argv)).toEqual([['SECRET_A', '1']])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  class AskAround implements Policy {
-    preSession(): Action | null {
-      return { kind: 'ask', reason: 'before' }
-    }
-
-    postSession(): Action | null {
-      return { kind: 'ask', reason: 'after' }
-    }
-  }
-
-  it.each(['export B=1', 'B=1 true', '{ export B=1; } & wait'])(
-    'a write asked before and after asks each once: %s',
-    async (line) => {
-      // The nod to the first question stands while the second waits.
-      const ws = executableWorkspace(undefined, [new AskAround()])
-      try {
-        expect(await askedRounds(ws, line, 2)).toEqual([['before B 1'], ['after B 1']])
-        expect((await ws.shell(line)).exitCode).toBe(0)
-      } finally {
-        await ws.close()
-      }
-    },
-  )
-
-  it('the writes of a line are spent when it ends', async () => {
-    // A retry finds the nods for the writes before the one it waits on.
-    const ws = executableWorkspace(undefined, [new AskAround()])
-    try {
-      const line = 'B=1 true; export C=2'
-      expect(await askedRounds(ws, line, 2)).toEqual([
-        ['before B 1', 'before C 2'],
-        ['after B 1', 'after C 2'],
-      ])
-      expect((await ws.shell(line)).exitCode).toBe(0)
-      expect(await askedRounds(ws, line, 1)).toEqual([['before B 1', 'before C 2']])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  class AskAB implements Policy {
-    preSession(ctx: SessionContext): Action | null {
-      return ['A', 'B'].includes(ctx.key) ? { kind: 'ask', reason: `${ctx.key} needs a nod` } : null
-    }
-  }
-
-  it('a killed job spends the nods it held', async () => {
-    // A job held on a question and then killed is never retried.
-    const ws = executableWorkspace(undefined, [new AskAB()])
-    try {
-      await ws.shell('{ export A=1; export B=2; } & wait')
-      const nod = ws.decisions.pending().find((r) => r.argv[0] === 'A')
-      await ws.decisions.answer(nod?.id ?? '', Outcome.ALLOW)
-      const killed = await ws.shell(
-        '{ export A=1; export B=2; touch /data/m; sleep 30; } & ' +
-          'until [ -e /data/m ]; do sleep 0.1; done; kill %1; wait',
-      )
-      expect(killed.refusal?.kind).toBe('pending')
-      expect((await ws.shell('export A=1')).refusal?.kind).toBe('pending')
-    } finally {
-      await ws.close()
-    }
-  })
-
   class AskReads implements Policy {
     readonly seen: [VfsContext, VfsResultContext][] = []
     private readonly pre: VfsContext[] = []
@@ -1251,7 +1145,7 @@ describe('every method answers Deny and Ask', () => {
   })
 })
 
-describe('postCommand and postSession', () => {
+describe('postCommand', () => {
   class AfterCommands implements Policy {
     readonly seen: CommandResultContext[] = []
 
@@ -1427,33 +1321,6 @@ describe('postCommand and postSession', () => {
       await ws.close()
     }
   })
-
-  class GuardVars implements Policy {
-    readonly seen: SessionResultContext[] = []
-
-    postSession(ctx: SessionResultContext): Action | null {
-      this.seen.push(ctx)
-      if (ctx.key !== 'A') return null
-      if (ctx.value === '2' || ctx.verb === 'unset') return { kind: 'deny', reason: 'frozen' }
-      return null
-    }
-  }
-
-  it('a postSession deny puts the old value back', async () => {
-    const policy = new GuardVars()
-    const ws = executableWorkspace(undefined, [policy])
-    try {
-      expect((await ws.shell('export A=1')).exitCode).toBe(0)
-      expect(policy.seen.at(-1)?.old).toBeNull()
-      expect((await ws.shell('export A=2')).exitCode).toBe(1)
-      expect(policy.seen.at(-1)?.old).toBe('1')
-      expect((await ws.shell('echo $A')).stdoutText).toBe('1\n')
-      expect((await ws.shell('unset A')).exitCode).toBe(1)
-      expect((await ws.shell('echo $A')).stdoutText).toBe('1\n')
-    } finally {
-      await ws.close()
-    }
-  })
 })
 
 describe('what a method sees', () => {
@@ -1538,11 +1405,6 @@ describe('what a method sees', () => {
       if (ctx.path.virtual === '/data/owner.txt') this.note('preVfs', ctx)
       return null
     }
-
-    preSession(ctx: SessionContext): Action | null {
-      if (ctx.key === 'TEAM') this.note('preSession', ctx)
-      return null
-    }
   }
 
   it('sees who makes the call', async () => {
@@ -1553,11 +1415,9 @@ describe('what a method sees', () => {
       seer.seen.length = 0
       ws.createSession('agent')
       await ws.shell('cd /data', { sessionId: 'agent' })
-      await ws.shell('export TEAM=core', { sessionId: 'agent' })
       await ws.shell('cat /data/owner.txt', { sessionId: 'agent' })
       await new Session(ws, 'agent').vfs.read('/data/owner.txt')
       expect(seer.seen).toEqual([
-        ['preSession', 'agent', '/data'],
         ['preCommand', 'agent', '/data'],
         ['preVfs', 'agent', '/data'],
         ['preVfs', 'agent', '/data'],
@@ -1828,26 +1688,20 @@ describe('what a method sees', () => {
   })
 })
 
-it.each([
-  'preCommand',
-  'postCommand',
-  'preExecute',
-  'postExecute',
-  'preVfs',
-  'postVfs',
-  'preSession',
-  'postSession',
-] as const)('composition stops before an invalid later action at %s', async (method) => {
-  const policy: Policy = {
-    [method]: () => [{ kind: 'deny', reason: 'first refusal' }, 'invalid later action'],
-  }
-  const policies = new Policies([policy])
-  const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
-  const answers = await policies.answers(method, ctx, false)
-  expect(answers).toHaveLength(1)
-  expect(answers[0]?.reason).toBe('first refusal')
-  await expect(policies.answers(method, ctx, true)).rejects.toThrow('invalid later action')
-})
+it.each(['preCommand', 'postCommand', 'preExecute', 'postExecute', 'preVfs', 'postVfs'] as const)(
+  'composition stops before an invalid later action at %s',
+  async (method) => {
+    const policy: Policy = {
+      [method]: () => [{ kind: 'deny', reason: 'first refusal' }, 'invalid later action'],
+    }
+    const policies = new Policies([policy])
+    const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
+    const answers = await policies.answers(method, ctx, false)
+    expect(answers).toHaveLength(1)
+    expect(answers[0]?.reason).toBe('first refusal')
+    await expect(policies.answers(method, ctx, true)).rejects.toThrow('invalid later action')
+  },
+)
 
 it('composition keeps registration snapshot during suspension', async () => {
   let enter: () => void = () => {

@@ -155,6 +155,15 @@ export interface HiddenVars {
   readonly patterns?: readonly string[]
 }
 
+/**
+ * What one session reads but cannot write: a set, unset or mark of one of
+ * these names is refused with EACCES, as a write to a hidden name is.
+ */
+export interface ProtectedVars {
+  readonly names?: readonly string[]
+  readonly patterns?: readonly string[]
+}
+
 export type ProcessScope = 'session' | 'workspace'
 
 /**
@@ -167,12 +176,14 @@ export type ProcessScope = 'session' | 'workspace'
  * the profile what exists. `DEFAULT_VISIBILITY` hides nothing.
  *
  * `shown` re-opens a hidden subtree and states a subtree's mode;
+ * `protected` names the variables the session reads but cannot write;
  * `processes` is whose processes the session sees.
  */
 export interface Visibility {
   readonly paths: HiddenPaths | null
   readonly shown: ShownPaths | null
   readonly vars: HiddenVars | null
+  readonly protected: ProtectedVars | null
   readonly processes: ProcessScope
 }
 
@@ -180,6 +191,7 @@ export const DEFAULT_VISIBILITY: Visibility = Object.freeze({
   paths: null,
   shown: null,
   vars: null,
+  protected: null,
   processes: 'session',
 })
 

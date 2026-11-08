@@ -171,13 +171,10 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         # 5), so each operand lands its assignments through the gated
         # session view before the next reads, RANDOM's seed included
         # (`[[ RANDOM=42 -eq RANDOM ]]` seeds, then draws).
-        policies = ctx.namespace.registry.policies
         values = []
         for operand in (node.left, node.right):
             try:
-                values.append(
-                    await session_arith(ctx.session, operand, policies)
-                )
+                values.append(await session_arith(ctx.session, operand))
             except PolicyDenied as exc:
                 raise CondError(f"{ctx.name}: {exc.filename}: denied")
             except (ArithError, ReadonlyVariableError) as exc:

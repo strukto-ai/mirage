@@ -18,10 +18,10 @@ import {
   loadWorkspaceConfigFile,
 } from '@struktoai/mirage-node'
 
-// The reviewer's policy as a document. workspace.yaml names a program
-// per method (guard.py and credentials.py, beside it) and the runtime
-// each runs on; the config loader reads the files, embeds their source,
-// and hands back what `new Workspace` takes, which is what
+// The reviewer's profile as a document. workspace.yaml protects the
+// credentials and names a program (guard.py, beside it) and the runtime it
+// runs on; the config loader reads the file, embeds its source, and hands
+// back what `new Workspace` takes, which is what
 // `mirage workspace create` does behind the daemon. A path in the document is relative to the
 // document, never to the process. The document is written once and read
 // by both implementations, so this file loads the python example's. The
@@ -39,10 +39,10 @@ const SEED = [
 const LINES: [string, string, string][] = [
   ['reviewer', 'cat /repo/notes.txt', 'pre_command read the file and found no marker'],
   ['reviewer', 'cat /repo/flagged.txt', 'and refuses one that holds it'],
-  ['reviewer', 'export AWS_SECRET=x', 'pre_session refuses a credential'],
+  ['reviewer', 'export AWS_SECRET=x', 'the profile protects a credential'],
   ['reviewer', 'export SAFE=1 && echo $SAFE', 'silence where no method objects'],
   ['host', 'cat /repo/flagged.txt', 'no profile, so no program'],
-  ['host', 'export AWS_SECRET=x', "the program is the profile's, not the workspace's"],
+  ['host', 'export AWS_SECRET=x', "the protection is the profile's, not the workspace's"],
 ]
 
 const dec = new TextDecoder()

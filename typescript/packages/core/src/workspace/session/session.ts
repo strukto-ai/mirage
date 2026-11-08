@@ -688,7 +688,7 @@ export class SessionState {
     // The shell draws a first `$RANDOM` seed from the session's ids, so a new
     // shell binds as it lands, as a new source does.
     this.records.shell.useIds(drawFrom(this.idSource))
-    this.hideVars()
+    this.guardVars()
   }
 
   get ids(): IdSource {
@@ -700,27 +700,31 @@ export class SessionState {
     this.records.shell.useIds(drawFrom(ids))
   }
 
-  /** What exists for this session; the shell takes its hidden names as it lands. */
+  /** What exists for this session; the shell takes its hidden and protected names as it lands. */
   get visibility(): Visibility {
     return this.vis ?? DEFAULT_VISIBILITY
   }
 
   set visibility(visibility: Visibility) {
     this.vis = visibility
-    this.hideVars()
+    this.guardVars()
   }
 
   /**
-   * Hand the shell the names the session's visibility hides. The shell holds
-   * them itself, so a new visibility, or a new shell, takes them as it lands,
-   * wherever it is set. Mirrors Python's hide_vars.
+   * Hand the shell the names the session's visibility hides and protects.
+   * The shell holds them itself, so a new visibility, or a new shell, takes
+   * them as it lands, wherever it is set. Mirrors Python's guard_vars.
    */
-  hideVars(): void {
+  guardVars(): void {
     if (this.vis === undefined) return
-    const hidden = this.vis.vars
+    const { vars: hidden, protected: guarded } = this.vis
     this.records.shell.hide(
       hidden === null ? [] : [...(hidden.names ?? [])],
       hidden === null ? [] : [...(hidden.patterns ?? [])],
+    )
+    this.records.shell.protect(
+      guarded === null ? [] : [...(guarded.names ?? [])],
+      guarded === null ? [] : [...(guarded.patterns ?? [])],
     )
   }
 
@@ -966,7 +970,8 @@ export class SessionState {
    *
    * A live read-only projection of `vars`, not a container: a writer
    * goes through `SessionView.set` (or `seedVar` when seeding a session
-   * before it is narrowed), so a `pre_session` policy sees every write.
+   * before it is narrowed), so a hidden, protected or readonly name
+   * refuses every write.
    * `state.ts` has always documented that rule; refusing writes to the
    * projection is what stops it being walked around by assigning into
    * storage, and an assignment into a plain object would land in a
@@ -1174,6 +1179,12 @@ export class SessionState {
         patterns: [...(vis.vars.patterns ?? [])],
       }
     }
+    if (vis.protected !== null) {
+      data.protected_vars = {
+        names: [...(vis.protected.names ?? [])],
+        patterns: [...(vis.protected.patterns ?? [])],
+      }
+    }
     if (this.commands !== null) data.commands = commandsToDict(this.commands)
     if (Object.keys(this.scripts).length > 0) data.scripts = scriptsToDict(this.scripts)
     if (Object.keys(this.commandLimits).length > 0)
@@ -1201,6 +1212,7 @@ export class SessionState {
     shown_paths?: { entries?: { path: string; mode?: MountMode }[] } | null
     hide_reasons?: { patterns?: string[]; reason?: string }[] | null
     hidden_vars?: { names?: string[]; patterns?: string[] } | null
+    protected_vars?: { names?: string[]; patterns?: string[] } | null
     commands?: ReturnType<typeof commandsToDict> | null
     scripts?: Record<string, ScriptJSON[]> | null
     profile?: string | null
@@ -1268,6 +1280,13 @@ export class SessionState {
         vars:
           data.hidden_vars != null
             ? { names: data.hidden_vars.names ?? [], patterns: data.hidden_vars.patterns ?? [] }
+            : null,
+        protected:
+          data.protected_vars != null
+            ? {
+                names: data.protected_vars.names ?? [],
+                patterns: data.protected_vars.patterns ?? [],
+              }
             : null,
         processes: processes.list,
       },

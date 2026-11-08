@@ -18,9 +18,9 @@ import {
   ScriptSource,
   Workspace,
   SessionProfile,
+  type CommandContext,
   type Deny,
   type Policy,
-  type SessionContext,
 } from '@struktoai/mirage-node'
 
 // A release workspace under two policies, one through each entry point code
@@ -36,15 +36,16 @@ import {
 //                      the same ctx as JSON, print their answer, and speak
 //                      only for the sessions under that profile.
 //
+// A variable the operator owns is no policy at all: the profile protects
+// it (`vars.protect`), so its sessions read it and cannot set it.
+//
 // The same block spelled as a document is policy_yaml.ts, beside this
 // file.
 
-/** Refuse an env write that would set a credential, for everyone. */
-const operatorOwnsCredentials: Policy = {
-  preSession(ctx: SessionContext): Deny | null {
-    return ctx.key.startsWith('AWS_')
-      ? { kind: 'deny', reason: 'credentials are set by the operator' }
-      : null
+/** Refuse every `rm`, for everyone. */
+const nothingIsRemoved: Policy = {
+  preCommand(ctx: CommandContext): Deny | null {
+    return ctx.command === 'rm' ? { kind: 'deny', reason: 'nothing is removed here' } : null
   },
 }
 
@@ -85,10 +86,12 @@ const SEED = [
 const LINES: [string, string, string][] = [
   ['reviewer', 'cat /repo/notes.txt', 'pre_command read the file and found no marker'],
   ['reviewer', 'cat /repo/flagged.txt', 'and refuses one that holds it; the reason is for the operator'],
-  ['reviewer', 'export AWS_SECRET=x', 'the coded policy, at the session view'],
+  ['reviewer', 'export AWS_SECRET=x', 'the profile protects a credential'],
   ['reviewer', 'export SAFE=1 && echo $SAFE', 'silence where no method objects'],
+  ['reviewer', 'rm /repo/notes.txt', 'the coded policy'],
   ['host', 'cat /repo/flagged.txt', 'no profile, so no program'],
-  ['host', 'export AWS_SECRET=x', 'the coded policy speaks for every session'],
+  ['host', 'export AWS_SECRET=x', 'and nothing protected'],
+  ['host', 'rm /repo/notes.txt', 'the coded policy speaks for every session'],
 ]
 
 const dec = new TextDecoder()
@@ -108,12 +111,13 @@ async function main(): Promise<void> {
     { '/repo/': new RAMVFS(), '/scratch/': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      policies: [operatorOwnsCredentials],
+      policies: [nothingIsRemoved],
       // The workspace takes parsed profiles; the document is validated
       // here rather than in the constructor, as in permissions.ts.
       profiles: {
         reviewer: SessionProfile(
           {
+            vars: { protect: ['AWS_*'] },
             policy: {
               pre_command: [{ script: MARKED, runtime: 'monty' }],
               pre_vfs: [{ script: COLD, runtime: 'monty' }],

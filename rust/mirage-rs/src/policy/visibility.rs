@@ -573,6 +573,7 @@ mod tests {
                     })
                     .collect(),
                 vars: classify_vars(&strings(&case["vars"])),
+                ..Visibility::default()
             });
             for query in case["queries"].as_array().unwrap() {
                 let path = text(query["path"].as_str().unwrap());

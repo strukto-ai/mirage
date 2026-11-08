@@ -7248,12 +7248,10 @@ components:
                   - pre_execute
                   - pre_command
                   - pre_vfs
-                  - pre_session
                   - pre_network
                   - post_execute
                   - post_command
                   - post_vfs
-                  - post_session
                   - post_network
               type: object
             - type: 'null'
@@ -7299,30 +7297,30 @@ components:
         \ law.\nA rule naming no path is read by verb (deny before ask before\nallow), wherever\
         \ it is written. A rule carrying paths, and every\nhide, is read by anchor depth:\
         \ the deeper entry wins, ties break by\nverb.\n\nA profile may also state a ``policy``:\
-        \ for each ``pre_`` method it\nanswers at (``pre_execute``, ``pre_command``, ``pre_vfs``,\n\
-        ``pre_session``), a list of programs, each with the runtime it runs\non (``ProfilePolicy``,\
-        \ the shape a ``clis`` entry has). A program's\nfunction for the method takes its\
-        \ context and returns its answer:\nNone for no opinion, a deny, an ask, or at ``pre_execute``\
-        \ a route.\nThey are asked in order and the first deny wins, so a policy expresses\n\
-        the conditions a declarative rule cannot; like every policy, it can\nonly restrict,\
-        \ never grant past a deny. The document is optional\nbeside it: a profile stating\
-        \ only a policy hides nothing, and the\npolicy is its whole admission policy.\n\n\
-        Args:\n    cwd (str | None): the session's working directory at creation.\n    env\
-        \ (dict[str, str | EnvVar] | None): the env entries seeded\n        into the session\
-        \ at creation, in the workspace ``env``\n        grammar: a bare string is an exported\
-        \ literal, and a\n        ``from:`` entry a managed pointer, so a credential is\n\
-        \        named here and fetched, never written as its value.\n    mounts (dict[str,\
-        \ ProfileMount] | None): per-mount settings,\n        keyed by prefix: a mode, ask\
-        \ and deny rules for lines\n        working inside the mount, and hides under it.\
-        \ A mount the\n        mapping omits keeps its own mode and gains no rules.\n    paths\
-        \ (PathsBlock | None): the profile's hides, absolute.\n    vars (VarsBlock | None):\
-        \ the profile's hidden variables.\n    commands (CommandsBlock | None): the profile's\
-        \ allow list and its\n        ask / deny rules, absolute paths.\n    policy (dict[ScriptMethod,\
-        \ list[ProfilePolicy]] | None): the\n        profile's policy: each ``pre_`` method's\
-        \ programs, asked in\n        order.\n    network (bool | dict[str, list[str]] | None):\
-        \ where the\n        session's lines may connect, the workspace's ``network``\n  \
-        \      grammar, held besides the workspace's own; None leaves the\n        workspace's\
-        \ alone."
+        \ for each method it answers at\n(``pre_execute``, ``pre_command``, ``pre_vfs``, ``pre_network``\
+        \ and\ntheir ``post_`` twins), a list of programs, each with the runtime it runs\n\
+        on (``ProfilePolicy``, the shape a ``clis`` entry has). A program's\nfunction for\
+        \ the method takes its context and returns its answer:\nNone for no opinion, a deny,\
+        \ an ask, or at ``pre_execute`` a route.\nThey are asked in order and the first deny\
+        \ wins, so a policy expresses\nthe conditions a declarative rule cannot; like every\
+        \ policy, it can\nonly restrict, never grant past a deny. The document is optional\n\
+        beside it: a profile stating only a policy hides nothing, and the\npolicy is its whole\
+        \ admission policy.\n\nArgs:\n    cwd (str | None): the session's working directory\
+        \ at creation.\n    env (dict[str, str | EnvVar] | None): the env entries seeded\n\
+        \        into the session at creation, in the workspace ``env``\n        grammar:\
+        \ a bare string is an exported literal, and a\n        ``from:`` entry a managed pointer,\
+        \ so a credential is\n        named here and fetched, never written as its value.\n\
+        \    mounts (dict[str, ProfileMount] | None): per-mount settings,\n        keyed by\
+        \ prefix: a mode, ask and deny rules for lines\n        working inside the mount,\
+        \ and hides under it. A mount the\n        mapping omits keeps its own mode and gains\
+        \ no rules.\n    paths (PathsBlock | None): the profile's hides, absolute.\n    vars\
+        \ (VarsBlock | None): the profile's hidden and protected\n        variables.\n   \
+        \ commands (CommandsBlock | None): the profile's allow list and its\n        ask /\
+        \ deny rules, absolute paths.\n    policy (dict[ScriptMethod, list[ProfilePolicy]]\
+        \ | None): the\n        profile's policy: each ``pre_`` method's programs, asked in\n\
+        \        order.\n    network (bool | dict[str, list[str]] | None): where the\n   \
+        \     session's lines may connect, the workspace's ``network``\n        grammar, held\
+        \ besides the workspace's own; None leaves the\n        workspace's alone."
     SessionResponse:
       properties:
         session_id:
@@ -7610,11 +7608,20 @@ components:
           type: array
           title: Hide
           default: []
+        protect:
+          items:
+            type: string
+          type: array
+          title: Protect
+          default: []
       additionalProperties: false
       type: object
       title: VarsBlock
       description: "``vars:`` of a profile.\n\nArgs:\n    hide (tuple[str, ...]): variable\
-        \ names or globs over names the\n        session reads as unset."
+        \ names or globs over names the\n        session reads as unset.\n    protect\
+        \ (tuple[str, ...]): variable names or globs over names the\n        session\
+        \ reads but cannot set, unset or mark: the operator's\n        to set, through\
+        \ the profile's ``env``."
     WorkspaceBrief:
       properties:
         id:

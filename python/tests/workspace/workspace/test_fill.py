@@ -2051,28 +2051,19 @@ async def test_self_read_in_the_prefix_keeps_the_fetch():
         await ws.close()
 
 
-class DenyUnrelatedWrite(Policy):
-    async def pre_session(self, ctx) -> Action | None:
-        if ctx.key == "UNRELATED":
-            return Deny(f"no writing {ctx.key}")
-        return None
-
-
 @pytest.mark.asyncio
-async def test_session_write_policy_disables_masking():
-    # A pre_session rule may refuse a write mid-line while later
-    # statements still run, so under one no assignment or unset is
-    # trusted to land: the fetch keeps today's shape and the output is
-    # unchanged.
+async def test_a_protected_name_never_masks():
+    # A write to a protected name is refused, as one to a readonly name
+    # is, so it is no mask: the standing value stays the one a read finds.
     calls, fetch = counting_source({"TOKEN": "t0"})
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws(
         {"TOKEN": {"from": "fake", "ref": "r"}},
-        policies=[DenyUnrelatedWrite()],
+        profiles={"default": {"vars": {"protect": ["TOKEN"]}}},
     )
     try:
         io = await ws.shell("TOKEN=local; printenv TOKEN")
-        assert (await io.stdout_str()) == "local\n"
+        assert io.stderr == b"TOKEN: permission denied\n"
         assert calls == ["r"]
     finally:
         await ws.close()
@@ -2441,16 +2432,6 @@ async def test_a_bad_instance_config_fails_the_lines_that_read_it():
         await ws.close()
 
 
-# A profile policy at the session view and one away from it: only the
-# first is a session-write gate, and only for the sessions under its
-# profile.
-SESSION_GATE = """\
-def pre_session(ctx):
-    if ctx['key'].startswith('AWS_'):
-        return {'kind': 'deny'}
-"""
-
-
 def _scripted_ws(env, method: str, source: str) -> Workspace:
     return _ws(
         env,
@@ -2468,27 +2449,10 @@ def _scripted_ws(env, method: str, source: str) -> Workspace:
 
 
 @pytest.mark.asyncio
-async def test_a_profile_policy_at_the_session_view_drops_the_masks():
-    # Its pre_session may refuse the assignment mid-line, so the standing
-    # value is fetched, as under a coded pre_session policy.
-    calls, fetch = counting_source({"TOKEN": "t0"})
-    register_secrets("fake", FakeConfig, fetch)
-    ws = _scripted_ws(
-        {"TOKEN": {"from": "fake", "ref": "r"}}, "pre_session", SESSION_GATE
-    )
-    try:
-        io = await ws.shell("TOKEN=local; printenv TOKEN")
-        assert (await io.stdout_str()) == "local\n"
-        assert calls == ["r"]
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_profile_policy_away_from_the_session_view_keeps_the_masks():
+async def test_a_profile_policy_keeps_the_masks():
     # The script policy stands at every entry point of every workspace, but
-    # this program says nothing at the session view, so the fill's masks hold
-    # and no source is contacted.
+    # none of them refuses a session write, so the fill's masks hold and no
+    # source is contacted.
     calls, fetch = counting_source({"TOKEN": "t0"})
     register_secrets("fake", FakeConfig, fetch)
     ws = _scripted_ws(

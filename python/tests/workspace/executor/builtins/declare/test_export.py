@@ -60,9 +60,8 @@ async def test_export_bare_prints_like_p():
 
 @pytest.mark.asyncio
 async def test_export_write_requires_a_threaded_view():
-    # A write reached without the workspace's gated view is a wiring
-    # bug, not a mode: the old fallback built an ungated view here, so
-    # `export AWS_SECRET_ACCESS_KEY=x` cleared every pre_session rule.
+    # A write reached without the line's session view is a wiring bug,
+    # not a mode, so it raises rather than writing past the view.
     session = make_session()
     with pytest.raises(RuntimeError, match="gated session view"):
         await handle_export(["SECRET=x"], session)

@@ -9,7 +9,7 @@ use super::{
 use crate::interp::escapes::decode_ansi_c;
 use crate::interp::parameter::scan_parameter;
 use crate::interp::pattern::{Case, Pattern};
-use crate::interp::write::{Denied, Fault};
+use crate::interp::write::Fault;
 use crate::interp::{Signal, listing, pattern, quote};
 
 /// The letters `${v@x}` knows.
@@ -173,8 +173,8 @@ impl<H: Host> Expander<'_, H> {
         })
     }
 
-    /// One write an expansion makes (`${X:=d}`, `$((X=5))`) through the
-    /// gate, as `X=d` would: a bare name over an array lands at element 0.
+    /// One write an expansion makes (`${X:=d}`, `$((X=5))`), as `X=d`
+    /// would: a bare name over an array lands at element 0.
     pub(super) async fn expansion_write(
         &mut self,
         name: &str,
@@ -187,7 +187,7 @@ impl<H: Host> Expander<'_, H> {
                 &format!("{name}: permission denied\n"),
             ));
         }
-        let landed = self.writer().land_element(name, key, value).await;
+        let landed = self.writer().land_element(name, key, value);
         match landed {
             Err(Fault::Readonly { name, .. }) => Err(discard(
                 self.shell.vars.voice(),
@@ -405,14 +405,12 @@ fn unescape_all(text: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A refused expansion-time write discards the line: a hidden name or the
-/// gate's refusal in their words, and an `-i` value that does not evaluate
+/// A refused expansion-time write discards the line: a hidden or
+/// protected name in its words, and an `-i` value that does not evaluate
 /// as `n=1+` does, in the shell's `voice`.
 pub(super) fn write_refusal(voice: &[u8], fault: Fault) -> Fault {
     match fault {
-        Fault::Hidden(name) | Fault::Denied(Denied { name, .. }) => {
-            discard(voice, &format!("{name}: permission denied\n"))
-        }
+        Fault::Denied(name) => discard(voice, &format!("{name}: permission denied\n")),
         Fault::Arith(error) => Signal::arith(voice, &error, "", true).into(),
         other => other,
     }

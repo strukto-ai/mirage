@@ -15,7 +15,6 @@
 from collections.abc import Callable
 from typing import Any
 
-from mirage.policy.policies import Policies
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import TSNodeLike
 from mirage.utils.glob_walk import escape_glob
@@ -28,7 +27,6 @@ async def expand_pattern(
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
-    policies: Policies | None = None,
 ) -> str:
     """Expand one pattern word into the matcher's glob dialect, as case
     patterns and the right side of ``[[ == ]]`` read it: quoted text
@@ -39,11 +37,8 @@ async def expand_pattern(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): function-call scope, if any.
-        policies (Policies | None): the policies its writes clear.
     """
-    runs = await expand(
-        ts_node, "pattern", context, execute_fn, call_stack, policies
-    )
+    runs = await expand(ts_node, "pattern", context, execute_fn, call_stack)
     return "".join(
         escape_glob(text) if quoted else text for text, quoted in runs
     )
@@ -54,7 +49,6 @@ async def expand_regex(
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
-    policies: Policies | None = None,
 ) -> str:
     """Expand the right side of ``[[ =~ ]]`` into a POSIX extended
     regex: quoted text matches only itself.
@@ -64,10 +58,5 @@ async def expand_regex(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): function-call scope, if any.
-        policies (Policies | None): the policies its writes clear.
     """
-    return str(
-        await expand(
-            ts_node, "regex", context, execute_fn, call_stack, policies
-        )
-    )
+    return str(await expand(ts_node, "regex", context, execute_fn, call_stack))

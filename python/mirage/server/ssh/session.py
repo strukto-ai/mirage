@@ -208,9 +208,9 @@ async def open_session(
 
     The session runs under ``profile`` (the login key's), else the
     workspace's default profile. The login environment is exported by
-    an unrecorded line, so every name clears the session's
-    ``pre_session`` gate like any ``export`` would, and a name the
-    profile already set keeps its value.
+    an unrecorded line, so a hidden or protected name is refused as any
+    ``export`` of it would be, and a name the profile already set keeps
+    its value.
 
     Args:
         ws (Workspace): the workspace, on its own loop.

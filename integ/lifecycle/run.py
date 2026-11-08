@@ -51,8 +51,6 @@ from mirage.policy.types import (
     Route,
     RouteContext,
     Scope,
-    SessionContext,
-    SessionResultContext,
     ShellExplanation,
     ShellNode,
     VfsContext,
@@ -245,7 +243,7 @@ class TrackedStreamCLI:
 
 class RulePolicy(Policy):
     """A host policy whose answers are supplied by JSON: per hook, the
-    answer for a word of the line, a command, a path or a variable."""
+    answer for a word of the line, a command or a path."""
 
     def __init__(self, rule: dict[str, Any]) -> None:
         self.rule = rule
@@ -257,7 +255,7 @@ class RulePolicy(Policy):
 
         Args:
             hook (str): the hook in python spelling.
-            subject (str): the line, command name, path or variable.
+            subject (str): the line, command name or path.
             line (bool): match a word the line contains, not the whole.
         """
         for key, answer in self.rule.get(hook, {}).items():
@@ -285,12 +283,6 @@ class RulePolicy(Policy):
 
     async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
         return self.answer("post_vfs", ctx.path.virtual)
-
-    async def pre_session(self, ctx: SessionContext) -> Action | None:
-        return self.answer("pre_session", ctx.key)
-
-    async def post_session(self, ctx: SessionResultContext) -> Action | None:
-        return self.answer("post_session", ctx.key)
 
 
 def answered(answers: tuple[Deny | Ask | Route, ...]) -> list[dict[str, Any]]:
@@ -645,8 +637,7 @@ async def action(
     elif op == "snapshot":
         held["state"] = await to_state_dict(ws)
     elif op == "checkout":
-        # A checkout onto the running workspace: the restored state wins,
-        # and every restored variable clears the session gate first.
+        # A checkout onto the running workspace: the restored state wins.
         await apply_state_dict(ws, held["state"])
     elif op == "mounts":
         return sorted(m.prefix for m in ws.mounts())

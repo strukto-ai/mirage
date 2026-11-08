@@ -147,6 +147,8 @@ pub struct Store {
     random_seed: Seed,
     random_last: u32,
     hidden: Option<Arc<VisibilityMatcher>>,
+    /// The names a profile protects: read as any name is, never written.
+    protected: Option<Arc<VisibilityMatcher>>,
     ids: Ids,
     held: usize,
     /// A fresh stamp on every change to the records or the hidden names.
@@ -193,6 +195,7 @@ impl Store {
             random_seed: Seed::Fresh,
             random_last: 0,
             hidden: None,
+            protected: None,
             ids,
             held: 0,
             stamp: fresh_stamp(),
@@ -342,21 +345,21 @@ impl Store {
 
     /// Hide the names a session's visibility lists, exactly or by glob.
     pub fn hide_vars(&mut self, names: &[String], patterns: &[String]) {
-        let units = |list: &[String]| -> Vec<Vec<u32>> {
-            list.iter()
-                .map(|name| name.chars().map(u32::from).collect())
-                .collect()
-        };
-        let hides = !names.is_empty() || !patterns.is_empty();
-        self.hide(hides.then(|| {
-            Arc::new(VisibilityMatcher::new(Visibility {
-                vars: VarScope {
-                    names: units(names),
-                    patterns: units(patterns),
-                },
-                ..Visibility::default()
-            }))
-        }));
+        self.hide(var_matcher(names, patterns));
+    }
+
+    /// Protect the names a session's profile lists, exactly or by glob:
+    /// they read as any name does, and a set, unset or mark of one is
+    /// refused as a write to a hidden name is.
+    pub fn protect_vars(&mut self, names: &[String], patterns: &[String]) {
+        self.protected = var_matcher(names, patterns);
+    }
+
+    pub fn protected(&self, name: &str) -> bool {
+        self.protected.as_ref().is_some_and(|matcher| {
+            let units: Vec<u32> = name.chars().map(u32::from).collect();
+            matcher.var_hidden(&units)
+        })
     }
 
     /// The bytes the variables hold: every record, names and values, and
@@ -591,8 +594,8 @@ impl Store {
         env
     }
 
-    /// Write a record without the gate: a session being seeded, or the
-    /// shell's own bookkeeping (`PWD`, `BASH_REMATCH`).
+    /// Write a record past the writer's checks: a session being seeded, or
+    /// the shell's own bookkeeping (`PWD`, `BASH_REMATCH`).
     pub fn seed(&mut self, name: &str, value: Value) {
         let var = match self.vars.get(name) {
             Some(existing) => existing.holding(Some(value)),
@@ -629,11 +632,10 @@ impl Store {
         }
     }
 
-    /// Store a write the gate passed: the coerced value on the name's
+    /// Store a write the writer allowed: the coerced value on the name's
     /// record, a managed pointer dropped (an agent write shadows it for
-    /// this session only), exported under `set -a`. The record it replaced
-    /// comes back for an undo.
-    pub fn land(&mut self, name: &str, value: Value, allexport: bool) -> Option<Arc<Var>> {
+    /// this session only), exported under `set -a`.
+    pub fn land(&mut self, name: &str, value: Value, allexport: bool) {
         let mut var = match self.vars.get(name) {
             Some(existing) => existing.holding(Some(value)),
             None => Var {
@@ -648,7 +650,7 @@ impl Store {
         if let Some(value) = &var.value {
             self.note_kind(name, value);
         }
-        self.place(name, Some(Arc::new(var)))
+        self.place(name, Some(Arc::new(var)));
     }
 
     /// The element `slot` of the array `name` holds, None when the record
@@ -706,12 +708,9 @@ impl Store {
     /// local stays unset until it returns; a name an enclosing scope
     /// shadows is that scope's to lose: the unset reveals the value it
     /// saved, which the name holds from then on (`x=old; x=pre f` where f
-    /// runs `unset x` reads `old` inside f and after it). Returns the
-    /// record dropped and the scope it emptied, for an undo.
-    pub fn drop_var(&mut self, name: &str) -> (Option<Arc<Var>>, Option<usize>) {
-        let frame = self.shadowing(name);
-        let old = self.vars.get(name).cloned();
-        match frame {
+    /// runs `unset x` reads `old` inside f and after it).
+    pub fn drop_var(&mut self, name: &str) {
+        match self.shadowing(name) {
             Some(index) if Some(index) != self.local && name != RANDOM => {
                 let saved = self.frames[index].saved.remove(name).flatten();
                 self.place(name, saved);
@@ -724,33 +723,6 @@ impl Store {
             self.random_seed = Seed::Off;
         }
         self.make_plain(name);
-        (old, frame)
-    }
-
-    /// What makes `RANDOM`, `LINENO` and `BASHPID` special as it stands,
-    /// for an undo.
-    pub fn marks(&self) -> (Seed, Vec<String>) {
-        (self.random_seed.clone(), self.plain.clone())
-    }
-
-    /// Put back what `drop_var` dropped, after a refusal: the value the
-    /// unset revealed goes back to its scope before the name's own record.
-    pub fn undrop(
-        &mut self,
-        name: &str,
-        old: Option<Arc<Var>>,
-        frame: Option<usize>,
-        marks: (Seed, Vec<String>),
-    ) {
-        let unsaved = frame.filter(|&index| {
-            index < self.frames.len() && !self.frames[index].saved.contains_key(name)
-        });
-        if let Some(index) = unsaved {
-            let revealed = self.vars.get(name).cloned();
-            self.frames[index].saved.insert(name.to_owned(), revealed);
-        }
-        self.place(name, old);
-        (self.random_seed, self.plain) = marks;
     }
 
     /// Open a function's scope; returns the caller's, for `leave`.
@@ -967,6 +939,7 @@ impl Store {
         forked.held = self.held;
         forked.stamp = self.stamp;
         forked.hidden = self.hidden.clone();
+        forked.protected = self.protected.clone();
         forked.pipe_status = self.pipe_status.clone();
         forked.function_names = self.function_names.clone();
         forked.call_lines = self.call_lines.clone();
@@ -1054,19 +1027,6 @@ impl Store {
         self.random_last = 0;
     }
 
-    /// The generator as it stands, for an undo.
-    pub fn generator(&self) -> (Option<u32>, Seed, u32) {
-        (
-            self.random_state,
-            self.random_seed.clone(),
-            self.random_last,
-        )
-    }
-
-    pub fn set_generator(&mut self, generator: (Option<u32>, Seed, u32)) {
-        (self.random_state, self.random_seed, self.random_last) = generator;
-    }
-
     /// Whether a write to RANDOM seeds it now.
     pub fn seeds_random(&self, name: &str) -> bool {
         name == RANDOM && self.random_seed != Seed::Off
@@ -1076,7 +1036,7 @@ impl Store {
     /// arithmetic context does: drawing through `draws`, stopping at a
     /// write to a readonly name, its subscripts expanding first when
     /// `expand` (a `let` operand, an `-i` value). The writes come back for
-    /// the caller to land through the gate.
+    /// the caller to land.
     pub fn arith(
         &mut self,
         draws: &mut Draws,
@@ -1099,8 +1059,8 @@ impl Store {
         reading.evaluate(text, added, nounset, &dynamic, expand)
     }
 
-    /// Replay an evaluation's scratch draws on the generator, once the gate
-    /// landed the seed it assigned: the session ends seeded and advanced by
+    /// Replay an evaluation's scratch draws on the generator, once the
+    /// writer landed the seed it assigned: the session ends seeded and advanced by
     /// every read since, as bash's does.
     pub fn settle(&mut self, draws: &mut Draws) -> Result<(), arith::Error> {
         let Some(seeded) = draws.seeded.take() else {
@@ -1221,6 +1181,24 @@ impl Store {
     }
 }
 
+/// A matcher over variable names, exact or by glob; None for no names.
+fn var_matcher(names: &[String], patterns: &[String]) -> Option<Arc<VisibilityMatcher>> {
+    let units = |list: &[String]| -> Vec<Vec<u32>> {
+        list.iter()
+            .map(|name| name.chars().map(u32::from).collect())
+            .collect()
+    };
+    (!names.is_empty() || !patterns.is_empty()).then(|| {
+        Arc::new(VisibilityMatcher::new(Visibility {
+            vars: VarScope {
+                names: units(names),
+                patterns: units(patterns),
+            },
+            ..Visibility::default()
+        }))
+    })
+}
+
 /// Case-convert the UTF-8 runs of `text`, any other byte kept as it is.
 fn recase(text: &[u8], convert: fn(&str) -> String) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
@@ -1258,8 +1236,8 @@ fn draw(mut state: u32, last: u32) -> (u32, u32) {
 
 /// An arithmetic evaluation's reads of `$RANDOM`. A read before the
 /// expression assigns `RANDOM` draws from the session; once it assigns one,
-/// the assignment is still pending at the gate, so reads draw from a
-/// scratch generator seeded the way the gate will seed the session, and
+/// the assignment is still pending, so reads draw from a scratch generator
+/// seeded the way the writer will seed the session, and
 /// `Store::settle` replays them once it has.
 #[derive(Debug, Default)]
 pub struct Draws {
@@ -1270,7 +1248,7 @@ pub struct Draws {
 }
 
 /// An `-i` coercion's evaluations: their `RANDOM` reads and the writes they
-/// made, which land through the gate before the value they were made for.
+/// made, which land before the value they were made for.
 #[derive(Debug, Default)]
 pub struct Coercion {
     pub draws: Draws,
@@ -1366,9 +1344,6 @@ mod tests {
             ]
         );
         assert_eq!((map.len(), map.get(&keys[19])), (4, Some(&b"v"[..])));
-        map.remove(&keys[18]);
-        map.remove(&keys[19]);
-        assert_eq!(Value::Assoc(Box::new(map)).rendering(), b"3 4");
     }
 
     #[test]
@@ -1703,12 +1678,6 @@ mod tests {
         store.leave(outer);
         assert_eq!(store.dynamic(LINENO), Some(b"7".to_vec()));
         assert_eq!(store.dynamic(BASHPID), Some(b"42".to_vec()));
-
-        let marks = store.marks();
-        let (old, frame) = store.drop_var(LINENO);
-        assert_eq!(store.fork().dynamic(LINENO), None);
-        store.undrop(LINENO, old, frame, marks);
-        assert_eq!(store.dynamic(LINENO), Some(b"7".to_vec()));
 
         store.drop_var(LINENO);
         let outer = store.enter();

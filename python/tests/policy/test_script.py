@@ -37,7 +37,6 @@ from mirage.policy.types import (
     ProfileScript,
     Route,
     RouteContext,
-    SessionContext,
     VfsContext,
     VfsResultContext,
     WorkspaceContext,
@@ -256,10 +255,6 @@ def _ops_ctx(
     )
 
 
-def _session_ctx(key: str = "AWS_KEY") -> SessionContext:
-    return SessionContext(verb="set", key=key, value="v", session_id="s")
-
-
 def _key(entry: ProfileScript) -> tuple[str, str]:
     """The engine a program runs on, as the policy keys it: its runtime
     and its settings with the default memory cap."""
@@ -415,19 +410,13 @@ def test_a_line_lists_each_command_as_pre_command_reads_it():
     assert data["cwd"] == "/data"
 
 
-def test_an_op_and_a_variable_write_read_as_their_fields():
+def test_an_op_reads_as_its_fields():
     op = script_context(_ops_ctx())
     assert op["call"]["name"] == "write"
     assert op["call"]["effect"] == "write"
     assert op["path"] == "/scratch/frozen/f"
     assert op["write"] is True
     assert op["cwd"] == "/" and op["env"] == {} and op["mounts"] == []
-    written = script_context(_session_ctx())
-    assert (written["verb"], written["key"], written["value"]) == (
-        "set",
-        "AWS_KEY",
-        "v",
-    )
 
 
 def test_what_a_backend_returned_keeps_its_keys():
@@ -515,7 +504,6 @@ async def test_a_method_without_a_program_runs_nothing():
     engine = FakeProgram(_answer(kind="deny"))
     policy = _policy("pre_command", engine)
     assert await policy.pre_vfs(_ops_ctx()) is None
-    assert await policy.pre_session(_session_ctx()) is None
     assert engine.requests == []
 
 

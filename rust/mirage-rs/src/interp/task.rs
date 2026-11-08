@@ -1,9 +1,10 @@
-//! A shell operation its host drives: an expansion or a gated write runs as
-//! a future that owns its shell, and each time it waits on the host it
-//! hands over one request, which the host answers before stepping it again.
-//! A request that needs the shell's state carries a copy of it, a child
-//! shell for a substitution and a read-only fork for a policy, so the host
-//! never reaches the shell a task holds.
+//! A shell operation its host drives: an expansion runs as a future that
+//! owns its shell, and each time it waits on the host it hands over one
+//! request, which the host answers before stepping it again. A request
+//! that needs the shell's state carries a copy of it, a child shell for a
+//! substitution and a read-only fork for a pause, so the host never
+//! reaches the shell a task holds. A session write asks the host nothing
+//! and runs at once.
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -16,7 +17,7 @@ use std::task::{Context, Poll, Waker};
 use super::Diagnostic;
 use super::expand::{Expander, Field, Host, Substitution};
 use super::shell::Shell;
-use super::write::{Denied, Fault, Gate, Verb, Writer, element_reference};
+use super::write::{Fault, Writer, element_reference};
 use crate::integer::parse_decimal;
 use crate::shell::Tree;
 use crate::vars::{Assigned, Store, Value};
@@ -35,16 +36,6 @@ pub enum Ask {
     },
     /// Start `node`'s process substitution in `shell` and name its pipe.
     ProcessSubstitution { shell: Shell, node: usize },
-    /// The `pre_session` (`post` false) or `post_session` policies on a
-    /// write; `view` is the session as the write finds it.
-    Gate {
-        post: bool,
-        verb: Verb,
-        key: String,
-        value: Option<Vec<u8>>,
-        old: Option<Vec<u8>>,
-        view: Store,
-    },
     /// A long piece of work has run a while; the host lets others run, or
     /// stops the operation, before it goes on. `view` is the session as the
     /// work has left it so far, which whatever the host runs meanwhile reads
@@ -56,7 +47,6 @@ pub enum Ask {
 pub enum Answer {
     Substituted(Substitution),
     Path(Vec<u8>),
-    Gate(Result<(), Denied>),
     Resumed,
     /// The host could not do it; the operation stops with this.
     Failed(Fault),
@@ -72,7 +62,6 @@ struct Slot {
     asked: Option<Ask>,
     answer: Option<Answer>,
     slices: u32,
-    listens: bool,
 }
 
 /// The operation's side of its host.
@@ -93,60 +82,6 @@ impl Line {
             slot.answer.take().map_or(Poll::Pending, Poll::Ready)
         })
         .await
-    }
-
-    /// Ask the gate about a write, before it lands or once it has
-    /// (`post`): the policy's refusal as a denial, a host that failed
-    /// answering as its own fault.
-    async fn gated(
-        &self,
-        post: bool,
-        verb: Verb,
-        key: &str,
-        value: Option<&[u8]>,
-        old: Option<&[u8]>,
-        store: &Store,
-    ) -> Result<(), Fault> {
-        let ask = Ask::Gate {
-            post,
-            verb,
-            key: key.to_owned(),
-            value: value.map(<[u8]>::to_vec),
-            old: old.map(<[u8]>::to_vec),
-            view: store.fork(),
-        };
-        match self.ask(ask).await {
-            Answer::Gate(answer) => answer.map_err(Fault::Denied),
-            Answer::Failed(fault) => Err(fault),
-            _ => Err(Fault::Host("an answer that is no gate")),
-        }
-    }
-}
-
-impl Gate for Line {
-    fn listens(&self) -> bool {
-        self.slot.borrow().listens
-    }
-
-    async fn pre(
-        &mut self,
-        verb: Verb,
-        key: &str,
-        value: Option<&[u8]>,
-        store: &Store,
-    ) -> Result<(), Fault> {
-        self.gated(false, verb, key, value, None, store).await
-    }
-
-    async fn post(
-        &mut self,
-        verb: Verb,
-        key: &str,
-        value: Option<&[u8]>,
-        old: Option<&[u8]>,
-        store: &Store,
-    ) -> Result<(), Fault> {
-        self.gated(true, verb, key, value, old, store).await
     }
 }
 
@@ -221,16 +156,13 @@ pub struct Task<T> {
 }
 
 impl<T: 'static> Task<T> {
-    /// Start `run` against a host that `listens` for session writes or not.
-    pub fn new<F, R>(listens: bool, run: F) -> Self
+    /// Start `run` against its host.
+    pub fn new<F, R>(run: F) -> Self
     where
         F: FnOnce(Line) -> R,
         R: Future<Output = T> + 'static,
     {
-        let slot = Rc::new(RefCell::new(Slot {
-            listens,
-            ..Slot::default()
-        }));
+        let slot = Rc::new(RefCell::new(Slot::default()));
         let line = Line {
             slot: Rc::clone(&slot),
         };
@@ -257,13 +189,6 @@ impl<T: 'static> Task<T> {
             }
             Poll::Pending => self.slot.borrow_mut().asked.take(),
         }
-    }
-
-    /// Whether a policy hears the session's writes from now on: a policy
-    /// added while the host ran a substitution hears what the operation
-    /// writes after it.
-    pub fn listen(&mut self, listens: bool) {
-        self.slot.borrow_mut().listens = listens;
     }
 
     /// Answer what the last step asked.
@@ -345,14 +270,8 @@ impl<T> Ended<T> {
 }
 
 /// Expand `node` of `tree` as `mode` says.
-pub fn expand(
-    shell: Shell,
-    tree: Arc<Tree>,
-    node: usize,
-    mode: Mode,
-    listens: bool,
-) -> Task<Ended<Expanded>> {
-    Task::new(listens, move |mut line| async move {
+pub fn expand(shell: Shell, tree: Arc<Tree>, node: usize, mode: Mode) -> Task<Ended<Expanded>> {
+    Task::new(move |mut line| async move {
         let mut shell = shell;
         let mut diagnostics = Vec::new();
         let result = {
@@ -449,85 +368,72 @@ pub enum Write {
     },
 }
 
-/// Run one session write through the gate; an error a `RANDOM=` seed
-/// makes is a warning when `warns`, raised otherwise.
-pub fn write(shell: Shell, write: Write, listens: bool, warns: bool) -> Task<Ended<i64>> {
-    Task::new(listens, move |mut line| async move {
-        let mut shell = shell;
-        let mut diagnostics = Vec::new();
-        let array = match &write {
-            Write::IsSet { reference, .. } => element_reference(reference)
-                .and_then(|(name, _)| shell.indexed(name))
-                .map(Cow::into_owned),
-            _ => None,
-        };
-        let result = {
-            let mut writer = Writer::of(&mut shell, &mut line, warns.then_some(&mut diagnostics));
-            match write {
-                Write::Set {
-                    name,
-                    value,
-                    follow_ref,
-                    assigned,
-                    added,
-                } => writer
-                    .set(
-                        &name,
-                        value,
-                        follow_ref,
-                        assigned.as_ref(),
-                        added.as_deref(),
-                    )
-                    .await
-                    .map(|()| 0),
-                Write::Unset { name, follow_ref } => {
-                    writer.unset(&name, follow_ref).await.map(|()| 0)
-                }
-                Write::Mark {
-                    name,
-                    attr,
-                    on,
-                    follow_ref,
-                } => writer.mark(&name, attr, on, follow_ref).await.map(|()| 0),
-                Write::Index { subscript } => writer.subscript_index(&subscript).await,
-                Write::Arith { text, expand } => writer.arith(&text, expand).await,
-                Write::IsSet {
-                    reference,
-                    expanded,
-                } => writer
-                    .is_set(&reference, array, expanded)
-                    .await
-                    .map(i64::from),
-                Write::Element {
-                    name,
-                    subscript,
-                    value,
-                    append,
-                } => writer
-                    .element(&name, subscript.as_deref(), &value, append)
-                    .await
-                    .map(|element| element as i64),
-                Write::Push { name, words } => writer.push(&name, words).await.map(|()| 0),
-                Write::UnsetElement {
-                    name,
-                    subscript,
-                    every,
-                } => writer
-                    .unset_element(&name, &subscript, every)
-                    .await
-                    .map(|element| element as i64),
-                Write::Integer { text, added } => writer
-                    .evaluate_integer(&text, added.as_deref())
-                    .await
-                    .map(|value| parse_decimal(&value).unwrap_or(0)),
-            }
-        };
-        Ended {
-            shell,
-            result,
-            diagnostics,
-        }
-    })
+/// Run one session write on `shell`; an error a `RANDOM=` seed makes is a
+/// warning when `warns`, raised otherwise. The result is the write's
+/// value, and what it said on the way.
+pub fn write(
+    shell: &mut Shell,
+    write: Write,
+    warns: bool,
+) -> (Result<i64, Fault>, Vec<Diagnostic>) {
+    let mut diagnostics = Vec::new();
+    let array = match &write {
+        Write::IsSet { reference, .. } => element_reference(reference)
+            .and_then(|(name, _)| shell.indexed(name))
+            .map(Cow::into_owned),
+        _ => None,
+    };
+    let mut writer = Writer::of(shell, warns.then_some(&mut diagnostics));
+    let result = match write {
+        Write::Set {
+            name,
+            value,
+            follow_ref,
+            assigned,
+            added,
+        } => writer
+            .set(
+                &name,
+                value,
+                follow_ref,
+                assigned.as_ref(),
+                added.as_deref(),
+            )
+            .map(|()| 0),
+        Write::Unset { name, follow_ref } => writer.unset(&name, follow_ref).map(|()| 0),
+        Write::Mark {
+            name,
+            attr,
+            on,
+            follow_ref,
+        } => writer.mark(&name, attr, on, follow_ref).map(|()| 0),
+        Write::Index { subscript } => writer.subscript_index(&subscript),
+        Write::Arith { text, expand } => writer.arith(&text, expand),
+        Write::IsSet {
+            reference,
+            expanded,
+        } => writer.is_set(&reference, array, expanded).map(i64::from),
+        Write::Element {
+            name,
+            subscript,
+            value,
+            append,
+        } => writer
+            .element(&name, subscript.as_deref(), &value, append)
+            .map(|element| element as i64),
+        Write::Push { name, words } => writer.push(&name, words).map(|()| 0),
+        Write::UnsetElement {
+            name,
+            subscript,
+            every,
+        } => writer
+            .unset_element(&name, &subscript, every)
+            .map(|element| element as i64),
+        Write::Integer { text, added } => writer
+            .evaluate_integer(&text, added.as_deref())
+            .map(|value| parse_decimal(&value).unwrap_or(0)),
+    };
+    (result, diagnostics)
 }
 
 #[cfg(test)]
@@ -547,7 +453,7 @@ mod tests {
         let word = (0..tree.nodes.len())
             .find(|&n| tree.kind(n) == "concatenation")
             .unwrap();
-        let mut task = expand(shell(), Arc::clone(&tree), word, Mode::Fields, false);
+        let mut task = expand(shell(), Arc::clone(&tree), word, Mode::Fields);
         let Some(Ask::Substitute { body, shell, .. }) = task.step() else {
             panic!("expected a substitution");
         };
@@ -569,103 +475,17 @@ mod tests {
     }
 
     #[test]
-    fn a_listened_write_asks_both_gates_and_a_refusal_undoes_it() {
-        let mut task = write(
-            shell(),
-            Write::Set {
-                name: "x".to_owned(),
-                value: Value::Scalar(b"new".to_vec()),
-                follow_ref: true,
-                assigned: None,
-                added: None,
-            },
-            true,
-            true,
-        );
-        let Some(Ask::Gate {
-            post: false, view, ..
-        }) = task.step()
-        else {
-            panic!("expected pre_session");
-        };
-        assert_eq!(view.scalar("x"), Some(&b"a b"[..]));
-        task.answer(Answer::Gate(Ok(())));
-        let Some(Ask::Gate {
-            post: true, view, ..
-        }) = task.step()
-        else {
-            panic!("expected post_session");
-        };
-        assert_eq!(view.scalar("x"), Some(&b"new"[..]));
-        task.answer(Answer::Gate(Err(Denied {
-            name: "x".to_owned(),
-            record: 7,
-        })));
-        assert!(task.step().is_none());
-        let ended = task.output().unwrap();
-        assert!(matches!(
-            ended.result,
-            Err(Fault::Denied(Denied { record: 7, .. }))
-        ));
-        assert_eq!(ended.shell.vars.scalar("x"), Some(&b"a b"[..]));
-    }
-
-    #[test]
-    fn a_host_failing_at_the_gate_stops_with_its_own_fault() {
-        let mut task = write(
-            shell(),
-            Write::Unset {
-                name: "x".to_owned(),
-                follow_ref: true,
-            },
-            true,
-            true,
-        );
-        assert!(matches!(task.step(), Some(Ask::Gate { post: false, .. })));
-        task.answer(Answer::Failed(Fault::Host("the host failed")));
-        assert!(task.step().is_none());
-        let ended = task.output().unwrap();
-        assert!(matches!(ended.result, Err(Fault::Host(_))));
-        assert_eq!(ended.shell.vars.scalar("x"), Some(&b"a b"[..]));
-    }
-
-    #[test]
-    fn a_host_that_starts_listening_mid_task_is_asked_about_later_writes() {
-        let tree = Arc::new(crate::shell::parse(b"echo ${y:=$(hi)}"));
-        let word = (0..tree.nodes.len())
-            .find(|&n| tree.kind(n) == "expansion")
-            .unwrap();
-        let mut task = expand(shell(), Arc::clone(&tree), word, Mode::Fields, false);
-        assert!(matches!(task.step(), Some(Ask::Substitute { .. })));
-        task.listen(true);
-        task.answer(Answer::Substituted(Substitution {
-            stdout: b"v".to_vec(),
-            stderr: Vec::new(),
-            status: 0,
-        }));
-        let Some(Ask::Gate {
-            post: false, key, ..
-        }) = task.step()
-        else {
-            panic!("expected pre_session");
-        };
-        assert_eq!(key, "y");
-    }
-
-    #[test]
-    fn an_unheard_write_runs_in_one_step() {
-        let mut task = write(
-            shell(),
+    fn a_write_lands_at_once() {
+        let mut shell = shell();
+        let (result, _) = write(
+            &mut shell,
             Write::Arith {
                 text: b"y = 6 * 7".to_vec(),
                 expand: false,
             },
-            false,
             true,
         );
-        assert!(task.step().is_none());
-        let ended = task.output().unwrap();
-        assert_eq!(ended.result.ok(), Some(42));
-        assert_eq!(ended.shell.vars.scalar("y"), Some(&b"42"[..]));
+        assert_eq!(result.ok(), Some(42));
+        assert_eq!(shell.vars.scalar("y"), Some(&b"42"[..]));
     }
 }

@@ -86,6 +86,8 @@ pub struct Visibility {
     pub hidden: PathScope,
     pub shown: Vec<Show>,
     pub vars: VarScope,
+    /// The names the session reads but cannot set, unset or mark.
+    pub protected: VarScope,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -118,6 +120,7 @@ pub struct Profile {
     pub commands: Option<Rules>,
     pub paths: Option<Paths>,
     pub vars: Option<Vec<Text>>,
+    pub protect: Option<Vec<Text>>,
     pub mounts: Option<Vec<Mount>>,
 }
 

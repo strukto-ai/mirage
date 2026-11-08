@@ -22,8 +22,6 @@ import type {
   NetworkResultContext,
   VfsContext,
   VfsResultContext,
-  SessionContext,
-  SessionResultContext,
   WorkspaceContext,
 } from './types.ts'
 
@@ -41,7 +39,7 @@ import type {
  * The methods come in pairs, one per surface: the line (`preExecute` /
  * `postExecute`), each command or CLI (`preCommand` / `postCommand`),
  * each `ws.vfs` / `session.vfs` call (`preVfs` / `postVfs`) and each
- * session write (`preSession` / `postSession`). Every method may answer
+ * connection (`preNetwork` / `postNetwork`). Every method may answer
  * Deny or Ask; a Limit only at `postExecute`, where a line's output comes
  * back to cap, a Route only at `preExecute`. One more, `preWorkspace`,
  * answers on a server before a workspace is built, with a Deny only. A
@@ -111,19 +109,6 @@ export interface Policy {
    */
   postNetwork?(
     ctx: NetworkResultContext,
-  ): Action | Action[] | null | Promise<Action | Action[] | null>
-  /**
-   * Admit, hold or refuse one session write (set, unset, mark) on the
-   * session plane, before it lands. Not path-scoped on purpose: the
-   * context carries a key, never a pseudo-path.
-   */
-  preSession?(ctx: SessionContext): Action | Action[] | null | Promise<Action | Action[] | null>
-  /**
-   * Judge one session write once it landed. A Deny, or an Ask the host
-   * has not approved, puts the old value back and refuses the write.
-   */
-  postSession?(
-    ctx: SessionResultContext,
   ): Action | Action[] | null | Promise<Action | Action[] | null>
   /**
    * Judge one finished line's output: what `preExecute` saw, plus the exit

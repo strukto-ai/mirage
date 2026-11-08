@@ -4,10 +4,9 @@
 
 use super::codec::Item;
 use super::expand::{Field, marked};
-use super::job::Output;
 use super::shell::Shell;
 use super::task::Expanded;
-use super::write::{Denied, Fault, Verb};
+use super::write::Fault;
 use super::{Diagnostic, Signal};
 use crate::arith;
 use crate::vars::{Value, Var};
@@ -125,10 +124,7 @@ pub fn arith_error(error: &arith::Error) -> Item {
 /// errors.
 pub fn fault_out(fault: &Fault) -> Item {
     match fault {
-        Fault::Hidden(name) => Item::tuple([Item::text("hidden"), Item::text(name)]),
-        Fault::Denied(Denied { name, record }) => {
-            Item::tuple([Item::text("denied"), Item::text(name), Item::int(*record)])
-        }
+        Fault::Denied(name) => Item::tuple([Item::text("denied"), Item::text(name)]),
         Fault::Readonly { name, subscript } => Item::tuple([
             Item::text("readonly"),
             Item::text(name),
@@ -177,11 +173,18 @@ pub fn expanded_out(expanded: &Expanded) -> Item {
     }
 }
 
-/// How an operation ended: `("ok", answer)`, or the fault it stopped on.
-pub fn result_out(result: &Result<Output, Fault>) -> Item {
+/// How an expansion ended: `("ok", answer)`, or the fault it stopped on.
+pub fn result_out(result: &Result<Expanded, Fault>) -> Item {
     match result {
-        Ok(Output::Expanded(done)) => Item::tuple([Item::text("ok"), expanded_out(done)]),
-        Ok(Output::Wrote(value)) => Item::tuple([Item::text("ok"), Item::Big(*value)]),
+        Ok(done) => Item::tuple([Item::text("ok"), expanded_out(done)]),
+        Err(fault) => fault_out(fault),
+    }
+}
+
+/// How a write ended: `("ok", value)`, or the fault it stopped on.
+pub fn wrote_out(result: &Result<i64, Fault>) -> Item {
+    match result {
+        Ok(value) => Item::tuple([Item::text("ok"), Item::Big(*value)]),
         Err(fault) => fault_out(fault),
     }
 }
@@ -209,13 +212,5 @@ pub fn conversion_out(kept: &Result<Option<Vec<u8>>, arith::Error>) -> Item {
     match kept {
         Ok(text) => Item::opt(text.as_ref(), Item::text),
         Err(error) => Item::tuple([Item::text("error"), arith_error(error)]),
-    }
-}
-
-/// A gate question's verb as the hosts name it.
-pub fn verb_name(verb: Verb) -> &'static str {
-    match verb {
-        Verb::Set => "set",
-        Verb::Unset => "unset",
     }
 }

@@ -153,7 +153,7 @@ async function finishFind(
       vfs,
       statPath,
       dispatch,
-      identity: identityFrom(sessionView(session, registry.policies, context.frame.diagnostics)),
+      identity: identityFrom(sessionView(session, context.frame.diagnostics)),
       stdin,
       starts,
       ...(signal !== undefined ? { signal } : {}),
@@ -289,7 +289,7 @@ export async function handleCommand(
   if (JOB_BUILTINS.has(cmdName) && jobTable !== null) {
     const textParts = parts.map((p) => (typeof p === 'string' ? p : p.virtual))
     if (cmdName === 'ps') {
-      return handlePs(jobTable, textParts, session, sessionView(session, registry.policies))
+      return handlePs(jobTable, textParts, session, sessionView(session))
     }
     const handler = JOB_HANDLERS[cmdName]
     if (handler !== undefined) {
@@ -297,7 +297,7 @@ export async function handleCommand(
         jobTable,
         textParts,
         session,
-        sessionView(session, registry.policies, context.frame.diagnostics),
+        sessionView(session, context.frame.diagnostics),
         mergeSignals(signal, context.frame.abortSignal),
         // `fg` is the one job builtin that writes before it blocks.
         sink,
@@ -359,7 +359,7 @@ export async function handleCommand(
           ids: registry.ids,
           entries: registry.runtimeEntries,
           vfs: commandFiles(null),
-          session: sessionView(session, registry.policies, context.frame.diagnostics),
+          session: sessionView(session, context.frame.diagnostics),
           ...(registry.processView === undefined
             ? {}
             : { processes: registry.processView(session) }),
@@ -431,7 +431,7 @@ export async function handleCommand(
         commandLimits: registry.commandLimits,
         ids: registry.ids,
         vfs: files,
-        session: sessionView(session, registry.policies, context.frame.diagnostics),
+        session: sessionView(session, context.frame.diagnostics),
         ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
       },
       (path) => registry.tryMountFor(path),
@@ -663,7 +663,7 @@ export async function handleCommand(
         newerTimes,
         undefined,
         envSnapshot(session),
-        identityFrom(sessionView(session, registry.policies, context.frame.diagnostics)).profile,
+        identityFrom(sessionView(session, context.frame.diagnostics)).profile,
       )
     } catch (err) {
       if (err instanceof UsageError) {
@@ -778,7 +778,7 @@ export async function handleCommand(
       registry,
       session.cwd,
       files,
-      sessionView(session, registry.policies, context.frame.diagnostics),
+      sessionView(session, context.frame.diagnostics),
       mergeSignals(signal, context.frame.abortSignal),
       dispatch,
       follow,
@@ -795,7 +795,7 @@ export async function handleCommand(
       stdin,
       makeStorageKey(registry),
       files,
-      sessionView(session, registry.policies, context.frame.diagnostics),
+      sessionView(session, context.frame.diagnostics),
       session.cwd,
       spelledWords(parts.slice(1)),
       aggregateFor(cmdName, operandMounts(registry, cmdName, csScopes)),
@@ -965,7 +965,7 @@ export async function handleCommand(
       cmdStr,
       stdin,
       files,
-      sessionView(session, registry.policies, context.frame.diagnostics),
+      sessionView(session, context.frame.diagnostics),
       mergeSignals(signal, context.frame.abortSignal),
       dispatch,
       (name, ps, ts, fk, opts) =>

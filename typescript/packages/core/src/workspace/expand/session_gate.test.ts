@@ -14,39 +14,32 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { Policy } from '../../policy/base.ts'
-import type { Action, SessionContext } from '../../policy/types.ts'
+import { SessionProfile } from '../../policy/profile.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 const DEC = new TextDecoder()
 
-class DenyAws implements Policy {
-  preSession(ctx: SessionContext): Action | null {
-    if (!ctx.key.startsWith('AWS_')) return null
-    return { kind: 'deny', reason: 'not yours to set' }
-  }
-}
-
-class DenyUnset implements Policy {
-  preSession(ctx: SessionContext): Action | null {
-    return ctx.verb === 'unset' ? { kind: 'deny', reason: 'no unsets' } : null
-  }
-}
-
+/** A workspace whose profile protects `AWS_*` and seeds one. */
 function guarded(): Workspace {
   return new Workspace(
     { '/ram': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      policies: [new DenyAws()],
+      profiles: {
+        default: SessionProfile({ vars: { protect: ['AWS_*'] }, env: { AWS_REGION: 'eu' } }),
+      },
     },
   )
 }
 
-// Every expansion-time writer below reached the session env directly, so a
-// preSession rule was one `${X:=}` away from being irrelevant. Mirrors
+async function valueOf(ws: Workspace, name: string): Promise<string> {
+  return DEC.decode((await ws.shell(`echo [$${name}]`)).stdout).trim()
+}
+
+// Every expansion-time writer below lands in the store, which refuses a
+// protected name whichever door the write came in by. Mirrors
 // python/tests/workspace/expand/test_session_gate.py.
 const REFUSED: [string, string][] = [
   ['export AWS_PROFILE=x', 'AWS_PROFILE'],
@@ -59,9 +52,20 @@ const REFUSED: [string, string][] = [
   ['printf -v AWS_KEY %s x', 'AWS_KEY'],
   ['for ((AWS_I=0; AWS_I<1; AWS_I++)); do :; done', 'AWS_I'],
   // The write re-aims an unset reference, so the mark lands on a name the
-  // assignment's own gate never saw.
+  // assignment itself never named.
   ['declare -n ref; export ref=AWS_KEY', 'AWS_KEY'],
   ['declare -n ref; readonly ref=AWS_KEY', 'AWS_KEY'],
+  ['AWS_KEY=x printenv AWS_KEY', 'AWS_KEY'],
+  ['read AWS_KEY <<< x', 'AWS_KEY'],
+  ['AWS_KEY+=(x)', 'AWS_KEY'],
+]
+
+const KEPT_BY_OPERATOR = [
+  'AWS_REGION=us',
+  'unset AWS_REGION',
+  "unset 'AWS_REGION[0]'",
+  'export -n AWS_REGION',
+  'readonly AWS_REGION',
 ]
 
 const ALLOWED: [string, string, string][] = [
@@ -72,16 +76,31 @@ const ALLOWED: [string, string, string][] = [
   ['for ((I=0; I<1; I++)); do :; done', 'I', '[1]'],
 ]
 
-describe('every session writer clears the pre_session gate', () => {
+describe('every session writer refuses a protected name', () => {
   for (const [line, name] of REFUSED) {
     it(`refuses ${line}`, async () => {
       const ws = guarded()
       try {
         const result = await ws.shell(line)
-        expect(result.exitCode, `${line} was not refused`).not.toBe(0)
-        expect(result.refusal?.reason, line).toContain('not yours to set')
-        const after = await ws.shell(`echo [$${name}]`)
-        expect(DEC.decode(after.stdout).trim(), `${line} wrote anyway`).toBe('[]')
+        expect(result.exitCode, `${line} was not refused`).toBe(1)
+        expect(DEC.decode(result.stderr)).toContain(`${name}: permission denied`)
+        expect(await valueOf(ws, name), `${line} wrote anyway`).toBe('[]')
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+
+  for (const line of KEPT_BY_OPERATOR) {
+    it(`reads and keeps what the operator set: ${line}`, async () => {
+      const ws = guarded()
+      try {
+        const result = await ws.shell(line)
+        expect(result.exitCode, `${line} was not refused`).toBe(1)
+        expect(DEC.decode(result.stderr)).toContain('AWS_REGION: permission denied')
+        expect(await valueOf(ws, 'AWS_REGION')).toBe('[eu]')
+        const shown = await ws.shell('declare -p AWS_REGION')
+        expect(DEC.decode(shown.stdout)).toBe('declare -x AWS_REGION="eu"\n')
       } finally {
         await ws.close()
       }
@@ -105,14 +124,12 @@ describe('every session writer clears the pre_session gate', () => {
 describe('a session write states itself as a whole variable', () => {
   it('refuses a subscripted printf target', async () => {
     // `printf -v name[i]` writes the session's array table, so it is a
-    // session write like any other. Taking the direct path for it left
-    // `printf -v 'AWS_KEY[0]'` as the one spelling a pre_session rule
-    // could not refuse.
+    // session write like any other.
     const ws = guarded()
     try {
       const result = await ws.shell("printf -v 'AWS_KEY[0]' %s x")
-      expect(result.exitCode).not.toBe(0)
-      expect(result.refusal?.reason).toContain('not yours to set')
+      expect(result.exitCode).toBe(1)
+      expect(DEC.decode(result.stderr)).toContain('AWS_KEY: permission denied')
       const after = await ws.shell('echo "[${AWS_KEY[0]}]"')
       expect(DEC.decode(after.stdout).trim()).toBe('[]')
     } finally {
@@ -148,7 +165,7 @@ it('does not expand length after a refused offset', async () => {
   try {
     const result = await ws.shell('v=abcdef; echo "${v:(AWS_LIMIT=1):${OTHER:=2}}"')
     expect(result.exitCode).toBe(1)
-    expect(result.refusal?.reason).toContain('not yours to set')
+    expect(DEC.decode(result.stderr)).toContain('AWS_LIMIT: permission denied')
     for (const name of ['AWS_LIMIT', 'OTHER']) {
       const after = await ws.shell(`echo [$${name}]`)
       expect(DEC.decode(after.stdout).trim()).toBe('[]')
@@ -159,8 +176,7 @@ it('does not expand length after a refused offset', async () => {
 })
 
 // The literals store first and take their marks once they all have; a
-// policy refusing a later one must not leave an earlier one stored but
-// unfrozen.
+// protected later one must not leave an earlier one stored but unfrozen.
 const LITERALS: [string, string][] = [
   ['readonly SAFE=(one) AWS_BLOCKED=(two)', '-ar'],
   ['export SAFE=(one) AWS_BLOCKED=(two)', '-ax'],
@@ -173,7 +189,7 @@ describe('a refused literal leaves the stored ones marked', () => {
       const ws = guarded()
       try {
         const result = await ws.shell(line)
-        expect(result.refusal?.reason).toContain('not yours to set')
+        expect(DEC.decode(result.stderr)).toContain('AWS_BLOCKED: permission denied')
         const shown = await ws.shell('declare -p SAFE')
         expect(DEC.decode(shown.stdout)).toBe(`declare ${expected} SAFE=([0]="one")\n`)
       } finally {
@@ -185,8 +201,8 @@ describe('a refused literal leaves the stored ones marked', () => {
 
 it("keeps a literal's mark on the target its write cleared", async () => {
   // The literal writes through `ref` to `T`; the plain operand then re-aims
-  // `ref` at `AWS_KEY`, and the literal's `-x` must not follow it there past
-  // the gate. Under `-n` it marks the reference itself.
+  // `ref` at `AWS_KEY`, and the literal's `-x` must not follow it to the
+  // protected name. Under `-n` it marks the reference itself.
   const ws = guarded()
   try {
     const result = await ws.shell('T=old; declare -n ref=T; declare -nx ref=AWS_KEY ref=(one)')
@@ -194,25 +210,6 @@ it("keeps a literal's mark on the target its write cleared", async () => {
     const shown = await ws.shell('declare -p ref AWS_KEY')
     expect(DEC.decode(shown.stdout)).toBe('declare -nx ref="AWS_KEY"\n')
     expect(DEC.decode(shown.stderr)).toContain('AWS_KEY: not found')
-  } finally {
-    await ws.close()
-  }
-})
-
-it('asks for no unset when a fresh local is assigned', async () => {
-  // The new local's reset is the scope's bookkeeping, not a deletion the
-  // line asked for; only the assignment is the gated write.
-  const ws = new Workspace(
-    { '/ram': new RAMVFS() },
-    {
-      mode: MountMode.WRITE,
-      policies: [new DenyUnset()],
-    },
-  )
-  try {
-    const result = await ws.shell('X=outer; f(){ local X=inner; echo "$X"; }; f; echo "$X"')
-    expect(result.exitCode).toBe(0)
-    expect(DEC.decode(result.stdout)).toBe('inner\nouter\n')
   } finally {
     await ws.close()
   }

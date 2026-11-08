@@ -60,7 +60,6 @@ from mirage.policy.profile import (
     profile_from_dict,
     profile_to_dict,
 )
-from mirage.rs.session import ShellVars
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
     Channel,
@@ -120,7 +119,6 @@ from mirage.workspace.session.session import (
     vars_to_fields,
 )
 from mirage.workspace.session.shell_dirs import set_cwd
-from mirage.workspace.session.state import gate_restored_vars
 from mirage.workspace.snapshot.config import (
     MountArgs,
     index_config_dump,
@@ -727,23 +725,24 @@ async def apply_state_dict(
     Workspace must already have its mounts constructed via the args
     from build_mount_args. This function constructs nothing.
 
-    Every session table and the env template clear the target's
-    ``pre_session`` gate first (``_gate_restored_state``), before any
-    mount, session or template lands, so a refusal aborts the load with
-    the workspace as it was. A snapshot mount with no mount at that
-    exact prefix here is not restored and is reported at warning level.
+    Every session table and the env template are read first
+    (``_read_restored_state``), and each table checked against
+    ``max_env``, before any mount, session or template lands, so a
+    failure aborts the load with the workspace as it was. A snapshot
+    mount with no mount at that exact prefix here is not restored and is
+    reported at warning level.
 
     Args:
         ws (WorkspaceLike): the target workspace.
         state (dict[str, Any]): the snapshot state.
-        replace_cache (bool): drop the live cache once the gate has
-            passed, ahead of the mounts' load_state, so the snapshot's
+        replace_cache (bool): drop the live cache once the tables are
+            read, ahead of the mounts' load_state, so the snapshot's
             entries are all that is left. A checkout onto a running
             workspace asks for this; a workspace built for the state
-            has nothing to drop. It sits behind the gate because the
-            callers used to clear before calling, and a refused
-            checkout then still sent every cached read back to an
-            origin that may have moved.
+            has nothing to drop. It sits after the tables because the
+            callers used to clear before calling, and a failed checkout
+            then still sent every cached read back to an origin that
+            may have moved.
         built_for_state (bool): the workspace was just built from this
             state, under its profile table, and has run nothing: each
             session then lands the narrowing and ask decisions its table
@@ -755,9 +754,7 @@ async def apply_state_dict(
             state is loaded into them.
     """
     check_format_version(state)
-    sessions, seed_vars = await _gate_restored_state(
-        ws, state, built_for_state
-    )
+    sessions, seed_vars = _read_restored_state(ws, state, built_for_state)
     for session in sessions:
         check_env_fits(session, ws.registry.max_env)
     # A snapshot holds no document bindings, so a load into a live
@@ -879,29 +876,16 @@ async def _restore_nodes(ws: WorkspaceLike, state: dict[str, Any]) -> None:
     await ws.namespace.replace_nodes(entries)
 
 
-async def _gate_restored_state(
+def _read_restored_state(
     ws: WorkspaceLike, state: dict[str, Any], built_for_state: bool = False
 ) -> tuple[list[SessionState], dict[str, ShellVar] | None]:
-    """Vet every env input the snapshot carries before any of it lands.
+    """Read every session table and the env template the snapshot
+    carries, before any of it lands.
 
-    Each session table and the env template fire the ``pre_session``
-    gate (``gate_restored_vars``) here, ahead of the mounts' load_state
-    and the session writes: a refusal that arrived once an earlier
-    session had already been overwritten left the workspace in a state
-    no snapshot describes, and one its close then persisted. The
-    template is gated under the id the restore makes the default
-    session, which is the session a live write of it would land in.
-
-    On a checkout each table is judged under the policy the target
-    gives its session, never the one the snapshot's own profile
-    compiled, which was the source deployment's and does not land: the
-    live session's for an id the target already has, and the default
-    profile's for one the restore will create, which is what
-    ``script_of`` answers for an id the manager does not know and the
-    profile ``_restore_sessions`` then puts the created session under.
-    A workspace built for the state seats every table first, its
-    narrowing, ask decisions, cwd and variables, so each is judged as
-    the session it records, under the policy it then runs under.
+    A workspace built for the state seats every table here, its
+    narrowing, ask decisions, cwd and variables, as a stored record
+    hydrates; a checkout onto a running workspace keeps its own
+    sessions' narrowing and decisions.
 
     Args:
         ws (WorkspaceLike): the target workspace.
@@ -925,19 +909,8 @@ async def _gate_restored_state(
             session.decisions = fields.decisions
             set_cwd(session, fields.cwd)
             session.vars = fields.vars
-    for fields in sessions:
-        await gate_restored_vars(ws.policies, fields.session_id, fields.vars)
     seed = state.get(StateKey.ENV)
-    if not seed:
-        return sessions, None
-    default_sid = state.get(StateKey.DEFAULT_SESSION_ID)
-    seed_vars = vars_from_fields(seed)
-    await gate_restored_vars(
-        ws.policies,
-        ws._session_mgr.default_id if default_sid is None else default_sid,
-        ShellVars.of(seed_vars),
-    )
-    return sessions, seed_vars
+    return sessions, vars_from_fields(seed) if seed else None
 
 
 async def _restore_sessions(
@@ -956,15 +929,14 @@ async def _restore_sessions(
         sid = fields.session_id
         if ws._session_mgr.has(sid):
             # The session already exists, live on a running workspace,
-            # seated by the gate on one built for the state, or the
-            # default adopted above: the restored state wins, matching
-            # the replace_from_snapshot contract below.
+            # seated as its table was read on one built for the state, or
+            # the default adopted above: the restored state wins,
+            # matching the replace_from_snapshot contract below.
             session = ws._session_mgr.get(sid)
         else:
             session = ws._session_mgr.create(sid)
             # A session the restore creates is one created without a
-            # profile name, so it runs under the document's default:
-            # the policy `_gate_restored_state` judged its table under,
+            # profile name, so it runs under the document's default,
             # where a bare session ran under none.
             compiled = ws._session_mgr.default_profile
             if compiled is not None:

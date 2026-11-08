@@ -45,7 +45,6 @@ from mirage.policy.types import (
     Pending,
     RouteContext,
     Scope,
-    SessionContext,
     SessionDecisionsQuery,
     VfsContext,
 )
@@ -144,19 +143,17 @@ def ask_rule(
     | RouteContext
     | VfsContext
     | ExecuteResultContext
-    | SessionContext
     | NetworkContext,
     ask: Ask,
 ) -> CommandRule:
     """The rule an Ask is keyed on: the document's, or for a coded Ask
     one synthesized over what was asked about (the program, the path,
-    the line, the variable), so a session answer reads "stop asking me
+    the line, the host), so a session answer reads "stop asking me
     about this".
 
     Args:
         ctx (CommandContext | RouteContext | VfsContext |
-            ExecuteResultContext | SessionContext | NetworkContext): what
-            the method saw.
+            ExecuteResultContext | NetworkContext): what the method saw.
         ask (Ask): the policy's answer.
     """
     if ask.rule is not None:
@@ -166,8 +163,6 @@ def ask_rule(
         return CommandRule(reason=ask.reason, commands=(program,))
     if isinstance(ctx, VfsContext):
         return CommandRule(reason=ask.reason, paths=(ctx.path.virtual,))
-    if isinstance(ctx, SessionContext):
-        return CommandRule(reason=ask.reason, commands=(ctx.key,))
     if isinstance(ctx, NetworkContext):
         return CommandRule(
             reason=ask.reason, commands=(ctx.host or ctx.address,)
@@ -231,17 +226,16 @@ def is_pending(refusal: Refusal | None) -> bool:
 
 
 def op_question(
-    ctx: VfsContext | SessionContext | RouteContext | ExecuteResultContext,
+    ctx: VfsContext | RouteContext | ExecuteResultContext,
     ask: Ask,
 ) -> tuple[CommandContext, Ask]:
     """A question about no command as the ledger keys it: no command,
     and the words of its record are what was asked about: the path of a
-    VFS call, the variable a session write sets with the value it
-    writes, the line.
+    VFS call, the line.
 
     Args:
-        ctx (VfsContext | SessionContext | RouteContext |
-            ExecuteResultContext): what the method saw.
+        ctx (VfsContext | RouteContext | ExecuteResultContext): what the
+            method saw.
         ask (Ask): the chain's answer.
     """
     rules = ask.rules or (ask_rule(ctx, ask),)
@@ -251,8 +245,6 @@ def op_question(
     if isinstance(ctx, VfsContext):
         words: tuple[str, ...] = (ctx.path.virtual,)
         paths = (ctx.path,)
-    elif isinstance(ctx, SessionContext):
-        words = (ctx.key,) if ctx.value is None else (ctx.key, ctx.value)
     else:
         words = (ctx.line,)
         cwd = ctx.session.cwd() if ctx.session is not None else ""
@@ -437,7 +429,7 @@ class Decisions(DecisionOwner):
 
     async def resolve_op(
         self,
-        ctx: VfsContext | SessionContext,
+        ctx: VfsContext,
         ask: Ask,
         caller: Caller | None = None,
     ) -> Deny | Pending | None:
@@ -455,9 +447,7 @@ class Decisions(DecisionOwner):
         said = await self.resolve(asked, keyed, claimant=claimant)
         return Deny(ask.reason) if isinstance(said, Abandoned) else said
 
-    def held_op(
-        self, ctx: VfsContext | SessionContext, ask: Ask
-    ) -> Deny | Pending | None:
+    def held_op(self, ctx: VfsContext, ask: Ask) -> Deny | Pending | None:
         return self.held(*op_question(ctx, ask))
 
     async def within_call(

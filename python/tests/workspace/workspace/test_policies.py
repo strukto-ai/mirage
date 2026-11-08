@@ -23,13 +23,10 @@ from mirage.policy import (
     Ask,
     CommandResultContext,
     CommandRule,
-    Decision,
     ExecuteResultContext,
     Outcome,
     PolicyDenied,
     PolicyError,
-    SessionContext,
-    SessionResultContext,
     VfsContext,
     VfsResultContext,
 )
@@ -1257,20 +1254,14 @@ async def test_an_inline_document_may_not_add_a_policy():
         await ws.close()
 
 
-# Programs at the op and session views and nowhere else: writes under
-# /data/frozen are refused, so is an AWS_* variable, and a command is
-# never judged.
+# A program at the op view and nowhere else: writes under /data/frozen
+# are refused, and a command is never judged.
 FROZEN = """
 def pre_vfs(ctx):
     if ctx['write'] and ctx['path'].startswith('/data/frozen/'):
         return {'kind': 'deny', 'reason': 'frozen by ' + ctx['profile']}
 """
-CREDENTIALS = """
-def pre_session(ctx):
-    if ctx['key'].startswith('AWS_'):
-        return {'kind': 'deny', 'reason': 'credentials are set by the operator'}
-"""
-GATES = {"pre_vfs": FROZEN, "pre_session": CREDENTIALS}
+GATES = {"pre_vfs": FROZEN}
 
 
 @pytest.mark.asyncio
@@ -1294,25 +1285,6 @@ async def test_a_profile_policy_judges_its_sessions_file_calls():
         assert not await ws.vfs.exists("/data/frozen/f")
         # Another session is not judged by it.
         await ws.vfs.write("/data/frozen/g", b"x\n")
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_profile_policy_judges_the_session_view():
-    ws = Workspace(
-        {"/data/": RAMVFS()}, mode=MountMode.WRITE, profiles=_scripted(GATES)
-    )
-    try:
-        ws.create_session("s", profile="release")
-        refused = await ws.shell("export AWS_SECRET=x", session_id="s")
-        assert refused.exit_code == 1
-        assert refused.stderr == b"AWS_SECRET: permission denied\n"
-        assert refused.refusal is not None
-        assert refused.refusal.reason == "credentials are set by the operator"
-        landed = await ws.shell("export SAFE=1 && echo $SAFE", session_id="s")
-        assert landed.exit_code == 0
-        assert landed.stdout == b"1\n"
     finally:
         await ws.close()
 
@@ -1448,112 +1420,6 @@ async def test_recursive_commands_enforce_coded_pre_vfs_policy(
         assert b"PRIVATE_SENTINEL" not in (result.stdout or b"")
         assert b"/data/src/cache" in result.stderr
         assert b"Permission denied" in result.stderr
-    finally:
-        await ws.close()
-
-
-class AskSecrets(Policy):
-    async def pre_session(self, ctx: SessionContext) -> Action | None:
-        return Ask("secret write") if ctx.key.startswith("SECRET") else None
-
-
-@pytest.mark.asyncio
-async def test_a_pre_session_ask_a_host_answers_inline_writes():
-    asked: list[Decision] = []
-
-    async def approve(record: Decision) -> Decision:
-        asked.append(record)
-        return replace(record, outcome=Outcome.ALLOW)
-
-    ws = Workspace(
-        {"/data/": RAMVFS()}, policies=[AskSecrets()], on_ask=approve
-    )
-    try:
-        assert (await ws.shell("export SECRET_A=1")).exit_code == 0
-        assert (await ws.shell("echo $SECRET_A")).stdout == b"1\n"
-        assert [r.argv for r in asked] == [("SECRET_A", "1")]
-    finally:
-        await ws.close()
-
-
-class AskAround(Policy):
-    async def pre_session(self, ctx: SessionContext) -> Action | None:
-        return Ask("before")
-
-    async def post_session(self, ctx: SessionResultContext) -> Action | None:
-        return Ask("after")
-
-
-async def _asked(
-    ws: Workspace, line: str, count: int
-) -> list[set[tuple[str, ...]]]:
-    asked = []
-    for _ in range(count):
-        held = await ws.shell(line)
-        assert held.refusal is not None and held.refusal.kind == "pending"
-        records = ws.decisions.pending()
-        asked.append({(r.reason, *r.argv) for r in records})
-        for record in records:
-            await ws.decisions.answer(record.id, Outcome.ALLOW)
-    return asked
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line", ["export B=1", "B=1 true", "{ export B=1; } & wait"]
-)
-async def test_a_write_asked_before_and_after_asks_each_once(line: str):
-    # The nod to the first question stands while the second waits.
-    ws = Workspace({"/data/": RAMVFS()}, policies=[AskAround()])
-    try:
-        asked = await _asked(ws, line, 2)
-        assert asked == [{("before", "B", "1")}, {("after", "B", "1")}]
-        assert (await ws.shell(line)).exit_code == 0
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_the_writes_of_a_line_are_spent_when_it_ends():
-    # A retry finds the nods for the writes before the one it waits on.
-    ws = Workspace({"/data/": RAMVFS()}, policies=[AskAround()])
-    try:
-        line = "B=1 true; export C=2"
-        asked = await _asked(ws, line, 2)
-        assert asked == [
-            {("before", "B", "1"), ("before", "C", "2")},
-            {("after", "B", "1"), ("after", "C", "2")},
-        ]
-        assert (await ws.shell(line)).exit_code == 0
-        assert (await _asked(ws, line, 1)) == [
-            {("before", "B", "1"), ("before", "C", "2")}
-        ]
-    finally:
-        await ws.close()
-
-
-class AskAB(Policy):
-    async def pre_session(self, ctx: SessionContext) -> Action | None:
-        return Ask(f"{ctx.key} needs a nod") if ctx.key in ("A", "B") else None
-
-
-@pytest.mark.asyncio
-async def test_a_killed_job_spends_the_nods_it_held():
-    # A job held on a question and then killed is never retried.
-    ws = Workspace(
-        {"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[AskAB()]
-    )
-    try:
-        await ws.shell("{ export A=1; export B=2; } & wait")
-        (nod,) = (r for r in ws.decisions.pending() if r.argv[0] == "A")
-        await ws.decisions.answer(nod.id, Outcome.ALLOW)
-        killed = await ws.shell(
-            "{ export A=1; export B=2; touch /data/m; sleep 30; } & "
-            "until [ -e /data/m ]; do sleep 0.1; done; kill %1; wait"
-        )
-        assert killed.refusal is not None and killed.refusal.kind == "pending"
-        later = await ws.shell("export A=1")
-        assert later.refusal is not None and later.refusal.kind == "pending"
     finally:
         await ws.close()
 
@@ -1801,36 +1667,6 @@ async def test_a_once_nod_covers_one_streamed_read_however_far_it_is_pulled():
         await ws.close()
 
 
-class GuardVars(Policy):
-    def __init__(self) -> None:
-        self.seen: list[SessionResultContext] = []
-
-    async def post_session(self, ctx: SessionResultContext) -> Action | None:
-        self.seen.append(ctx)
-        if ctx.key != "A":
-            return None
-        if ctx.value == "2" or ctx.verb == "unset":
-            return Deny("frozen")
-        return None
-
-
-@pytest.mark.asyncio
-async def test_a_post_session_deny_puts_the_old_value_back():
-    policy = GuardVars()
-    ws = Workspace({"/data/": RAMVFS()}, policies=[policy])
-    try:
-        assert (await ws.shell("export A=1")).exit_code == 0
-        assert policy.seen[-1].old is None
-        refused = await ws.shell("export A=2")
-        assert refused.exit_code == 1
-        assert policy.seen[-1].old == "1"
-        assert (await ws.shell("echo $A")).stdout == b"1\n"
-        assert (await ws.shell("unset A")).exit_code == 1
-        assert (await ws.shell("echo $A")).stdout == b"1\n"
-    finally:
-        await ws.close()
-
-
 class ReadsAround(Policy):
     def __init__(self) -> None:
         self.seen: list[tuple[str, str | None, bytes, bool]] = []
@@ -1909,11 +1745,6 @@ class SeesCaller(Policy):
             self._note("pre_vfs", ctx)
         return None
 
-    async def pre_session(self, ctx) -> Action | None:
-        if ctx.key == "TEAM":
-            self._note("pre_session", ctx)
-        return None
-
 
 # A program that denies with what its caller says: the same session id
 # and working directory a coded policy reads off ``ctx.caller``.
@@ -1937,11 +1768,9 @@ async def test_a_method_sees_who_makes_the_call():
         seer.seen.clear()
         ws.create_session("agent")
         await ws.shell("cd /data", session_id="agent")
-        await ws.shell("export TEAM=core", session_id="agent")
         await ws.shell("cat /data/owner.txt", session_id="agent")
         await Session(ws, "agent").vfs.read("/data/owner.txt")
         assert seer.seen == [
-            ("pre_session", "agent", "/data"),
             ("pre_command", "agent", "/data"),
             ("pre_vfs", "agent", "/data"),
             ("pre_vfs", "agent", "/data"),

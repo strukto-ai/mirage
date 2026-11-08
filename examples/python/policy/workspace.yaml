@@ -1,6 +1,6 @@
-# The reviewer's policy as a document: the block policy.py passes in
-# code, with a program per method beside this file. One file, read by
-# both implementations:
+# The reviewer's profile as a document: the block policy.py passes in
+# code, with its program beside this file. One file, read by both
+# implementations:
 #
 #   ./python/.venv/bin/python examples/python/policy/policy_yaml.py
 #   pnpm -C examples/typescript exec tsx policy/policy_yaml.ts
@@ -15,8 +15,8 @@ mounts:
 
 profiles:
   reviewer:
+    vars:
+      protect: [AWS_*]
     policy:
       pre_command:
         - {script: ./guard.py, runtime: monty}
-      pre_session:
-        - {script: ./credentials.py, runtime: monty}

@@ -36,8 +36,6 @@ async function allHooks(): Promise<void> {
     postCommand: () => record('post_command'),
     preVfs: () => record('pre_vfs'),
     postVfs: () => record('post_vfs'),
-    preSession: () => record('pre_session'),
-    postSession: () => record('post_session'),
   }
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, policies: [policy] })
   try {
@@ -48,11 +46,9 @@ async function allHooks(): Promise<void> {
     equal([...seen].sort(), [
       'post_command',
       'post_execute',
-      'post_session',
       'post_vfs',
       'pre_command',
       'pre_execute',
-      'pre_session',
       'pre_vfs',
     ])
   } finally {

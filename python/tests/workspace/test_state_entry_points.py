@@ -21,7 +21,6 @@ from mirage.commands.spec import CommandSpec
 from mirage.io.types import IOResult
 from mirage.mount.core import MountCore
 from mirage.policy import Action, Deny, Policy, VfsContext
-from mirage.policy.types import SessionContext
 from mirage.shell.array import make_array
 from mirage.shell.variable import VarAttr
 from mirage.types import (
@@ -62,7 +61,7 @@ class _OverlayRAMVFS(RAMVFS):
     setattr = BaseVFS.setattr
 
 
-def _two_mounts(policies=None) -> Workspace:
+def _two_mounts(policies=None, protect: tuple[str, ...] = ()) -> Workspace:
     a = RAMVFS()
     a._store.files["/x.txt"] = b"public\n"
     b = RAMVFS()
@@ -71,6 +70,7 @@ def _two_mounts(policies=None) -> Workspace:
         {"/a": (a, MountMode.WRITE), "/b": (b, MountMode.WRITE)},
         mode=MountMode.WRITE,
         policies=policies,
+        profiles={"default": {"vars": {"protect": list(protect)}}},
     )
 
 
@@ -322,19 +322,9 @@ def test_overlay_setattr_still_lands_without_policies():
     assert meta is not None and meta.mode == 0o600
 
 
-class DenySecretEnv(Policy):
-    """Veto env writes to SECRET_* names through the session view."""
-
-    async def pre_session(self, ctx: SessionContext) -> Action | None:
-        if ctx.key.startswith("SECRET"):
-            return Deny("SECRET_* refused by policy\n")
-        return None
-
-
-def test_export_fires_the_state_gate():
-    # The session plane's gate: an env write clears pre_session exactly
-    # as a VFS write clears pre_vfs, whichever tier asked.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+def test_export_refuses_a_protected_name():
+    # A protected name refuses an env write whichever tier asked.
+    ws = _two_mounts(protect=("SECRET*",))
 
     async def run():
         denied = await ws.shell("export SECRET_X=1")
@@ -343,19 +333,17 @@ def test_export_fires_the_state_gate():
 
     denied, allowed = asyncio.run(run())
     assert denied.exit_code != 0
-    assert denied.refusal and "refused by policy" in denied.refusal.reason
+    assert b"permission denied" in (denied.stderr or b"")
     assert "SECRET_X" not in ws.env
     assert allowed.exit_code == 0
     assert ws.env.get("PUBLIC_X") == "1"
 
 
-def test_every_declaring_spelling_fires_the_state_gate():
-    # A mark is a session write, so the no-value forms clear the gate
-    # too. `readonly NAME` marked through `set_attr` and walked straight
-    # past it: a deployment refusing SECRET_* still saw the line exit 0,
-    # create the record, and freeze the name against every later write
-    # the deployment's own wiring would make.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+def test_every_declaring_spelling_refuses_a_protected_name():
+    # A mark is a session write, so the no-value forms refuse too: a
+    # `readonly NAME` that walked past would create the record and freeze
+    # the name against every later write the operator's own wiring makes.
+    ws = _two_mounts(protect=("SECRET*",))
 
     async def run():
         return [
@@ -371,7 +359,7 @@ def test_every_declaring_spelling_fires_the_state_gate():
 
     for io in asyncio.run(run()):
         assert io.exit_code != 0, f"unexpected success: {io}"
-        assert io.refusal and "refused by policy" in io.refusal.reason
+        assert b"permission denied" in (io.stderr or b"")
     session = ws.get_session(ws.default_session_id)
     for name in ("SECRET_A", "SECRET_B", "SECRET_C", "SECRET_D", "SECRET_E"):
         assert name not in session.vars
@@ -518,10 +506,10 @@ def test_facade_symlink_respects_the_sessions_view():
     assert not ws.namespace.is_link("/b/lk")
 
 
-def test_bare_export_of_a_new_name_fires_the_gate():
+def test_bare_export_of_a_new_name_refuses_a_protected_name():
     # `export NAME` writes no value, but marking a name is still a
-    # session write, so it clears the same gate an assignment does.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+    # session write, so it refuses as an assignment does.
+    ws = _two_mounts(protect=("SECRET*",))
 
     async def run():
         denied = await ws.shell("export SECRET_BARE")
@@ -531,7 +519,7 @@ def test_bare_export_of_a_new_name_fires_the_gate():
 
     denied, allowed, listed = asyncio.run(run())
     assert denied.exit_code != 0
-    assert denied.refusal and "refused by policy" in denied.refusal.reason
+    assert b"permission denied" in (denied.stderr or b"")
     assert "SECRET_BARE" not in ws.env
     assert allowed.exit_code == 0
     # Marked but unset, which is bash's third state: `export -p` lists
@@ -541,24 +529,22 @@ def test_bare_export_of_a_new_name_fires_the_gate():
     assert "SECRET_BARE" not in listed
 
 
-def test_local_fires_the_gate():
-    ws = _two_mounts(policies=[DenySecretEnv()])
+def test_local_refuses_a_protected_name():
+    ws = _two_mounts(protect=("SECRET*",))
 
     async def run():
         return await ws.shell("f() { local SECRET_L=1; }; f")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert io.refusal and "refused by policy" in io.refusal.reason
+    assert b"permission denied" in (io.stderr or b"")
     assert "SECRET_L" not in ws.env
 
 
-def test_plain_assignment_fires_the_gate():
-    # The assignment path used to write `session.env` directly, so a
-    # policy that vetoed `export SECRET_X=1` still admitted
-    # `SECRET_X=1`. Denial mirrors the readonly case: a fatal
-    # variable-assignment error that abandons the rest of the line.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+def test_plain_assignment_refuses_a_protected_name():
+    # A refusal mirrors the readonly case: a fatal variable-assignment
+    # error that abandons the rest of the line.
+    ws = _two_mounts(protect=("SECRET*",))
 
     async def run():
         denied = await ws.shell("SECRET_P=1; echo after")
@@ -567,16 +553,16 @@ def test_plain_assignment_fires_the_gate():
 
     denied, allowed = asyncio.run(run())
     assert denied.exit_code != 0
-    assert denied.refusal and "refused by policy" in denied.refusal.reason
+    assert b"permission denied" in (denied.stderr or b"")
     assert "SECRET_P" not in ws.env
     assert allowed.exit_code == 0
     assert ws.env.get("PUBLIC_P") == "1"
 
 
-def test_append_assignment_fires_the_gate():
-    # An integer `+=` evaluates behind the gate, so what its sides assign
-    # waits for it, as a plain `SECRET_N=X=5`'s does.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+def test_append_assignment_refuses_a_protected_name():
+    # An integer `+=` onto a protected name is refused before it
+    # evaluates, so nothing its sides assign lands.
+    ws = _two_mounts(protect=("SECRET*",))
     session = ws.get_session(ws.default_session_id)
     seed_var(session, "SECRET_N", "1")
     set_attr(session, "SECRET_N", VarAttr.INTEGER)
@@ -593,23 +579,23 @@ def test_append_assignment_fires_the_gate():
     assert ws.env["SECRET_N"] == "1"
 
 
-def test_array_assignment_fires_the_gate():
-    # A denied name must not be writable by switching to array syntax:
-    # SECRET=(a b) lands on the same session plane as SECRET=x.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+def test_array_assignment_refuses_a_protected_name():
+    # A protected name must not be writable by switching to array
+    # syntax: SECRET=(a b) lands on the same session plane as SECRET=x.
+    ws = _two_mounts(protect=("SECRET*",))
 
     async def run():
         return await ws.shell("SECRET_V=(a b); echo after")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert io.refusal and "refused by policy" in io.refusal.reason
+    assert b"permission denied" in (io.stderr or b"")
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
     assert "SECRET_V" not in sess.arrays
 
 
-def test_array_append_assignment_fires_the_gate():
-    ws = _two_mounts(policies=[DenySecretEnv()])
+def test_array_append_assignment_refuses_a_protected_name():
+    ws = _two_mounts(protect=("SECRET*",))
 
     async def run():
         return await ws.shell("SECRET_VA+=(a)")
@@ -620,8 +606,8 @@ def test_array_append_assignment_fires_the_gate():
     assert "SECRET_VA" not in sess.arrays
 
 
-def test_subscript_assignment_fires_the_gate():
-    ws = _two_mounts(policies=[DenySecretEnv()])
+def test_subscript_assignment_refuses_a_protected_name():
+    ws = _two_mounts(protect=("SECRET*",))
 
     async def run():
         return await ws.shell("SECRET_S[0]=x")
@@ -633,11 +619,11 @@ def test_subscript_assignment_fires_the_gate():
     assert "SECRET_S" not in ws.env
 
 
-def test_scalar_append_onto_an_existing_array_fires_the_gate():
+def test_scalar_append_onto_an_existing_array_refuses_a_protected_name():
     # SECRET+=x on a name that already holds an array appends to
     # element 0 through a branch of its own; it is still a session
     # write.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+    ws = _two_mounts(protect=("SECRET*",))
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
     seed_var(sess, "SECRET_E", make_array(["a"]))
 
@@ -649,41 +635,41 @@ def test_scalar_append_onto_an_existing_array_fires_the_gate():
     assert sess.arrays["SECRET_E"] == make_array(["a"])
 
 
-def test_declaration_array_assignment_fires_the_gate():
+def test_declaration_array_assignment_refuses_a_protected_name():
     # export/declare with an array literal store through the staged
-    # path, not handle_export, so the gate has to fire there too.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+    # path, not handle_export, so it has to refuse there too.
+    ws = _two_mounts(protect=("SECRET*",))
 
     async def run():
         return await ws.shell("export SECRET_D=(a)")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert io.refusal and "refused by policy" in io.refusal.reason
+    assert b"permission denied" in (io.stderr or b"")
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
     assert "SECRET_D" not in sess.arrays
 
 
-def test_bare_declare_a_fires_the_gate():
+def test_bare_declare_a_refuses_a_protected_name():
     # `declare -a NAME` with no value stores an empty array (or converts
-    # the scalar it holds), a write the gate has to see like any other.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+    # the scalar it holds), a write like any other.
+    ws = _two_mounts(protect=("SECRET*",))
 
     async def run():
         return await ws.shell("declare -a SECRET_B; declare -A SECRET_M")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert io.refusal and "refused by policy" in io.refusal.reason
+    assert b"permission denied" in (io.stderr or b"")
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
     assert "SECRET_B" not in sess.arrays
     assert "SECRET_M" not in sess.assocs
 
 
-def test_bare_declare_a_of_a_readonly_name_fires_the_gate():
+def test_bare_declare_a_of_a_readonly_name_refuses_a_protected_name():
     # bash converts a readonly scalar all the same, past the readonly
-    # refusal a gated write makes, so the rule is asked on its own.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+    # refusal the writer makes, so the protected name is checked first.
+    ws = _two_mounts(protect=("SECRET*",))
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
     seed_var(sess, "SECRET_R", "v")
     set_attr(sess, "SECRET_R", VarAttr.READONLY)
@@ -697,13 +683,11 @@ def test_bare_declare_a_of_a_readonly_name_fires_the_gate():
     assert sess.env["SECRET_R"] == "v"
 
 
-def test_a_prefix_assignment_clears_the_gate():
+def test_a_prefix_assignment_refuses_a_protected_name():
     # `SECRET=leak cmd` is a session write like any other, and the form
-    # puts it in the command's environment, so a deployment refusing
-    # `SECRET_*` has to be asked. Only the hidden half was checked here,
-    # and the seeding goes through the ungated entry point, so the secret
-    # reached the command and printed.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+    # puts it in the command's environment; its seeding goes past the
+    # writer's checks, so the prefix loop checks the name itself.
+    ws = _two_mounts(protect=("SECRET*",))
 
     async def run():
         denied = await ws.shell("SECRET_K=leak printenv SECRET_K")
@@ -713,24 +697,23 @@ def test_a_prefix_assignment_clears_the_gate():
 
     denied, out, allowed_out = asyncio.run(run())
     assert denied.exit_code != 0
-    assert denied.refusal and "refused by policy" in denied.refusal.reason
+    assert b"permission denied" in (denied.stderr or b"")
     assert out == ""
-    # A name no rule covers still reaches the command.
+    # A name the profile leaves alone still reaches the command.
     assert allowed_out == "fine\n"
 
 
-def test_declare_x_on_an_existing_name_clears_the_gate():
+def test_declare_x_on_an_existing_name_refuses_a_protected_name():
     # `declare -x NAME` on a name that already exists writes no value, so
-    # the handler reaches the gate on no other path and the export mark
-    # is the only session write there is. Stamping it directly let an
-    # agent export a host-seeded credential the deployment had refused.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+    # the export mark is the only session write there is; stamping it
+    # directly would let an agent export a credential the operator set.
+    ws = _two_mounts(protect=("SECRET*",))
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
     seed_var(sess, "SECRET_TOKEN", "hunter2")
 
     io = asyncio.run(ws.shell("declare -x SECRET_TOKEN"))
     assert io.exit_code != 0
-    assert io.refusal and "refused by policy" in io.refusal.reason
+    assert b"permission denied" in (io.stderr or b"")
     assert VarAttr.EXPORT not in sess.vars["SECRET_TOKEN"].attrs
     # The value is untouched and still readable as a shell variable.
     assert sess.vars["SECRET_TOKEN"].value == "hunter2"
@@ -872,30 +855,10 @@ def test_readonly_loop_variable_refuses_before_the_body():
     assert "ran" not in out
 
 
-def test_the_gate_learns_which_session_asked():
-    # `deny set for session X` is just a policy once the context says
-    # who asked; the session view adds the id in one place for every spelling.
-    seen: list[str] = []
-
-    class CaptureSession(Policy):
-        async def pre_session(self, ctx: SessionContext) -> Action | None:
-            seen.append(ctx.session_id)
-            return None
-
-    ws = _two_mounts(policies=[CaptureSession()])
-    ws.create_session("agent", mounts={"/a": "write"})
-
-    async def run():
-        await ws.shell("X=1", session_id="agent")
-
-    asyncio.run(run())
-    assert seen == ["agent"]
-
-
-def test_subscripted_unset_of_a_scalar_fires_the_gate():
+def test_subscripted_unset_of_a_scalar_refuses_a_protected_name():
     # `unset 'SECRET[0]'` on a scalar is the whole unset in element
     # clothing; the element branch used to skip the view entirely.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+    ws = _two_mounts(protect=("SECRET*",))
     seed_var(ws.get_session(ws.default_session_id), "SECRET_U", "v")
 
     async def run():
@@ -903,12 +866,12 @@ def test_subscripted_unset_of_a_scalar_fires_the_gate():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert io.refusal and "refused by policy" in io.refusal.reason
+    assert b"permission denied" in (io.stderr or b"")
     assert ws.env.get("SECRET_U") == "v"
 
 
-def test_subscripted_unset_of_an_array_element_fires_the_gate():
-    ws = _two_mounts(policies=[DenySecretEnv()])
+def test_subscripted_unset_of_an_array_element_refuses_a_protected_name():
+    ws = _two_mounts(protect=("SECRET*",))
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
     seed_var(sess, "SECRET_W", make_array(["a", "b"]))
 
@@ -920,11 +883,11 @@ def test_subscripted_unset_of_an_array_element_fires_the_gate():
     assert sess.arrays["SECRET_W"] == make_array(["a", "b"])
 
 
-def test_for_loop_variable_fires_the_gate():
-    # The loop variable is a session write per iteration; a denied
+def test_for_loop_variable_refuses_a_protected_name():
+    # The loop variable is a session write per iteration; a refused
     # write aborts the loop before its body runs, like a readonly
     # loop variable in bash.
-    ws = _two_mounts(policies=[DenySecretEnv()])
+    ws = _two_mounts(protect=("SECRET*",))
 
     async def run():
         denied = await ws.shell("for SECRET_I in a b; do echo ran; done")

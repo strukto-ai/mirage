@@ -62,8 +62,6 @@ import {
   type Pending,
   type PolicyMethod,
   type Route,
-  type SessionContext,
-  type SessionResultContext,
   type VfsContext,
   type VfsExplanation,
   type VfsResultContext,
@@ -76,7 +74,6 @@ type MethodContext =
   | VfsContext
   | VfsResultContext
   | ExecuteResultContext
-  | SessionContext
   | WorkspaceContext
   | NetworkContext
 
@@ -570,43 +567,6 @@ export async function postCommandGate(
 }
 
 /**
- * Fire postSession once a session write landed; a Deny, or an Ask the
- * host has not approved, becomes a PolicyDenied, for the writer to put the
- * old value back before it reports. Mirrors the Python
- * `post_session_gate`.
- */
-export async function postSessionGate(
-  policies: Policies | null,
-  ctx: SessionContext,
-  old: string | null,
-): Promise<void> {
-  if (policies === null) return
-  if (!(await policies.wantsFor('postSession', ctx.sessionId))) return
-  const landed: SessionResultContext = { ...ctx, old }
-  await sessionRefused(policies, landed, await policies.postSession(landed))
-}
-
-async function sessionRefused(
-  policies: Policies,
-  ctx: SessionContext,
-  answer: Deny | Ask | null,
-): Promise<void> {
-  const refused = answer?.kind === 'ask' ? await policies.decisions.resolveOp(ctx, answer) : answer
-  if (refused !== null) {
-    throw policyDenied(refused, ctx.key, `${ctx.key}: permission denied`)
-  }
-}
-
-/**
- * Fire preSession on the session plane; a Deny, or an Ask the host has
- * not approved, becomes a PolicyDenied. The one seam helper the session
- * plane's writers call, so a refusal is identical however the state is
- * reached: shell builtin, command view, or a later tier. Null policies (a
- * view constructed outside a workspace) gate nothing. An Ask goes to the
- * workspace's ledger (`Policies.decisions`), inside a line too. A write a
- * method makes while it decides (`ctx.session`) throws EACCES.
- */
-/**
  * Fire preNetwork as a connection is about to open; a Deny, or an Ask,
  * refuses it with EACCES, the host as the name refused. A connection opens
  * under a command that was admitted without the question, so an Ask refuses
@@ -673,15 +633,6 @@ export async function postNetworkGate(
   }
   const ended = { ...ctx, caller: policyCaller(currentCaller().session, policies.account) }
   await apart(() => policies.postNetwork(ended, passed))
-}
-
-export async function preSessionGate(
-  policies: Policies | null,
-  ctx: SessionContext,
-): Promise<void> {
-  if (explaining() === DryRun.DECIDING) throw eacces(ctx.key)
-  if (!policies?.wants('preSession')) return
-  await sessionRefused(policies, ctx, await policies.preSession(ctx))
 }
 
 /**
@@ -751,9 +702,8 @@ export class Policies {
    * per-session refinement of `wants`: a policy that defines the method
    * counts, unless it speaks per session (`SessionScopedMixin`) and says this
    * is not one of its. For a seam that pays ahead for a method rather than
-   * gating on it: the secret fill drops its masks under a session-write
-   * gate, and a profile's policy at that entry point is one profile's, not
-   * every session's. `codedOnly` leaves the profile's rules out, for a
+   * gating on it, a profile's policy at that entry point is one profile's,
+   * not every session's. `codedOnly` leaves the profile's rules out, for a
    * caller whose line's gate already answers for them.
    */
   async wantsFor(method: PolicyMethod, sessionId: string, codedOnly = false): Promise<boolean> {
@@ -854,7 +804,6 @@ export class Policies {
                 RouteContext &
                 VfsResultContext &
                 ExecuteResultContext &
-                SessionResultContext &
                 WorkspaceContext &
                 NetworkResultContext,
             ),
@@ -1054,21 +1003,9 @@ export class Policies {
     return [action, limit]
   }
 
-  /** Fire preSession across the policies; the first Deny wins, else the first Ask. */
-  async preSession(ctx: SessionContext): Promise<Deny | Ask | null> {
-    const [action] = await this.fire('preSession', ctx)
-    return action
-  }
-
   /** Fire preWorkspace across the policies; the first Deny wins. */
   async preWorkspace(ctx: WorkspaceContext): Promise<Deny | null> {
     const [action] = await this.fire('preWorkspace', ctx)
     return action?.kind === 'deny' ? action : null
-  }
-
-  /** Fire postSession across the policies; the first Deny wins, else the first Ask. */
-  async postSession(ctx: SessionResultContext): Promise<Deny | Ask | null> {
-    const [action] = await this.fire('postSession', ctx)
-    return action
   }
 }

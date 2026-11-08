@@ -12,19 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { sessionAccess, sessionVoice } from '../../context/session_context.ts'
+import { explaining, sessionAccess, sessionVoice } from '../../context/session_context.ts'
 import { memoryRoom } from '../../io/memory.ts'
-import { PolicyDenied, preSessionGate, type Policies } from '../../policy/index.ts'
-import type { ShellVars } from '../../rs/session.ts'
+import { PolicyDenied } from '../../policy/index.ts'
+import { DryRun } from '../../policy/types.ts'
 import { rawValue, varOf } from '../../rs/session.ts'
-import type { Item, ShellTask } from '../../rs/shell.ts'
+import type { Item, Outcome, Shell } from '../../rs/shell.ts'
 import { plainDecimal } from '../../shell/arith.ts'
 import { arrayGet, ShellArray } from '../../shell/array.ts'
 import { joinBytes } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError } from '../../shell/errors.ts'
 import type { ShellValue, VarAttr } from '../../shell/variable.ts'
-import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import type { SessionView } from '../../view/types.ts'
 import {
   argsBytes,
@@ -36,7 +35,7 @@ import {
   positionalBytes,
 } from './budget.ts'
 import type { SessionState } from './session.ts'
-import { drive, faultError, listens, SessionGate } from './task.ts'
+import { faultError } from './task.ts'
 
 /**
  * Hand the session's shell the state around it that a task reads: the
@@ -72,19 +71,31 @@ export function frame(session: SessionState, callStack: CallStack | null = null)
 }
 
 /**
- * Run one gated write on the session's shell to its end: `start` makes the
- * task, given whether a policy listens. Mirrors Python's run_write.
+ * Refuse a write a policy makes while it decides: a method may read the
+ * session it is handed but not change it. Mirrors Python's _refuse_deciding.
  */
-export async function runWrite(
+function refuseDeciding(name: string): void {
+  if (explaining() === DryRun.DECIDING) {
+    throw new PolicyDenied(`${name}: permission denied`, name)
+  }
+}
+
+/**
+ * Run one write on the session's shell; a hidden or protected name refuses
+ * with EACCES. `write` is the shell's write, which answers its result and its
+ * warnings. Mirrors Python's run_write.
+ */
+export function runWrite(
   session: SessionState,
-  policies: Policies | null,
-  start: (heard: boolean) => ShellTask,
+  write: (shell: Shell) => Outcome,
   diagnostics: (string | Uint8Array)[] | null = null,
-): Promise<bigint> {
-  const heard = await listens(policies, session.sessionId)
-  frame(session)
-  const task = start(heard)
-  return (await drive(task, new SessionGate(session, policies), diagnostics ?? [])) as bigint
+  callStack: CallStack | null = null,
+): bigint {
+  frame(session, callStack)
+  const [result, said] = write(session.vars.shell)
+  if (diagnostics !== null) diagnostics.push(...said)
+  if (result[0] !== 'ok') throw faultError(result)
+  return result[1] as bigint
 }
 
 /**
@@ -225,18 +236,14 @@ export function visibleAssocs(
 /**
  * An indexed subscript resolved outside an arithmetic expression: `a[i]=v`,
  * `unset 'a[i]'`. It is arithmetic, so it may assign (`a[x=3]`) and seed
- * (`a[RANDOM=42]`); each lands through the gate. One that fails lands what it
+ * (`a[RANDOM=42]`); each lands as it is made. One that fails lands what it
  * assigned before failing, then throws. Mirrors Python's subscript_index.
  */
-export async function subscriptIndex(
-  session: SessionState,
-  subscript: string,
-  policies: Policies | null = null,
-): Promise<bigint> {
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function subscriptIndex(session: SessionState, subscript: string): Promise<bigint> {
   const plain = plainDecimal(subscript)
   if (plain !== null) return plain
-  const shell = session.vars.shell
-  return runWrite(session, policies, (heard) => shell.index(subscript, { listens: heard }))
+  return runWrite(session, (shell) => shell.index(subscript))
 }
 
 /**
@@ -247,10 +254,9 @@ export async function subscriptIndex(
 export async function fatalSubscriptIndex(
   session: SessionState,
   subscript: string,
-  policies: Policies | null = null,
 ): Promise<bigint> {
   try {
-    return await subscriptIndex(session, subscript, policies)
+    return await subscriptIndex(session, subscript)
   } catch (err) {
     if (err instanceof ArithError) throw err.signal('', true)
     throw err
@@ -259,22 +265,18 @@ export async function fatalSubscriptIndex(
 
 /**
  * Evaluate an arithmetic command, a `let` operand or a test's integer
- * operand against the session, its writes landed through the gate in order;
- * `expand` for a `let` operand, whose subscripts expand first. Mirrors
- * Python's session_arith.
+ * operand against the session, its writes landed in order; `expand` for a
+ * `let` operand, whose subscripts expand first. Mirrors Python's
+ * session_arith.
  */
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function sessionArith(
   session: SessionState,
   text: string,
-  policies: Policies | null = null,
   callStack: CallStack | null = null,
   expand = false,
 ): Promise<bigint> {
-  const shell = session.vars.shell
-  const heard = await listens(policies, session.sessionId)
-  frame(session, callStack)
-  const task = shell.arith(text, expand, { listens: heard })
-  return (await drive(task, new SessionGate(session, policies), [])) as bigint
+  return runWrite(session, (shell) => shell.arith(text, expand), null, callStack)
 }
 
 /**
@@ -284,8 +286,7 @@ export async function sessionArith(
  */
 export function conversionScalar(session: SessionState, name: string): string | null {
   const answer = session.vars.shell.conversionScalar(name)
-  if (Array.isArray(answer))
-    throw faultError(['arith', (answer as readonly Item[])[1] ?? null], new Map())
+  if (Array.isArray(answer)) throw faultError(['arith', (answer as readonly Item[])[1] ?? null])
   return answer as string | null
 }
 
@@ -296,17 +297,13 @@ export function conversionScalar(session: SessionState, name: string): string | 
  * text, evaluated after `text` in the same evaluation and added to it.
  * Mirrors Python's evaluate_integer.
  */
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function evaluateInteger(
   session: SessionState,
-  policies: Policies | null,
   text: string,
   added: string | null = null,
 ): Promise<string> {
-  const shell = session.vars.shell
-  const value = await runWrite(session, policies, (heard) =>
-    shell.integer(text, added, { listens: heard }),
-  )
-  return String(value)
+  return String(runWrite(session, (shell) => shell.integer(text, added)))
 }
 
 /**
@@ -328,41 +325,14 @@ export function appended(
 }
 
 /**
- * Refuse a write that names a hidden variable, the vars twin of EACCES on a
- * create into hidden path space. Mirrors Python's ensure_var_visible.
+ * Refuse a write that names a hidden or protected variable, the vars twin of
+ * EACCES on a create into hidden path space. Mirrors Python's
+ * ensure_var_writable.
  */
-export function ensureVarVisible(session: SessionState, name: string): void {
-  if (session.vars.shell.hidden(name)) {
+export function ensureVarWritable(session: SessionState, name: string): void {
+  const shell = session.vars.shell
+  if (shell.hidden(name) || shell.protected(name)) {
     throw new PolicyDenied(`${name}: permission denied`, name)
-  }
-}
-
-// The names the shell maintains itself (`seedVar`'s second caller): a `cd`
-// writes the first two and `[[ =~ ]]` the third, ungated, because they are
-// the shell's to keep current rather than the session's to admit. Mirrors
-// Python `SHELL_BOOKKEEPING`.
-export const SHELL_BOOKKEEPING: ReadonlySet<string> = new Set(['PWD', 'OLDPWD', 'BASH_REMATCH'])
-
-/**
- * Vet a variable table a snapshot restores through the session gate: every
- * variable fires `preSession` as a `set` of its rendered value before any of
- * them lands, and a refusal aborts the load. The shell's own bookkeeping is
- * exempt here as it is live. Mirrors Python `gate_restored_vars`.
- */
-export async function gateRestoredVars(
-  policies: Policies | null,
-  sessionId: string,
-  table: ShellVars,
-): Promise<void> {
-  const shell = table.shell
-  for (const name of shell.names()) {
-    if (SHELL_BOOKKEEPING.has(name)) continue
-    await preSessionGate(policies, {
-      verb: 'set',
-      key: name,
-      value: shell.rendered(name),
-      sessionId,
-    })
   }
 }
 
@@ -380,62 +350,44 @@ export function varKind(
   return session.vars.shell.kind(name)
 }
 
-/**
- * Run one element write as one call, so a ONCE answer to its `pre_session`
- * question stands until its `post_session` one is answered too, and name the
- * status it came to. Mirrors Python's _element_write.
- */
-async function elementWrite(
+/** Run one element write and name the status it came to. Mirrors Python's _element_write. */
+function elementWrite(
   session: SessionState,
-  policies: Policies | null,
-  start: (listens: boolean) => ShellTask,
+  write: (shell: Shell) => Outcome,
   diagnostics: (string | Uint8Array)[] | null = null,
-): Promise<(typeof ELEMENT_STATUS)[number]> {
-  const write = (): Promise<bigint> => runWrite(session, policies, start, diagnostics)
-  let code = 0n
-  if (policies === null || !asyncContextIsolatesTasks) code = await write()
-  else {
-    await policies.decisions.withinCall(session.sessionId, async () => {
-      code = await write()
-    })
-  }
-  return ELEMENT_STATUS[Number(code)] ?? 'ok'
+): (typeof ELEMENT_STATUS)[number] {
+  return ELEMENT_STATUS[Number(runWrite(session, write, diagnostics))] ?? 'ok'
 }
 
 /**
  * Append words at the extent of the indexed array a name holds (`a+=(x y)`),
- * as one gated write; with no policy listening it lands in place, so a loop
- * building an array costs each word once. Mirrors Python's push_words.
+ * each in place, so a loop building an array costs each word once. Mirrors
+ * Python's push_words.
  */
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function pushWords(
   session: SessionState,
-  policies: Policies | null,
   name: string,
   words: readonly string[],
 ): Promise<void> {
-  const shell = session.vars.shell
-  await elementWrite(session, policies, (heard) => shell.push(name, words, { listens: heard }))
+  elementWrite(session, (shell) => shell.push(name, words))
 }
 
 /**
- * Clear one element (`unset 'a[i]'`) as one gated write, keeping the indexes
- * after it: an associative subscript is the key verbatim, an indexed one
- * arithmetic whose writes land first, and a scalar's element 0 the whole
- * scalar. `every` for a subscript typed as `@` or `*`, which empties an
- * indexed array. A hidden or unset name clears nothing. Mirrors Python's
- * unset_element.
+ * Clear one element (`unset 'a[i]'`), keeping the indexes after it: an
+ * associative subscript is the key verbatim, an indexed one arithmetic whose
+ * writes land first, and a scalar's element 0 the whole scalar. `every` for a
+ * subscript typed as `@` or `*`, which empties an indexed array. A hidden or
+ * unset name clears nothing. Mirrors Python's unset_element.
  */
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function unsetElement(
   session: SessionState,
-  policies: Policies | null,
   name: string,
   subscript: string,
   every = false,
 ): Promise<(typeof ELEMENT_STATUS)[number]> {
-  const shell = session.vars.shell
-  return elementWrite(session, policies, (heard) =>
-    shell.unsetElement(name, subscript, every, { listens: heard }),
-  )
+  return elementWrite(session, (shell) => shell.unsetElement(name, subscript, every))
 }
 
 /**
@@ -444,63 +396,52 @@ export async function unsetElement(
  * an indexed subscript evaluates and what it assigns lands (`[[ -v a[x=2] ]]`
  * leaves x at 2). Mirrors Python's element_is_set.
  */
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function elementIsSet(
   session: SessionState,
   ref: string,
-  policies: Policies | null = null,
   expanded = false,
 ): Promise<boolean> {
-  const shell = session.vars.shell
-  return (
-    (await runWrite(session, policies, (heard) =>
-      shell.isSet(ref, { expanded, listens: heard }),
-    )) !== 0n
-  )
+  return runWrite(session, (shell) => shell.isSet(ref, { expanded })) !== 0n
 }
 
 /**
  * Assign one element (or a bare name resolved as element 0 of an array, a
- * scalar otherwise) as one gated write, so a `pre_session` rule sees
- * `m[k]=v` as a write to `m`; with no policy listening it lands in place.
- * The subscript arrives already expanded: an associative name takes it as
- * the key verbatim, an indexed one evaluates it as arithmetic, even when the
- * name is readonly. `append` concatenates, or adds under `-i`. Without a
- * `diagnostics` sink, a seed's arithmetic error propagates. Mirrors Python's
- * assign_element.
+ * scalar otherwise) in place. The subscript arrives already expanded: an
+ * associative name takes it as the key verbatim, an indexed one evaluates it
+ * as arithmetic, even when the name is readonly. `append` concatenates, or
+ * adds under `-i`. Without a `diagnostics` sink, a seed's arithmetic error
+ * propagates. Mirrors Python's assign_element.
  */
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function assignElement(
   session: SessionState,
-  policies: Policies | null,
   name: string,
   subscript: string | null,
   value: string,
   append = false,
   diagnostics: (string | Uint8Array)[] | null = null,
 ): Promise<(typeof ELEMENT_STATUS)[number]> {
-  const shell = session.vars.shell
   const warns = diagnostics !== null
   return elementWrite(
     session,
-    policies,
-    (heard) => shell.element(name, subscript, value, { append, listens: heard, warns }),
+    (shell) => shell.element(name, subscript, value, { append, warns }),
     diagnostics,
   )
 }
 
 /**
- * Write one variable through the session plane's gate. A string stores a
- * scalar, a ShellArray an indexed array, a record an associative one.
- * Readonly and hidden names refuse; the value is shaped by the name's
- * attributes (`-i -l -u`) before the `pre_session` policy judges it, lands,
- * and is put back when `post_session` refuses. `followRef` resolves a
- * `declare -n` reference to its target first; `assigned` names the elements
- * an array write assigns; `added` is an integer `+=`'s text; without a
- * `diagnostics` sink, a seed's arithmetic error propagates. Mirrors Python's
- * set_var.
+ * Write one variable through the session plane. A string stores a scalar, a
+ * ShellArray an indexed array, a record an associative one. Readonly, hidden
+ * and protected names refuse; the value is shaped by the name's attributes
+ * (`-i -l -u`) before it lands. `followRef` resolves a `declare -n` reference
+ * to its target first; `assigned` names the elements an array write assigns;
+ * `added` is an integer `+=`'s text; without a `diagnostics` sink, a seed's
+ * arithmetic error propagates. Mirrors Python's set_var.
  */
+// eslint-disable-next-line @typescript-eslint/require-await
 async function setVar(
   session: SessionState,
-  policies: Policies | null,
   name: string,
   value: ShellValue,
   followRef = true,
@@ -508,18 +449,16 @@ async function setVar(
   assigned: ReadonlySet<bigint | string> | null = null,
   added: string | null = null,
 ): Promise<void> {
+  refuseDeciding(name)
   const [raw, assoc] = rawValue(value)
-  const shell = session.vars.shell
-  await runWrite(
+  runWrite(
     session,
-    policies,
-    (heard) =>
+    (shell) =>
       shell.set(name, raw, {
         assoc,
         followRef,
         assigned: assigned === null ? null : [...assigned],
         added,
-        listens: heard,
         warns: diagnostics !== null,
       }),
     diagnostics,
@@ -527,41 +466,35 @@ async function setVar(
 }
 
 /**
- * Drop one variable through the session plane's gate; a missing or hidden
- * name is quiet. A name an enclosing scope shadows is that scope's to lose:
- * the unset reveals the value it saved. `followRef` resolves a `declare -n`
+ * Drop one variable through the session plane; a missing or hidden name is
+ * quiet. A name an enclosing scope shadows is that scope's to lose: the
+ * unset reveals the value it saved. `followRef` resolves a `declare -n`
  * reference to its target; `unset -n r` drops the reference and passes
  * false. Mirrors Python's unset_var.
  */
-async function unsetVar(
-  session: SessionState,
-  policies: Policies | null,
-  name: string,
-  followRef = true,
-): Promise<void> {
-  const shell = session.vars.shell
-  await runWrite(session, policies, (heard) => shell.unset(name, { followRef, listens: heard }))
+// eslint-disable-next-line @typescript-eslint/require-await
+async function unsetVar(session: SessionState, name: string, followRef = true): Promise<void> {
+  refuseDeciding(name)
+  runWrite(session, (shell) => shell.unset(name, { followRef }))
 }
 
 /**
- * Turn one attribute on or off through the session plane's gate, writing no
- * value: `export NAME` on a fresh name leaves it unset. A null attribute
- * declares the name and changes no attribute. `followRef` marks what a
- * `declare -n` reference points at; `declare -rn r` marks the reference
- * itself. Mirrors Python's mark_var.
+ * Turn one attribute on or off through the session plane, writing no value:
+ * `export NAME` on a fresh name leaves it unset. A null attribute declares
+ * the name and changes no attribute. `followRef` marks what a `declare -n`
+ * reference points at; `declare -rn r` marks the reference itself. Mirrors
+ * Python's mark_var.
  */
+// eslint-disable-next-line @typescript-eslint/require-await
 async function markVar(
   session: SessionState,
-  policies: Policies | null,
   name: string,
   attr: VarAttr | null,
   on: boolean,
   followRef = true,
 ): Promise<void> {
-  const shell = session.vars.shell
-  await runWrite(session, policies, (heard) =>
-    shell.mark(name, attr, on, { followRef, listens: heard }),
-  )
+  refuseDeciding(name)
+  runWrite(session, (shell) => shell.mark(name, attr, on, { followRef }))
 }
 
 /**
@@ -647,13 +580,13 @@ export function shadowLocal(session: SessionState, name: string, inherit = false
 }
 
 /**
- * Write a variable without consulting the gate.
+ * Write a variable past the writer's checks.
  *
  * Two kinds of caller: seeding a session before it is handed out, and the
  * shell's own bookkeeping (`$PWD`/`$OLDPWD` after a `cd`, `BASH_REMATCH`
  * after `[[ =~ ]]`). A variable the line named goes through
  * `SessionView.set` instead. A prefix assignment (`FOO=bar cmd`) lands here
- * too, after asking `ensureVarVisible` and `preSession` with the value.
+ * too, after asking `ensureVarWritable`.
  *
  * Nor does it count against max_env: a caller that grows a value a line
  * chose, as a prefix assignment does, calls `checkEnv` first.
@@ -674,7 +607,7 @@ export function bindLastWord(session: SessionState, words: readonly string[]): v
 }
 
 /**
- * Turn one attribute on or off without the gate, creating the name unset if
+ * Turn one attribute on or off past the writer's checks, creating the name unset if
  * needed, as `readonly NAME` on a fresh name does; a null attribute only
  * declares the name.
  */
@@ -689,44 +622,23 @@ export function setAttr(
 }
 
 /**
- * A session write as one call, so a ONCE answer to its preSession question
- * stands until its postSession one is answered too. Without task isolation
- * a call cannot be told from another task's, so there the write is its own.
- * Mirrors Python's `_one_call`.
- */
-function oneCall(
-  session: SessionState,
-  policies: Policies | null,
-  write: () => Promise<void>,
-): Promise<void> {
-  return policies === null || !asyncContextIsolatesTasks
-    ? write()
-    : policies.decisions.withinCall(session.sessionId, write)
-}
-
-/**
  * The session plane's view: ten facts bound to one session.
  *
- * The one constructor every tier uses, so the gate cannot be skipped by
+ * The one constructor every tier uses, so its checks cannot be skipped by
  * picking a different entry point. The view carries no handle back to the
  * raw session. `diagnostics` is the evaluator's warning sink.
  */
 export function sessionView(
   session: SessionState,
-  policies: Policies | null = null,
   diagnostics?: (string | Uint8Array)[],
 ): SessionView {
   return {
     get: (name) => envGet(session, name),
     snapshot: () => envSnapshot(session),
     set: (name, value, followRef = true, assigned = null, added = null) =>
-      oneCall(session, policies, () =>
-        setVar(session, policies, name, value, followRef, diagnostics ?? null, assigned, added),
-      ),
-    unset: (name, followRef = true) =>
-      oneCall(session, policies, () => unsetVar(session, policies, name, followRef)),
-    mark: (name, attr, on, followRef = true) =>
-      oneCall(session, policies, () => markVar(session, policies, name, attr, on, followRef)),
+      setVar(session, name, value, followRef, diagnostics ?? null, assigned, added),
+    unset: (name, followRef = true) => unsetVar(session, name, followRef),
+    mark: (name, attr, on, followRef = true) => markVar(session, name, attr, on, followRef),
     isReadonly: (name, followRef = true) => envIsReadonly(session, name, followRef),
     profile: () => session.profile,
     cwd: () => session.cwd,

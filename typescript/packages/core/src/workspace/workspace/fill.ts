@@ -358,8 +358,9 @@ function unsetMasks(stmt: TSNodeLike): ReadonlySet<string> | null {
  * only run from later statements, and even an opaque read there
  * observes the replacement. The prefix ends at the first statement
  * that is anything else, that runs in the background (`&` detaches it
- * to a subshell, so nothing persists), or that touches a readonly name
- * (the write fails and the standing value stays observable). A name
+ * to a subshell, so nothing persists), or that touches a readonly or
+ * protected name (the write fails and the standing value stays
+ * observable). A name
  * read while still unmasked (`TOKEN=$TOKEN`) stays fetched: within a
  * statement the read precedes the write.
  *
@@ -367,20 +368,13 @@ function unsetMasks(stmt: TSNodeLike): ReadonlySet<string> | null {
  * body for that body's own reads (`ownMasks`); `inBody` says which,
  * because `local` writes only inside a function and refuses at top
  * level with the standing value still readable.
- *
- * `writesGated` empties the set: a `preSession` policy may refuse a
- * write mid-line while later statements still run, and a refused mask
- * would leave the standing value readable, so under such a policy
- * nothing masks and the fetch keeps today's shape.
  */
 export function maskedNames(
   node: TSNodeLike,
   session: SessionState,
-  writesGated: boolean,
   inBody = false,
   before: TSNodeLike | null = null,
 ): ReadonlySet<string> {
-  if (writesGated) return new Set()
   const masked = new Set<string>()
   const needed = new Set<string>()
   const children = node.children
@@ -404,11 +398,12 @@ export function maskedNames(
     if (masks === null) break
     const following = children[idx + 1]
     if (following?.type === '&') break
-    const readonlyHit = [...masks].some((name) => {
-      const record = session.vars.get(name)
-      return record?.attrs.has(VarAttr.Readonly) ?? false
-    })
-    if (readonlyHit) break
+    const refused = [...masks].some(
+      (name) =>
+        (session.vars.get(name)?.attrs.has(VarAttr.Readonly) ?? false) ||
+        session.vars.shell.protected(name),
+    )
+    if (refused) break
     for (const name of referencedNames(stmt)) {
       for (const target of [name, deref(session, name)]) {
         if (!masked.has(target)) needed.add(target)
@@ -438,17 +433,13 @@ const BODY_CONTAINERS: ReadonlySet<string> = new Set(['compound_statement', 'sub
  * the prefix that runs before it (`before`) discounts its reads
  * exactly as a same-line body's prefix would.
  */
-function ownMasks(
-  node: TSNodeLike,
-  session: SessionState,
-  writesGated: boolean,
-): ReadonlySet<string> {
+function ownMasks(node: TSNodeLike, session: SessionState): ReadonlySet<string> {
   let own: ReadonlySet<string> = new Set()
-  if (BODY_CONTAINERS.has(node.type)) own = maskedNames(node, session, writesGated, true)
-  else if (node.type === 'program') own = maskedNames(node, session, writesGated)
+  if (BODY_CONTAINERS.has(node.type)) own = maskedNames(node, session, true)
+  else if (node.type === 'program') own = maskedNames(node, session)
   const parent = node.parent ?? null
   if (parent !== null && BODY_CONTAINERS.has(parent.type)) {
-    const scoped = maskedNames(parent, session, writesGated, true, node)
+    const scoped = maskedNames(parent, session, true, node)
     if (scoped.size > 0) own = new Set([...own, ...scoped])
   }
   return own
@@ -554,7 +545,6 @@ function wanted(
   pending: Map<string, ManagedRef>,
   lineCliEnvNames: ReadonlySet<string>,
   masked: ReadonlySet<string>,
-  writesGated: boolean,
 ): Set<string> {
   const unmaskedPending = (): Set<string> =>
     new Set([...pending.keys()].filter((name) => !masked.has(name)))
@@ -570,7 +560,7 @@ function wanted(
     if (commandInvocations(node).some(([head]) => head === null)) {
       return unmaskedPending()
     }
-    const own = position === 0 ? new Set<string>() : ownMasks(node, session, writesGated)
+    const own = position === 0 ? new Set<string>() : ownMasks(node, session)
     if (reads.whole) {
       renderedAny = true
       const prior: ReadonlySet<string> | null = renderedExcluded
@@ -618,23 +608,20 @@ function wanted(
  * each unit's own leading prefix: the line's, which `lineNodes` puts
  * first, masks everything after it (a stored body or alias runs at an
  * invocation point, after the masking prefix), and a defined body's
- * masks only that body's reads (`ownMasks`). `writesGated` says a
- * policy overrides `preSession`, so no assignment or unset is trusted to
- * land (`maskedNames`).
+ * masks only that body's reads (`ownMasks`).
  */
 export function fillNames(
   session: SessionState,
   nodes: TSNodeLike[],
   whole: boolean,
   lineCliEnvNames: ReadonlySet<string>,
-  writesGated = false,
 ): ReadonlySet<string> {
   const pending = pendingOf(session)
   if (pending.size === 0) return new Set()
   if (whole) return new Set(pending.keys())
   const first = nodes[0]
-  const masked = first === undefined ? new Set<string>() : maskedNames(first, session, writesGated)
-  return wanted(session, nodes, pending, lineCliEnvNames, masked, writesGated)
+  const masked = first === undefined ? new Set<string>() : maskedNames(first, session)
+  return wanted(session, nodes, pending, lineCliEnvNames, masked)
 }
 
 /**

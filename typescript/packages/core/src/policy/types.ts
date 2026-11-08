@@ -439,12 +439,10 @@ export type ScriptMethod =
   | 'preExecute'
   | 'preCommand'
   | 'preVfs'
-  | 'preSession'
   | 'preNetwork'
   | 'postExecute'
   | 'postCommand'
   | 'postVfs'
-  | 'postSession'
   | 'postNetwork'
 
 /**
@@ -828,41 +826,6 @@ export interface ExecuteResultContext extends RouteContext {
 }
 
 /**
- * Facts about one session-state mutation, as preSession methods see it.
- * Fires on the session plane before the write lands, so it holds
- * whichever tier asked. Not an VfsContext: a session key is not a
- * path, and a path-scoped policy must never receive one dressed as a
- * path and match it by accident. `value` is null for an unset.
- * `sessionId` says which session is writing, so a policy can scope a
- * rule to one agent (deny `set` for session X).
- */
-export interface SessionContext {
-  /** The session's files; policy writes are refused by the dispatcher. */
-  vfs?: FileView
-  verb: string
-  key: string
-  value: string | null
-  sessionId: string
-  /** The session, read only. */
-  session?: SessionView
-  /**
-   * Who makes the call, read only: its `session` is the session above
-   * (`sessionId`, `cwd`). Filled when a method is asked.
-   */
-  caller?: PolicyCaller
-}
-
-/**
- * One session write that landed, as postSession methods see it: what
- * preSession saw, plus the value it replaced (`old`, rendered as `value`
- * is; null when the name was unset). Mirrors the Python
- * SessionResultContext.
- */
-export interface SessionResultContext extends SessionContext {
-  old: string | null
-}
-
-/**
  * One workspace a server is about to build, as preWorkspace methods see
  * it: before any of it is built or any secret it names is read. `config`
  * is the config as the caller wrote it, validated: a create's whole
@@ -883,8 +846,6 @@ export const VALIDITY: Readonly<
     | 'preVfs'
     | 'postVfs'
     | 'postExecute'
-    | 'preSession'
-    | 'postSession'
     | 'preWorkspace'
     | 'preNetwork'
     | 'postNetwork',
@@ -897,8 +858,6 @@ export const VALIDITY: Readonly<
   preVfs: new Set(['deny', 'ask']),
   postVfs: new Set(['deny', 'ask']),
   postExecute: new Set(['deny', 'ask', 'limit']),
-  preSession: new Set(['deny', 'ask']),
-  postSession: new Set(['deny', 'ask']),
   preWorkspace: new Set(['deny']),
   preNetwork: new Set(['deny', 'ask', 'limit']),
   postNetwork: new Set(),

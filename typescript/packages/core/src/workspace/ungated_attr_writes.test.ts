@@ -19,10 +19,10 @@ import { describe, expect, it } from 'vitest'
 
 const SRC = dirname(dirname(fileURLToPath(import.meta.url)))
 
-// `setAttr` is the *ungated* attribute entry point: it writes the record and
-// asks no policy. That is correct only where this operand's own path
-// already cleared `preSession`, which is a per-call-site fact and not a
-// property of the function it sits in. Reading a nearby `view.set` and
+// `setAttr` is the *ungated* attribute entry point: it writes the record
+// past the writer's hidden, protected and readonly checks. That is correct
+// only where this operand's own path already passed them, which is a
+// per-call-site fact and not a property of the function it sits in. Reading a nearby `view.set` and
 // assuming it covers the name at hand is how three separate bugs
 // shipped: `readonly NAME` froze a refused name, `declare -x NAME`
 // exported a host-seeded credential, and `SECRET=x cmd` handed one to
@@ -40,7 +40,7 @@ const ALLOWED: Record<string, string> = {
   'workspace/node/explain.ts::seeded':
     "the line pass's preview of a command's own prefix, on a fork of the " +
     'walked session that only policies read and nothing runs in; the run ' +
-    "seeds it again through `executeCommand`'s gated loop",
+    "seeds it again through `executeCommand`'s checked loop",
   'workspace/session/shell_dirs.ts::changeDir':
     "the shell's own bookkeeping for the two fixed names PWD and " +
     'OLDPWD as part of a cd the router already authorized, not a name ' +
@@ -101,7 +101,7 @@ describe('ungated attribute writes', () => {
       unexplained,
       'ungated setAttr call site with no stated reason. Either name the ' +
         'gated write that covers this operand and add it to ALLOWED, or ' +
-        'route the mark through `view.mark` so `preSession` sees it.',
+        'route the mark through `view.mark` so the writer checks it.',
     ).toEqual([])
   })
 

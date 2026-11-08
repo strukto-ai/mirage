@@ -134,14 +134,12 @@ async function evalCondBinary(
     // so a hidden name reads as unset here too.
     // bash evaluates the left operand, binds what it assigned, then
     // evaluates the right (`[[ x=5 -eq x ]]` is true and leaves x at 5),
-    // so each operand lands its assignments through the gated session view before
-    // the next reads, RANDOM's seed included (`[[ RANDOM=42 -eq RANDOM ]]`
-    // seeds, then draws).
-    const policies = ctx.namespace.registry.policies
+    // so each operand lands its assignments before the next reads, RANDOM's
+    // seed included (`[[ RANDOM=42 -eq RANDOM ]]` seeds, then draws).
     const values: bigint[] = []
     for (const operand of [node.left, node.right]) {
       try {
-        values.push(await sessionArith(ctx.session, operand, policies))
+        values.push(await sessionArith(ctx.session, operand))
       } catch (exc) {
         if (exc instanceof PolicyDenied) {
           throw new CondError(`${ctx.name}: ${exc.virtualPath}: denied`)

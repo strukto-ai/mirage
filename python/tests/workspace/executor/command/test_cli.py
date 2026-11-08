@@ -29,8 +29,6 @@ from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.policy import Action, Deny, Policy
-from mirage.policy.types import SessionContext
 from mirage.rs.errors import StreamRefusal
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
@@ -999,15 +997,6 @@ def test_an_env_value_does_not_count_as_typed():
     assert parsed.typed_dests == []
 
 
-class DenyAwsWrites(Policy):
-    """Refuses any session write naming an AWS variable."""
-
-    async def pre_session(self, ctx: SessionContext) -> Action | None:
-        if ctx.key.startswith("AWS_"):
-            return Deny("not yours to set\n")
-        return None
-
-
 async def stash(config: None, paths, texts, ctx: Context):
     """A leaf that writes the session plane through its entry point."""
     view = ctx.session
@@ -1039,15 +1028,16 @@ async def test_a_leaf_writes_the_session_through_its_entry_point():
 
 
 @pytest.mark.asyncio
-async def test_a_leafs_session_write_clears_the_same_gate_the_shell_does():
-    # An entry point that skipped the gate would make an installed CLI the way
-    # around every pre_session rule, which is the whole reason writes
-    # go through one entry point rather than to the session.
-    with Workspace({"/ram/": RAMVFS()}, policies=[DenyAwsWrites()]) as ws:
+async def test_a_leafs_session_write_refuses_a_protected_name():
+    # An entry point that wrote the session directly would make an
+    # installed CLI the way around a protected name, which is the whole
+    # reason writes go through one entry point rather than to the session.
+    profile = {"vars": {"protect": ["AWS_*"]}}
+    with Workspace({"/ram/": RAMVFS()}, profiles={"default": profile}) as ws:
         ws.register_cli("stash", STASH)
         denied = await ws.shell("stash AWS_PROFILE prod")
         assert denied.exit_code != 0
-        assert denied.refusal and "not yours to set" in denied.refusal.reason
+        assert denied.stderr == b"stash: AWS_PROFILE: Permission denied\n"
         assert (await ws.shell("echo $AWS_PROFILE")).stdout == b"\n"
         allowed = await ws.shell("stash OTHER fine")
         assert allowed.exit_code == 0

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.policy import PolicyDenied
-from mirage.policy.policies import Policies
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import VarAttr, VarKind
@@ -75,7 +74,6 @@ async def handle_local(
     session: SessionState,
     state: SessionView | None = None,
     decl: Declaration = Declaration(),
-    policies: Policies | None = None,
     subscripts: SubscriptFn | None = None,
 ) -> Result:
     """Declare names in the running function's scope, or globally.
@@ -94,8 +92,6 @@ async def handle_local(
         session (SessionState): shell session state.
         state (SessionView | None): the gated session view.
         decl (Declaration): the spelling and the letters it carried.
-        policies (Policies | None): the policies an ``-i`` value's
-            assignments clear.
         subscripts (SubscriptFn | None): expands an element operand's
             subscript (``declare 'd[$i]=w'``); None takes it as typed.
     """
@@ -138,7 +134,6 @@ async def handle_local(
             view,
             decl,
             not decl.global_scope and session.vars.shell.in_function(),
-            policies,
             subscripts,
         )
     finally:
@@ -152,7 +147,6 @@ async def _declare_operands(
     view: SessionView,
     decl: Declaration,
     scoped: bool,
-    policies: Policies | None = None,
     subscripts: SubscriptFn | None = None,
 ) -> Result:
     """Run ``handle_local``'s operands in the scope it settled on.
@@ -164,8 +158,6 @@ async def _declare_operands(
         decl (Declaration): the spelling and the letters it carried.
         scoped (bool): a function's own scope, which a local shadows;
             False at global scope.
-        policies (Policies | None): the policies an ``-i`` value's
-            assignments clear.
         subscripts (SubscriptFn | None): expands an element operand's
             subscript.
     """
@@ -187,7 +179,6 @@ async def _declare_operands(
             shaping=shaping,
             global_scope=not scoped,
             inherit=inherit,
-            policies=policies,
         )
         for position, operand in enumerate(operands):
             if isinstance(operand, str):
@@ -200,7 +191,6 @@ async def _declare_operands(
                         operand,
                         decl,
                         scoped,
-                        policies,
                         subscripts,
                     )
                 )
@@ -266,7 +256,6 @@ async def _declare_operand(
     assign: str,
     decl: Declaration,
     scoped: bool,
-    policies: Policies | None = None,
     subscripts: SubscriptFn | None = None,
 ) -> str | None:
     """Declare one ``NAME``, ``NAME=value``, ``NAME+=value`` or element
@@ -283,8 +272,6 @@ async def _declare_operand(
         decl (Declaration): the spelling and the letters it carried.
         scoped (bool): a function's own scope, which a local shadows;
             False at global scope.
-        policies (Policies | None): the policies an ``-i`` value's
-            assignments clear.
         subscripts (SubscriptFn | None): expands an element operand's
             subscript.
 
@@ -299,7 +286,7 @@ async def _declare_operand(
     key, append, val = operand_parts(assign)
     if val is not None and SUBSCRIPT_RE.fullmatch(key):
         return await _declare_element(
-            session, view, key, append, val, decl, scoped, policies, subscripts
+            session, view, key, append, val, decl, scoped, subscripts
         )
     bad_name = identifier_refusal(cmd, assign)
     if bad_name is not None:
@@ -370,7 +357,6 @@ async def _declare_operand(
             shaping,
             marks,
             creates,
-            policies,
         )
     # A new local holds nothing of the caller's but what `start_local`
     # kept; otherwise the value lands as any declaration's does
@@ -401,7 +387,6 @@ async def _declare_element(
     val: str,
     decl: Declaration,
     scoped: bool,
-    policies: Policies | None = None,
     subscripts: SubscriptFn | None = None,
 ) -> str | None:
     """Assign one ``NAME[SUB]=value`` operand as bash's declaration does:
@@ -418,7 +403,6 @@ async def _declare_element(
         val (str): the value.
         decl (Declaration): the spelling and the letters it carried.
         scoped (bool): a function's own scope, which a local shadows.
-        policies (Policies | None): the policies the write clears.
         subscripts (SubscriptFn | None): expands the subscript.
 
     Returns:
@@ -460,9 +444,7 @@ async def _declare_element(
         )
     subscript = raw if subscripts is None else await subscripts(raw)
     await premark(view, name, shaping)
-    status = await assign_element(
-        session, policies, name, subscript, val, append
-    )
+    status = await assign_element(session, name, subscript, val, append)
     if status == "readonly":
         return readonly_line(cmd, name)
     if status == "denied":
@@ -500,7 +482,6 @@ async def _aim_reference(
     shaping: AttrMarks,
     marks: AttrMarks,
     creates: bool,
-    policies: Policies | None = None,
 ) -> str | None:
     """Aim a ``declare -n NAME=VALUE`` (or ``NAME+=VALUE``) reference
     once the name may take one.
@@ -525,8 +506,6 @@ async def _aim_reference(
         shaping (AttrMarks): the ``-i -l -u`` / ``+i +l +u`` marks.
         marks (AttrMarks): the attribute marks.
         creates (bool): the declaration made ``key`` a new local.
-        policies (Policies | None): the policies an ``-i`` value's
-            assignments clear.
 
     Returns:
         The refusal line ("" for a silent one), or None once aimed.
@@ -544,7 +523,6 @@ async def _aim_reference(
     if (VarAttr.INTEGER, True) in shaping:
         await evaluate_integer(
             session,
-            policies,
             old if append else given,
             given if append else None,
         )
@@ -630,8 +608,6 @@ async def local_builtin(call: BuiltinCall) -> Result:
         call.context.session,
         session_view(
             call.context.session,
-            call.namespace.registry.policies,
             diagnostics=call.context.frame.diagnostics,
         ),
-        policies=call.namespace.registry.policies,
     )

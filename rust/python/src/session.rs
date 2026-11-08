@@ -7,10 +7,10 @@ use pyo3::types::{PyBool, PyBytes, PyDict, PyList, PyTuple};
 use streams::interp::codec::Item;
 use streams::interp::expand::Substitution;
 use streams::interp::host::{self, Held};
-use streams::interp::job::{Job, Running, Step};
+use streams::interp::job::{Job, Step};
 use streams::interp::shell::{Frame, Shell as Inner};
-use streams::interp::task::{self, Answer, Ask, Mode, Write};
-use streams::interp::write::{Denied, Fault};
+use streams::interp::task::{self, Answer, Ask, Ended, Expanded, Mode, Task, Write};
+use streams::interp::write::Fault;
 use streams::interp::{listing, quote};
 use streams::shell::Tree;
 use streams::vars::{self, Assigned, Indexed, Kind, Managed, Store, Value, Var};
@@ -144,15 +144,13 @@ impl Shell {
         Ok(&mut self.shell_mut()?.vars)
     }
 
-    fn write_task(
-        slf: &Bound<'_, Self>,
-        write: Write,
-        listens: bool,
-        warns: bool,
-    ) -> PyResult<ShellTask> {
-        ShellTask::start(slf, None, |inner| {
-            Running::Write(task::write(inner, write, listens, warns))
-        })
+    /// Run a write on the shell at once: `(("ok", value) | fault,
+    /// diagnostics)`.
+    fn write(&mut self, py: Python<'_>, write: Write, warns: bool) -> PyResult<Outcome> {
+        let (result, diagnostics) = task::write(self.shell_mut()?, write, warns);
+        let result = py_of(py, &host::wrote_out(&result))?;
+        let diagnostics = py_of(py, &host::diagnostics_out(&diagnostics))?;
+        Ok((result.unbind(), diagnostics.unbind()))
     }
 }
 
@@ -238,16 +236,6 @@ impl Shell {
             .transpose()
     }
 
-    /// What a `pre_session` rule is shown for a name's record, references
-    /// not followed; None when it is unset.
-    fn rendered<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyAny>>> {
-        self.store()?
-            .record(name)
-            .and_then(|var| var.value.as_ref())
-            .map(|value| text_of(py, &value.rendering()))
-            .transpose()
-    }
-
     fn names(&self) -> PyResult<Vec<String>> {
         Ok(self
             .store()?
@@ -303,6 +291,17 @@ impl Shell {
         Ok(self.store()?.hidden(name))
     }
 
+    /// Protect the names a session's profile lists, exactly or by glob:
+    /// they read as any name does, and a write to one is refused.
+    fn protect(&mut self, names: Vec<String>, patterns: Vec<String>) -> PyResult<()> {
+        self.store_mut()?.protect_vars(&names, &patterns);
+        Ok(())
+    }
+
+    fn protected(&self, name: &str) -> PyResult<bool> {
+        Ok(self.store()?.protected(name))
+    }
+
     fn nameref_target(&self, name: &str) -> PyResult<Option<String>> {
         Ok(self.store()?.nameref_target(name).map(str::to_owned))
     }
@@ -338,7 +337,7 @@ impl Shell {
         Ok(out)
     }
 
-    /// Write a value with no gate, as seeding a session does.
+    /// Write a value past the writer's checks, as seeding a session does.
     #[pyo3(signature = (name, value, assoc = false))]
     fn seed(&mut self, name: &str, value: Bound<'_, PyAny>, assoc: bool) -> PyResult<()> {
         let value = value_in(&value, assoc)?;
@@ -346,7 +345,8 @@ impl Shell {
         Ok(())
     }
 
-    /// Set or clear one attribute (its `declare` letter) with no gate.
+    /// Set or clear one attribute (its `declare` letter) past the writer's
+    /// checks.
     #[pyo3(signature = (name, letter, on))]
     fn set_attr(&mut self, name: &str, letter: Option<&str>, on: bool) -> PyResult<()> {
         let attr = letter.map(vars::attrs_of);
@@ -604,38 +604,32 @@ impl Shell {
     }
 
     /// Expand `node` as `mode` (`fields`, `text`, `assignment`, `pattern`,
-    /// `regex` or `arith`) says; `listens` when a session policy hears writes.
-    fn expand(
-        slf: &Bound<'_, Self>,
-        node: &ShellNode,
-        mode: &str,
-        listens: bool,
-    ) -> PyResult<ShellTask> {
+    /// `regex` or `arith`) says.
+    fn expand(slf: &Bound<'_, Self>, node: &ShellNode, mode: &str) -> PyResult<ShellTask> {
         let mode: Mode = mode.parse().map_err(PyRuntimeError::new_err)?;
         let tree = Arc::clone(&node.tree);
         let index = node.index as usize;
-        ShellTask::start(slf, Some((Arc::clone(&tree), node.serial)), |inner| {
-            Running::Expand(task::expand(inner, tree, index, mode, listens))
+        ShellTask::start(slf, (Arc::clone(&tree), node.serial), |inner| {
+            task::expand(inner, tree, index, mode)
         })
     }
 
-    /// Set a variable through the gate. `value` is text, or a mapping for
-    /// an array (`assoc` for an associative one); `assigned` names the
-    /// indexes or keys an array write assigns; `added` is an integer
-    /// `+=`'s operand.
-    #[pyo3(signature = (name, value, *, assoc = false, follow_ref = true, assigned = None, added = None, listens = false, warns = true))]
+    /// Set a variable. `value` is text, or a mapping for an array
+    /// (`assoc` for an associative one); `assigned` names the indexes or
+    /// keys an array write assigns; `added` is an integer `+=`'s operand.
+    #[pyo3(signature = (name, value, *, assoc = false, follow_ref = true, assigned = None, added = None, warns = true))]
     #[allow(clippy::too_many_arguments)]
     fn set(
-        slf: &Bound<'_, Self>,
+        &mut self,
+        py: Python<'_>,
         name: String,
         value: Bound<'_, PyAny>,
         assoc: bool,
         follow_ref: bool,
         assigned: Option<Vec<Bound<'_, PyAny>>>,
         added: Option<Bound<'_, PyAny>>,
-        listens: bool,
         warns: bool,
-    ) -> PyResult<ShellTask> {
+    ) -> PyResult<Outcome> {
         let value = value_in(&value, assoc)?;
         let assigned = match assigned {
             None => None,
@@ -657,30 +651,24 @@ impl Shell {
             assigned,
             added,
         };
-        Self::write_task(slf, write, listens, warns)
+        self.write(py, write, warns)
     }
 
-    #[pyo3(signature = (name, *, follow_ref = true, listens = false))]
-    fn unset(
-        slf: &Bound<'_, Self>,
-        name: String,
-        follow_ref: bool,
-        listens: bool,
-    ) -> PyResult<ShellTask> {
-        Self::write_task(slf, Write::Unset { name, follow_ref }, listens, true)
+    #[pyo3(signature = (name, *, follow_ref = true))]
+    fn unset(&mut self, py: Python<'_>, name: String, follow_ref: bool) -> PyResult<Outcome> {
+        self.write(py, Write::Unset { name, follow_ref }, true)
     }
 
-    /// Set or clear an attribute through the gate; no letter declares
-    /// the name only.
-    #[pyo3(signature = (name, letter, on, *, follow_ref = true, listens = false))]
+    /// Set or clear an attribute; no letter declares the name only.
+    #[pyo3(signature = (name, letter, on, *, follow_ref = true))]
     fn mark(
-        slf: &Bound<'_, Self>,
+        &mut self,
+        py: Python<'_>,
         name: String,
         letter: Option<&str>,
         on: bool,
         follow_ref: bool,
-        listens: bool,
-    ) -> PyResult<ShellTask> {
+    ) -> PyResult<Outcome> {
         let attr = letter.map(vars::attrs_of);
         let write = Write::Mark {
             name,
@@ -688,126 +676,115 @@ impl Shell {
             on,
             follow_ref,
         };
-        Self::write_task(slf, write, listens, true)
+        self.write(py, write, true)
     }
 
     /// Resolve an indexed array's subscript, what it assigns landed.
-    #[pyo3(signature = (subscript, *, listens = false))]
-    fn index(
-        slf: &Bound<'_, Self>,
-        subscript: Bound<'_, PyAny>,
-        listens: bool,
-    ) -> PyResult<ShellTask> {
+    fn index(&mut self, py: Python<'_>, subscript: Bound<'_, PyAny>) -> PyResult<Outcome> {
         let subscript = bytes_of(&subscript)?;
-        Self::write_task(slf, Write::Index { subscript }, listens, true)
+        self.write(py, Write::Index { subscript }, true)
     }
 
     /// Whether a `name` / `name[sub]` reference is set, as `test -v`
     /// asks; what its subscript assigns landed. The result is 1 or 0.
     /// `expanded` for a subscript already expanded, an associative key
     /// then taken verbatim.
-    #[pyo3(signature = (reference, *, expanded = false, listens = false))]
+    #[pyo3(signature = (reference, *, expanded = false))]
     fn is_set(
-        slf: &Bound<'_, Self>,
+        &mut self,
+        py: Python<'_>,
         reference: Bound<'_, PyAny>,
         expanded: bool,
-        listens: bool,
-    ) -> PyResult<ShellTask> {
+    ) -> PyResult<Outcome> {
         let reference = bytes_of(&reference)?;
         let write = Write::IsSet {
             reference,
             expanded,
         };
-        Self::write_task(slf, write, listens, true)
+        self.write(py, write, true)
     }
 
     /// Write one element a builtin names, or a bare name as element 0;
-    /// the result is 0 landed, 1 hidden, 2 readonly or 3 a subscript that
-    /// names no element. `warns` as for `set`.
-    #[pyo3(signature = (name, subscript, value, *, append = false, listens = false, warns = true))]
+    /// the result is 0 landed, 1 denied (hidden or protected), 2 readonly
+    /// or 3 a subscript that names no element. `warns` as for `set`.
+    #[pyo3(signature = (name, subscript, value, *, append = false, warns = true))]
     #[allow(clippy::too_many_arguments)]
     fn element(
-        slf: &Bound<'_, Self>,
+        &mut self,
+        py: Python<'_>,
         name: String,
         subscript: Option<Bound<'_, PyAny>>,
         value: Bound<'_, PyAny>,
         append: bool,
-        listens: bool,
         warns: bool,
-    ) -> PyResult<ShellTask> {
+    ) -> PyResult<Outcome> {
         let write = Write::Element {
             name,
             subscript: subscript.as_ref().map(bytes_of).transpose()?,
             value: bytes_of(&value)?,
             append,
         };
-        Self::write_task(slf, write, listens, warns)
+        self.write(py, write, warns)
     }
 
     /// Append words at an indexed array's extent (`a+=(x y)`).
-    #[pyo3(signature = (name, words, *, listens = false))]
     fn push(
-        slf: &Bound<'_, Self>,
+        &mut self,
+        py: Python<'_>,
         name: String,
         words: Vec<Bound<'_, PyAny>>,
-        listens: bool,
-    ) -> PyResult<ShellTask> {
+    ) -> PyResult<Outcome> {
         let words = words.iter().map(bytes_of).collect::<PyResult<_>>()?;
-        Self::write_task(slf, Write::Push { name, words }, listens, true)
+        self.write(py, Write::Push { name, words }, true)
     }
 
     /// Clear one element (`unset 'a[i]'`), or every one when `every`, a
     /// subscript typed as `@` or `*`; the result is 0 cleared, 3 a
     /// subscript that names no element or 4 one other than 0 on a scalar.
-    #[pyo3(signature = (name, subscript, *, every = false, listens = false))]
+    #[pyo3(signature = (name, subscript, *, every = false))]
     fn unset_element(
-        slf: &Bound<'_, Self>,
+        &mut self,
+        py: Python<'_>,
         name: String,
         subscript: Bound<'_, PyAny>,
         every: bool,
-        listens: bool,
-    ) -> PyResult<ShellTask> {
+    ) -> PyResult<Outcome> {
         let subscript = bytes_of(&subscript)?;
         let write = Write::UnsetElement {
             name,
             subscript,
             every,
         };
-        Self::write_task(slf, write, listens, true)
+        self.write(py, write, true)
     }
 
     /// Evaluate an arithmetic command or `let` operand, its writes landed;
     /// `expand` for a `let` operand, whose subscripts expand first.
-    #[pyo3(signature = (text, *, listens = false, expand = false))]
-    fn arith(
-        slf: &Bound<'_, Self>,
-        text: Bound<'_, PyAny>,
-        listens: bool,
-        expand: bool,
-    ) -> PyResult<ShellTask> {
+    #[pyo3(signature = (text, *, expand = false))]
+    fn arith(&mut self, py: Python<'_>, text: Bound<'_, PyAny>, expand: bool) -> PyResult<Outcome> {
         let text = bytes_of(&text)?;
-        Self::write_task(slf, Write::Arith { text, expand }, listens, true)
+        self.write(py, Write::Arith { text, expand }, true)
     }
 
     /// Evaluate a value as an `-i` write coerces it, its writes landed;
     /// `added` is an integer `+=`'s text.
-    #[pyo3(signature = (text, added = None, *, listens = false))]
+    #[pyo3(signature = (text, added = None))]
     fn integer(
-        slf: &Bound<'_, Self>,
+        &mut self,
+        py: Python<'_>,
         text: Bound<'_, PyAny>,
         added: Option<Bound<'_, PyAny>>,
-        listens: bool,
-    ) -> PyResult<ShellTask> {
+    ) -> PyResult<Outcome> {
         let text = bytes_of(&text)?;
         let added = added.as_ref().map(bytes_of).transpose()?;
-        Self::write_task(slf, Write::Integer { text, added }, listens, true)
+        self.write(py, Write::Integer { text, added }, true)
     }
 }
 
-/// What an ended task leaves: its result tuple and diagnostics.
+/// What an ended operation leaves: its result tuple and diagnostics.
 type Outcome = (Py<PyAny>, Py<PyAny>);
 
-/// An operation running on a shell, driven by the host. Started, it has
+/// An expansion running on a shell, driven by the host. Started, it has
 /// run to its first request or its end: `step` returns the request it
 /// waits on, which one `answer_*` call answers, running it to the next,
 /// or None once it has ended, when the shell is its owner's again and
@@ -818,18 +795,18 @@ type Outcome = (Py<PyAny>, Py<PyAny>);
 pub struct ShellTask {
     job: Job,
     owner: Py<Shell>,
-    tree: Option<(Arc<Tree>, u64)>,
+    tree: (Arc<Tree>, u64),
     asked: Option<Py<PyAny>>,
     ended: Option<Outcome>,
 }
 
 impl ShellTask {
-    /// Hand the shell to an operation and run it to its first request
-    /// or its end, when the shell comes back.
+    /// Hand the shell to an expansion and run it to its first request or
+    /// its end, when the shell comes back.
     fn start(
         slf: &Bound<'_, Shell>,
-        tree: Option<(Arc<Tree>, u64)>,
-        run: impl FnOnce(Inner) -> Running,
+        tree: (Arc<Tree>, u64),
+        run: impl FnOnce(Inner) -> Task<Ended<Expanded>>,
     ) -> PyResult<Self> {
         let mut shell = slf.borrow_mut();
         let inner = shell.0.take().ok_or_else(running)?;
@@ -846,16 +823,13 @@ impl ShellTask {
         Ok(task)
     }
 
-    fn node(&self, index: usize) -> PyResult<ShellNode> {
-        let (tree, serial) = self
-            .tree
-            .as_ref()
-            .ok_or_else(|| PyRuntimeError::new_err("a write has no tree"))?;
-        Ok(ShellNode {
+    fn node(&self, index: usize) -> ShellNode {
+        let (tree, serial) = &self.tree;
+        ShellNode {
             tree: Arc::clone(tree),
             serial: *serial,
             index: index as u32,
-        })
+        }
     }
 
     fn ask<'py>(&self, py: Python<'py>, ask: Ask) -> PyResult<Bound<'py, PyAny>> {
@@ -870,7 +844,7 @@ impl ShellTask {
                 "substitute",
                 Shell::wrap(shell),
                 text_of(py, &body)?,
-                self.node(node)?,
+                self.node(node),
                 span,
                 read.map(|fields| py_of(py, &host::fields_out(&fields)))
                     .transpose()?,
@@ -878,30 +852,7 @@ impl ShellTask {
                 .into_pyobject(py)?
                 .into_any(),
             Ask::ProcessSubstitution { shell, node } => {
-                ("process", Shell::wrap(shell), self.node(node)?)
-                    .into_pyobject(py)?
-                    .into_any()
-            }
-            Ask::Gate {
-                post,
-                verb,
-                key,
-                value,
-                old,
-                view,
-            } => {
-                let verb = host::verb_name(verb);
-                let value = value.map(|v| text_of(py, &v)).transpose()?;
-                let old = old.map(|v| text_of(py, &v)).transpose()?;
-                (
-                    "gate",
-                    post,
-                    verb,
-                    key,
-                    value,
-                    old,
-                    Shell::wrap(Inner::new(view)),
-                )
+                ("process", Shell::wrap(shell), self.node(node))
                     .into_pyobject(py)?
                     .into_any()
             }
@@ -945,9 +896,8 @@ impl ShellTask {
 impl ShellTask {
     /// The request the operation waits on, None once it has ended. A
     /// request is `("substitute", shell, body, node, span, read)`,
-    /// `("process", shell, node)`, `("gate", post, verb, key, value, old,
-    /// view)` or `("pause", view)`; each shell is one the host may read
-    /// while it answers.
+    /// `("process", shell, node)` or `("pause", view)`; each shell is one
+    /// the host may read while it answers.
     fn step<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
         self.asked.as_ref().map(|ask| ask.bind(py).clone())
     }
@@ -974,26 +924,9 @@ impl ShellTask {
         self.answer(py, Answer::Path(path))
     }
 
-    /// The gate's answer: None to let the write through, or the refused
-    /// name and the host's record of the refusal.
-    #[pyo3(signature = (denied))]
-    fn answer_gate(&mut self, py: Python<'_>, denied: Option<(String, u32)>) -> PyResult<()> {
-        let answer = match denied {
-            None => Ok(()),
-            Some((name, record)) => Err(Denied { name, record }),
-        };
-        self.answer(py, Answer::Gate(answer))
-    }
-
     /// The host has let others run; the operation goes on.
     fn answer_resumed(&mut self, py: Python<'_>) -> PyResult<()> {
         self.answer(py, Answer::Resumed)
-    }
-
-    /// Whether a policy hears the session's writes from now on, told
-    /// before each answer.
-    fn listen(&mut self, listens: bool) {
-        self.job.listen(listens);
     }
 
     /// The host could not do what was asked; the operation stops.

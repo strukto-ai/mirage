@@ -241,7 +241,6 @@ async def mapfile_builtin(call: BuiltinCall) -> Result:
         call.execute_fn,
         session_view(
             call.context.session,
-            call.namespace.registry.policies,
             diagnostics=call.context.frame.diagnostics,
         ),
         cmd=str(call.argv.name),

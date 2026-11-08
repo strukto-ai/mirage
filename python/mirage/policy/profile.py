@@ -278,11 +278,15 @@ class VarsBlock(BaseModel):
     Args:
         hide (tuple[str, ...]): variable names or globs over names the
             session reads as unset.
+        protect (tuple[str, ...]): variable names or globs over names the
+            session reads but cannot set, unset or mark: the operator's
+            to set, through the profile's ``env``.
     """
 
     model_config = _DOC
 
     hide: tuple[str, ...] = ()
+    protect: tuple[str, ...] = ()
 
 
 class CommandsBlock(BaseModel):
@@ -513,9 +517,9 @@ class SessionProfile(BaseModel):
     hide, is read by anchor depth: the deeper entry wins, ties break by
     verb.
 
-    A profile may also state a ``policy``: for each ``pre_`` method it
-    answers at (``pre_execute``, ``pre_command``, ``pre_vfs``,
-    ``pre_session``), a list of programs, each with the runtime it runs
+    A profile may also state a ``policy``: for each method it answers at
+    (``pre_execute``, ``pre_command``, ``pre_vfs``, ``pre_network`` and
+    their ``post_`` twins), a list of programs, each with the runtime it runs
     on (``ProfilePolicy``, the shape a ``clis`` entry has). A program's
     function for the method takes its context and returns its answer:
     None for no opinion, a deny, an ask, or at ``pre_execute`` a route.
@@ -537,7 +541,8 @@ class SessionProfile(BaseModel):
             working inside the mount, and hides under it. A mount the
             mapping omits keeps its own mode and gains no rules.
         paths (PathsBlock | None): the profile's hides, absolute.
-        vars (VarsBlock | None): the profile's hidden variables.
+        vars (VarsBlock | None): the profile's hidden and protected
+            variables.
         commands (CommandsBlock | None): the profile's allow list and its
             ask / deny rules, absolute paths.
         policy (dict[ScriptMethod, list[ProfilePolicy]] | None): the
@@ -686,6 +691,7 @@ def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
     entry dumps as a row rather than a path mapped to its mode, and a
     rule dumps its compiled ``mount`` and, when it names commands and
     paths, a pair the document refuses. Those blocks are spelled here,
+    ``vars`` writes only the lists it states,
     the limits and process scopes keep their unset fields, as the
     session record writes them on both hosts, and an env entry is
     written with the fields its author set, a managed one as its
@@ -702,11 +708,16 @@ def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
             "env",
             "mounts",
             "paths",
+            "vars",
             "commands",
             "command_limits",
             "processes",
         },
     )
+    if profile.vars is not None:
+        doc["vars"] = profile.vars.model_dump(
+            mode="json", exclude_defaults=True
+        )
     if profile.env is not None:
         doc["env"] = {
             name: (

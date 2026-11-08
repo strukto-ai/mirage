@@ -1,4 +1,4 @@
-//! A running operation as its host drives it: starting it runs it to its
+//! A running expansion as its host drives it: starting it runs it to its
 //! first request or its end, each answer runs it on to the next, and a
 //! long list of fields comes back in slices the host takes one at a time,
 //! letting others run between them.
@@ -9,36 +9,24 @@ use super::task::{Answer, Ask, Ended, Expanded, Task};
 /// The fields one slice of a result holds.
 pub const SLICE: usize = 4096;
 
-/// The operation a job runs.
-pub enum Running {
-    Expand(Task<Ended<Expanded>>),
-    Write(Task<Ended<i64>>),
-}
-
-/// What an operation ended with.
-pub enum Output {
-    Expanded(Expanded),
-    Wrote(i64),
-}
-
 /// Where a run stopped: a request the operation waits on, or its end,
 /// with the shell it held for its owner to take back.
 pub enum Step {
     Asked(Ask),
-    Ended(Ended<Output>),
+    Ended(Ended<Expanded>),
 }
 
 pub struct Job {
-    running: Running,
+    task: Task<Ended<Expanded>>,
     ended: bool,
     rest: std::vec::IntoIter<Field>,
 }
 
 impl Job {
-    /// Start `running`: run it to its first request or its end.
-    pub fn start(running: Running) -> (Self, Step) {
+    /// Start `task`: run it to its first request or its end.
+    pub fn start(task: Task<Ended<Expanded>>) -> (Self, Step) {
         let mut job = Self {
-            running,
+            task,
             ended: false,
             rest: Vec::new().into_iter(),
         };
@@ -52,19 +40,8 @@ impl Job {
         if self.ended {
             return None;
         }
-        match &mut self.running {
-            Running::Expand(task) => task.answer(answer),
-            Running::Write(task) => task.answer(answer),
-        }
+        self.task.answer(answer);
         Some(self.run())
-    }
-
-    /// Whether a policy hears the session's writes from now on.
-    pub fn listen(&mut self, listens: bool) {
-        match &mut self.running {
-            Running::Expand(task) => task.listen(listens),
-            Running::Write(task) => task.listen(listens),
-        }
     }
 
     /// Whether slices of the result are left to take.
@@ -78,21 +55,15 @@ impl Job {
     }
 
     fn run(&mut self) -> Step {
-        let ended = match &mut self.running {
-            Running::Expand(task) => match task.step() {
-                Some(ask) => return Step::Asked(ask),
-                None => task.output().map(|ended| ended.map(Output::Expanded)),
-            },
-            Running::Write(task) => match task.step() {
-                Some(ask) => return Step::Asked(ask),
-                None => task.output().map(|ended| ended.map(Output::Wrote)),
-            },
-        };
+        if let Some(ask) = self.task.step() {
+            return Step::Asked(ask);
+        }
+        let ended = self.task.output();
         self.ended = true;
         let Some(mut ended) = ended else {
             unreachable!("an operation that asks nothing more has ended once");
         };
-        if let Ok(Output::Expanded(Expanded::Fields(fields))) = &mut ended.result {
+        if let Ok(Expanded::Fields(fields)) = &mut ended.result {
             if fields.len() > SLICE {
                 self.rest = fields.split_off(SLICE).into_iter();
             }
@@ -117,13 +88,7 @@ mod tests {
         let word = (0..tree.nodes.len())
             .find(|&n| tree.kind(n) == "simple_expansion")
             .unwrap();
-        Job::start(Running::Expand(expand(
-            shell,
-            tree,
-            word,
-            Mode::Fields,
-            false,
-        )))
+        Job::start(expand(shell, tree, word, Mode::Fields))
     }
 
     #[test]
@@ -132,7 +97,7 @@ mod tests {
         let Step::Ended(ended) = step else {
             panic!("expected an end");
         };
-        let Ok(Output::Expanded(Expanded::Fields(fields))) = ended.result else {
+        let Ok(Expanded::Fields(fields)) = ended.result else {
             panic!("expected fields");
         };
         assert_eq!(fields.len(), 2);
@@ -148,7 +113,7 @@ mod tests {
         let Step::Ended(ended) = step else {
             panic!("expected an end");
         };
-        let Ok(Output::Expanded(Expanded::Fields(first))) = ended.result else {
+        let Ok(Expanded::Fields(first)) = ended.result else {
             panic!("expected fields");
         };
         assert_eq!(first.len(), SLICE);

@@ -3687,6 +3687,11 @@
           }
         },
         "scriptedops": {
+          "vars": {
+            "protect": [
+              "AWS_*"
+            ]
+          },
           "policy": {
             "pre_command": [
               {
@@ -3702,15 +3707,6 @@
                 "script": {
                   "language": "python",
                   "source": "def pre_vfs(ctx):\n    name = ctx['call']['name']\n    by = ctx['profile']\n    reason = None\n    if ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n        reason = 'cold by ' + by\n    elif name == 'read' and ctx['path'].startswith('/scratch/drop/'):\n        reason = 'drop box by ' + by\n    elif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n        reason = 'vault by ' + by\n    if reason is not None:\n        return {'kind': 'deny', 'reason': reason}\n"
-                },
-                "runtime": "monty"
-              }
-            ],
-            "pre_session": [
-              {
-                "script": {
-                  "language": "python",
-                  "source": "def pre_session(ctx):\n    if ctx['key'].startswith('AWS_'):\n        reason = 'credentials are set by the operator'\n        return {'kind': 'deny', 'reason': reason}\n"
                 },
                 "runtime": "monty"
               }
@@ -3900,21 +3896,17 @@
           }
         },
         "scriptedopswasm": {
+          "vars": {
+            "protect": [
+              "AWS_*"
+            ]
+          },
           "policy": {
             "pre_vfs": [
               {
                 "script": {
                   "language": "python",
                   "source": "def pre_vfs(ctx):\n    name = ctx['call']['name']\n    by = ctx['profile']\n    reason = None\n    if ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n        reason = 'cold by ' + by\n    elif name == 'read' and ctx['path'].startswith('/scratch/drop/'):\n        reason = 'drop box by ' + by\n    elif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n        reason = 'vault by ' + by\n    if reason is not None:\n        return {'kind': 'deny', 'reason': reason}\n"
-                },
-                "runtime": "wasi"
-              }
-            ],
-            "pre_session": [
-              {
-                "script": {
-                  "language": "python",
-                  "source": "def pre_session(ctx):\n    if ctx['key'].startswith('AWS_'):\n        reason = 'credentials are set by the operator'\n        return {'kind': 'deny', 'reason': reason}\n"
                 },
                 "runtime": "wasi"
               }
@@ -3973,21 +3965,17 @@
           }
         },
         "scriptedopswasm": {
+          "vars": {
+            "protect": [
+              "AWS_*"
+            ]
+          },
           "policy": {
             "pre_vfs": [
               {
                 "script": {
                   "language": "python",
                   "source": "def pre_vfs(ctx):\n    name = ctx['call']['name']\n    by = ctx['profile']\n    reason = None\n    if ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n        reason = 'cold by ' + by\n    elif name == 'read' and ctx['path'].startswith('/scratch/drop/'):\n        reason = 'drop box by ' + by\n    elif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n        reason = 'vault by ' + by\n    if reason is not None:\n        return {'kind': 'deny', 'reason': reason}\n"
-                },
-                "runtime": "pyodide"
-              }
-            ],
-            "pre_session": [
-              {
-                "script": {
-                  "language": "python",
-                  "source": "def pre_session(ctx):\n    if ctx['key'].startswith('AWS_'):\n        reason = 'credentials are set by the operator'\n        return {'kind': 'deny', 'reason': reason}\n"
                 },
                 "runtime": "pyodide"
               }

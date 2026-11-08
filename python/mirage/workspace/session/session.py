@@ -55,6 +55,7 @@ from mirage.types import (
     HiddenVars,
     Limit,
     MountMode,
+    ProtectedVars,
     ShowEntry,
     ShownPaths,
     Visibility,
@@ -786,6 +787,11 @@ class SessionState:
                 "names": list(vis.vars.names),
                 "patterns": list(vis.vars.patterns),
             }
+        if vis.protected is not None:
+            data["protected_vars"] = {
+                "names": list(vis.protected.names),
+                "patterns": list(vis.protected.patterns),
+            }
         if self.commands is not None:
             data["commands"] = commands_to_dict(self.commands)
         if self.scripts:
@@ -873,6 +879,7 @@ class SessionState:
         shown = data.get("shown_paths")
         reasons = data.get("hide_reasons")
         vars_ = data.get("hidden_vars")
+        protected = data.get("protected_vars")
         commands = data.get("commands")
         scripts = data.get("scripts")
         decisions = data.get("decisions")
@@ -886,6 +893,7 @@ class SessionState:
                 "hidden_paths",
                 "shown_paths",
                 "hidden_vars",
+                "protected_vars",
                 "function_aliases",
             )
         }
@@ -918,6 +926,7 @@ class SessionState:
             paths is not None
             or shown is not None
             or vars_ is not None
+            or protected is not None
             or processes is not None
         ):
             data["visibility"] = Visibility(
@@ -952,6 +961,14 @@ class SessionState:
                         patterns=tuple(vars_.get("patterns", ())),
                     )
                     if vars_ is not None
+                    else None
+                ),
+                protected=(
+                    ProtectedVars(
+                        names=tuple(protected.get("names", ())),
+                        patterns=tuple(protected.get("patterns", ())),
+                    )
+                    if protected is not None
                     else None
                 ),
                 processes=data.get("processes", ProcessPermissions()).list,
@@ -1026,7 +1043,7 @@ class SessionState:
         Read-only, so an assignment into it raises instead of landing in
         a throwaway dict. A writer goes through `SessionView.set` (or
         `seed_var` when seeding a session before it is narrowed), so a
-        `pre_session` policy sees every write.
+        hidden, protected or readonly name refuses every write.
         """
         return _Records(self.vars, str)
 
@@ -1056,8 +1073,9 @@ class SessionState:
         # a new source, or a new shell, binds as it lands.
         if name in ("ids", "vars") and {"ids", "vars"} <= self.__dict__.keys():
             self.vars.shell.use_ids(self.ids.random_u32)
-        # The shell holds the hidden names itself, so a new visibility,
-        # or a new shell, takes them as it lands, wherever it is set.
+        # The shell holds the hidden and protected names itself, so a new
+        # visibility, or a new shell, takes them as it lands, wherever it
+        # is set.
         if (
             name in ("visibility", "vars")
             and {
@@ -1066,14 +1084,19 @@ class SessionState:
             }
             <= self.__dict__.keys()
         ):
-            self.hide_vars()
+            self.guard_vars()
 
-    def hide_vars(self) -> None:
-        """Hand the shell the names the session's visibility hides."""
-        hidden = self.visibility.vars
+    def guard_vars(self) -> None:
+        """Hand the shell the names the session's visibility hides and
+        protects."""
+        hidden, protected = self.visibility.vars, self.visibility.protected
         self.vars.shell.hide(
             [] if hidden is None else list(hidden.names),
             [] if hidden is None else list(hidden.patterns),
+        )
+        self.vars.shell.protect(
+            [] if protected is None else list(protected.names),
+            [] if protected is None else list(protected.patterns),
         )
 
     def __post_init__(self) -> None:

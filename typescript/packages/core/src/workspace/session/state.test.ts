@@ -20,16 +20,12 @@ import { CallStack } from '../../shell/call_stack.ts'
 import { describe, expect, it } from 'vitest'
 import type { SessionView } from '../../view/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
-import { Policies } from '../../policy/policies.ts'
-import type { Action, SessionContext } from '../../policy/types.ts'
 import { ReadonlyVariableError } from '../../shell/errors.ts'
-import { ShellVars } from '../../rs/session.ts'
 import { SessionState } from './session.ts'
 import {
   assignElement,
   elementIsSet,
   envSnapshot,
-  gateRestoredVars,
   inCallEnv,
   outliveCall,
   positionalParams,
@@ -43,22 +39,13 @@ import {
 } from './state.ts'
 import { RANDOM } from '../../shell/constants.ts'
 import { makeVar } from '../../shell/variable.ts'
-import { makeArray, ShellArray } from '../../shell/array.ts'
+import { makeArray } from '../../shell/array.ts'
 import { parseProgram } from '../../shell/parse/parse.ts'
 import { runWithSession } from '../../context/session_context.ts'
 
-class DenySecrets {
-  preSession(ctx: SessionContext): Action | null {
-    if (ctx.key.startsWith('SECRET')) {
-      return { kind: 'deny', reason: 'SECRET_* refused by policy' }
-    }
-    return null
-  }
-}
-
-function makeView(policies: Policies | null = null): [SessionView, SessionState] {
+function makeView(): [SessionView, SessionState] {
   const session = new SessionState({ sessionId: 's', cwd: '/', vars: varsFromEnv({ A: '1' }) })
-  return [sessionView(session, policies), session]
+  return [sessionView(session), session]
 }
 
 describe('sessionView', () => {
@@ -108,53 +95,6 @@ describe('sessionView', () => {
     expect('S' in session.arrays).toBe(false)
   })
 
-  it('an array write renders the gate value as words', async () => {
-    const seen: (string | null)[] = []
-    class Capture {
-      preSession(ctx: SessionContext): Action | null {
-        seen.push(ctx.value)
-        return null
-      }
-    }
-    const policies = new Policies()
-    policies.add(new Capture())
-    const [view] = makeView(policies)
-    await view.set(
-      'A',
-      new ShellArray([
-        [0, 'x'],
-        [2, 'y'],
-      ]),
-    )
-    expect(seen).toEqual(['x y'])
-  })
-
-  it('a shaped write gates the value that lands', async () => {
-    // `declare -l profile; profile=ADMIN` stores `admin`, so a rule refusing
-    // `admin` has to see `admin`, not the raw text: coercion runs
-    // before the gate.
-    const seen: (string | null)[] = []
-    class Capture {
-      preSession(ctx: SessionContext): Action | null {
-        seen.push(ctx.value)
-        if (ctx.value === 'admin') return { kind: 'deny', reason: 'no admin' }
-        return null
-      }
-    }
-    const policies = new Policies()
-    policies.add(new Capture())
-    const [view, session] = makeView(policies)
-    seedVar(session, 'profile', '')
-    setAttr(session, 'profile', VarAttr.Lower)
-    await expect(view.set('profile', 'ADMIN')).rejects.toBeInstanceOf(PolicyDenied)
-    expect(session.env.profile).toBe('')
-    seedVar(session, 'n', '0')
-    setAttr(session, 'n', VarAttr.Integer)
-    await view.set('n', '3+4')
-    expect(session.env.n).toBe('7')
-    expect(seen).toEqual(['admin', '7'])
-  })
-
   it('integer coercion resolves elements', async () => {
     // `n=a[1]+1` under `-i` reads the element, as bash does, through
     // the same resolver every other arithmetic entry point uses.
@@ -174,21 +114,6 @@ describe('sessionView', () => {
     await expect(view.set('n', '1+')).rejects.toBeInstanceOf(ArithError)
   })
 
-  it('the gate learns which session asked', async () => {
-    const seen: string[] = []
-    class CaptureSession {
-      preSession(ctx: SessionContext): Action | null {
-        seen.push(ctx.sessionId)
-        return null
-      }
-    }
-    const policies = new Policies()
-    policies.add(new CaptureSession())
-    const [view] = makeView(policies)
-    await view.set('B', '1')
-    expect(seen).toEqual(['s'])
-  })
-
   it('readonly refusal is typed', async () => {
     // The view owns the refusal so every writer states it the same way;
     // builtins catch the typed error and render their own bash wording.
@@ -200,13 +125,18 @@ describe('sessionView', () => {
     expect(session.env.A).toBe('1')
   })
 
-  it('preSession gate vetoes a write', async () => {
-    const policies = new Policies()
-    policies.add(new DenySecrets())
-    const [view, session] = makeView(policies)
-    await expect(view.set('SECRET_KEY', 'x')).rejects.toBeInstanceOf(PolicyDenied)
+  it('a protected name reads and refuses every write', async () => {
+    const [view, session] = makeView()
+    session.visibility = {
+      ...session.visibility,
+      protected: { names: ['A'], patterns: ['SECRET_*'] },
+    }
+    expect(view.get('A')).toBe('1')
+    await expect(view.set('SECRET_KEY', 'x')).rejects.toThrow('SECRET_KEY: permission')
     expect('SECRET_KEY' in session.env).toBe(false)
-    await expect(view.unset('SECRET_KEY')).rejects.toBeInstanceOf(PolicyDenied)
+    await expect(view.unset('A')).rejects.toBeInstanceOf(PolicyDenied)
+    await expect(view.mark('A', VarAttr.Readonly, true)).rejects.toBeInstanceOf(PolicyDenied)
+    expect(session.vars.get('A')?.attrs.has(VarAttr.Readonly)).toBe(false)
     await view.set('PUBLIC', 'y')
     expect(session.env.PUBLIC).toBe('y')
   })
@@ -338,11 +268,11 @@ describe('elementIsSet', () => {
 describe('assignElement', () => {
   it('writes an associative key and appends to it', async () => {
     const session = elementSession()
-    expect(await assignElement(session, null, 'm', 'b', '2')).toBe('ok')
-    expect(await assignElement(session, null, 'm', 'b', 'x', true)).toBe('ok')
+    expect(await assignElement(session, 'm', 'b', '2')).toBe('ok')
+    expect(await assignElement(session, 'm', 'b', 'x', true)).toBe('ok')
     // A bare target over an associative array is the key "0".
-    expect(await assignElement(session, null, 'm', null, 'top')).toBe('ok')
-    expect(await assignElement(session, null, 'm', '', 'v')).toBe('subscript')
+    expect(await assignElement(session, 'm', null, 'top')).toBe('ok')
+    expect(await assignElement(session, 'm', '', 'v')).toBe('subscript')
     expect(session.assocs.m?.b).toBe('2x')
     expect(session.assocs.m?.['0']).toBe('top')
   })
@@ -352,14 +282,14 @@ describe('assignElement', () => {
     const held = session.vars.delete('s5')
     session.vars.set('ro', { value: held?.value ?? null, attrs: new Set([VarAttr.Readonly]) })
     session.visibility = { ...session.visibility, vars: { names: ['h'], patterns: [] } }
-    expect(await assignElement(session, null, 'arr', '1', 'X')).toBe('ok')
-    expect(await assignElement(session, null, 'arr', '-1', 'Y')).toBe('ok')
-    expect(await assignElement(session, null, 'arr', '-9', 'n')).toBe('subscript')
+    expect(await assignElement(session, 'arr', '1', 'X')).toBe('ok')
+    expect(await assignElement(session, 'arr', '-1', 'Y')).toBe('ok')
+    expect(await assignElement(session, 'arr', '-9', 'n')).toBe('subscript')
     // An existing scalar migrates to element 0 under a subscript.
     seedVar(session, 'sc', 'base')
-    expect(await assignElement(session, null, 'sc', '1', 'one')).toBe('ok')
-    expect(await assignElement(session, null, 'ro', '0', 'x')).toBe('readonly')
-    expect(await assignElement(session, null, 'h', '0', 'x')).toBe('denied')
+    expect(await assignElement(session, 'sc', '1', 'one')).toBe('ok')
+    expect(await assignElement(session, 'ro', '0', 'x')).toBe('readonly')
+    expect(await assignElement(session, 'h', '0', 'x')).toBe('denied')
     expect(session.arrays.arr).toEqual(makeArray(['10', 'X', 'Y']))
     expect(session.arrays.sc).toEqual(makeArray(['base', 'one']))
   })
@@ -399,10 +329,9 @@ describe('subscriptIndex', () => {
     // session past it.
     expect(await subscriptIndex(s, 'RANDOM=42, RANDOM')).toBe(17772n)
     expect(s.vars.shell.nextRandom()).toBe(26794)
-    // Through the session policies, a refusal is the gate's.
-    await expect(
-      subscriptIndex(s, 'SECRET_N=1', new Policies([new DenySecrets()])),
-    ).rejects.toBeInstanceOf(PolicyDenied)
+    // A protected name the subscript assigns refuses.
+    s.visibility = { ...s.visibility, protected: { patterns: ['SECRET_*'] } }
+    await expect(subscriptIndex(s, 'SECRET_N=1')).rejects.toBeInstanceOf(PolicyDenied)
     expect(s.env.SECRET_N).toBeUndefined()
   })
 })
@@ -459,56 +388,6 @@ describe('a failing coercion', () => {
     seedVar(s, 'x', 'RANDOM=42,1/0')
     await expect(view.set('n', 'x')).rejects.toBeInstanceOf(ArithError)
     expect(s.vars.shell.nextRandom()).toBe(17772)
-  })
-})
-
-// A snapshot is the one env input the deployment did not author, so the
-// restore fires the same gate a typed `export` does, name by name, and a
-// refusal aborts the whole restore rather than dropping one variable.
-describe('gateRestoredVars', () => {
-  function denying(): Policies {
-    const policies = new Policies()
-    policies.add(new DenySecrets())
-    return policies
-  }
-
-  it('refuses a denied name and passes the rest', async () => {
-    const table = ShellVars.of(varsFromEnv({ SECRET_A: '1', PUBLIC: '2' }))
-    await expect(gateRestoredVars(denying(), 's', table)).rejects.toBeInstanceOf(PolicyDenied)
-    await gateRestoredVars(denying(), 's', ShellVars.of(varsFromEnv({ PUBLIC: '2' })))
-    await gateRestoredVars(null, 's', table)
-  })
-
-  // The names the shell keeps current itself (`cd` writes PWD/OLDPWD through
-  // `seedVar`, ungated) stay the shell's on a restore too.
-  it('leaves the shell bookkeeping alone', async () => {
-    class DenyAll {
-      preSession(): Action | null {
-        return { kind: 'deny', reason: 'nothing may be set' }
-      }
-    }
-    const policies = new Policies()
-    policies.add(new DenyAll())
-    await gateRestoredVars(policies, 's', ShellVars.of(varsFromEnv({ PWD: '/', OLDPWD: '/' })))
-    await expect(
-      gateRestoredVars(policies, 's', ShellVars.of(varsFromEnv({ X: '1' }))),
-    ).rejects.toBeInstanceOf(PolicyDenied)
-  })
-
-  it('shows a policy each value rendered', () => {
-    const shell = ShellVars.of({
-      s: makeVar('x'),
-      m: makeVar({ b: '2', a: '1' }),
-      a: makeVar(makeArray(['p', 'q'])),
-      d: makeVar(null),
-    }).shell
-    expect(['s', 'm', 'a', 'd', 'no'].map((n) => shell.rendered(n))).toEqual([
-      'x',
-      '1 2',
-      'p q',
-      null,
-      null,
-    ])
   })
 })
 
@@ -584,7 +463,7 @@ describe('the frame a task reads', () => {
     gone.release()
     setAttr(session, 'r', VarAttr.Nameref)
     const notes: (string | Uint8Array)[] = []
-    await runWithSession(other, () => sessionView(session, null, notes).set('r', makeArray(['x'])))
+    await runWithSession(other, () => sessionView(session, notes).set('r', makeArray(['x'])))
     held.release()
     expect(
       notes.map((note) => (typeof note === 'string' ? note : new TextDecoder().decode(note))),

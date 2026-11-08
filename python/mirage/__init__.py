@@ -59,7 +59,6 @@ if TYPE_CHECKING:
         PolicyDenied,
         PolicyError,
         Scope,
-        SessionContext,
         SessionProfile,
         ShellExplanation,
         ShellNode,
@@ -174,7 +173,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "PolicyDenied",
         "PolicyError",
         "Scope",
-        "SessionContext",
         "SessionProfile",
     ),
     "mirage.workspace": (
@@ -312,7 +310,6 @@ __all__ = [
     "MachineConfig",
     "Scope",
     "Session",
-    "SessionContext",
     "SessionProfile",
     "SessionState",
     "UsageError",

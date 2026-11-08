@@ -214,6 +214,7 @@ describe('session predicates on the fallback storage', () => {
       paths: { paths: ['/a', '/b'], patterns: [] },
       shown: { entries: [{ path: '/b/ok', mode: MountMode.READ }] },
       vars: { names: ['A'], patterns: ['X_*'] },
+      protected: null,
       processes: 'session',
     })
   })

@@ -15,11 +15,11 @@
 import asyncio
 
 from mirage import (
+    CommandContext,
     CommandExplanation,
     Deny,
     MountMode,
     Policy,
-    SessionContext,
     Workspace,
 )
 from mirage.runtime.types import ScriptSource
@@ -38,16 +38,19 @@ from mirage.vfs.ram import RAMVFS
 #                      the same ctx as JSON, print their answer, and
 #                      speak only for the sessions under that profile.
 #
+# A variable the operator owns is no policy at all: the profile protects
+# it (``vars.protect``), so its sessions read it and cannot set it.
+#
 # The same block spelled as a document is policy_yaml.py, beside this
 # file.
 
 
-class OperatorOwnsCredentials(Policy):
-    """Refuse an env write that would set a credential, for everyone."""
+class NothingIsRemoved(Policy):
+    """Refuse every ``rm``, for everyone."""
 
-    async def pre_session(self, ctx: SessionContext) -> Deny | None:
-        if ctx.key.startswith("AWS_"):
-            return Deny("credentials are set by the operator")
+    async def pre_command(self, ctx: CommandContext) -> Deny | None:
+        if ctx.command == "rm":
+            return Deny("nothing is removed here")
         return None
 
 
@@ -99,17 +102,19 @@ LINES = [
     (
         "reviewer",
         "export AWS_SECRET=x",
-        "the coded policy, at the session view",
+        "the profile protects a credential",
     ),
     (
         "reviewer",
         "export SAFE=1 && echo $SAFE",
         "silence where no method objects",
     ),
+    ("reviewer", "rm /repo/notes.txt", "the coded policy"),
     ("host", "cat /repo/flagged.txt", "no profile, so no program"),
+    ("host", "export AWS_SECRET=x", "and nothing protected"),
     (
         "host",
-        "export AWS_SECRET=x",
+        "rm /repo/notes.txt",
         "the coded policy speaks for every session",
     ),
 ]
@@ -135,9 +140,10 @@ async def main() -> None:
             "/scratch/": RAMVFS(),
         },
         mode=MountMode.WRITE,
-        policies=[OperatorOwnsCredentials()],
+        policies=[NothingIsRemoved()],
         profiles={
             "reviewer": {
+                "vars": {"protect": ["AWS_*"]},
                 "policy": {
                     "pre_command": [{"script": MARKED, "runtime": "monty"}],
                     "pre_vfs": [{"script": COLD, "runtime": "monty"}],

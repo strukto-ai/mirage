@@ -18,7 +18,6 @@ from typing import Any, Callable
 
 from mirage.cache.index.scope import command_scope
 from mirage.policy import PolicyDenied
-from mirage.policy.policies import Policies
 from mirage.shell.array import (
     ShellArray,
     build_assoc_literal,
@@ -179,7 +178,6 @@ async def expand_array_items(
             registry,
             session.cwd,
             cs,
-            registry.policies,
         )
         resolved = await resolve_globs(
             classified,
@@ -200,7 +198,6 @@ async def _subscript_key_text(
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
     cs: CallStack | None,
-    policies: Policies | None,
 ) -> str:
     """The expanded subscript text of one ``name[...]=`` assignment.
 
@@ -217,7 +214,6 @@ async def _subscript_key_text(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         cs (CallStack | None): shell call stack.
-        policies (Policies | None): the policies its writes clear.
     """
     inner = [
         sc
@@ -229,7 +225,7 @@ async def _subscript_key_text(
         return raw
     parts = []
     for sc in inner:
-        parts.append(await expand_node(sc, context, execute_fn, cs, policies))
+        parts.append(await expand_node(sc, context, execute_fn, cs))
     return "".join(parts)
 
 
@@ -287,10 +283,7 @@ async def execute_assignment(
         for c in node.named_children
         if c.type not in (NT.VARIABLE_NAME, "subscript")
     ]
-    policies = namespace.registry.policies
-    view = session_view(
-        session, policies, diagnostics=context.frame.diagnostics
-    )
+    view = session_view(session, diagnostics=context.frame.diagnostics)
     # `set -x` traces the name as typed, before the store refuses it.
     xtrace = session.shell_options.get("xtrace")
     if val_nodes and val_nodes[0].type == NT.ARRAY:
@@ -334,7 +327,7 @@ async def execute_assignment(
         ):
             # `arr+=(...)` starts at the extent, so it fills the hole a
             # trailing `unset arr[last]` left but skips interior ones.
-            await _landed(push_words(session, policies, key, items))
+            await _landed(push_words(session, key, items))
             return result(
                 text, exit_code=assignment_status(context.frame, sub_seq)
             )
@@ -348,16 +341,14 @@ async def execute_assignment(
             held,
             items,
             append,
-            functools.partial(subscript_index, session, policies=policies),
+            functools.partial(subscript_index, session),
         )
         await _assign_var(view, key, base)
         return result(
             text, exit_code=assignment_status(context.frame, sub_seq)
         )
     if val_nodes:
-        val = await expand_assignment(
-            val_nodes[0], context, execute_fn, cs, policies
-        )
+        val = await expand_assignment(val_nodes[0], context, execute_fn, cs)
     else:
         val = text.partition("=")[2]
     if xtrace:
@@ -378,7 +369,7 @@ async def execute_assignment(
         if not get_text(subscript_node)[len(spelled) + 1 : -1]:
             raise _bad_subscript(subscript_node)
         subscript = await _subscript_key_text(
-            subscript_node, spelled, context, execute_fn, cs, policies
+            subscript_node, spelled, context, execute_fn, cs
         )
     # `a=x` writes element 0 of an array and the key "0" of a map,
     # keeping the rest; `a+=x` appends onto it, and `n+=3` on an integer
@@ -386,7 +377,6 @@ async def execute_assignment(
     status = await _landed(
         assign_element(
             session,
-            policies,
             key,
             subscript,
             val,
