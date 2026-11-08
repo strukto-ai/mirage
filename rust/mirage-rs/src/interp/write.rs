@@ -409,7 +409,8 @@ impl<G: Gate> Writer<'_, G> {
     /// what the append stored before it: every slot, or under `-i`, whose
     /// words may write the array, each that still holds what it stored.
     /// With a policy listening, the whole value lands through `set` as one
-    /// write, but under `-i` each word is a write of its own, in order.
+    /// write, but under `-i` each word is a write of its own, in order, and
+    /// a word refused leaves the last value the policy passed.
     pub async fn push(&mut self, name: &str, words: Vec<Vec<u8>>) -> Result<(), Fault> {
         let name = self.store.target(name);
         self.writable(&name)?;
@@ -446,7 +447,12 @@ impl<G: Gate> Writer<'_, G> {
                 .set_element(&name, slot.clone(), Some(word), None)
                 .await
             {
-                for (slot, text) in stored.into_iter().rev() {
+                let unheard = if self.gate.listens() {
+                    Vec::new()
+                } else {
+                    stored
+                };
+                for (slot, text) in unheard.into_iter().rev() {
                     if text.is_none_or(|text| self.store.element(&name, &slot) == Some(&text[..])) {
                         self.store.put_element(&name, &slot, None, false);
                     }
@@ -1185,6 +1191,14 @@ mod tests {
         run(writer.element("b", Some(b"0"), b"b[2]=7,5", false)).unwrap();
         let held: Vec<_> = writer.store.indexed("b").unwrap().iter().collect();
         assert_eq!(held, [(0, &b"5"[..]), (1, &b"9"[..]), (2, &b"7"[..])]);
+        let failed = run(writer.push("b", vec![b"2".to_vec(), b"b[0]=4,1/0".to_vec()]));
+        assert!(matches!(failed, Err(Fault::Arith(_))));
+        let left = Value::Indexed(writer.store.indexed("b").unwrap().clone()).rendering();
+        assert_eq!(left, b"4 9 7 2");
+        assert_eq!(
+            gate.heard.last().and_then(|(_, _, seen)| seen.clone()),
+            Some(left)
+        );
     }
 
     #[test]
