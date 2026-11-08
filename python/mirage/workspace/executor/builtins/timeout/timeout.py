@@ -552,6 +552,8 @@ async def _deadline(
         # ends the wait, and not even that once timeout stopped itself.
         if stops:
             await _stop(processes, process, signal, foreground)
+        else:
+            await _forward(processes, process, signal, foreground)
         if kill_after == 0 or (signal == SIGSTOP and not foreground):
             await asyncio.get_running_loop().create_future()
         await asyncio.sleep(kill_after)
@@ -565,6 +567,8 @@ async def _deadline(
             # A shell that ignores the signal lives on past the program
             # it stops; timeout waits for it, and -k's KILL ends the wait.
             await _stop(processes, process, signal, foreground)
+        else:
+            await _forward(processes, process, signal, foreground)
         done, _ = await asyncio.wait(
             {task}, timeout=kill_after if kill_after else None
         )
@@ -589,6 +593,24 @@ async def _deadline(
     )
 
 
+async def _forward(
+    processes: ProcessTable,
+    process: ProcessHandle,
+    signal: int,
+    foreground: bool,
+) -> None:
+    # A signal a process takes and goes on reaches the programs on machines
+    # as sent, and leaves Mirage's own runners as they are; 0 only probes.
+    if signal == 0:
+        return
+    if not foreground:
+        await processes.send_group(process.record.group, signal)
+        return
+    sending = processes.send_program(process, signal)
+    if sending is not None:
+        await sending
+
+
 async def _stop(
     processes: ProcessTable,
     process: ProcessHandle,
@@ -603,7 +625,7 @@ async def _stop(
     # is waited for, and -k's KILL follows should it outlive kill_after:
     # True then.
     if foreground:
-        sending = processes.send(process, signal)
+        sending = processes.send_program(process, signal)
         if sending is None:
             deliver(process, signal)
         else:

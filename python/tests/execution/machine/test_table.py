@@ -21,7 +21,7 @@ from mirage.execution.machine.table import MachineTable
 from mirage.execution.machine.types import MachineProcess, MachineState
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachinePid
-from mirage.machine.constants import CHECK_LINE, PROCESS
+from mirage.machine.constants import CHECK_LINE, CHECK_MARK, PROCESS
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.types import RunResult
@@ -32,9 +32,10 @@ from mirage.vfs.ram import RAMVFS
 class _Box(MachineHandle):
     provider = "box"
 
-    def __init__(self, name: str, code: int | None) -> None:
+    def __init__(self, name: str, code: int | None, ran: bool = True) -> None:
         super().__init__(name)
         self.code = code
+        self.ran = ran
         self.lines: list[str] = []
 
     async def connect(self) -> None:
@@ -43,18 +44,25 @@ class _Box(MachineHandle):
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         self.lines.append(argv[-1])
-        return RunResult(stdout=b"", stderr=None, exit_code=self.code or 0)
+        said = f"{CHECK_MARK}\n".encode() if self.ran else b""
+        return RunResult(stdout=said, stderr=None, exit_code=self.code or 0)
 
 
 @pytest.mark.asyncio
 async def test_a_check_tells_how_far_mirage_reaches_each_machine():
-    boxes = {"a": _Box("a", 0), "b": _Box("b", 1), "c": _Box("c", None)}
+    boxes = {
+        "a": _Box("a", 0),
+        "b": _Box("b", 1),
+        "c": _Box("c", None),
+        "d": _Box("d", 1, ran=False),
+    }
     table = MachineTable(boxes)
     found = await table.check(lambda: 7.0)
     assert [(str(m.id), m.state, m.checked_at) for m in found] == [
         ("box:a", MachineState.MANAGED, 7.0),
         ("box:b", MachineState.REACHABLE, 7.0),
         ("box:c", MachineState.UNREACHABLE, 7.0),
+        ("box:d", MachineState.UNREACHABLE, 7.0),
     ]
     assert boxes["a"].lines == [CHECK_LINE]
 
@@ -430,6 +438,47 @@ async def test_a_kept_signal_to_a_group_gone_by_its_scan_fails():
         assert said.exit_code == 1
         assert "No such process" in await said.stderr_str()
     finally:
+        await ws.close()
+
+
+class _Handler(_Sleeper):
+    """A box whose program ends on the one signal it handles."""
+
+    def __init__(self, name: str, handles: int) -> None:
+        super().__init__(name)
+        self.handles = handles
+
+    async def signal(self, target, signum):
+        self.sent.append((target, signum))
+        if signum == self.handles:
+            self.ended.set()
+        return True
+
+
+@pytest.mark.asyncio
+async def test_a_foreground_timeout_sends_to_the_program_under_its_shell():
+    box = _Handler("a", 10)
+    ws = _sleepers(a=box)
+    try:
+        said = await ws.shell("timeout --foreground -s USR1 0.1 train 1")
+        assert said.exit_code == 124
+        assert [signum for _, signum in box.sent] == [10]
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("how", ["", "--foreground "])
+async def test_a_timeout_forwards_a_kept_signal_to_the_program(how):
+    box = _Handler("a", 28)
+    ws = _sleepers(a=box)
+    try:
+        said = await ws.shell(f"timeout {how}-s WINCH 0.1 train 1")
+        assert said.exit_code == 124
+        assert {signum for _, signum in box.sent} == {28}
+    finally:
+        box.ended.set()
         await ws.close()
 
 

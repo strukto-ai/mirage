@@ -34,6 +34,7 @@ from mirage.machine.program import (
     Children,
     _served,
     close_children,
+    host_status,
     open_program_pipe,
     reap_host_run,
     run_program,
@@ -846,3 +847,19 @@ async def test_system_time_env_preloads_libfaketime_at_the_offset(
     assert await run_with_system_clock(clock, system_time_env({})) == {}
     assert await system_time_env({}) == {}
     assert FAKETIME_LIBRARIES
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="ps")
+async def test_a_host_scan_leaves_a_group_whose_pid_went_to_another_program():
+    leader = await asyncio.create_subprocess_exec(
+        "sleep", "30", start_new_session=True
+    )
+    began = time.time()
+    try:
+        rows = await host_status({leader.pid: ("run", began)})
+        assert [(row.tag, row.pid) for row in rows] == [("run", leader.pid)]
+        assert await host_status({leader.pid: ("old", began - 3600)}) == []
+    finally:
+        leader.kill()
+        await leader.wait()

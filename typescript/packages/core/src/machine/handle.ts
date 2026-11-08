@@ -33,6 +33,7 @@ import {
 } from './config.ts'
 import {
   CHECK_LINE,
+  CHECK_MARK,
   CHECK_WAIT_SECONDS,
   FAKETIME_PROBE_SECONDS,
   faketimeEnv,
@@ -224,6 +225,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     const deadline = AbortSignal.timeout(CHECK_WAIT_SECONDS * 1000)
     await this.ensureConnected(deadline)
     const ran = await abortable(this.execLine(CHECK_LINE, null, {}, '/', deadline), deadline)
+    if (!new TextDecoder().decode(ran.stdout).includes(CHECK_MARK))
+      throw new Error(`${this.id.toString()}: check did not run: exit ${String(ran.exitCode)}`)
     return ran.exitCode === 0
   }
 

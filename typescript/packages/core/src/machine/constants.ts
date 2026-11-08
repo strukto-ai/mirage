@@ -155,10 +155,15 @@ export const PROCESS = 'MIRAGE_PROCESS'
 // answering is given up on after it.
 export const REAP_WAIT_SECONDS = 5
 
+// What the check line prints first: a result without it is a line no shell
+// there ran (a stopped container's exec answers with a status of its own),
+// which says nothing of the machine's tools.
+export const CHECK_MARK = 'mirage-check'
+
 // The line a check runs: true where Mirage can see and stop every process a
 // program on the machine starts, by its `PROCESS` tag, which takes `/proc`
 // and the `tr` and `grep` the scan and the stop line run.
-export const CHECK_LINE = 'test -d /proc/self && command -v tr && command -v grep'
+export const CHECK_LINE = `echo ${CHECK_MARK}; test -d /proc/self && command -v tr && command -v grep`
 
 // How long a check may take: a machine that does not answer in it is
 // unreachable.

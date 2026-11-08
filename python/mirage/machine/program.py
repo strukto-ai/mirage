@@ -327,45 +327,59 @@ async def _group_started(group: int) -> list[float]:
     return starts
 
 
-async def host_status(groups: Mapping[int, str]) -> list[MachineProcess]:
+async def host_status(
+    groups: Mapping[int, tuple[str, float]],
+) -> list[MachineProcess]:
     """Every process of the host programs' process groups, as ``ps``
     lists them now: each program leads a group of its own, and every
-    member is tagged as the Mirage process whose program leads it.
-    Mirrors TypeScript's ``hostStatus``.
+    member is tagged as the Mirage process whose program leads it. A
+    group led by a process that started at another time
+    (``HOST_START_SLACK_SECONDS``) is left out: the program's pid went
+    to another program. Mirrors TypeScript's ``hostStatus``.
 
     Args:
-        groups (Mapping[int, str]): each program's pid, which is its
-            group's, and the tag of the Mirage process it is.
+        groups (Mapping[int, tuple[str, float]]): each program's pid,
+            which is its group's, the tag of the Mirage process it is
+            and when it started, in epoch seconds.
 
     Raises:
         OSError: the host has no ``ps``.
     """
     if not groups or sys.platform == "win32":
         return []
-    found: list[MachineProcess] = []
+    found: list[tuple[int, MachineProcess]] = []
+    reused: set[int] = set()
     text = await _ps("-A", "-o", "pid=,ppid=,pgid=,lstart=,args=")
     for line in text.splitlines():
         fields = line.split(None, 8)
         if len(fields) < 8 or not fields[2].isdigit():
             continue
-        tag = groups.get(int(fields[2]))
-        if tag is None:
+        group = int(fields[2])
+        held = groups.get(group)
+        if held is None:
             continue
+        tag, began = held
         try:
             started = _lstart(" ".join(fields[3:8]))
         except ValueError as exc:
             logger.debug("process %s: no start: %s", fields[0], exc)
             continue
+        pid = int(fields[0])
+        if pid == group and abs(started - began) > HOST_START_SLACK_SECONDS:
+            reused.add(group)
         found.append(
-            MachineProcess(
-                tag,
-                int(fields[0]),
-                int(fields[1]),
-                started,
-                fields[8] if len(fields) > 8 else "",
+            (
+                group,
+                MachineProcess(
+                    tag,
+                    pid,
+                    int(fields[1]),
+                    started,
+                    fields[8] if len(fields) > 8 else "",
+                ),
             )
         )
-    return found
+    return [row for group, row in found if group not in reused]
 
 
 async def signal_host(target: MachinePid, signum: int) -> bool:

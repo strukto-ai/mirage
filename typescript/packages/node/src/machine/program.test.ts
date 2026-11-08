@@ -32,6 +32,7 @@ import {
   serve,
   unserve,
   closeChildren,
+  hostStatus,
   openProgramPipe,
   reapHostRun,
   runProgram,
@@ -830,3 +831,19 @@ describe('systemTimeEnv', () => {
     }
   })
 })
+
+it.skipIf(process.platform === 'win32')(
+  'a host scan leaves a group whose pid went to another program',
+  async () => {
+    const leader = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' })
+    const began = Date.now() / 1000
+    const pid = leader.pid ?? 0
+    try {
+      const rows = await hostStatus(new Map([[pid, ['run', began] as const]]))
+      expect(rows.map((row) => [row.tag, row.pid])).toEqual([['run', pid]])
+      expect(await hostStatus(new Map([[pid, ['old', began - 3600] as const]]))).toEqual([])
+    } finally {
+      leader.kill('SIGKILL')
+    }
+  },
+)

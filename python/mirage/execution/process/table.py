@@ -295,6 +295,47 @@ class ProcessTable:
             return None
         return self.sender(handle, signal)
 
+    def send_program(
+        self, handle: ProcessHandle, signal: int
+    ) -> Awaitable[bool] | None:
+        """Send a signal as ``send`` does to the program a runner is, or
+        to the programs under it when it is a shell, which has none of
+        its own to send it to.
+
+        Args:
+            handle (ProcessHandle): the runner.
+            signal (int): the signal.
+
+        Returns:
+            Awaitable[bool] | None: whether one ran, once sent; None when
+            no program on a machine is there to take it.
+        """
+        sending = self.send(handle, signal)
+        if sending is not None:
+            return sending
+        below = [
+            sent
+            for child in self._under(handle.record.pid)
+            if child.record.runtime is not None
+            and (sent := self.send(child, signal)) is not None
+        ]
+        return _any_sent(below) if below else None
+
+    async def send_group(self, group_id: int, signal: int) -> None:
+        """Send a signal a process takes and goes on to every program on
+        a machine in a process group as ``send`` does, leaving Mirage's
+        own runners as they are. The machines are scanned first, so what
+        a program started there is in the group.
+
+        Args:
+            group_id (int): the group.
+            signal (int): the signal.
+        """
+        await self.scan()
+        members = self._members(group_id)
+        sending = [self.send(member, signal) for member in members]
+        await asyncio.gather(*(sent for sent in sending if sent is not None))
+
     async def signal_group(self, group_id: int, signal: int) -> bool:
         """Deliver a signal to every live runner of a process group, as
         killpg(2) does: a program on a machine gets it as sent
@@ -595,6 +636,10 @@ class ProcessTable:
                 errors.append(exc)
         if errors:
             raise ExceptionGroup("process cancellation failed", errors)
+
+
+async def _any_sent(sending: list[Awaitable[bool]]) -> bool:
+    return any(await asyncio.gather(*sending))
 
 
 async def _signal_members(

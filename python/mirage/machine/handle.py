@@ -25,6 +25,7 @@ from mirage.io.types import ByteSource
 from mirage.machine.config import MachineConfig, check_mount_type
 from mirage.machine.constants import (
     CHECK_LINE,
+    CHECK_MARK,
     CHECK_WAIT_SECONDS,
     FAKETIME_PROBE_SECONDS,
     PROCESS,
@@ -241,11 +242,16 @@ class MachineHandle:
             program here starts; False when only what it started itself.
 
         Raises:
-            Exception: the machine could not be reached in time.
+            Exception: the machine could not be reached in time, or no
+                shell there ran the line (a stopped container).
         """
         async with asyncio.timeout(CHECK_WAIT_SECONDS):
             await self._ensure_connected()
             ran = await self.exec_line(CHECK_LINE, None, {}, "/")
+        if CHECK_MARK.encode() not in (ran.stdout or b""):
+            raise RuntimeError(
+                f"{self.id}: check did not run: exit {ran.exit_code}"
+            )
         return ran.exit_code == 0
 
     @property

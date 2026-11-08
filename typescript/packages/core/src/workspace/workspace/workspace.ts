@@ -865,7 +865,9 @@ export class Workspace {
    * Mirage process whose program leads it. A host whose processes this
    * package cannot see (a browser) shows none; Node's workspace does.
    */
-  protected hostStatus(_groups: ReadonlyMap<number, string>): Promise<MachineProcess[]> {
+  protected hostStatus(
+    _groups: ReadonlyMap<number, readonly [string, number]>,
+  ): Promise<MachineProcess[]> {
     return Promise.resolve([])
   }
 

@@ -467,21 +467,28 @@ async function groupStarted(group: number): Promise<number[]> {
 /**
  * Every process of the host programs' process groups, as `ps` lists them
  * now: each program leads a group of its own, and every member is tagged as
- * the Mirage process whose program leads it. Rejects when the host has no
- * `ps`. Mirrors Python's `host_status`.
+ * the Mirage process whose program leads it. A group led by a process that
+ * started at another time (`HOST_START_SLACK_SECONDS`) is left out: the
+ * program's pid went to another program. Rejects when the host has no `ps`.
+ * Mirrors Python's `host_status`.
  *
- * @param groups each program's pid, which is its group's, and the tag of the
- *   Mirage process it is.
+ * @param groups each program's pid, which is its group's, the tag of the
+ *   Mirage process it is and when it started, in epoch seconds.
  */
-export async function hostStatus(groups: ReadonlyMap<number, string>): Promise<MachineProcess[]> {
+export async function hostStatus(
+  groups: ReadonlyMap<number, readonly [string, number]>,
+): Promise<MachineProcess[]> {
   if (groups.size === 0 || process.platform === 'win32') return []
-  const found: MachineProcess[] = []
+  const found: [number, MachineProcess][] = []
+  const reused = new Set<number>()
   const text = await ps(['-A', '-o', 'pid=,ppid=,pgid=,lstart=,args='])
   for (const line of text.split('\n')) {
     const fields = line.trim().split(/\s+/)
     if (fields.length < 8 || !/^[0-9]+$/.test(fields[2] ?? '')) continue
-    const tag = groups.get(Number(fields[2]))
-    if (tag === undefined) continue
+    const group = Number(fields[2])
+    const held = groups.get(group)
+    if (held === undefined) continue
+    const [tag, began] = held
     let started: number
     try {
       started = lstart(fields.slice(3, 8).join(' '))
@@ -490,15 +497,20 @@ export async function hostStatus(groups: ReadonlyMap<number, string>): Promise<M
       continue
     }
     const args = line.trim().replace(/^(\S+\s+){8}/, '')
-    found.push({
-      tag,
-      pid: Number(fields[0]),
-      ppid: Number(fields[1]),
-      started,
-      args: fields.length > 8 ? args : '',
-    })
+    const pid = Number(fields[0])
+    if (pid === group && Math.abs(started - began) > HOST_START_SLACK_SECONDS) reused.add(group)
+    found.push([
+      group,
+      {
+        tag,
+        pid,
+        ppid: Number(fields[1]),
+        started,
+        args: fields.length > 8 ? args : '',
+      },
+    ])
   }
-  return found
+  return found.filter(([group]) => !reused.has(group)).map(([, row]) => row)
 }
 
 /**

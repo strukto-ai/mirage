@@ -23,7 +23,9 @@ import type { MachineId, MachinePid } from '../types.ts'
 import type { Machine, MachineProcess, MachineState } from './types.ts'
 
 /** Scans the host programs' process groups, given each program's pid and tag. */
-export type HostStatus = (groups: ReadonlyMap<number, string>) => Promise<MachineProcess[]>
+export type HostStatus = (
+  groups: ReadonlyMap<number, readonly [string, number]>,
+) => Promise<MachineProcess[]>
 
 /** Sends a signal to a host process. */
 export type HostSignal = (target: MachinePid, signum: number) => Promise<boolean>
@@ -181,14 +183,14 @@ export class MachineTable {
       .filter((handle) => handle.executing || shown.has(handle.id.toString()))
       .map((handle) => [handle.id, handle.status(workspace)])
     if (this.hostStatus !== null) {
-      const groups = new Map<number, string>()
+      const groups = new Map<number, readonly [string, number]>()
       for (const [tag, record] of runs) {
         if (
           record.machine.toString() === host &&
           record.machinePid !== null &&
           (live.has(tag) || fresh.has(tag) || held.has(tag))
         )
-          groups.set(record.machinePid.pid, tag)
+          groups.set(record.machinePid.pid, [tag, record.machinePid.started])
       }
       if (groups.size > 0 || shown.has(host))
         scans.push([processes.machine, this.hostStatus(groups)])

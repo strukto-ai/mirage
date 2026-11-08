@@ -244,6 +244,35 @@ export class ProcessTable {
   }
 
   /**
+   * Send a signal as `send` does to the program a runner is, or to the
+   * programs under it when it is a shell, which has none of its own to
+   * send it to. Answers whether one ran, once sent; null when no program on
+   * a machine is there to take it. Mirrors Python's `send_program`.
+   */
+  sendProgram(handle: ProcessHandle, signal: number): Promise<boolean> | null {
+    const sending = this.send(handle, signal)
+    if (sending !== null) return sending
+    const below = this.under(handle.record.id.pid)
+      .filter((child) => child.record.runtime !== null)
+      .map((child) => this.send(child, signal))
+      .filter((sent) => sent !== null)
+    if (below.length === 0) return null
+    return anySent(below)
+  }
+
+  /**
+   * Send a signal a process takes and goes on to every program on a machine
+   * in a process group as `send` does, leaving Mirage's own runners as they
+   * are. The machines are scanned first, so what a program started there is
+   * in the group. Mirrors Python's `send_group`.
+   */
+  async sendGroup(groupId: number, signal: number): Promise<void> {
+    await this.scan()
+    const sending = this.members(groupId).map((member) => this.send(member, signal))
+    await Promise.all(sending.filter((sent) => sent !== null))
+  }
+
+  /**
    * Deliver a signal to every live runner of a process group, as killpg(2)
    * does: a program on a machine gets it as sent (`send`), a runner that
    * ignores it (a shell) hands it to the program it runs right now
@@ -453,6 +482,10 @@ export class ProcessTable {
  * @param members the runners, deepest first.
  * @param signal the signal.
  */
+async function anySent(sending: Promise<boolean>[]): Promise<boolean> {
+  return (await Promise.all(sending)).includes(true)
+}
+
 async function signalMembers(
   table: ProcessTable,
   members: readonly ProcessHandle[],

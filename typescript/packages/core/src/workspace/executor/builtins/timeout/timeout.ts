@@ -400,11 +400,14 @@ export async function handleTimeout(
       void processes.signalGroup(process.record.group, number)
       return
     }
-    const sending = processes.send(process, number)
+    const sending = processes.sendProgram(process, number)
     if (sending === null) deliver(process, number)
     else void sending
   }
-  const watch = supervise(run, abort.signal, send, sink, held, seconds, lineSignal, {
+  const passOn = (number: number): void => {
+    forward(processes, process, number, foreground)
+  }
+  const watch = supervise(run, abort.signal, send, passOn, sink, held, seconds, lineSignal, {
     signal,
     killAfter,
     foreground,
@@ -451,14 +454,29 @@ async function* streamed(
   io.stderr = result.stderr
 }
 
+// A signal a process takes and goes on reaches the programs on machines as
+// sent, and leaves Mirage's own runners as they are; 0 only probes.
+function forward(
+  processes: ProcessTable,
+  process: ProcessHandle,
+  number: number,
+  foreground: boolean,
+): void {
+  if (number === 0) return
+  if (foreground) void processes.sendProgram(process, number)
+  else void processes.sendGroup(process.record.group, number)
+}
+
 /**
  * Wait for the run, and at the deadline do what the signal does: `send`
- * signals the command, and `aborted` fires once the run was told to stop.
+ * signals the command, `passOn` hands a signal it carries on through to the
+ * programs on machines, and `aborted` fires once the run was told to stop.
  */
 async function supervise(
   run: Promise<IOResult>,
   aborted: AbortSignal,
   send: (signal: number) => void,
+  passOn: (signal: number) => void,
   sink: PipeConsole,
   held: IOResult[],
   seconds: number,
@@ -480,6 +498,7 @@ async function supervise(
   }
   const reached = (): void => {
     if (stops || !carriesOn || how.ignored) send(signal)
+    else passOn(signal)
     if (killAfter === 0) return
     kill.at = new Promise((resolve) => {
       kill.cancel = atDeadline(killAfter, () => {

@@ -57,7 +57,9 @@ export class Workspace extends CoreWorkspace {
   }
 
   /** The host programs' process groups, as this host's `ps` lists them. */
-  protected override hostStatus(groups: ReadonlyMap<number, string>): Promise<MachineProcess[]> {
+  protected override hostStatus(
+    groups: ReadonlyMap<number, readonly [string, number]>,
+  ): Promise<MachineProcess[]> {
     return hostStatus(groups)
   }
 

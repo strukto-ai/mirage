@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { CHECK_LINE, PROCESS } from '../../machine/constants.ts'
+import { CHECK_LINE, CHECK_MARK, PROCESS } from '../../machine/constants.ts'
 import { MachineHandle } from '../../machine/handle.ts'
 import { MachineRuntime } from '../../runtime/machine/runtime.ts'
 import type { RunResult } from '../../runtime/types.ts'
@@ -34,6 +34,7 @@ class Box extends MachineHandle {
   constructor(
     name: string,
     readonly code: number | null,
+    readonly ran = true,
   ) {
     super(name)
   }
@@ -44,19 +45,26 @@ class Box extends MachineHandle {
 
   protected override execArgv(argv: readonly string[]): Promise<RunResult> {
     this.lines.push(argv.at(-1) ?? '')
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: this.code ?? 0 })
+    const stdout = new TextEncoder().encode(this.ran ? `${CHECK_MARK}\n` : '')
+    return Promise.resolve({ stdout, stderr: null, exitCode: this.code ?? 0 })
   }
 }
 
 describe('MachineTable', () => {
   it('checks how far Mirage reaches each machine', async () => {
     const a = new Box('a', 0)
-    const table = new MachineTable({ a, b: new Box('b', 1), c: new Box('c', null) })
+    const table = new MachineTable({
+      a,
+      b: new Box('b', 1),
+      c: new Box('c', null),
+      d: new Box('d', 1, false),
+    })
     const found = await table.check(() => 7)
     expect(found.map((m) => [m.id.toString(), m.state, m.checkedAt])).toEqual([
       ['box:a', 'managed', 7],
       ['box:b', 'reachable', 7],
       ['box:c', 'unreachable', 7],
+      ['box:d', 'unreachable', 7],
     ])
     expect(a.lines).toEqual([CHECK_LINE])
   })
@@ -194,6 +202,22 @@ class Gone extends Leaver {
   override signal(target: string | MachinePid, signum: number): Promise<boolean> {
     this.sent.push([target, signum])
     return Promise.resolve(this.rows.length > 0)
+  }
+}
+
+/** A box whose program ends on the one signal it handles. */
+class Handler extends Sleeper {
+  constructor(
+    name: string,
+    readonly handles: number,
+  ) {
+    super(name)
+  }
+
+  override signal(target: string | MachinePid, signum: number): Promise<boolean> {
+    this.sent.push([target, signum])
+    if (signum === this.handles) this.finish()
+    return Promise.resolve(true)
   }
 }
 
@@ -488,6 +512,32 @@ describe('MachineTable scans', () => {
       expect(said.exitCode).toBe(1)
       expect(DEC.decode(said.stderr)).toContain('No such process')
     } finally {
+      await ws.close()
+    }
+  })
+
+  it('sends a foreground timeout to the program under its shell', async () => {
+    const box = new Handler('a', 10)
+    const ws = sleepers({ a: box })
+    try {
+      const said = await ws.shell('timeout --foreground -s USR1 0.1 train 1')
+      expect(said.exitCode).toBe(124)
+      expect(box.sent.map(([, signum]) => signum)).toEqual([10])
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  })
+
+  it.each(['', '--foreground '])('forwards a kept timeout signal %s', async (how) => {
+    const box = new Handler('a', 28)
+    const ws = sleepers({ a: box })
+    try {
+      const said = await ws.shell(`timeout ${how}-s WINCH 0.1 train 1`)
+      expect(said.exitCode).toBe(124)
+      expect(new Set(box.sent.map(([, signum]) => signum))).toEqual(new Set([28]))
+    } finally {
+      box.finish()
       await ws.close()
     }
   })

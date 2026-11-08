@@ -53,7 +53,7 @@ class MachineTable:
     Args:
         machines (Mapping[str, MachineHandle | Mapping[str, Any]] |
             None): each machine's handle or its YAML entry, by name.
-        host_status (Callable[[Mapping[int, str]],
+        host_status (Callable[[Mapping[int, tuple[str, float]]],
             Awaitable[list[MachineProcess]]] | None): scans the host
             programs' process groups, given each program's pid and tag;
             None leaves the host unscanned.
@@ -69,7 +69,8 @@ class MachineTable:
         machines: Mapping[str, MachineHandle | Mapping[str, Any]]
         | None = None,
         host_status: Callable[
-            [Mapping[int, str]], Awaitable[list[MachineProcess]]
+            [Mapping[int, tuple[str, float]]],
+            Awaitable[list[MachineProcess]],
         ]
         | None = None,
         host_signal: Callable[[MachinePid, int], Awaitable[bool]]
@@ -208,7 +209,7 @@ class MachineTable:
             ]
             if self._host_status is not None:
                 groups = {
-                    record.machine_pid.pid: tag
+                    record.machine_pid.pid: (tag, record.machine_pid.started)
                     for tag, record in runs.items()
                     if record.machine == processes.machine
                     and record.machine_pid is not None
