@@ -93,7 +93,7 @@ flowchart LR
 | Python | TypeScript | Runs | Can return |
 | --- | --- | --- | --- |
 | `pre_execute` | `preExecute` | once per line, before any of it runs | Deny, Ask, Route |
-| `pre_command` | `preCommand` | before each command or CLI, once the line is parsed and expanded | Deny, Ask |
+| `pre_command` | `preCommand` | before each command or CLI, once the line is parsed and expanded | Deny, Ask, Route |
 | `post_command` | `postCommand` | after each command, once its output drained | Deny, Ask |
 | `post_execute` | `postExecute` | once per line, after it ends | Deny, Ask, Limit |
 | `pre_vfs` | `preVfs` | before each VFS call, including command and runtime file operations | Deny, Ask |
@@ -220,27 +220,28 @@ A policy written as a program, on monty or Python on wasm, gets the same
 ```python Python
 from mirage.policy import Policy, Route, RouteContext
 
-class JobsInDocker(Policy):
+class JobsOnTheBox(Policy):
     async def pre_execute(self, ctx: RouteContext) -> Route | None:
         paths = [p.virtual for c in ctx.commands for p in c.paths]
         if any(p.startswith("/jobs/") for p in paths):
-            return Route("docker")
+            return Route(machine="box")
         return None
 ```
 
 ```typescript TypeScript
-const jobsInDocker: Policy = {
+const jobsOnTheBox: Policy = {
   preExecute(ctx) {
     const jobs = ctx.commands.some((c) => c.paths.some((p) => p.virtual.startsWith('/jobs/')))
-    return jobs ? { kind: 'route', runtime: 'docker' } : null
+    return jobs ? { kind: 'route', machine: 'box' } : null
   },
 }
 ```
 
 </CodeGroup>
 
-`python3 /jobs/train.py` runs on the workspace's `docker` runtime. See
-[Route Runtime](/home/policy/route-runtime) for runtimes.
+`python3 /jobs/train.py` runs on the workspace's `box`
+[machine](/home/setup/machine/overview). See
+[Route Runtime](/home/policy/route-runtime) for runtimes and machines.
 
 ### post_execute
 

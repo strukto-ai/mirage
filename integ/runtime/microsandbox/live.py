@@ -26,7 +26,8 @@ from pathlib import Path
 
 from mirage import RAMVFS, MountMode, PathSpec, Workspace
 from mirage.commands.config import Context
-from mirage.runtime.sandbox.microsandbox import MicrosandboxRuntime
+from mirage.machine.microsandbox import MicrosandboxMachine
+from mirage.runtime.machine import MachineRuntime
 
 SANDBOX = os.environ["MIRAGE_E2E_SANDBOX"]
 GUEST = "/e2e-guest"
@@ -52,26 +53,25 @@ async def check(name, operation):
 
 
 async def raw(command):
-    return await MicrosandboxRuntime(config={"sandbox": SANDBOX}).exec_line(
+    return await MicrosandboxMachine("msb", {"sandbox": SANDBOX}).exec_line(
         command, None, {}, "/"
     )
 
 
 async def transport():
-    runtime = MicrosandboxRuntime(config={"sandbox": SANDBOX})
+    runtime = MicrosandboxMachine("msb", {"sandbox": SANDBOX})
     for data in (None, b"", b"\x00\xff\r\n", bytes(range(256)) * 16384):
-        result = await runtime.execute(
-            [],
-            list(
-                (
-                    "python3",
-                    "-c",
-                    "import sys,hashlib; "
-                    "print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())",
-                )
+        result = await runtime.run(
+            (
+                "python3",
+                "-c",
+                "import sys,hashlib; "
+                "print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())",
             ),
             Context(cwd=PathSpec.from_str_path("/tmp"), stdin=data),
-            kind="process",
+            None,
+            None,
+            None,
         )
         assert result.exit_code == 0, result.stderr
         assert (
@@ -82,26 +82,25 @@ async def transport():
     data = bytes(range(256)) * 16384
     words = ("a b", "$(literal)", "", "--flag", "\u2603", "one\ntwo")
     marker = "quotes ' \" $ and\nnewlines"
-    result = await runtime.execute(
-        [],
-        list(
-            (
-                "python3",
-                "-c",
-                "import os,sys,json; assert os.getcwd()=='/tmp'; "
-                "assert os.environ['MARK']==sys.argv[1]; "
-                "sys.stdout.buffer.write(sys.stdin.buffer.read()); "
-                "sys.stderr.write(json.dumps(sys.argv[2:])); sys.exit(23)",
-                marker,
-                *words,
-            )
+    result = await runtime.run(
+        (
+            "python3",
+            "-c",
+            "import os,sys,json; assert os.getcwd()=='/tmp'; "
+            "assert os.environ['MARK']==sys.argv[1]; "
+            "sys.stdout.buffer.write(sys.stdin.buffer.read()); "
+            "sys.stderr.write(json.dumps(sys.argv[2:])); sys.exit(23)",
+            marker,
+            *words,
         ),
         Context(
             cwd=PathSpec.from_str_path("/tmp"),
             env={"MARK": marker},
             stdin=data,
         ),
-        kind="process",
+        None,
+        None,
+        None,
     )
     assert result.stdout == data
     assert json.loads(result.stderr) == list(words)
@@ -131,14 +130,17 @@ async def mode_checks(mode):
     mounts = {prefix: source, prefix + "/ro": (readonly, MountMode.READ)}
     if mode == "both":
         mounts[GUEST] = RAMVFS()
-    runtime = MicrosandboxRuntime(
-        captures=["python3", "dash", "sleep"],
-        config={"sandbox": SANDBOX, "mount_type": mode},
+    runtime = MicrosandboxMachine(
+        "msb", {"sandbox": SANDBOX, "mount_type": mode}
     )
     ws = Workspace(
         mounts,
         mode=MountMode.EXEC,
-        runtimes=[runtime, "workspace"],
+        machines={"msb": runtime},
+        runtimes=[
+            MachineRuntime(["python3", "dash", "sleep"], machine="msb"),
+            "workspace",
+        ],
         profiles={"hidden": {"paths": {"hide": [prefix + "/secret.txt"]}}},
     )
     agent = await ws.session(
@@ -327,13 +329,12 @@ async def cycles():
         ws = Workspace(
             {HOST: RAMVFS()},
             mode=MountMode.EXEC,
-            runtimes=[
-                MicrosandboxRuntime(
-                    captures=["python3"],
-                    config={"sandbox": SANDBOX, "mount_type": "ssh"},
-                ),
-                "workspace",
-            ],
+            machines={
+                "msb": MicrosandboxMachine(
+                    "msb", {"sandbox": SANDBOX, "mount_type": "ssh"}
+                )
+            },
+            runtimes=[MachineRuntime(["python3"], machine="msb"), "workspace"],
         )
         try:
             result = await ws.shell("python3 -c 'print(\"cycle\")'")
@@ -388,7 +389,7 @@ async def host_pids(marker):
     ]
 
 
-class FullInspect(MicrosandboxRuntime):
+class FullInspect(MicrosandboxMachine):
     async def _microsandbox(self, args, stdin=None, output=None):
         return await super()._microsandbox(
             ["inspect", *args[1:]] if args[0] == "status" else args,
@@ -422,11 +423,12 @@ async def probe_with_storage_locked():
             result.exit_code == 0 and result.stdout == b"runtime-probe-ok"
         ), result
         pending = asyncio.create_task(
-            FullInspect(config={"sandbox": SANDBOX}).execute(
-                [],
-                list(("true",)),
+            FullInspect("msb", {"sandbox": SANDBOX}).run(
+                ("true",),
                 Context(cwd=PathSpec.from_str_path("/")),
-                kind="process",
+                None,
+                None,
+                None,
             )
         )
         try:
@@ -461,16 +463,12 @@ async def missing_fuse_device():
     ws = Workspace(
         {"/missing-fuse": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[
-            MicrosandboxRuntime(
-                captures=["python3"],
-                config={
-                    "sandbox": SANDBOX,
-                    "mount_type": "ssh",
-                },
-            ),
-            "workspace",
-        ],
+        machines={
+            "msb": MicrosandboxMachine(
+                "msb", {"sandbox": SANDBOX, "mount_type": "ssh"}
+            )
+        },
+        runtimes=[MachineRuntime(["python3"], machine="msb"), "workspace"],
     )
     moved = await raw(
         "test -c /dev/fuse && test ! -e /dev/fuse-mirage-e2e && "
@@ -488,8 +486,8 @@ async def missing_fuse_device():
 
 
 async def stopped_after_connect(mode):
-    runtime = MicrosandboxRuntime(
-        config={"sandbox": SANDBOX, "mount_type": mode}
+    runtime = MicrosandboxMachine(
+        "msb", {"sandbox": SANDBOX, "mount_type": mode}
     )
     assert (await runtime.exec_line("true", None, {}, "/")).exit_code == 0
     await local("msb", "stop", SANDBOX, "--timeout", "10")
@@ -513,14 +511,14 @@ async def stopped_after_connect(mode):
         await runtime.close()
 
 
-class StopAfterProbe(MicrosandboxRuntime):
+class StopAfterProbe(MicrosandboxMachine):
     async def connect(self):
         await super().connect()
         await local("msb", "stop", SANDBOX, "--timeout", "10")
 
 
 async def stopped_between_probe_and_pipe(mode):
-    candidate = StopAfterProbe(config={"sandbox": SANDBOX, "mount_type": mode})
+    candidate = StopAfterProbe("msb", {"sandbox": SANDBOX, "mount_type": mode})
     try:
         pipe = await candidate.open_pipe("printf race-command-ran")
         try:
@@ -542,7 +540,7 @@ async def stopped_between_probe_and_pipe(mode):
 
 
 async def lifecycle_checks():
-    runtime = MicrosandboxRuntime(config={"sandbox": SANDBOX})
+    runtime = MicrosandboxMachine("msb", {"sandbox": SANDBOX})
 
     await check(
         "storage_lock_does_not_block_exec_and_cancel_reaps_probe",

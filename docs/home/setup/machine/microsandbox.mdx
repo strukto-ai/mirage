@@ -1,0 +1,144 @@
+---
+title: microsandbox
+icon: /images/microsandbox-logo.svg
+description: Run captured programs in an existing microsandbox microVM.
+---
+
+The `microsandbox` machine provider reaches a running
+[microsandbox](https://microsandbox.dev) microVM, by name, and the `machine`
+runtime runs captured programs in it. You create and start the sandbox; Mirage runs programs in
+it through the `msb` CLI. Python SDK and Node.
+
+## Installation
+
+Install `msb` on the host and put it on `PATH`. Create a
+sandbox from an image with `sh`, your programs, and the tools needed for
+[connecting the workspace](#connecting-the-workspace):
+
+```bash
+msb create my-registry/mirage-fuse:latest --name mirage-box
+```
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/runtime/overview#captures).
+Add `@python` to run Python programs in the guest too.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.machine import MachineRuntime
+
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"box": {"provider": "microsandbox", "sandbox": "mirage-box"}},
+        runtimes=[MachineRuntime(["@python", "@external"], machine="box")],
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, MachineRuntime, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { box: { provider: 'microsandbox', sandbox: 'mirage-box' } },
+        runtimes: [new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' })],
+      },
+    )
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    machines:
+      box:
+        provider: microsandbox
+        sandbox: mirage-box
+    runtimes:
+      - name: machine
+        captures: ["@python", "@external"]
+        machine: box
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+## Connecting the workspace
+
+A program in the sandbox opens workspace files at the same paths as in
+Mirage. Set `mount_type` in Python or YAML, or `mountType` in TypeScript:
+
+- `ssh` shares the host workspace through guest `sshfs`.
+- `fuse` uses a Mirage workspace running inside the guest.
+- `both` keeps the guest's own mounts and uses [ssh](#ssh) for the rest.
+- Unset leaves file access to you.
+
+### ssh
+
+Add `mount_type: ssh` to the config (`mountType: 'ssh'` in TypeScript).
+Install `mirage-ai[ssh]` on a Python host or `ssh2` on a Node host. The
+guest needs `sshfs` and access to `/dev/fuse`, but no Mirage installation,
+SSH keys or open port (`apt-get install sshfs`). In `ssh` and `both`, each
+runtime instance serves
+its first session only. If the guest restarts, Mirage mounts the paths
+again; a command caught mid-restart exits 126 without running.
+
+### fuse
+
+Use [the machine image](/home/setup/machine/overview#the-machine-image),
+which carries Mirage and `fuse3`. Put the same mounts at the same paths
+in a `sandbox.yaml` inside the guest:
+
+```yaml
+mounts:
+  /data:
+    vfs: s3
+    config:
+      bucket: my-bucket
+    backend: fuse
+    mountpoint: /data
+```
+
+```bash
+msb copy sandbox.yaml mirage-box:/tmp/sandbox.yaml
+msb exec mirage-box -- mkdir -p /data
+msb exec mirage-box -- mirage workspace create /tmp/sandbox.yaml
+```
+
+The guest's config controls these files, not the host workspace's rules.
+Mirage refuses commands if session rules restrict a guest mount it cannot
+enforce. Matching paths alone does not share data; configure both workspaces
+to use the same backend. If a path the guest mounted goes away, as on a
+restart, commands exit 126 until it is mounted again.
+
+## Runtime behavior
+
+| Capability | In the sandbox |
+| --- | --- |
+| Command | The captured program and its arguments, through `msb exec` |
+| Piped input | stdin |
+| Environment | The session's, over the config `env` |
+| Working directory | The shell's, unchanged |
+| Workspace files | By `mount_type`; see [above](#connecting-the-workspace) |
+| Disk and network | The sandbox's own |
+
+## Notes
+
+- Keep the sandbox running while Mirage is connected. Reconnect after a restart.
+- Closing the runtime leaves the sandbox running.
+- A [timeout](/home/setup/machine/overview#timeouts) cancels the CLI call and
+  stops that run's processes in the sandbox.
+- A program's output reaches Mirage as it prints, except when Mirage pipes
+  input into the program: then the output arrives when the program ends.
+- Commands share the sandbox's files and processes. Use one sandbox per tenant.
+- Environment values are passed as CLI arguments. Avoid secrets on hosts shared
+  with untrusted users.

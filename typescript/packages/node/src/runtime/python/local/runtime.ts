@@ -40,7 +40,7 @@ import {
   onHostPath,
   runProgram,
   systemTimeEnv,
-} from '../../sandbox/program.ts'
+} from '../../../machine/program.ts'
 import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '@struktoai/mirage-core/shell/constants'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'

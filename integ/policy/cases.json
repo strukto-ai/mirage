@@ -352,7 +352,7 @@
    "id": "a_hook_answering_outside_its_kinds_fails_the_line",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
-    {"op": "register_policy", "id": "wrong", "pre_command": {"date": {"route": "workspace"}}, "pre_execute": {"odd": {"limit": {"max_bytes": 1}}}},
+    {"op": "register_policy", "id": "wrong", "pre_command": {"date": {"limit": {"max_bytes": 1}}}, "pre_execute": {"odd": {"limit": {"max_bytes": 1}}}},
     {"op": "exec", "command": "date", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr_contains": "of RulePolicy returned", "refusal": null}}},
     {"op": "exec", "command": "echo odd", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr_contains": "legal kinds here", "refusal": null}}}
    ]

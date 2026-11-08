@@ -38,6 +38,7 @@ import { JobTable } from './table.ts'
 import { JobHandle, type JobResult, type JobRunner } from './handle.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { generationOf, type RecordFields } from '../../workspace/record/types.ts'
+import { FIRST_PID } from '../process/constants.ts'
 
 const dec = (b: Uint8Array | undefined): string =>
   b === undefined ? '' : new TextDecoder().decode(b)
@@ -2222,7 +2223,8 @@ describe('JobTable process plane', () => {
   // and numbers its pids past the highest the store recorded.
   it("reaps this daemon's programs from before a restart as it claims", async () => {
     const store = new RAMExecutionStore()
-    await store.publish('d', { '7': ran(7) }, 7)
+    const pid = FIRST_PID + 6
+    await store.publish('d', { [String(pid)]: ran(pid) }, pid)
     const reaped: unknown[] = []
     const a = new JobTable(store, undefined, null, undefined, 'd')
     a.reaper = (record) => {
@@ -2231,9 +2233,9 @@ describe('JobTable process plane', () => {
     }
     await a.claim()
     await until(() => Promise.resolve(reaped.length > 0))
-    expect(reaped).toEqual([ran(7)])
+    expect(reaped).toEqual([ran(pid)])
     const job = await sleeping(a)
-    expect(job.pid).toBe(8)
+    expect(job.pid).toBe(pid + 1)
     await a.killAll()
     await a.close()
   })

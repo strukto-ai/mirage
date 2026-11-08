@@ -47,7 +47,7 @@ class ProcessResponse(BaseModel):
     error: str | None
 
 
-def _to_response(record: Process) -> ProcessResponse:
+def to_response(record: Process) -> ProcessResponse:
     return ProcessResponse(
         pid=record.pid,
         session_id=record.session_id,
@@ -102,7 +102,7 @@ async def list_processes(
         records = await runner.ws.processes(
             session_id or None, state, line, job, where
         )
-        return [_to_response(r) for r in records]
+        return [to_response(r) for r in records]
 
     return await runner.call(read())
 
@@ -120,4 +120,4 @@ async def get_process(
     record = await runner.call(read())
     if record is None:
         raise HTTPException(status_code=404, detail="process not found")
-    return _to_response(record)
+    return to_response(record)

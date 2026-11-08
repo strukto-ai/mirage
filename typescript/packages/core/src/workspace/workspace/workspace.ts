@@ -88,7 +88,9 @@ import {
   WorkspaceBinding,
 } from '../../runtime/binding.ts'
 import { PrefixResolver } from '../../runtime/resolver.ts'
-import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
+import { MachineTable } from '../../execution/machine/table.ts'
+import type { MachineProcess } from '../../execution/machine/types.ts'
+import type { Machine } from '../../execution/machine/types.ts'
 import { wholeLineRuntime } from '../../runtime/table.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { SecretSource } from '../../secrets/config.ts'
@@ -155,7 +157,14 @@ import { checkReadCapability } from '../mount/read_policy.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { Mount } from '../mount/spec.ts'
 import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
-import { explainedLine, explainLine, holds, lineJudgments } from '../node/explain.ts'
+import {
+  explainedLine,
+  explainLine,
+  holds,
+  lineJudgments,
+  offLineRefusal,
+} from '../node/explain.ts'
+import { decodeText } from '../../shell/bytes.ts'
 import { DEFAULT_PROFILE, MAX_ENV } from '../session/constants.ts'
 import { checkEnvFits } from '../session/budget.ts'
 import { SessionManager } from '../session/manager.ts'
@@ -281,6 +290,8 @@ export class Workspace {
   }
   private readonly eventManager: EventManager
   private readonly runtimeWorld: Runtimes
+  /** The machines its programs run on, by name. */
+  readonly machineTable: MachineTable
   // Named for what it holds: the source declarations, never a secret.
   private readonly declaredSecretSources: Readonly<Record<string, SecretSource>>
   private secretSourcesBuilt: Readonly<Record<string, ResolvedSource>> | null = null
@@ -741,18 +752,29 @@ export class Workspace {
       null,
       this.processTable,
     )
+    this.machineTable = new MachineTable(
+      options.machines,
+      (groups) => this.hostStatus(groups),
+      (target, signum) => this.signalHost(target, signum),
+    )
+    this.processTable.scanner = () => this.machineTable.scan(this.processTable, this.workspaceId)
+    this.processTable.sender = (handle, signum) =>
+      this.machineTable.send(this.processTable, handle, signum)
     this.runtimeWorld = new Runtimes({
       registry: this.registry,
       entries: options.runtimes,
       binding: this.runtimeBinding,
+      machines: this.machineTable,
     })
     this.closers.push(() => this.runtimeWorld.close())
+    this.closers.push(() => this.machineTable.close())
     this.closers.push(() => this.registry.clis.close())
     this.router = new Router(this.registry, this.runtimeWorld)
     if (options.routePolicy !== undefined) {
       this.registry.policies.place(new RoutePolicy(options.routePolicy, this.scriptPolicy))
     }
     this.registry.bindClocks()
+    this.machineTable.claim()
   }
 
   /**
@@ -798,11 +820,11 @@ export class Workspace {
   /**
    * Stop the program a lapsed workspace's process ran past the workspace,
    * answering whether this workspace reached it: a host program by its pid
-   * when it ran on this host (`reapHostRun`), a sandbox's run through each
-   * runtime here on the machine it ran on, which stops what the process's
-   * tag marks there. It counts as reached only once a box held it and it was
-   * stopped: a box that holds none of it, or one that could not be reached,
-   * leaves it to a workspace that reaches its own. Mirrors Python's
+   * when it ran on this host (`reapHostRun`), a machine's run through the
+   * machine it ran on, which stops what the process's tag marks there. It
+   * counts as reached only once the machine held it and it was stopped: one
+   * that holds none of it, or one that could not be reached, leaves it to a
+   * workspace that reaches its own. Mirrors Python's
    * `Workspace._reap_process`.
    *
    * @param record the process, as its workspace published it.
@@ -815,18 +837,14 @@ export class Workspace {
     if (typeof pid !== 'number') return false
     if (machine === this.processTable.machine.toString() && found != null)
       return this.reapHostRun(found, typeof seen === 'number' ? seen : null, signum)
-    const tag = new ProcessId(this.workspaceId, pid).toString()
-    let reached = false
-    for (const runtime of this.runtimes()) {
-      if (!(runtime instanceof RemoteSandbox)) continue
-      try {
-        if ((runtime.machine ?? this.processTable.machine).toString() !== machine) continue
-        reached = (await runtime.reap(tag, signum)) || reached
-      } catch (err) {
-        console.debug(`${runtime.name}: run not reaped:`, err)
-      }
+    const handle = typeof machine === 'string' ? this.machineTable.find(machine) : null
+    if (handle === null) return false
+    try {
+      return await handle.reap(new ProcessId(this.workspaceId, pid).toString(), signum)
+    } catch (err) {
+      console.debug(`${String(machine)}: run not reaped:`, err)
+      return false
     }
-    return reached
   }
 
   /**
@@ -839,6 +857,26 @@ export class Workspace {
     _seenAt: number | null,
     _signum: number,
   ): Promise<boolean> {
+    return Promise.resolve(false)
+  }
+
+  /**
+   * Every process of the host programs' process groups, each tagged as the
+   * Mirage process whose program leads it. A host whose processes this
+   * package cannot see (a browser) shows none; Node's workspace does.
+   */
+  protected hostStatus(
+    _groups: ReadonlyMap<number, readonly [string, number]>,
+  ): Promise<MachineProcess[]> {
+    return Promise.resolve([])
+  }
+
+  /**
+   * Send a signal to a host process as `kill` sent it, answering whether it
+   * ran. A host whose processes this package cannot reach (a browser)
+   * reaches none; Node's workspace does.
+   */
+  protected signalHost(_target: MachinePid, _signum: number): Promise<boolean> {
     return Promise.resolve(false)
   }
 
@@ -1465,9 +1503,9 @@ export class Workspace {
    * The processes the workspace keeps, by pid: every live one, and the
    * newest ended ones, as its store keeps them, so a daemon that does not
    * hold the workspace's lease lists the same ones; the holder reads its
-   * own as they are now. A session's, those in a state, those a line ran,
-   * those a job ran (its own and every one under it, while a session lists
-   * it) or those run on a machine when named.
+   * own as they are now, its machines scanned first. A session's, those in
+   * a state, those a line ran, those a job ran (its own and every one under
+   * it, while a session lists it) or those run on a machine when named.
    */
   async processes(
     filter: {
@@ -1478,11 +1516,12 @@ export class Workspace {
       machine?: MachineId
     } = {},
   ): Promise<Process[]> {
+    const claimed = this.jobTable.claimed
+    if (claimed) await this.processTable.scan()
     const found = new Map<number, Process>()
     for (const process of await this.jobTable.store.findProcesses(filter.sessionId)) {
       found.set(process.id.pid, process)
     }
-    const claimed = this.jobTable.claimed
     if (claimed) {
       for (const process of this.processTable.records()) {
         if (filter.sessionId === undefined || process.sessionId === filter.sessionId)
@@ -1523,6 +1562,24 @@ export class Workspace {
           ) ?? null)
       : null
     return own ?? (await this.jobTable.store.getProcess(id))
+  }
+
+  /**
+   * The machines the workspace runs programs on, each as a check of it finds
+   * it now: its own host first, which Mirage always manages, then every
+   * machine `machines:` names, checked at once; only `machine` when named.
+   * Mirrors Python's `Workspace.machines`.
+   */
+  async machines(machine?: MachineId): Promise<Machine[]> {
+    const host = this.processTable.machine
+    const found: Machine[] =
+      machine === undefined || machine.toString() === host.toString()
+        ? [{ id: host, state: 'managed', checkedAt: this.clock.now() }]
+        : []
+    return [
+      ...found,
+      ...(await this.machineTable.check(() => this.clock.now(), machine?.toString())),
+    ]
   }
 
   async closeSession(sessionId: string): Promise<void> {
@@ -1623,7 +1680,7 @@ export class Workspace {
           line,
           judged,
           wholeLine ? judged : verdicts,
-          () => whole?.name ?? '',
+          (one) => (wholeLine ? this.router.placementFor(one, this.router.unplaced()) : ['', '']),
           reparse,
           wholeLine,
         )
@@ -1652,7 +1709,7 @@ export class Workspace {
       if ('kind' in placed) {
         const refused = placementRefused(placed, line)
         return {
-          ...explainedLine(line, judged, verdicts, () => '', reparse),
+          ...explainedLine(line, judged, verdicts, () => ['', ''], reparse),
           answers,
           outcome: placed.kind === 'pending' ? Outcome.ASK : Outcome.DENY,
           reason: placed.reason,
@@ -1666,10 +1723,28 @@ export class Workspace {
         line,
         judged,
         wholeLine ? judged : verdicts,
-        (one) => this.router.runtimeFor(one, placed),
+        this.router.placements(judged, placed),
         reparse,
         wholeLine,
       )
+      if (wholeLine && said.outcome === Outcome.ALLOW) {
+        // A command routed off the runtime that runs the line whole
+        // refuses the line, as the run's admission does.
+        for (const one of judged) {
+          const off = await offLineRefusal(one, (each) => this.router.offLine(each, placed))
+          if (off?.refusal == null) continue
+          return {
+            ...said,
+            answers,
+            outcome: Outcome.DENY,
+            reason: off.refusal.reason,
+            source: '',
+            refusal: off.refusal,
+            exitCode: off.exitCode,
+            stderr: decodeText(off.stderr),
+          }
+        }
+      }
       return { ...said, answers }
     } finally {
       parser.release()

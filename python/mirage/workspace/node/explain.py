@@ -37,6 +37,7 @@ from mirage.policy import (
     HandOff,
     Occurrence,
     Pending,
+    Route,
     ShellExplanation,
     ShellNode,
     refusal_of,
@@ -47,7 +48,7 @@ from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.decisions import is_pending
 from mirage.policy.match import Outcome, has_rules, reads_args, scopes_paths
 from mirage.policy.match.decide import source_of
-from mirage.policy.policies import settled
+from mirage.policy.policies import command_route, settled
 from mirage.rs.session import ShellVars
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.helpers import (
@@ -183,8 +184,8 @@ class Judgment:
         stderr (str): what the agent would read, empty to run.
         refusal (Refusal | None): the record the refused result would
             carry, None when the line would run.
-        answers (tuple[Deny | Ask, ...]): every policy's answer to the
-            command, in the order the chain asks them.
+        answers (tuple[Deny | Ask | Route, ...]): every policy's answer
+            to the command, in the order the chain asks them.
         words (tuple[CommandWord, ...]): the command line word by word,
             each with its kind and the path it names, redirect targets
             last.
@@ -201,7 +202,7 @@ class Judgment:
     exit_code: int = 0
     stderr: str = ""
     refusal: Refusal | None = None
-    answers: tuple[Deny | Ask, ...] = ()
+    answers: tuple[Deny | Ask | Route, ...] = ()
     words: tuple[CommandWord, ...] = ()
 
 
@@ -237,7 +238,7 @@ async def _explained(
     ctx: CommandContext,
     registry: MountRegistry,
     asked: Deny | Ask | None,
-    answers: tuple[Deny | Ask, ...],
+    answers: tuple[Deny | Ask | Route, ...],
 ) -> Judgment:
     """One command's explanation, read off the answers the gate's chain
     gave and rendered from the same table the gate renders a refusal
@@ -254,10 +255,16 @@ async def _explained(
         ctx (CommandContext): the classified command.
         registry (MountRegistry): registry holding the decision ledger.
         asked (Deny | Ask | None): what the policy chain answered.
-        answers (tuple[Deny | Ask, ...]): the answers it came from.
+        answers (tuple[Deny | Ask | Route, ...]): the answers it came
+            from.
     """
     document = settled(
-        tuple(a for a in answers if a.policy == PermissionsPolicy.__name__)
+        tuple(
+            a
+            for a in answers
+            if isinstance(a, (Deny, Ask))
+            and a.policy == PermissionsPolicy.__name__
+        )
     )
     rule = document.rule if document is not None else None
     base = Judgment(
@@ -1378,7 +1385,7 @@ async def _admitted(
         )
     action = await resolved(
         one.ctx,
-        settled(judgment.answers),
+        _refusal(judgment.answers),
         registry,
         cancel,
         Claimant(handed, one.occurrence) if handed is not None else None,
@@ -1396,6 +1403,7 @@ async def admit_line(
     namespace: Namespace | None,
     cancel: asyncio.Event | None = None,
     handed: HandOff | None = None,
+    off_line: Callable[[Judged], bool] | None = None,
 ) -> Refused | None:
     """Admit every command of a line a runtime takes whole.
 
@@ -1410,7 +1418,9 @@ async def admit_line(
     command runs (``eval``, ``sh -c``, ``xargs``, ``env`` ... see
     ``inner_lines``) are judged in turn; and what the runtime would do
     past the gate is refused under a rule that would have read it
-    (:func:`_line_refusal`).
+    (:func:`_line_refusal`). A command a ``pre_command`` route places
+    off the runtime or machine the line runs whole on is refused too,
+    since one run cannot put it elsewhere.
 
     No gate follows this pass: the runtime runs the line whole, so
     every grant it matches is claimed on the line's hand-off exactly as
@@ -1429,6 +1439,9 @@ async def admit_line(
         cancel (asyncio.Event | None): the run's kill channel.
         handed (HandOff | None): the line's hand-off, None outside a
             line (a bare admission with no run behind it).
+        off_line (Callable[[Judged], bool] | None): whether a
+            command's route places it off where the line runs whole
+            (``Router.off_line``); None reads no command route.
     """
     async for one in _judge_line(
         ast,
@@ -1440,9 +1453,36 @@ async def admit_line(
         rules_only=False,
     ):
         refused = await _admitted(one, registry, handed, cancel)
+        if refused is None and off_line is not None:
+            refused = await off_line_refusal(one, off_line)
         if refused is not None:
             return refused
     return None
+
+
+async def off_line_refusal(
+    one: Judged, off_line: Callable[[Judged], bool]
+) -> Refused | None:
+    """The refusal of a command a ``pre_command`` route places off the
+    runtime or machine its line runs whole on, which that one run cannot
+    honor; None for one that stays.
+
+    Args:
+        one (Judged): the command's judgment and its place on the line.
+        off_line (Callable[[Judged], bool]): whether its route places it
+            off the line (``Router.off_line``).
+    """
+    route = command_route(one.judgment.answers)
+    if route is None or one.ctx is None or not off_line(one):
+        return None
+    command = one.judgment.command
+    action = Deny(
+        f"{route.policy} routes {command} elsewhere, and a line "
+        "run whole runs in one place",
+        policy=route.policy,
+    )
+    err, code = await render_command_deny(command, action, one.ctx)
+    return Refused(err, code, refusal_of(action))
 
 
 async def _verdict_refuses(
@@ -1873,7 +1913,7 @@ def explained_line(
     line: str,
     judged: Sequence[Judged],
     verdicts: Sequence[Judged],
-    runtime_of: Callable[[Judged], str],
+    placed_of: Callable[[Judged], tuple[str, str]],
     whole_line: bool = False,
     aliases: frozenset[str] = frozenset(),
 ) -> ShellExplanation:
@@ -1902,7 +1942,8 @@ def explained_line(
             line on: the profile's rules alone (``every=False``), or
             ``judged`` itself for a runtime that takes the line whole,
             whose gate asks every policy.
-        runtime_of (Callable[[Judged], str]): the runtime that would run a
+        placed_of (Callable[[Judged], tuple[str, str]]): the runtime and
+            the machine that would run a
             command, empty for the workspace.
         whole_line (bool): whether a runtime takes the line whole.
         aliases (frozenset[str]): the alias names the session expands,
@@ -1913,7 +1954,7 @@ def explained_line(
         at = one.occurrence
         scopes.setdefault((at.parent, at.source), []).append(one)
     root = next((key for key in scopes if key[0] is None), (None, line))
-    node = _scope_node("line", root, scopes, runtime_of, aliases)
+    node = _scope_node("line", root, scopes, placed_of, aliases)
     # The run holds a line only on a verdict the pass may give on the
     # gate's behalf (``prejudge_line``): a question about words the
     # runtime completes (``find -exec``, ``xargs``) is the gate's, asked
@@ -1957,6 +1998,18 @@ def explained_line(
     )
 
 
+def _refusal(answers: tuple[Deny | Ask | Route, ...]) -> Deny | Ask | None:
+    """What a command's answers come to as the gate reads them: the
+    first Deny (two routes that disagree among them), else the first
+    Ask; a route the answers agree on refuses nothing.
+
+    Args:
+        answers (tuple[Deny | Ask | Route, ...]): the command's answers.
+    """
+    verdict = settled(answers)
+    return None if isinstance(verdict, Route) else verdict
+
+
 def _verdict_of(judgment: Judgment) -> tuple[Outcome, str, str]:
     """A command's outcome, reason and source as its explanation states
     them: the refusal it meets (``ASK`` for a question waiting on the
@@ -1968,17 +2021,17 @@ def _verdict_of(judgment: Judgment) -> tuple[Outcome, str, str]:
     Args:
         judgment (Judgment): the command's judgment.
     """
-    decider = settled(judgment.answers)
+    decider = _refusal(judgment.answers)
     if decider is not None and decider.rule is not None:
         source = source_of(decider.rule)
     else:
         source = (
             "commands.allow" if judgment.source == "commands.allow" else ""
         )
-    refusal = judgment.refusal
-    if refusal is not None:
-        outcome = Outcome.ASK if is_pending(refusal) else Outcome.DENY
-        return outcome, refusal.reason, source
+    refused = judgment.refusal
+    if refused is not None:
+        outcome = Outcome.ASK if is_pending(refused) else Outcome.DENY
+        return outcome, refused.reason, source
     if isinstance(decider, Ask):
         return Outcome.ASK, decider.reason, source
     if judgment.exit_code:
@@ -1990,7 +2043,7 @@ def _scope_node(
     kind: str,
     key: tuple[Occurrence | None, str],
     scopes: dict[tuple[Occurrence | None, str], list[Judged]],
-    runtime_of: Callable[[Judged], str],
+    placed_of: Callable[[Judged], tuple[str, str]],
     aliases: frozenset[str],
 ) -> ShellNode:
     """One scope of a line as a node: its text parsed, the commands
@@ -2003,7 +2056,8 @@ def _scope_node(
             its text was evaluated from, and the text.
         scopes (dict[tuple[Occurrence | None, str], list[Judged]]): every
             scope's judgments.
-        runtime_of (Callable[[Judged], str]): the runtime that would run a
+        placed_of (Callable[[Judged], tuple[str, str]]): the runtime and
+            the machine that would run a
             command.
         aliases (frozenset[str]): the alias names each scope is parsed
             with.
@@ -2036,7 +2090,7 @@ def _scope_node(
                 else "substitution",
                 other,
                 scopes,
-                runtime_of,
+                placed_of,
                 aliases,
             )
             for at, other in inside
@@ -2051,7 +2105,7 @@ def _scope_node(
                 return [ShellNode("command", get_text(node), kids)]
             return [
                 _command_of(
-                    one, get_text(node), kids if i == 0 else (), runtime_of
+                    one, get_text(node), kids if i == 0 else (), placed_of
                 )
                 for i, one in enumerate(ones)
             ]
@@ -2075,7 +2129,7 @@ def _scope_node(
     for (start, end), ones in mine.items():
         spoken = decode_text(raw[start:end])
         children.extend(
-            _command_of(one, spoken, (), runtime_of) for one in ones
+            _command_of(one, spoken, (), placed_of) for one in ones
         )
     children.extend(take(0, len(raw)))
     return ShellNode(kind, text, tuple(children))
@@ -2085,7 +2139,7 @@ def _command_of(
     one: Judged,
     text: str,
     children: tuple[ShellNode, ...],
-    runtime_of: Callable[[Judged], str],
+    placed_of: Callable[[Judged], tuple[str, str]],
 ) -> CommandExplanation:
     """One command's public explanation.
 
@@ -2093,10 +2147,12 @@ def _command_of(
         one (Judged): the command's judgment and place.
         text (str): its source text.
         children (tuple[ShellNode, ...]): the scopes it runs in turn.
-        runtime_of (Callable[[Judged], str]): the runtime that would run it.
+        placed_of (Callable[[Judged], tuple[str, str]]): the runtime and
+            the machine that would run it.
     """
     judgment = one.judgment
     outcome, reason, source = _verdict_of(judgment)
+    runtime, machine = placed_of(one)
     return CommandExplanation(
         command=judgment.command,
         words=judgment.words,
@@ -2107,7 +2163,8 @@ def _command_of(
         source=source,
         answers=judgment.answers,
         refusal=judgment.refusal,
-        runtime=runtime_of(one),
+        runtime=runtime,
+        machine=machine,
         text=text,
         children=children,
     )

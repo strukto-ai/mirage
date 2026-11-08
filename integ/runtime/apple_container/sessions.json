@@ -8,15 +8,19 @@
     {
       "id": "session_env_replaces_image_env",
       "world": {
+        "machines": {
+          "box": {
+            "provider": "apple_container",
+            "container": "${MIRAGE_INTEG_APPLE_CONTAINER}"
+          }
+        },
         "runtimes": [
           {
-            "name": "apple_container",
+            "name": "machine",
             "captures": [
               "printenv"
             ],
-            "config": {
-              "container": "${MIRAGE_INTEG_APPLE_CONTAINER}"
-            }
+            "machine": "box"
           },
           "workspace"
         ]
@@ -33,64 +37,6 @@
           "expect": {
             "exit": 0,
             "stdout": "/usr/bin:/bin\n"
-          }
-        }
-      ]
-    },
-    {
-      "id": "unlisted_session_falls_back",
-      "world": {
-        "runtimes": [
-          {
-            "name": "apple_container",
-            "captures": [
-              "@line"
-            ],
-            "config": {
-              "container": "${MIRAGE_INTEG_APPLE_CONTAINER}",
-              "containers": {
-                "some_agent": "no-such-container"
-              }
-            }
-          },
-          "workspace"
-        ]
-      },
-      "steps": [
-        {
-          "command": "uname -s",
-          "expect": {
-            "exit": 0,
-            "stdout": "Linux\n"
-          }
-        }
-      ]
-    },
-    {
-      "id": "unlisted_session_without_fallback_fails_loud",
-      "world": {
-        "runtimes": [
-          {
-            "name": "apple_container",
-            "captures": [
-              "@line"
-            ],
-            "config": {
-              "containers": {
-                "some_agent": "${MIRAGE_INTEG_APPLE_CONTAINER}"
-              }
-            }
-          },
-          "workspace"
-        ]
-      },
-      "steps": [
-        {
-          "command": "uname -s",
-          "expect": {
-            "exit": 1,
-            "stdout": "",
-            "stderr_contains": "apple_container has no container for session"
           }
         }
       ]

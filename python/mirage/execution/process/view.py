@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from mirage.execution.process.child import ChildProcess
@@ -31,6 +31,9 @@ class ProcessView:
     the view stands and None once it is revoked, for the processes of
     other workspaces, which only the store lists. A process group is
     found, probed and signalled through the members the view sees.
+    ``scan`` brings the table in step with what each machine runs now,
+    and ``send`` signals a program on a machine as sent, None for a
+    process Mirage stops itself (``terminate``).
     """
 
     list: Callable[[], tuple[Process, ...]]
@@ -39,6 +42,8 @@ class ProcessView:
     terminate: Callable[[int, int], bool]
     permissions: Callable[[], ProcessPermissions | None]
     probe_group: Callable[[int], bool]
-    signal_group: Callable[[int, int], bool]
+    signal_group: Callable[[int, int], Awaitable[bool]]
+    scan: Callable[[], Awaitable[None]]
+    send: Callable[[int, int], Awaitable[bool] | None]
     depth: int = 0
     spawn: Callable[[SpawnRequest], ChildProcess] | None = None

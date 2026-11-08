@@ -103,27 +103,34 @@ class Deny:
 
 @dataclass(frozen=True, slots=True)
 class Route:
-    """Place a line on a runtime, the answer ``pre_execute`` gives
-    beside a Deny.
+    """Place a line or one command on a runtime, a machine or both: the
+    answer ``pre_execute`` gives for a line and ``pre_command`` for a
+    command, beside a Deny.
 
-    The runtime serves every command it captures on the line, as a
-    ``route_policy`` verdict naming it does. A Deny at the stage
-    outranks it, and two policies placing one line on different
-    runtimes refuse the line, since neither choice is the line's.
+    The runtime serves every command it captures there, as a
+    ``route_policy`` verdict naming it does; the machine is where the
+    machine runtime runs what it serves, over its entry's own machine. A
+    Deny at the stage outranks it, and two policies placing one line on
+    different runtimes or machines refuse it, since neither choice is
+    the line's.
 
     Args:
-        runtime (str): the runtime entry's name.
+        runtime (str | None): the runtime entry's name; None leaves each
+            command on its first capturer.
         reason (str): why the line goes there, for ``explain`` to show;
             empty when the policy gives none.
         policy (str): the policy that placed the line; the chain fills
             it in.
+        machine (str | None): the machine's name under ``machines:``;
+            None leaves each machine runtime on its own.
     """
 
     kind: ClassVar[str] = "route"
 
-    runtime: str
+    runtime: str | None = None
     reason: str = ""
     policy: str = ""
+    machine: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,12 +287,13 @@ class Answer(BaseModel):
     What a policy program prints, and what the server's entry points
     send (``answer_to_dict``, which adds the policy that spoke). A deny
     or an ask may leave the reason out for the default one; a route
-    names its runtime and may say why.
+    names its runtime, its machine or both, and may say why.
 
     Args:
         kind (Literal["deny", "ask", "route"]): which answer.
         reason (str | None): why.
         runtime (str | None): the runtime a route places the line on.
+        machine (str | None): the machine a route runs it on.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -293,14 +301,15 @@ class Answer(BaseModel):
     kind: Literal["deny", "ask", "route"]
     reason: str | None = None
     runtime: str | None = None
+    machine: str | None = None
 
     @model_validator(mode="after")
     def _v_fields(self) -> "Answer":
         if self.kind == Route.kind:
-            if not self.runtime:
-                raise ValueError("a route names its runtime")
-        elif self.runtime is not None:
-            raise ValueError(f"a {self.kind} carries no runtime")
+            if not self.runtime and not self.machine:
+                raise ValueError("a route names its runtime or its machine")
+        elif self.runtime is not None or self.machine is not None:
+            raise ValueError(f"a {self.kind} carries no runtime or machine")
         return self
 
 
@@ -1105,7 +1114,7 @@ class WorkspaceContext:
 
 
 VALIDITY: dict[str, frozenset[str]] = {
-    "pre_command": frozenset({Deny.kind, Ask.kind}),
+    "pre_command": frozenset({Deny.kind, Ask.kind, Route.kind}),
     "post_command": frozenset({Deny.kind, Ask.kind}),
     "pre_execute": frozenset({Deny.kind, Ask.kind, Route.kind}),
     "pre_vfs": frozenset({Deny.kind, Ask.kind}),
@@ -1192,8 +1201,8 @@ class CommandExplanation(Explanation):
     ``pre_command`` answers) and where it would run.
 
     Args:
-        answers (tuple[Deny | Ask, ...]): every policy's answer to the
-            command (``pre_command``).
+        answers (tuple[Deny | Ask | Route, ...]): every policy's answer
+            to the command (``pre_command``).
         command (str): the program, as the gate read it.
         words (tuple[CommandWord, ...]): the command line word by word,
             each with its kind and the path it names. A path the session
@@ -1205,6 +1214,8 @@ class CommandExplanation(Explanation):
         stderr (str): what the agent would read from it, empty to run.
         runtime (str): the runtime entry that would run it, empty when
             the workspace runs it itself.
+        machine (str): the machine it would run on, ``docker:tools``,
+            empty when the workspace's own does.
         text (str): the command's source text.
         children (tuple[ShellNode, ...]): the lines it runs in turn
             (``$( )`` in its words, a ``bash -c`` string), in source
@@ -1213,12 +1224,13 @@ class CommandExplanation(Explanation):
 
     type: ClassVar[str] = "command"
 
-    answers: "tuple[Deny | Ask, ...]" = ()
+    answers: "tuple[Deny | Ask | Route, ...]" = ()
     command: str
     words: tuple[CommandWord, ...] = ()
     exit_code: int = 0
     stderr: str = ""
     runtime: str = ""
+    machine: str = ""
     text: str = ""
     children: tuple[ShellNode, ...] = ()
 

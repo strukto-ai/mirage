@@ -79,7 +79,7 @@ export const INTERPRETER_NAMES: ReadonlySet<string> = new Set(
     .map(([name]) => name),
 )
 
-// Shell words a native runtime's captures can take from the session: the
+// Shell words a machine runtime's captures can take from the session: the
 // interpreters, and the process tools whose host programs see that
 // runtime's own processes rather than mirage's managed runners.
 export const CAPTURABLE_BUILTINS: ReadonlySet<string> = new Set([

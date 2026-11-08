@@ -2062,6 +2062,166 @@
       "remove": true
     },
     {
+      "target": "$.paths[\"/v1/machines\"].get",
+      "update": {
+        "x-mint": {
+          "content": "<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n| `501` | The server requires accounts; saved configs are kept only on a server of one account |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+        }
+      }
+    },
+    {
+      "target": "$.paths[\"/v1/machines\"].get.responses[\"401\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines\"].get.responses[\"422\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines\"].get.responses[\"429\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines\"].get.responses[\"501\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines\"].post",
+      "update": {
+        "x-mint": {
+          "content": "<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | Bad request: malformed, a host not allowed, or a browser page from another origin |\n| `401` | The token is missing or wrong |\n| `409` | The id or name is taken, the workspace is busy, or a file changed since it was read |\n| `429` | Past a rate limit, or a new session past max_sessions |\n| `501` | The server requires accounts; saved configs are kept only on a server of one account |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+        }
+      }
+    },
+    {
+      "target": "$.paths[\"/v1/machines\"].post.responses[\"400\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines\"].post.responses[\"401\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines\"].post.responses[\"409\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines\"].post.responses[\"429\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines\"].post.responses[\"501\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/types\"].get",
+      "update": {
+        "x-mint": {
+          "content": "<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `429` | Past a rate limit, or a new session past max_sessions |\n| `501` | The server requires accounts; saved configs are kept only on a server of one account |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+        }
+      }
+    },
+    {
+      "target": "$.paths[\"/v1/machines/types\"].get.responses[\"401\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/types\"].get.responses[\"429\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/types\"].get.responses[\"501\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].get",
+      "update": {
+        "x-mint": {
+          "content": "<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `404` | The workspace, session, job or file does not exist |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n| `501` | The server requires accounts; saved configs are kept only on a server of one account |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+        }
+      }
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].get.responses[\"401\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].get.responses[\"404\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].get.responses[\"422\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].get.responses[\"429\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].get.responses[\"501\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].put",
+      "update": {
+        "x-mint": {
+          "content": "<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | Bad request: malformed, a host not allowed, or a browser page from another origin |\n| `401` | The token is missing or wrong |\n| `404` | The workspace, session, job or file does not exist |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n| `501` | The server requires accounts; saved configs are kept only on a server of one account |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+        }
+      }
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].put.responses[\"400\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].put.responses[\"401\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].put.responses[\"404\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].put.responses[\"422\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].put.responses[\"429\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].put.responses[\"501\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].delete",
+      "update": {
+        "x-mint": {
+          "content": "<div className=\"hidden\">\n<ResponseExample>\n\n```http 204 No Content\nHTTP/1.1 204 No Content\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `404` | The workspace, session, job or file does not exist |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n| `501` | The server requires accounts; saved configs are kept only on a server of one account |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+        }
+      }
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].delete.responses[\"401\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].delete.responses[\"404\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].delete.responses[\"422\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].delete.responses[\"429\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/machines/{ref}\"].delete.responses[\"501\"]",
+      "remove": true
+    },
+    {
       "target": "$.paths[\"/v1/policies\"].get",
       "update": {
         "x-mint": {
@@ -2395,6 +2555,58 @@
     },
     {
       "target": "$.paths[\"/v1/workspaces/{workspace_id}/processes/{pid}\"].get.responses[\"429\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/machines\"].get",
+      "update": {
+        "x-mint": {
+          "content": "<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `404` | The workspace, session, job or file does not exist |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+        }
+      }
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/machines\"].get.responses[\"401\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/machines\"].get.responses[\"404\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/machines\"].get.responses[\"422\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/machines\"].get.responses[\"429\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/machines/{machine_id}\"].get",
+      "update": {
+        "x-mint": {
+          "content": "<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `400` | Bad request: malformed, a host not allowed, or a browser page from another origin |\n| `401` | The token is missing or wrong |\n| `404` | The workspace, session, job or file does not exist |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+        }
+      }
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/machines/{machine_id}\"].get.responses[\"400\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/machines/{machine_id}\"].get.responses[\"401\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/machines/{machine_id}\"].get.responses[\"404\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/machines/{machine_id}\"].get.responses[\"422\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/machines/{machine_id}\"].get.responses[\"429\"]",
       "remove": true
     },
     {

@@ -511,6 +511,7 @@ fn workspace_fields(raw: &Doc, kind: &str, at: &str) -> Answer {
                 "system_time",
                 "clis",
                 "runtimes",
+                "machines",
                 "route_policy",
                 "profiles",
                 "profile",

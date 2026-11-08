@@ -73,6 +73,8 @@ from mirage.execution.job.constants import HANGUP_EXIT_CODE
 from mirage.execution.line.handle import LineHandle
 from mirage.execution.line.table import LineTable
 from mirage.execution.line.types import Line, LineState
+from mirage.execution.machine.table import MachineTable
+from mirage.execution.machine.types import Machine, MachineState
 from mirage.execution.process.child import ChildProcess
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.stdio import ProcessInput, ProcessOutput
@@ -96,6 +98,8 @@ from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget
 from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
+from mirage.machine.handle import MachineHandle
+from mirage.machine.program import host_status, reap_host_run, signal_host
 from mirage.observe.log_entry import EVENT_COMMAND, EVENT_RESULT, EVENT_VFS
 from mirage.observe.observer import Observer
 from mirage.observe.store import ObserverStore
@@ -128,8 +132,6 @@ from mirage.runtime.binding import (
 )
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.routing import RouteRule
-from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.program import reap_host_run
 from mirage.runtime.table import whole_line_runtime
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.secrets.config import EnvVar, SecretSource
@@ -203,6 +205,7 @@ from mirage.workspace.node.explain import (
     explained_line,
     holds,
     line_judgments,
+    off_line_refusal,
 )
 from mirage.workspace.record.types import RecordFields
 from mirage.workspace.session import SessionManager, SessionState
@@ -307,6 +310,8 @@ class Workspace:
         namespace_store: NamespaceStore | None = None,
         session_store: NamespaceStore | None = None,
         runtimes: list[Runtime[Any] | str] | None = None,
+        machines: Mapping[str, MachineHandle | Mapping[str, Any]]
+        | None = None,
         route_policy: RouteRule | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
@@ -796,7 +801,16 @@ class Workspace:
             self._sandbox_mounts,
             self.process_table,
         )
-        self._runtimes = Runtimes(self._registry, self._runtime_binding)
+        self.machine_table = MachineTable(machines, host_status, signal_host)
+        self.process_table.scanner = lambda: self.machine_table.scan(
+            self.process_table, self._workspace_id
+        )
+        self.process_table.sender = lambda handle, signum: (
+            self.machine_table.send(self.process_table, handle, signum)
+        )
+        self._runtimes = Runtimes(
+            self._registry, self._runtime_binding, self.machine_table
+        )
         self._runtimes.resolve(runtimes)
         self._router = Router(self._registry, self._runtimes)
         if route_policy is not None:
@@ -824,6 +838,7 @@ class Workspace:
         except BaseException:
             self._registry.release_clocks()
             raise
+        self.machine_table.claim()
 
     async def history(
         self,
@@ -933,7 +948,16 @@ class Workspace:
                 line,
                 judged,
                 judged if whole_line else verdicts,
-                lambda one: whole.name if isinstance(whole, Runtime) else "",
+                lambda one: (
+                    self._router.placement_for(
+                        one,
+                        RouteDecision(
+                            bindings=self._registry.runtime_bindings
+                        ),
+                    )
+                    if whole_line
+                    else ("", "")
+                ),
                 whole_line,
                 aliases,
             )
@@ -960,7 +984,7 @@ class Workspace:
         if isinstance(placed, (Deny, Pending)):
             refused = placement_refused(placed, line)
             said = explained_line(
-                line, judged, verdicts, lambda one: "", aliases=aliases
+                line, judged, verdicts, lambda one: ("", ""), aliases=aliases
             )
             return dataclasses.replace(
                 said,
@@ -980,10 +1004,28 @@ class Workspace:
             line,
             judged,
             judged if whole_line else verdicts,
-            lambda one: self._router.runtime_for(one, placed),
+            self._router.placements(judged, placed),
             whole_line,
             aliases,
         )
+        if whole_line and said.outcome is Outcome.ALLOW:
+            # A command routed off the runtime that runs the line whole
+            # refuses the line, as the run's admission does.
+            off_line = partial(self._router.off_line, decision=placed)
+            for one in judged:
+                off = await off_line_refusal(one, off_line)
+                if off is None or off.refusal is None:
+                    continue
+                return dataclasses.replace(
+                    said,
+                    answers=answers,
+                    outcome=Outcome.DENY,
+                    reason=off.refusal.reason,
+                    source="",
+                    refusal=off.refusal,
+                    exit_code=off.exit_code,
+                    stderr=decode_text(off.stderr),
+                )
         return dataclasses.replace(said, answers=answers)
 
     @property
@@ -1586,8 +1628,8 @@ class Workspace:
         """Stop the program a lapsed workspace's process ran past the
         workspace, answering whether this workspace reached it: a host
         program by its pid when it ran on this host, a sandbox's run
-        through each runtime here on the machine it ran on, which stops
-        what the process's tag marks there. It counts as reached only
+        through the machine it ran on, which stops what the process's tag
+        marks there. It counts as reached only
         once a box held it and it was stopped: a box that holds none of
         it, or one that could not be reached, leaves it to a workspace
         that reaches its own.
@@ -1609,21 +1651,20 @@ class Workspace:
                 seen,
                 signum,
             )
-        tag = str(ProcessId(self._workspace_id, pid))
-        reached = False
-        for runtime in self.runtimes():
-            if not isinstance(runtime, RemoteSandbox):
-                continue
-            try:
-                if (
-                    str(runtime.machine or self.process_table.machine)
-                    != machine
-                ):
-                    continue
-                reached = await runtime.reap(tag, signum) or reached
-            except Exception as exc:
-                logger.debug("%s: run not reaped: %s", runtime.name, exc)
-        return reached
+        handle = (
+            self.machine_table.find(machine)
+            if isinstance(machine, str)
+            else None
+        )
+        if handle is None:
+            return False
+        try:
+            return await handle.reap(
+                str(ProcessId(self._workspace_id, pid)), signum
+            )
+        except Exception as exc:
+            logger.debug("%s: run not reaped: %s", machine, exc)
+            return False
 
     def add_runtime(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
         """Add a runtime entry to the workspace's ordered set;
@@ -1968,6 +2009,7 @@ class Workspace:
                 self._diff_pool.close,
                 self._script_policy.close,
                 self._runtimes.close,
+                self.machine_table.close,
                 self._registry.clis.close,
             ],
             job_table=self.job_table,
@@ -2034,6 +2076,8 @@ class Workspace:
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         drift_policy: DriftPolicy = DriftPolicy.STRICT,
         runtimes: list[Runtime[Any] | str] | None = None,
+        machines: Mapping[str, MachineHandle | Mapping[str, Any]]
+        | None = None,
         policies: list[Policy] | None = None,
         policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
@@ -2088,6 +2132,9 @@ class Workspace:
             runtimes (list[Runtime[Any] | str] | None): the runtimes to
                 build the workspace with; a snapshot carries none, so a
                 profile policy naming one needs it here.
+            machines (Mapping[str, MachineHandle | Mapping[str, Any]] |
+                None): the machines its programs run on, by name; a
+                snapshot carries none.
             policies (list[Policy] | None): the coded policies to
                 register, as the constructor takes them. A snapshot
                 carries none, and the restored session tables are
@@ -2141,6 +2188,7 @@ class Workspace:
                 secrets=secrets,
                 drift_policy=drift_policy,
                 runtimes=runtimes,
+                machines=machines,
                 policies=policies,
                 policy_functions=policy_functions,
                 profiles=profiles,
@@ -2162,6 +2210,8 @@ class Workspace:
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         drift_policy: DriftPolicy = DriftPolicy.STRICT,
         runtimes: list[Runtime[Any] | str] | None = None,
+        machines: Mapping[str, MachineHandle | Mapping[str, Any]]
+        | None = None,
         policies: list[Policy] | None = None,
         policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
@@ -2197,6 +2247,9 @@ class Workspace:
             runtimes (list[Runtime[Any] | str] | None): the runtimes to
                 build the workspace with; a snapshot carries none, so a
                 profile policy naming one needs it here.
+            machines (Mapping[str, MachineHandle | Mapping[str, Any]] |
+                None): the machines its programs run on, by name; a
+                snapshot carries none.
             policies (list[Policy] | None): the coded policies to
                 register, as the constructor takes them. A snapshot
                 carries none, and the restored session tables are
@@ -2228,6 +2281,7 @@ class Workspace:
             clis=clis,
             secrets=secrets,
             runtimes=runtimes,
+            machines=machines,
             policies=policies,
             policy_functions=policy_functions,
             profiles=profiles,
@@ -2308,6 +2362,8 @@ class Workspace:
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         runtimes: list[Runtime[Any] | str] | None = None,
+        machines: Mapping[str, MachineHandle | Mapping[str, Any]]
+        | None = None,
         policies: list[Policy] | None = None,
         policy_functions: Mapping[str, Callable[..., Any]] | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
@@ -2345,6 +2401,7 @@ class Workspace:
             processes=args.processes,
             ceilings=ceilings,
             runtimes=runtimes,
+            machines=machines,
             policies=policies,
             policy_functions=policy_functions,
             clock=clock,
@@ -2735,7 +2792,7 @@ class Workspace:
         """The processes the workspace keeps, by pid: every live one,
         and the newest ended ones, as its store keeps them, so a daemon
         that does not hold the workspace's lease lists the same ones; the
-        holder reads its own as they are now.
+        holder reads its own as they are now, its machines scanned first.
 
         Args:
             session_id (str | None): only this session's processes.
@@ -2745,13 +2802,15 @@ class Workspace:
                 own and every one under it, while a session lists it.
             machine (MachineId | None): only the processes run there.
         """
+        claimed = self.job_table.claimed
+        if claimed:
+            await self.process_table.scan()
         found = {
             process.pid: process
             for process in await self.job_table.store.find_processes(
                 session_id
             )
         }
-        claimed = self.job_table.claimed
         if claimed:
             found.update(
                 (process.pid, process)
@@ -2802,6 +2861,27 @@ class Workspace:
             if record is not None:
                 return record
         return await self.job_table.store.get_process(process_id)
+
+    async def machines(
+        self, machine: MachineId | None = None
+    ) -> list[Machine]:
+        """The machines the workspace runs programs on, each as a check
+        of it finds it now: its own host first, which Mirage always
+        manages, then every machine ``machines:`` names, checked at once.
+
+        Args:
+            machine (MachineId | None): only this machine; None for every
+                one.
+        """
+        host = self.process_table.machine
+        found = (
+            [Machine(host, MachineState.MANAGED, self._clock.now())]
+            if machine is None or machine == host
+            else []
+        )
+        return found + await self.machine_table.check(
+            self._clock.now, None if machine is None else str(machine)
+        )
 
     async def ensure_sessions_loaded(self) -> None:
         """Hydrate sessions from the session store (idempotent).
@@ -3361,6 +3441,7 @@ class Workspace:
         *,
         stream: Literal[True],
         session: SessionState | None = None,
+        machine: str | None = None,
     ) -> ShellExecution: ...
 
     @overload
@@ -3383,6 +3464,7 @@ class Workspace:
         *,
         stream: Literal[False] = False,
         session: SessionState | None = None,
+        machine: str | None = None,
     ) -> IOResult: ...
 
     @overload
@@ -3405,6 +3487,7 @@ class Workspace:
         *,
         stream: bool,
         session: SessionState | None = None,
+        machine: str | None = None,
     ) -> IOResult | ShellExecution: ...
 
     async def shell(
@@ -3426,6 +3509,7 @@ class Workspace:
         *,
         stream: bool = False,
         session: SessionState | None = None,
+        machine: str | None = None,
     ) -> IOResult | ShellExecution:
         """Execute a shell command, or return its running execution when streamed.
 
@@ -3465,6 +3549,11 @@ class Workspace:
                 everything else keeps its normal binding, so the
                 argument overrides policy, never capability. Raises
                 ValueError for a name that is not a workspace entry.
+            machine: Explicit machine for this line, by its ``machines:``
+                name: the machine runtime runs what it serves on it, over
+                its entry's own machine, for this line only (nested evals
+                inherit it). Raises ValueError for a name that is not a
+                workspace machine.
             routing_decision: Internal. The typed line's routing decision,
                 forwarded by the executor's nested evals so inner
                 lines never re-route.
@@ -3546,6 +3635,7 @@ class Workspace:
                 scope,
                 job_table,
                 session=session,
+                machine=machine,
             )
 
         execution = ShellExecution(
@@ -3593,6 +3683,7 @@ class Workspace:
         job_table: JobTable | None = None,
         *,
         session: SessionState | None = None,
+        machine: str | None = None,
     ) -> IOResult:
         """Run the internal shell invocation with its existing cancellation scope."""
         # The one cancellation seam: the whole line is one task, so a
@@ -3639,6 +3730,7 @@ class Workspace:
                     call_stack=call_stack,
                     line_handle=line_handle,
                     job_table=job_table,
+                    machine=machine,
                 )
                 source = None
                 if (
@@ -3772,6 +3864,7 @@ class Session:
         runtime: str | None = None,
         *,
         stream: Literal[True],
+        machine: str | None = None,
     ) -> ShellExecution: ...
 
     @overload
@@ -3786,6 +3879,7 @@ class Session:
         runtime: str | None = None,
         *,
         stream: Literal[False] = False,
+        machine: str | None = None,
     ) -> IOResult: ...
 
     @overload
@@ -3800,6 +3894,7 @@ class Session:
         runtime: str | None = None,
         *,
         stream: bool,
+        machine: str | None = None,
     ) -> IOResult | ShellExecution: ...
 
     async def shell(
@@ -3813,6 +3908,7 @@ class Session:
         runtime: str | None = None,
         *,
         stream: bool = False,
+        machine: str | None = None,
     ) -> IOResult | ShellExecution:
         """Run a shell line as this session; ``Workspace.shell`` with
         the session fixed.
@@ -3827,6 +3923,7 @@ class Session:
             cancel (asyncio.Event | None): abort signal.
             record (bool): whether the line enters history.
             runtime (str | None): the runtime to route the line to.
+            machine (str | None): the machine to run the line on.
             stream (bool): return bounded live events and a final status handle.
         """
         return await self._ws.shell(
@@ -3839,6 +3936,7 @@ class Session:
             record=record,
             runtime=runtime,
             stream=stream,
+            machine=machine,
         )
 
     async def glob(self, pattern: str) -> list[str]:

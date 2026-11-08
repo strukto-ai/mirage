@@ -77,6 +77,9 @@ class ProcessHandle:
         # Started for exactly one command, whose program, should it run
         # on a runtime of its own, runs as this process (``take``).
         self.one_command = False
+        # What the program that takes it (``take``) ignores as well: a
+        # job's INT and QUIT, never what only a shell ignores.
+        self.program_ignores: frozenset[int] = frozenset()
         # The host stopped it (its table stopped, its session closed),
         # which ends whoever waits for it as well.
         self.revoked = False
@@ -158,7 +161,8 @@ class ProcessHandle:
         """Take the runner as the program it was started for
         (``one_command``), which runs on ``machine`` with ``runtime``, as
         bash execs a stage's or a job's one program in place. Its record
-        names both from then on.
+        names both from then on, and it ignores only what the program
+        does (``program_ignores``).
 
         Args:
             machine (MachineId | None): where the program runs; None for
@@ -173,6 +177,7 @@ class ProcessHandle:
             if not self.one_command:
                 return False
             self.one_command = False
+            self.ignores = self.program_ignores
             self._record = replace(
                 self._record,
                 machine=machine or self._record.machine,

@@ -21,7 +21,7 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.context import current_caller
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.runtime.sandbox.constants import stop_signal
+from mirage.machine.constants import stop_signal
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace

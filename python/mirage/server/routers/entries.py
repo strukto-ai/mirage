@@ -37,6 +37,7 @@ ROUTES: dict[EntryKind, str] = {
     "vfs": "/v1/vfs",
     "cli": "/v1/clis",
     "runtime": "/v1/runtimes",
+    "machine": "/v1/machines",
 }
 
 # The route that lists a kind's types, which no entry can be named.

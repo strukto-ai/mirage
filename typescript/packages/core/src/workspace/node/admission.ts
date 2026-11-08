@@ -25,6 +25,7 @@ import type {
   CommandRule,
   Deny,
   Pending,
+  Route,
 } from '../../policy/index.ts'
 import {
   askRule,
@@ -38,7 +39,7 @@ import {
 import { lineTokens } from '../../policy/match/allow.ts'
 import { patternMatches, splitPattern } from '../../policy/match/pattern.ts'
 import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
-import { settled } from '../../policy/policies.ts'
+import { commandRoute, settled } from '../../policy/policies.ts'
 import { CommandWord, type EntryGate } from '../../policy/types.ts'
 import { getRedirects, literalWord } from '../../shell/helpers.ts'
 import type { Redirect, TSNodeLike } from '../../shell/types.ts'
@@ -129,24 +130,28 @@ const REDIRECT_CHAIN: ReadonlySet<string> = new Set([
  * `granted` holds the ask rules the line runs under a grant for: the one
  * the entry point answered for this line, and the session's standing ones.
  * `ctx` is what `preCommand` judged the command on, which `postCommand`
- * extends with what came back.
+ * extends with what came back. `route` is where `preCommand` placed the
+ * command over its line's placement; null when no policy placed it.
  */
 export class Admitted implements EntryGate {
   readonly rules: AdmissionRules | null
   readonly ctx: CommandContext
   readonly judged: ReadonlySet<string>
   readonly granted: readonly CommandRule[]
+  readonly route: Route | null
 
   constructor(init: {
     rules: AdmissionRules | null
     ctx: CommandContext
     judged: ReadonlySet<string>
     granted: readonly CommandRule[]
+    route?: Route | null
   }) {
     this.rules = init.rules
     this.ctx = init.ctx
     this.judged = init.judged
     this.granted = init.granted
+    this.route = init.route ?? null
   }
 
   // Throw `PolicyDenied` when a rule in force refuses this entry for the
@@ -515,7 +520,7 @@ export async function gate(
   every = false,
   rulesOnly = false,
   line = '',
-): Promise<[CommandContext, Deny | Ask | null, (Deny | Ask)[]]> {
+): Promise<[CommandContext, Deny | Ask | null, (Deny | Ask | Route)[]]> {
   const tool = intrinsic || isTool(name, session)
   const env = envSnapshot(session)
   const [tokens, program] = programTokens(
@@ -589,9 +594,7 @@ export async function gate(
     // line explain walks is the walked one, not the stored one.
     ...registry.policies.views?.(session.sessionId, session),
   }
-  const answers = (await registry.policies.answers('preCommand', ctx, every, rulesOnly)).filter(
-    (a): a is Deny | Ask => a.kind !== 'route',
-  )
+  const answers = [...(await registry.policies.answers('preCommand', ctx, every, rulesOnly))]
   if (unlistedService(ctx, registry, session)) {
     answers.unshift({
       kind: 'deny',
@@ -599,7 +602,8 @@ export async function gate(
       policy: PermissionsPolicy.name,
     })
   }
-  return [ctx, settled(answers), answers]
+  const verdict = settled(answers)
+  return [ctx, verdict?.kind === 'route' ? null : verdict, answers]
 }
 
 /**
@@ -667,7 +671,7 @@ export async function admit(
     rulesOnly,
     claimant?.occurrence.source ?? '',
   )
-  const [ctx, asked] = gated
+  const [ctx, asked, answers] = gated
   const action = await resolved(ctx, asked, registry, signal, claimant)
   if (action === null) {
     const granted = session.decisions
@@ -680,6 +684,7 @@ export async function admit(
       ctx,
       judged: new Set(ctx.paths.map((p) => norm(p.virtual))),
       granted,
+      route: commandRoute(answers),
     })
   }
   const [stderr, exitCode] = await renderCommandDeny(name, action, ctx)

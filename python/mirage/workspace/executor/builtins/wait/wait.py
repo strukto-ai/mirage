@@ -16,6 +16,7 @@ import asyncio
 
 from mirage.context import get_current_evaluation
 from mirage.execution.job import JobHandle, JobState, JobTable
+from mirage.execution.process.constants import FIRST_PID
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
@@ -27,6 +28,8 @@ from mirage.workspace.executor.background import report_jobs
 from mirage.workspace.executor.builtins.constants import IDENTIFIER_RE
 from mirage.workspace.executor.builtins.jobspec import (
     job_result,
+    job_with_machine_pid,
+    process_view,
     resolve_spec,
     session_of,
 )
@@ -176,7 +179,18 @@ async def handle_wait(
     await job_table.sync(sid)
     visible = job_table.list_jobs(sid)
     for spec in specs:
-        job, refusal = resolve_spec(visible, spec)
+        if spec.isdigit() and 0 < int(spec) < FIRST_PID:
+            job, ambiguous = await job_with_machine_pid(
+                process_view(job_table, session), visible, int(spec)
+            )
+            if ambiguous:
+                errors.append(
+                    f"{shell_voice()}wait: {spec}: ambiguous job spec"
+                )
+                continue
+            refusal = f"pid {spec} is not a child of this shell"
+        else:
+            job, refusal = resolve_spec(visible, spec)
         if job is None:
             errors.append(f"{shell_voice()}wait: {refusal}")
             continue

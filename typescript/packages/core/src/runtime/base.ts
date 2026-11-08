@@ -113,6 +113,26 @@ export abstract class Runtime<E = unknown> {
     return null
   }
 
+  /**
+   * The name a refusal of one run speaks in: the runtime's. Mirrors
+   * Python's `Runtime.voice`.
+   *
+   * @param _ctx the run's context.
+   */
+  voice(_ctx: Context): string {
+    return this.name
+  }
+
+  /**
+   * The machine one run of this runtime goes to: its own (`machine`),
+   * whatever the run's route names. Mirrors Python's `Runtime.machine_for`.
+   *
+   * @param _ctx the run's context.
+   */
+  machineFor(_ctx: Context): MachineId | null {
+    return this.machine
+  }
+
   /** Whether workspace file mutations already invalidate through dispatch. */
   get fileEffectsDispatched(): boolean {
     return this.reach === 'workspace'
@@ -161,15 +181,22 @@ export abstract class Runtime<E = unknown> {
       const kind = opts.kind ?? 'code'
       const capture = this.binding?.capture()
       const restricted = capture?.restrictedMounts ?? []
-      if (this.reach !== 'workspace' && restricted.length > 0 && !this.servesSession(restricted))
-        return refusedRun(this.name, "runtime cannot enforce this session's file restrictions")
+      if (
+        this.reach !== 'workspace' &&
+        restricted.length > 0 &&
+        !this.servesSession(restricted, ctx)
+      )
+        return refusedRun(
+          this.voice(ctx),
+          "runtime cannot enforce this session's file restrictions",
+        )
       // A process on this machine opens its connections around the gateway,
       // so a workspace whose network is limited, or whose policies judge
       // each connection, runs none.
       if (this.reach === 'process') {
         for (const egress of liveEgress()) {
           if (egress.rule !== null || (await egress.hooked))
-            return refusedRun(this.name, "runtime cannot enforce this workspace's network")
+            return refusedRun(this.voice(ctx), "runtime cannot enforce this workspace's network")
         }
       }
       const engine = await this.engine()
@@ -219,7 +246,8 @@ export abstract class Runtime<E = unknown> {
     const { process: shell, session } = currentCaller()
     if (this.reach === 'workspace' || processes === null || shell == null || session == null)
       return run(ctx)
-    if (shell.take(this.machine, this.name)) return run(ctx)
+    const machine = this.machineFor(ctx)
+    if (shell.take(machine, this.name)) return run(ctx)
     const line = ctx.flags.c
     const command =
       kind === 'line' && typeof line === 'string'
@@ -246,7 +274,7 @@ export abstract class Runtime<E = unknown> {
         },
         parent: shell.record.id.pid,
         limit: session.processes.max,
-        machine: this.machine,
+        machine,
         runtime: this.name,
       })
     } catch (error) {
@@ -344,8 +372,9 @@ export abstract class Runtime<E = unknown> {
    * Whether every restricted mount is served through this caller's gate.
    *
    * @param _restrictedMounts the mounts the session restricts.
+   * @param _ctx the run's context.
    */
-  protected servesSession(_restrictedMounts: readonly string[]): boolean {
+  protected servesSession(_restrictedMounts: readonly string[], _ctx: Context): boolean {
     return false
   }
 

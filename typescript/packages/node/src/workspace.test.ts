@@ -26,6 +26,7 @@ import { DiskVFS } from './vfs/disk/disk.ts'
 import { InlineGitHub } from '../tests/vfs/fixtures/github.ts'
 import { buildVfs } from './vfs/registry.ts'
 import { conditionalS3, s3Vfs, tmpRoot } from '../tests/test-utils.ts'
+import { LocalRuntime } from './runtime/python/local/runtime.ts'
 import { Workspace } from './workspace.ts'
 
 describe('@struktoai/mirage-node Workspace', () => {
@@ -266,5 +267,30 @@ describe('the write policy at the workspace entry points', () => {
     expect(() => new Workspace({ '/s3': conditionalS3() }, { cacheLimit: 0 })).toThrow(
       'caches reads',
     )
+  })
+})
+
+describe('a host scan', () => {
+  it('finds what an ended program left running', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new LocalRuntime(), 'workspace'] },
+    )
+    const spawn =
+      'import subprocess as s; ' +
+      "s.Popen(['sleep', '30'], stdin=s.DEVNULL, stdout=s.DEVNULL, stderr=s.DEVNULL)"
+    try {
+      expect((await ws.shell(`python3 -c "${spawn}"`)).exitCode).toBe(0)
+      const said = await ws.shell('ps -o machine=,mpid=,args=')
+      const held = said.stdoutText
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/))
+        .filter((row) => row.slice(2).join(' ') === 'sleep 30')
+      expect(held).toHaveLength(1)
+      expect(held[0]?.[0]).toMatch(/^host:/)
+      expect((await ws.shell(`kill -9 ${held[0]?.[1] ?? ''}`)).exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
   })
 })

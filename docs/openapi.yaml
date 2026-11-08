@@ -27,6 +27,9 @@ tags:
   - name: Saved runtimes
     x-group: Runtimes
     parent: Saved configurations
+  - name: Saved machines
+    x-group: Machines
+    parent: Saved configurations
   - name: Saved configurations
   - name: Policies
   - name: Asks
@@ -36,6 +39,8 @@ tags:
   - name: Jobs
     parent: Workspace operations
   - name: Processes
+    parent: Workspace operations
+  - name: Machines
     parent: Workspace operations
   - name: Service
   - name: Daemon
@@ -2013,6 +2018,85 @@ paths:
         epoch seconds.'
       tags:
         - Processes
+      x-hosts:
+        - daemon
+  /v1/workspaces/{workspace_id}/machines:
+    get:
+      summary: List machines
+      operationId: list_machines_v1_workspaces__workspace_id__machines_get
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MachineResponse'
+                title: Response List Machines V1 Workspaces  Workspace Id  Machines Get
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+      description: 'The machines the workspace runs programs on, its own host first, each
+
+        checked now: `managed` when Mirage sees and stops every process its
+
+        programs start there, `reachable` when only what it started itself,
+
+        `unreachable` when the check failed.'
+      tags:
+        - Machines
+      x-hosts:
+        - daemon
+  /v1/workspaces/{workspace_id}/machines/{machine_id}:
+    get:
+      summary: Get a machine
+      operationId: get_machine_v1_workspaces__workspace_id__machines__machine_id__get
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+        - name: machine_id
+          in: path
+          required: true
+          description: The machine's id, written `provider:name`.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MachineDetailResponse'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+      description: One machine, checked now, with the processes the workspace keeps that
+
+        ran on it, what a scan of it finds among them.
+      tags:
+        - Machines
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/shell:
@@ -4994,6 +5078,229 @@ paths:
       tags:
         - Saved runtimes
       x-hosts: *id002
+  /v1/machines:
+    get:
+      operationId: list_entries_v1_machines_get
+      parameters:
+        - in: query
+          name: type
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+          description: Only entries of this type, such as s3.
+        - in: query
+          name: q
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+          description: Only entries whose name contains this text, ignoring case.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntryList'
+        '401':
+          $ref: '#/components/responses/401'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: List machine configs
+      description: 'The saved machine configs: a machine''s provider and fields, kept by name
+        for templates to use.'
+      tags:
+        - Saved machines
+      x-hosts: *id002
+    post:
+      operationId: create_entry_v1_machines_post
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntry'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Create a machine config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSavedEntryRequest'
+            example:
+              name: tools
+              type: docker
+              fields:
+                container: mirage-tools
+      description: Save a machine config. Its fields are checked against the type's; secret
+        fields are sealed, and a string field may point at a saved store's secret instead.
+        A name already saved is a 409.
+      tags:
+        - Saved machines
+      x-hosts: *id002
+  /v1/machines/types:
+    get:
+      operationId: list_types_v1_machines_types_get
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              example:
+                docker:
+                  - name: container
+                    type: string
+                    secret: false
+                    required: true
+              schema:
+                $ref: '#/components/schemas/TypeTable'
+        '401':
+          $ref: '#/components/responses/401'
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: List machine config types
+      description: Every type a machine config can be, with the fields its config takes. The example shows one registered type; the response includes all types available on the server.
+      tags:
+        - Saved machines
+      x-hosts: *id002
+  /v1/machines/{ref}:
+    get:
+      operationId: get_entry_v1_machines__ref__get
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The machine config's name.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntryDetail'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Get a machine config
+      description: One saved machine config, with its sealed fields named but not answered.
+      tags:
+        - Saved machines
+      x-hosts: *id002
+    put:
+      operationId: update_entry_v1_machines__ref__put
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The machine config's name.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntry'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Update a machine config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSavedEntryRequest'
+            example:
+              fields:
+                container: mirage-tools-2
+      description: Change a machine config's fields. Its name and type stay; a sealed field
+        left out keeps its value.
+      tags:
+        - Saved machines
+      x-hosts: *id002
+    delete:
+      operationId: delete_entry_v1_machines__ref__delete
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The machine config's name.
+      responses:
+        '204':
+          description: No content
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Delete a machine config
+      description: Delete a saved machine config.
+      tags:
+        - Saved machines
+      x-hosts: *id002
   /v1/policies:
     get:
       operationId: list_policies_v1_policies_get
@@ -5624,6 +5931,59 @@ components:
         - exited
       title: LineState
       type: string
+    MachineState:
+      type: string
+      enum:
+        - managed
+        - reachable
+        - unreachable
+      title: MachineState
+      description: 'How far Mirage reaches a machine, as its last check found it: `managed`
+        (Mirage sees and stops every process its programs start there), `reachable`
+        (only what it started itself) or `unreachable` (the last check failed).'
+    MachineResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: The machine's id, written `provider:name`.
+        state:
+          $ref: '#/components/schemas/MachineState'
+        checked_at:
+          type: number
+          title: Checked At
+          description: When the check ran, in epoch seconds.
+      type: object
+      required:
+        - id
+        - state
+        - checked_at
+      title: MachineResponse
+    MachineDetailResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: The machine's id, written `provider:name`.
+        state:
+          $ref: '#/components/schemas/MachineState'
+        checked_at:
+          type: number
+          title: Checked At
+          description: When the check ran, in epoch seconds.
+        processes:
+          items:
+            $ref: '#/components/schemas/ProcessResponse'
+          type: array
+          title: Processes
+          description: The processes the workspace keeps that ran on the machine.
+      type: object
+      required:
+        - id
+        - state
+        - checked_at
+        - processes
+      title: MachineDetailResponse
     MachinePidResponse:
       properties:
         exited:
@@ -7344,6 +7704,16 @@ components:
               type: object
             - type: 'null'
           title: Clis
+        machines:
+          anyOf:
+            - additionalProperties:
+                additionalProperties: true
+                type: object
+              type: object
+            - type: 'null'
+          title: Machines
+          description: The machines the workspace runs programs on, by name, each a
+            `provider` and its config.
         runtimes:
           anyOf:
             - items:
@@ -7587,6 +7957,10 @@ components:
         runtime:
           type: string
           description: Run the line on this runtime, by name, instead of the one routing picks.
+        machine:
+          type: string
+          description: Run the line's programs on this machine, by name, instead of the one
+            routing picks.
         record:
           type: boolean
           default: true

@@ -113,10 +113,10 @@
         "opfs",
         "console-redis"
       ],
-      "command": "ps | cut -f2 | grep '^ps$' 2>/dev/null",
+      "command": "ps -o args= | grep -x 'ps -o args=' 2>/dev/null",
       "expect": {
         "exit": 0,
-        "stdout": "ps\n",
+        "stdout": "ps -o args=\n",
         "stderr": ""
       }
     },
@@ -128,11 +128,56 @@
         "opfs",
         "console-redis"
       ],
-      "command": "true && ps | cut -f2 | grep '^ps$' 2>/dev/null",
+      "command": "true && ps -o args= | grep -x 'ps -o args=' 2>/dev/null",
       "expect": {
         "exit": 0,
-        "stdout": "ps\n",
+        "stdout": "ps -o args=\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "console_ps_names_each_process_machine_and_machine_pid",
+      "seq": 509018,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "ps | head -1; ps -o machine,mpid -p $$",
+      "expect": {
+        "exit": 0,
+        "stdout": "    PID MACHINE                            MPID CMD\nMACHINE                            MPID\n-                                     -\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_ps_forest_draws_a_job_under_its_shell",
+      "seq": 509020,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "sleep 8 & ps --forest -o args= | grep -c '^ \\\\_ sleep 8$'; ps f -o args= | grep -c '^ \\\\_ sleep 8$'; kill $!",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_mirage_pids_start_past_machine_pids",
+      "seq": 509022,
+      "targets": [
+        "ram",
+        "opfs",
+        "console-redis"
+      ],
+      "command": "[ $$ -gt 4194304 ] && echo mirage; kill 412; echo kill=$?; kill -0 412; echo probe=$?; wait 412; echo wait=$?; ps -p 412 -o pid=; echo ps=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage\nkill=1\nprobe=1\nwait=127\nps=1\n",
+        "stderr": "bash: line 1: kill: (412) - No such process\nbash: line 1: kill: (412) - No such process\nbash: line 1: wait: pid 412 is not a child of this shell\n"
       }
     }
   ]

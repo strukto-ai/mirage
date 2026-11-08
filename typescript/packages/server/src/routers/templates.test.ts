@@ -155,7 +155,7 @@ describe('templates router', () => {
       payload: { config: named('gone') },
     })
     expect(gone.statusCode).toBe(400)
-    expect(gone.json()).toEqual({ detail: 'gone is not saved as a VFS, CLI or runtime' })
+    expect(gone.json()).toEqual({ detail: 'gone is not saved as a VFS, CLI, runtime or machine' })
     await app.close()
   })
 

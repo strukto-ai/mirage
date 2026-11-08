@@ -119,7 +119,27 @@ COLUMNS: dict[str, tuple[str, int, bool, str]] = {
     "wchan": ("WCHAN", 6, False, "dash"),
     "nwchan": ("WCHAN", 6, True, "dash"),
     "label": ("LABEL", 31, False, "dash"),
+    "machine": ("MACHINE", 31, False, "machine"),
+    "mpid": ("MPID", 7, True, "mpid"),
 }
+
+
+# What ps prints without -o: each process's pid, the machine its program
+# runs on with that program's pid there (``-`` for Mirage's own), and
+# its command.
+PLAIN = (
+    ("pid", "PID"),
+    ("machine", "MACHINE"),
+    ("mpid", "MPID"),
+    ("cmd", "CMD"),
+)
+
+# What a forest (BSD ``f``, ``--forest``) puts before each command, as
+# procps-ng 4.0.4 draws it: a child's branch, then for each ancestor
+# between it and the root a bar while that ancestor has a later sibling.
+BRANCH = " \\_ "
+BAR = " |  "
+GAP = "    "
 
 
 # The fixed answers for a runner: what procps prints for a process on no

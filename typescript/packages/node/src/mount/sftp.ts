@@ -15,7 +15,7 @@
 import { eexist, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
-import { registerPipeServer } from '@struktoai/mirage-core/runtime/sandbox/mounts'
+import { registerPipeServer } from '@struktoai/mirage-core/machine/mounts'
 import type { PipeWriter } from '@struktoai/mirage-core/runtime/types'
 import { S_IFDIR, S_IFLNK, S_IFMT } from '@struktoai/mirage-core/utils/stat_view'
 import type { Files } from '@struktoai/mirage-core/workspace/files'

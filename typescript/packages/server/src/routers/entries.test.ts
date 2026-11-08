@@ -205,10 +205,10 @@ describe('entries router', () => {
     expect(clis.git).toBeUndefined()
     const auth = clis.mcp?.find((f) => f.name === 'auth.type')
     expect(auth).toMatchObject({ group: 'auth', options: ['bearer', 'header'] })
-    const runtimes = await types(app, '/v1/runtimes/types')
-    const key = runtimes.daytona?.find((f) => f.name === 'api_key')
+    const machines = await types(app, '/v1/machines/types')
+    const key = machines.daytona?.find((f) => f.name === 'api_key')
     expect(key?.secret).toBe(true)
-    const ssh = Object.fromEntries((runtimes.ssh ?? []).map((f) => [f.name, f]))
+    const ssh = Object.fromEntries((machines.ssh ?? []).map((f) => [f.name, f]))
     expect(ssh.host).toMatchObject({ type: 'string', required: true })
     expect(ssh.port).toMatchObject({ type: 'number', required: false })
     expect(ssh.timeout?.default).toBe(30)
@@ -217,16 +217,16 @@ describe('entries router', () => {
     expect(ssh.env).toBeUndefined()
   })
 
-  it('checks a runtime against its field types', async () => {
+  it('checks a machine against its field types', async () => {
     const { app } = setup()
-    const made = await call(app, 'POST', '/v1/runtimes', {
+    const made = await call(app, 'POST', '/v1/machines', {
       name: 'box',
       type: 'ssh',
       fields: { host: 'h', port: 2222 },
     })
     expect(made.status).toBe(201)
     expect(made.body.config).toEqual({ host: 'h', port: 2222 })
-    const hostless = await call(app, 'POST', '/v1/runtimes', {
+    const hostless = await call(app, 'POST', '/v1/machines', {
       name: 'box2',
       type: 'ssh',
       fields: { port: 22 },
@@ -234,15 +234,21 @@ describe('entries router', () => {
     expect(hostless.status).toBe(400)
   })
 
-  it('answers a runtime with its captures', async () => {
+  it('keeps a machine credential sealed', async () => {
     const { app } = setup()
-    const r = await call(app, 'POST', '/v1/runtimes', {
+    const r = await call(app, 'POST', '/v1/machines', {
       name: 'dt',
       type: 'daytona',
       fields: { sandbox_id: 's1', api_key: 'k' },
     })
     expect(r.status).toBe(201)
-    expect(r.body.captures).toEqual([])
     expect(r.body.config).toEqual({ sandbox_id: 's1' })
+  })
+
+  it('answers a runtime with its captures', async () => {
+    const { app } = setup()
+    const r = await call(app, 'POST', '/v1/runtimes', { name: 'py', type: 'monty', fields: {} })
+    expect(r.status).toBe(201)
+    expect(r.body.captures).toEqual([])
   })
 })

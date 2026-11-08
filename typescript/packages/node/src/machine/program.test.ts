@@ -1,0 +1,849 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { describe, expect, it, vi } from 'vitest'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
+import {
+  SERVED,
+  serve,
+  unserve,
+  closeChildren,
+  hostStatus,
+  openProgramPipe,
+  reapHostRun,
+  runProgram,
+  systemTimeEnv,
+} from './program.ts'
+import { runWithSystemClock, ShiftedClock, SystemClock } from '@struktoai/mirage-core/utils/clock'
+import { FAKETIME_LIBRARIES } from '@struktoai/mirage-core/machine/constants'
+import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
+import type { ProcessHandle } from '@struktoai/mirage-core/execution/process/handle'
+import { runAsProcess } from '@struktoai/mirage-core/context/session_context'
+import { PathSpec } from '@struktoai/mirage-core/types'
+import { PIPE_DIAGNOSTIC_BYTES } from '@struktoai/mirage-core/machine/constants'
+import { ProcessInput } from '@struktoai/mirage-core/execution/process/stdio'
+import { PipeClosed } from '@struktoai/mirage-core/io/errors'
+
+const DEC = new TextDecoder()
+
+// Whether a process has exited: gone, or a zombie its new parent has not
+// reaped yet. Polled, since a kill lands asynchronously.
+async function ended(pid: number): Promise<boolean> {
+  for (let i = 0; i < 500; i++) {
+    const state = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+      encoding: 'utf8',
+    }).stdout.trim()
+    if (state === '' || state.startsWith('Z')) return true
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  return false
+}
+
+// Whether `pid` runs: present, and no zombie.
+function running(pid: number): boolean {
+  const state = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+    encoding: 'utf8',
+  }).stdout.trim()
+  return state !== '' && !state.startsWith('Z')
+}
+
+// A child that starts a sleep in a session of its own, so killing the
+// child's group leaves it running with the output pipes it inherited.
+const ESCAPE = [
+  "const { spawn } = require('node:child_process')",
+  "const c = spawn('sleep', ['30'], { detached: true, stdio: 'inherit' })",
+  "require('node:fs').writeFileSync(process.argv[1], String(c.pid))",
+  'setTimeout(() => undefined, 30000)',
+].join('\n')
+
+async function* oneThenOpen(): AsyncIterable<Uint8Array> {
+  yield new TextEncoder().encode('x')
+  await new Promise<void>(() => undefined)
+}
+
+async function escapedPid(pidFile: string): Promise<number> {
+  while (!existsSync(pidFile) || readFileSync(pidFile, 'utf8').trim() === '') {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  return Number(readFileSync(pidFile, 'utf8'))
+}
+
+// A runner whose run is `sh -c script`, stopped through its abort.
+function shRunner(
+  script: string,
+  output?: (chunk: Uint8Array) => Promise<void>,
+  direct = false,
+  stdin: AsyncIterable<Uint8Array> | null = null,
+): ProcessHandle {
+  const abort = new AbortController()
+  return new ProcessTable(undefined, undefined, runAsProcess).start({
+    sessionId: 's',
+    command: 'sh',
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => {
+      abort.abort()
+    },
+    run: async () =>
+      (
+        await runProgram('sh', null, ['-c', script], stdin, {
+          signal: abort.signal,
+          direct,
+          ...(output === undefined ? {} : { output }),
+        })
+      ).exitCode,
+  })
+}
+
+describe('runProgram', () => {
+  // A folder a kernel mount here serves answers on the loop spawning the
+  // child, which waits inside the spawn until the child runs, so the child
+  // starts outside and the prelude takes it in: its `cd` sets PWD.
+  it('knows a served folder by its absolute and resolved names', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-serve-'))
+    mkdirSync(join(dir, 'real'))
+    symlinkSync(join(dir, 'real'), join(dir, 'link'))
+    const names = serve(join(dir, 'link', 'mp'))
+    try {
+      expect(names).toEqual([join(dir, 'link', 'mp'), join(realpathSync(join(dir, 'real')), 'mp')])
+      expect(names.every((name) => SERVED.has(name))).toBe(true)
+    } finally {
+      unserve(names)
+    }
+  })
+
+  // A lazily released mount may end after a new one took its path.
+  it('keeps a folder served while another mount records it', () => {
+    const [old, current] = [serve('/tmp/mirage-mp'), serve('/tmp/mirage-mp')]
+    unserve(old)
+    expect(SERVED.has('/tmp/mirage-mp')).toBe(true)
+    unserve(current)
+    expect(SERVED.has('/tmp/mirage-mp')).toBe(false)
+  })
+
+  it.each([undefined, null, new DOMException('timed out', 'TimeoutError')])(
+    'starts nothing once stopped while it checks a served program (reason %s)',
+    async (reason) => {
+      const dir = mkdtempSync(join(tmpdir(), 'mirage-served-'))
+      const tool = join(dir, 'tool')
+      const ran = join(dir, 'ran')
+      writeFileSync(tool, `#!/bin/sh\ntouch '${ran}'\n`, { mode: 0o755 })
+      const names = serve(dir)
+      const controller = new AbortController()
+      try {
+        const running = runProgram(tool, null, [], null, { signal: controller.signal })
+        controller.abort(reason)
+        await expect(running).rejects.toMatchObject({ name: 'AbortError' })
+        await delay(300)
+        expect(existsSync(ran)).toBe(false)
+      } finally {
+        unserve(names)
+      }
+    },
+  )
+
+  it('starts a child in a served folder outside it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-served-'))
+    const pwd = async (): Promise<string> =>
+      new TextDecoder().decode(
+        (
+          await runProgram(
+            process.execPath,
+            null,
+            ['-e', 'process.stdout.write(process.env.PWD ?? "")'],
+            null,
+            { cwd: dir, env: {} },
+          )
+        ).stdout,
+      )
+    const names = serve(dir)
+    try {
+      expect(await pwd()).toBe(dir)
+    } finally {
+      unserve(names)
+    }
+    expect(await pwd()).toBe('')
+  })
+
+  // A kill that names TERM reaches the program as TERM, so its handler
+  // runs, and the runner's status is bash's 143 for a child TERM ended.
+  it('lets the child handle the TERM a kill sent its runner', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
+    const runner = shRunner(
+      `trap 'echo bye > ${said}; exit 0' TERM; echo $$ > ${pidFile}; ` +
+        'while :; do sleep 0.05; done',
+    )
+    await escapedPid(pidFile)
+    expect(runner.terminate(15)).toBe(true)
+    expect((await runner.join()).exit).toBe(143)
+    expect(readFileSync(said, 'utf8')).toBe('bye\n')
+  })
+
+  it('gives the child no handler when a kill sent its runner KILL', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
+    const runner = shRunner(
+      `trap 'echo bye > ${said}; exit 0' TERM; echo $$ > ${pidFile}; ` +
+        'while :; do sleep 0.05; done',
+    )
+    const child = await escapedPid(pidFile)
+    expect(runner.terminate(9)).toBe(true)
+    expect((await runner.join()).exit).toBe(137)
+    expect(existsSync(said)).toBe(false)
+    expect(await ended(child)).toBe(true)
+  })
+
+  // A KILL while a program still has the grace an earlier TERM gave it ends
+  // that grace: what ignores TERM is killed at once, as a second
+  // `kill -KILL` does, not a second later.
+  it('ends the grace when a KILL follows the TERM', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const runner = shRunner(`trap '' TERM; echo $$ > ${pidFile}; while :; do sleep 0.05; done`)
+    const child = await escapedPid(pidFile)
+    expect(runner.terminate(15)).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const killed = Date.now()
+    expect(runner.terminate(9)).toBe(true)
+    expect((await runner.join()).exit).toBe(137)
+    expect(Date.now() - killed).toBeLessThan(500)
+    expect(await ended(child)).toBe(true)
+  })
+
+  // A child that is the program itself and exits on its own after a gentler
+  // signal leaves its status with the runner; a client's (`docker exec`)
+  // says nothing about the program, and a child the signal ended has none.
+  it.each([
+    [true, "trap 'exit 3' TERM; ", 15, 3],
+    [false, "trap 'exit 3' TERM; ", 15, null],
+    [true, '', 15, null],
+    [true, "trap 'exit 3' TERM; ", 9, null],
+  ] as const)(
+    'leaves the status of a direct child that handled the signal (direct %s, %j, %d)',
+    async (direct, trap, signum, code) => {
+      const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+      const pidFile = join(dir, 'pid')
+      const runner = shRunner(
+        `${trap}echo $$ > ${pidFile}; while :; do sleep 0.05; done`,
+        undefined,
+        direct,
+      )
+      await escapedPid(pidFile)
+      expect(runner.terminate(signum)).toBe(true)
+      expect((await runner.join()).exit).toBe(128 + signum)
+      expect(runner.programCode).toBe(code)
+    },
+  )
+
+  // A kill reaches the program once, as bash's does: a handler that counts
+  // its signals, or one already exiting, must not see a second.
+  it('signals the child once for a kill', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const [pidFile, count] = [join(dir, 'pid'), join(dir, 'count')]
+    const program = [
+      'const fs = require("node:fs")',
+      `process.on("SIGTERM", () => { fs.appendFileSync("${count}", "x\\n"); setTimeout(() => process.exit(0), 200) })`,
+      `fs.writeFileSync("${pidFile}", String(process.pid))`,
+      'setInterval(() => undefined, 1000)',
+    ].join('\n')
+    const runner = shRunner(`exec '${process.execPath}' -e '${program}'`)
+    await escapedPid(pidFile)
+    expect(runner.terminate(15)).toBe(true)
+    await runner.join()
+    expect(readFileSync(count, 'utf8')).toBe('x\n')
+  })
+
+  // macOS answers EPERM where Linux answers ESRCH for a group whose members
+  // have all exited but are not yet reaped; either way the group is gone,
+  // and the stop must not fail on it.
+  it('treats a group that answers EPERM as gone', async () => {
+    const kill = process.kill.bind(process)
+    const spy = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      try {
+        return kill(pid, signal)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err
+        throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' })
+      }
+    })
+    try {
+      const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+      const pidFile = join(dir, 'pid')
+      const runner = shRunner(
+        `trap 'exit 0' TERM; echo $$ > ${pidFile}; while :; do sleep 0.05; done`,
+      )
+      await escapedPid(pidFile)
+      expect(runner.terminate(15)).toBe(true)
+      const info = await runner.join()
+      expect([info.exit, info.error]).toEqual([143, null])
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  // The grace is the group's: a descendant still handling the signal after
+  // the program it ran under has exited keeps its second.
+  it('lets a descendant keep the grace after its parent exits', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
+    const runner = shRunner(
+      `sh -c 'trap "sleep 0.3; echo bye > ${said}; exit 0" TERM; ` +
+        `while :; do sleep 0.05; done' >/dev/null 2>&1 & echo $$ > ${pidFile}; wait`,
+    )
+    await escapedPid(pidFile)
+    await delay(200)
+    expect(runner.terminate(15)).toBe(true)
+    await runner.join()
+    expect(readFileSync(said, 'utf8')).toBe('bye\n')
+  })
+
+  // What ignores the signal, a descendant too, ends with KILL after the
+  // grace, though the program it ran under exited at once.
+  it('kills a descendant that ignores the signal after its parent exits', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const [pidFile, kidFile] = [join(dir, 'pid'), join(dir, 'kid')]
+    const runner = shRunner(
+      `sh -c "trap '' TERM; while :; do sleep 0.05; done" >/dev/null 2>&1 & ` +
+        `echo $! > ${kidFile}; echo $$ > ${pidFile}; wait`,
+    )
+    await escapedPid(pidFile)
+    const kid = await escapedPid(kidFile)
+    await delay(200)
+    expect(runner.terminate(15)).toBe(true)
+    await runner.join()
+    expect(await ended(kid)).toBe(true)
+  })
+
+  // A handler that writes more than a pipe holds is not blocked on it, even
+  // with a consumer that no longer reads: the output is dropped.
+  it('lets a handler writing its output finish in the grace', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
+    const runner = shRunner(
+      `trap 'head -c 300000 /dev/zero; head -c 300000 /dev/zero >&2; ` +
+        `echo bye > ${said}; exit 0' TERM; echo $$ > ${pidFile}; ` +
+        'while :; do sleep 0.05; done',
+      () => new Promise<void>(() => undefined),
+    )
+    await escapedPid(pidFile)
+    expect(runner.terminate(15)).toBe(true)
+    await runner.join()
+    expect(readFileSync(said, 'utf8')).toBe('bye\n')
+  })
+
+  // The input ends before the grace starts, as a closed pipe would: a
+  // handler that reads its input to the end gets there instead of waiting
+  // on a source that is still open until KILL.
+  it('ends the input of a child whose handler reads it to the end', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
+    const program = [
+      'const fs = require("node:fs")',
+      'process.on("SIGTERM", () => { let n = 0; process.stdin.on("data", (c) => { n += c.length }); ' +
+        `process.stdin.on("end", () => { fs.writeFileSync("${said}", String(n)); process.exit(0) }) })`,
+      `fs.writeFileSync("${pidFile}", String(process.pid))`,
+      'setInterval(() => undefined, 1000)',
+    ].join('\n')
+    const runner = shRunner(
+      `exec '${process.execPath}' -e '${program}'`,
+      undefined,
+      true,
+      oneThenOpen(),
+    )
+    await escapedPid(pidFile)
+    expect(runner.terminate(15)).toBe(true)
+    await runner.join()
+    expect(readFileSync(said, 'utf8')).toBe('1')
+  })
+
+  // A program that ignores the signal still ends: KILL follows the grace.
+  it('kills a child that ignores the signal once the grace has passed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const runner = shRunner(`trap '' TERM; echo $$ > ${pidFile}; while :; do sleep 0.05; done`)
+    const child = await escapedPid(pidFile)
+    expect(runner.terminate(15)).toBe(true)
+    expect((await runner.join()).exit).toBe(143)
+    expect(await ended(child)).toBe(true)
+  })
+
+  it('returns both streams and the status', async () => {
+    const r = await runProgram(
+      'sh',
+      'no sh',
+      ['-c', 'cat; echo e >&2; exit 3'],
+      new TextEncoder().encode('in'),
+    )
+    expect([DEC.decode(r.stdout), DEC.decode(r.stderr ?? undefined), r.exitCode]).toEqual([
+      'in',
+      'e\n',
+      3,
+    ])
+  })
+
+  // stderr goes to its own callback as it arrives, as stdout goes to output.
+  it('streams stderr to its callback', async () => {
+    const seen: Uint8Array[] = []
+    const r = await runProgram('sh', null, ['-c', 'echo o; echo e >&2; exit 3'], null, {
+      errors: (chunk) => {
+        seen.push(chunk)
+        return Promise.resolve()
+      },
+    })
+    expect([
+      DEC.decode(r.stdout),
+      DEC.decode(r.stderr ?? undefined),
+      DEC.decode(Buffer.concat(seen)),
+      r.exitCode,
+    ]).toEqual(['o\n', '', 'e\n', 3])
+  })
+
+  it('keeps input-close listeners bounded while consuming a long byte source', async () => {
+    const children = new Set<ChildProcess>()
+    let chunks = 0
+    async function* input() {
+      for (let i = 0; i < 5000; i++) {
+        const child = [...children][0]
+        if (child?.stdin === null || child?.stdin === undefined)
+          throw new Error('missing child input')
+        expect(child.stdin.listenerCount('close')).toBeLessThanOrEqual(2)
+        chunks++
+        yield await Promise.resolve(new Uint8Array(1024))
+      }
+    }
+    const result = await runProgram('wc', null, ['-c'], input(), { children })
+    expect(result.exitCode).toBe(0)
+    expect(Number(DEC.decode(result.stdout).trim())).toBe(5000 * 1024)
+    expect(chunks).toBe(5000)
+  })
+
+  it('finishes an exited command with an open, idle managed stdin', async () => {
+    const input = new ProcessInput()
+    const result = await runProgram('sh', null, ['-c', 'printf done'], input.stream())
+    expect(result.exitCode).toBe(0)
+    expect(DEC.decode(result.stdout)).toBe('done')
+    await expect(input.write(new TextEncoder().encode('late'))).rejects.toBeInstanceOf(PipeClosed)
+  })
+
+  it('finishes an exited command while a plain input pull is still waiting', async () => {
+    let release = (): void => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    async function* input(): AsyncGenerator<Uint8Array> {
+      await held
+      yield new Uint8Array()
+    }
+    try {
+      const result = await runProgram('sh', null, ['-c', 'printf done'], input())
+      expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'done'])
+    } finally {
+      release()
+    }
+  })
+
+  it('aborts a command while its managed input pull is waiting', async () => {
+    const input = new ProcessInput()
+    const controller = new AbortController()
+    const run = runProgram('sh', null, ['-c', 'exec sleep 30'], input.stream(), {
+      signal: controller.signal,
+    })
+    controller.abort()
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(input.write(new TextEncoder().encode('late'))).rejects.toBeInstanceOf(PipeClosed)
+  })
+
+  it('rejects a missing program with its hint', async () => {
+    await expect(runProgram('mirage-no-such-program', 'install it', [], null)).rejects.toThrow(
+      'install it',
+    )
+  })
+
+  it('kills the child when the call is aborted', async () => {
+    const controller = new AbortController()
+    const started = Date.now()
+    const run = runProgram('sh', 'no sh', ['-c', 'exec sleep 30'], null, {
+      signal: controller.signal,
+    })
+    setTimeout(() => {
+      controller.abort()
+    }, 50)
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    expect(Date.now() - started).toBeLessThan(5000)
+  })
+
+  it('kills what the child started, which holds its pipes open', async () => {
+    const controller = new AbortController()
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const run = runProgram('sh', null, ['-c', `sleep 30 & echo $! > ${pidFile}; wait`], null, {
+      signal: controller.signal,
+    })
+    while (!existsSync(pidFile) || readFileSync(pidFile, 'utf8').trim() === '') {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    const started = Date.now()
+    controller.abort()
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(await ended(Number(readFileSync(pidFile, 'utf8')))).toBe(true)
+  })
+
+  it('does not wait on a descendant that left the group when aborted', async () => {
+    const controller = new AbortController()
+    const pidFile = join(mkdtempSync(join(tmpdir(), 'mirage-program-')), 'pid')
+    const run = runProgram(process.execPath, null, ['-e', ESCAPE, pidFile], null, {
+      signal: controller.signal,
+    })
+    const escaped = await escapedPid(pidFile)
+    try {
+      const started = Date.now()
+      controller.abort()
+      await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+      expect(Date.now() - started).toBeLessThan(3000)
+    } finally {
+      process.kill(escaped, 'SIGKILL')
+    }
+  })
+
+  it('closeChildren does not wait on a descendant that left the group', async () => {
+    const children = new Set<ChildProcess>()
+    const pidFile = join(mkdtempSync(join(tmpdir(), 'mirage-program-')), 'pid')
+    const run = runProgram(process.execPath, null, ['-e', ESCAPE, pidFile], null, { children })
+    const escaped = await escapedPid(pidFile)
+    try {
+      const started = Date.now()
+      await closeChildren(children)
+      expect((await run).exitCode).not.toBe(0)
+      expect(Date.now() - started).toBeLessThan(3000)
+    } finally {
+      process.kill(escaped, 'SIGKILL')
+    }
+  })
+
+  it('closeChildren skips a child that closed while its input is still closing', async () => {
+    const children = new Set<ChildProcess>()
+    let closing = (): void => undefined
+    const entered = new Promise<void>((resolve) => {
+      closing = resolve
+    })
+    let release = (): void => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const input: AsyncIterableIterator<Uint8Array> = {
+      [Symbol.asyncIterator]() {
+        return this
+      },
+      next: () => Promise.resolve({ done: true, value: undefined }),
+      return: async () => {
+        closing()
+        await held
+        return { done: true, value: undefined }
+      },
+    }
+    const run = runProgram('sh', null, ['-c', 'exit 0'], input, { children })
+    const exited = Promise.all(
+      [...children].map(
+        (child) =>
+          new Promise<void>((resolve) => {
+            child.once('close', () => {
+              resolve()
+            })
+          }),
+      ),
+    )
+    await entered
+    await exited
+    await closeChildren(children)
+    release()
+    expect((await run).exitCode).toBe(0)
+  })
+
+  it('closeChildren kills every running tree and waits for it', async () => {
+    const children = new Set<ChildProcess>()
+    const run = runProgram('sh', null, ['-c', 'sleep 30 & wait'], null, { children })
+    expect(children.size).toBe(1)
+    const started = Date.now()
+    await closeChildren(children)
+    expect((await run).exitCode).not.toBe(0)
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(children.size).toBe(0)
+  })
+})
+
+// Children whose output nobody reads: one exits once its input closes,
+// with a write still blocked in a thread; one stays blocked writing.
+const UNREAD_THEN_EXIT = [
+  'import os, sys, threading',
+  "threading.Thread(target=os.write, args=(1, b'x' * (1 << 20)), daemon=True).start()",
+  'sys.stdin.buffer.read()',
+  'os._exit(0)',
+].join('\n')
+const UNREAD_FOREVER = "import os\nos.write(1, b'x' * (1 << 20))"
+
+describe('openProgramPipe', () => {
+  it('keeps the tail of its stderr', async () => {
+    const pipe = await openProgramPipe(process.execPath, [
+      '-e',
+      "process.stderr.write('x'.repeat(40000) + 'the-end'); setTimeout(() => undefined, 30000)",
+    ])
+    let said = ''
+    try {
+      said = (await pipe.diagnostic?.()) ?? ''
+      expect(said.endsWith('the-end')).toBe(true)
+      expect(said.length).toBe(PIPE_DIAGNOSTIC_BYTES)
+    } finally {
+      await pipe.stop()
+    }
+    expect(await pipe.diagnostic?.()).toBe(said)
+  })
+
+  it.each([
+    ['exits once its input closes', UNREAD_THEN_EXIT],
+    ['never exits', UNREAD_FOREVER],
+  ])('stops a command that %s without waiting on output nobody read', async (_name, script) => {
+    const pipe = await openProgramPipe('python3', ['-c', script])
+    await delay(500)
+    const stopped = pipe.stop().then(() => 'stopped')
+    expect(await Promise.race([stopped, delay(5000, 'stuck', { ref: false })])).toBe('stopped')
+  })
+})
+
+describe('host runs', () => {
+  // A host program a runtime runs directly is its runner's process on this
+  // host: the runner's record names its PID and when it started, so a
+  // workspace that outlives this one can stop it. A client that runs a
+  // program elsewhere (`docker exec`) is not the program, so it names none.
+  it.each([true, false])('names its host pid when run directly: %s', async (direct) => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const children = new Set<ChildProcess>()
+    const runner = new ProcessTable(undefined, undefined, runAsProcess).start({
+      sessionId: 's',
+      command: 'sh',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => undefined,
+      run: async () =>
+        (
+          await runProgram('sh', null, ['-c', `echo $$ > ${pidFile}; sleep 0.3`], null, {
+            children,
+            direct,
+          })
+        ).exitCode,
+    })
+    const pid = await escapedPid(pidFile)
+    const found = runner.record.machinePid
+    expect((await runner.join()).exit).toBe(0)
+    if (!direct) {
+      expect(found).toBeNull()
+      return
+    }
+    expect(found?.pid).toBe(pid)
+    expect(Math.abs((found?.started ?? 0) - Date.now() / 1000)).toBeLessThan(5)
+    expect(found?.exited ?? null).toBeNull()
+  })
+
+  // A program that exits while what it started holds its output open marks
+  // its record with when it exited, the last time its group was known.
+  it('marks the record of a program that exits first', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const children = new Set<ChildProcess>()
+    const runner = new ProcessTable(undefined, undefined, runAsProcess).start({
+      sessionId: 's',
+      command: 'sh',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => undefined,
+      run: async () =>
+        (
+          await runProgram('sh', null, ['-c', `echo $$ > ${pidFile}; sleep 0.5 &`], null, {
+            children,
+            direct: true,
+          })
+        ).exitCode,
+    })
+    await escapedPid(pidFile)
+    const deadline = Date.now() + 5000
+    while (runner.record.machinePid?.exited == null && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    const exited = runner.record.machinePid?.exited
+    expect(typeof exited === 'number' && Math.abs(exited - Date.now() / 1000) < 5).toBe(true)
+    expect((await runner.join()).exit).toBe(0)
+  })
+
+  // A program a lapsed workspace left on this host is stopped, its whole
+  // group, while its PID still names the process it started; a PID that
+  // names a later process is left alone.
+  it('reaps a left host run only while it is the same', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const child = spawn(
+      'sh',
+      ['-c', `trap '' TERM; echo $$ > ${pidFile}; while :; do sleep 0.05; done`],
+      { detached: true, stdio: 'ignore' },
+    )
+    const exited = new Promise<string | null>((resolve) => {
+      child.once('exit', (_code, signal) => {
+        resolve(signal)
+      })
+    })
+    const pid = await escapedPid(pidFile)
+    const found = { pid, started: Date.now() / 1000 }
+    try {
+      expect(await reapHostRun({ pid, started: 0 }, null, 15)).toBe(true)
+      expect(child.exitCode === null && child.signalCode === null).toBe(true)
+      expect(await reapHostRun(found, null, 15)).toBe(true)
+      expect(await exited).toBe('SIGKILL')
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) process.kill(-pid, 'SIGKILL')
+    }
+  })
+
+  // A run whose leader exited before the program it started is stopped too,
+  // its group outliving the leader, while a member started by the time the
+  // group was last known to be the run's; a group none of whose members
+  // proves that, which may have taken the id since, is left alone and out of
+  // reach, so its record stays.
+  it('reaps a left host run whose leader exited', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const child = spawn('sh', ['-c', `sleep 30 & echo $! > ${pidFile}`], {
+      detached: true,
+      stdio: 'ignore',
+    })
+    const found = { pid: child.pid ?? 0, started: Date.now() / 1000 }
+    await new Promise((resolve) => child.once('exit', resolve))
+    const survivor = await escapedPid(pidFile)
+    try {
+      expect(await reapHostRun(found, null, 15)).toBe(false)
+      expect(await reapHostRun(found, found.started - 60, 15)).toBe(false)
+      expect(running(survivor)).toBe(true)
+      expect(await reapHostRun({ ...found, exited: Date.now() / 1000 }, null, 15)).toBe(true)
+      expect(await ended(survivor)).toBe(true)
+    } finally {
+      if (running(survivor)) process.kill(survivor, 'SIGKILL')
+    }
+  })
+
+  // A host whose ps fails before it lists every process reaches nothing: a
+  // group missing from a cut-short list is not taken for gone.
+  it('leaves a host run out of reach when ps fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    writeFileSync(join(dir, 'ps'), '#!/bin/sh\ncase "$1" in -A) kill -9 $$ ;; esac\nexit 1\n', {
+      mode: 0o755,
+    })
+    const path = process.env.PATH
+    process.env.PATH = `${dir}:${path ?? ''}`
+    try {
+      expect(await reapHostRun({ pid: 2 ** 22 + 7, started: Date.now() / 1000 }, null, 15)).toBe(
+        false,
+      )
+    } finally {
+      process.env.PATH = path
+    }
+  })
+
+  // A group this workspace may not signal is out of its reach while its
+  // leader still runs, so a workspace with the rights can stop it later.
+  it('leaves a host run it may not signal out of reach', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const child = spawn('sh', ['-c', `echo $$ > ${pidFile}; while :; do sleep 0.05; done`], {
+      detached: true,
+      stdio: 'ignore',
+    })
+    const pid = await escapedPid(pidFile)
+    const kill = process.kill.bind(process)
+    const spy = vi.spyOn(process, 'kill').mockImplementation((target, signal) => {
+      if (target === -pid)
+        throw Object.assign(new Error('Operation not permitted'), { code: 'EPERM' })
+      return kill(target, signal)
+    })
+    try {
+      expect(await reapHostRun({ pid, started: Date.now() / 1000 }, null, 15)).toBe(false)
+    } finally {
+      spy.mockRestore()
+      process.kill(-pid, 'SIGKILL')
+      child.unref()
+    }
+  })
+})
+
+describe('systemTimeEnv', () => {
+  it('preloads libfaketime at the workspace offset, before the env preload', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'faketime-'))
+    const library = join(dir, 'libfaketime.so.1')
+    writeFileSync(library, '')
+    const saved = FAKETIME_LIBRARIES.splice(
+      0,
+      FAKETIME_LIBRARIES.length,
+      join(dir, 'none'),
+      library,
+    )
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    try {
+      const start = Date.now() / 1000 - 3600.25
+      const clock = ShiftedClock.starting(new SystemClock(), start)
+      const env = await runWithSystemClock(clock, () => systemTimeEnv({ LD_PRELOAD: '/opt/x.so' }))
+      expect(env).toMatchObject({
+        LD_PRELOAD: `${library}:/opt/x.so`,
+        FAKETIME_FMT: '%s',
+        FAKETIME_DONT_RESET: '1',
+        FAKETIME_DONT_FAKE_MONOTONIC: '1',
+        NO_FAKE_STAT: '1',
+      })
+      expect(env.FAKETIME).toMatch(/^@\d+\.\d{3}$/)
+      expect(Number.parseFloat((env.FAKETIME ?? '').slice(1))).toBeCloseTo(start, 1)
+      rmSync(library)
+      expect(await runWithSystemClock(clock, () => systemTimeEnv({}))).toEqual({})
+      expect(await systemTimeEnv({})).toEqual({})
+    } finally {
+      FAKETIME_LIBRARIES.splice(0, FAKETIME_LIBRARIES.length, ...saved)
+      if (platform !== undefined) Object.defineProperty(process, 'platform', platform)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+it.skipIf(process.platform === 'win32')(
+  'a host scan leaves a group whose pid went to another program',
+  async () => {
+    const leader = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' })
+    const began = Date.now() / 1000
+    const pid = leader.pid ?? 0
+    try {
+      const rows = await hostStatus(new Map([[pid, ['run', began] as const]]))
+      expect(rows.map((row) => [row.tag, row.pid])).toEqual([['run', pid]])
+      expect(await hostStatus(new Map([[pid, ['old', began - 3600] as const]]))).toEqual([])
+    } finally {
+      leader.kill('SIGKILL')
+    }
+  },
+)

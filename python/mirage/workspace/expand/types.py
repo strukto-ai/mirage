@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from mirage.io.types import ByteSource, IOResult
     from mirage.policy.types import HandOff
     from mirage.rs.session import ShellVars
+    from mirage.runtime.types import RouteDecision, RuntimeIdentity
     from mirage.shell.call_stack import CallStack
     from mirage.shell.console import JobConsole
     from mirage.shell.types import TSNodeLike
@@ -53,6 +54,7 @@ class ExecuteFn(Protocol):
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
         job_table: JobTable | None = None,
+        routing_decision: RouteDecision[RuntimeIdentity] | None = None,
     ) -> IOResult: ...
 
 
