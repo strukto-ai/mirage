@@ -317,8 +317,12 @@ async function checkStream(
   try {
     await drain(runStream('sort', config, source, signal))
   } catch (error) {
-    // The refusal's message is the record's number, its output the record,
-    // which GNU writes with its own terminator.
+    // A disorder's message is the record's number, its output the record,
+    // which sort writes with its own terminator; any other refusal is sort's
+    // own line.
+    if (error instanceof StreamRefusal && error.status !== 1) {
+      return new IOResult({ exitCode: error.status, stderr: ENC.encode(`${error.message}\n`) })
+    }
     if (error instanceof StreamRefusal) {
       return new IOResult({
         exitCode: 1,

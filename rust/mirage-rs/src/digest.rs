@@ -233,7 +233,9 @@ impl CheckLines {
 }
 impl Stream for CheckLines {
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.records.push(input);
+        self.records
+            .push(input)
+            .map_err(|_| StreamError::refusal(b"read error", 1))?;
         self.pump(out)
     }
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {

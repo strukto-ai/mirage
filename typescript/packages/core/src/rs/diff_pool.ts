@@ -135,6 +135,11 @@ export class DiffPool implements DiffComputer {
     }
   }
 
+  private static wants(reply: DiffReply): 0 | 1 | null {
+    if (reply.kind !== 'output') throw new Error('diff worker returned an invalid reply')
+    return reply.wants
+  }
+
   private async run(
     options: DiffOptions,
     old: InputFactory,
@@ -176,17 +181,34 @@ export class DiffPool implements DiffComputer {
       return reply
     }
     try {
-      await call({ kind: 'open', options })
-      for (const [index, factory] of [
-        [0, old],
-        [1, next],
-      ] satisfies [0 | 1, InputFactory][]) {
-        const source = await abortable(Promise.resolve().then(factory), combined)
-        for await (const chunk of chunks(source, combined)) {
-          bytes += chunk.byteLength
-          await call({ kind: 'feed', index, chunk: new Uint8Array(chunk) })
+      let wants = DiffPool.wants(await call({ kind: 'open', options }))
+      const sources: (AsyncIterableIterator<Uint8Array> | undefined)[] = [undefined, undefined]
+      try {
+        // The engine names the input it reads next: one after the other for
+        // a whole diff, both in step for -q, which stops reading once it knows.
+        while (wants !== null) {
+          const index = wants
+          let source = sources[index]
+          if (source === undefined) {
+            const factory = index === 0 ? old : next
+            source = chunks(await abortable(Promise.resolve().then(factory), combined), combined)
+            sources[index] = source
+          }
+          const pulled = await source.next()
+          if (pulled.done === true) wants = DiffPool.wants(await call({ kind: 'end', index }))
+          else {
+            bytes += pulled.value.byteLength
+            wants = DiffPool.wants(
+              await call({ kind: 'feed', index, chunk: new Uint8Array(pulled.value) }),
+            )
+          }
         }
-        await call({ kind: 'end', index })
+      } finally {
+        try {
+          await sources[0]?.return?.()
+        } finally {
+          await sources[1]?.return?.()
+        }
       }
       for (;;) {
         const state = await call({ kind: 'inspect' })

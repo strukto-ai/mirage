@@ -18,12 +18,12 @@ def closed_pair():
 
 def test_indexed_inputs_preserve_bytes_and_drain_bounded_output():
     old, new = b"\xff" * 40000, b"\xfe" * 40000
-    diff_worker.open_pair(asdict(DiffOptions()))
-    assert diff_worker.feed(0, old[:20000]) == b""
-    assert diff_worker.feed(0, old[20000:]) == b""
-    assert diff_worker.end(0) == b""
-    assert diff_worker.feed(1, new) == b""
-    assert diff_worker.end(1) == b""
+    assert diff_worker.open_pair(asdict(DiffOptions())) == 0
+    assert diff_worker.feed(0, old[:20000]) == (b"", 0)
+    assert diff_worker.feed(0, old[20000:]) == (b"", 0)
+    assert diff_worker.end(0) == (b"", 1)
+    assert diff_worker.feed(1, new) == (b"", 1)
+    assert diff_worker.end(1) == (b"", None)
     first, busy = diff_worker.drain()
     assert len(first) == 65536 and busy
     last, busy = diff_worker.drain()
@@ -64,6 +64,14 @@ def test_refused_config_leaves_worker_ready_for_a_valid_pair():
     diff_worker.end(0)
     diff_worker.end(1)
     assert diff_worker.inspect_pair() == ("equal", 0, b"")
+
+
+def test_brief_names_the_input_it_reads_next_and_stops_once_it_knows():
+    assert diff_worker.open_pair(asdict(DiffOptions(brief=True))) == 0
+    assert diff_worker.feed(0, b"same\nold\n") == (b"", 1)
+    assert diff_worker.feed(1, b"same\n") == (b"", 1)
+    assert diff_worker.feed(1, b"new\n") == (b"", None)
+    assert diff_worker.inspect_pair() == ("different", 1, b"")
 
 
 @pytest.mark.parametrize("index", [0, 2])

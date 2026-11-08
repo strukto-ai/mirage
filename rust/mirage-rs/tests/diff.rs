@@ -209,7 +209,7 @@ fn brief_preserves_normalization_newline_and_binary_rules() {
             0,
         ),
         (r#"{"brief":true}"#, b"a\n", b"a", 1),
-        (r#"{"brief":true,"mode":"ed"}"#, b"a\n", b"a", 0),
+        (r#"{"brief":true,"mode":"ed"}"#, b"a\n", b"a", 1),
         (
             r#"{"brief":true,"ignore_case":true}"#,
             b"A\0\n",

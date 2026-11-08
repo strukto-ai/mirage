@@ -363,7 +363,9 @@ impl Uniq {
 
 impl Stream for Uniq {
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.records.push(input);
+        self.records
+            .push(input)
+            .map_err(|_| StreamError::refusal(b"uniq: memory exhausted", 1))?;
         self.pump(out);
         Ok(())
     }

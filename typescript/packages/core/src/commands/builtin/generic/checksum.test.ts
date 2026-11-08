@@ -13,8 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { stripSlash } from '../../../utils/slash.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { OpenStream } from '../../../rs/stream.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { checksumGeneric, parseFlags } from './checksum.ts'
@@ -103,6 +105,32 @@ describe('checksum --check', () => {
     [{ status: true }, ['', 'md5sum: /miss.txt: No such file or directory\n', 1]],
   ])('reports a missing recorded file under %j', async (flags, expected) => {
     expect(await runCheck(missingOne, flags)).toEqual(expected)
+  })
+
+  it("says a list line too long to hold as that list's read error", async () => {
+    // The digest engine refuses a list line past its cap. Out of memory,
+    // md5sum says the list's read error, prints none of its summaries and
+    // goes on to the next list (pinned, coreutils 9.7). Mirrors
+    // test_checksum.py.
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- called with the tested stream
+    const feed = OpenStream.prototype.feed
+    const spy = vi.spyOn(OpenStream.prototype, 'feed').mockImplementation(function (
+      this: OpenStream,
+      chunk: Uint8Array,
+    ) {
+      if (DEC.decode(chunk) === 'long') throw new StreamRefusal('read error', new Uint8Array())
+      return feed.call(this, chunk)
+    })
+    try {
+      const files = { '/sums.txt': `${DIGEST}  /ok.txt\n`, '/ok.txt': 'abc', '/long.txt': 'long' }
+      expect(await runCheck(files, {}, '/', ['/sums.txt', '/long.txt', '/sums.txt'])).toEqual([
+        '/ok.txt: OK\n/ok.txt: OK\n',
+        'md5sum: /long.txt: read error\n',
+        1,
+      ])
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('propagates a read failure that is not a filesystem error', async () => {
