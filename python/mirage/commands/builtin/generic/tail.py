@@ -439,7 +439,21 @@ async def _tail_file(
     read_range: ReadStreamFn | None,
     last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]] | None,
     counts: TailCounts,
-) -> AsyncIterator[bytes]:
+    box: list[int] | None = None,
+) -> AsyncGenerator[bytes, None]:
+    """One operand's tail, a count from the end read backwards in windows
+    where the backend reads ranges and the size is known.
+
+    Args:
+        path (PathSpec): the operand.
+        read (PolymorphicReadFn): bound whole-file reader.
+        stat (StatFn): bound stat.
+        read_range (ReadStreamFn | None): the backend's byte window.
+        last_lines (Callable | None): the mount's ``last_lines``.
+        counts (TailCounts): what to print.
+        box (list[int] | None): receives where in the file the print
+            ended, which a follow polls from.
+    """
     n = counts.lines if counts.lines is not None else 10
     from_end = counts.from_line is None and counts.from_byte is None
     if not is_stdin(path) and from_end:
@@ -461,6 +475,8 @@ async def _tail_file(
                 and info.size > 0
             ):
                 size = info.size
+                if box is not None:
+                    box[0] = size
                 if counts.byte_count is not None:
                     offset = max(0, size - abs(counts.byte_count))
                     if offset == size:
@@ -521,7 +537,10 @@ async def _tail_file(
                 finally:
                     await close_stream(selector)
     raw = read(path)
-    if inspect.isawaitable(raw):
+    if box is not None:
+        box[0] = 0
+        raw = _counted(raw, box)
+    elif inspect.isawaitable(raw):
         raw = await raw
     async with aclosing(
         tail(
@@ -578,6 +597,32 @@ async def _polled_window(
     yield await materialize(data)
 
 
+async def _gained(
+    read_range: ReadStreamFn, io: IOResult, p: PathSpec, pos: int
+) -> tuple[bytes, int]:
+    """What a size-unknown file gained past ``pos``, read from there, and
+    where the next poll starts. A read that finds nothing at a position
+    the file no longer reaches, its byte before ``pos`` gone too, means
+    it was truncated, which is noted and read from the start.
+
+    Args:
+        read_range (ReadStreamFn): the backend's byte window.
+        io (IOResult): the result a truncation notice lands on.
+        p (PathSpec): the file.
+        pos (int): how far the previous poll read.
+    """
+    data = await materialize(read_range(p, offset=pos, size=None))
+    if (
+        not data
+        and pos
+        and not await materialize(read_range(p, offset=pos - 1, size=1))
+    ):
+        _note(io, f"tail: {p.raw_path}: file truncated\n")
+        data = await materialize(read_range(p, offset=0, size=None))
+        pos = 0
+    return data, pos + len(data)
+
+
 async def _catch_up(
     read: Callable[..., Any],
     read_range: ReadStreamFn | None,
@@ -587,9 +632,10 @@ async def _catch_up(
     pos: int,
 ) -> tuple[bytes, int]:
     """What a followed file gained past ``pos``, and where the next poll
-    starts: a size-unknown file is read whole and measured, and a file
-    shorter than ``pos`` was truncated, which is noted and read from the
-    start.
+    starts: a size-unknown file is read from ``pos`` where the backend
+    reads windows (``_gained``) and otherwise read whole and measured,
+    and a file shorter than ``pos`` was truncated, which is noted and
+    read from the start.
 
     Args:
         read (Callable[..., Any]): bound whole-file reader.
@@ -601,6 +647,8 @@ async def _catch_up(
         pos (int): how far the previous poll read.
     """
     whole: bytes | None = None
+    if size is None and read_range is not None:
+        return await _gained(read_range, io, p, pos)
     if size is None:
         whole = await _whole(read, p)
         size = len(whole)
@@ -621,7 +669,7 @@ async def _follow(
     paths: list[PathSpec],
     pending: list[tuple[PathSpec, str]],
     *,
-    read: Callable[..., Any],
+    first: Callable[..., AsyncGenerator[bytes, None]],
     poll_read: Callable[..., Any],
     read_range: ReadStreamFn | None,
     stat: StatFn,
@@ -671,10 +719,18 @@ async def _follow(
     follow cannot keep reading a file renamed away: there is no open
     handle, so the path is polled until it holds bytes again.
 
+    The first print is a plain tail's (``_tail_file``), printed as it
+    is read, so a count from the end reads only the end where the
+    backend reads windows; the polls go on from where it ended. Its
+    first bytes are the open: a read that fails before them is a failed
+    open, and one that fails later is reported and the file dropped the
+    same way.
+
     A file whose stat carries no size (a backend that cannot know one
     without reading reports ``None``, never a guess) is polled by
-    reading it whole every interval and measuring that: one read per
-    poll, rather than a follow that never prints.
+    reading from where the last poll ended, where the backend reads
+    windows, and otherwise by reading it whole every interval and
+    measuring that, rather than a follow that never prints.
 
     One file followed by descriptor, under a count of lines from the
     end, is asked of the mount's ``follow`` first: a mount that is told
@@ -695,8 +751,9 @@ async def _follow(
         paths (list[PathSpec]): the operands that opened.
         pending (list[tuple[PathSpec, str]]): the ones ``--retry`` waits
             for, each with the notice that announces it.
-        read (Callable[..., Any]): bound whole-file reader, for the
-            first print.
+        first (Callable[..., AsyncGenerator[bytes, None]]): a file's
+            first print, ``_tail_file`` asking no ``last_lines``, whose
+            answer says nothing of where the polls go on from.
         poll_read (Callable[..., Any]): the polls' whole-file reader.
         read_range (ReadStreamFn | None): the polls' byte-window reader.
         stat (StatFn): the polls' stat.
@@ -723,6 +780,13 @@ async def _follow(
     active = list(enumerate(paths))
     waiting = [(len(paths) + i, p, how) for i, (p, how) in enumerate(pending)]
     last: int | None = None
+
+    async def lost(slot: int, p: PathSpec, exc: Exception) -> None:
+        await report_fs_error(io, "tail", p, exc)
+        active.remove((slot, p))
+        if flags.retry:
+            waiting.append((slot, p, APPEARED))
+
     # The stream follow opened holds the mount busy, so it closes however
     # the print ends, a reader that stops early included.
     try:
@@ -734,6 +798,8 @@ async def _follow(
                 active.remove((slot, p))
                 continue
             box = [0]
+            printed: AsyncGenerator[bytes, None] | None = None
+            head: bytes | None = None
             try:
                 if (
                     follow is not None
@@ -746,41 +812,37 @@ async def _follow(
                 ):
                     added = await follow(p, follow_lines, flags.interval)
                 # A follow's stream holds the first print too.
-                chunks = (
-                    []
-                    if added is not None
-                    else [
-                        chunk
-                        async for chunk in tail(
-                            _counted(read(p), box),
-                            n=counts.lines,
-                            c=counts.byte_count,
-                            from_line=counts.from_line,
-                            from_byte=counts.from_byte,
-                            terminator=counts.terminator,
-                        )
-                    ]
-                )
+                if added is None:
+                    printed = first(p, box=box)
+                    head = await anext(printed, None)
             except FS_ERRORS as exc:
                 if added is not None:
                     await close_quietly(added)
                     added = None
+                if printed is not None:
+                    await printed.aclose()
                 # There is no handle to hold, so this first read is the
                 # open: one that fails after the operand's stat passed is
                 # GNU's failed open, reported the way the stat's failure
                 # would have been, and under --retry waited for like a
                 # file that was never there (this is the initial open that
                 # a descriptor follow's --retry covers).
-                await report_fs_error(io, "tail", p, exc)
-                active.remove((slot, p))
-                if flags.retry:
-                    waiting.append((slot, p, APPEARED))
+                await lost(slot, p, exc)
                 continue
             if show_headers:
                 yield operand_header(p, last is not None)
             last = slot
-            for chunk in chunks:
-                yield chunk
+            if printed is None:
+                continue
+            async with aclosing(printed):
+                try:
+                    if head is not None:
+                        yield head
+                    async for chunk in printed:
+                        yield chunk
+                except FS_ERRORS as exc:
+                    await lost(slot, p, exc)
+                    continue
             positions[slot] = box[0]
         if added is not None:
             async for chunk in added:
@@ -1054,7 +1116,14 @@ async def tail_generic(
             return _follow(
                 opened,
                 pending,
-                read=stream,
+                first=functools.partial(
+                    _tail_file,
+                    read=stream,
+                    stat=stat,
+                    read_range=read_range,
+                    last_lines=None,
+                    counts=counts,
+                ),
                 poll_read=poll_read,
                 read_range=poll_range,
                 stat=poll_stat,

@@ -53,13 +53,14 @@ async def _walk_with(
     if find_type == "f":
         await before_full_walk(dispatch, path, command)
     unreadable: list[str] = []
-    paths = await walk_find(
+    rows = walk_find(
         path,
         readdir=readdir,
         stat=stat,
         args=parse_find_args((), type=find_type),
         unreadable=unreadable,
     )
+    paths = sorted([row async for row in rows])
     return Walked(paths=tuple(paths), unreadable=tuple(unreadable))
 
 

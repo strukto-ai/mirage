@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
 from dataclasses import replace
 from functools import partial
 
@@ -12,7 +12,7 @@ from mirage.core.generic.find_eval import (
 )
 from mirage.errors.classify import is_entry_error
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.dates import iso_timestamp
+from mirage.utils.dates import in_mtime_window, iso_timestamp
 from mirage.utils.hidden import path_visible
 from mirage.utils.stat_view import DIR_SIZE
 from mirage.view.namespace_view import followed_stat
@@ -92,87 +92,6 @@ async def _is_empty_entry(
     return st is not None and st.type is FileType.FILE and st.size == 0
 
 
-async def _walk_collect(
-    readdir: Callable[[PathSpec], Awaitable[list[str]]],
-    stat: Callable[[PathSpec], Awaitable[FileStat]],
-    spec: PathSpec,
-    maxdepth: int | None,
-    depth: int,
-    acc: list[tuple[str, str]],
-    unreadable: list[str] | None = None,
-    unstatted: dict[str, Exception] | None = None,
-    real: Callable[[str], str] | None = None,
-    chain: tuple[tuple[str, str], ...] = (),
-    loops: list[tuple[str, str]] | None = None,
-) -> None:
-    if maxdepth is not None and depth > maxdepth:
-        return
-    try:
-        children = await readdir(spec)
-    except (FileNotFoundError, NotADirectoryError):
-        # Only vanished dirs are skipped; API errors (rate limit, auth)
-        # propagate.
-        return
-    except PermissionError:
-        # A directory the session may not open (a rule refused it at
-        # the guarded readdir): GNU names it and walks on, so a caller
-        # that collects those gets the path and the walk continues; one
-        # that does not is not left with a silent gap in its listing.
-        if unreadable is None:
-            raise
-        unreadable.append(spec.virtual)
-        return
-    for child in children:
-        # Classification is stat's job (an index lookup right after the
-        # readdir that populated it). The one in-band proof is a trailing
-        # slash on a cold listing: no backend renders a file with one.
-        # Name heuristics beyond that guessed wrong (attachments and
-        # uploads carry whatever name the sender gave them) and are gone.
-        if child.endswith("/"):
-            trimmed = child.rstrip("/")
-            is_dir = True
-            kind = "d"
-        else:
-            trimmed = child
-            st = await _stat_entry(stat, trimmed, unstatted)
-            is_dir = st is not None and st.type == FileType.DIRECTORY
-            kind = printf_kind(st)
-        below = chain
-        if is_dir and real is not None:
-            # Under -L a directory is the one it resolves to, and one
-            # already open above is GNU's file system loop: never a row,
-            # never entered.
-            here = real(trimmed)
-            ancestor = next((v for v, r in chain if r == here), None)
-            if ancestor is not None:
-                if loops is not None:
-                    loops.append((trimmed, ancestor))
-                continue
-            below = (*chain, (trimmed, here))
-        acc.append((trimmed, kind))
-        if not is_dir:
-            continue
-        child_spec = PathSpec(
-            virtual=trimmed,
-            directory=trimmed,
-            resolved=False,
-            vfs_path=trimmed.strip("/"),
-        )
-        await _walk_collect(
-            readdir,
-            stat,
-            child_spec,
-            maxdepth,
-            depth + 1,
-            acc,
-            unreadable,
-            unstatted,
-            real,
-            below,
-            loops,
-        )
-
-
 async def walk_find(
     search_path: PathSpec,
     *,
@@ -188,8 +107,17 @@ async def walk_find(
     listing: Callable[[PathSpec], Awaitable[list[str]]] | None = None,
     links: LinkView | None = None,
     stopped: list[str] | None = None,
-) -> list[str]:
-    """Walk readdir/stat under one start point and match every entry.
+) -> AsyncGenerator[str, None]:
+    """Walk readdir/stat under one start point, yielding each entry the
+    expression keeps as the walk reaches it.
+
+    A directory's entries are visited in name order, where findutils
+    takes them in the order the directory lists them, so the rows come in
+    a tree walk's order: a directory, then what it holds, or under
+    ``-depth`` what it holds, then the directory. Each entry is judged
+    once, when it is reached: a ``-prune`` keeps the walk out of the
+    directory it holds for, a ``-quit`` ends the walk, and a reader that
+    stops reading stops the walk with it.
 
     A directory the guarded readdir refuses lands in ``unreadable``. An
     entry whose stat fails lands in ``unstatted`` with its error, in
@@ -232,208 +160,221 @@ async def walk_find(
             reached on; the walk evaluates nothing after it.
     """
     stat = partial(followed_stat, stat, follow)
-    collected: list[tuple[str, str]] = []
-    search_key = search_path.virtual.strip("/")
     root_path = (
         search_path.virtual.rstrip("/") if search_path.virtual != "/" else "/"
     )
-    prune_tree = find_eval.bind_tree(
-        find_eval.args_to_tree(args),
-        "",
-        search_path.virtual,
-        search_path.raw_path,
-    )
-    prunes = find_eval.tree_has_prune(prune_tree)
-    quits = find_eval.tree_has(prune_tree, (find_types.Quit,))
-    need_empty = find_eval.tree_has_empty(prune_tree)
-    acts = find_eval.tree_has_action(prune_tree)
-    reads_stat = find_eval.tree_reads_stat(prune_tree)
-    reads_link = find_eval.tree_reads_link(prune_tree)
-    # Under -depth a directory is judged after what it holds, so its
-    # -quit cannot be met on the way in.
-    early_quit = quits and not args.depth_first
-
-    async def read_directory(spec: PathSpec) -> list[str]:
-        if enters is not None and not enters(spec.virtual):
-            return []
-        if quits and find_eval.quit_fired(prune_tree):
-            return []
-        if prunes or early_quit:
-            key = spec.virtual.rstrip("/") or "/"
-            depth = len(spec.virtual.rstrip("/").split("/")) - len(
-                root_path.rstrip("/").split("/")
-            )
-            info = await _stat_entry(stat, spec.virtual, unstatted)
-            empty = (
-                await _is_empty_entry(
-                    readdir,
-                    stat,
-                    spec.virtual,
-                    True,
-                    unstatted,
-                    unreadable,
-                )
-                if need_empty
-                else None
-            )
-            await find_eval.prime_regexes(prune_tree, [key])
-            xkind, target = (
-                await _other_side(follow, links, key, "d")
-                if reads_link
-                else (None, None)
-            )
-            find_eval.keep(
-                find_types.FindEntry(
-                    key=key,
-                    name=spec.virtual.rstrip("/").rsplit("/", 1)[-1],
-                    kind="d",
-                    depth=depth,
-                    is_empty=empty,
-                    mtime=modified_ts(info.modified) if info else None,
-                    stat=info if reads_stat else None,
-                    xkind=xkind,
-                    target=target,
-                ),
-                prune_tree,
-                args.mindepth,
-                acts,
-            )
-            # A directory that reached -quit is the walk's last: what it
-            # holds is never read.
-            if key in find_eval.pruned_keys(prune_tree) or (
-                early_quit and find_eval.quit_fired(prune_tree)
-            ):
-                return []
-        return await (listing or readdir)(spec)
-
-    root_stat = (
-        root if root is not None else await _stat_entry(stat, root_path)
-    )
-    if root_stat is not None:
-        collected.append((root_path, printf_kind(root_stat)))
-    # GNU depth convention: the search root is depth 0, its children are
-    # depth 1. A start point that is not a directory has no children, so
-    # readdir on it is either an error the walk would have to swallow
-    # (Box answers ENOTDIR) or a wasted round trip everywhere else.
-    if root_stat is None or root_stat.type == FileType.DIRECTORY:
-        real = follow.resolve if follow is not None else None
-        await _walk_collect(
-            read_directory,
-            stat,
-            search_path,
-            args.maxdepth,
-            1,
-            collected,
-            unreadable,
-            unstatted,
-            real,
-            ((root_path, real(root_path)),) if real is not None else (),
-            loops,
-        )
     tree = find_eval.bind_tree(
         find_eval.args_to_tree(args),
         "",
         search_path.virtual,
         search_path.raw_path,
     )
+    prunes = find_eval.tree_has_prune(tree)
+    quits = find_eval.tree_has(tree, (find_types.Quit,))
+    regexes = find_eval.tree_has(tree, (find_types.Regex,))
+    need_empty = find_eval.tree_has_empty(tree)
+    acts = find_eval.tree_has_action(tree)
     need_size = args.min_size is not None or args.max_size is not None
     windowed = args.mtime_min is not None or args.mtime_max is not None
     need_mtime = windowed or find_eval.tree_has_time(tree)
-    need_stat = need_mtime or reads_stat
+    need_stat = need_mtime or find_eval.tree_reads_stat(tree)
     need_link = find_eval.tree_reads_link(tree)
     failing = find_eval.time_tests_failing(tree)
-    learned: dict[str, float | None] = {}
-    statted: dict[str, FileStat | None] = {}
-    results: list[str] = []
     vis = session_visibility()
-    if args.depth_first:
-        collected.sort(key=lambda row: depth_first_key(row[0]))
-    else:
-        collected.sort()
-    await find_eval.prime_regexes(tree, (p for p, _ in collected))
-    for p, kind in collected:
+    real = follow.resolve if follow is not None else None
+    quit = False
+
+    async def judge(
+        p: str, kind: str, depth: int, known: FileStat | None
+    ) -> bool:
+        nonlocal quit
         if not path_visible(vis, p):
-            continue
+            return False
         is_dir = kind == "d"
-        entry_name = p.rsplit("/", 1)[-1]
-        key = p
-        rel = key.strip("/")
-        if search_key:
-            depth = (
-                0
-                if rel == search_key
-                else rel.count("/") - search_key.count("/")
-            )
-        else:
-            depth = 0 if rel == "" else rel.count("/") + 1
         is_empty = None
         if need_empty:
             is_empty = await _is_empty_entry(
-                readdir,
-                stat,
-                p,
-                is_dir,
-                unstatted,
-                unreadable,
+                readdir, stat, p, is_dir, unstatted, unreadable
             )
         # With a time test in the tree the stat comes first, so the entry
-        # answers the test itself and a -prune after it fires only where
-        # GNU's would; the stat that -size alone needs waits for the rows
-        # the tree kept.
+        # answers the test itself; the stat that -size alone needs waits
+        # for the entries the tree kept.
         st = None
+        mtime = None
         if need_stat:
-            st = await _stat_entry(stat, p, unstatted)
+            st = (
+                known
+                if known is not None
+                else await _stat_entry(stat, p, unstatted)
+            )
             if st is None and windowed:
-                continue
+                return False
             # A failed stat leaves the time unknown, which fails every time
             # test, so another -o arm (-name) can still match the entry.
-            learned[key] = modified_ts(st.modified) if st is not None else None
-            statted[key] = st
+            mtime = modified_ts(st.modified) if st is not None else None
         xkind, target = (
             await _other_side(follow, links, p, kind)
             if need_link
             else (None, None)
         )
+        if regexes:
+            await find_eval.prime_regexes(tree, [p])
         entry = find_types.FindEntry(
-            key=key,
-            name=entry_name,
+            key=p,
+            name=p.rsplit("/", 1)[-1],
             kind=kind,
             depth=depth,
             is_empty=is_empty,
-            mtime=learned.get(key),
+            mtime=mtime,
             stat=st,
             xkind=xkind,
             target=target,
         )
-        judged = failing if need_mtime and entry.mtime is None else tree
+        judged = failing if need_mtime and mtime is None else tree
         kept = find_eval.keep(entry, judged, args.mindepth, acts)
-        if find_eval.quit_fired(judged):
-            if kept:
-                results.append(p)
+        if quits and find_eval.quit_fired(judged):
+            quit = True
             if stopped is not None:
                 stopped.append(p)
-            break
+            return kept
         if not kept:
-            continue
+            return False
         if need_size and not is_dir and st is None:
             st = await _stat_entry(stat, p, unstatted)
             if st is None:
-                continue
+                return False
         if need_size and not _sized(
             args, DIR_SIZE if is_dir or st is None else st.size or 0
         ):
+            return False
+        return st is None or in_mtime_window(
+            modified_ts(st.modified), args.mtime_min, args.mtime_max
+        )
+
+    async def entries(p: str, depth: int) -> list[str]:
+        """The names a directory the walk enters holds, in name order."""
+        if (
+            (args.maxdepth is not None and depth >= args.maxdepth)
+            or (enters is not None and not enters(p))
+            or (prunes and p in find_eval.pruned_keys(tree))
+        ):
+            return []
+        spec = PathSpec(
+            virtual=p, directory=p, resolved=False, vfs_path=p.strip("/")
+        )
+        try:
+            children = await (listing or readdir)(spec)
+        except (FileNotFoundError, NotADirectoryError):
+            # Only vanished dirs are skipped; API errors (rate limit, auth)
+            # propagate.
+            return []
+        except PermissionError:
+            # A directory the session may not open (a rule refused it at
+            # the guarded readdir): find names it and walks on, so a caller
+            # that collects those gets the path and the walk continues;
+            # one that does not is not left with a silent gap in its
+            # listing.
+            if unreadable is None:
+                raise
+            if p not in unreadable:
+                unreadable.append(p)
+            return []
+        return sorted(children, key=lambda child: child.rstrip("/"))
+
+    start = root if root is not None else await _stat_entry(stat, root_path)
+    chain = ((root_path, real(root_path)),) if real is not None else ()
+    # Each open directory: its path, depth, the -L chain above it, the
+    # entries left to visit, whether it is judged itself (a start point
+    # that could not be statted reports only what it holds), and its stat
+    # when known.
+    frames: list[
+        tuple[
+            str,
+            int,
+            tuple[tuple[str, str], ...],
+            Iterator[str],
+            bool,
+            FileStat | None,
+        ]
+    ] = []
+    # find's depth convention: the search root is depth 0, its children are
+    # depth 1. A start point that is not a directory has no children, so
+    # readdir on it is either an error the walk would have to swallow
+    # (Box answers ENOTDIR) or a wasted round trip everywhere else.
+    if start is None:
+        frames.append(
+            (
+                root_path,
+                0,
+                chain,
+                iter(await entries(root_path, 0)),
+                False,
+                None,
+            )
+        )
+    else:
+        kind = printf_kind(start)
+        first = not args.depth_first or kind != "d"
+        if first and await judge(root_path, kind, 0, start):
+            yield root_path
+        if kind == "d" and not quit:
+            frames.append(
+                (
+                    root_path,
+                    0,
+                    chain,
+                    iter(await entries(root_path, 0)),
+                    True,
+                    start,
+                )
+            )
+    while frames and not quit:
+        p, depth, above, left, judged, known = frames[-1]
+        child = next(left, None)
+        if child is None:
+            frames.pop()
+            if (
+                args.depth_first
+                and judged
+                and await judge(p, "d", depth, known)
+            ):
+                yield p
             continue
-        if windowed and st is not None:
-            ts = modified_ts(st.modified)
-            if ts is None:
+        # Classification is stat's job (an index lookup right after the
+        # readdir that populated it). The one in-band proof is a trailing
+        # slash on a cold listing: no backend renders a file with one.
+        trimmed = child.rstrip("/")
+        kind = (
+            "d"
+            if child.endswith("/")
+            else printf_kind(await _stat_entry(stat, trimmed, unstatted))
+        )
+        inner = above
+        if kind == "d" and real is not None:
+            # Under -L a directory is the one it resolves to, and one
+            # already open above is find's file system loop: never a row,
+            # never entered.
+            here = real(trimmed)
+            ancestor = next((v for v, r in above if r == here), None)
+            if ancestor is not None:
+                if loops is not None:
+                    loops.append((trimmed, ancestor))
                 continue
-            if args.mtime_min is not None and ts < args.mtime_min:
-                continue
-            if args.mtime_max is not None and ts > args.mtime_max:
-                continue
-        results.append(p)
-    find_eval.settle_prunes(tree, learned, statted)
-    return sorted(find_eval.drop_pruned(results, tree, ""))
+            inner = (*above, (trimmed, here))
+        first = not args.depth_first or kind != "d"
+        if first and await judge(trimmed, kind, depth + 1, None):
+            yield trimmed
+        if kind == "d" and not quit:
+            frames.append(
+                (
+                    trimmed,
+                    depth + 1,
+                    inner,
+                    iter(await entries(trimmed, depth + 1)),
+                    True,
+                    None,
+                )
+            )
 
 
 def depth_first_key(path: str) -> tuple[tuple[str, int], ...]:

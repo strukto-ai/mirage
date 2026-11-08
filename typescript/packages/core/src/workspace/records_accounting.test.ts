@@ -37,6 +37,17 @@ describe('Workspace record accounting', () => {
     ws.records.push(record(VFSName.S3, 7))
     expect(ws.networkBytes).toBe(107)
     expect(ws.cacheBytes).toBe(30)
+    ws.records.push(record(VFSName.S3, 3))
+    expect(ws.networkBytes).toBe(110)
+    ws.records.length = 0
+    for (const [source, bytes] of [
+      [VFSName.S3, 1],
+      [VFSName.S3, 2],
+      [VFSName.RAM, 4],
+      [VFSName.S3, 8],
+    ] as const)
+      ws.records.push(record(source, bytes))
+    expect([ws.networkBytes, ws.cacheBytes]).toEqual([11, 4])
   })
 
   it('returns zeros on a fresh workspace', () => {

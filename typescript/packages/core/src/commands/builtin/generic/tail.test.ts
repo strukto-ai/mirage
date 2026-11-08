@@ -78,6 +78,8 @@ class Growing {
     readonly data: Map<string, Uint8Array | null>,
     readonly sized = true,
   ) {}
+  wholeReads = 0
+  ranged = 0
   stat = (p: PathSpec): Promise<FileStat> => {
     const data = this.data.get(p.virtual)
     if (data === undefined) {
@@ -100,16 +102,22 @@ class Growing {
   }
   stream = async function* (this: Growing, p: PathSpec): AsyncIterable<Uint8Array> {
     await Promise.resolve()
+    this.wholeReads++
     yield bytesOf(this.data.get(p.virtual))
   }.bind(this)
   readRange = async function* (
     this: Growing,
     p: PathSpec,
     offset: number,
-    size: number,
+    size: number | null,
   ): AsyncIterable<Uint8Array> {
     await Promise.resolve()
-    yield bytesOf(this.data.get(p.virtual)).slice(offset, offset + size)
+    const window = bytesOf(this.data.get(p.virtual)).slice(
+      offset,
+      size === null ? undefined : offset + size,
+    )
+    this.ranged += window.byteLength
+    yield window
   }.bind(this)
   set(path: string, text: string): void {
     this.data.set(path, ENC.encode(text))
@@ -247,7 +255,7 @@ describe('tail -f', () => {
     expect(io.exitCode).toBe(0)
   })
 
-  it('reads a size-unknown file whole every poll', async () => {
+  it('reads a size-unknown file from where it left off', async () => {
     const fs = new Growing(new Map(), false)
     fs.set('/d/log', 'a\n')
     const abort = new AbortController()
@@ -269,6 +277,52 @@ describe('tail -f', () => {
     await grower
     expect(text).toBe('a\nb\nz\n')
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('tail: /d/log: file truncated\n')
+    expect(fs.wholeReads).toBe(1)
+  })
+
+  it('reads only the end of a file for its first print', async () => {
+    const fs = new Growing(new Map())
+    fs.set('/d/log', 'x'.repeat(8 << 20) + '\nlast\n')
+    const abort = new AbortController()
+    const [stream] = (await tailGeneric(
+      [spec('/d/log')],
+      [],
+      followOpts(abort, { lines: '1' }),
+      fs.stream,
+      fs.stat,
+      fs.readRange,
+    )) as [AsyncIterable<Uint8Array>, IOResult]
+    const grower = (async () => {
+      await sleep(50)
+      fs.append('/d/log', 'more\n')
+    })()
+    const text = await drainFor(stream, 150, abort)
+    await grower
+    expect(text).toBe('last\nmore\n')
+    expect(fs.wholeReads).toBe(0)
+    expect(fs.ranged).toBeLessThan(1 << 20)
+  })
+
+  it('reports a first print that fails partway', async () => {
+    const fs = new Growing(new Map())
+    fs.set('/d/log', 'a\n')
+    async function* read(p: PathSpec): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield ENC.encode('a\n')
+      throw efbig(p)
+    }
+    const abort = new AbortController()
+    const [stream, io] = (await tailGeneric(
+      [spec('/d/log')],
+      [],
+      followOpts(abort, { lines: '+1' }),
+      read,
+      fs.stat,
+    )) as [AsyncIterable<Uint8Array>, IOResult]
+    expect(await drainFor(stream, 100, abort)).toBe('a\n')
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe(
+      "tail: error reading '/d/log': File too large\ntail: no files remaining\n",
+    )
   })
 
   it('prints a repeated operand once per occurrence', async () => {
@@ -532,7 +586,7 @@ describe('tail -f', () => {
       const readRange = async function* (
         p: PathSpec,
         offset: number,
-        size: number,
+        size: number | null,
       ): AsyncIterable<Uint8Array> {
         tripped()
         yield* fs.readRange(p, offset, size)
@@ -570,14 +624,24 @@ describe('tail -f', () => {
       // follow too.
       const fs = new Growing(new Map([['/d/f', ENC.encode('a\n')]]))
       let trip = true
+      const tripped = (): void => {
+        if (!trip) return
+        trip = false
+        const err = new Error('ENOENT') as Error & { code: string }
+        err.code = 'ENOENT'
+        throw err
+      }
       const stream = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
-        if (trip) {
-          trip = false
-          const err = new Error('ENOENT') as Error & { code: string }
-          err.code = 'ENOENT'
-          throw err
-        }
+        tripped()
         yield* fs.stream(p)
+      }
+      const readRange = async function* (
+        p: PathSpec,
+        offset: number,
+        size: number | null,
+      ): AsyncIterable<Uint8Array> {
+        tripped()
+        yield* fs.readRange(p, offset, size)
       }
       const abort = new AbortController()
       const [out, io] = (await tailGeneric(
@@ -586,7 +650,7 @@ describe('tail -f', () => {
         followOpts(abort, flags),
         stream,
         fs.stat,
-        fs.readRange,
+        readRange,
       )) as [AsyncIterable<Uint8Array>, IOResult]
       const text = await drainFor(out, 300, abort)
       expect(text).toBe('a\n')
@@ -612,7 +676,7 @@ describe('tail -f', () => {
       followOpts(abort, { f: true }),
       stream,
       fs.stat,
-      fs.readRange,
+      stream,
     )) as [AsyncIterable<Uint8Array>, IOResult]
     const text = await drainFor(out, 300, abort)
     expect(text).toBe('')
@@ -628,7 +692,7 @@ describe('tail -f', () => {
     const readRange = async function* (
       p: PathSpec,
       offset: number,
-      size: number,
+      size: number | null,
     ): AsyncIterable<Uint8Array> {
       if (!trip) {
         yield* fs.readRange(p, offset, size)
@@ -1089,8 +1153,9 @@ it.each([
   async function* range(
     _path: PathSpec,
     offset: number,
-    count: number,
+    count: number | null,
   ): AsyncGenerator<Uint8Array> {
+    if (count === null) throw new Error('an open-ended range')
     expect(count).toBeLessThanOrEqual(1 << 20)
     requested += count
     await Promise.resolve()

@@ -27,7 +27,6 @@ import type {
   FindEntry,
   Owner,
   Path,
-  PendingPrune,
   PredNode,
   PrintfKind,
   Regex,
@@ -355,20 +354,12 @@ export function withoutPrune(node: PredNode): PredNode {
   }
 }
 
-// Every directory key the tree's `-prune` nodes reached. A pending prune
-// counts until `settlePrunes` decides it.
+// Every directory key the tree's `-prune` nodes reached, pending ones
+// included.
 export function prunedKeys(node: PredNode): string[] {
   if (node.op === 'prune') return [...node.pruned, ...node.pending.map((p) => p.entry.key)]
   if (node.op === 'not') return prunedKeys(node.kid)
   if (node.op === 'and' || node.op === 'or') return node.kids.flatMap(prunedKeys)
-  return []
-}
-
-/** Every `-prune` still waiting on a time test. */
-export function pendingPrunes(node: PredNode): PendingPrune[] {
-  if (node.op === 'prune') return [...node.pending]
-  if (node.op === 'not') return pendingPrunes(node.kid)
-  if (node.op === 'and' || node.op === 'or') return node.kids.flatMap(pendingPrunes)
   return []
 }
 
@@ -397,62 +388,6 @@ export function timeTestsFailing(node: PredNode): PredNode {
     default:
       return node
   }
-}
-
-// Decide the pending prunes whose directory mtime is now known. Each decided
-// directory leaves the pending ledgers and is evaluated again with its
-// mtime, so the prunes it reaches are exactly GNU's, whichever arm the tests
-// send it down: `find d -newermt X -prune` skips only the contents of
-// directories newer than X, and `( -mtime 1 -o -type d ) -prune` skips every
-// directory's. A key `mtimes` does not name stays pending.
-export function settlePrunes(
-  node: PredNode,
-  mtimes: ReadonlyMap<string, number | null>,
-  stats: ReadonlyMap<string, FileStat | null> | null = null,
-): void {
-  const decided = new Map<string, FindEntry>()
-  for (const prune of pruneNodes(node)) {
-    const still: PendingPrune[] = []
-    for (const pend of prune.pending) {
-      if (mtimes.has(pend.entry.key)) decided.set(pend.entry.key, pend.entry)
-      else still.push(pend)
-    }
-    prune.pending = still
-  }
-  for (const [key, entry] of decided) {
-    const mtime = mtimes.get(key) ?? null
-    const tree = mtime === null ? timeTestsFailing(node) : node
-    const stat = stats === null ? entry.stat : stats.has(key) ? stats.get(key) : entry.stat
-    evaluate(tree, { ...entry, mtime, stat: stat ?? null }, freshEffects())
-  }
-}
-
-// The rows minus everything under a directory `-prune` reached. The pruned
-// directory itself stays, the root spelled `/` included: GNU reports it when
-// the rest of the expression does, and only its contents go unvisited. Rows are spelled as the
-// ledger's keys are, or as display paths when `prefix` is given.
-export function dropPruned(rows: string[], tree: PredNode, prefix = ''): string[] {
-  const stems = prunedKeys(tree).map((key) => rstripSlash(displayPath(prefix, key)) + '/')
-  if (stems.length === 0) return rows
-  return rows.filter((row) => !stems.some((stem) => row.startsWith(stem) && row !== stem))
-}
-
-// Decide every pending prune by asking for its directory's mtime. The
-// backend judged its entries without their mtimes, so a prune reached past
-// `-newermt` or `-mtime` is only pending; the caller's overlay-aware stat
-// answers for the directory here, and a directory the test rejects keeps
-// its contents (`find d -newermt X -prune` skips only the directories newer
-// than X, as GNU does). `mtimeOf` takes a mount-relative key and answers
-// null when the directory reports no mtime or is gone.
-export async function settlePendingPrunes(
-  node: PredNode,
-  mtimeOf: (key: string) => Promise<number | null>,
-): Promise<void> {
-  const mtimes = new Map<string, number | null>()
-  for (const pend of pendingPrunes(node)) {
-    mtimes.set(pend.entry.key, await mtimeOf(pend.entry.key))
-  }
-  settlePrunes(node, mtimes)
 }
 
 export function treeHasEmpty(node: PredNode): boolean {

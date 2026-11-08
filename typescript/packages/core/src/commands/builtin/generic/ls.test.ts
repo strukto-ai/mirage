@@ -23,10 +23,11 @@ import type { LsIndicator, LsLinkMode } from '../../../types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Files } from '../../../workspace/files.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import type { Context } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -143,14 +144,19 @@ const codeStat = (p: PathSpec): Promise<FileStat> => {
   )
 }
 
+async function drained(pending: Promise<CommandFnResult>): Promise<[Uint8Array, IOResult]> {
+  const result = await pending
+  if (result === null) return [new Uint8Array(), new IOResult()]
+  const [out, io] = result
+  return [await materialize(out), io]
+}
+
 async function status(
   paths: string[],
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<[number, string]> {
-  const result = await lsGeneric(paths.map(spec), ctx(flags), codeReaddir, codeStat)
-  if (result === null) return [-1, '']
-  const [out, io] = result
-  return [io.exitCode, DEC.decode((out ?? new Uint8Array()) as Uint8Array)]
+  const [out, io] = await drained(lsGeneric(paths.map(spec), ctx(flags), codeReaddir, codeStat))
+  return [io.exitCode, DEC.decode(out)]
 }
 
 describe('lsGeneric exit codes', () => {
@@ -176,6 +182,39 @@ describe('lsGeneric exit codes', () => {
   })
 })
 
+describe('lsGeneric -R', () => {
+  // As ls does, an operand is checked before any is listed, so its failure is
+  // named before what the walk meets below another, and each directory below
+  // prints as the walk reaches it. Mirrors test_ls.py.
+  it('lists each directory as the walk reaches it', async () => {
+    const listed: string[] = []
+    const tracked = (p: PathSpec): Promise<string[]> => {
+      listed.push(key(p))
+      return codeReaddir(p)
+    }
+    const result = await lsGeneric(
+      [spec('/deep'), spec('/good'), spec('/bad')],
+      ctx({ recursive: true }),
+      tracked,
+      codeStat,
+    )
+    const [out, io] = result as [AsyncIterable<Uint8Array>, IOResult]
+    const pulled = out[Symbol.asyncIterator]()
+    expect(DEC.decode((await pulled.next()).value as Uint8Array)).toBe('/deep:\nsub\n')
+    expect(listed).toEqual(['/deep', '/good', '/bad'])
+    const rest: Uint8Array[] = []
+    for (let next = await pulled.next(); next.done !== true; next = await pulled.next())
+      rest.push(next.value)
+    expect(DEC.decode(concat(rest))).toBe('\n/good:\na.txt\nb.txt\n')
+    expect(listed).toEqual(['/deep', '/good', '/bad', '/deep/sub'])
+    expect(io.exitCode).toBe(LS_FAILURE)
+    const lines = DEC.decode(io.stderr as Uint8Array)
+      .trimEnd()
+      .split('\n')
+    expect(lines.map((line) => line.split("'")[1])).toEqual(['/bad', '/deep/sub'])
+  })
+})
+
 describe('structure-only directories', () => {
   const missing = (p: PathSpec): Promise<never> => {
     const err = new Error(p.virtual) as Error & { code: string }
@@ -192,20 +231,22 @@ describe('structure-only directories', () => {
   // A structure chain (a link's ancestors) continues below the first
   // level, so -R descends it: only a mount root stops the walk.
   it('-R descends structure that continues below', async () => {
-    const result = await runWithMountGate('/', MountMode.WRITE, () =>
-      lsGeneric(
-        [PathSpec.fromStrPath('/ghost')],
-        {
-          flags: { recursive: true },
-          cwd: PathSpec.fromStrPath('/'),
-          vfs: owing('/ghost/deep/lnk/'),
-        } as never,
-        missing,
-        missing,
+    const [out, io] = await runWithMountGate('/', MountMode.WRITE, () =>
+      drained(
+        lsGeneric(
+          [PathSpec.fromStrPath('/ghost')],
+          {
+            flags: { recursive: true },
+            cwd: PathSpec.fromStrPath('/'),
+            vfs: owing('/ghost/deep/lnk/'),
+          } as never,
+          missing,
+          missing,
+        ),
       ),
     )
-    expect(result?.[1].exitCode).toBe(LS_OK)
-    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/ghost:\ndeep\n\n/ghost/deep:\nlnk\n')
+    expect(io.exitCode).toBe(LS_OK)
+    expect(DEC.decode(out)).toBe('/ghost:\ndeep\n\n/ghost/deep:\nlnk\n')
   })
 
   // A directory whose listing is refused is refused whole: a name the
@@ -222,21 +263,23 @@ describe('structure-only directories', () => {
           type: p.virtual === '/base/x' ? FileType.FILE : FileType.DIRECTORY,
         }),
       )
-    const result = await runWithMountGate('/', MountMode.WRITE, () =>
-      lsGeneric(
-        [PathSpec.fromStrPath('/base')],
-        {
-          flags: { recursive: true },
-          cwd: PathSpec.fromStrPath('/'),
-          vfs: owing('/base/sealed/il/'),
-        } as never,
-        guardedReaddir,
-        guardedStat,
+    const [out, io] = await runWithMountGate('/', MountMode.WRITE, () =>
+      drained(
+        lsGeneric(
+          [PathSpec.fromStrPath('/base')],
+          {
+            flags: { recursive: true },
+            cwd: PathSpec.fromStrPath('/'),
+            vfs: owing('/base/sealed/il/'),
+          } as never,
+          guardedReaddir,
+          guardedStat,
+        ),
       ),
     )
-    expect(result?.[1].exitCode).toBe(LS_MINOR_PROBLEM)
-    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/base:\nsealed\nx\n')
-    expect(DEC.decode(result?.[1].stderr as Uint8Array)).toBe(
+    expect(io.exitCode).toBe(LS_MINOR_PROBLEM)
+    expect(DEC.decode(out)).toBe('/base:\nsealed\nx\n')
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe(
       "ls: cannot open directory '/base/sealed': Permission denied\n",
     )
   })

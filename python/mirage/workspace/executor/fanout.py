@@ -42,6 +42,7 @@ from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, Producer
 from mirage.utils.hidden import path_visible
 from mirage.view.types import FollowOperands, SessionView
+from mirage.workspace.executor.command.handler import framed, mount_voice
 from mirage.workspace.files import Files
 from mirage.workspace.lookup import line_facts
 from mirage.workspace.mount import (
@@ -253,6 +254,10 @@ async def _fan_out_traversal(
                 stderr=format_fs_error(cmd_name, exc, paths),
             ),
         )
+    if stdout is not None and not isinstance(stdout, bytes):
+        # A walk that streams meets a failing mount as it is read; that
+        # failure is this command's result too.
+        stdout = framed(stdout, io, mount_voice(cmd_name, paths))
     # Only the mounts the walk can reach bound its output: a hidden one
     # never contributes a row, so its stricter limit must not apply.
     prefixes = {primary_mount.prefix}

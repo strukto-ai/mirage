@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { eacces, fsError } from '../../../../errors/fs.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import type { PathSpec } from '../../../../types.ts'
+import { FileStat, FileType, type PathSpec } from '../../../../types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { CondError } from './errors.ts'
@@ -73,6 +73,37 @@ describe('evalFlat', () => {
     [['/data/a', '-nt', '/data/b'], false],
   ] as const)('reads a refused stat as absent: %j', async (expr, expected) => {
     expect(await evalFlat(failingStat(eacces), [...expr])).toBe(expected)
+  })
+
+  // Mirrors python's test_s_unknown_size_reads_one_chunk_and_closes_the_read.
+  it('answers -s on a size-unknown file from one chunk and closes the read', async () => {
+    const pulled: string[] = []
+    let closed = false
+    async function* body(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
+      try {
+        for (const part of ['x'.repeat(10), 'y'.repeat(10)]) {
+          pulled.push(part)
+          yield new TextEncoder().encode(part)
+        }
+      } finally {
+        closed = true
+      }
+    }
+    const unsized: CondContext = {
+      dispatch: ((op: string) =>
+        op === 'stat'
+          ? Promise.resolve([new FileStat({ name: 'zt.txt', type: FileType.FILE }), null])
+          : op === 'read'
+            ? Promise.resolve([body(), null])
+            : Promise.reject(new Error(`unexpected ${op}`))) as unknown as DispatchFn,
+      namespace: { sessionLinks: () => ({ follow: (v: string) => v }) } as unknown as Namespace,
+      session: { cwd: '/data' } as unknown as SessionState,
+      name: 'test',
+    }
+    expect(await evalFlat(unsized, ['-s', '/data/zt.txt'])).toBe(true)
+    expect(pulled).toEqual(['x'.repeat(10)])
+    expect(closed).toBe(true)
   })
 
   // Mirrors python's test_a_stat_refused_eperm_reads_as_absent.

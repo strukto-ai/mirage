@@ -36,7 +36,7 @@ def _sink(fail: frozenset[str] = frozenset()):
     async def _write(p, d):
         if p.mount_path in fail:
             raise _SdkError("disk full")
-        written[p.mount_path] = d
+        written[p.mount_path] = await materialize(d)
 
     return written, _write
 

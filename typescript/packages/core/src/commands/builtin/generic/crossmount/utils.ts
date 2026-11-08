@@ -24,7 +24,7 @@ import { ROOT_CWD } from '../../../constants.ts'
 import { OPERAND_CONCURRENCY } from '../../constants.ts'
 import { eisdir, isFsError } from '../../../../errors/fs.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
-import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
+import { IOResult, materialize, type ByteSource, type PathRecord } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { type FileStat, FileType } from '../../../../types.ts'
 import type { Context } from '../../../config.ts'
@@ -37,6 +37,7 @@ import { parseFlags as parseGrepFlags } from '../grep.ts'
 import { groupLine } from '../../grep_binary.ts'
 import { betweenFiles as rgBetweenFiles, parseFlags as parseRgFlags } from '../rg.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { currentCaller, withCaller } from '../../../../context/session_context.ts'
 
 // Run one native single-mount command per operand, in operand order. Each
 // operand executes on its owning mount through `runSingle` (which also
@@ -59,6 +60,34 @@ export function runSeparator(cmdName: string, flagKwargs: Record<string, FlagVal
   return ''
 }
 
+/**
+ * One operand's run output, a bounded chunk at a time. A lazy stream can fail
+ * on first pull (head/tail opening the operand mid-drain); that is reported on
+ * the run as the native run would report it, and the remaining operands go
+ * on. Mirrors Python's `operand_output`.
+ */
+export async function* operandOutput(
+  cmdName: string,
+  scope: PathSpec,
+  out: ByteSource | null,
+  io: IOResult,
+  signal?: AbortSignal,
+): AsyncGenerator<Uint8Array> {
+  try {
+    yield* chunks(out ?? new Uint8Array(), signal)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    io.stderr = concatBytes([
+      await materialize(io.stderr),
+      encodeText(fsErrorLine(cmdName, scope, err)),
+    ])
+    // The command's own code for a failed read, not the catch-all: a lazy
+    // operand that fails here is the same failure the single-mount run
+    // reports eagerly, and it must answer the same number.
+    io.exitCode = readFailExitCode(cmdName, err)
+  }
+}
+
 export async function runOperands(
   runSingle: RunSingle,
   cmdName: string,
@@ -70,24 +99,7 @@ export async function runOperands(
   for (const scope of scopes) {
     const [out, io] = await runSingle(cmdName, [scope], texts, flagKwargs, {})
     const parts: Uint8Array[] = []
-    try {
-      for await (const part of chunks(out ?? new Uint8Array())) parts.push(part)
-    } catch (e) {
-      // A lazy stream can fail on first pull (head/tail opening the operand
-      // mid-drain); report it like the native run would and keep the
-      // remaining operands, GNU-style.
-      if (!isFsError(e)) throw e
-      const existing = await materialize(io.stderr)
-      const line = encodeText(fsErrorLine(cmdName, scope, e))
-      const merged = new Uint8Array(existing.byteLength + line.byteLength)
-      merged.set(existing, 0)
-      merged.set(line, existing.byteLength)
-      io.stderr = merged
-      // The command's own code for a failed read, not the catch-all: a
-      // lazy operand that fails here is the same failure the single-mount
-      // run reports eagerly, and it must answer the same number.
-      io.exitCode = readFailExitCode(cmdName, e)
-    }
+    for await (const part of operandOutput(cmdName, scope, out, io)) parts.push(part)
     results.push({ scope, data: concatBytes(parts), io })
   }
   return results
@@ -215,7 +227,11 @@ export function transferLinksOf(
   }
 }
 
-/** Stream independent native reads in order, keeping at most four invocations open. */
+/**
+ * Stream independent native reads in order, keeping at most four invocations
+ * open. The result settles as the stream drains; the runs' records (find's
+ * matches) join, in operand order, once the last has drained.
+ */
 export function streamOperands(
   runSingle: RunSingle,
   cmdName: string,
@@ -234,6 +250,7 @@ export function streamOperands(
     }[] = []
     let next = 0
     let printed = false
+    const records: (readonly PathRecord[] | null)[] = []
     const start = (): void => {
       const scope = scopes[next++]
       if (scope === undefined) return
@@ -258,28 +275,25 @@ export function streamOperands(
         const { scope, result } = head
         const [out, branch] = await abortable(result, controller.signal)
         let first = true
-        try {
-          for await (const data of chunks(out ?? new Uint8Array(), controller.signal)) {
-            if (data.byteLength === 0) continue
-            if (first && printed && separator !== '') yield encodeText(separator)
-            first = false
-            printed = true
-            yield data
-          }
-        } catch (err) {
-          if (!isFsError(err)) throw err
-          branch.stderr = concatBytes([
-            await materialize(branch.stderr),
-            encodeText(fsErrorLine(cmdName, scope, err)),
-          ])
-          branch.exitCode = readFailExitCode(cmdName, err)
+        for await (const data of operandOutput(cmdName, scope, out, branch, controller.signal)) {
+          if (data.byteLength === 0) continue
+          if (first && printed && separator !== '') yield encodeText(separator)
+          first = false
+          printed = true
+          yield data
         }
         io.stderr = concatBytes([await materialize(io.stderr), await materialize(branch.stderr)])
         io.exitCode = Math.max(io.exitCode, branch.exitCode)
         if (branch.refusal !== null) io.refusal = branch.refusal
+        records.push(branch.records)
         pending.shift()
         start()
       }
+      io.records = records.every((found) => found !== null)
+        ? records.flatMap((found, position) =>
+            found.map((record) => ({ ...record, run: position })),
+          )
+        : null
     } finally {
       controller.abort()
       for (const item of pending) {
@@ -292,5 +306,5 @@ export function streamOperands(
       }
     }
   }
-  return [stream(), io]
+  return [withCaller(stream(), currentCaller()), io]
 }

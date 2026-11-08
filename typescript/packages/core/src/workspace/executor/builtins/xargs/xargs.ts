@@ -37,7 +37,7 @@ import { chunks } from '../../../../io/cooperative.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
 import { SharedStdin, yieldBytes } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
-import { IOResult } from '../../../../io/types.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
@@ -1243,9 +1243,11 @@ export async function handleXargs(
     let stopped: number | null = null
     let failed = false
     const torn: IOResult[] = []
+    // Each run's stderr, joined once the runs end.
+    const errors = [encodeText(plan.notes)]
     async function record(io: IOResult): Promise<boolean> {
       if (io.exitCode === 255 && stopped === null) stopped = 124
-      merged.stderr = (await merged.merge(new IOResult({ stderr: io.stderr }))).stderr
+      errors.push(await materialize(io.stderr))
       return io.exitCode !== 0
     }
     try {
@@ -1268,11 +1270,13 @@ export async function handleXargs(
       if (stopped !== null) merged.exitCode = stopped
       else if (sink.failure !== null) {
         const [text, code] = sink.failure
-        merged.stderr = (await merged.merge(new IOResult({ stderr: encodeText(text) }))).stderr
+        errors.push(encodeText(text))
         // A command that failed outranks xargs's own error: GNU 4.10 exits
         // 123 on `X1 'c` when X1 fails.
         merged.exitCode = failed ? 123 : code
       } else merged.exitCode = failed ? 123 : 0
+      const stderr = concat(errors)
+      merged.stderr = stderr.byteLength > 0 ? stderr : null
       node.exitCode = merged.exitCode
     }
   }

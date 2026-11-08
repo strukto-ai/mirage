@@ -16,6 +16,7 @@ import asyncio
 import errno
 
 from mirage.commands.builtin.generic.crossmount.relay.ls import run_ls
+from mirage.io.types import materialize
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 # Two mounts, /a/ and /b/, as a plain virtual-path tree. The relayed
@@ -81,14 +82,17 @@ def scope(virtual: str) -> PathSpec:
 
 def run(scopes, flags=None, roots=frozenset()):
     calls = Calls()
-    out, io = asyncio.run(
-        run_ls(
+
+    async def listed():
+        out, io = await run_ls(
             [scope(s) for s in scopes],
             flags or {},
             make_dispatch(calls, roots),
             None,
         )
-    )
+        return await materialize(out), io
+
+    out, io = asyncio.run(listed())
     return out.decode(), io, calls
 
 

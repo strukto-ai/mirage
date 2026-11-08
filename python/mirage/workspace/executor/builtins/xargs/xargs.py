@@ -52,7 +52,7 @@ from mirage.io import IOResult
 from mirage.io.cooperative import chunks
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import SharedStdin, yield_bytes
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console.pipe import PipeConsole
@@ -1236,21 +1236,23 @@ async def handle_xargs(
         finally:
             await source.aclose()
 
-    merged = IOResult(stderr=encode_text(plan.notes) or None)
+    notes = encode_text(plan.notes)
+    merged = IOResult(stderr=notes or None)
     node = ExecutionNode(command="xargs")
 
     async def output() -> AsyncIterator[bytes]:
         stop = None
         failed = False
         torn: list[IOResult] = []
+        # Each run's stderr, joined once the runs end.
+        errors = [notes]
 
         async def record(io: IOResult) -> None:
             nonlocal failed, stop
             failed = failed or io.exit_code != 0
             if io.exit_code == 255 and stop is None:
                 stop = 124
-            combined = await merged.merge(IOResult(stderr=io.stderr))
-            merged.stderr = combined.stderr
+            errors.append(await materialize(io.stderr))
 
         results = _run_lines(
             execute_fn,
@@ -1279,15 +1281,13 @@ async def handle_xargs(
                 merged.exit_code = stop
             elif sink.failure is not None:
                 text, code = sink.failure
-                combined = await merged.merge(
-                    IOResult(stderr=encode_text(text))
-                )
-                merged.stderr = combined.stderr
+                errors.append(encode_text(text))
                 # A command that failed outranks xargs's own error: GNU
                 # 4.10 exits 123 on `X1 'c` when X1 fails.
                 merged.exit_code = 123 if failed else code
             else:
                 merged.exit_code = 123 if failed else 0
+            merged.stderr = b"".join(errors) or None
             node.exit_code = merged.exit_code
 
     return output(), merged, node

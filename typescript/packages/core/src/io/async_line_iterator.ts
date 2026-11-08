@@ -53,6 +53,9 @@ export class PipeInput implements AsyncIterableIterator<Uint8Array> {
 export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private readonly source: AsyncIterator<Uint8Array>
   private buf: Uint8Array<ArrayBuffer> = new Uint8Array(0)
+  /** The store `loadRest` grows `buf` in, and where its bytes end. */
+  private store: Uint8Array<ArrayBuffer> = new Uint8Array(0)
+  private stored = 0
   private pulled = 0
   private exhausted = false
   private readonly budget = new YieldBudget()
@@ -170,13 +173,38 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         if (result.done === true) this.exhausted = true
         else {
           checkMemory(this.buf.byteLength + result.value.byteLength)
-          this.buf = concat([this.buf, result.value])
+          this.extend(result.value)
         }
       }
     } catch (error) {
       await this.failed(error)
       throw error
     }
+  }
+
+  /**
+   * Put `chunk` after `buf` in the room left at the end of `store` while
+   * `buf` still ends there, else in a store twice the size, so a long load
+   * copies each byte a bounded number of times.
+   */
+  private extend(chunk: Uint8Array): void {
+    const buf = this.buf
+    const end = this.stored + chunk.byteLength
+    if (
+      buf.buffer === this.store.buffer &&
+      buf.byteOffset + buf.byteLength === this.stored &&
+      end <= this.store.byteLength
+    ) {
+      this.store.set(chunk, this.stored)
+      this.stored = end
+      this.buf = this.store.subarray(buf.byteOffset, end)
+      return
+    }
+    this.store = new Uint8Array(2 * (buf.byteLength + chunk.byteLength))
+    this.store.set(buf)
+    this.store.set(chunk, buf.byteLength)
+    this.stored = buf.byteLength + chunk.byteLength
+    this.buf = this.store.subarray(0, this.stored)
   }
 
   /**
@@ -357,7 +385,18 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     delim: number | null,
     signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
-    let out: Uint8Array<ArrayBuffer> = new Uint8Array(0)
+    // The characters taken are the first `run` bytes of `buf`, set aside
+    // into `parts` whole before each pull, so none is copied twice.
+    const parts: Uint8Array[] = []
+    let held = 0
+    let run = 0
+    const setAside = (): void => {
+      if (run === 0) return
+      parts.push(this.buf.subarray(0, run))
+      held += run
+      this.buf = this.buf.subarray(run)
+      run = 0
+    }
     const room = memoryRoom()
     try {
       let taken = 0
@@ -366,26 +405,32 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         if (pending !== undefined) await pending
         // One pull can split a character across chunks, so top the buffer
         // up to the widest one before reading its first byte as a whole.
-        if (this.buf.byteLength < 4 && !this.exhausted) {
+        if (this.buf.byteLength - run < 4 && !this.exhausted) {
+          setAside()
           const result = await this.pull(signal)
           if (result.done === true) this.exhausted = true
           else this.buf = concat([this.buf, result.value])
           continue
         }
-        if (this.buf.byteLength === 0) return [new Uint8Array(out), false]
-        if (delim !== null && this.buf[0] === delim) {
-          this.buf = this.buf.subarray(1)
-          return [new Uint8Array(out), true]
+        if (this.buf.byteLength === run) {
+          setAside()
+          return [concat(parts), false]
         }
-        const width = charWidth(this.buf)
-        if (room !== null && out.byteLength + width > room) throw new MemoryExhausted()
-        out = concat([out, this.buf.subarray(0, width)])
-        this.buf = this.buf.subarray(width)
+        if (delim !== null && this.buf[run] === delim) {
+          setAside()
+          this.buf = this.buf.subarray(1)
+          return [concat(parts), true]
+        }
+        const width = charWidth(this.buf, run)
+        if (room !== null && held + run + width > room) throw new MemoryExhausted()
+        run += width
         taken++
       }
-      return [new Uint8Array(out), true]
+      setAside()
+      return [concat(parts), true]
     } catch (error) {
-      await this.failed(error, [out])
+      setAside()
+      await this.failed(error, parts)
       throw error
     }
   }
@@ -465,7 +510,7 @@ export function lineBuffer(stdin: ByteSource): AsyncLineIterator {
 }
 
 /**
- * How many bytes `data`'s first character spans, decoded as UTF-8.
+ * How many bytes the character at `at` in `data` spans, decoded as UTF-8.
  *
  * Always at least one and never more than what is there, so a caller
  * stepping by this never splits a character and never stalls. Bytes that
@@ -474,13 +519,13 @@ export function lineBuffer(stdin: ByteSource): AsyncLineIterator {
  * lead the encoding never uses, and a sequence cut short by a byte that
  * cannot continue it.
  */
-export function charWidth(data: Uint8Array): number {
-  const lead = data[0] ?? 0
+export function charWidth(data: Uint8Array, at = 0): number {
+  const lead = data[at] ?? 0
   if (lead < 0xc2 || lead >= 0xf5) return 1
   const width = lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4
-  const limit = Math.min(width, data.byteLength)
+  const limit = Math.min(width, data.byteLength - at)
   for (let i = 1; i < limit; i++) {
-    const byte = data[i] ?? 0
+    const byte = data[at + i] ?? 0
     if (byte < 0x80 || byte >= 0xc0) return i
   }
   return limit

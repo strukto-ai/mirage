@@ -22,7 +22,10 @@ import type { PredNode } from './types.ts'
 import { isEnoent } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { parseFindExpression } from '../../rs/find.ts'
+import { collected } from '../../test-utils.ts'
 
+const walk = (...args: Parameters<typeof walkFind>): Promise<string[]> =>
+  collected(walkFind(...args))
 function enoent(p: string): Error {
   const e = new Error(`ENOENT: ${p}`) as Error & { code: string }
   e.code = 'ENOENT'
@@ -75,7 +78,7 @@ describe('walkFind', () => {
           return row === undefined ? Promise.reject(enoent(path.virtual)) : Promise.resolve(row)
         },
       }
-      const result = await runWithCacheManager(manager, () => walkFind(ROOT, deps))
+      const result = await runWithCacheManager(manager, () => walk(ROOT, deps))
       expect(result).toEqual(['/', '/entry'])
       expect(sizes.mock.calls).toEqual([])
     },
@@ -98,7 +101,7 @@ describe('walkFind', () => {
       },
     }
     const result = await runWithCacheManager(manager, () =>
-      walkFind(ROOT, deps, { minSize: 6, maxSize: 6 }),
+      walk(ROOT, deps, { minSize: 6, maxSize: 6 }),
     )
     expect(result).toEqual(['/entry'])
     expect(sizes.mock.calls.length).toBeGreaterThan(0)
@@ -110,9 +113,7 @@ describe('walkFind', () => {
       stat: () =>
         Promise.resolve(new FileStat({ name: 'records.jsonl', type: FileType.FILE, size: null })),
     }
-    expect(await walkFind(PathSpec.fromStrPath('/records.jsonl'), deps, { empty: true })).toEqual(
-      [],
-    )
+    expect(await walk(PathSpec.fromStrPath('/records.jsonl'), deps, { empty: true })).toEqual([])
   })
 
   it('walks recursively and sorts by codepoint', async () => {
@@ -123,7 +124,7 @@ describe('walkFind', () => {
       },
       { '/Zeta.txt': { size: 1 }, '/alpha.txt': { size: 1 }, '/docs/a.md': { size: 1 } },
     )
-    const out = await walkFind(ROOT, deps)
+    const out = await walk(ROOT, deps)
     expect(out).toEqual(['/Zeta.txt', '/alpha.txt', '/docs', '/docs/a.md'])
   })
 
@@ -132,18 +133,18 @@ describe('walkFind', () => {
       { '/': ['/dir', '/file.txt'], '/dir': [] },
       { '/dir': {}, '/file.txt': { size: 1 } },
     )
-    expect(await walkFind(ROOT, deps, { type: 'd' })).toEqual(['/dir'])
-    expect(await walkFind(ROOT, deps, { type: 'f' })).toEqual(['/file.txt'])
+    expect(await walk(ROOT, deps, { type: 'd' })).toEqual(['/dir'])
+    expect(await walk(ROOT, deps, { type: 'f' })).toEqual(['/file.txt'])
   })
 
   it('treats entries whose stat fails as files', async () => {
     const deps = makeDeps({ '/': ['/phantom'] })
-    expect(await walkFind(ROOT, deps, { type: 'f' })).toEqual(['/phantom'])
+    expect(await walk(ROOT, deps, { type: 'f' })).toEqual(['/phantom'])
   })
 
   it('swallows ENOENT from readdir but propagates other errors', async () => {
     const missing = makeDeps({ '/': ['/gone/'] })
-    expect(await walkFind(ROOT, missing, {})).toEqual(['/gone'])
+    expect(await walk(ROOT, missing, {})).toEqual(['/gone'])
     const limited: WalkFindDeps = {
       ...makeDeps({}),
       readdir: (spec) =>
@@ -151,7 +152,7 @@ describe('walkFind', () => {
           ? Promise.resolve(['/bad/'])
           : Promise.reject(new Error('rate limited')),
     }
-    await expect(walkFind(ROOT, limited)).rejects.toThrow('rate limited')
+    await expect(walk(ROOT, limited)).rejects.toThrow('rate limited')
   })
 
   it('emits only the start path for maxDepth 0 per the GNU depth convention', async () => {
@@ -164,7 +165,7 @@ describe('walkFind', () => {
         return base.readdir(spec)
       },
     }
-    expect(await walkFind(ROOT, deps, { maxDepth: 0 })).toEqual(['/'])
+    expect(await walk(ROOT, deps, { maxDepth: 0 })).toEqual(['/'])
     expect(readdirCalls).toBe(0)
   })
 
@@ -182,19 +183,19 @@ describe('walkFind', () => {
     )
     const gated = parseFindExpression(['-mindepth', '1', '-newermt', '2010-01-01', '-prune'])
     expect(
-      await walkFind(ROOT, deps, { tree: gated.tree, minDepth: 1, mtimeMin: gated.mtimeMin }),
+      await walk(ROOT, deps, { tree: gated.tree, minDepth: 1, mtimeMin: gated.mtimeMin }),
     ).toEqual(['/new', '/old/f.txt'])
     const firm = parseFindExpression(['-mindepth', '1', '-prune', '-newermt', '2010-01-01'])
     expect(
-      await walkFind(ROOT, deps, { tree: firm.tree, minDepth: 1, mtimeMin: firm.mtimeMin }),
+      await walk(ROOT, deps, { tree: firm.tree, minDepth: 1, mtimeMin: firm.mtimeMin }),
     ).toEqual(['/new'])
   })
 
   it('emits the start path at depth 0 when it exists', async () => {
     const deps = makeDeps({ '/': ['/a.txt'] }, { '/': {}, '/a.txt': { size: 1 } })
-    expect(await walkFind(ROOT, deps)).toEqual(['/', '/a.txt'])
-    expect(await walkFind(ROOT, deps, { type: 'd' })).toEqual(['/'])
-    expect(await walkFind(ROOT, deps, { minDepth: 1 })).toEqual(['/a.txt'])
+    expect(await walk(ROOT, deps)).toEqual(['/', '/a.txt'])
+    expect(await walk(ROOT, deps, { type: 'd' })).toEqual(['/'])
+    expect(await walk(ROOT, deps, { minDepth: 1 })).toEqual(['/a.txt'])
   })
 
   it('matches the start path basename against -name', async () => {
@@ -203,7 +204,7 @@ describe('walkFind', () => {
       { '/mnt/x': {}, '/mnt/x/a.txt': { size: 1 } },
     )
     const root = new PathSpec({ virtual: '/mnt/x', directory: '/mnt/x', vfsPath: 'mnt/x' })
-    expect(await walkFind(root, deps, { name: 'x' })).toEqual(['/mnt/x'])
+    expect(await walk(root, deps, { name: 'x' })).toEqual(['/mnt/x'])
   })
 
   it('matches empty files and dirs for -empty', async () => {
@@ -222,13 +223,13 @@ describe('walkFind', () => {
         '/full-dir/a.txt': { size: 1 },
       },
     )
-    expect(await walkFind(ROOT, deps, { empty: true })).toEqual(['/empty-dir', '/empty.txt'])
+    expect(await walk(ROOT, deps, { empty: true })).toEqual(['/empty-dir', '/empty.txt'])
   })
 
   it('returns virtual paths under a mounted start point', async () => {
     const deps = makeDeps({ '/mnt/x': ['/mnt/x/a.txt'] }, { '/mnt/x/a.txt': { size: 1 } })
     const root = new PathSpec({ virtual: '/mnt/x', directory: '/mnt/x', vfsPath: 'mnt/x' })
-    expect(await walkFind(root, deps)).toEqual(['/mnt/x/a.txt'])
+    expect(await walk(root, deps)).toEqual(['/mnt/x/a.txt'])
   })
 
   it('filters mtime using naive timestamps as UTC', async () => {
@@ -236,7 +237,7 @@ describe('walkFind', () => {
       { '/': ['/naive.txt'] },
       { '/naive.txt': { size: 1, modified: '2026-01-05T00:00:00' } },
     )
-    const out = await walkFind(ROOT, deps, {
+    const out = await walk(ROOT, deps, {
       mtimeMin: Date.parse('2026-01-04T23:30:00Z') / 1000,
       mtimeMax: Date.parse('2026-01-05T00:30:00Z') / 1000,
     })
@@ -245,13 +246,13 @@ describe('walkFind', () => {
 
   it('keeps a child whose readdir raises ENOENT but stops descending', async () => {
     const deps = makeDeps({ '/': ['/ghost/'] })
-    expect(await walkFind(ROOT, deps)).toEqual(['/ghost'])
+    expect(await walk(ROOT, deps)).toEqual(['/ghost'])
   })
 
   it('propagates non-ENOENT stat errors from the dir-classification fallback', async () => {
     const base = makeDeps({ '/': ['/mystery'] })
     const deps: WalkFindDeps = { ...base, stat: () => Promise.reject(new Error('rate limited')) }
-    await expect(walkFind(ROOT, deps, { type: 'f' })).rejects.toThrow('rate limited')
+    await expect(walk(ROOT, deps, { type: 'f' })).rejects.toThrow('rate limited')
   })
 
   it('propagates non-ENOENT stat errors during size filtering', async () => {
@@ -260,12 +261,12 @@ describe('walkFind', () => {
       ...base,
       stat: () => Promise.reject(new Error('rate limited')),
     }
-    await expect(walkFind(ROOT, deps, { minSize: 1 })).rejects.toThrow('rate limited')
+    await expect(walk(ROOT, deps, { minSize: 1 })).rejects.toThrow('rate limited')
   })
 
   it('drops entries whose stat raises ENOENT during size filtering', async () => {
     const deps = makeDeps({ '/': ['/a.json'] })
-    expect(await walkFind(ROOT, deps, { minSize: 1 })).toEqual([])
+    expect(await walk(ROOT, deps, { minSize: 1 })).toEqual([])
   })
 
   const FLAKY_TREE = { '/': ['/a.json', '/b.json', '/c.json'] }
@@ -293,7 +294,7 @@ describe('walkFind', () => {
     const err = new Error('socket hang up')
     const unstatted = new Map<string, unknown>()
     const deps = { ...flaky(err), unstatted }
-    expect(await walkFind(ROOT, deps, { type: 'f' })).toEqual(['/a.json', '/b.json', '/c.json'])
+    expect(await walk(ROOT, deps, { type: 'f' })).toEqual(['/a.json', '/b.json', '/c.json'])
     expect([...unstatted]).toEqual([['/b.json', err]])
   })
 
@@ -301,7 +302,7 @@ describe('walkFind', () => {
     const calls: string[] = []
     const unstatted = new Map<string, unknown>()
     const deps = { ...flaky(new Error('socket hang up'), calls), unstatted }
-    expect(await walkFind(ROOT, deps, { minSize: 1 })).toEqual(['/', '/a.json', '/c.json'])
+    expect(await walk(ROOT, deps, { minSize: 1 })).toEqual(['/', '/a.json', '/c.json'])
     expect(calls.filter((p) => p === '/b.json')).toHaveLength(1)
   })
 
@@ -316,19 +317,17 @@ describe('walkFind', () => {
         { op: 'mtime', lo: null, hi: 0 },
       ],
     }
-    expect(await walkFind(ROOT, deps, { tree })).toEqual(['/b.json'])
+    expect(await walk(ROOT, deps, { tree })).toEqual(['/b.json'])
     expect([...unstatted]).toEqual([['/b.json', err]])
   })
 
   it('propagates an entry failure the caller does not collect', async () => {
-    await expect(walkFind(ROOT, flaky(new Error('socket hang up')))).rejects.toThrow(
-      'socket hang up',
-    )
+    await expect(walk(ROOT, flaky(new Error('socket hang up')))).rejects.toThrow('socket hang up')
   })
 
   it('propagates a timeout even when the caller collects', async () => {
     const deps = { ...flaky(new CommandTimeoutError('stat', 5)), unstatted: new Map() }
-    await expect(walkFind(ROOT, deps)).rejects.toThrow('timed out')
+    await expect(walk(ROOT, deps)).rejects.toThrow('timed out')
   })
 })
 

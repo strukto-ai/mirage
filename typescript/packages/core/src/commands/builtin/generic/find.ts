@@ -15,16 +15,13 @@
 import { modifiedTs, type FindOptions } from '../../../core/generic/find.ts'
 import {
   bindTree,
-  dropPruned,
   emitStartPath,
   argsToTree,
   primeRegexes,
   printfKind,
   quitFired,
-  settlePendingPrunes,
   startBasename,
   timeTestsFailing,
-  treeHas,
   treeHasTime,
   unrespellRaw,
 } from '../../../core/generic/find_eval.ts'
@@ -43,7 +40,6 @@ import { parseFindExpression, type FindExpr } from '../../../rs/find.ts'
 import { FileType, Follow, LineFacts, PathSpec, type FileStat } from '../../../types.ts'
 import { respellOne, respellRaw } from '../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
-import { compareCodePoints } from '../../../utils/sort.ts'
 import { readerOf } from '../../../workspace/files.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
@@ -56,16 +52,6 @@ import { dotRefusal, linkFollow, statOrEnoent, vfsStatPath } from '../utils/path
 
 const ENC = new TextEncoder()
 
-// The stat probe's path for one display row.
-function rowSpec(row: string): PathSpec {
-  return new PathSpec({
-    virtual: row,
-    directory: row,
-    resolved: false,
-    vfsPath: stripSlash(row),
-  })
-}
-
 // The structured row the action layer acts on: the resolved path, spelled
 // as it prints.
 function matchedPath(row: string, root: PathSpec): PathSpec {
@@ -77,45 +63,6 @@ function matchedPath(row: string, root: PathSpec): PathSpec {
     rawPath: row,
     resolved: true,
   })
-}
-
-async function applyMtimeFilter(
-  results: string[],
-  mtimeMin: number | null,
-  mtimeMax: number | null,
-  stat: (spec: PathSpec) => Promise<FileStat>,
-): Promise<string[]> {
-  if (mtimeMin === null && mtimeMax === null) return results
-  const filtered: string[] = []
-  for (const r of results) {
-    let st: FileStat
-    try {
-      st = await stat(rowSpec(r))
-    } catch (err) {
-      if (isEnoent(err) || isEnotdir(err)) continue
-      throw err
-    }
-    const mt = modifiedTs(st.modified)
-    if (mt === null) continue
-    if (mtimeMin !== null && mt < mtimeMin) continue
-    if (mtimeMax !== null && mt > mtimeMax) continue
-    filtered.push(r)
-  }
-  return filtered
-}
-
-// Epoch-second mtime of one row through the overlay-aware stat, null when it
-// has none or is gone.
-async function rowMtime(
-  stat: (spec: PathSpec) => Promise<FileStat>,
-  row: string,
-): Promise<number | null> {
-  try {
-    return modifiedTs((await stat(rowSpec(row))).modified)
-  } catch (err) {
-    if (!isEnoent(err) && !isEnotdir(err)) throw err
-    return null
-  }
 }
 
 // Results for a start point that is not a directory.
@@ -163,61 +110,6 @@ function startPointResults(
     stat: start,
   })
   return results
-}
-
-// Results for the directory start point itself, at depth 0.
-//
-// GNU lists a directory start point before descending into it, so
-// `find <dir>` names the directory even when it holds nothing. The generic
-// already statted the start point to get here, so it decides this row and
-// the backend only has to answer for descendants (see withRootRow for why
-// the backend's own row is dropped).
-//
-// The -mtime window is deliberately not applied here: the caller either
-// filters every row against namespace-aware times afterwards, or pushed the
-// window into the backend, and re-testing it against the probe's own stat
-// would drop rows a touch had just matched. `mtime` answers the tree's own
-// time tests, `stat` the tests that read one.
-function rootDirResults(
-  root: PathSpec,
-  options: FindOptions,
-  tree: PredNode,
-  isEmpty: boolean | null,
-  mtime: number | null = null,
-  stat: FileStat | null = null,
-): string[] {
-  const results: string[] = []
-  emitStartPath(results, rstripSlash(root.virtual) || '/', startBasename(root.virtual), {
-    kind: 'd',
-    isEmpty,
-    exists: true,
-    tree,
-    maxDepth: options.maxDepth ?? null,
-    minDepth: options.minDepth ?? null,
-    minSize: options.minSize ?? null,
-    maxSize: options.maxSize ?? null,
-    mtime,
-    stat,
-  })
-  return results
-}
-
-// Replace the backend's row for the start point with the generic's.
-//
-// Most native find ops emit the start path themselves, and each judged it
-// on the only facts it had: ssh calls every directory non-empty, an object
-// store calls one empty only when its own listing was empty, and a store
-// holding no directory marker reported nothing at all. Merging instead of
-// replacing would keep whichever of those a backend happened to say, so the
-// row is dropped and the generic's takes its place. Descendants are still
-// entirely the backend's answer.
-//
-// Compared with trailing slashes stripped, because a directory key is
-// spelled both ways across backends (chroma reports the root as `<root>/`).
-function withRootRow(rows: string[], display: string, root: string[]): string[] {
-  return rows
-    .filter((r) => (rstripSlash(r) || '/') !== display)
-    .concat(root.length > 0 ? [display] : [])
 }
 
 // The strerror of a start point statPath found nothing at. statPath answers
@@ -271,9 +163,7 @@ export function findGeneric(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-  find: (root: PathSpec, options: FindOptions) => Promise<string[]>,
-  stat?: (spec: PathSpec) => Promise<FileStat>,
-  dirEmpty?: (spec: PathSpec) => Promise<boolean>,
+  find: (root: PathSpec, options: FindOptions) => AsyncIterable<string>,
   unreadable?: () => string[],
   unstatted?: () => [string, unknown][],
   // A walker already evaluates times in its predicate tree. Its raw stat is
@@ -338,11 +228,6 @@ export function findGeneric(
   const mtimeMin = limits?.mtimeMin ?? null
   const mtimeMax = limits?.mtimeMax ?? null
   const emptyFlag = parsed.empty
-  // With a stat wired, the mtime window is applied by the overlay-
-  // aware post-filter below, not pushed into the core: backend cores
-  // only see native times and would drop files whose mtime lives in
-  // the namespace (touch results, observed writes).
-  const pushMtime = stat === undefined
   const effMtimeMin = expr !== null ? expr.mtimeMin : mtimeMin
   const effMtimeMax = expr !== null ? expr.mtimeMax : mtimeMax
   const options: FindOptions =
@@ -353,8 +238,8 @@ export function findGeneric(
           ...(expr.minDepth !== null ? { minDepth: expr.minDepth } : {}),
           ...(expr.minSize !== null ? { minSize: expr.minSize } : {}),
           ...(expr.maxSize !== null ? { maxSize: expr.maxSize } : {}),
-          ...(pushMtime && expr.mtimeMin !== null ? { mtimeMin: expr.mtimeMin } : {}),
-          ...(pushMtime && expr.mtimeMax !== null ? { mtimeMax: expr.mtimeMax } : {}),
+          ...(expr.mtimeMin !== null ? { mtimeMin: expr.mtimeMin } : {}),
+          ...(expr.mtimeMax !== null ? { mtimeMax: expr.mtimeMax } : {}),
           ...(expr.usesEmpty ? { empty: true } : {}),
           ...(expr.depthFirst ? { depthFirst: true } : {}),
         }
@@ -366,8 +251,8 @@ export function findGeneric(
           ...(minDepth !== null ? { minDepth } : {}),
           ...(minSize !== null ? { minSize } : {}),
           ...(maxSize !== null ? { maxSize } : {}),
-          ...(pushMtime && mtimeMin !== null ? { mtimeMin } : {}),
-          ...(pushMtime && mtimeMax !== null ? { mtimeMax } : {}),
+          ...(mtimeMin !== null ? { mtimeMin } : {}),
+          ...(mtimeMax !== null ? { mtimeMax } : {}),
           ...(pathFlag !== null ? { pathPattern: pathFlag } : {}),
           ...(emptyFlag ? { empty: true } : {}),
         }
@@ -422,8 +307,6 @@ export function findGeneric(
           continue
         }
       }
-      let startIsDir = false
-      let startFile: FileStat | null = null
       if (startStat !== undefined && !rootIsLink) {
         let start: FileStat | null
         try {
@@ -442,7 +325,7 @@ export function findGeneric(
           // rest, and exits 1. Reported as the operand was typed, falling
           // back to the resolved path for a synthesized root.
           const label = root.rawPath !== '' ? root.rawPath : root.virtual
-          missing.push(`find: '${label}': ${await missingStartDetail(root, missingStat ?? stat)}`)
+          missing.push(`find: '${label}': ${await missingStartDetail(root, missingStat)}`)
           continue
         }
         if (start.type !== FileType.DIRECTORY && root.rawPath.endsWith('/')) {
@@ -474,49 +357,23 @@ export function findGeneric(
           if (quitFired(tree)) break
           continue
         }
-        startIsDir = true
-        startFile = start
       }
-      // The directory row is known before any native op fetches descendants.
-      // Yielding it first lets a closed pipe prevent that remote traversal.
-      const usesEmptyEarly = expr !== null ? expr.usesEmpty : emptyFlag
-      const timed = treeHasTime(tree)
-      const mtimePushed = pushMtime && (effMtimeMin !== null || effMtimeMax !== null)
-      // The start point's own time answers its row's time tests, early and
-      // in the row that replaces the backend's below; unknown leaves the
-      // early row to the walk.
-      const rootMtime =
-        startIsDir && timed && !mtimePushed
-          ? stat !== undefined
-            ? await rowMtime(stat, rstripSlash(root.virtual) || '/')
-            : modifiedTs(startFile?.modified ?? null)
-          : null
-      let first: string[] = []
-      // A -quit on the root ends the walk before it begins, which only the
-      // walk can tell; -xtype reads past a link it may be.
-      const early = !treeHas(tree, ['quit', 'xtype'])
-      if (
-        early &&
-        startIsDir &&
-        !usesEmptyEarly &&
-        !mtimePushed &&
-        !(timed && rootMtime === null)
-      ) {
-        const rootRows =
-          rootDirResults(root, rootOptions, argsToTree(rootOptions), null, rootMtime, startFile)
-            .length > 0
-            ? [rstripSlash(root.virtual) || '/']
-            : []
-        const checked =
-          stat !== undefined
-            ? await applyMtimeFilter(rootRows, effMtimeMin, effMtimeMax, stat)
-            : rootRows
-        first = respellRaw(checked, root.virtual, root.rawPath)
-        for (const row of first) yield ENC.encode(row + '\n')
-      }
-      let keys: string[]
+      // Hidden rows drop here, above the walk, so a mount's visibility
+      // behavior is decided once for every backend.
+      const reader = ctx.vfs === undefined ? null : readerOf(ctx.vfs)
       try {
-        keys = await find(root, rootOptions)
+        for await (const key of find(root, rootOptions)) {
+          const display =
+            root.virtual === '/'
+              ? key
+              : rootKey === '/' && key === '/'
+                ? rstripSlash(root.virtual)
+                : rstripSlash(root.virtual) + key.slice(rootKey === '/' ? 0 : rootKey.length)
+          if (reader !== null && !reader.visible(display)) continue
+          const row = respellOne(display, root.virtual, root.rawPath)
+          yield ENC.encode(row + '\n')
+          records.push({ path: matchedPath(row, root), run })
+        }
       } catch (err) {
         // GNU find reports missing roots and moves on; anything else
         // (rate limits, auth failures) must surface.
@@ -543,64 +400,6 @@ export function findGeneric(
         )
       }
       for (const line of stopped?.() ?? []) missing.push(`find: ${line}`)
-      const rootMatches: string[] = []
-      for (const key of keys) {
-        const displayPath =
-          root.virtual === '/'
-            ? key
-            : rootKey === '/' && key === '/'
-              ? rstripSlash(root.virtual)
-              : rstripSlash(root.virtual) + key.slice(rootKey === '/' ? 0 : rootKey.length)
-        rootMatches.push(displayPath)
-      }
-      // GNU lists a directory start point itself before descending into it, so
-      // it is named even when it holds nothing. Decided here rather than by
-      // each backend, which read existence off its own listing. A pushed-down
-      // mtime window is the one case left to the backend: this row never
-      // passed through it.
-      // Emptiness is the one fact this row needs that a caller can decline to
-      // offer (a bespoke wrapper wires no readdir), and that caller's op may
-      // know it. Left alone in that case, so a backend's answer is never
-      // traded for "unknown".
-      const usesEmpty = expr !== null ? expr.usesEmpty : emptyFlag
-      const canProbe = !usesEmpty || dirEmpty !== undefined
-      let rows = rootMatches
-      // A walk that reached a -quit has judged the start point already, and
-      // under -depth after what it holds.
-      if (startIsDir && !mtimePushed && canProbe && quitted?.() !== true) {
-        const rootEmpty = usesEmpty && dirEmpty !== undefined ? await dirEmpty(root) : null
-        rows = withRootRow(
-          rootMatches,
-          root.virtual === '/' ? '/' : rstripSlash(root.virtual),
-          rootDirResults(
-            root,
-            rootOptions,
-            timed && rootMtime === null ? timeTestsFailing(tree) : argsToTree(rootOptions),
-            rootEmpty,
-            rootMtime,
-            startFile,
-          ),
-        )
-      }
-      const filtered =
-        stat !== undefined ? await applyMtimeFilter(rows, effMtimeMin, effMtimeMax, stat) : rows
-      filtered.sort(compareCodePoints)
-      // What -prune reached is known only once every row has been judged: a
-      // flat listing meets a child before its parent, so the ledger the tree
-      // kept is applied here, after every row is in.
-      if (stat !== undefined) {
-        await settlePendingPrunes(tree, (key) => rowMtime(stat, key))
-      }
-      const unpruned = dropPruned(filtered, tree)
-      // Hidden rows drop here, above the native-op/walk fork, so a mount's
-      // visibility behavior cannot depend on whether its backend ships a
-      // native find op: a walk through the dispatcher meets no hidden row,
-      // but a backend's own find knows nothing of hides.
-      const reader = ctx.vfs === undefined ? null : readerOf(ctx.vfs)
-      const visibleRows = reader === null ? unpruned : unpruned.filter((row) => reader.visible(row))
-      const added = respellRaw(visibleRows, root.virtual, root.rawPath)
-      for (const row of added) if (!first.includes(row)) yield ENC.encode(row + '\n')
-      for (const r of added) records.push({ path: matchedPath(r, root), run })
       if (quitted?.() === true) break
     }
     if (missing.length > 0) {

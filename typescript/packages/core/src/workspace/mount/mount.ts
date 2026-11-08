@@ -56,7 +56,7 @@ import {
 import { activePipe, pipeBelow } from '../../core/dev/device.ts'
 import type { DevicePipe } from '../../core/dev/pipe.ts'
 import {
-  appendByRewrite,
+  appendBySpooledRewrite,
   expectOffset,
   pwriteByStreamedRewrite,
   refuseTaken,
@@ -1040,7 +1040,7 @@ export class MountEntry {
         return await vfs.write(path, data, callerSignal(), handedOf(kw), kw.atomic === true)
       }
       if (vfs.supports('append')) return await vfs.append(path, data, handedOf(kw), callerSignal())
-      return await this.appendByRewrite(path, await materialize(data), kw.index)
+      return await this.appendByRewrite(path, data, kw.index)
     } finally {
       await closeQuietly(data)
     }
@@ -1048,11 +1048,11 @@ export class MountEntry {
 
   private appendByRewrite(
     path: PathSpec,
-    data: Uint8Array,
+    data: ByteSource,
     index: IndexCacheStore = this.index,
   ): Promise<unknown> {
-    return appendByRewrite(
-      (p) => this.readAt(index, p),
+    return appendBySpooledRewrite(
+      (p, spool) => this.readInto(index, p, spool),
       (request) => this.replaceAt(index, request),
       (p) => this.statAt(index, p),
       path,

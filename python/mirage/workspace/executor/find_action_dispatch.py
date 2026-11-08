@@ -42,7 +42,7 @@ from mirage.errors.fs import enoent, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.stream import SharedStdin, ensure_stream, materialize
-from mirage.io.types import ByteSource, IOResult, PathRecord
+from mirage.io.types import ByteSource, IOResult
 from mirage.rs.find import FindExpr
 from mirage.rs.stream import OpenStream, close_stream
 from mirage.runtime.types import DispatchFn
@@ -618,7 +618,7 @@ def _structural(path: PathSpec, registry: MountRegistry) -> bool:
 
 async def _apply_find_actions(
     stdout: ByteSource | None,
-    records: list[PathRecord] | None,
+    io: IOResult,
     expr: FindExpr,
     registry: MountRegistry,
     cwd: str,
@@ -674,9 +674,10 @@ async def _apply_find_actions(
 
     Args:
         stdout (ByteSource | None): display output from find.
-        records (list[PathRecord] | None): matches before rendering,
-            each with the start point it was found under, in operand
-            order.
+        io (IOResult): the selection's result, whose ``records`` are the
+            matches before rendering, each with the start point it was
+            found under, in operand order; a selection that streams
+            settles them as its rows drain, so they are read after.
         expr (FindExpr): the expression, parsed once for the line.
         registry (MountRegistry): used to route per-match dispatch.
         cwd (str): cwd forwarded to per-match sub-dispatch.
@@ -710,6 +711,7 @@ async def _apply_find_actions(
     if stdout is None or not (_has_actions(expr) or reorders):
         return stdout, b"", 0
     await materialize(stdout)
+    records = io.records
     if expr.execs and execute_fn is None:
         return (
             None,

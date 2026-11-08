@@ -34,22 +34,27 @@ import type { FindOptions } from '../generic/find.ts'
 import { walkFind } from '../generic/find.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
+import { collected } from '../../test-utils.ts'
 
 async function find(
   accessor: GDocsAccessor,
   path: PathSpec,
   options: FindOptions = {},
 ): Promise<string[]> {
-  return walkFind(
-    path,
-    {
-      readdir: async (spec) => {
-        const base = spec.virtual.replace(/\/$/, '')
-        return rowsOf(await readdirMod.readdir(accessor, spec)).map((row) => `${base}/${row.name}`)
+  return collected(
+    walkFind(
+      path,
+      {
+        readdir: async (spec) => {
+          const base = spec.virtual.replace(/\/$/, '')
+          return rowsOf(await readdirMod.readdir(accessor, spec)).map(
+            (row) => `${base}/${row.name}`,
+          )
+        },
+        stat: (spec) => statMod.stat(accessor, spec),
       },
-      stat: (spec) => statMod.stat(accessor, spec),
-    },
-    options,
+      options,
+    ),
   )
 }
 

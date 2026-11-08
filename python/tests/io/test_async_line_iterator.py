@@ -159,6 +159,19 @@ async def test_read_chars_spanning_a_chunk_boundary():
 
 
 @pytest.mark.asyncio
+async def test_reads_of_every_kind_share_one_offset_into_a_chunk():
+    it = AsyncLineIterator(_chunks([b"ab\ncd\xc3\xa9\nrest", b"!\n"]))
+    assert await it.readline() == b"ab"
+    assert await it.read_chars(3, None) == (b"cd\xc3\xa9", True)
+    assert it.position == 7
+    it.unread(b"Z")
+    assert await it.peek()
+    assert await it.read_until(b"\n") == (b"Z", True)
+    assert await it.read_chunk() == b"rest"
+    assert await it.readline() == b"!"
+
+
+@pytest.mark.asyncio
 async def test_read_chars_stops_at_the_delimiter():
     it = AsyncLineIterator(_chunks([b"ab:cd"]))
     data, complete = await it.read_chars(4, b":")
@@ -213,6 +226,25 @@ async def test_load_rest_ends_the_source_and_reads_on_from_memory():
     await lines.load_rest()
     assert ended == [True]
     assert [line async for line in lines] == [b"b", b"c"]
+
+
+@pytest.mark.asyncio
+async def test_a_line_read_during_a_load_waits_for_the_whole_rest():
+    gate, waiting = asyncio.Event(), asyncio.Event()
+    reader = AsyncLineIterator(_gated(gate, waiting, [b"b\nc", b"\nd\n"]))
+    assert await reader.readline() == b"a"
+    load = asyncio.create_task(reader.load_rest())
+    await waiting.wait()
+    line = asyncio.create_task(reader.readline())
+    for _ in range(100):
+        if reader._pull_lock._waiters:
+            break
+        await asyncio.sleep(0)
+    assert reader._pull_lock._waiters
+    gate.set()
+    await load
+    assert await line == b"b"
+    assert [rest async for rest in reader] == [b"c", b"d"]
 
 
 @pytest.mark.asyncio

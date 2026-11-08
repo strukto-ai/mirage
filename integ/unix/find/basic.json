@@ -77,6 +77,47 @@
         "true",
         "false"
       ]
+    },
+    {
+      "id": "find_walks_a_directory_before_its_later_siblings",
+      "seq": 500328,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "box",
+        "hf",
+        "hf-prefix",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/fwalk/a/b && printf x > /data/fwalk/a/b/x && printf c > /data/fwalk/a-c && printf t > /data/fwalk/a.txt && printf 0 > /data/fwalk/a0 && find /data/fwalk; find /data/fwalk -type f -print -quit",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fwalk\n/data/fwalk/a\n/data/fwalk/a/b\n/data/fwalk/a/b/x\n/data/fwalk/a-c\n/data/fwalk/a.txt\n/data/fwalk/a0\n/data/fwalk/a/b/x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "type",
+        "print",
+        "quit"
+      ],
+      "note": "A tree walk: a directory's contents follow it before its next sibling, so a/b comes before a-c even though '-' sorts before '/'. findutils 4.10 walks in readdir order; mirage visits siblings in name order."
     }
   ]
 }

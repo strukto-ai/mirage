@@ -785,6 +785,14 @@ export class Files {
  * those.
  */
 export class WorkspaceFiles extends Files {
+  /** The ledger's length, last record and byte totals when last summed. */
+  private tally: { count: number; last: OpRecord | undefined; network: number; cache: number } = {
+    count: 0,
+    last: undefined,
+    network: 0,
+    cache: 0,
+  }
+
   /**
    * The op ledger: every facade op lands here, and the executor appends each
    * shell line's ops too, so this is the one workspace-wide account (Python's
@@ -796,16 +804,36 @@ export class WorkspaceFiles extends Files {
 
   /** Total bytes transferred over the network. */
   get networkBytes(): number {
-    let total = 0
-    for (const r of this.recorded) if (!r.isCache) total += r.bytes
-    return total
+    return this.totals().network
   }
 
   /** Total bytes served from cache. */
   get cacheBytes(): number {
-    let total = 0
-    for (const r of this.recorded) if (r.isCache) total += r.bytes
-    return total
+    return this.totals().cache
+  }
+
+  /**
+   * The network and cache byte totals, adding only the records appended
+   * since the last sum. A ledger cut short or refilled since
+   * (`records.length = 0`) is summed again from its start. Mirrors Python's
+   * `_totals`.
+   */
+  private totals(): { network: number; cache: number } {
+    const records = this.recorded
+    let { count, network, cache } = this.tally
+    if (count > records.length || (count > 0 && records[count - 1] !== this.tally.last)) {
+      count = 0
+      network = 0
+      cache = 0
+    }
+    for (let i = count; i < records.length; i++) {
+      const record = records[i]
+      if (record === undefined) continue
+      if (record.isCache) cache += record.bytes
+      else network += record.bytes
+    }
+    this.tally = { count: records.length, last: records.at(-1), network, cache }
+    return { network, cache }
   }
 }
 

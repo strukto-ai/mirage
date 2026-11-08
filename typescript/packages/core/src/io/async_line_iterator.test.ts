@@ -98,6 +98,20 @@ describe('AsyncLineIterator', () => {
     for await (const line of lines) rest.push(decode(line))
     expect(rest).toEqual(['b', 'c'])
   })
+  it('loads many chunks in order around the lines read between them', async () => {
+    const lines = new AsyncLineIterator(
+      fromChunks([
+        encode('a\n'),
+        ...Array.from({ length: 50 }, () => encode('x')),
+        encode('\nb\n'),
+      ]),
+    )
+    expect(decode((await lines.readline()) ?? new Uint8Array())).toBe('a')
+    await lines.loadRest()
+    const rest: string[] = []
+    for await (const line of lines) rest.push(decode(line))
+    expect(rest).toEqual(['x'.repeat(50), 'b'])
+  })
 
   it('read1 answers what one pull brings, up to its size, and keeps the rest', async () => {
     let pulled = 0
@@ -173,6 +187,14 @@ describe('readChars counts characters, not bytes', () => {
     expect([decode(data), done]).toEqual(['\u00e9x', true])
   })
 
+  it('reads a run of characters across pulls up to the delimiter', async () => {
+    const lines = new AsyncLineIterator(
+      fromChunks([encode('ab'), encode('c\u00e9'), encode('d\nz')]),
+    )
+    const [taken, complete] = await lines.readChars(10, 0x0a)
+    expect([decode(taken), complete]).toEqual(['abc\u00e9d', true])
+    expect(decode((await lines.readline()) ?? new Uint8Array())).toBe('z')
+  })
   it('stops at the delimiter and reports a short read at EOF', async () => {
     const stop = new AsyncLineIterator(fromChunks([encode('ab:cd')]))
     expect(await stop.readChars(4, 0x3a).then(([d, ok]) => [decode(d), ok])).toEqual(['ab', true])

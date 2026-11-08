@@ -372,6 +372,8 @@ class _Growing:
         # A None entry is a directory.
         self.data = data
         self.sized = sized
+        self.whole_reads = 0
+        self.ranged = 0
 
     async def stat(self, p: PathSpec) -> FileStat:
         if p.virtual not in self.data:
@@ -388,12 +390,16 @@ class _Growing:
         )
 
     async def read(self, p: PathSpec) -> bytes:
+        self.whole_reads += 1
         return self.data[p.virtual]
 
     async def read_range(
-        self, p: PathSpec, offset: int, size: int
+        self, p: PathSpec, offset: int, size: int | None
     ) -> AsyncIterator[bytes]:
-        yield self.data[p.virtual][offset : offset + size]
+        end = None if size is None else offset + size
+        window = self.data[p.virtual][offset:end]
+        self.ranged += len(window)
+        yield window
 
 
 class _GoneAtRead(_Growing):
@@ -417,7 +423,7 @@ class _GoneAtRead(_Growing):
         return await super().read(p)
 
     async def read_range(
-        self, p: PathSpec, offset: int, size: int
+        self, p: PathSpec, offset: int, size: int | None
     ) -> AsyncIterator[bytes]:
         self._tripped(p)
         async for chunk in super().read_range(p, offset, size):
@@ -484,7 +490,7 @@ async def test_follow_reads_whole_when_the_backend_has_no_range():
 
 
 @pytest.mark.asyncio
-async def test_follow_reads_a_size_unknown_file_whole_every_poll():
+async def test_follow_reads_a_size_unknown_file_from_where_it_left_off():
     fs = _Growing({"/d/log": b"a\n"}, sized=False)
     stream, io = await _tail_generic(
         _paths("/d/log"), [], _follow_opts(), fs.stat, fs.read, fs.read_range
@@ -501,6 +507,48 @@ async def test_follow_reads_a_size_unknown_file_whole_every_poll():
     await grower
     assert b"".join(chunks) == b"a\nb\nz\n"
     assert io.stderr == b"tail: /d/log: file truncated\n"
+    assert fs.whole_reads == 1
+
+
+@pytest.mark.asyncio
+async def test_follow_reads_only_the_end_of_a_file_for_its_first_print():
+    fs = _Growing({"/d/log": b"x" * (8 << 20) + b"\nlast\n"})
+    stream, _ = await _tail_generic(
+        _paths("/d/log"),
+        [],
+        _follow_opts(lines="1"),
+        fs.stat,
+        fs.read,
+        fs.read_range,
+    )
+
+    async def grow() -> None:
+        await asyncio.sleep(0.05)
+        fs.data["/d/log"] += b"more\n"
+
+    grower = asyncio.create_task(grow())
+    chunks = await _drain_for(stream, 0.15)
+    await grower
+    assert b"".join(chunks) == b"last\nmore\n"
+    assert fs.whole_reads == 0
+    assert fs.ranged < 1 << 20
+
+
+@pytest.mark.asyncio
+async def test_follow_reports_a_first_print_that_fails_partway():
+    async def read(p: PathSpec) -> AsyncIterator[bytes]:
+        yield b"a\n"
+        raise efbig(p)
+
+    fs = _Growing({"/d/log": b"a\n"})
+    stream, io = await _tail_generic(
+        _paths("/d/log"), [], _follow_opts(lines="+1"), fs.stat, read
+    )
+    assert b"".join(await _drain_for(stream, 0.1)) == b"a\n"
+    assert io.stderr == (
+        b"tail: error reading '/d/log': File too large\n"
+        b"tail: no files remaining\n"
+    )
 
 
 @pytest.mark.asyncio

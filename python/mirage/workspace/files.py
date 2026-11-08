@@ -1069,6 +1069,9 @@ class WorkspaceFiles(Files):
     that facade, so it is a plain ``Files``.
     """
 
+    # The ledger's length, last record and byte totals when last summed.
+    _tally: tuple[int, OpRecord | None, int, int] = (0, None, 0, 0)
+
     @property
     def records(self) -> list[OpRecord]:
         """The op ledger: every facade op lands here, and the executor
@@ -1126,12 +1129,33 @@ class WorkspaceFiles(Files):
     @property
     def network_bytes(self) -> int:
         """Total bytes transferred over the network."""
-        return sum(r.bytes for r in self.records if not r.is_cache)
+        return self._totals()[0]
 
     @property
     def cache_bytes(self) -> int:
         """Total bytes served from cache."""
-        return sum(r.bytes for r in self.records if r.is_cache)
+        return self._totals()[1]
+
+    def _totals(self) -> tuple[int, int]:
+        """The network and cache byte totals, adding only the records
+        appended since the last sum. A ledger cut short or refilled
+        since (``records.clear()``) is summed again from its start."""
+        records = self._records
+        count, last, network, cache = self._tally
+        if count > len(records) or (count and records[count - 1] is not last):
+            count, network, cache = 0, 0, 0
+        for rec in records[count:]:
+            if rec.is_cache:
+                cache += rec.bytes
+            else:
+                network += rec.bytes
+        self._tally = (
+            len(records),
+            records[-1] if records else None,
+            network,
+            cache,
+        )
+        return network, cache
 
     def is_mounted(self, path: str) -> bool:
         """Check if a path is under a mount someone made.

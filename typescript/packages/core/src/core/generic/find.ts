@@ -18,19 +18,18 @@ import { isEacces, isEnoent } from '../../errors/fs.ts'
 import { FileType, PathSpec, type FileStat } from '../../types.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import { inMtimeWindow } from '../../utils/dates.ts'
 import { DIR_SIZE } from '../../utils/stat_view.ts'
 import { followedStat } from '../../view/namespace_view.ts'
 import type { LinkView } from '../../view/types.ts'
 import {
   bindTree,
-  dropPruned,
   keep,
   argsToTree,
   primeRegexes,
   printfKind,
   prunedKeys,
   quitFired,
-  settlePrunes,
   treeHas,
   treeHasAction,
   treeHasEmpty,
@@ -100,15 +99,6 @@ export interface WalkFindDeps {
   stopped?: string[]
 }
 
-interface WalkEntry {
-  path: string
-  depth: number
-  file: boolean
-  // What -type tests: the stat's own kind (a device is `c`), `d` for a
-  // directory a trailing slash proves.
-  kind: PrintfKind
-}
-
 export function modifiedTs(modified: string | null): number | null {
   // Naive timestamps are UTC, mirroring the Python implementation.
   if (modified === null || modified === '') return null
@@ -167,228 +157,195 @@ async function isEmptyEntry(deps: WalkFindDeps, path: string, isDir: boolean): P
   return st !== null && st.type === FileType.FILE && st.size === 0
 }
 
-async function walkCollect(
-  deps: WalkFindDeps,
-  spec: PathSpec,
-  maxDepth: number | null,
-  depth: number,
-  out: WalkEntry[],
-  chain: readonly (readonly [string, string])[] = [],
-): Promise<void> {
-  if (maxDepth !== null && depth > maxDepth) return
-  let children: string[]
-  try {
-    children = await deps.readdir(spec)
-  } catch (err) {
-    if (isEnoent(err)) return
-    if (isEacces(err) && deps.unreadable !== undefined) {
-      deps.unreadable.push(spec.virtual)
-      return
-    }
-    throw err
+/**
+ * Walk readdir/stat under one start point, yielding each entry the
+ * expression keeps as the walk reaches it. A directory's entries are visited
+ * in name order, where findutils takes them in the order the directory lists
+ * them, so the rows come in a tree walk's order: a directory, then what it
+ * holds, or under -depth what it holds, then the directory. Each
+ * entry is judged once, when it is reached: a -prune keeps the walk out of
+ * the directory it holds for, a -quit ends the walk, and a reader that stops
+ * reading stops the walk with it.
+ */
+export async function* walkFind(
+  path: PathSpec,
+  found: WalkFindDeps,
+  options: FindOptions = {},
+): AsyncGenerator<string> {
+  const links = found.follow
+  const deps: WalkFindDeps = {
+    ...found,
+    stat: (spec) => followedStat((p: PathSpec) => found.stat(p), links, spec),
   }
-  for (const child of children) {
+  // GNU lists the search root itself at depth 0 (even for the mount
+  // root), so `-maxdepth 0` prints just the root and `-name` can match
+  // the root's own basename.
+  const rootPath = path.virtual !== '/' ? rstripSlash(path.virtual) : '/'
+  const tree = bindTree(argsToTree(options), '', path.virtual, path.rawPath)
+  const prunes = treeHasPrune(tree)
+  const quits = treeHas(tree, ['quit'])
+  const regexes = treeHas(tree, ['regex'])
+  const needEmpty = treeHasEmpty(tree)
+  const acts = treeHasAction(tree)
+  const needSize = options.minSize != null || options.maxSize != null
+  const windowed = options.mtimeMin != null || options.mtimeMax != null
+  const needMtime = windowed || treeHasTime(tree)
+  const needStat = needMtime || treeReadsStat(tree)
+  const needLink = treeReadsLink(tree)
+  const failing = timeTestsFailing(tree)
+  // Set once a -quit is reached; the walk judges nothing after it.
+  let quit = false
+  const quitted = (): boolean => quit
+  const judge = async (
+    p: string,
+    kind: PrintfKind,
+    depth: number,
+    known: FileStat | null,
+  ): Promise<boolean> => {
+    const isDir = kind === 'd'
+    const isEmpty = needEmpty ? await isEmptyEntry(deps, p, isDir) : null
+    // With a time test in the tree the stat comes first, so the entry answers
+    // the test itself; the stat that -size alone needs waits for the entries
+    // the tree kept.
+    let st: FileStat | null = null
+    let mtime: number | null = null
+    if (needStat) {
+      st = known ?? (await statEntry(deps, p))
+      if (st === null && windowed) return false
+      // A failed stat leaves the time unknown, which fails every time test,
+      // so another -o arm (-name) can still match the entry.
+      mtime = st !== null ? modifiedTs(st.modified) : null
+    }
+    const [xkind, target] = needLink
+      ? await otherSide(links ?? null, found.links ?? null, p, kind)
+      : [null, null]
+    if (regexes) await primeRegexes(tree, [p])
+    const entry: FindEntry = {
+      key: p,
+      name: p.split('/').pop() ?? '',
+      kind,
+      depth,
+      isEmpty,
+      mtime,
+      stat: st,
+      xkind,
+      target,
+    }
+    const judged = needMtime && mtime === null ? failing : tree
+    const kept = keep(entry, judged, options.minDepth, acts)
+    if (quits && quitFired(judged)) {
+      quit = true
+      found.stopped?.push(p)
+      return kept
+    }
+    if (!kept) return false
+    if (needSize && !isDir && st === null) {
+      st = await statEntry(deps, p)
+      if (st === null) return false
+    }
+    if (needSize && !sized(options, isDir ? DIR_SIZE : (st?.size ?? 0))) return false
+    return st === null || inMtimeWindow(modifiedTs(st.modified), options.mtimeMin, options.mtimeMax)
+  }
+  // The names a directory the walk enters holds, in name order.
+  const entries = async (p: string, depth: number): Promise<string[]> => {
+    if (
+      (options.maxDepth != null && depth >= options.maxDepth) ||
+      (deps.enters !== undefined && !deps.enters(p)) ||
+      (prunes && prunedKeys(tree).includes(p))
+    )
+      return []
+    const spec = new PathSpec({ virtual: p, directory: p, resolved: false, vfsPath: stripSlash(p) })
+    let children: string[]
+    try {
+      children = await (deps.listing ?? deps.readdir)(spec)
+    } catch (err) {
+      if (isEnoent(err)) return []
+      if (isEacces(err) && deps.unreadable !== undefined) {
+        if (!deps.unreadable.includes(p)) deps.unreadable.push(p)
+        return []
+      }
+      throw err
+    }
+    return [...children].sort((a, b) => compareCodePoints(rstripSlash(a), rstripSlash(b)))
+  }
+  let start: FileStat | null = null
+  try {
+    start = await deps.stat(path)
+  } catch (err) {
+    if (!isEnoent(err)) throw err
+  }
+  const chain: readonly (readonly [string, string])[] =
+    links != null ? [[rootPath, links.resolve(rootPath)]] : []
+  // Each open directory: its path, depth, the -L chain above it, the entries
+  // left to visit, whether it is judged itself (a start point that could not
+  // be statted reports only what it holds), and its stat when known.
+  const frames: {
+    path: string
+    depth: number
+    chain: readonly (readonly [string, string])[]
+    left: string[]
+    judged: boolean
+    known: FileStat | null
+  }[] = []
+  // find's depth convention: the search root is depth 0, its children are depth
+  // 1. A start point that is not a directory has no children, so readdir on
+  // it is either an error the walk would have to swallow (Box answers
+  // ENOTDIR) or a wasted round trip everywhere else.
+  if (start === null) {
+    const left = (await entries(rootPath, 0)).reverse()
+    frames.push({ path: rootPath, depth: 0, chain, left, judged: false, known: null })
+  } else {
+    const kind = printfKind(start)
+    const first = options.depthFirst !== true || kind !== 'd'
+    if (first && (await judge(rootPath, kind, 0, start))) yield rootPath
+    if (kind === 'd' && !quitted()) {
+      const left = (await entries(rootPath, 0)).reverse()
+      frames.push({ path: rootPath, depth: 0, chain, left, judged: true, known: start })
+    }
+  }
+  while (frames.length > 0 && !quitted()) {
+    const frame = frames[frames.length - 1]
+    if (frame === undefined) break
+    const child = frame.left.pop()
+    if (child === undefined) {
+      frames.pop()
+      if (
+        options.depthFirst === true &&
+        frame.judged &&
+        (await judge(frame.path, 'd', frame.depth, frame.known))
+      )
+        yield frame.path
+      continue
+    }
     // Classification is stat's job (an index lookup right after the readdir
-    // that populated it). The one in-band proof is a trailing slash on a
-    // cold listing: no backend renders a file with one. Name heuristics
-    // beyond that guessed wrong (attachments and uploads carry whatever
-    // name the sender gave them) and are gone.
+    // that populated it). The one in-band proof is a trailing slash on a cold
+    // listing: no backend renders a file with one.
     const trimmed = child.endsWith('/') ? rstripSlash(child) : child
     let kind: PrintfKind = 'd'
     if (!child.endsWith('/')) {
       const s = await statEntry(deps, trimmed)
       kind = s === null ? 'f' : printfKind(s)
     }
-    const isFolder = kind === 'd'
-    let below = chain
-    if (isFolder && deps.follow != null) {
+    let inner = frame.chain
+    if (kind === 'd' && links != null) {
       // Under -L a directory is the one it resolves to, and one already open
-      // above is GNU's file system loop: never a row, never entered.
-      const here = deps.follow.resolve(trimmed)
-      const ancestor = chain.find(([, real]) => real === here)
+      // above is find's file system loop: never a row, never entered.
+      const here = links.resolve(trimmed)
+      const ancestor = frame.chain.find(([, real]) => real === here)
       if (ancestor !== undefined) {
         deps.loops?.push([trimmed, ancestor[0]])
         continue
       }
-      below = [...chain, [trimmed, here] as const]
+      inner = [...frame.chain, [trimmed, here] as const]
     }
-    out.push({ path: trimmed, depth, file: !isFolder, kind })
-    if (!isFolder) continue
-    const childSpec = new PathSpec({
-      virtual: trimmed,
-      directory: trimmed,
-      resolved: false,
-      vfsPath: stripSlash(trimmed),
-    })
-    await walkCollect(deps, childSpec, maxDepth, depth + 1, out, below)
+    const depth = frame.depth + 1
+    const first = options.depthFirst !== true || kind !== 'd'
+    if (first && (await judge(trimmed, kind, depth, null))) yield trimmed
+    if (kind === 'd' && !quitted()) {
+      const left = (await entries(trimmed, depth)).reverse()
+      frames.push({ path: trimmed, depth, chain: inner, left, judged: true, known: null })
+    }
   }
-}
-
-export async function walkFind(
-  path: PathSpec,
-  found: WalkFindDeps,
-  options: FindOptions = {},
-): Promise<string[]> {
-  const links = found.follow
-  const deps: WalkFindDeps = {
-    ...found,
-    stat: (spec) => followedStat((p: PathSpec) => found.stat(p), links, spec),
-  }
-  const collected: WalkEntry[] = []
-  // GNU lists the search root itself at depth 0 (even for the mount
-  // root), so `-maxdepth 0` prints just the root and `-name` can match
-  // the root's own basename.
-  const rootPath = path.virtual !== '/' ? rstripSlash(path.virtual) : '/'
-  const pruneTree = bindTree(argsToTree(options), '', path.virtual, path.rawPath)
-  const prunes = treeHasPrune(pruneTree)
-  const quits = treeHas(pruneTree, ['quit'])
-  const needEmpty = treeHasEmpty(pruneTree)
-  const acts = treeHasAction(pruneTree)
-  const readsStat = treeReadsStat(pruneTree)
-  const readsLink = treeReadsLink(pruneTree)
-  // Under -depth a directory is judged after what it holds, so its -quit
-  // cannot be met on the way in.
-  const earlyQuit = quits && options.depthFirst !== true
-  const readDirectory = async (spec: PathSpec): Promise<string[]> => {
-    if (deps.enters !== undefined && !deps.enters(spec.virtual)) return []
-    if (quits && quitFired(pruneTree)) return []
-    if (prunes || earlyQuit) {
-      const key = rstripSlash(spec.virtual) || '/'
-      const depth =
-        rstripSlash(spec.virtual).split('/').length - rstripSlash(rootPath).split('/').length
-      const info = await statEntry(deps, spec.virtual)
-      const isEmpty = needEmpty ? await isEmptyEntry(deps, spec.virtual, true) : null
-      await primeRegexes(pruneTree, [key])
-      const [xkind, target] = readsLink
-        ? await otherSide(links ?? null, found.links ?? null, key, 'd')
-        : [null, null]
-      keep(
-        {
-          key,
-          name: rstripSlash(spec.virtual).split('/').pop() ?? '',
-          kind: 'd',
-          depth,
-          isEmpty,
-          mtime: info === null ? null : modifiedTs(info.modified),
-          stat: readsStat ? info : null,
-          xkind,
-          target,
-        },
-        pruneTree,
-        options.minDepth,
-        acts,
-      )
-      // A directory that reached -quit is the walk's last: what it holds
-      // is never read.
-      if (prunedKeys(pruneTree).includes(key) || (earlyQuit && quitFired(pruneTree))) return []
-    }
-    return (deps.listing ?? deps.readdir)(spec)
-  }
-  let rootStat: FileStat | null = null
-  try {
-    rootStat = await deps.stat(path)
-  } catch (err) {
-    if (!isEnoent(err)) throw err
-  }
-  if (rootStat !== null) {
-    collected.push({
-      path: rootPath,
-      depth: 0,
-      file: rootStat.type !== FileType.DIRECTORY,
-      kind: printfKind(rootStat),
-    })
-  }
-  // GNU depth convention: the search root is depth 0, its children are
-  // depth 1, so the walk starts at 1 and -maxdepth 0 descends nowhere. A
-  // start point that is not a directory has no children, so readdir on it
-  // is either an error the walk would have to swallow (Box answers
-  // ENOTDIR) or a wasted round trip everywhere else.
-  if (rootStat === null || rootStat.type === FileType.DIRECTORY) {
-    await walkCollect(
-      { ...deps, readdir: readDirectory },
-      path,
-      options.maxDepth ?? null,
-      1,
-      collected,
-      links != null ? [[rootPath, links.resolve(rootPath)]] : [],
-    )
-  }
-  const results: string[] = []
-  const tree = bindTree(argsToTree(options), '', path.virtual, path.rawPath)
-  const needSize = options.minSize != null || options.maxSize != null
-  const windowed = options.mtimeMin != null || options.mtimeMax != null
-  const needMtime = windowed || treeHasTime(tree)
-  const needStat = needMtime || readsStat
-  const needLink = treeReadsLink(tree)
-  const failing = timeTestsFailing(tree)
-  const learned = new Map<string, number | null>()
-  const statted = new Map<string, FileStat | null>()
-  collected.sort((a, b) =>
-    options.depthFirst === true
-      ? compareDepthFirst(a.path, b.path)
-      : compareCodePoints(a.path, b.path),
-  )
-  await primeRegexes(
-    tree,
-    collected.map((entry) => (entry.path === '' ? '/' : entry.path)),
-  )
-  for (const entry of collected) {
-    const name = entry.path.split('/').pop() ?? ''
-    const key = entry.path === '' ? '/' : entry.path
-    let isEmpty: boolean | null = null
-    if (needEmpty) {
-      isEmpty = await isEmptyEntry(deps, entry.path, !entry.file)
-    }
-    // With a time test in the tree the stat comes first, so the entry
-    // answers the test itself and a -prune after it fires only where GNU's
-    // would; the stat that -size alone needs waits for the rows the tree
-    // kept.
-    let st: FileStat | null = null
-    if (needStat) {
-      st = await statEntry(deps, entry.path)
-      if (st === null && windowed) continue
-      // A failed stat leaves the time unknown, which fails every time test,
-      // so another -o arm (-name) can still match the entry.
-      learned.set(key, st !== null ? modifiedTs(st.modified) : null)
-      statted.set(key, st)
-    }
-    const [xkind, target] = needLink
-      ? await otherSide(links ?? null, found.links ?? null, entry.path, entry.kind)
-      : [null, null]
-    const findEntry: FindEntry = {
-      key,
-      name,
-      kind: entry.kind,
-      depth: entry.depth,
-      isEmpty,
-      mtime: learned.get(key) ?? null,
-      stat: st,
-      xkind,
-      target,
-    }
-    const judged = needMtime && findEntry.mtime === null ? failing : tree
-    const kept = keep(findEntry, judged, options.minDepth, acts)
-    if (quitFired(judged)) {
-      if (kept) results.push(key)
-      found.stopped?.push(key)
-      break
-    }
-    if (!kept) continue
-    if (needSize && entry.file && st === null) {
-      st = await statEntry(deps, entry.path)
-      if (st === null) continue
-    }
-    if (needSize && !sized(options, entry.file ? (st?.size ?? 0) : DIR_SIZE)) continue
-    if (windowed && st !== null) {
-      const mt = modifiedTs(st.modified)
-      if (mt === null) continue
-      if (options.mtimeMin != null && mt < options.mtimeMin) continue
-      if (options.mtimeMax != null && mt > options.mtimeMax) continue
-    }
-    results.push(key)
-  }
-  settlePrunes(tree, learned, statted)
-  return dropPruned(results, tree)
 }
 
 /**

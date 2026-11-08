@@ -236,15 +236,12 @@ export interface Action {
 }
 
 /**
- * `-prune`: true, and a directory it reaches loses its contents. Every
- * backend evaluates the tree entry by entry with no say over its own
- * walk, and a flat listing meets a child before its parent, so the node
- * keeps the ledger of pruned directory keys (mount-relative) and
- * `dropPruned` applies it to what the walk returned; `bindTree` hands
- * every start point a fresh ledger. A prune reached past a time test the
- * entry could not answer lands in `pending`; until `settlePrunes`
- * evaluates the directory again with its mtime, it counts as pruned, the
- * most a walk without times can say.
+ * `-prune`: true, and a directory it reaches loses its contents. The node
+ * keeps the ledger of pruned directory keys (mount-relative), which the
+ * walk reads before it enters a directory; `bindTree` hands every start
+ * point a fresh ledger. A prune reached past a time test the entry could
+ * not answer lands in `pending` and counts as pruned, the most a walk
+ * without that time can say.
  */
 export interface Prune {
   op: 'prune'

@@ -29,80 +29,35 @@ ReadFn = Callable[[PathSpec], Awaitable[bytes]]
 WriteFn = RewriteWriteFn
 
 
-async def append_by_rewrite(
-    read: ReadFn, write: WriteFn, stat: StatFn, path: PathSpec, data: bytes
-) -> FileStat | None:
-    """Append by reading the file and writing it back whole.
-
-    Existing-file rewrites follow the mount's write policy. Missing-file
-    creation requires atomic absence protection. A zero-byte append is an open
-    for appending with nothing written after it (``cmd >> f`` opens ``f``
-    before ``cmd`` runs): it creates a missing file and leaves an existing
-    one alone, so it costs a stat rather than moving the whole object
-    twice to add nothing, and cannot put back bytes a concurrent writer
-    had just replaced.
-
-    Args:
-        read (ReadFn): whole-file reader; only ENOENT means empty.
-        write (WriteFn): whole-file replacement.
-        stat (StatFn): point lookup, for a zero-byte append.
-        path (PathSpec): the file.
-        data (bytes): the bytes to add.
-    """
-    if not data:
-        try:
-            found = await stat(path)
-        except FileNotFoundError:
-            return await write(
-                ReplaceRequest(
-                    path,
-                    data,
-                    await write_condition(path, "put", own=OwnRead.ABSENT),
-                )
-            )
-        if found.type == FileType.DIRECTORY:
-            raise eisdir(path.virtual)
-        return None
-    own: str | OwnRead | None
-    try:
-        existing, own = await read_versioned(path, lambda: read(path))
-        own = own if own is not None else OwnRead.UNKNOWN
-    except FileNotFoundError:
-        return await write(
-            ReplaceRequest(
-                path,
-                data,
-                await write_condition(path, "put", own=OwnRead.ABSENT),
-            )
-        )
-    return await write(
-        ReplaceRequest(
-            path, existing + data, await write_condition(path, "put", own=own)
-        )
-    )
-
-
-async def append_by_streamed_rewrite(
-    read: Callable[
-        [PathSpec, Callable[[str | None], None]], AsyncIterator[bytes]
-    ],
+async def append_by_spooled_rewrite(
+    read: Callable[[PathSpec, ByteSpool], Awaitable[str | None]],
     write: RewriteWriteFn,
     stat: StatFn,
     path: PathSpec,
     data: ByteSource,
 ) -> FileStat | None:
-    """Stage a read-modify-write with bounded RAM and the read's version.
+    """Append by spooling the file and writing it back whole, its bytes
+    and the new ones streamed, so memory holds a chunk at a time whatever
+    the sizes and the write carries the version the read did. The new
+    bytes are spooled before the file is read: a streamed write lets its
+    path go while its source is pulled, so a write landing meanwhile is
+    in the file the replacement is made from.
 
-    The new bytes are spooled before the file is read: a streamed write
-    lets its path go while its source is pulled, so a write landing
-    meanwhile is in the file the replacement is made from.
+    Existing-file rewrites follow the mount's write policy, and a missing
+    file is created only while it is still absent. A zero-byte append is
+    an open for appending with nothing written after it (``cmd >> f``
+    opens ``f`` before ``cmd`` runs): it creates a missing file and
+    leaves an existing one alone, so it costs a stat rather than moving
+    the whole object twice to add nothing, and cannot put back bytes a
+    concurrent writer had just replaced.
 
     Args:
-        read (Callable): streaming reader.
-        write (Callable): streaming replacement.
-        stat (StatFn): point lookup for an empty append.
+        read (Callable): fills a spool with the whole file and answers
+            the version the read carried; only ENOENT means empty.
+        write (RewriteWriteFn): streaming replacement.
+        stat (StatFn): point lookup, for a zero-byte append.
         path (PathSpec): the destination.
-        data (ByteSource): additional bytes, consumed once.
+        data (ByteSource): the bytes to add, consumed once.
     """
     async with ByteSpool() as incoming:
         await incoming.fill(data)
@@ -121,14 +76,10 @@ async def append_by_streamed_rewrite(
                 raise eisdir(path)
             return None
         async with ByteSpool() as spool:
-            own: str | OwnRead = OwnRead.UNKNOWN
-
-            def remember(version: str | None) -> None:
-                nonlocal own
-                own = version if version is not None else OwnRead.UNKNOWN
-
+            own: str | OwnRead
             try:
-                await spool.fill(read(path, remember))
+                version = await read(path, spool)
+                own = version if version is not None else OwnRead.UNKNOWN
             except FileNotFoundError:
                 if spool.size:
                     raise
@@ -140,6 +91,38 @@ async def append_by_streamed_rewrite(
                     await write_condition(path, "put", own=own),
                 )
             )
+
+
+async def append_by_streamed_rewrite(
+    read: Callable[
+        [PathSpec, Callable[[str | None], None]], AsyncIterator[bytes]
+    ],
+    write: RewriteWriteFn,
+    stat: StatFn,
+    path: PathSpec,
+    data: ByteSource,
+) -> FileStat | None:
+    """``append_by_spooled_rewrite`` over a streaming reader, which hands
+    the version it read to the callback it is given.
+
+    Args:
+        read (Callable): streaming reader.
+        write (Callable): streaming replacement.
+        stat (StatFn): point lookup for an empty append.
+        path (PathSpec): the destination.
+        data (ByteSource): additional bytes, consumed once.
+    """
+
+    async def fill(target: PathSpec, spool: ByteSpool) -> str | None:
+        seen: list[str | None] = [None]
+
+        def remember(version: str | None) -> None:
+            seen[0] = version
+
+        await spool.fill(read(target, remember))
+        return seen[0]
+
+    return await append_by_spooled_rewrite(fill, write, stat, path, data)
 
 
 async def pwrite_by_streamed_rewrite(
