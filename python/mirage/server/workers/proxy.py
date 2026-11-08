@@ -246,6 +246,15 @@ class WorkerProxy:
             return await self._create(scope, receive, send, None, workspace_id)
         home = pool.home(workspace_id)
         if home is None or home.dead:
+            # A stopped workspace no worker holds, as after a restart: its
+            # delete claims the id meanwhile, so a start of it goes to the
+            # same worker.
+            if action is None and method == "DELETE":
+                settle = pool.claim(workspace_id, first)
+                try:
+                    return await self._pass(first, scope, receive, send)
+                finally:
+                    settle()
             return await self._pass(first, scope, receive, send)
         if action == "clone" and len(parts) == 4 and method == "POST":
             return await self._create(scope, receive, send, home)
@@ -402,7 +411,7 @@ class WorkerProxy:
                 return await send_answer(send, answer)
         # The workers share one state root, so each lists the workspaces
         # the others run as stopped: the running one is listed, and each id
-        # once.
+        # once, the running ones first, as each worker lists them.
         by_id: dict[str, dict[str, Any]] = {}
         for answer in answers:
             for item in json.loads(answer.body):
@@ -410,7 +419,11 @@ class WorkerProxy:
                 if seen is None or seen.get("status") != "running":
                     by_id[str(item["id"])] = item
         items = sorted(
-            by_id.values(), key=lambda item: float(item.get("created_at") or 0)
+            by_id.values(),
+            key=lambda item: (
+                item.get("status") != "running",
+                float(item.get("created_at") or 0),
+            ),
         )
         await send_json(send, 200, items)
 
@@ -790,6 +803,9 @@ def _stopped_in(response: httpx.Response) -> bool:
     """
     try:
         body = response.json()
-    except ValueError:
+    except ValueError as exc:
+        logger.debug(
+            "mirage: a worker answered a workspace with no JSON: %s", exc
+        )
         return False
     return isinstance(body, dict) and body.get("status") == "stopped"

@@ -79,10 +79,6 @@ export async function loadProfileArgument(path: string): Promise<JsonValue> {
 interface WorkspaceBrief {
   id: string
   status: string
-  mode: string
-  mount_count: number
-  session_count: number
-  created_at: number
 }
 
 interface MountSummary {
@@ -128,15 +124,8 @@ function formatWorkspaceExplanation(said: {
 
 function formatWorkspaceList(items: WorkspaceBrief[]): string {
   if (items.length === 0) return 'No workspaces.'
-  const rows = items.map((w) => [
-    w.id,
-    w.status,
-    w.mode,
-    String(w.mount_count),
-    String(w.session_count),
-    formatAge(w.created_at),
-  ])
-  return formatTable(['ID', 'STATUS', 'MODE', 'MOUNTS', 'SESSIONS', 'AGE'], rows)
+  const rows = items.map((w) => [w.id, w.status])
+  return formatTable(['ID', 'STATUS'], rows)
 }
 
 function formatWorkspaceDetail(d: WorkspaceDetail): string {

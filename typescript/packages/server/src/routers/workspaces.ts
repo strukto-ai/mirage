@@ -36,6 +36,7 @@ import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
+import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import {
   streamOf,
@@ -239,6 +240,24 @@ async function hasState(host: ServerHost, id: string): Promise<boolean> {
   }
 }
 
+/**
+ * The store a workspace built from `config` keeps its state in: the one
+ * its `store:` block names, else the server's. A config that no longer
+ * checks names none the server can open, so the server's is read.
+ */
+function storeOf(
+  deps: WorkspaceRoutesDeps,
+  config: Record<string, JsonValue> | null,
+): WorkspaceStateStore {
+  if (config?.store === undefined || config.store === null) return deps.host.stateStore()
+  try {
+    return deps.host.stateStore(checkConfig(config))
+  } catch (e) {
+    console.debug(`mirage: a saved config's store did not open: ${(e as Error).message}`)
+    return deps.host.stateStore()
+  }
+}
+
 /** What a stopped workspace keeps: the config it starts from, and when it was first created. */
 interface Kept {
   config: Record<string, JsonValue> | null
@@ -256,7 +275,7 @@ async function kept(
 ): Promise<Kept | null> {
   if (!(await deps.registry.allows(id, account, 0))) return null
   const config = await deps.registry.savedConfig(id, account)
-  const store = deps.host.stateStore()
+  const store = storeOf(deps, config)
   let meta: Record<string, unknown> | null
   try {
     meta = await store.loadMeta(id)
@@ -603,8 +622,11 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       .list()
       .filter((e) => deps.registry.visible(e.id, req.account) !== null)
       .map(makeBrief)
+    // One that stops while this reads is listed once, as it was first read.
+    const listed = new Set(running.map((w) => w.id))
     const idle: WorkspaceBrief[] = []
     for (const id of await deps.registry.stoppedIds(req.account)) {
+      if (listed.has(id)) continue
       const k = await kept(deps, id, req.account)
       if (k !== null) idle.push(makeStoppedBrief(id, k.config, k.createdAt))
     }
@@ -764,7 +786,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       if (!(await stopped(deps, id, req.account))) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
-      const store = deps.host.stateStore()
+      const store = storeOf(deps, await deps.registry.savedConfig(id, req.account))
       try {
         if (!(await deps.registry.forget(id, store))) {
           return reply.status(409).send({ detail: 'workspace is starting or stopping; try again' })

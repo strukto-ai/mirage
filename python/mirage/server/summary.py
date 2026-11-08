@@ -125,7 +125,8 @@ async def make_detail(
 def _config_mounts(config: dict[str, JsonValue] | None) -> list[MountSummary]:
     """The mounts a stopped workspace's config names, as a running one's
     would list them: a mount with no mode of its own takes the config's,
-    and a mode reads in lower case, as a config may write it in any.
+    write by default, and a mode reads in lower case, as a config may
+    write it in any.
 
     Args:
         config (dict[str, JsonValue] | None): the config it starts from.
@@ -134,7 +135,7 @@ def _config_mounts(config: dict[str, JsonValue] | None) -> list[MountSummary]:
     if not isinstance(mounts, dict):
         return []
     mode = (config or {}).get("mode")
-    fallback = mode.lower() if isinstance(mode, str) else "read"
+    fallback = mode.lower() if isinstance(mode, str) else "write"
     out: list[MountSummary] = []
     for prefix, mount in mounts.items():
         spec = mount if isinstance(mount, dict) else {}

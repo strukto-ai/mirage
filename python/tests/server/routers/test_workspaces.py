@@ -1812,6 +1812,34 @@ async def test_a_stopped_workspace_is_listed_shown_and_deleted(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_stopped_workspace_is_deleted_from_the_store_its_config_names(
+    tmp_path,
+):
+    own = tmp_path / "own"
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        body = {
+            "id": "mine",
+            "config": {
+                "mounts": {"/": {"vfs": "ram"}},
+                "store": {"type": "disk", "root": str(own)},
+            },
+        }
+        r = await client.post("/v1/workspaces", json=body)
+        assert r.status_code == 201, r.text
+        await client.post("/v1/workspaces/mine/stop")
+        got = (await client.get("/v1/workspaces/mine")).json()
+        assert (got["status"], got["mode"]) == ("stopped", "write")
+        assert got["created_at"] > 0
+        assert (own / "workspaces" / "mine").exists()
+        r = await client.delete("/v1/workspaces/mine")
+        assert r.status_code == 200, r.text
+        assert not (own / "workspaces" / "mine").exists()
+
+
+@pytest.mark.asyncio
 async def test_start_of_an_unknown_id_is_not_found(tmp_path):
     app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
     async with AsyncClient(

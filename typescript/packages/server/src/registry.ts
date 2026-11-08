@@ -439,6 +439,8 @@ export class WorkspaceRegistry {
     configDigest: string,
     run: (admitted: boolean) => Promise<T>,
   ): Promise<T> {
+    // A stopped workspace being deleted takes no build under its id.
+    if (this.forgets.has(id)) return run(false)
     for (
       let pending = this.creates.get(id);
       pending !== undefined;
@@ -462,7 +464,12 @@ export class WorkspaceRegistry {
 
   /** Whether `id` is being deleted or stopped. */
   removing(id: string): boolean {
-    return this.removals.has(id) || this.forgets.has(id)
+    return this.removals.has(id)
+  }
+
+  /** Whether stopped `id` is being deleted. */
+  forgetting(id: string): boolean {
+    return this.forgets.has(id)
   }
 
   get(id: string): WorkspaceEntry {
@@ -579,7 +586,9 @@ export class WorkspaceRegistry {
    * reserved until it is done. Mirrors Python's `forget`.
    */
   async forget(id: string, store: WorkspaceStateStore): Promise<boolean> {
-    if (this.entries.has(id) || this.creates.has(id) || this.removing(id)) return false
+    if (this.entries.has(id) || this.creates.has(id) || this.removing(id) || this.forgets.has(id)) {
+      return false
+    }
     this.forgets.add(id)
     try {
       await store.drop(id)

@@ -1024,6 +1024,16 @@ def _build_store_group(
     return RAMWorkspaceStateStore()
 
 
+def config_state_store(config: WorkspaceConfig) -> WorkspaceStateStore | None:
+    """The store a config's ``store:`` block names; None when it names
+    none.
+
+    Args:
+        config (WorkspaceConfig): the workspace config.
+    """
+    return None if config.store is None else _build_state_store(config.store)
+
+
 def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
     namespace = (
         _build_store_group(block.namespace)

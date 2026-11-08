@@ -118,20 +118,8 @@ def load_profile_argument(path: Path) -> dict[str, Any]:
 def _format_workspace_list(items: list[dict[str, Any]]) -> str:
     if not items:
         return "No workspaces."
-    rows = [
-        [
-            item["id"],
-            item["status"],
-            item["mode"],
-            str(item["mount_count"]),
-            str(item["session_count"]),
-            format_age(item["created_at"]),
-        ]
-        for item in items
-    ]
-    return format_table(
-        ["ID", "STATUS", "MODE", "MOUNTS", "SESSIONS", "AGE"], rows
-    )
+    rows = [[item["id"], item["status"]] for item in items]
+    return format_table(["ID", "STATUS"], rows)
 
 
 def _format_workspace_detail(detail: dict[str, Any]) -> str:

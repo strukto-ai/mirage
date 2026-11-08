@@ -47,6 +47,31 @@ from mirage.utils.abort import MirageAbortError
 from mirage.workspace.record.disk import DiskRecordClient
 
 
+class _GatedStore:
+    """A state store whose drop waits until let go."""
+
+    def __init__(self) -> None:
+        self.gate = asyncio.Event()
+
+    async def drop(self, workspace_id: str) -> None:
+        await self.gate.wait()
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_id_being_deleted_takes_no_build_nor_the_reverse():
+    registry = WorkspaceRegistry(idle_grace_seconds=10.0)
+    store = _GatedStore()
+    deleting = asyncio.create_task(registry.forget("w", store))
+    await asyncio.sleep(0)
+    async with registry.creating("w", "a") as admitted:
+        assert admitted is False
+    store.gate.set()
+    assert await deleting is True
+    async with registry.creating("w", "a") as admitted:
+        assert admitted is True
+        assert await registry.forget("w", store) is False
+
+
 @pytest.mark.asyncio
 async def test_an_overlapping_remove_joins_the_deletion_in_flight(
     monkeypatch,

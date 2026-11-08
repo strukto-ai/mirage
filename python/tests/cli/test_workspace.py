@@ -340,16 +340,11 @@ def test_the_list_shows_each_workspace_status():
             ]
         )
     ).splitlines()
-    assert rows[0].split() == [
-        "ID",
-        "STATUS",
-        "MODE",
-        "MOUNTS",
-        "SESSIONS",
-        "AGE",
+    assert [row.split() for row in rows] == [
+        ["ID", "STATUS"],
+        ["on", "running"],
+        ["off", "stopped"],
     ]
-    assert rows[1].split()[:2] == ["on", "running"]
-    assert rows[2].split()[:2] == ["off", "stopped"]
 
 
 @pytest.mark.parametrize("gone", ["close", "cancel", "kill"])

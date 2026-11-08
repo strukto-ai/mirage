@@ -170,7 +170,20 @@ export class WorkerProxy {
       return this.create(req, res, null, id)
     }
     const home = pool.home(id)
-    if (home === undefined || home.dead) return this.pass(first, req, res)
+    if (home === undefined || home.dead) {
+      // A stopped workspace no worker holds, as after a restart: its delete
+      // claims the id meanwhile, so a start of it goes to the same worker.
+      if (action === undefined && method === 'DELETE') {
+        const settle = pool.claim(id, first)
+        try {
+          await this.pass(first, req, res)
+          return
+        } finally {
+          settle()
+        }
+      }
+      return this.pass(first, req, res)
+    }
     if (action === 'clone' && parts.length === 4 && method === 'POST') {
       return this.create(req, res, home)
     }
@@ -292,7 +305,8 @@ export class WorkerProxy {
       return
     }
     // The workers share one state root, so each lists the workspaces the
-    // others run as stopped: the running one is listed, and each id once.
+    // others run as stopped: the running one is listed, and each id once,
+    // the running ones first, as each worker lists them.
     const byId = new Map<string, Record<string, unknown>>()
     for (const answer of answers) {
       for (const item of JSON.parse(answer.body.toString()) as Record<string, unknown>[]) {
@@ -301,8 +315,9 @@ export class WorkerProxy {
       }
     }
     const items = [...byId.values()]
+    const stopped = (item: Record<string, unknown>): number => (item.status === 'running' ? 0 : 1)
     const key = (item: Record<string, unknown>): number => Number(item.created_at ?? 0)
-    items.sort((a, b) => key(a) - key(b))
+    items.sort((a, b) => stopped(a) - stopped(b) || key(a) - key(b))
     sendJson(res, 200, items)
   }
 
@@ -495,7 +510,8 @@ export function buildWorkerProxy(options: WorkerProxyOptions): WorkerProxy {
 function stoppedIn(body: Buffer): boolean {
   try {
     return (JSON.parse(body.toString()) as { status?: unknown }).status === 'stopped'
-  } catch {
+  } catch (error) {
+    console.debug('mirage: a worker answered a workspace with no JSON:', error)
     return false
   }
 }

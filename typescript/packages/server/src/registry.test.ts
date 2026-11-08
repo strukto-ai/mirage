@@ -42,6 +42,7 @@ import {
   WorkspaceRegistry,
 } from './registry.ts'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
+import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import type { CommandContext, VfsContext } from '@struktoai/mirage-core/policy/types'
 
 describe('newWorkspaceId', () => {
@@ -84,6 +85,24 @@ describe('WorkspaceRegistry', () => {
     expect(r.list()).toHaveLength(1)
     await r.remove(entry.id)
     expect(r.has(entry.id)).toBe(false)
+  })
+
+  it('builds nothing under a stopped id while it is deleted, and deletes none being built', async () => {
+    const r = new WorkspaceRegistry()
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const store = { drop: () => gate } as unknown as WorkspaceStateStore
+    const deleting = r.forget('w', store)
+    expect(await r.creating('w', 'a', (admitted) => Promise.resolve(admitted))).toBe(false)
+    release()
+    expect(await deleting).toBe(true)
+    const built = await r.creating('w', 'a', async (admitted) => {
+      expect(await r.forget('w', store)).toBe(false)
+      return admitted
+    })
+    expect(built).toBe(true)
   })
 
   it('joins an overlapping remove instead of deleting the id again', async () => {

@@ -1627,6 +1627,30 @@ describe('workspace cancel, kill, stop and start', () => {
     }
   })
 
+  it('deletes a stopped workspace from the store its config names, and reads its mode as written', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-own-store-'))
+    const own = join(root, 'own')
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      const body = {
+        id: 'mine',
+        config: { mounts: { '/': { vfs: 'ram' } }, store: { type: 'disk', root: own } },
+      }
+      expect((await post(app, '/v1/workspaces', body)).statusCode).toBe(201)
+      await post(app, '/v1/workspaces/mine/stop')
+      const got = await app.inject({ method: 'GET', url: '/v1/workspaces/mine' })
+      expect(got.json()).toMatchObject({ status: 'stopped', mode: 'write' })
+      expect(got.json<{ created_at: number }>().created_at).toBeGreaterThan(0)
+      expect(existsSync(join(own, 'workspaces', 'mine'))).toBe(true)
+      const deleted = await app.inject({ method: 'DELETE', url: '/v1/workspaces/mine' })
+      expect(deleted.statusCode).toBe(200)
+      expect(existsSync(join(own, 'workspaces', 'mine'))).toBe(false)
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('answers 404 for a start or stop of an unknown id', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ws-start-unknown-'))
     const app = buildApp({ stateRoot: join(root, 'state') })

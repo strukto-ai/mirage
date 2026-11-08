@@ -475,6 +475,10 @@ class WorkspaceRegistry:
             bool: True when this create holds the id; False when another
                 config's create is building it.
         """
+        # A stopped workspace being deleted takes no build under its id.
+        if self.forgetting(workspace_id):
+            yield False
+            return
         while (pending := self._creates.get(workspace_id)) is not None:
             digest, building = pending
             if digest != config_digest:
@@ -542,10 +546,17 @@ class WorkspaceRegistry:
             workspace_id (str): id to check.
 
         Returns:
-            bool: True while a ``remove``, ``stop`` or ``forget`` of it is
-                in flight.
+            bool: True while a ``remove`` or ``stop`` of it is in flight.
         """
-        return workspace_id in self._removals or workspace_id in self._forgets
+        return workspace_id in self._removals
+
+    def forgetting(self, workspace_id: str) -> bool:
+        """Whether stopped ``workspace_id`` is being deleted.
+
+        Args:
+            workspace_id (str): id to check.
+        """
+        return workspace_id in self._forgets
 
     def get(self, workspace_id: str) -> WorkspaceEntry:
         if workspace_id not in self._entries:
@@ -720,6 +731,7 @@ class WorkspaceRegistry:
             workspace_id in self._entries
             or workspace_id in self._creates
             or self.removing(workspace_id)
+            or self.forgetting(workspace_id)
         ):
             return False
         self._forgets.add(workspace_id)
@@ -791,7 +803,7 @@ class WorkspaceRegistry:
         else:
             runner, ws = None, workspace
         wid = workspace_id or new_workspace_id()
-        if wid in self._entries or self.removing(wid):
+        if wid in self._entries or self.removing(wid) or self.forgetting(wid):
             raise ValueError(f"workspace id already exists: {wid!r}")
         for policy in restored_with:
             ws.policies.remove(policy)

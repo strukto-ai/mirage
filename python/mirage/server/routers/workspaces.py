@@ -16,6 +16,7 @@ import errno
 import hashlib
 import io
 import json
+import logging
 import time
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
@@ -34,6 +35,7 @@ from mirage.config import (
     WorkspaceConfig,
     _load_profile_policy,
     build_mcp_clis,
+    config_state_store,
     resolve_secrets,
 )
 from mirage.io.network import NetworkRule, run_with_network
@@ -99,7 +101,10 @@ from mirage.utils.ids import check_name, new_workspace_id
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.snapshot.utils import is_safe_blob_path
 from mirage.workspace.store import DiskWorkspaceStateStore
+from mirage.workspace.store.base import WorkspaceStateStore
 from mirage.workspace.store.disk import DOT_IDS
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/workspaces")
 
@@ -123,6 +128,31 @@ async def _has_state(request: Request, workspace_id: str) -> bool:
         await store.close()
 
 
+def _store_of(
+    request: Request, config: dict[str, JsonValue] | None
+) -> WorkspaceStateStore:
+    """The store a workspace built from ``config`` keeps its state in:
+    the one its ``store:`` block names, else the server's. A config that
+    no longer checks names none the server can open, so the server's is
+    read.
+
+    Args:
+        request (Request): the request, for the app's state root.
+        config (dict[str, JsonValue] | None): the saved config.
+    """
+    if config is not None and config.get("store") is not None:
+        try:
+            named = config_state_store(check_config(config))
+        except ValueError as exc:
+            logger.debug(
+                "mirage: a saved config's store did not open: %s", exc
+            )
+        else:
+            if named is not None:
+                return named
+    return DiskWorkspaceStateStore(str(request.app.state.state_root))
+
+
 async def _kept(
     request: Request, workspace_id: str
 ) -> tuple[dict[str, JsonValue] | None, float] | None:
@@ -139,7 +169,7 @@ async def _kept(
     if not await registry.allows(workspace_id, account, 0.0):
         return None
     config = await registry.saved_config(workspace_id, account)
-    store = DiskWorkspaceStateStore(str(request.app.state.state_root))
+    store = _store_of(request, config)
     try:
         meta = await store.load_meta(workspace_id)
     finally:
@@ -634,7 +664,11 @@ async def list_workspaces(request: Request) -> list[WorkspaceBrief]:
         for e in registry.list()
         if registry.visible(e.id, account) is not None
     ]
+    # One that stops while this reads is listed once, as it was first read.
+    listed = {brief.id for brief in briefs}
     for wid in await registry.stopped_ids(account):
+        if wid in listed:
+            continue
         kept = await _kept(request, wid)
         if kept is not None:
             briefs.append(make_stopped_brief(wid, *kept))
@@ -723,7 +757,10 @@ async def delete_workspace(
     if registry.visible(workspace_id, request.state.account) is None:
         if not await _stopped(request, workspace_id):
             raise HTTPException(status_code=404, detail="workspace not found")
-        store = DiskWorkspaceStateStore(str(request.app.state.state_root))
+        store = _store_of(
+            request,
+            await registry.saved_config(workspace_id, request.state.account),
+        )
         try:
             forgotten = await registry.forget(workspace_id, store)
         finally:

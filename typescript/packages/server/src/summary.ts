@@ -107,13 +107,13 @@ export async function makeDetail(entry: WorkspaceEntry, verbose = false): Promis
 
 /**
  * The mounts a stopped workspace's config names, as a running one's would
- * list them: a mount with no mode of its own takes the config's, and a mode
- * reads in lower case, as a config may write it in any.
+ * list them: a mount with no mode of its own takes the config's, write by
+ * default, and a mode reads in lower case, as a config may write it in any.
  */
 function configMounts(config: Record<string, JsonValue> | null): MountSummary[] {
   const mounts = config?.mounts
   if (!isPlainObject(mounts)) return []
-  const mode = typeof config?.mode === 'string' ? config.mode.toLowerCase() : 'read'
+  const mode = typeof config?.mode === 'string' ? config.mode.toLowerCase() : 'write'
   return Object.entries(mounts)
     .map(([prefix, mount]) => {
       const spec = isPlainObject(mount) ? mount : {}
