@@ -416,7 +416,7 @@ describe('the IdSource seam', () => {
     ["import * as uuid from 'uuid'\nuuid.v1()", 'uuid.v1'],
     ["import { uuid7 } from '../../utils/ids'\nuuid7()", 'uuid7'],
     ["import { uuid7 } from '../../utils/ids.ts'\nuuid7()", 'uuid7'],
-    ["import { newSessionId as mint } from './ids.js'\nmint()", 'newSessionId'],
+    ["import { newSessionId as mint } from '../utils/ids.js'\nmint()", 'newSessionId'],
     ["import * as ids from '../../utils/ids.ts'\nids.newWorkspaceId()", 'newWorkspaceId'],
   ])('flags %j as %j', (source, expected) => {
     expect(directDraws(source)).toEqual(new Set([expected]))

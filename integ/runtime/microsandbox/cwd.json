@@ -8,15 +8,19 @@
     {
       "id": "unserved_cwd_fails_loud",
       "world": {
+        "machines": {
+          "box": {
+            "provider": "microsandbox",
+            "sandbox": "${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}"
+          }
+        },
         "runtimes": [
           {
-            "name": "microsandbox",
+            "name": "native",
             "captures": [
               "uname"
             ],
-            "config": {
-              "sandbox": "${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}"
-            }
+            "machine": "box"
           },
           "workspace"
         ],

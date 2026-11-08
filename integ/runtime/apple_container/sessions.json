@@ -8,15 +8,19 @@
     {
       "id": "session_env_replaces_image_env",
       "world": {
+        "machines": {
+          "box": {
+            "provider": "apple_container",
+            "container": "${MIRAGE_INTEG_APPLE_CONTAINER}"
+          }
+        },
         "runtimes": [
           {
-            "name": "apple_container",
+            "name": "native",
             "captures": [
               "printenv"
             ],
-            "config": {
-              "container": "${MIRAGE_INTEG_APPLE_CONTAINER}"
-            }
+            "machine": "box"
           },
           "workspace"
         ]
@@ -40,18 +44,22 @@
     {
       "id": "unlisted_session_falls_back",
       "world": {
+        "machines": {
+          "box": {
+            "provider": "apple_container",
+            "container": "${MIRAGE_INTEG_APPLE_CONTAINER}",
+            "containers": {
+              "some_agent": "no-such-container"
+            }
+          }
+        },
         "runtimes": [
           {
-            "name": "apple_container",
+            "name": "native",
             "captures": [
               "@line"
             ],
-            "config": {
-              "container": "${MIRAGE_INTEG_APPLE_CONTAINER}",
-              "containers": {
-                "some_agent": "no-such-container"
-              }
-            }
+            "machine": "box"
           },
           "workspace"
         ]
@@ -69,17 +77,21 @@
     {
       "id": "unlisted_session_without_fallback_fails_loud",
       "world": {
+        "machines": {
+          "box": {
+            "provider": "apple_container",
+            "containers": {
+              "some_agent": "${MIRAGE_INTEG_APPLE_CONTAINER}"
+            }
+          }
+        },
         "runtimes": [
           {
-            "name": "apple_container",
+            "name": "native",
             "captures": [
               "@line"
             ],
-            "config": {
-              "containers": {
-                "some_agent": "${MIRAGE_INTEG_APPLE_CONTAINER}"
-              }
-            }
+            "machine": "box"
           },
           "workspace"
         ]

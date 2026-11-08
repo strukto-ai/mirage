@@ -3361,7 +3361,7 @@
           ],
           "session": "capped",
           "expect": {
-            "value": 1
+            "value": 4194305
           }
         },
         {

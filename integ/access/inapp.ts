@@ -375,6 +375,8 @@ async function steps(
             )
             .join('\n'),
         })
+      } else if (kind === 'records' && step.kind === 'machines') {
+        answers.push({ text: (await get(wid).machines()).map((m) => m.state).join('\n') })
       } else if (kind === 'records') {
         const ws = get(wid)
         const state = typeof step.state === 'string' ? step.state : undefined

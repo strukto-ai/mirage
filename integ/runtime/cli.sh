@@ -84,7 +84,8 @@ RUNTIMES='{
     "microsandbox": {"captures": ["@line"], "config": {"sandbox": "${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}"}},
     "apple_container": {"captures": ["@line"], "config": {"container": "${MIRAGE_INTEG_APPLE_CONTAINER}"}}
   },
-  "optional": ["sandlock", "e2b", "smolvm", "microsandbox", "apple_container"]
+  "optional": ["sandlock", "e2b", "smolvm", "microsandbox", "apple_container"],
+  "machines": ["docker", "ssh", "e2b", "smolvm", "microsandbox", "apple_container"]
 }'
 
 # The case once per runtime it names on this host, one JSON per line (a case
@@ -95,7 +96,8 @@ RUNTIMES='{
 # keyed by the runtime, then by `runtime@host`, then by `ram` and
 # `runtime@ram` (every mount here is RAM: this is a case's ram variant), is
 # merged over `expect`, and the world runs the runtime's table entry with
-# the case's `entry` laid over it.
+# the case's `entry` laid over it; a machine provider's config becomes its
+# `machines:` entry, which the native runtime runs on.
 # INTEG_RUNTIMES (comma separated) keeps only the runtimes it names.
 runtime_variants() {
   local case_json="$1" host="$2"
@@ -139,9 +141,13 @@ runtime_variants() {
            + (if ($base | has("config")) or ($over | has("config"))
               then {config: (($base.config // {}) + ($over.config // {}))} else {} end)
          end) as $entry
+      | (if ($t.machines | index($r)) != null and ($entry | type) == "object"
+         then {machines: {($r): ({provider: $r} + ($entry.config // {}))},
+               runtimes: [($entry | del(.config)) + {name: "native", machine: $r}, "workspace"]}
+         else {runtimes: [$entry, "workspace"]} end) as $placed
       | $c + {
           id: ($c.id + "@" + $r),
-          world: (($c.world // {}) + {runtimes: [$entry, "workspace"]}),
+          world: (($c.world // {}) + $placed),
           steps: ($steps | map(unmark)),
           requires: (($c.requires // []) + $t.requires[$h][$r]),
           optional: ($t.optional | index($r) != null)
@@ -204,6 +210,7 @@ write_world_yaml() {
       + (if has("network") then {network: .network} else {} end)
       + (if .profiles then {profiles: .profiles} else {} end)
       + (if .profile then {profile: .profile} else {} end)
+      + (if .machines then {machines: .machines} else {} end)
       + (if .runtimes then {runtimes: .runtimes} else {} end)
       + (if .route_policy then {route_policy: .route_policy} else {} end)
       + (if .clis then {clis: .clis} else {} end)' \

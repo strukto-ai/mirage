@@ -17,7 +17,8 @@ import { type ByteSource } from '@struktoai/mirage-core/io/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../../workspace.ts'
-import { EXEC_PRELUDE, PROCESS } from '@struktoai/mirage-core/machine/constants'
+import { PROCESS } from '@struktoai/mirage-core/machine/constants'
+import { TAGGED_PRELUDE } from './constants.ts'
 import { MicrosandboxMachine } from './handle.ts'
 import * as program from '../program.ts'
 import { captured, native, on } from '../../../tests/fixtures/machine.ts'
@@ -144,14 +145,13 @@ describe('MicrosandboxMachine', () => {
             '/',
             '-e',
             'MARK=request',
-            '-e',
-            `${PROCESS}=runid`,
             '--',
             '/bin/sh',
             '-c',
-            EXEC_PRELUDE,
+            TAGGED_PRELUDE,
             'sh',
             '/work',
+            `${PROCESS}=runid`,
             ...words,
           ],
           input,

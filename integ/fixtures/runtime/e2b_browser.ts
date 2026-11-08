@@ -85,7 +85,10 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
       {
         mode: MountMode.EXEC,
         machines: { e2b: machine },
-        runtimes: [new NativeRuntime({ captures: ['python3', 'node'], machine: 'e2b' }), 'workspace'],
+        runtimes: [
+          new NativeRuntime({ captures: ['python3', 'node'], machine: 'e2b' }),
+          'workspace',
+        ],
       },
     )
     try {

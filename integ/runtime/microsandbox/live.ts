@@ -123,7 +123,10 @@ async function modeChecks(mountType: 'ssh' | 'fuse' | 'both') {
   const ws = new Workspace(mounts, {
     mode: MountMode.EXEC,
     machines: { msb: runtime },
-    runtimes: [new NativeRuntime({ captures: ['python3', 'dash', 'sleep'], machine: 'msb' }), 'workspace'],
+    runtimes: [
+      new NativeRuntime({ captures: ['python3', 'dash', 'sleep'], machine: 'msb' }),
+      'workspace',
+    ],
     profiles: { hidden: { paths: { hide: [prefix + '/secret.txt'] } } },
   })
   const agent = await ws.session('agent', mountType === 'fuse' ? {} : { profile: 'hidden' })
@@ -533,7 +536,10 @@ async function lifecycleChecks() {
       }
     })
     await check(`${mountType}_released_cli_can_restart_after_probe`, async () => {
-      const candidate = new StopAfterProbe('msb', { sandbox, ...(mountType === null ? {} : { mountType }) })
+      const candidate = new StopAfterProbe('msb', {
+        sandbox,
+        ...(mountType === null ? {} : { mountType }),
+      })
       try {
         const pipe = await candidate.openPipe('printf race-command-ran')
         const reader = pipe.reader.getReader()

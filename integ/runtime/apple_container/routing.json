@@ -4,17 +4,21 @@
       "id": "unmapped_constructor",
       "world": {
         "session_id": "constructor",
+        "machines": {
+          "box": {
+            "provider": "apple_container",
+            "containers": {
+              "agent_a": "unused"
+            }
+          }
+        },
         "runtimes": [
           {
-            "name": "apple_container",
+            "name": "native",
             "captures": [
               "uname"
             ],
-            "config": {
-              "containers": {
-                "agent_a": "unused"
-              }
-            }
+            "machine": "box"
           },
           "workspace"
         ]
@@ -34,17 +38,21 @@
       "id": "unmapped_toString",
       "world": {
         "session_id": "toString",
+        "machines": {
+          "box": {
+            "provider": "apple_container",
+            "containers": {
+              "agent_a": "unused"
+            }
+          }
+        },
         "runtimes": [
           {
-            "name": "apple_container",
+            "name": "native",
             "captures": [
               "uname"
             ],
-            "config": {
-              "containers": {
-                "agent_a": "unused"
-              }
-            }
+            "machine": "box"
           },
           "workspace"
         ]
@@ -64,17 +72,21 @@
       "id": "unmapped___proto__",
       "world": {
         "session_id": "__proto__",
+        "machines": {
+          "box": {
+            "provider": "apple_container",
+            "containers": {
+              "agent_a": "unused"
+            }
+          }
+        },
         "runtimes": [
           {
-            "name": "apple_container",
+            "name": "native",
             "captures": [
               "uname"
             ],
-            "config": {
-              "containers": {
-                "agent_a": "unused"
-              }
-            }
+            "machine": "box"
           },
           "workspace"
         ]

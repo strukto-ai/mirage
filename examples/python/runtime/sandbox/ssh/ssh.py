@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.machine.ssh import SSHMachine
+from mirage.runtime.native import NativeRuntime
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 
@@ -53,8 +53,6 @@ data = S3VFS(
 
 proj = SSHVFS(SSHConfig(host="dev", root=REMOTE_DIR, known_hosts=None))
 
-runtime = SSHMachine(captures=["python3"], config={"host": "dev"})
-
 LOAD_PY = (
     "import csv, json, sys\n"
     "rows = list(csv.DictReader(open(sys.argv[1])))\n"
@@ -82,7 +80,8 @@ async def main() -> None:
     ws = Workspace(
         {"/data": data, REMOTE_DIR: proj},
         mode=MountMode.EXEC,
-        runtimes=[runtime, "workspace"],
+        machines={"box": {"provider": "ssh", "host": "dev"}},
+        runtimes=[NativeRuntime(["python3"], machine="box"), "workspace"],
     )
 
     # Seed both sides through the workspace: the dataset into S3, the
@@ -108,7 +107,7 @@ async def main() -> None:
 
     await show(ws, "rm load.py points.csv result.json /data/points.csv")
 
-    await runtime.close()
+    await ws.close()
     await proj.accessor.close()
 
 

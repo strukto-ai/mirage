@@ -158,7 +158,7 @@
         "opfs",
         "console-redis"
       ],
-      "command": "sleep 5 & ps --forest -o args= | grep -c '^ \\\\_ sleep 5$'; ps f -o comm= | grep -c '^ \\\\_ sleep$'; kill $!",
+      "command": "sleep 8 & ps --forest -o args= | grep -c '^ \\\\_ sleep 8$'; ps f -o args= | grep -c '^ \\\\_ sleep 8$'; kill $!",
       "expect": {
         "exit": 0,
         "stdout": "1\n1\n",

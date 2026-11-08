@@ -1187,7 +1187,7 @@ async def lifecycle(
         f"{len(json.loads(out)['items'])}"
     )
     refused = []
-    for kind in ("cli", "runtime"):
+    for kind in ("cli", "runtime", "machine"):
         codes = [
             (await cli(kind, "types"))[0],
             (await cli(kind, "list"))[0],
