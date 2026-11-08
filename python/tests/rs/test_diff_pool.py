@@ -550,3 +550,36 @@ async def test_native_config_refusal_survives_worker_and_pool_recovers():
         assert (await pool.compare(DiffOptions(), _bytes, _bytes)).status == 0
     finally:
         await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_brief_closes_both_inputs_when_one_close_fails():
+    pool = DiffPool()
+    closed = []
+
+    async def failing():
+        try:
+            yield b"a\n"
+            yield b"more"
+        finally:
+            raise OSError("close failed")
+
+    async def tracked():
+        try:
+            yield b"b\n"
+            yield b"more"
+        finally:
+            closed.append(True)
+
+    async def old():
+        return failing()
+
+    async def new():
+        return tracked()
+
+    try:
+        with pytest.raises(OSError, match="close failed"):
+            await pool.compare(DiffOptions(brief=True), old, new)
+        assert closed == [True]
+    finally:
+        await pool.close()

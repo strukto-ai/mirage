@@ -393,12 +393,12 @@ fn a_first_field_past_the_cap_is_refused_after_the_output_before_it() {
 }
 
 #[test]
-fn cancel_drops_a_held_record_and_ignores_later_input() {
+fn cancel_frees_a_held_record_a_few_blocks_a_step_and_ignores_later_input() {
     let options = config("2", "fields");
     let config = json!({ "options": options });
     let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
     let mut out = Vec::new();
-    for chunk in long_line(MAX_HELD / 2).chunks(WORK) {
+    for chunk in long_line(MAX_HELD / 2).chunks(1024) {
         stream.feed(chunk, &mut out).unwrap();
         while stream.busy() {
             stream.drain(&mut out).unwrap();
@@ -406,7 +406,12 @@ fn cancel_drops_a_held_record_and_ignores_later_input() {
     }
     assert!(out.is_empty());
     assert!(stream.cancel());
-    assert!(!stream.busy());
+    let mut steps = 0;
+    while stream.busy() {
+        stream.drain(&mut out).unwrap();
+        steps += 1;
+    }
+    assert!(steps > 1);
     stream.feed(b"x\ty\n", &mut out).unwrap();
     stream.drain(&mut out).unwrap();
     stream.finish(&mut out).unwrap();

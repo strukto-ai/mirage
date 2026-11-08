@@ -203,7 +203,11 @@ export class DiffPool implements DiffComputer {
           }
         }
       } finally {
-        for (const source of sources) await source?.return?.()
+        try {
+          await sources[0]?.return?.()
+        } finally {
+          await sources[1]?.return?.()
+        }
       }
       for (;;) {
         const state = await call({ kind: 'inspect' })

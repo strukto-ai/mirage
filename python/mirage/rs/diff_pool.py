@@ -238,9 +238,12 @@ class DiffPool:
                     size += self._append(output, reply[0])
                     wants = self._wants(reply[1])
             finally:
-                for source in sources:
-                    if source is not None:
-                        await source.aclose()
+                try:
+                    if sources[0] is not None:
+                        await sources[0].aclose()
+                finally:
+                    if sources[1] is not None:
+                        await sources[1].aclose()
             busy = True
             while busy:
                 drain_reply = await lease.call(diff_worker.drain)

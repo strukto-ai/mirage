@@ -11,12 +11,13 @@ const WIDTH: u64 = 80;
 const WORK: usize = 4096;
 const OUTPUT: usize = 16384;
 /// The most input column holds, with a row's cell for each line it lays
-/// out across: past it the run fails as the real one does once memory runs
-/// out.
+/// out across or a width for each column of a table: past it the run fails
+/// as the real one does once memory runs out.
 #[cfg(not(test))]
 const MAX_HELD: usize = 1 << 30;
 #[cfg(test)]
 const MAX_HELD: usize = 1 << 18;
+const OUT_OF_MEMORY: &[u8] = b"column: read failed: Cannot allocate memory";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -312,10 +313,12 @@ impl Writer {
 
 /// The first place at or past `at`, and at most `end`, that starts a
 /// lossy UTF-8 unit: no unit takes a byte that is not a continuation byte
-/// past its first.
+/// past its first, and none is longer than four bytes, so a unit begun
+/// before `at` ends within three bytes of it.
 fn boundary(text: &[u8], at: usize, end: usize) -> usize {
     let mut at = at.min(end);
-    while at < end && matches!(text[at], 0x80..=0xbf) {
+    let last = at.saturating_add(3).min(end);
+    while at < last && matches!(text[at], 0x80..=0xbf) {
         at += 1;
     }
     at
@@ -391,6 +394,7 @@ impl Lines {
     }
 }
 
+/// Lay `text` out, exiting 1 when a table's widths would pass `MAX_HELD`.
 async fn run(config: Config, width: u64, text: Vec<u8>, host: Host) -> i32 {
     let mut meter = Meter {
         host: host.clone(),
@@ -426,6 +430,9 @@ async fn run(config: Config, width: u64, text: Vec<u8>, host: Host) -> i32 {
             let mut index = 0;
             while let Some(cell) = reader.next(&text, separator.as_ref(), &mut meter).await {
                 if widths.len() <= index {
+                    if (index + 1) * size_of::<u64>() + text.len() > MAX_HELD {
+                        return 1;
+                    }
                     widths.push(0);
                 }
                 widths[index] = widths[index].max(cell.width);
@@ -510,10 +517,7 @@ impl Stream for Column {
             .saturating_add(self.text.len() + input.len());
         if held > MAX_HELD {
             self.text = Vec::new();
-            return Err(StreamError::refusal(
-                b"column: read failed: Cannot allocate memory",
-                1,
-            ));
+            return Err(StreamError::refusal(OUT_OF_MEMORY, 1));
         }
         self.text.extend_from_slice(input);
         Ok(())
@@ -534,6 +538,10 @@ impl Stream for Column {
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         if let Some(engine) = &mut self.engine {
             engine.drain(out)?;
+            if !engine.busy() && engine.status() != 0 {
+                self.engine = None;
+                return Err(StreamError::refusal(OUT_OF_MEMORY, 1));
+            }
         }
         Ok(())
     }
@@ -654,7 +662,7 @@ mod tests {
 
     #[test]
     fn input_past_what_column_holds_fails_as_memory_runs_out() {
-        let refused = StreamError::refusal(b"column: read failed: Cannot allocate memory", 1);
+        let refused = StreamError::refusal(OUT_OF_MEMORY, 1);
         for (options, input) in [
             (r#"{"table":true}"#, vec![b'x'; MAX_HELD + 1]),
             ("{}", b"a\n".repeat(MAX_HELD / (size_of::<Cell>() + 2) + 1)),
@@ -671,6 +679,33 @@ mod tests {
         assert_eq!(
             column(r#"{"table":true}"#, &[&table]),
             b"a  b\n".repeat(MAX_HELD / 8)
+        );
+        let wide = b"a,".repeat(MAX_HELD / 8);
+        let mut stream =
+            open(config(DEFAULTS, r#"{"table":true,"separator":","}"#).as_bytes()).unwrap();
+        let mut out = Vec::new();
+        stream.feed_input(0, &wide, &mut out).unwrap();
+        let mut result = stream.end_input(0, &mut out);
+        while result.is_ok() && stream.busy() {
+            result = stream.drain(&mut out);
+        }
+        assert_eq!(result, Err(refused));
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn a_window_ends_within_three_bytes_of_its_work() {
+        let emoji = "😀😀".as_bytes();
+        assert_eq!(boundary(emoji, 1, emoji.len()), 4);
+        assert_eq!(boundary(emoji, 3, emoji.len()), 4);
+        let stray = [0x80; 3 * WORK];
+        assert_eq!(boundary(&stray, 10, stray.len()), 13);
+        assert_eq!(boundary(&stray, stray.len() - 1, stray.len()), stray.len());
+        let input = [&stray[..], b",x\n"].concat();
+        let expected = ["\u{fffd}".repeat(stray.len()), "  x\n".to_owned()].concat();
+        assert_eq!(
+            column(r#"{"table":true,"separator":","}"#, &[&input]),
+            expected.as_bytes()
         );
     }
 

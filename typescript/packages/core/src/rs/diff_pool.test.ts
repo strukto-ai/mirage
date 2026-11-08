@@ -245,6 +245,40 @@ describe('diff pool with its Rust worker', () => {
     expect(concat(large.output).byteLength).toBeGreaterThan(huge.byteLength)
   })
 
+  it('closes both -q inputs when one close fails', async () => {
+    const owner = pool()
+    let closed = false
+    const source = (
+      text: string,
+      close: () => Promise<IteratorResult<Uint8Array>>,
+    ): AsyncIterableIterator<Uint8Array> => {
+      const pending = [new TextEncoder().encode(text), new TextEncoder().encode('more')]
+      const iterator: AsyncIterableIterator<Uint8Array> = {
+        next: () => {
+          const value = pending.shift()
+          return Promise.resolve(
+            value === undefined ? { done: true, value: undefined } : { done: false, value },
+          )
+        },
+        return: close,
+        [Symbol.asyncIterator]: () => iterator,
+      }
+      return iterator
+    }
+    await expect(
+      owner.compare(
+        { ...options, brief: true },
+        () => source('a\n', () => Promise.reject(new Error('close failed'))),
+        () =>
+          source('b\n', () => {
+            closed = true
+            return Promise.resolve({ done: true, value: undefined })
+          }),
+      ),
+    ).rejects.toThrow('close failed')
+    expect(closed).toBe(true)
+  })
+
   it('cancels synchronous matching while host timers keep running and recovers', async () => {
     const owner = pool()
     await owner.compare(options, empty, empty)

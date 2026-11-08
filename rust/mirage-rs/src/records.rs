@@ -11,6 +11,10 @@ pub(crate) enum Take<T = Vec<u8>> {
 pub(crate) const MAX_LEN: usize = 1 << 30;
 #[cfg(test)]
 pub(crate) const MAX_LEN: usize = 1 << 16;
+/// The most the buffer grows to by doubling: a record at the cap and the
+/// chunks past it fit, short of the 2 GiB a byte vector on wasm32 cannot
+/// hold.
+const GROW_LIMIT: usize = MAX_LEN + MAX_LEN / 2;
 
 /// A record passed `MAX_LEN` with no terminator.
 #[derive(Debug)]
@@ -30,25 +34,38 @@ pub(crate) struct Records {
 impl Records {
     fn compact(&mut self) {
         if self.pos * 2 > self.buf.len() {
-            self.buf.drain(..self.pos);
-            self.searched -= self.pos;
-            if let Some((end, _)) = &mut self.ready {
-                *end -= self.pos;
-            }
-            self.pos = 0;
+            self.drain_read();
             crate::release_capacity(&mut self.buf);
         }
     }
 
     /// Take the next bytes, refused once the record they would extend has
-    /// been searched past `MAX_LEN` with no terminator.
+    /// been searched past `MAX_LEN` with no terminator. Room is made by
+    /// dropping what was read first, then by doubling up to `GROW_LIMIT`.
     pub(crate) fn push(&mut self, data: &[u8]) -> Result<(), Overlong> {
         self.compact();
         if self.searched.saturating_sub(self.pos) > MAX_LEN {
             return Err(Overlong);
         }
+        if self.buf.len() + data.len() > self.buf.capacity() {
+            self.drain_read();
+        }
+        let needed = self.buf.len() + data.len();
+        if needed > self.buf.capacity() {
+            let doubled = self.buf.capacity().saturating_mul(2).min(GROW_LIMIT);
+            self.buf.reserve_exact(needed.max(doubled) - self.buf.len());
+        }
         self.buf.extend_from_slice(data);
         Ok(())
+    }
+
+    fn drain_read(&mut self) {
+        self.buf.drain(..self.pos);
+        self.searched -= self.pos;
+        if let Some((end, _)) = &mut self.ready {
+            *end -= self.pos;
+        }
+        self.pos = 0;
     }
 
     pub(crate) fn end(&mut self) {
@@ -124,16 +141,23 @@ impl Records {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_LEN, Records, Take};
+    use super::{GROW_LIMIT, MAX_LEN, Records, Take};
     use crate::{StreamError, open};
 
     #[test]
-    fn a_record_searched_past_the_cap_takes_no_more() {
-        let long = vec![b'x'; MAX_LEN + 1];
+    fn a_record_searched_past_the_cap_takes_no_more_and_never_doubles_past_the_limit() {
         let mut records = Records::default();
-        records.push(&long).unwrap();
-        assert!(matches!(records.peek_span(b'\n'), Take::Wait));
-        assert!(records.push(b"\n").is_err());
+        records.push(b"a\nb").unwrap();
+        assert!(matches!(records.next_span(b'\n'), Take::Record(b"a")));
+        let refused = loop {
+            assert!(matches!(records.peek_span(b'\n'), Take::Wait));
+            if records.push(&[b'x'; 1000]).is_err() {
+                break records.buf.len();
+            }
+            assert!(records.buf.capacity() <= GROW_LIMIT);
+        };
+        assert!(refused > MAX_LEN && refused <= MAX_LEN + 1000);
+        let long = vec![b'x'; MAX_LEN + 1];
         let mut pieces = Records::default();
         for _ in 0..3 {
             pieces.push(&long).unwrap();

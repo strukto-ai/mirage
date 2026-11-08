@@ -102,6 +102,7 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         return Ok(Box::new(Brief {
             config,
             held: [Vec::new(), Vec::new()],
+            searched: [0; 2],
             ended: [false; 2],
             lines: if ignores { None } else { Some(false) },
             differ: None,
@@ -523,19 +524,29 @@ impl Stream for Diff {
 struct Brief {
     config: Config,
     held: [Vec<u8>; 2],
+    /// How far each held line is known to have no newline, or where its
+    /// newline is, so a long line is searched once.
+    searched: [usize; 2],
     ended: [bool; 2],
     /// Whether lines' keys decide, None until the binary probe has run.
     lines: Option<bool>,
     differ: Option<bool>,
 }
 
-/// The next line `held` holds, through its newline or, once its input has
-/// ended, to its end.
-fn next_line(held: &[u8], ended: bool) -> Option<&[u8]> {
-    match memchr::memchr(b'\n', held) {
-        Some(at) => Some(&held[..=at]),
-        None if ended && !held.is_empty() => Some(held),
-        None => None,
+/// Where the line `held` holds from `at` ends: past its newline or, once
+/// its input has ended, at its end. The search starts at `searched` and
+/// leaves it at the newline, or at the end when there is none.
+fn line_end(held: &[u8], at: usize, searched: &mut usize, ended: bool) -> Option<usize> {
+    let from = at.max(*searched);
+    match memchr::memchr(b'\n', &held[from..]) {
+        Some(found) => {
+            *searched = from + found;
+            Some(from + found + 1)
+        }
+        None => {
+            *searched = held.len();
+            (ended && at < held.len()).then_some(held.len())
+        }
     }
 }
 
@@ -586,15 +597,15 @@ impl Brief {
     fn settle_lines(&mut self) -> Option<bool> {
         let mut at = [0, 0];
         let differ = loop {
-            let old = next_line(&self.held[0][at[0]..], self.ended[0]);
-            let new = next_line(&self.held[1][at[1]..], self.ended[1]);
+            let old = line_end(&self.held[0], at[0], &mut self.searched[0], self.ended[0]);
+            let new = line_end(&self.held[1], at[1], &mut self.searched[1], self.ended[1]);
             match (old, new) {
                 (Some(old), Some(new)) => {
-                    if key(&old, &self.config) != key(&new, &self.config) {
+                    let lines = [&self.held[0][at[0]..old], &self.held[1][at[1]..new]];
+                    if key(&lines[0], &self.config) != key(&lines[1], &self.config) {
                         break Some(true);
                     }
-                    at[0] += old.len();
-                    at[1] += new.len();
+                    at = [old, new];
                 }
                 (None, None) if self.ended == [true, true] => break Some(false),
                 (None, Some(_)) if self.ended[0] => break Some(true),
@@ -602,8 +613,10 @@ impl Brief {
                 _ => break None,
             }
         };
-        self.held[0].drain(..at[0]);
-        self.held[1].drain(..at[1]);
+        for ((held, searched), at) in self.held.iter_mut().zip(&mut self.searched).zip(at) {
+            held.drain(..at);
+            *searched = searched.saturating_sub(at);
+        }
         differ
     }
 }
@@ -625,7 +638,7 @@ impl Stream for Brief {
         let short = |index: usize| match self.lines {
             None => !self.ready(index),
             Some(false) => self.held[index].is_empty(),
-            Some(true) => next_line(&self.held[index], false).is_none(),
+            Some(true) => !self.held[index][self.searched[index]..].contains(&b'\n'),
         };
         (0..2).find(|index| !self.ended[*index] && short(*index))
     }
@@ -772,6 +785,14 @@ mod brief_tests {
         // As diffutils 3.10 compares under -q, ed's output style aside.
         let ed = brief(json!({"mode": "ed"}), [b"a", b"a\n"], 1);
         assert_eq!((ed.0.as_str(), ed.1), ("different", 1));
+    }
+
+    #[test]
+    fn a_long_line_is_searched_once_as_it_comes() {
+        let old = [vec![b'a'; 1 << 21], b"\nb\n".to_vec()].concat();
+        let new = old.to_ascii_uppercase();
+        let (outcome, _, _) = brief(json!({"ignore_case": true}), [&old, &new], 16);
+        assert_eq!(outcome, "equal");
     }
 
     #[test]

@@ -13,6 +13,11 @@ const WORK: usize = 16384;
 const PARK: usize = 64 * 1024;
 #[cfg(test)]
 const PARK: usize = 4096;
+/// The set-aside blocks a step frees once their hold is dropped.
+#[cfg(not(test))]
+const RETIRE: usize = 64;
+#[cfg(test)]
+const RETIRE: usize = 2;
 
 /// The most of a record cut holds while a decision waits on the rest of
 /// it: past it the run fails as the real one does once memory runs out.
@@ -808,6 +813,8 @@ struct Cut {
     input: Vec<u8>,
     cursor: usize,
     line: Option<Line>,
+    /// Blocks a dropped line had set aside, freed `RETIRE` a step.
+    retired: VecDeque<Vec<u8>>,
     /// The line waits on bytes the input has not given yet.
     hungry: bool,
     ended: bool,
@@ -815,13 +822,21 @@ struct Cut {
 }
 
 impl Cut {
+    fn retire(&mut self) {
+        if let Some(line) = self.line.take() {
+            self.retired.extend(line.held.parked);
+        }
+    }
+
     fn step(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let kept = self.retired.len().saturating_sub(RETIRE);
+        self.retired.truncate(kept);
         let mut work = WORK;
         while work > 0 {
             if let Some(line) = &mut self.line {
                 match line.step(&self.options, &self.ranges, out, &mut work) {
                     Progress::Done => {
-                        self.line = None;
+                        self.retire();
                         continue;
                     }
                     Progress::Spent => return Ok(()),
@@ -892,24 +907,27 @@ impl Stream for Cut {
     }
 
     fn busy(&self) -> bool {
-        !self.cancelled
-            && (self.cursor < self.input.len()
-                || self
-                    .line
-                    .as_ref()
-                    .is_some_and(|line| !self.hungry || (self.ended && !line.held.complete)))
+        !self.retired.is_empty()
+            || !self.cancelled
+                && (self.cursor < self.input.len()
+                    || self
+                        .line
+                        .as_ref()
+                        .is_some_and(|line| !self.hungry || (self.ended && !line.held.complete)))
     }
 
     fn cancel(&mut self) -> bool {
         self.cancelled = true;
         self.input = Vec::new();
         self.cursor = 0;
-        self.line = None;
+        self.retire();
         true
     }
 
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         if self.cancelled {
+            let kept = self.retired.len().saturating_sub(RETIRE);
+            self.retired.truncate(kept);
             return Ok(());
         }
         self.step(out)
@@ -947,6 +965,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         input: Vec::new(),
         cursor: 0,
         line: None,
+        retired: VecDeque::new(),
         hungry: false,
         ended: false,
         cancelled: false,
