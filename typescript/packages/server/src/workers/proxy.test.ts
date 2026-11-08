@@ -199,7 +199,12 @@ describe('WorkerProxy', () => {
     if (building === undefined) throw new Error('no worker 0')
     const settle = d.pool.claim('x', building)
     expect((await call(`${d.url}/v1/workspaces/n/clone`, 'POST', { id: 'x' })).status).toBe(409)
+    const overlap = d.pool.claim('x', building)
     settle()
+    settle()
+    expect(d.pool.building('x')).toBe(building)
+    overlap()
+    expect(d.pool.building('x')).toBeUndefined()
     expect((await call(`${d.url}/v1/workspaces/n/stop`, 'POST')).status).toBe(200)
     expect((await call(`${d.url}/v1/workspaces/a/clone`, 'POST', { id: 'n' })).status).toBe(409)
     expect((await call(`${d.url}/v1/workspaces`, 'POST', { id: 'n', config: CONFIG })).status).toBe(

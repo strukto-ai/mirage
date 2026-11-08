@@ -186,7 +186,12 @@ async def test_a_create_under_a_held_id_or_config_workspace_id_goes_to_its_worke
             "/v1/workspaces/n/clone", json={"id": "x"}
         )
         assert building.status_code == 409
+        overlap = d.pool.claim("x", d.pool.workers[0])
         settle()
+        settle()
+        assert d.pool.building("x") is d.pool.workers[0]
+        overlap()
+        assert d.pool.building("x") is None
         stopped = await d.client.post("/v1/workspaces/n/stop")
         assert stopped.status_code == 200
         held = await d.client.post("/v1/workspaces/a/clone", json={"id": "n"})

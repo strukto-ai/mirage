@@ -158,7 +158,8 @@ async def _kept(
 ) -> tuple[dict[str, JsonValue] | None, float] | None:
     """What the caller's ``workspace_id``, not live, keeps: the config it
     starts from and when it was first created, or None when it keeps
-    neither config nor state.
+    neither config nor state. A saved config's store that cannot be read,
+    such as a Redis that is down, leaves the config with no creation time.
 
     Args:
         request (Request): the request, for the registry and its account.
@@ -172,6 +173,15 @@ async def _kept(
     store = _store_of(request, config)
     try:
         meta = await store.load_meta(workspace_id)
+    except Exception as exc:
+        if config is None:
+            raise
+        logger.warning(
+            "mirage: workspace %s's store could not be read: %s",
+            workspace_id,
+            exc,
+        )
+        meta = None
     finally:
         await store.close()
     if config is None and meta is None:

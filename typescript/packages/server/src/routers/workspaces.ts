@@ -266,7 +266,9 @@ interface Kept {
 
 /**
  * What `account`'s `id`, not live, keeps: its config or its state, null
- * when it keeps neither. Mirrors Python's `_kept`.
+ * when it keeps neither. A saved config's store that cannot be read, such
+ * as a Redis that is down, leaves the config with no creation time.
+ * Mirrors Python's `_kept`.
  */
 async function kept(
   deps: WorkspaceRoutesDeps,
@@ -279,6 +281,10 @@ async function kept(
   let meta: Record<string, unknown> | null
   try {
     meta = await store.loadMeta(id)
+  } catch (e) {
+    if (config === null) throw e
+    console.warn(`mirage: workspace ${id}'s store could not be read: ${(e as Error).message}`)
+    meta = null
   } finally {
     await store.close()
   }

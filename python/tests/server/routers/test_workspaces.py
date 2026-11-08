@@ -19,6 +19,7 @@ import io
 import json
 import lzma
 import os
+import shutil
 import tarfile
 import threading
 import time
@@ -1837,6 +1838,39 @@ async def test_a_stopped_workspace_is_deleted_from_the_store_its_config_names(
         r = await client.delete("/v1/workspaces/mine")
         assert r.status_code == 200, r.text
         assert not (own / "workspaces" / "mine").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_workspace_whose_store_cannot_be_read_is_listed(
+    tmp_path,
+):
+    own = tmp_path / "own"
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        body = {
+            "id": "mine",
+            "config": {
+                "mounts": {"/": {"vfs": "ram"}},
+                "store": {"type": "disk", "root": str(own)},
+            },
+        }
+        r = await client.post("/v1/workspaces", json=body)
+        assert r.status_code == 201, r.text
+        ram = {"mounts": {"/": {"vfs": "ram"}}}
+        r = await client.post("/v1/workspaces", json={"id": "on", "config": ram})
+        assert r.status_code == 201, r.text
+        await client.post("/v1/workspaces/mine/stop")
+        shutil.rmtree(own)
+        own.write_text("not a directory")
+        listed = await client.get("/v1/workspaces")
+        assert listed.status_code == 200, listed.text
+        rows = [
+            (w["id"], w["status"], w["created_at"] if w["id"] == "mine" else None)
+            for w in listed.json()
+        ]
+        assert rows == [("on", "running", None), ("mine", "stopped", 0)]
 
 
 @pytest.mark.asyncio

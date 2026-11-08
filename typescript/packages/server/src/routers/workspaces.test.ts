@@ -1651,6 +1651,33 @@ describe('workspace cancel, kill, stop and start', () => {
     }
   })
 
+  it('lists a stopped workspace whose store cannot be read', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-lost-store-'))
+    const own = join(root, 'own')
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      const body = {
+        id: 'mine',
+        config: { mounts: { '/': { vfs: 'ram' } }, store: { type: 'disk', root: own } },
+      }
+      expect((await post(app, '/v1/workspaces', body)).statusCode).toBe(201)
+      const ram = { mounts: { '/': { vfs: 'ram' } } }
+      expect((await post(app, '/v1/workspaces', { id: 'on', config: ram })).statusCode).toBe(201)
+      await post(app, '/v1/workspaces/mine/stop')
+      rmSync(own, { recursive: true, force: true })
+      writeFileSync(own, 'not a directory')
+      const listed = await app.inject({ method: 'GET', url: '/v1/workspaces' })
+      expect(listed.statusCode).toBe(200)
+      expect(listed.json()).toEqual([
+        expect.objectContaining({ id: 'on', status: 'running' }),
+        expect.objectContaining({ id: 'mine', status: 'stopped', created_at: 0 }),
+      ])
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('shows a stopped workspace with the mode and mounts it ran with', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ws-same-view-'))
     const app = buildApp({ stateRoot: join(root, 'state') })

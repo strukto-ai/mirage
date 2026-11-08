@@ -154,12 +154,12 @@ def _config_mounts(config: dict[str, JsonValue] | None) -> list[MountSummary]:
     return out
 
 
-def _mode_of(value: object, fallback: str) -> str:
+def _mode_of(value: JsonValue, fallback: str) -> str:
     """A mode as a running workspace names it, an alias such as ``rw``
     read as ``write``; ``fallback`` when the config gives none.
 
     Args:
-        value (object): the mode the config wrote, if any.
+        value (JsonValue): the mode the config wrote, if any.
         fallback (str): the mode when it wrote none.
     """
     if not isinstance(value, str):
