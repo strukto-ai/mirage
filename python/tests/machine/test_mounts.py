@@ -48,7 +48,8 @@ from mirage.machine.mounts import (
     running_line,
     top_prefixes,
 )
-from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.machine.types import MachinePipe
+from mirage.runtime.types import RunResult
 from mirage.types import Limit
 from tests.fixtures.machine import on
 
@@ -80,7 +81,7 @@ class Drain:
         return []
 
 
-class FakeSandbox(MachineHandle, PipeTransportMixin):
+class FakeMachine(MachineHandle, PipeTransportMixin):
     """A sandbox that answers its mount table and takes sshfs pipes."""
 
     provider = "fake"
@@ -143,7 +144,7 @@ class FakeSandbox(MachineHandle, PipeTransportMixin):
             return RunResult(stdout=b"", stderr=b"boom\n", exit_code=3)
         if line.startswith("fusermount3 -uz "):
             if self.fail_unmount:
-                raise RuntimeError("the sandbox went away")
+                raise RuntimeError("the machine went away")
             source, _ = self.table.pop(shlex.split(line)[2], (None, None))
             self.running.discard(source)
         return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
@@ -189,7 +190,7 @@ class FakeSandbox(MachineHandle, PipeTransportMixin):
             self.stopped.append(prefix)
             requests.feed_eof()
 
-        return SandboxPipe(requests, Sink(), stop)
+        return MachinePipe(requests, Sink(), stop)
 
     def sshfs_exits(self, prefix):
         """End ``prefix``'s server: its sshfs then unmounts itself."""
@@ -206,7 +207,7 @@ def escaped(text, more=""):
 
 def sharing(sandbox, mount_type):
     """Another workspace's runtime on the same sandbox."""
-    other = FakeSandbox(mount_type)
+    other = FakeMachine(mount_type)
     other.table = sandbox.table
     other.running = sandbox.running
     return other
@@ -312,7 +313,7 @@ def test_top_prefixes_leave_out_the_root_devices_and_nested_mounts():
 
 @pytest.mark.asyncio
 async def test_ssh_serves_every_prefix_the_session_sees():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
@@ -334,7 +335,7 @@ async def test_ssh_serves_every_prefix_the_session_sees():
     "cwd, ran", [("/notes", False), ("/data", True), ("/", True)]
 )
 async def test_ssh_refuses_a_line_from_a_cwd_it_cannot_see(cwd, ran):
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     assert (await ws.shell("mkdir -p /notes")).exit_code == 0
     result = await ws.shell(f"cd {cwd} && python3 job.py")
@@ -344,7 +345,7 @@ async def test_ssh_refuses_a_line_from_a_cwd_it_cannot_see(cwd, ran):
     else:
         assert said == (
             126,
-            "fake: the sandbox cannot see the working directory /notes; "
+            "fake: the machine cannot see the working directory /notes; "
             "cd into a mount first\n",
         )
         assert (sandbox.commands, sandbox.pipes) == ([], [])
@@ -353,7 +354,7 @@ async def test_ssh_refuses_a_line_from_a_cwd_it_cannot_see(cwd, ran):
 
 @pytest.mark.asyncio
 async def test_a_cwd_the_sandbox_cannot_see_is_refused_before_connecting():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
 
     async def offline() -> None:
         raise ConnectionError("offline")
@@ -364,7 +365,7 @@ async def test_a_cwd_the_sandbox_cannot_see_is_refused_before_connecting():
     result = await ws.shell("cd /notes && python3 job.py")
     assert (result.exit_code, await result.stderr_str()) == (
         126,
-        "fake: the sandbox cannot see the working directory /notes; "
+        "fake: the machine cannot see the working directory /notes; "
         "cd into a mount first\n",
     )
     assert sandbox._mounts._lines == []
@@ -373,7 +374,7 @@ async def test_a_cwd_the_sandbox_cannot_see_is_refused_before_connecting():
 
 @pytest.mark.asyncio
 async def test_a_branch_refused_for_its_cwd_leaves_a_running_branch_admitted():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     assert (await ws.shell("mkdir -p /notes")).exit_code == 0
     line = asyncio.create_task(
@@ -393,7 +394,7 @@ async def test_a_branch_refused_for_its_cwd_leaves_a_running_branch_admitted():
 
 @pytest.mark.asyncio
 async def test_a_second_session_is_refused_rather_than_shown_the_first_view():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     other = await ws.session("other")
@@ -401,15 +402,15 @@ async def test_a_second_session_is_refused_rather_than_shown_the_first_view():
     result = await other.shell("python3 job.py")
     assert result.exit_code == 1
     assert await result.stderr_str() == (
-        "fake: this sandbox shows session agent's view of the workspace; "
-        "give session other a sandbox of its own\n"
+        "fake: this machine shows session agent's view of the workspace; "
+        "give session other a machine of its own\n"
     )
     await ws.close()
 
 
 @pytest.mark.asyncio
 async def test_a_session_made_again_under_its_id_is_refused():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -418,8 +419,8 @@ async def test_a_session_made_again_under_its_id_is_refused():
     result = await agent.shell("python3 job.py")
     assert result.exit_code == 1
     assert await result.stderr_str() == (
-        "fake: this sandbox shows an earlier session agent's view of the "
-        "workspace; give session agent a sandbox of its own\n"
+        "fake: this machine shows an earlier session agent's view of the "
+        "workspace; give session agent a machine of its own\n"
     )
     assert len(sandbox.pipes) == 2
     await ws.close()
@@ -427,7 +428,7 @@ async def test_a_session_made_again_under_its_id_is_refused():
 
 @pytest.mark.asyncio
 async def test_hidden_unserved_mounts_refuse_without_claiming_the_sandbox():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox, hide=["/data", "/my notes"])
     agent = await ws.session("agent", profile="agent")
     other = await ws.session("other")
@@ -442,7 +443,7 @@ async def test_hidden_unserved_mounts_refuse_without_claiming_the_sandbox():
 
 @pytest.mark.asyncio
 async def test_a_refused_line_leaves_the_sandbox_free():
-    sandbox = FakeSandbox("both", own=["/data", "/my notes"])
+    sandbox = FakeMachine("both", own=["/data", "/my notes"])
     ws = workspace(sandbox, hide=["/data"])
     agent = await ws.session("agent", profile="agent")
     other = await ws.session("other")
@@ -454,7 +455,7 @@ async def test_a_refused_line_leaves_the_sandbox_free():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source", ["tmpfs", "mirage-cache"])
 async def test_both_serves_what_the_sandbox_does_not_mount_itself(source):
-    sandbox = FakeSandbox("both")
+    sandbox = FakeMachine("both")
     sandbox.table["/data"] = (source, "tmpfs")
     ws = workspace(sandbox, hide=["/my notes/secret"])
     agent = await ws.session("agent", profile="agent")
@@ -468,7 +469,7 @@ async def test_both_serves_what_the_sandbox_does_not_mount_itself(source):
 async def test_a_rule_under_a_prefix_the_sandbox_serves_refuses_the_line(
     mount_type,
 ):
-    sandbox = FakeSandbox(mount_type, own=["/data"])
+    sandbox = FakeMachine(mount_type, own=["/data"])
     ws = workspace(sandbox, hide=["/data/secret.csv"])
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
@@ -480,7 +481,7 @@ async def test_a_rule_under_a_prefix_the_sandbox_serves_refuses_the_line(
 
 @pytest.mark.asyncio
 async def test_a_mount_the_sandbox_makes_later_under_a_rule_refuses_the_line():
-    sandbox = FakeSandbox("fuse")
+    sandbox = FakeMachine("fuse")
     ws = workspace(sandbox, hide=["/data/secret.csv"])
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 126
@@ -493,7 +494,7 @@ async def test_a_mount_the_sandbox_makes_later_under_a_rule_refuses_the_line():
 
 @pytest.mark.asyncio
 async def test_fuse_serves_nothing_from_the_host_and_takes_any_session():
-    sandbox = FakeSandbox("fuse", own=["/data"])
+    sandbox = FakeMachine("fuse", own=["/data"])
     ws = workspace(sandbox, hide=["/my notes/secret"])
     agent = await ws.session("agent", profile="agent")
     other = await ws.session("other")
@@ -505,13 +506,13 @@ async def test_fuse_serves_nothing_from_the_host_and_takes_any_session():
 
 @pytest.mark.asyncio
 async def test_a_sandbox_without_sshfs_fails_loud():
-    sandbox = FakeSandbox("ssh", sshfs=False)
+    sandbox = FakeMachine("ssh", sshfs=False)
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
     assert result.exit_code == 1
     assert await result.stderr_str() == (
-        "python3: fake: serving the workspace into a sandbox needs sshfs there; "
+        "python3: fake: serving the workspace into a machine needs sshfs there; "
         "install it in the image (apt-get install sshfs)\n"
     )
     assert sandbox.pipes == []
@@ -520,7 +521,7 @@ async def test_a_sandbox_without_sshfs_fails_loud():
 
 @pytest.mark.asyncio
 async def test_a_dead_sshfs_mount_is_dropped_before_serving():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     sandbox.table["/data"] = ("mirage-gone:/data", "fuse.sshfs")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
@@ -534,14 +535,14 @@ async def test_a_dead_sshfs_mount_is_dropped_before_serving():
 
 
 FOREIGN = (
-    "fake: another sshfs serves /data in this sandbox; "
-    "give this workspace a sandbox of its own\n"
+    "fake: another sshfs serves /data in this machine; "
+    "give this workspace a machine of its own\n"
 )
 
 
 @pytest.mark.asyncio
 async def test_a_second_workspace_on_the_sandbox_unmounts_nothing():
-    first = FakeSandbox("ssh")
+    first = FakeMachine("ssh")
     second = sharing(first, "ssh")
     ws1, ws2 = workspace(first), workspace(second)
     one = await ws1.session("agent", profile="agent")
@@ -562,7 +563,7 @@ async def test_a_second_workspace_on_the_sandbox_unmounts_nothing():
 
 @pytest.mark.asyncio
 async def test_dropping_an_ended_server_leaves_the_mount_that_replaced_it():
-    first = FakeSandbox("ssh")
+    first = FakeMachine("ssh")
     second = sharing(first, "ssh")
     ws1, ws2 = workspace(first), workspace(second)
     one = await ws1.session("agent", profile="agent")
@@ -584,7 +585,7 @@ async def test_dropping_an_ended_server_leaves_the_mount_that_replaced_it():
 
 @pytest.mark.asyncio
 async def test_a_check_that_fails_leaves_the_next_line_checking():
-    first = FakeSandbox("ssh")
+    first = FakeMachine("ssh")
     second = sharing(first, "ssh")
     ws1, ws2 = workspace(first), workspace(second)
     one = await ws1.session("agent", profile="agent")
@@ -607,7 +608,7 @@ async def test_a_check_that_fails_leaves_the_next_line_checking():
 
 @pytest.mark.asyncio
 async def test_both_takes_no_other_workspaces_sshfs_for_its_own():
-    first = FakeSandbox("ssh")
+    first = FakeMachine("ssh")
     second = sharing(first, "both")
     ws1, ws2 = workspace(first), workspace(second)
     one = await ws1.session("agent", profile="agent")
@@ -623,7 +624,7 @@ async def test_both_takes_no_other_workspaces_sshfs_for_its_own():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mount_type", ["both", "fuse"])
 async def test_a_hidden_mount_the_sandbox_serves_refuses_the_line(mount_type):
-    sandbox = FakeSandbox(mount_type, own=["/data"])
+    sandbox = FakeMachine(mount_type, own=["/data"])
     ws = workspace(sandbox, hide=["/data"])
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
@@ -638,7 +639,7 @@ async def test_a_hidden_mount_the_sandbox_serves_refuses_the_line(mount_type):
 
 @pytest.mark.asyncio
 async def test_a_mode_cap_on_a_mount_the_sandbox_serves_refuses_the_line():
-    sandbox = FakeSandbox("both", own=["/data"])
+    sandbox = FakeMachine("both", own=["/data"])
     ws = workspace(sandbox, modes={"/data/sub": "r"})
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
@@ -652,7 +653,7 @@ async def test_a_mode_cap_on_a_mount_the_sandbox_serves_refuses_the_line():
 async def test_a_shown_read_only_path_on_a_sandbox_owned_mount_refuses(
     mount_type,
 ):
-    sandbox = FakeSandbox(mount_type, own=["/data"])
+    sandbox = FakeMachine(mount_type, own=["/data"])
     ws = workspace(sandbox)
     try:
         agent = await ws.session(
@@ -676,7 +677,7 @@ async def test_a_line_with_its_own_cwd_serves_the_live_session(monkeypatch):
             await super().serve(reader, writer)
 
     monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     await ws.session("agent", profile="agent")
     result = await ws.shell("python3 job.py", session_id="agent", cwd="/data")
@@ -698,7 +699,7 @@ async def test_a_server_runs_outside_the_line_that_started_it(monkeypatch):
             await super().serve(reader, writer)
 
     monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -729,7 +730,7 @@ async def test_a_line_returns_once_every_server_has_landed(monkeypatch):
             return []
 
     monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
-    ws = workspace(FakeSandbox("ssh"))
+    ws = workspace(FakeMachine("ssh"))
     agent = await ws.session("agent", profile="agent")
     line = asyncio.create_task(agent.shell("python3 job.py"))
     first, server = await asyncio.wait_for(held.get(), 5)
@@ -779,7 +780,7 @@ async def test_a_landing_that_fails_fails_the_line_with_its_error(
             return failures.pop() if lost and failures else []
 
     monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
-    ws = workspace(FakeSandbox("ssh"))
+    ws = workspace(FakeMachine("ssh"))
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell(line)
     assert (result.exit_code, await result.stderr_str()) == (status, stderr)
@@ -803,7 +804,7 @@ async def test_a_line_that_times_out_still_lands_its_writes(
 
     monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     ws = workspace(
-        FakeSandbox("ssh"),
+        FakeMachine("ssh"),
         command_limits={"@line": Limit(timeout_seconds=0.05)},
     )
     agent = await ws.session("agent", profile="agent")
@@ -835,7 +836,7 @@ async def test_a_landing_the_deadline_stops_logs_what_failed_before_it(
 
     monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     ws = workspace(
-        FakeSandbox("ssh"),
+        FakeMachine("ssh"),
         command_limits={"@line": Limit(timeout_seconds=0.05)},
     )
     agent = await ws.session("agent", profile="agent")
@@ -856,9 +857,9 @@ async def test_a_landing_stopped_as_a_sync_returns_logs_its_failure(caplog):
             asyncio.get_running_loop().call_soon(landing[0].cancel)
             return [("/data/a.bin", QuotaExceededError(errno.EDQUOT, ""))]
 
-    held = mounts.SandboxMounts("fake", "ssh", None, None)
+    held = mounts.MachineMounts("fake", "ssh", None, None)
     held._served["/data"] = (None, None, Server(None, None, None))
-    landing.append(asyncio.create_task(held.land()))
+    landing.append(asyncio.create_task(held.land_writes()))
     with caplog.at_level("WARNING"):
         await asyncio.wait(landing)
     assert landing[0].cancelled()
@@ -883,7 +884,7 @@ async def test_a_line_whose_deadline_stops_its_landing_still_lands(
 
     monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     ws = workspace(
-        FakeSandbox("ssh"),
+        FakeMachine("ssh"),
         command_limits={"@line": Limit(timeout_seconds=0.05)},
     )
     agent = await ws.session("agent", profile="agent")
@@ -894,13 +895,13 @@ async def test_a_line_whose_deadline_stops_its_landing_still_lands(
 
 @pytest.mark.asyncio
 async def test_a_mount_of_its_own_under_a_served_prefix_fails_loud():
-    sandbox = FakeSandbox("both", own=["/data/sub"])
+    sandbox = FakeMachine("both", own=["/data/sub"])
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
     assert result.exit_code == 1
     assert await result.stderr_str() == (
-        "python3: fake: the sandbox mounts /data/sub itself, and serving /data would "
+        "python3: fake: the machine mounts /data/sub itself, and serving /data would "
         "cover it\n"
     )
     assert sandbox.pipes == []
@@ -909,7 +910,7 @@ async def test_a_mount_of_its_own_under_a_served_prefix_fails_loud():
 
 @pytest.mark.asyncio
 async def test_a_mount_added_later_is_served_on_the_next_line():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -921,7 +922,7 @@ async def test_a_mount_added_later_is_served_on_the_next_line():
 
 @pytest.mark.asyncio
 async def test_a_server_that_ended_is_started_again():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -935,17 +936,17 @@ async def test_a_server_that_ended_is_started_again():
 
 def lost(prefix):
     return (
-        f"fake: {prefix} is no longer mounted in the sandbox (did it "
+        f"fake: {prefix} is no longer mounted in the machine (did it "
         "restart?); the line did not run\n"
     )
 
 
-# A restart after the line was admitted took the sandbox's mounts while
+# A restart after the line was admitted took the machine's mounts while
 # the host still serves them: the line never runs over the bare
 # directories, and the next one serves them again.
 @pytest.mark.asyncio
 async def test_a_line_over_mounts_the_sandbox_lost_never_runs():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -962,11 +963,11 @@ async def test_a_line_over_mounts_the_sandbox_lost_never_runs():
     await ws.close()
 
 
-# A mount the sandbox put over a served prefix is left alone: ending the
+# A mount the machine put over a served prefix is left alone: ending the
 # sshfs under it would take it down too.
 @pytest.mark.asyncio
 async def test_a_mount_over_a_served_prefix_is_left_alone():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -977,7 +978,7 @@ async def test_a_mount_over_a_served_prefix_is_left_alone():
     second = await agent.shell("python3 covered.py")
     assert (second.exit_code, await second.stderr_str()) == (
         1,
-        "fake: another mount covers /data in this sandbox; the line did "
+        "fake: another mount covers /data in this machine; the line did "
         "not run\n",
     )
     assert "python3 covered.py" not in sandbox.commands
@@ -993,7 +994,7 @@ async def test_a_mount_over_a_served_prefix_is_left_alone():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mount_type", ["fuse", "both"])
 async def test_lines_wait_for_a_mount_of_the_sandboxs_own_it_lost(mount_type):
-    sandbox = FakeSandbox(mount_type, own=["/data"])
+    sandbox = FakeMachine(mount_type, own=["/data"])
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -1016,7 +1017,7 @@ async def test_lines_wait_for_a_mount_of_the_sandboxs_own_it_lost(mount_type):
 
 @pytest.mark.asyncio
 async def test_a_prefix_with_a_hash_is_served_and_its_lines_run():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     ws.add_mount("/a#b", RAMVFS(), mode=MountMode.WRITE)
     agent = await ws.session("agent", profile="agent")
@@ -1026,7 +1027,7 @@ async def test_a_prefix_with_a_hash_is_served_and_its_lines_run():
     await ws.close()
 
 
-# Under fuse the mounts are read again on each line until the sandbox holds
+# Under fuse the mounts are read again on each line until the machine holds
 # every prefix, so one it mounts late is guarded too; then once per change.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -1035,7 +1036,7 @@ async def test_a_prefix_with_a_hash_is_served_and_its_lines_run():
 async def test_fuse_reads_the_mounts_until_the_sandbox_holds_them_all(
     own, reads
 ):
-    sandbox = FakeSandbox("fuse", own=own)
+    sandbox = FakeMachine("fuse", own=own)
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     for _ in range(3):
@@ -1046,7 +1047,7 @@ async def test_fuse_reads_the_mounts_until_the_sandbox_holds_them_all(
 
 @pytest.mark.asyncio
 async def test_fuse_guards_a_mount_the_sandbox_lays_after_the_first_line():
-    sandbox = FakeSandbox("fuse")
+    sandbox = FakeMachine("fuse")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -1063,10 +1064,10 @@ async def test_fuse_guards_a_mount_the_sandbox_lays_after_the_first_line():
 
 
 # A cover over a served prefix whose server ended is left alone too: serving
-# again would mount the host's sshfs over the sandbox's mount.
+# again would mount the host's sshfs over the machine's mount.
 @pytest.mark.asyncio
 async def test_a_cover_over_an_ended_server_is_left_alone():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -1077,7 +1078,7 @@ async def test_a_cover_over_an_ended_server_is_left_alone():
     result = await agent.shell("python3 covered.py")
     assert (result.exit_code, await result.stderr_str()) == (
         1,
-        "fake: another mount covers /data in this sandbox; the line did "
+        "fake: another mount covers /data in this machine; the line did "
         "not run\n",
     )
     assert sandbox.table["/data"] == ("tmpfs", "tmpfs")
@@ -1085,11 +1086,11 @@ async def test_a_cover_over_an_ended_server_is_left_alone():
     await ws.close()
 
 
-# A mount the sandbox held at a prefix before it was served is no cover:
+# A mount the machine held at a prefix before it was served is no cover:
 # once the server ends it shows again, and the prefix is served over it.
 @pytest.mark.asyncio
 async def test_a_prefix_served_over_a_mount_of_the_sandboxs_is_served_again():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     sandbox.table["/data"] = ("vol", "ext4")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
@@ -1107,7 +1108,7 @@ async def test_a_prefix_served_over_a_mount_of_the_sandboxs_is_served_again():
 # when it looks like the one the prefix was served over.
 @pytest.mark.asyncio
 async def test_a_cover_like_the_mount_under_a_live_server_is_left_alone():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     sandbox.table["/data"] = ("tmpfs", "tmpfs")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
@@ -1125,7 +1126,7 @@ async def test_a_cover_like_the_mount_under_a_live_server_is_left_alone():
 # A covered prefix the workspace no longer mounts is dropped, not refused.
 @pytest.mark.asyncio
 async def test_a_covered_prefix_the_workspace_dropped_is_not_refused():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -1136,12 +1137,12 @@ async def test_a_covered_prefix_the_workspace_dropped_is_not_refused():
     await ws.close()
 
 
-# A mount the workspace dropped is no longer the sandbox's to wait for, and
+# A mount the workspace dropped is no longer the machine's to wait for, and
 # one added again at that prefix starts afresh.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mount_type", ["fuse", "both"])
 async def test_a_mount_the_workspace_dropped_is_not_waited_for(mount_type):
-    sandbox = FakeSandbox(mount_type, own=["/my notes"])
+    sandbox = FakeMachine(mount_type, own=["/my notes"])
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -1155,7 +1156,7 @@ async def test_a_mount_the_workspace_dropped_is_not_waited_for(mount_type):
 
 @pytest.mark.asyncio
 async def test_a_sandbox_holding_no_mount_runs_its_lines_unguarded():
-    sandbox = FakeSandbox("fuse")
+    sandbox = FakeMachine("fuse")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -1165,7 +1166,7 @@ async def test_a_sandbox_holding_no_mount_runs_its_lines_unguarded():
 
 @pytest.mark.asyncio
 async def test_a_failed_unmount_still_stops_its_pipe():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -1176,7 +1177,7 @@ async def test_a_failed_unmount_still_stops_its_pipe():
 
 @pytest.mark.asyncio
 async def test_close_unmounts_when_the_mount_table_cannot_be_read():
-    sandbox = FakeSandbox("ssh")
+    sandbox = FakeMachine("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -1193,7 +1194,7 @@ async def test_a_server_that_fails_says_why(monkeypatch):
             raise RuntimeError("no server here")
 
     monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
-    sandbox = FakeSandbox("ssh", sshfs_mounts=False)
+    sandbox = FakeMachine("ssh", sshfs_mounts=False)
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
@@ -1210,7 +1211,7 @@ async def _refused_by_the_cli() -> str:
 
 @pytest.mark.asyncio
 async def test_a_failed_mount_keeps_pipe_diagnostics_when_the_guest_is_gone():
-    class UnavailableSandbox(FakeSandbox):
+    class UnavailableMachine(FakeMachine):
         async def exec_line(self, line, stdin, env, cwd):
             if self.pipes and line == "cat /proc/mounts":
                 raise RuntimeError("guest unavailable")
@@ -1218,14 +1219,14 @@ async def test_a_failed_mount_keeps_pipe_diagnostics_when_the_guest_is_gone():
 
         async def open_pipe(self, command):
             pipe = await super().open_pipe(command)
-            return SandboxPipe(
+            return MachinePipe(
                 pipe.reader,
                 pipe.writer,
                 pipe.stop,
                 _refused_by_the_cli,
             )
 
-    ws = workspace(UnavailableSandbox("ssh", sshfs_mounts=False))
+    ws = workspace(UnavailableMachine("ssh", sshfs_mounts=False))
     try:
         result = await ws.shell("python3 job.py")
         assert result.exit_code == 1

@@ -133,7 +133,7 @@ class Runtime(ABC, Generic[E]):
         process records name; None for the workspace's own."""
         return None
 
-    def voice(self, ctx: Context) -> str:
+    def refusal_name(self, ctx: Context) -> str:
         """The name a refusal of one run speaks in: the runtime's.
 
         Args:
@@ -216,7 +216,7 @@ class Runtime(ABC, Generic[E]):
                 and not self._serves_session(capture.restricted_mounts, ctx)
             ):
                 return refused_run(
-                    self.voice(ctx),
+                    self.refusal_name(ctx),
                     "runtime cannot enforce this session's file restrictions",
                 )
             # A process on this machine opens its connections around the
@@ -227,7 +227,7 @@ class Runtime(ABC, Generic[E]):
                 for egress in live_egress()
             ):
                 return refused_run(
-                    self.voice(ctx),
+                    self.refusal_name(ctx),
                     "runtime cannot enforce this workspace's network",
                 )
             engine = await self.engine()

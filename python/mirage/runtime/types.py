@@ -84,11 +84,6 @@ Language: TypeAlias = Literal["python", "js"]
 #   machine's world; the gate never sees those effects.
 RuntimeReach: TypeAlias = Literal["workspace", "process", "remote"]
 
-# How a sandbox sees the workspace: ``ssh`` serves every prefix from the
-# host over SFTP, ``fuse`` leaves them to the sandbox's own mirage, and
-# ``both`` serves from the host what the sandbox does not mount itself.
-MountType: TypeAlias = Literal["ssh", "fuse", "both"]
-
 
 class DispatchFn(Protocol):
     """The workspace dispatch: run the function ``name`` against the
@@ -365,24 +360,6 @@ class PipeWriter(Protocol):
     def write(self, data: bytes) -> None: ...
 
     def close(self) -> None: ...
-
-
-@dataclass(frozen=True, slots=True)
-class SandboxPipe:
-    """A command a sandbox runs with its stdin and stdout held open.
-
-    Args:
-        reader (ByteReader): what the command writes.
-        writer (PipeWriter): what the command reads.
-        stop (Callable[[], Awaitable[None]]): ends the command.
-        diagnostic (Callable[[], Awaitable[str]] | None): bounded startup diagnostics,
-            when available.
-    """
-
-    reader: ByteReader
-    writer: PipeWriter
-    stop: Callable[[], Awaitable[None]]
-    diagnostic: Callable[[], Awaitable[str]] | None = None
 
 
 # What a caller asks of a runtime: run code in its language (``code``),

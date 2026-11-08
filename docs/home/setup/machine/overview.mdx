@@ -5,12 +5,13 @@ description: Run captured programs on a container, VM, cloud sandbox or remote m
 ---
 
 A machine is somewhere you already have: a container, a microVM, a cloud
-sandbox or a host over SSH. Declare each one under `machines:` with the
-`provider` that reaches it, and run captured programs there with the
-`machine` runtime, whose `machine` names it. You create and stop the machine;
-Mirage only runs programs on it. `captures` defaults to
-[`@external`](/home/setup/runtime/overview#captures), every program Mirage
-does not have itself.
+sandbox or a host over SSH. You create and stop it; Mirage only runs programs
+on it.
+
+Declare each machine under `machines:` with the `provider` that reaches it,
+and run captured programs there with the `machine` runtime. `captures`
+defaults to [`@external`](/home/setup/runtime/overview#captures), every
+program Mirage does not have itself.
 
 ```yaml
 machines:
@@ -25,144 +26,149 @@ runtimes:
 A line or a command can also name its machine: `execute(machine=)`, a
 `machine` on the shell request, or a policy's `Route(machine=)`.
 
-A program there opens workspace files at the same paths, so the machine
-must see the mounts. `docker`, `e2b`, `ssh`, `smolvm`, `microsandbox`, and
-`apple_container` pick how with `mount_type`: `ssh` serves them from the
-workspace, `fuse` from a Mirage inside the machine, and `both` mixes the two.
-Daytona uses a Mirage inside.
+| Provider | Runs programs in |
+| --- | --- |
+| [Docker](/home/setup/machine/docker) | A Docker container |
+| [E2B](/home/setup/machine/e2b) | An E2B cloud sandbox |
+| [Daytona](/home/setup/machine/daytona) | A Daytona cloud sandbox |
+| [smolvm](/home/setup/machine/smolvm) | A microVM with its own kernel |
+| [Microsandbox](/home/setup/machine/microsandbox) | A microVM with its own kernel |
+| [Apple Container](/home/setup/machine/apple_container) | A container on macOS, a VM of its own |
+| [SSH](/home/setup/machine/ssh) | Any machine running `sshd` |
 
-| Provider | Runs programs in | Workspace files through |
+[Sandlock](/home/setup/runtime/sandlock) is a runtime, not a machine: it runs
+programs on this Linux host, confined.
+
+## Connecting the workspace
+
+A program on a machine opens workspace files at the same paths as in Mirage,
+so the machine must see the mounts. `mount_type` picks how:
+
+| `mount_type` | How the files get there | Rules that apply |
 | --- | --- | --- |
-| [Docker](/home/setup/machine/docker) | A Docker container | `mount_type`: `ssh`, `fuse` or `both` |
-| [E2B](/home/setup/machine/e2b) | An E2B cloud sandbox | `mount_type`: `ssh`, `fuse` or `both` |
-| [Daytona](/home/setup/machine/daytona) | A Daytona cloud sandbox | FUSE, from a Mirage inside |
-| [smolvm](/home/setup/machine/smolvm) | A microVM with its own kernel | `mount_type`: `ssh`, `fuse` or `both` |
-| [Microsandbox](/home/setup/machine/microsandbox) | A microVM with its own kernel | `mount_type`: `ssh`, `fuse` or `both` |
-| [Apple Container](/home/setup/machine/apple_container) | A container on macOS, a VM of its own | `mount_type`: `ssh`, `fuse` or `both` |
-| [SSH](/home/setup/machine/ssh) | Any machine running `sshd` | `mount_type`: `ssh`, `fuse` or `both` |
+| `ssh` | Mirage serves every mount over the provider's connection; the machine mounts each with `sshfs` | This workspace's mount modes, hides, permissions and policies |
+| `fuse` | A Mirage on the machine mounts your backends with FUSE | That Mirage's own config |
+| `both` | The machine's own FUSE mounts where it has them, `ssh` for the rest | Each side's own |
+| unset | Nothing; you put the files there yourself | The machine's |
 
-[Sandlock](/home/setup/runtime/sandlock) is a runtime, not a machine:
-it runs programs on this Linux host, confined, with a
-[FUSE folder](/home/setup/fuse) you grant.
+Daytona has no `mount_type`: it always uses a Mirage on the machine. Once
+connected, run the shared
+[workspace file check](/home/setup/runtime/overview#verify-workspace-file-access).
 
-After following a provider page's **Connecting the workspace** steps, run the
-shared [workspace file check](/home/setup/runtime/overview#verify-workspace-file-access)
-to confirm reads and writes cross the runtime boundary.
+### ssh
 
-## Language compatibility
+- The machine needs only `sshfs`. No Mirage, keys or open port.
+- Each file call is a round trip to the workspace. With `both`, keep bulk
+  data on the machine's own mounts.
+- A machine shows one session's view, the first that runs a line there, and
+  one workspace's mounts. Give each agent and each workspace its own machine.
+- If the machine restarts, Mirage mounts the paths again. A line caught
+  mid-restart exits 126 without running.
+- The root mount and `/dev` are not served.
 
-Python modules, file modes and other language APIs come from the interpreter
-installed on the machine. Mirage forwards the captured program's
-arguments, input, environment and working directory; a working directory
-the machine lacks fails the program with exit 126. Each run also gets
-`MIRAGE_PROCESS`, the id of its Mirage process (`w1:9`), which every process
-it starts inherits. Each provider's **Runtime behavior** table describes
-that boundary.
+Mirage refuses to run a program when it cannot enforce the session's file
+rules: restrictions on `/` or `/dev`, hiding a mount when that would expose
+the machine's own files underneath, restrictions on mounts a Mirage on the
+machine serves, and rules that depend on which program opens a file.
 
-File operations reach workspace mounts through the connection configured
-for that provider. They also remain subject to the machine's own
-permissions and confinement.
+### fuse
 
-## Processes and signals
+Build [the machine image](#the-machine-image), write the same mounts at the
+same paths into `sandbox.yaml`, and start Mirage with it on the machine. Each
+provider page has the commands.
 
-`ps` lists a program on a machine with the machine and its pid there, and
-everything the program started as processes of their own, found by a scan
-of the machine's `/proc` for its `MIRAGE_PROCESS`:
+```yaml
+mounts:
+  /data:
+    vfs: s3
+    config:
+      bucket: my-bucket
+    backend: fuse
+    mountpoint: /data
+```
+
+- This workspace's rules do not reach those files, so a line is refused
+  while the session's permissions hide or narrow anything under them.
+- If a path the machine mounted goes away, lines exit 126 until it is
+  mounted again. Start Mirage from the image's entrypoint so a restart
+  mounts it again.
+- Keep the machine's paths in step with the host's mounts yourself.
+  `sandbox.yaml` can differ where it should, such as narrower credentials.
+
+## What a program sees
+
+| | On the machine |
+| --- | --- |
+| Command | The captured program and its words, as typed |
+| Piped input | stdin |
+| Environment | The session's, over the config `env`, plus `MIRAGE_PROCESS`, the id of its Mirage process |
+| Working directory | The shell's, unchanged; one the machine lacks exits 126 |
+| Disk, network, language modules | The machine's own |
+
+## Processes and jobs
+
+One session can run jobs on several machines at once. `jobs`, `wait`, `kill`
+and `ps` work across them. `ps` lists each program with its machine and its
+pid there, and what the program started under it:
 
 ```text
     PID MACHINE                            MPID CMD
 4194305 -                                     - ps
 4194306 docker:box                           13 python3 train.py
 4194307 docker:box                           19 sleep 300
+4194308 ssh:gpu                              13 python3 eval.py
 ```
 
-`ps -o machine,mpid` selects those columns, and `ps f` or `ps --forest`
-draws each command under its parent's. A process a scan found leaves the
-list once a scan no longer sees it.
+`ps -o machine,mpid` selects those columns, and `ps f` draws each command
+under its parent's.
 
-`kill` sends a signal to a program on a machine as you sent it: a program
-that traps `USR1` gets it and runs on, and one that `TERM` ends exits with
-its own status, which `wait` reports. KILL is sent only when you ask for it
-(`kill -9`, `timeout -k`) or when Mirage shuts the workspace down. Mirage's
-own stops, a `head` that has read enough, a line's timeout, a cancelled
-line, send TERM, then KILL a second later, to every process on the machine
-that carries the run's `MIRAGE_PROCESS`.
+`kill` sends a signal to a program as you sent it: a program that traps `USR1`
+runs on, and one that `TERM` ends exits with its own status, which `wait`
+reports. KILL is sent only when you ask for it (`kill -9`, `timeout -k`) or
+when Mirage shuts the workspace down.
 
-In a Mirage shell a pid is Mirage's: they start at 4194305, past any
-machine's own. A smaller number given to `kill`, `kill -0`, `wait` or
-`ps -p` is a machine pid, the process whose program has that pid on its
-machine; one that two machines both have is refused as an ambiguous job
-spec. Inside a program on a machine a pid is that machine's, and a line
-sent whole to a machine (`@line`) runs in that machine's shell, with its
-pids. Every one of these follows the session's `processes` grants.
+In a Mirage shell a pid is Mirage's, starting at 4194305. A smaller number
+given to `kill`, `wait` or `ps -p` is a machine pid. One that two machines
+both have is refused as an ambiguous job spec, so use the Mirage pid. Inside a
+program on a machine, pids are that machine's. All of this follows the
+session's `processes` grants.
 
 ## Machine states
 
-Each check finds a machine in one of three states:
-
 | State | Means |
 | --- | --- |
-| `managed` | Mirage reached it and sees and stops every process its programs start there: it has `/proc` and the `sh`, `tr` and `grep` the scan runs. The workspace's own host is always `managed`. |
-| `reachable` | Mirage reached it, but sees and stops only what it started itself. |
+| `managed` | Mirage sees and stops every process its programs start there. The workspace's own host is always `managed`. |
+| `reachable` | Mirage reached it, but sees and stops only what it started itself. The machine lacks `/proc`, `sh`, `tr` or `grep`. |
 | `unreachable` | The last check failed. |
 
-`GET /v1/workspaces/{id}/machines` checks every machine and lists the host
-first; `GET /v1/workspaces/{id}/machines/{machine}` checks one and lists its
-processes. `mirage workspace list-machines` prints the same table.
+`GET /v1/workspaces/{id}/machines` checks every machine,
+`GET /v1/workspaces/{id}/machines/{machine}` checks one and lists its
+processes, and `mirage workspace list-machines` prints the table.
 
 ## The machine image
 
-Every machine needs a POSIX shell at `/bin/sh`, which starts each command,
-and `grep`, which finds what a run cut short left running. With
+Every machine needs a POSIX shell at `/bin/sh` and `grep`. With
 [libfaketime](https://github.com/wolfcw/libfaketime) in the image, programs
-see the workspace's [`system_time`](/home/configuration#system-time);
-without it they see the machine's clock.
-With `mount_type: ssh` the machine also needs `sshfs`.
-A machine that serves the mounts with its own Mirage needs `fuse3` and
-Mirage. The repository's Dockerfile builds that image from the current
-checkout, with every mountable backend:
+see the workspace's [`system_time`](/home/configuration#system-time). With
+`mount_type: ssh` the machine also needs `sshfs`, and a machine that runs its
+own Mirage needs `fuse3` and Mirage.
 
-```bash
-docker build -f docker/sandbox/Dockerfile --target fuse -t mirage-python-fuse .
-```
-
-Narrow it to the backends you use with `MIRAGE_EXTRAS`:
+The repository's Dockerfile builds that image for every provider:
 
 ```bash
 docker build -f docker/sandbox/Dockerfile --target fuse \
-  --build-arg MIRAGE_EXTRAS=s3,postgres -t mirage-fuse-lean .
+  --build-arg MIRAGE_EXTRAS=s3,postgres -t mirage-fuse .
 ```
 
-The same image serves every provider: run it under Docker, Apple's
-`container`, Microsandbox or smolvm, or use it as a Daytona image or an E2B template base.
-Add the programs your captures need, such as Node.js for `node`. The Mirage
-inside is the Python build, whichever SDK the host uses.
+Leave out `MIRAGE_EXTRAS` for every mountable backend. Add the programs your
+captures need, such as Node.js for `node`.
 
 ## Timeouts
 
-`command_limits` apply to a program on a machine as to any command: a line past
-its `@line` entry's `timeout_seconds` exits 124, and `max_bytes` and
-`max_lines` cap the program's output.
+`command_limits` apply to a program on a machine as to any command: a line
+past its `timeout_seconds` exits 124, and `max_bytes` and `max_lines` cap its
+output.
 
-<Warning>
-  A timeout stops the program: Mirage sends TERM, then KILL a second later, to every process there that carries the
-  run's `MIRAGE_PROCESS`; that needs `/bin/sh`, `tr`, `grep` and `/proc` on
-  the machine, and Mirage gives up after 5 seconds if it stops answering. In TypeScript, a Daytona command keeps
-  running after a timeout. A Daytona sandbox has no timeout of its own, so
-  it keeps running and billing. Use the provider's own limits.
-</Warning>
-
-
-## Serving session files
-
-With `mount_type: ssh`, workspace file access follows the session's permissions
-and policies. You do not need to expose a public file server or copy service
-credentials into the machine. Each machine is assigned to one session.
-
-Mirage refuses to run a program when it cannot enforce the session's file
-restrictions. Unsupported cases include:
-
-- Restrictions on `/` or `/dev`.
-- Hiding a mount when doing so would expose the machine's own files underneath.
-- Restrictions on mounts served by a separate Mirage inside the machine.
-- File rules that depend on which program opens a file.
+A timeout sends TERM, then KILL a second later, to every process of that run,
+and gives up after 5 seconds if the machine stops answering. Use the
+provider's own limits for anything that must not outlive a timeout.

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 MICROSANDBOX_HINT = (
-    "the microsandbox runtime needs `msb` on PATH "
+    "the microsandbox machine needs `msb` on PATH "
     "(https://microsandbox.dev); start the sandbox before connecting"
 )
 

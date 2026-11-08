@@ -15,6 +15,7 @@
 import asyncio
 import logging
 import weakref
+from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -53,11 +54,11 @@ class MachineTable:
     Args:
         machines (Mapping[str, MachineHandle | Mapping[str, Any]] |
             None): each machine's handle or its YAML entry, by name.
-        host_status (Callable[[Mapping[int, tuple[str, float]]],
+        scan_host (Callable[[Mapping[int, tuple[str, float]]],
             Awaitable[list[MachineProcess]]] | None): scans the host
             programs' process groups, given each program's pid and tag;
             None leaves the host unscanned.
-        host_signal (Callable[[MachinePid, int], Awaitable[bool]] |
+        signal_host (Callable[[MachinePid, int], Awaitable[bool]] |
             None): sends a signal to a host process; None sends none.
 
     Raises:
@@ -68,12 +69,12 @@ class MachineTable:
         self,
         machines: Mapping[str, MachineHandle | Mapping[str, Any]]
         | None = None,
-        host_status: Callable[
+        scan_host: Callable[
             [Mapping[int, tuple[str, float]]],
             Awaitable[list[MachineProcess]],
         ]
         | None = None,
-        host_signal: Callable[[MachinePid, int], Awaitable[bool]]
+        signal_host: Callable[[MachinePid, int], Awaitable[bool]]
         | None = None,
     ) -> None:
         self._handles = {
@@ -86,8 +87,8 @@ class MachineTable:
                 raise ValueError(
                     f"machine {name!r} is already in another workspace"
                 )
-        self._host_status = host_status
-        self._host_signal = host_signal
+        self._scan_host = scan_host
+        self._signal_host = signal_host
         # The processes scans found, by machine, pid and start, each
         # with the event that ends it once a scan no longer sees it and
         # the tag of the run that started it.
@@ -97,12 +98,17 @@ class MachineTable:
         # The runs whose program has ended that a scan has looked at
         # since, by tag; one not yet looked at is scanned once more for
         # what it left running.
-        self._swept: set[str] = set()
+        self._scanned_after_end: set[str] = set()
         # One scan at a time, so an older answer never lands after a
         # newer one and ends what the newer one found.
         self._scanning = asyncio.Lock()
+        # One signal at a time on each machine, in the order they were
+        # asked for, so a parent hears it before its children.
+        self._signaling: defaultdict[str, asyncio.Lock] = defaultdict(
+            asyncio.Lock
+        )
 
-    def claim(self) -> None:
+    def hold_handles(self) -> None:
         """Hold every handle for this table's workspace, once it is
         built: a workspace that failed to build holds none, and another
         cannot take one until ``close``."""
@@ -134,7 +140,7 @@ class MachineTable:
             )
         return handle
 
-    def find(self, machine: str) -> MachineHandle | None:
+    def by_id(self, machine: str) -> MachineHandle | None:
         """The handle whose id is ``machine``, written ``docker:tools``.
 
         Args:
@@ -193,36 +199,35 @@ class MachineTable:
                 if record.runtime is not None
             }
             ended = {tag for tag in runs if tag not in live}
-            fresh = ended - self._swept
-            swept = self._swept & ended
-            held = {tag for _, _, tag in self._found.values()}
-            shown = {machine for machine, _, _ in self._found}
-            shown |= {
+            unscanned = ended - self._scanned_after_end
+            still_scanned = self._scanned_after_end & ended
+            found_tags = {tag for _, _, tag in self._found.values()}
+            machines_to_scan = {machine for machine, _, _ in self._found}
+            machines_to_scan |= {
                 str(runs[tag].machine)
-                for tag in fresh
+                for tag in unscanned
                 if runs[tag].machine != processes.machine
             }
             scans: list[tuple[MachineId, Awaitable[list[MachineProcess]]]] = [
                 (handle.id, handle.status(workspace))
                 for handle in self._handles.values()
-                if handle.executing or str(handle.id) in shown
+                if handle.executing or str(handle.id) in machines_to_scan
             ]
-            if self._host_status is not None:
+            if self._scan_host is not None:
                 groups = {
                     record.machine_pid.pid: (tag, record.machine_pid.started)
                     for tag, record in runs.items()
                     if record.machine == processes.machine
                     and record.machine_pid is not None
-                    and (tag in live or tag in fresh or tag in held)
+                    and (tag in live or tag in unscanned or tag in found_tags)
                 }
-                if groups or str(processes.machine) in shown:
-                    scans.append(
-                        (processes.machine, self._host_status(groups))
-                    )
+                if groups or str(processes.machine) in machines_to_scan:
+                    scans.append((processes.machine, self._scan_host(groups)))
             found = await asyncio.gather(
                 *(scan for _, scan in scans), return_exceptions=True
             )
             failed: set[str] = set()
+            finishing: list[ProcessHandle] = []
             for (machine, _), rows in zip(scans, found, strict=True):
                 if isinstance(rows, Exception):
                     logger.debug("%s: scan failed: %s", machine, rows)
@@ -230,10 +235,16 @@ class MachineTable:
                     continue
                 if isinstance(rows, BaseException):
                     raise rows
-                self._settle(processes, machine, rows, live, runs)
-            self._swept = swept | {
-                tag for tag in fresh if str(runs[tag].machine) not in failed
+                finishing.extend(
+                    self._apply_scan(processes, machine, rows, live, runs)
+                )
+            self._scanned_after_end = still_scanned | {
+                tag
+                for tag in unscanned
+                if str(runs[tag].machine) not in failed
             }
+            if finishing:
+                await asyncio.wait([handle.task for handle in finishing])
 
     def send(
         self, processes: ProcessTable, handle: ProcessHandle, signum: int
@@ -262,20 +273,20 @@ class MachineTable:
         target = record.machine_pid
         if record.machine == processes.machine:
             if (
-                self._host_signal is None
+                self._signal_host is None
                 or target is None
                 or target.exited is not None
             ):
                 return None
-        elif self.find(str(record.machine)) is None or (
+        elif self.by_id(str(record.machine)) is None or (
             target is None and record.runtime is None
         ):
             return None
-        return self._sent(
+        return self._deliver(
             handle, record.machine, target or str(record.id), signum
         )
 
-    async def _sent(
+    async def _deliver(
         self,
         handle: ProcessHandle,
         machine: MachineId,
@@ -293,7 +304,7 @@ class MachineTable:
             signum (int): the signal.
         """
         try:
-            sent = await self._signal(machine, target, signum)
+            sent = await self._signal_on(machine, target, signum)
         except Exception as exc:
             logger.debug("%s: signal %d not sent: %s", machine, signum, exc)
             if handle.record.runtime is None:
@@ -303,7 +314,7 @@ class MachineTable:
             handle.program_signaled(signum)
             return True
         if handle.record.runtime is None:
-            self._end(handle)
+            self._end_found(handle)
             return False
         if signum in CONTINUE_SIGNALS or signum in STOP_SIGNALS:
             return True
@@ -311,7 +322,7 @@ class MachineTable:
             signum, children=handle.record.parent is not None
         )
 
-    async def _signal(
+    async def _signal_on(
         self, machine: MachineId, target: str | MachinePid, signum: int
     ) -> bool:
         """Send ``signum`` to one process on ``machine``.
@@ -321,24 +332,26 @@ class MachineTable:
             target (str | MachinePid): its run's tag, or its machine pid.
             signum (int): the signal.
         """
-        handle = self.find(str(machine))
-        if handle is not None:
-            return await handle.signal(target, signum)
-        if self._host_signal is None or not isinstance(target, MachinePid):
-            return False
-        return await self._host_signal(target, signum)
+        async with self._signaling[str(machine)]:
+            handle = self.by_id(str(machine))
+            if handle is not None:
+                return await handle.signal(target, signum)
+            if self._signal_host is None or not isinstance(target, MachinePid):
+                return False
+            return await self._signal_host(target, signum)
 
-    def _settle(
+    def _apply_scan(
         self,
         processes: ProcessTable,
         machine: MachineId,
         rows: list[MachineProcess],
         live: dict[str, ProcessHandle],
         runs: dict[str, Process],
-    ) -> None:
-        """Bring the table in step with one machine's scan. A run of
-        another machine entry is left out: two entries that reach one
-        machine both see its processes, which are the other run's.
+    ) -> list[ProcessHandle]:
+        """Bring the table in step with one machine's scan, answering
+        the processes it no longer shows, now ending. A run of another
+        machine entry is left out: two entries that reach one machine
+        both see its processes, which are the other run's.
 
         Args:
             processes (ProcessTable): the workspace's processes.
@@ -364,7 +377,7 @@ class MachineTable:
                 and handle.record.runtime is not None
                 and handle.record.machine == machine
             ):
-                root = _root_of(run, pids, handle.record.machine_pid)
+                root = _program_row(run, pids, handle.record.machine_pid)
                 if root is not None:
                     placed[root.pid] = handle.record.pid
                     known = handle.record.machine_pid
@@ -380,7 +393,7 @@ class MachineTable:
                     parent = placed.get(row.ppid)
                     if parent is None and handle is not None:
                         parent = handle.record.pid
-                    found = self._found_process(
+                    found = self._place_found(
                         processes, machine, row, parent, owner
                     )
                     if found is not None:
@@ -389,11 +402,15 @@ class MachineTable:
                 waiting = [
                     row for row in waiting if row not in (ready or waiting)
                 ]
+        finishing: list[ProcessHandle] = []
         for key in [k for k in self._found if k[0] == str(machine)]:
             if key not in seen:
-                self._found.pop(key)[1].set()
+                found, gone, _ = self._found.pop(key)
+                gone.set()
+                finishing.append(found)
+        return finishing
 
-    def _found_process(
+    def _place_found(
         self,
         processes: ProcessTable,
         machine: MachineId,
@@ -447,7 +464,9 @@ class MachineTable:
                 await gone.wait()
             except asyncio.CancelledError:
                 signum = held[0].signal if held else None
-                await asyncio.shield(self._stop(machine, target, signum or 15))
+                await asyncio.shield(
+                    self._stop_found(machine, target, signum or 15)
+                )
                 raise
             return 0
 
@@ -471,7 +490,7 @@ class MachineTable:
         self._found[key] = (handle, gone, row.tag)
         return handle
 
-    async def _stop(
+    async def _stop_found(
         self, machine: MachineId, target: MachinePid, signum: int
     ) -> None:
         """Stop a process a scan found, as Mirage stops what it runs.
@@ -482,13 +501,13 @@ class MachineTable:
             signum (int): the signal Mirage stops it with.
         """
         try:
-            await self._signal(machine, target, signum)
+            await self._signal_on(machine, target, signum)
         except Exception as exc:
             logger.debug(
                 "%s: process %d not stopped: %s", machine, target.pid, exc
             )
 
-    def _end(self, handle: ProcessHandle) -> None:
+    def _end_found(self, handle: ProcessHandle) -> None:
         """End a process a scan found, which its machine no longer runs.
 
         Args:
@@ -519,7 +538,7 @@ class MachineTable:
             )
 
 
-def _root_of(
+def _program_row(
     run: list[MachineProcess], pids: set[int], known: MachinePid | None
 ) -> MachineProcess | None:
     """The first process of a run: the one carrying its tag whose parent

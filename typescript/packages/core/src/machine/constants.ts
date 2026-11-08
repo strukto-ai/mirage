@@ -17,12 +17,12 @@ import { decodeBase64 } from '../utils/base64.ts'
 import { boundSystemClock, systemNow } from '../utils/clock.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
 import type { MachinePid } from '../execution/types.ts'
-import type { MountType } from '../runtime/types.ts'
+import type { MountType } from './types.ts'
 
 const ENC = new TextEncoder()
 
 /**
- * Why a sandbox cannot take a line, named by the state its status command
+ * Why a machine cannot take a line, named by the state its status command
  * reported. `hints` holds the provider's advice per state, with `{name}`
  * standing for `name`; `otherwise` is the advice for a state it lacks.
  * Mirrors Python's `not_running_hint`.
@@ -54,13 +54,13 @@ export function stopSignal(runner: ProcessHandle | null): number | null {
 
 export const MOUNT_TYPES: readonly MountType[] = ['ssh', 'fuse', 'both']
 
-// How long a sandbox has to show a served prefix as mounted, and how
+// How long a machine has to show a served prefix as mounted, and how
 // often it is asked.
 export const MOUNT_WAIT_SECONDS = 15
 export const MOUNT_POLL_SECONDS = 0.1
 
 // How long a served prefix's SFTP server may take to end once its
-// sandbox side is unmounted.
+// machine side is unmounted.
 export const UNMOUNT_WAIT_SECONDS = 5
 
 // How much of a pipe helper's stderr is kept to say why a mount failed,
@@ -75,28 +75,28 @@ export const PIPE_DIAGNOSTIC_WAIT_SECONDS = 1
 export const SSHFS_OPTIONS =
   'passive,dir_cache=no,direct_io,attr_timeout=0,entry_timeout=0,negative_timeout=0'
 
-// Where sshfs writes its errors in the sandbox, one file per prefix; its
+// Where sshfs writes its errors in the machine, one file per prefix; its
 // stdout is the SFTP stream, so its stderr cannot share the pipe.
 export const SSHFS_LOG_PREFIX = '/tmp/.mirage_sshfs'
 
 // How an sshfs source names the mirage serving it: `mirage-<id>:<prefix>`,
-// so each instance knows its own mounts from another's on the same sandbox.
+// so each instance knows its own mounts from another's on the same machine.
 export const SSHFS_SOURCE_PREFIX = 'mirage-'
 
 export const SSHFS_HINT =
-  'serving the workspace into a sandbox needs sshfs there; install it in the image (apt-get install sshfs)'
+  'serving the workspace into a machine needs sshfs there; install it in the image (apt-get install sshfs)'
 export const PIPE_SERVER_HINT =
-  'serving the workspace into a sandbox needs @struktoai/mirage-node and its ssh2 peer'
+  'serving the workspace into a machine needs @struktoai/mirage-node and its ssh2 peer'
 
 /**
- * Every argv a sandbox runs goes under this POSIX sh prelude, with the
+ * Every argv a machine runs goes under this POSIX sh prelude, with the
  * cwd as $1: a provider program's exec passes `-w /` (`execArgs`), and a
  * provider whose exec takes one command line dresses it (`wrapLine`), so
  * no provider's own cwd is used. An exec's `-e` can append to the image's
  * environment rather than replace a name it already sets, `-w` can
  * create a missing directory, and an SDK's cwd fails a missing one its
  * own way (E2B: exit 1). sh imports the environment last-wins, `cd`
- * fails loud (126) on a cwd the sandbox does not serve, and `exec` hands
+ * fails loud (126) on a cwd the machine does not serve, and `exec` hands
  * over the argv unchanged. `cd` runs without CDPATH, so a relative cwd
  * resolves from `/` and prints nothing, while the program still sees the
  * guest's own CDPATH. The shell is named by path, /bin/sh, since the
@@ -106,10 +106,10 @@ export const PIPE_SERVER_HINT =
 export const EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
 
 /**
- * A line in a sandbox holding mounts runs under this guard, inside its own
- * exec, so it checks the boot the program runs in: a sandbox that restarted
+ * A line in a machine holding mounts runs under this guard, inside its own
+ * exec, so it checks the boot the program runs in: a machine that restarted
  * after the line was admitted has lost its mounts, and a program run over
- * the bare directories would write to the sandbox's own disk. `$1` is the
+ * the bare directories would write to the machine's own disk. `$1` is the
  * mount table, then four words per mount (mountpoint and source as the
  * table escapes them, type, the message), then `--` and the argv. Each
  * mount must be the top entry at its mountpoint, or the guard prints its
@@ -140,7 +140,7 @@ export function mountField(text: string, source = false): string {
 }
 
 /**
- * Every process a run starts in a sandbox carries this variable, set to the
+ * Every process a run starts in a machine carries this variable, set to the
  * id of the Mirage process the run is (`w1:9`), so a run cancelled midway,
  * or one a lapsed workspace left, can be stopped in the box: stopping the
  * client that started it does not reach the box everywhere (`docker exec`
@@ -153,7 +153,7 @@ export const PROCESS = 'MIRAGE_PROCESS'
 // How long stopping a cancelled run may hold the cancel: the stop line's
 // own second of grace, plus the exec's round trips. A box that stopped
 // answering is given up on after it.
-export const REAP_WAIT_SECONDS = 5
+export const MACHINE_STOP_WAIT_SECONDS = 5
 
 // What the check line prints first: a result without it is a line no shell
 // there ran (a stopped container's exec answers with a status of its own),
@@ -183,15 +183,15 @@ export const STOP_POLL_SECONDS = 0.02
 
 // Where the stop line finds tr, grep and sleep: the config's PATH is for
 // the programs it runs and may name none of the system's directories.
-export const REAP_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+export const TOOLS_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
 // Output as base64 lines per read, status on fd 3, for an exec that returns text.
 export const ENCODE_PRELUDE =
-  `e() { PATH=${REAP_PATH}; ` +
+  `e() { PATH=${TOOLS_PATH}; ` +
   'while c=$(dd bs=65536 count=1 2>/dev/null | base64) && [ -n "$c" ]; ' +
   `do printf '%s\\n' "$c"; done; }; ` +
-  `(PATH=${REAP_PATH}; command -v dd && command -v base64) >/dev/null || ` +
-  "{ echo 'mirage: the sandbox needs dd and base64 to return output' >&2; " +
+  `(PATH=${TOOLS_PATH}; command -v dd && command -v base64) >/dev/null || ` +
+  "{ echo 'mirage: the machine needs dd and base64 to return output' >&2; " +
   'exit 127; }; '
 export const ENCODE_OUTPUT =
   ENCODE_PRELUDE +
@@ -221,7 +221,7 @@ export function encodeOutput(line: string, combined = false): string {
 /**
  * The bytes an `encodeOutput` command wrote, from whole lines of its
  * output. A blank line adds nothing; a line that is not base64, which only
- * the sandbox's own shell writes (the encoder missing), comes back as it
+ * the machine's own shell writes (the encoder missing), comes back as it
  * is, with its newline.
  *
  * @param text whole lines of the command's output.
@@ -244,18 +244,18 @@ export function decodeOutput(text: string): Uint8Array {
 }
 
 /**
- * The command line for a sandbox whose exec takes one (ssh, e2b,
+ * The command line for a machine whose exec takes one (ssh, e2b,
  * daytona): cwd, env, then the argv.
  *
  * Such an exec has no docker-style `-w`/`-e` to trust: SSH's env channel
  * is AcceptEnv-gated server-side, so it silently drops names, and an
  * SDK's own cwd fails a missing directory in its own words. So the
  * working directory and the merged environment ride the command itself:
- * the prelude every sandbox runs a command under enters `cwd` (exit 126
- * when the sandbox lacks it), then `env 'K=V' ... 'prog' 'arg'`; a shell
+ * the prelude every machine runs a command under enters `cwd` (exit 126
+ * when the machine lacks it), then `env 'K=V' ... 'prog' 'arg'`; a shell
  * line is the argv `/bin/sh -c line`. Every piece is single-quoted for sh,
  * so the shell the exec starts reads each as one word whatever it holds;
- * the sandbox only needs a POSIX shell at `/bin/sh`.
+ * the machine only needs a POSIX shell at `/bin/sh`.
  *
  * @param argv the program and its arguments.
  * @param env the merged environment.
@@ -274,7 +274,7 @@ export function wrapLine(
 
 // What the stop line exits with when no process carries the run's id: the
 // box it ran in holds nothing of the run.
-export const REAP_ABSENT = 3
+export const NOT_RUNNING_STATUS = 3
 
 /**
  * The shell line that stops every process of the run `process` tags.
@@ -283,25 +283,25 @@ export const REAP_ABSENT = 3
  * gets `signum`, and what still runs a second later gets KILL, so a
  * program that ignores it stops too. The tag is matched as a whole entry,
  * so `w1:9` never stops the run of `w1:90`. The line exits 0 once it
- * stopped them and `REAP_ABSENT` when there were none. It looks tr and
- * grep up on its own PATH (`REAP_PATH`) and exits 127 without them, so it
+ * stopped them and `NOT_RUNNING_STATUS` when there were none. It looks tr and
+ * grep up on its own PATH (`TOOLS_PATH`) and exits 127 without them, so it
  * needs only a POSIX shell, tr, grep and `/proc`.
  *
  * @param process the id of the Mirage process the run is, as `PROCESS`
  *   carries it.
  * @param signum the first signal, TERM (15) unless a `kill` named another.
  */
-export function reapLine(process: string, signum = 15): string {
+export function stopLine(process: string, signum = 15): string {
   const mark = singleQuote(`${PROCESS}=${process}`)
   return (
-    `PATH=${REAP_PATH}; command -v tr >/dev/null || exit 127; ` +
+    `PATH=${TOOLS_PATH}; command -v tr >/dev/null || exit 127; ` +
     'command -v grep >/dev/null || exit 127; ' +
     `m=${mark}; ` +
     'left() { l=; for p in /proc/[0-9]*; do ' +
     'tr \'\\000\' \'\\n\' < "$p/environ" 2>/dev/null | grep -qxF "$m" ' +
     '&& l="$l ${p#/proc/}"; done; ' +
     '[ -n "$l" ]; }; ' +
-    `left || exit ${String(REAP_ABSENT)}; kill -${String(signum)} $l 2>/dev/null; ` +
+    `left || exit ${String(NOT_RUNNING_STATUS)}; kill -${String(signum)} $l 2>/dev/null; ` +
     'for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; ' +
     'kill -KILL $l 2>/dev/null; true'
   )
@@ -322,14 +322,14 @@ export const SCAN_MARK = 'M'
  * `SCAN_MARK`, the tag, its pid, its parent's pid, when it started in clock
  * ticks after boot (`stat`'s 22nd field) and its arguments, space
  * separated. A process that exits mid-scan is skipped, and nothing else is
- * printed. It needs what `reapLine` does. Mirrors Python's `scan_line`.
+ * printed. It needs what `stopLine` does. Mirrors Python's `scan_line`.
  *
  * @param workspace the workspace's id, which every tag starts with.
  */
 export function scanLine(workspace: string): string {
   const mark = singleQuote(`${PROCESS}=${workspace}:`)
   return (
-    `PATH=${REAP_PATH}; m=${mark}; ` +
+    `PATH=${TOOLS_PATH}; m=${mark}; ` +
     'for p in /proc/[0-9]*; do ' +
     "t=$(tr '\\000' '\\n' 2>/dev/null < \"$p/environ\" " +
     `| grep -m1 '^${PROCESS}=') || continue; ` +
@@ -348,18 +348,18 @@ export function scanLine(workspace: string): string {
  * sent it. A tag names the program its run started: the process carrying
  * it whose parent carries none. A machine pid names its pid while that is
  * the process that started then. The line exits 0 once it sent the signal
- * and `REAP_ABSENT` when no such process runs. Mirrors Python's
+ * and `NOT_RUNNING_STATUS` when no such process runs. Mirrors Python's
  * `signal_line`.
  *
  * @param target the run's tag, or the process.
  * @param signum the signal.
  */
 export function signalLine(target: string | MachinePid, signum: number): string {
-  const absent = String(REAP_ABSENT)
+  const absent = String(NOT_RUNNING_STATUS)
   if (typeof target !== 'string') {
     const pid = String(target.pid)
     return (
-      `PATH=${REAP_PATH}; ` +
+      `PATH=${TOOLS_PATH}; ` +
       `s=$(cat /proc/${pid}/stat 2>/dev/null) || exit ${absent}; ` +
       'set -- ${s##*)}; ' +
       `[ "\${20}" = ${String(Math.trunc(target.started))} ] || exit ${absent}; ` +
@@ -368,7 +368,7 @@ export function signalLine(target: string | MachinePid, signum: number): string 
   }
   const mark = singleQuote(`${PROCESS}=${target}`)
   return (
-    `PATH=${REAP_PATH}; m=${mark}; l=' '; r=; ` +
+    `PATH=${TOOLS_PATH}; m=${mark}; l=' '; r=; ` +
     'for p in /proc/[0-9]*; do ' +
     "tr '\\000' '\\n' 2>/dev/null < \"$p/environ\" " +
     '| grep -qxF "$m" || continue; ' +
@@ -380,12 +380,12 @@ export function signalLine(target: string | MachinePid, signum: number): string 
   )
 }
 
-// How long a sandbox gets to answer the libfaketime probe, which every run
+// How long a machine gets to answer the libfaketime probe, which every run
 // waiting on it shares.
 export const FAKETIME_PROBE_SECONDS = 30
 
 // Where Linux distributions install libfaketime, which a process reads a
-// workspace's system time through, on this host or in a sandbox.
+// workspace's system time through, on this host or in a machine.
 export const FAKETIME_LIBRARIES = [
   '/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1',
   '/usr/lib/aarch64-linux-gnu/faketime/libfaketime.so.1',
@@ -417,7 +417,7 @@ export function faketimeEnv(library: string, env: Record<string, string>): Recor
 }
 
 /**
- * A shell line that prints the first of `FAKETIME_LIBRARIES` a sandbox
+ * A shell line that prints the first of `FAKETIME_LIBRARIES` a machine
  * holds, and nothing when it holds none. Mirrors Python's `faketime_probe`.
  */
 export function faketimeProbe(): string {

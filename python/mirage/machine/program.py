@@ -44,7 +44,8 @@ from mirage.machine.constants import (
     faketime_env,
     stop_signal,
 )
-from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
+from mirage.machine.types import MachinePipe
+from mirage.runtime.types import OutputFn, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.utils.clock import bound_system_clock
 
@@ -327,7 +328,7 @@ async def _group_started(group: int) -> list[float]:
     return starts
 
 
-async def host_status(
+async def scan_host(
     groups: Mapping[int, tuple[str, float]],
 ) -> list[MachineProcess]:
     """Every process of the host programs' process groups, as ``ps``
@@ -335,7 +336,7 @@ async def host_status(
     member is tagged as the Mirage process whose program leads it. A
     group led by a process that started at another time
     (``HOST_START_SLACK_SECONDS``) is left out: the program's pid went
-    to another program. Mirrors TypeScript's ``hostStatus``.
+    to another program. Mirrors TypeScript's ``scanHost``.
 
     Args:
         groups (Mapping[int, tuple[str, float]]): each program's pid,
@@ -413,13 +414,13 @@ async def signal_host(target: MachinePid, signum: int) -> bool:
     return True
 
 
-async def reap_host_run(
+async def stop_host_run(
     machine_pid: MachinePid, seen_at: float | None, signum: int
 ) -> bool:
     """Stop a host program a lapsed workspace left, the one its process
     record names on this host: its process group gets ``signum``, then
     KILL after ``STOP_GRACE_SECONDS``. Mirrors TypeScript's
-    ``reapHostRun``.
+    ``stopHostRun``.
 
     It is reached only while its PID still names a process started when
     the program did, to the second ``ps`` shows, so a PID the host
@@ -676,7 +677,7 @@ def _served(path: str) -> bool:
 def reported_state(
     result: RunResult, command: str, path: Sequence[str | int]
 ) -> str:
-    """The state a sandbox's status command printed as JSON, at ``path``.
+    """The state a machine's status command printed as JSON, at ``path``.
 
     Args:
         result (RunResult): the status command's run.
@@ -707,7 +708,7 @@ def exec_args(
     cwd: str | None,
     argv: Sequence[str],
 ) -> list[str]:
-    """A sandbox program's exec arguments, the same for every program that runs
+    """A machine program's exec arguments, the same for every program that runs
     a command in a box: the program's own words, ``/`` as the working
     directory and each variable as ``-e``, the target or ``--``, then
     the command.
@@ -882,8 +883,8 @@ async def close_children(children: Children) -> None:
     )
 
 
-async def open_program_pipe(executable: str, args: list[str]) -> SandboxPipe:
-    """Hold a byte transport to a sandbox helper until stopped.
+async def open_program_pipe(executable: str, args: list[str]) -> MachinePipe:
+    """Hold a byte transport to a machine helper until stopped.
 
     The tail of what the helper says on stderr is kept for
     ``diagnostic``, so a mount that fails can say why. Stopping ends
@@ -936,4 +937,4 @@ async def open_program_pipe(executable: str, args: list[str]) -> SandboxPipe:
         draining.cancel()
         await asyncio.gather(draining, return_exceptions=True)
 
-    return SandboxPipe(child.stdout, child.stdin, stop, diagnostic)
+    return MachinePipe(child.stdout, child.stdin, stop, diagnostic)

@@ -246,9 +246,19 @@ builtins `mount_root`, `output_cap`, `permissions`. `observe/`: a hidden
 (`LanguageRuntime.run` resolves the program, `interpret` runs it), a whole
 line (`run_line`, `sh -c` with `ctx.flags["c"]`) or a process (`run_process`,
 argv in `texts`). `WorkspaceRuntime` (default) runs inside mirage;
-`MontyRuntime` and wasm run in-process; `SSHRuntime` and `DaytonaRuntime` run
-remote. `RuntimeFiles` bridges a guest's file ops back to the dispatcher
+`MontyRuntime` and wasm run in-process; `MachineRuntime` runs programs on a
+machine. `RuntimeFiles` bridges a guest's file ops back to the dispatcher
 through `ctx.vfs`.
+
+### Machines
+
+`machine/`: where programs run, split from how they run. A `MachineHandle`
+per provider (docker, ssh, e2b, ...) comes from a `machines:` entry, its id
+`provider:name`; `ProgramMachine` is the base for providers driven by a local
+program such as `docker exec`. `execution/machine/`: a workspace's
+`MachineTable`, which scans each machine's `/proc` for what a run started and
+sends signals as sent. A line picks its machine with `execute(machine=)` or
+`Route(machine=)`.
 
 ### FUSE and FSKit
 
@@ -309,8 +319,9 @@ flowchart LR
 Repository:
 
 ```
-python/mirage/   accessor core vfs commands workspace shell runtime policy
-                 observe cache events mount fuse cli server agents
+python/mirage/   accessor core vfs commands workspace shell runtime machine
+                 execution policy observe cache events mount fuse cli server
+                 agents
 typescript/packages/
   core/          runtime-agnostic twin; no Node-only or browser-only API
   node/ browser/ runtime-specific VFS, commands, wiring, FUSE (node)

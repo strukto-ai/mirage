@@ -33,6 +33,56 @@
       ]
     },
     {
+      "id": "jobs_and_processes_span_two_machines",
+      "runtimes": [
+        "docker"
+      ],
+      "also_machines": [
+        "second"
+      ],
+      "entry": {
+        "captures": [
+          "dash"
+        ]
+      },
+      "steps": [
+        {
+          "command": "dash -c 'exec sleep 30' &",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "dash -c 'exec sleep 31' &",
+          "machine": "second",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "sleep 1; jobs; ps -o machine | sort -u",
+          "expect": {
+            "exit": 0,
+            "stdout": "[1] running dash -c 'exec sleep 30'\n[2] running dash -c 'exec sleep 31'\n-\nMACHINE\ndocker:docker\ndocker:second\n"
+          }
+        },
+        {
+          "command": "kill %1; wait %1; echo rc=$?; jobs; ps -o machine | sort -u",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=143\n[2] running dash -c 'exec sleep 31'\n-\nMACHINE\ndocker:second\n"
+          }
+        },
+        {
+          "command": "kill %2; wait %2; echo rc=$?; jobs; ps -o machine | sort -u",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=143\n-\nMACHINE\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "a_signal_reaches_the_program_as_sent",
       "runtimes": [
         "docker",

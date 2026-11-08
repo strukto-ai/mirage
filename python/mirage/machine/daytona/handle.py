@@ -29,7 +29,7 @@ from mirage.runtime.types import OutputFn, RunResult
 
 
 class DaytonaMachine(MachineHandle):
-    """A Daytona sandbox the user runs as a whole-line runtime.
+    """A running Daytona sandbox, reached through its SDK.
 
     You create the sandbox yourself (dashboard, `daytona sandbox
     create`, or the SDK); mirage only connects by ``sandbox_id`` and

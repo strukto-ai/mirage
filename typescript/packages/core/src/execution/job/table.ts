@@ -139,7 +139,7 @@ export class JobTable {
   // When the lease was last taken or renewed, on the monotonic clock: past
   // its length the lease may be another daemon's.
   private renewedAt = 0
-  // Records of programs this daemon left before a restart that the reaper
+  // Records of programs this daemon left before a restart that the runStopper
   // could not reach, published with this life's so a later claim or another
   // daemon tries them again.
   private left: Record<string, RecordFields> = {}
@@ -181,7 +181,7 @@ export class JobTable {
    * whether this workspace reached it; the workspace sets it, since it holds
    * the runtimes that reach it.
    */
-  reaper: ((record: RecordFields, signum: number) => Promise<boolean>) | null = null
+  runStopper: ((record: RecordFields, signum: number) => Promise<boolean>) | null = null
   // Told each job this table's jobs run as it ends; the workspace sets it,
   // to trace the job.
   ended: ((record: Job) => void) | null = null
@@ -1428,7 +1428,7 @@ export class JobTable {
 
   /**
    * Stop the programs this daemon left before a restart, which `claim`
-   * found under its id. The ones the reaper could not reach stay in this
+   * found under its id. The ones the runStopper could not reach stay in this
    * life's record, as they were last vouched for.
    */
   private async reapEarlier(records: Record<string, RecordFields>): Promise<void> {
@@ -1443,7 +1443,7 @@ export class JobTable {
 
   /**
    * Hand each process a daemon's records list that ran a program past the
-   * workspace (its `runtime`) to the reaper, and answer the ones this
+   * workspace (its `runtime`) to the runStopper, and answer the ones this
    * workspace could not reach. The lease is checked again before each is
    * stopped, so a daemon that took it back meanwhile keeps its processes,
    * and its records as they are.
@@ -1456,7 +1456,7 @@ export class JobTable {
     for (const [pid, record] of Object.entries(records)) {
       if (record.runtime == null) continue
       if (await this.running(owner)) return records
-      if (this.reaper === null || !(await this.reaper(record, 15))) left[pid] = record
+      if (this.runStopper === null || !(await this.runStopper(record, 15))) left[pid] = record
     }
     return left
   }

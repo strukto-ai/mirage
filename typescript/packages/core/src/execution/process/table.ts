@@ -474,20 +474,20 @@ async function signalMembers(
   members: readonly ProcessHandle[],
   signal: number,
 ): Promise<void> {
-  const sending: Promise<boolean>[] = []
-  const reached = new Set<number>()
+  const sending = new Map(
+    [...members].reverse().map((member) => [member.record.id.pid, table.send(member, signal)]),
+  )
+  const reached = new Set([...sending].filter(([, sent]) => sent !== null).map(([pid]) => pid))
   for (const member of members) {
-    const sent = table.send(member, signal)
-    if (sent !== null) {
-      sending.push(sent)
-      reached.add(member.record.id.pid)
-    } else if (
-      !member.ignores.has(signal) ||
-      !members.some(
-        (other) => other.record.parent === member.record.id.pid && reached.has(other.record.id.pid),
-      )
+    if (
+      !reached.has(member.record.id.pid) &&
+      (!member.ignores.has(signal) ||
+        !members.some(
+          (other) =>
+            other.record.parent === member.record.id.pid && reached.has(other.record.id.pid),
+        ))
     )
       deliver(member, signal)
   }
-  await Promise.all(sending)
+  await Promise.all([...sending.values()].filter((sent) => sent !== null))
 }

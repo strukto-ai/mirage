@@ -12,17 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { MachineHandle } from '@struktoai/mirage-core/machine/handle'
-import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/machine/mixin'
 import { requireId } from '@struktoai/mirage-core/machine/config'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
-import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { DOCKER_CONFIG_FIELDS, type DockerConfig } from './config.ts'
 import { notRunningHint } from '@struktoai/mirage-core/machine/constants'
 import { DOCKER_HINT, RUNNING_STATE } from './constants.ts'
-import { execArgs, openProgramPipe, reportedState, runProgram } from '../program.ts'
+import { reportedState } from '../program.ts'
+import { ProgramMachine } from '../transport.ts'
 
 /**
  * A container the user runs as a whole-line runtime.
@@ -34,56 +31,26 @@ import { execArgs, openProgramPipe, reportedState, runProgram } from '../program
  * the merged environment, the session cwd, real stdin, and separated
  * stderr.
  */
-export class DockerMachine extends MachineHandle<DockerConfig> implements PipeTransport {
+export class DockerMachine extends ProgramMachine<DockerConfig> {
   static override readonly configFields: ConfigFields = DOCKER_CONFIG_FIELDS
-  readonly [PIPE_TRANSPORT] = true as const
   static override readonly provider = 'docker'
+  protected readonly program = 'docker'
+  protected readonly installHint = DOCKER_HINT
 
   constructor(name: string, config?: DockerConfig) {
     super(name, config, DockerMachine.configFields)
     requireId('docker', 'container', this.config.container)
   }
 
-  // Run `docker` once; the seam tests override.
-  protected docker(
-    args: string[],
-    stdin: ByteSource | null = null,
-    output: OutputFn | null = null,
-    signal?: AbortSignal,
-    errors: OutputFn | null = null,
-  ): Promise<RunResult> {
-    return runProgram('docker', DOCKER_HINT, args, stdin, {
-      ...(signal !== undefined ? { signal } : {}),
-      ...(output !== null ? { output } : {}),
-      ...(errors !== null ? { errors } : {}),
-    })
+  protected execWords(): readonly [readonly string[], readonly string[]] {
+    return [['exec', '-i'], [this.config.container]]
   }
 
   async connect(): Promise<void> {
     const container = this.config.container
-    const status = await this.docker(['inspect', '--format', '{{json .State}}', container])
+    const status = await this.execProgram(['inspect', '--format', '{{json .State}}', container])
     const state = reportedState(status, 'docker inspect', ['Status'])
     if (state !== RUNNING_STATE) throw new Error(notRunningHint('container', container, state, {}))
-  }
-
-  protected override execArgv(
-    argv: readonly string[],
-    stdin: ByteSource | null,
-    env: Record<string, string>,
-    cwd: string,
-    output: OutputFn | null,
-    errors: OutputFn | null,
-    signal?: AbortSignal,
-  ): Promise<RunResult> {
-    const args = execArgs(['exec', '-i'], [this.config.container], env, cwd, argv)
-    return this.docker(args, stdin, output, signal, errors)
-  }
-
-  openPipe(command: string): Promise<SandboxPipe> {
-    return openProgramPipe(
-      'docker',
-      execArgs(['exec', '-i'], [this.config.container], {}, null, ['/bin/sh', '-c', command]),
-    )
   }
 }
 

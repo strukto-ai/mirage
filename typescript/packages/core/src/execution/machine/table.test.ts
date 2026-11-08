@@ -418,6 +418,38 @@ describe('MachineTable scans', () => {
     }
   })
 
+  it('reaches a parent before its child with a group signal', async () => {
+    const box = new Sleeper('a')
+    const ws = sleepers({ a: box })
+    try {
+      await ws.shell('( train 1; true ) &')
+      await started(box)
+      await ws.shell('kill -QUIT -- -$$')
+      expect(box.sent.map(([target, signum]) => [(target as MachinePid).pid, signum])).toEqual([
+        [412, 3],
+        [413, 3],
+      ])
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  })
+
+  it('leaves what a scan no longer sees out of that ps', async () => {
+    const box = new Sleeper('a')
+    const ws = sleepers({ a: box })
+    try {
+      await ws.shell('train 1 &')
+      await started(box)
+      expect(DEC.decode((await ws.shell('ps -o mpid')).stdout)).toContain('413')
+      box.rows = box.rows.slice(0, 1)
+      expect(DEC.decode((await ws.shell('ps -o mpid')).stdout)).not.toContain('413')
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  })
+
   it("reaches a shell's program with a group signal as sent", async () => {
     const box = new Sleeper('a')
     const ws = sleepers({ a: box })

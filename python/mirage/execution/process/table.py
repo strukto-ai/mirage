@@ -619,28 +619,31 @@ class ProcessTable:
 async def _signal_members(
     table: ProcessTable, members: list[ProcessHandle], signal: int
 ) -> None:
-    """Deliver a signal to each runner of a group, in order: the
-    programs on machines as sent, Mirage's own at once (``deliver``). A
-    runner that ignores it, a shell, hands it to the program it runs
-    right now, unless a process of that program, a child a scan found,
-    already got it as sent.
+    """Deliver a signal to each runner of a group: the programs on
+    machines as sent, a parent before its children so a shell does not
+    see its child die first, and Mirage's own at once (``deliver``),
+    deepest first. A runner that ignores it, a shell, hands it to the
+    program it runs right now, unless a process of that program, a child
+    a scan found, got it as sent.
 
     Args:
         table (ProcessTable): the table the runners run in.
         members (list[ProcessHandle]): the runners, deepest first.
         signal (int): the signal.
     """
-    sending: list[Awaitable[bool]] = []
-    reached: set[int] = set()
+    sending = {
+        member.record.pid: table.send(member, signal)
+        for member in reversed(members)
+    }
+    reached = {pid for pid, sent in sending.items() if sent is not None}
     for member in members:
-        sent = table.send(member, signal)
-        if sent is not None:
-            sending.append(sent)
-            reached.add(member.record.pid)
-        elif signal not in member.ignores or not any(
-            other.record.parent == member.record.pid
-            and other.record.pid in reached
-            for other in members
+        if member.record.pid not in reached and (
+            signal not in member.ignores
+            or not any(
+                other.record.parent == member.record.pid
+                and other.record.pid in reached
+                for other in members
+            )
         ):
             deliver(member, signal)
-    await asyncio.gather(*sending)
+    await asyncio.gather(*(s for s in sending.values() if s is not None))

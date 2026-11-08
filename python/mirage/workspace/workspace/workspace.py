@@ -99,7 +99,7 @@ from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.machine.handle import MachineHandle
-from mirage.machine.program import host_status, reap_host_run, signal_host
+from mirage.machine.program import scan_host, signal_host, stop_host_run
 from mirage.observe.log_entry import EVENT_COMMAND, EVENT_RESULT, EVENT_VFS
 from mirage.observe.observer import Observer
 from mirage.observe.store import ObserverStore
@@ -453,7 +453,7 @@ class Workspace:
             clock=self._clock,
             daemon=daemon_id,
         )
-        self.job_table.reaper = self._reap_process
+        self.job_table.run_stopper = self._stop_lapsed_run
 
         def trace_job(record: Job) -> None:
             machine = next(
@@ -801,7 +801,7 @@ class Workspace:
             self._sandbox_mounts,
             self.process_table,
         )
-        self.machine_table = MachineTable(machines, host_status, signal_host)
+        self.machine_table = MachineTable(machines, scan_host, signal_host)
         self.process_table.scanner = lambda: self.machine_table.scan(
             self.process_table, self._workspace_id
         )
@@ -838,7 +838,7 @@ class Workspace:
         except BaseException:
             self._registry.release_clocks()
             raise
-        self.machine_table.claim()
+        self.machine_table.hold_handles()
 
     async def history(
         self,
@@ -1624,7 +1624,9 @@ class Workspace:
         """The ordered runtime world, first capturer first."""
         return list(self._runtimes.entries)
 
-    async def _reap_process(self, record: RecordFields, signum: int) -> bool:
+    async def _stop_lapsed_run(
+        self, record: RecordFields, signum: int
+    ) -> bool:
         """Stop the program a lapsed workspace's process ran past the
         workspace, answering whether this workspace reached it: a host
         program by its pid when it ran on this host, a sandbox's run
@@ -1646,20 +1648,20 @@ class Workspace:
         if machine == str(self.process_table.machine) and isinstance(
             found, dict
         ):
-            return await reap_host_run(
+            return await stop_host_run(
                 MachinePid(found["pid"], found["started"], found["exited"]),
                 seen,
                 signum,
             )
         handle = (
-            self.machine_table.find(machine)
+            self.machine_table.by_id(machine)
             if isinstance(machine, str)
             else None
         )
         if handle is None:
             return False
         try:
-            return await handle.reap(
+            return await handle.stop_run(
                 str(ProcessId(self._workspace_id, pid)), signum
             )
         except Exception as exc:

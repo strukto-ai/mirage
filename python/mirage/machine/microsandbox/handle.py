@@ -16,7 +16,6 @@ import asyncio
 
 from mirage.io.types import ByteSource
 from mirage.machine.constants import PROCESS, not_running_hint
-from mirage.machine.handle import MachineHandle
 from mirage.machine.microsandbox.config import MicrosandboxConfig
 from mirage.machine.microsandbox.constants import (
     INSPECT_TIMEOUT_SECONDS,
@@ -24,17 +23,17 @@ from mirage.machine.microsandbox.constants import (
     RUNNING_STATE,
     TAGGED_PRELUDE,
 )
-from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.program import (
     exec_args,
     open_program_pipe,
     reported_state,
-    run_program,
 )
-from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
+from mirage.machine.transport import ProgramMachine
+from mirage.machine.types import MachinePipe
+from mirage.runtime.types import OutputFn, RunResult
 
 
-class MicrosandboxMachine(MachineHandle, PipeTransportMixin):
+class MicrosandboxMachine(ProgramMachine):
     """Run programs in an existing Microsandbox guest through `msb`.
 
     The user starts the sandbox and serves its workspace at the same
@@ -49,26 +48,14 @@ class MicrosandboxMachine(MachineHandle, PipeTransportMixin):
     provider = "microsandbox"
     config_cls = MicrosandboxConfig
     config: MicrosandboxConfig
+    program = "msb"
+    install_hint = MICROSANDBOX_HINT
+
+    def exec_words(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return ("exec", self.config.sandbox, "--quiet"), ("--",)
 
     async def _ensure_connected(self) -> None:
         """Skip the connect-once latch: every exec probes the guest."""
-
-    async def _microsandbox(
-        self,
-        args: list[str],
-        stdin: ByteSource | None = None,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
-    ) -> RunResult:
-        """Run `msb` once."""
-        return await run_program(
-            "msb",
-            MICROSANDBOX_HINT,
-            args,
-            stdin,
-            output=output,
-            errors=errors,
-        )
 
     async def connect(self) -> None:
         """Require a running sandbox before executing any commands."""
@@ -77,13 +64,12 @@ class MicrosandboxMachine(MachineHandle, PipeTransportMixin):
                 await self._connect()
         except TimeoutError as error:
             raise RuntimeError(
-                "msb runtime inspection timed out after "
-                f"{INSPECT_TIMEOUT_SECONDS} seconds"
+                f"msb status timed out after {INSPECT_TIMEOUT_SECONDS} seconds"
             ) from error
 
     async def _connect(self) -> None:
         sandbox = self.config.sandbox
-        status = await self._microsandbox(
+        status = await self._exec_program(
             ["status", sandbox, "--format", "json"]
         )
         state = reported_state(status, "msb status", ("status",))
@@ -106,41 +92,38 @@ class MicrosandboxMachine(MachineHandle, PipeTransportMixin):
         # Released msb can still auto-start a guest stopped after this probe.
         await self.connect()
         # Piped stdin skips --stream: msb fails more runs that close it early.
-        head = (
-            self._head() if stdin is not None else (*self._head(), "--stream")
-        )
+        words, tail = self.exec_words()
+        head = words if stdin is not None else (*words, "--stream")
         tag = env.get(PROCESS)
-        args = exec_args(head, ("--",), env, cwd, argv)
+        args = exec_args(head, tail, env, cwd, argv)
         if tag is not None:
             rest = {key: value for key, value in env.items() if key != PROCESS}
             command = (f"{PROCESS}={tag}", *argv)
             args = exec_args(
                 head,
-                ("--",),
+                tail,
                 rest,
                 None,
                 ("/bin/sh", "-c", TAGGED_PRELUDE, "sh", cwd, *command),
             )
-        return await self._microsandbox(
+        return await self._exec_program(
             args,
             stdin=stdin,
             output=output,
             errors=errors,
         )
 
-    async def open_pipe(self, command: str) -> SandboxPipe:
+    async def open_pipe(self, command: str) -> MachinePipe:
         """Hold a byte-preserving msb stream open for guest sshfs."""
         await self.connect()
+        head, tail = self.exec_words()
         return await open_program_pipe(
-            "msb",
+            self.program,
             exec_args(
-                (*self._head(), "--stream"),
-                ("--",),
+                (*head, "--stream"),
+                tail,
                 {},
                 None,
                 ("/bin/sh", "-c", command),
             ),
         )
-
-    def _head(self) -> tuple[str, ...]:
-        return ("exec", self.config.sandbox, "--quiet")

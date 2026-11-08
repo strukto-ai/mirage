@@ -14,16 +14,16 @@
 
 from abc import ABC, abstractmethod
 
-from mirage.runtime.types import SandboxPipe
+from mirage.machine.types import MachinePipe
 
 
 class PipeTransportMixin(ABC):
-    """A sandbox that holds a command's stdin and stdout open, byte for
+    """A machine that holds a command's stdin and stdout open, byte for
     byte: what a ``mount_type`` serves the workspace through."""
 
     @abstractmethod
-    async def open_pipe(self, command: str) -> SandboxPipe:
-        """Start a command in the sandbox with its stdin and stdout held
+    async def open_pipe(self, command: str) -> MachinePipe:
+        """Start a command in the machine with its stdin and stdout held
         open, for a ``mount_type``'s SFTP.
 
         Args:

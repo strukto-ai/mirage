@@ -34,11 +34,11 @@ from mirage.machine.program import (
     Children,
     _served,
     close_children,
-    host_status,
     open_program_pipe,
-    reap_host_run,
     run_program,
+    scan_host,
     serve,
+    stop_host_run,
     system_time_env,
     unserve,
 )
@@ -736,10 +736,10 @@ async def test_a_left_host_run_is_reaped_only_while_it_is_the_same(tmp_path):
     pid = await _wait_for_pid(pid_file)
     found = MachinePid(pid, time.time())
     try:
-        assert await reap_host_run(MachinePid(pid, 0.0), None, 15)
+        assert await stop_host_run(MachinePid(pid, 0.0), None, 15)
         assert child.returncode is None
         async with asyncio.timeout(5):
-            assert await reap_host_run(found, None, 15)
+            assert await stop_host_run(found, None, 15)
             await child.wait()
         assert child.returncode == -9
     finally:
@@ -766,10 +766,10 @@ async def test_a_left_host_run_whose_leader_exited_is_reaped(tmp_path):
     await child.wait()
     survivor = await _wait_for_pid(pid_file)
     try:
-        assert not await reap_host_run(found, None, 15)
-        assert not await reap_host_run(found, found.started - 60, 15)
+        assert not await stop_host_run(found, None, 15)
+        assert not await stop_host_run(found, found.started - 60, 15)
         assert await _running(survivor)
-        assert await reap_host_run(
+        assert await stop_host_run(
             MachinePid(found.pid, found.started, time.time()), None, 15
         )
         assert await _ended(survivor)
@@ -786,7 +786,7 @@ async def test_a_host_run_is_out_of_reach_when_ps_fails(tmp_path, monkeypatch):
     fake.write_text('#!/bin/sh\ncase "$1" in -A) kill -9 $$ ;; esac\nexit 1\n')
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
-    assert not await reap_host_run(
+    assert not await stop_host_run(
         MachinePid(2**22 + 7, time.time()), None, 15
     )
 
@@ -812,7 +812,7 @@ async def test_a_host_run_it_may_not_signal_is_out_of_reach(
     pid = await _wait_for_pid(pid_file)
     monkeypatch.setattr(os, "killpg", _denied)
     try:
-        assert not await reap_host_run(MachinePid(pid, time.time()), None, 15)
+        assert not await stop_host_run(MachinePid(pid, time.time()), None, 15)
     finally:
         monkeypatch.undo()
         child.kill()
@@ -857,9 +857,9 @@ async def test_a_host_scan_leaves_a_group_whose_pid_went_to_another_program():
     )
     began = time.time()
     try:
-        rows = await host_status({leader.pid: ("run", began)})
+        rows = await scan_host({leader.pid: ("run", began)})
         assert [(row.tag, row.pid) for row in rows] == [("run", leader.pid)]
-        assert await host_status({leader.pid: ("old", began - 3600)}) == []
+        assert await scan_host({leader.pid: ("old", began - 3600)}) == []
     finally:
         leader.kill()
         await leader.wait()

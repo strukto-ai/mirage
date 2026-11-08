@@ -27,15 +27,15 @@ import type { Daytona, Sandbox } from '@daytonaio/sdk'
 /**
  * A Daytona sandbox the user runs as a whole-line runtime.
  *
- * You create the sandbox yourself (dashboard, `daytona sandbox
+ * You create the machine yourself (dashboard, `daytona sandbox
  * create`, or the SDK); mirage only connects by `sandboxId` and execs
  * lines. `apiKey` falls back to DAYTONA_API_KEY. Daytona's exec has
  * no stdin and reports combined output once the command ends, so piped
  * bytes are uploaded and redirected in, stderr comes back null, and a
  * stream gets its output at the end. The output is base64-encoded in the
- * sandbox, since the exec returns it as text (`encodeOutput`: the sandbox
+ * sandbox, since the exec returns it as text (`encodeOutput`: the machine
  * needs dd and base64). close() releases the SDK client and never
- * touches the sandbox.
+ * touches the machine.
  */
 export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
   static override readonly configFields: ConfigFields = DAYTONA_CONFIG_FIELDS
@@ -92,7 +92,7 @@ export class DaytonaMachine extends MachineHandle<DaytonaConfig> {
     await this.sandbox.fs.uploadFile(Buffer.from(data), path)
   }
 
-  /** Release the SDK client; the sandbox itself is the user's. */
+  /** Release the SDK client; the machine itself is the user's. */
   override async close(): Promise<void> {
     this.sandbox = null
     if (this.client !== null) {

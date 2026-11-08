@@ -1735,7 +1735,7 @@ describe('JobTable process plane', () => {
   })
 
   // The processes of a daemon that lost the lease are not listed; each that
-  // ran a program past the workspace is handed to the reaper as published,
+  // ran a program past the workspace is handed to the runStopper as published,
   // and its record keeps only the processes nobody here reached. One that
   // ran none (a shell) has nothing left to stop.
   it.each([false, true])(
@@ -1752,7 +1752,7 @@ describe('JobTable process plane', () => {
       await store.publish('dead', { '2': host, '3': box, '4': shell })
       const reaped: [unknown, number][] = []
       const b = new JobTable(store)
-      b.reaper = (record, signum) => {
+      b.runStopper = (record, signum) => {
         reaped.push([record, signum])
         return Promise.resolve(!(unreached && record.pid === 3))
       }
@@ -1780,7 +1780,7 @@ describe('JobTable process plane', () => {
     await store.lease('dying')
     const reaped: unknown[] = []
     const b = new JobTable(store)
-    b.reaper = (record) => {
+    b.runStopper = (record) => {
       reaped.push(String(record.machine).split(':')[1])
       return Promise.resolve(true)
     }
@@ -1799,7 +1799,7 @@ describe('JobTable process plane', () => {
     const store = new RAMExecutionStore(0.5)
     const b = new JobTable(store)
     const reaped: unknown[] = []
-    b.reaper = (record) => {
+    b.runStopper = (record) => {
       reaped.push(String(record.machine).split(':')[1])
       return Promise.resolve(true)
     }
@@ -1930,7 +1930,7 @@ describe('JobTable process plane', () => {
     await store.publish('back', { '2': ran(2) })
     const reaped: unknown[] = []
     const b = new JobTable(store)
-    b.reaper = (record) => {
+    b.runStopper = (record) => {
       reaped.push(record)
       return Promise.resolve(true)
     }
@@ -1949,7 +1949,7 @@ describe('JobTable process plane', () => {
     let calls = 0
     let finished = false
     const b = new JobTable(store)
-    b.reaper = async () => {
+    b.runStopper = async () => {
       calls += 1
       await new Promise((resolve) => setTimeout(resolve, 50))
       finished = true
@@ -2112,7 +2112,7 @@ describe('JobTable process plane', () => {
     const store = new RAMExecutionStore()
     const a = new JobTable(store, undefined, null, undefined, 'd')
     const reaped: unknown[] = []
-    a.reaper = (record) => {
+    a.runStopper = (record) => {
       reaped.push(record.pid)
       return Promise.resolve(true)
     }
@@ -2154,13 +2154,13 @@ describe('JobTable process plane', () => {
     expect(await store.holder()).toBeNull()
   })
 
-  // A program this daemon left before a restart that the reaper could not
+  // A program this daemon left before a restart that the runStopper could not
   // reach stays in its record, so a later claim tries it again.
   it('keeps the record of a program it could not reach as it claims', async () => {
     const store = new RAMExecutionStore()
     await store.publish('d', { '7': ran(7) }, 7)
     const a = new JobTable(store, undefined, null, undefined, 'd')
-    a.reaper = () => Promise.resolve(false)
+    a.runStopper = () => Promise.resolve(false)
     await a.claim()
     await until(async () => (await store.processes()).d?.['7']?.machine === 'docker:t')
     await a.close()
@@ -2227,7 +2227,7 @@ describe('JobTable process plane', () => {
     await store.publish('d', { [String(pid)]: ran(pid) }, pid)
     const reaped: unknown[] = []
     const a = new JobTable(store, undefined, null, undefined, 'd')
-    a.reaper = (record) => {
+    a.runStopper = (record) => {
       reaped.push(record)
       return Promise.resolve(true)
     }

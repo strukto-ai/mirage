@@ -84,6 +84,10 @@ export function registerShellCommand(parent: Command): void {
     .option('-s, --session <id>', 'Session id')
     .option('--cwd <path>', 'Working directory for this line (a workspace path)')
     .option('--runtime <name>', "Workspace runtime entry to place this line's captured stages on")
+    .option(
+      '--machine <name>',
+      "Machine to run this line's captured stages on, by its name under machines:",
+    )
     .option('--json', 'Collect output and print the final result as JSON')
     .option('--explain', 'Say what the line would do, as a tree; run nothing')
     .action(
@@ -93,6 +97,7 @@ export function registerShellCommand(parent: Command): void {
         session?: string
         cwd?: string
         runtime?: string
+        machine?: string
         explain?: boolean
         json?: boolean
       }) => {
@@ -100,6 +105,7 @@ export function registerShellCommand(parent: Command): void {
         const body: Record<string, unknown> = { command: opts.command }
         if (opts.cwd !== undefined) body.cwd = opts.cwd
         if (opts.runtime !== undefined) body.runtime = opts.runtime
+        if (opts.machine !== undefined) body.machine = opts.machine
         if (opts.explain === true) {
           const said = await answer(await post({ ...opts, workspace }, 'shell', body))
           emit(said as ExplanationRecord, opts.json === true ? undefined : formatExplanation)

@@ -829,7 +829,7 @@ class _ReapedBox(MachineHandle):
     async def connect(self) -> None:
         return None
 
-    async def reap(self, tag: str, signum: int) -> bool:
+    async def stop_run(self, tag: str, signum: int) -> bool:
         self.reaped.append((tag, signum))
         pid = int(tag.rpartition(":")[2])
         if pid == 6:
@@ -852,15 +852,15 @@ async def test_a_workspace_reaps_the_programs_its_machines_reach():
     ws = Workspace({}, machines={"b1": box})
     try:
         wid = ws.process_table.workspace_id
-        assert await ws._reap_process(_box_process(2), 15)
-        assert not await ws._reap_process(_box_process(3), 15)
-        assert not await ws._reap_process(_box_process(6), 15)
-        assert not await ws._reap_process(_box_process(4, "other:b2"), 15)
+        assert await ws._stop_lapsed_run(_box_process(2), 15)
+        assert not await ws._stop_lapsed_run(_box_process(3), 15)
+        assert not await ws._stop_lapsed_run(_box_process(6), 15)
+        assert not await ws._stop_lapsed_run(_box_process(4, "other:b2"), 15)
         host = {
             **_box_process(5, "host:elsewhere"),
             "machine_pid": {"pid": 41, "started": 1.0, "exited": None},
         }
-        assert not await ws._reap_process(host, 15)
+        assert not await ws._stop_lapsed_run(host, 15)
         assert box.reaped == [
             (f"{wid}:2", 15),
             (f"{wid}:3", 15),

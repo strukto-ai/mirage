@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 SMOLVM_HINT = (
-    "the smolvm runtime needs `smolvm` on PATH "
+    "the smolvm machine needs `smolvm` on PATH "
     "(https://smolmachines.com); the host also needs a "
     "hypervisor: /dev/kvm on Linux, Hypervisor.framework on "
     "macOS, WHP on Windows"

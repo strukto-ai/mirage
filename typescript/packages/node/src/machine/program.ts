@@ -20,7 +20,8 @@ import { access, open, stat } from 'node:fs/promises'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
-import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
+import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import {
   EXEC_PRELUDE,
   HOST_START_SLACK_SECONDS,
@@ -470,12 +471,12 @@ async function groupStarted(group: number): Promise<number[]> {
  * the Mirage process whose program leads it. A group led by a process that
  * started at another time (`HOST_START_SLACK_SECONDS`) is left out: the
  * program's pid went to another program. Rejects when the host has no `ps`.
- * Mirrors Python's `host_status`.
+ * Mirrors Python's `scan_host`.
  *
  * @param groups each program's pid, which is its group's, the tag of the
  *   Mirage process it is and when it started, in epoch seconds.
  */
-export async function hostStatus(
+export async function scanHost(
   groups: ReadonlyMap<number, readonly [string, number]>,
 ): Promise<MachineProcess[]> {
   if (groups.size === 0 || process.platform === 'win32') return []
@@ -556,9 +557,9 @@ export async function signalHost(target: MachinePid, signum: number): Promise<bo
  * while its leader still runs
  * (macOS answers EPERM for one that only exited unreaped). Answers true once
  * the program is stopped or gone, false when this workspace cannot reach it.
- * Mirrors Python's `reap_host_run`.
+ * Mirrors Python's `stop_host_run`.
  */
-export async function reapHostRun(
+export async function stopHostRun(
   machinePid: MachinePid,
   seenAt: number | null,
   signum: number,
@@ -632,7 +633,7 @@ async function readInto(
 }
 
 /**
- * The state a sandbox's status command printed as JSON, at `path`: the keys
+ * The state a machine's status command printed as JSON, at `path`: the keys
  * and indexes down to it. Throws when the command failed or its JSON holds
  * no state. Mirrors Python's `reported_state`.
  */
@@ -660,7 +661,7 @@ export function reportedState(
 }
 
 /**
- * A sandbox program's exec arguments, the same for every program that runs a
+ * A machine program's exec arguments, the same for every program that runs a
  * command in a box: the program's own words (`head`: `exec -i`, smolvm's
  * `machine exec --name M`), `/` as the working directory and each
  * variable as `-e`, the target or `--` (`tail`: `--` where the command is
@@ -797,14 +798,14 @@ export async function closeChildren(children: Set<ChildProcess>): Promise<void> 
 }
 
 /**
- * Hold a byte transport to a sandbox helper until stopped. The tail of what
+ * Hold a byte transport to a machine helper until stopped. The tail of what
  * the helper says on stderr is kept for `diagnostic`, so a mount that fails
  * can say why. Stopping ends the helper's input; one that has not closed
  * 100 ms later loses its process group and our ends of its pipes, which
  * output nobody read would otherwise hold open, exited or not. Mirrors
  * Python's `open_program_pipe`.
  */
-export function openProgramPipe(executable: string, args: string[]): Promise<SandboxPipe> {
+export function openProgramPipe(executable: string, args: string[]): Promise<MachinePipe> {
   const child = spawn(executable, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',

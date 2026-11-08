@@ -27,10 +27,10 @@ from mirage.execution.process.table import ProcessTable
 from mirage.io.types import materialize
 from mirage.machine import MachineConfig, MachineHandle
 from mirage.machine.constants import (
+    NOT_RUNNING_STATUS,
     PROCESS,
-    REAP_ABSENT,
     faketime_probe,
-    reap_line,
+    stop_line,
 )
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
@@ -41,7 +41,7 @@ from mirage.types import FileStat, FileType, Limit, PathSpec
 from tests.fixtures.machine import machine_runtime, on
 
 
-class RecordingSandbox(MachineHandle):
+class RecordingMachine(MachineHandle):
     provider = "recbox"
 
     def __init__(self, captures=None, name="box", **kwargs) -> None:
@@ -81,7 +81,7 @@ class RecordingSandbox(MachineHandle):
     ],
 )
 async def test_version_commands_reach_the_remote_environment(line):
-    box = RecordingSandbox(captures=(line.split()[0],))
+    box = RecordingMachine(captures=(line.split()[0],))
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
@@ -98,7 +98,7 @@ async def test_version_commands_reach_the_remote_environment(line):
 
 @pytest.mark.asyncio
 async def test_first_line_connects_once():
-    box = RecordingSandbox(captures=("python3",))
+    box = RecordingMachine(captures=("python3",))
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
@@ -117,7 +117,7 @@ async def test_first_line_connects_once():
 
 @pytest.mark.asyncio
 async def test_failed_connect_retries_on_the_next_line():
-    class FlakyBox(RecordingSandbox):
+    class FlakyBox(RecordingMachine):
         async def connect(self) -> None:
             await super().connect()
             if self.connected == 1:
@@ -142,7 +142,7 @@ async def test_failed_connect_retries_on_the_next_line():
 
 @pytest.mark.asyncio
 async def test_a_handle_another_workspace_takes_connects_again():
-    box = RecordingSandbox(captures=("python3",))
+    box = RecordingMachine(captures=("python3",))
     for _ in range(2):
         ws = Workspace(
             {"/data": RAMVFS()},
@@ -158,7 +158,7 @@ async def test_a_handle_another_workspace_takes_connects_again():
 
 @pytest.mark.asyncio
 async def test_cwd_passes_through_verbatim_and_env_merges():
-    box = RecordingSandbox(captures=("@line",), config={"env": {"BASE": "1"}})
+    box = RecordingMachine(captures=("@line",), config={"env": {"BASE": "1"}})
     cwd = PathSpec.from_str_path("/data/deep")
     ctx = Context(flags={"c": "nvidia-smi"}, env={"LINE": "2"}, cwd=cwd)
     result = await machine_runtime(box).run_line(None, [], [], ctx)
@@ -172,7 +172,7 @@ async def test_cwd_passes_through_verbatim_and_env_merges():
 
 @pytest.mark.asyncio
 async def test_stdin_bytes_reach_exec_line():
-    box = RecordingSandbox(captures=("@line",))
+    box = RecordingMachine(captures=("@line",))
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
@@ -190,7 +190,7 @@ async def test_machines_take_lines_not_stages():
     # A machine's runtime is a line executor, never the engine inside
     # one command: it carries the line entry point and no interpreter
     # entry point.
-    runtime = machine_runtime(RecordingSandbox())
+    runtime = machine_runtime(RecordingMachine())
     assert isinstance(runtime, LineExecutorMixin)
     assert not isinstance(runtime, LanguageRuntime)
     with pytest.raises(UnsupportedExecutionError, match="code execution"):
@@ -198,13 +198,13 @@ async def test_machines_take_lines_not_stages():
 
 
 def test_config_dict_form_coerces():
-    box = RecordingSandbox(config={"env": {"A": "1"}})
+    box = RecordingMachine(config={"env": {"A": "1"}})
     assert box.config == MachineConfig(env={"A": "1"})
 
 
 @pytest.mark.asyncio
 async def test_line_timeout_answers_124():
-    class SlowBox(RecordingSandbox):
+    class SlowBox(RecordingMachine):
         async def exec_line(
             self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
         ) -> RunResult:
@@ -233,7 +233,7 @@ async def test_line_timeout_answers_124():
 # the run's id, with one more exec that carries no id of its own.
 @pytest.mark.asyncio
 async def test_a_cancelled_run_stops_what_it_left_in_the_box():
-    class StuckBox(RecordingSandbox):
+    class StuckBox(RecordingMachine):
         async def exec_line(
             self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
         ) -> RunResult:
@@ -253,14 +253,14 @@ async def test_a_cancelled_run_stops_what_it_left_in_the_box():
     with pytest.raises(asyncio.CancelledError):
         await task
     tag = box.exec_envs[0][PROCESS]
-    assert [line for line, _, _ in box.execs] == ["yes", reap_line(tag)]
+    assert [line for line, _, _ in box.execs] == ["yes", stop_line(tag)]
     assert PROCESS not in box.exec_envs[1]
 
 
 # A run a ``kill`` stopped is stopped in the box with the signal it named.
 @pytest.mark.asyncio
 async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
-    class StuckBox(RecordingSandbox):
+    class StuckBox(RecordingMachine):
         async def exec_line(
             self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
         ) -> RunResult:
@@ -287,7 +287,7 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
     assert box.exec_envs[0][PROCESS] == str(runner.record.id)
     assert [line for line, _, _ in box.execs] == [
         "yes",
-        reap_line(str(runner.record.id), 2),
+        stop_line(str(runner.record.id), 2),
     ]
 
 
@@ -295,7 +295,7 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
 # workspace that outlives this one stops it by.
 @pytest.mark.asyncio
 async def test_a_run_in_the_box_is_tagged_with_its_process():
-    box = RecordingSandbox(captures=("yes",))
+    box = RecordingMachine(captures=("yes",))
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
 
     async def run() -> int:
@@ -315,34 +315,34 @@ async def test_a_run_in_the_box_is_tagged_with_its_process():
 # run: a box that holds none of it answers so, and a stop that failed
 # raises, so neither counts as having stopped it.
 @pytest.mark.asyncio
-@pytest.mark.parametrize("code,held", [(0, True), (REAP_ABSENT, False)])
+@pytest.mark.parametrize("code,held", [(0, True), (NOT_RUNNING_STATUS, False)])
 async def test_a_left_run_is_reaped_by_its_tag(code, held):
-    class AnsweringBox(RecordingSandbox):
+    class AnsweringBox(RecordingMachine):
         async def exec_line(self, line, stdin, env, cwd) -> RunResult:
             await super().exec_line(line, stdin, env, cwd)
             return RunResult(stdout=b"", stderr=None, exit_code=code)
 
     box = AnsweringBox(captures=("yes",))
-    assert await box.reap("t1", 15) is held
+    assert await box.stop_run("t1", 15) is held
     assert box.connected == 1
-    assert [line for line, _, _ in box.execs] == [reap_line("t1", 15)]
+    assert [line for line, _, _ in box.execs] == [stop_line("t1", 15)]
 
 
 @pytest.mark.asyncio
 async def test_a_failed_reap_raises():
-    class FailingBox(RecordingSandbox):
+    class FailingBox(RecordingMachine):
         async def exec_line(self, line, stdin, env, cwd) -> RunResult:
             return RunResult(stdout=b"", stderr=None, exit_code=127)
 
     with pytest.raises(RuntimeError):
-        await FailingBox(captures=("yes",)).reap("t1", 15)
+        await FailingBox(captures=("yes",)).stop_run("t1", 15)
 
 
 @pytest.mark.asyncio
 async def test_a_box_that_stops_answering_holds_a_cancel_only_so_long(
     monkeypatch,
 ):
-    class DeadBox(RecordingSandbox):
+    class DeadBox(RecordingMachine):
         async def exec_line(
             self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
         ) -> RunResult:
@@ -350,7 +350,9 @@ async def test_a_box_that_stops_answering_holds_a_cancel_only_so_long(
             await asyncio.Event().wait()
             raise AssertionError("unreachable")
 
-    monkeypatch.setattr("mirage.machine.handle.REAP_WAIT_SECONDS", 0.01)
+    monkeypatch.setattr(
+        "mirage.machine.handle.MACHINE_STOP_WAIT_SECONDS", 0.01
+    )
     box = DeadBox(captures=("yes",))
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
     task = asyncio.create_task(
@@ -366,7 +368,7 @@ async def test_a_box_that_stops_answering_holds_a_cancel_only_so_long(
 
 @pytest.mark.asyncio
 async def test_line_output_caps_truncate_with_notice():
-    class ChattyBox(RecordingSandbox):
+    class ChattyBox(RecordingMachine):
         async def exec_line(
             self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
         ) -> RunResult:
@@ -390,7 +392,7 @@ async def test_line_output_caps_truncate_with_notice():
 
 @pytest.mark.asyncio
 async def test_remote_line_invalidates_local_read_caches():
-    box = RecordingSandbox(captures=("python3",))
+    box = RecordingMachine(captures=("python3",))
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
@@ -416,7 +418,7 @@ def test_reach_is_remote():
     assert MachineRuntime.reach == "remote"
 
 
-class FaketimeBox(RecordingSandbox):
+class FaketimeBox(RecordingMachine):
     """Answers the libfaketime probe as a sandbox holding ``holds``, or
     none when it is empty."""
 
@@ -472,7 +474,7 @@ async def test_a_program_gets_the_system_time_through_the_sandboxs_libfaketime(
         await ws.close()
 
 
-class CountedBox(RecordingSandbox):
+class CountedBox(RecordingMachine):
     """``answers`` is what its probes exit with, in turn."""
 
     def __init__(self) -> None:

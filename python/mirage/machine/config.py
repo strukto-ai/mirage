@@ -15,8 +15,8 @@
 from dataclasses import dataclass, field
 
 from mirage.machine.constants import MOUNT_TYPES
+from mirage.machine.types import MountType
 from mirage.runtime.config import RuntimeConfig
-from mirage.runtime.types import MountType
 
 
 @dataclass(frozen=True, slots=True)

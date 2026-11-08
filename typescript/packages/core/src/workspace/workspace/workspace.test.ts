@@ -410,7 +410,7 @@ class ReapedBox extends MachineHandle {
     return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
   }
 
-  override reap(tag: string, signum: number): Promise<boolean> {
+  override stopRun(tag: string, signum: number): Promise<boolean> {
     this.reaped.push([tag, signum])
     const pid = Number(tag.slice(tag.lastIndexOf(':') + 1))
     if (pid === 6) return Promise.reject(new Error('box not answering'))
@@ -434,9 +434,9 @@ it('reaps the programs its machines reach', async () => {
     const wid = ws.processTable.workspaceId
     const reap = (
       ws as unknown as {
-        reapProcess: (record: Record<string, unknown>, signum: number) => Promise<boolean>
+        stopLapsedRun: (record: Record<string, unknown>, signum: number) => Promise<boolean>
       }
-    ).reapProcess.bind(ws)
+    ).stopLapsedRun.bind(ws)
     expect(await reap(boxProcess(2), 15)).toBe(true)
     expect(await reap(boxProcess(3), 15)).toBe(false)
     expect(await reap(boxProcess(6), 15)).toBe(false)

@@ -35,9 +35,9 @@ import {
 } from '@struktoai/mirage-node'
 
 const __HERE = dirname(fileURLToPath(import.meta.url))
-dotenv.config({ path: resolve(__HERE, '../../../../../.env.development') })
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
 
-const REMOTE_DIR = resolve(__HERE, '../../../../python/runtime/sandbox/microsandbox/remote')
+const REMOTE_DIR = resolve(__HERE, '../../../python/machine/microsandbox/remote')
 
 interface RunResult {
   code: number

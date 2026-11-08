@@ -22,7 +22,8 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.io.types import materialize
 from mirage.machine import program
 from mirage.machine.docker import DockerMachine
-from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.machine.types import MachinePipe
+from mirage.runtime.types import RunResult
 from tests.fixtures.machine import on
 
 
@@ -35,7 +36,7 @@ class FakeDockerMachine(DockerMachine):
         self.running = running
         self.calls: list[tuple[list[str], bytes | None]] = []
 
-    async def _docker(self, args, stdin=None, output=None, errors=None):
+    async def _exec_program(self, args, stdin=None, output=None, errors=None):
         stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[0] == "inspect":
@@ -143,7 +144,7 @@ class MountingDockerMachine(FakeDockerMachine):
         self.captures = captures
         self.table: dict[str, tuple[str, str]] = {}
 
-    async def _docker(self, args, stdin=None, output=None, errors=None):
+    async def _exec_program(self, args, stdin=None, output=None, errors=None):
         if args[-1] == "cat /proc/mounts":
             self.calls.append((list(args), stdin))
             rows = "".join(
@@ -151,7 +152,7 @@ class MountingDockerMachine(FakeDockerMachine):
                 for p, (source, t) in self.table.items()
             )
             return RunResult(rows.encode(), None, 0)
-        return await super()._docker(args, stdin, output)
+        return await super()._exec_program(args, stdin, output)
 
     async def open_pipe(self, command):
         source, prefix = shlex.split(command)[5:7]
@@ -161,7 +162,7 @@ class MountingDockerMachine(FakeDockerMachine):
         async def stop() -> None:
             requests.feed_eof()
 
-        return SandboxPipe(requests, io.BytesIO(), stop)
+        return MachinePipe(requests, io.BytesIO(), stop)
 
 
 RESTRICTIONS = [

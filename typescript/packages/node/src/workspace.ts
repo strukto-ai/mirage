@@ -26,7 +26,7 @@ import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
-import { hostStatus, reapHostRun, signalHost } from './machine/program.ts'
+import { scanHost, stopHostRun, signalHost } from './machine/program.ts'
 import type { MachineProcess } from '@struktoai/mirage-core/execution/machine/types'
 import { MachineId, type MachinePid } from '@struktoai/mirage-core/execution/types'
 import { hostname } from 'node:os'
@@ -48,19 +48,19 @@ export class Workspace extends CoreWorkspace {
   }
 
   /** A host program a lapsed workspace left reaches this host's processes. */
-  protected override reapHostRun(
+  protected override stopHostRun(
     machinePid: MachinePid,
     seenAt: number | null,
     signum: number,
   ): Promise<boolean> {
-    return reapHostRun(machinePid, seenAt, signum)
+    return stopHostRun(machinePid, seenAt, signum)
   }
 
   /** The host programs' process groups, as this host's `ps` lists them. */
-  protected override hostStatus(
+  protected override scanHost(
     groups: ReadonlyMap<number, readonly [string, number]>,
   ): Promise<MachineProcess[]> {
-    return hostStatus(groups)
+    return scanHost(groups)
   }
 
   /** A signal to a host process reaches this host's processes. */

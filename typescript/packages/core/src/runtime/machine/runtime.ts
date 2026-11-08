@@ -104,7 +104,7 @@ export class MachineRuntime
    * The provider of the machine the run goes to, as a refusal of its mounts
    * names it; the runtime's name when it names none.
    */
-  override voice(ctx: Context): string {
+  override refusalName(ctx: Context): string {
     const name = ctx.machine ?? this.defaultMachine
     if (this.machines === null || name === null || !this.machines.names().includes(name))
       return this.name

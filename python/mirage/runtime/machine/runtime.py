@@ -107,7 +107,7 @@ class MachineRuntime(
     def machine_for(self, ctx: Context) -> MachineId | None:
         return self.handle(ctx).id
 
-    def voice(self, ctx: Context) -> str:
+    def refusal_name(self, ctx: Context) -> str:
         """The provider of the machine the run goes to, as a refusal of
         its mounts names it; the runtime's name when it names none."""
         name = ctx.machine or self.default_machine

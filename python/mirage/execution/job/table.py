@@ -176,7 +176,7 @@ class JobTable:
         # clock: past its length the lease may be another daemon's.
         self._renewed = 0.0
         # Records of programs this daemon left before a restart that the
-        # reaper could not reach, published with this life's so a later
+        # run_stopper could not reach, published with this life's so a later
         # claim or another daemon tries them again.
         self._left: dict[str, RecordFields] = {}
         self._jobs: dict[str, dict[int, JobHandle]] = {}
@@ -207,9 +207,9 @@ class JobTable:
         # workspace, given the process as it was published and the first
         # signal, and answers whether this workspace reached it; the
         # workspace sets it, since it holds the runtimes that reach it.
-        self.reaper: Callable[[RecordFields, int], Awaitable[bool]] | None = (
-            None
-        )
+        self.run_stopper: (
+            Callable[[RecordFields, int], Awaitable[bool]] | None
+        ) = None
         # Told each job this table's jobs run as it ends; the workspace
         # sets it, to trace the job.
         self.ended: Callable[[Job], None] | None = None
@@ -1497,7 +1497,7 @@ class JobTable:
 
     async def _reap_earlier(self, records: dict[str, RecordFields]) -> None:
         """Stop the programs this daemon left before a restart, which
-        ``claim`` found under its id. The ones the reaper could not reach
+        ``claim`` found under its id. The ones the run_stopper could not reach
         stay in this life's record, as they were last vouched for.
 
         Args:
@@ -1516,7 +1516,7 @@ class JobTable:
         self, owner: str, records: dict[str, RecordFields]
     ) -> dict[str, RecordFields]:
         """Hand each process a daemon's records list that ran a program
-        past the workspace (its ``runtime``) to the reaper, and answer
+        past the workspace (its ``runtime``) to the run_stopper, and answer
         the ones this workspace could not reach. The lease is checked
         again before each is stopped, so a daemon that took it back
         meanwhile keeps its processes, and its records as they are.
@@ -1531,7 +1531,9 @@ class JobTable:
                 continue
             if await self._running(owner):
                 return records
-            if self.reaper is None or not await self.reaper(record, 15):
+            if self.run_stopper is None or not await self.run_stopper(
+                record, 15
+            ):
                 left[pid] = record
         return left
 

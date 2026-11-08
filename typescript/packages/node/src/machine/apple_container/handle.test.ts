@@ -42,7 +42,7 @@ class FakeAppleContainerMachine extends AppleContainerMachine {
   inspectStdout: string | null = null
   readonly calls: [string[], Uint8Array | null][] = []
 
-  protected override async container(
+  protected override async execProgram(
     args: string[],
     source: ByteSource | null = null,
     output: OutputFn | null = null,

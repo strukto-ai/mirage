@@ -1408,7 +1408,7 @@ def _ran(pid: int, machine: str = "docker:t") -> dict:
 
 
 # The processes of a daemon that lost the lease are not listed; each that
-# ran a program past the workspace is handed to the reaper as published,
+# ran a program past the workspace is handed to the run_stopper as published,
 # and its record keeps only the processes nobody here reached. One that
 # ran none (a shell) has nothing left to stop.
 @pytest.mark.asyncio
@@ -1425,12 +1425,12 @@ async def test_a_lapsed_daemons_programs_are_reaped(unreached):
     await store.publish("dead", {"2": host, "3": box, "4": shell})
     reaped: list[tuple[dict, int]] = []
 
-    async def reaper(record: dict, signum: int) -> bool:
+    async def run_stopper(record: dict, signum: int) -> bool:
         reaped.append((record, signum))
         return not (unreached and record["pid"] == 3)
 
     b = JobTable(store)
-    b.reaper = reaper
+    b.run_stopper = run_stopper
     assert await b.remote_processes() == {}
     async with asyncio.timeout(5):
         while b._reaping:
@@ -1464,12 +1464,12 @@ async def test_a_claim_reaps_this_daemons_programs_from_before_a_restart():
     await store.publish("d", {str(pid): _ran(pid)}, pid)
     reaped: list[dict] = []
 
-    async def reaper(record: dict, signum: int) -> bool:
+    async def run_stopper(record: dict, signum: int) -> bool:
         reaped.append(record)
         return True
 
     a = JobTable(store, daemon="d")
-    a.reaper = reaper
+    a.run_stopper = run_stopper
     await a.claim()
     async with asyncio.timeout(5):
         while a._reaping:
@@ -1557,12 +1557,12 @@ async def test_a_daemon_that_renews_keeps_its_programs():
     await store.publish("back", {"2": _ran(2)})
     reaped: list[dict] = []
 
-    async def reaper(record: dict, signum: int) -> bool:
+    async def run_stopper(record: dict, signum: int) -> bool:
         reaped.append(record)
         return True
 
     b = JobTable(store)
-    b.reaper = reaper
+    b.run_stopper = run_stopper
     assert await b.remote_processes() == {}
     async with asyncio.timeout(5):
         while b._reaping:
@@ -1580,7 +1580,7 @@ async def test_teardown_stops_the_reaping():
     await store.publish("dead", {"2": _ran(2)})
     started, cancelled = asyncio.Event(), asyncio.Event()
 
-    async def reaper(record: dict, signum: int) -> bool:
+    async def run_stopper(record: dict, signum: int) -> bool:
         started.set()
         try:
             await asyncio.Event().wait()
@@ -1590,7 +1590,7 @@ async def test_teardown_stops_the_reaping():
         return True
 
     b = JobTable(store)
-    b.reaper = reaper
+    b.run_stopper = run_stopper
     await b.remote_processes()
     await asyncio.wait_for(started.wait(), 5)
     await b.kill_all()
@@ -1612,12 +1612,12 @@ async def test_a_start_reaps_lapsed_daemons():
     await store.lease("dying")
     reaped: list[str] = []
 
-    async def reaper(record: dict, signum: int) -> bool:
+    async def run_stopper(record: dict, signum: int) -> bool:
         reaped.append(record["machine"].partition(":")[2])
         return True
 
     b = JobTable(store)
-    b.reaper = reaper
+    b.run_stopper = run_stopper
     b.reap_lapsed()
     async with asyncio.timeout(5):
         while not reaped:
@@ -1643,7 +1643,7 @@ async def test_a_start_finishes_the_lease_wait_after_an_early_timer(
         waits.append(seconds)
         clock.advance(seconds - 0.001 if len(waits) == 1 else seconds)
 
-    async def reaper(record: dict, signum: int) -> bool:
+    async def run_stopper(record: dict, signum: int) -> bool:
         reaped.append(record["machine"].partition(":")[2])
         return True
 
@@ -1653,7 +1653,7 @@ async def test_a_start_finishes_the_lease_wait_after_an_early_timer(
     await store.publish("dying", {"2": _ran(2, "docker:dying")})
     await store.lease("dying")
     b = JobTable(store)
-    b.reaper = reaper
+    b.run_stopper = run_stopper
     try:
         await b._sweep()
         await asyncio.gather(*b._reaping)
@@ -1841,11 +1841,11 @@ async def test_a_claim_reaps_none_of_what_its_table_runs():
     a = JobTable(store, daemon="d")
     reaped: list[int] = []
 
-    async def reaper(record: dict, signum: int) -> bool:
+    async def run_stopper(record: dict, signum: int) -> bool:
         reaped.append(record["pid"])
         return True
 
-    a.reaper = reaper
+    a.run_stopper = run_stopper
     runner = a.processes.start(
         session_id="s",
         command="sleep 30",
@@ -1891,7 +1891,7 @@ async def test_a_close_gives_up_the_lease_a_pending_claim_takes():
 
 
 async def _unreached(record: dict, signum: int) -> bool:
-    """A reaper that reaches no program.
+    """A run_stopper that reaches no program.
 
     Args:
         record (dict): the published process.
@@ -1900,14 +1900,14 @@ async def _unreached(record: dict, signum: int) -> bool:
     return False
 
 
-# A program this daemon left before a restart that the reaper could not
+# A program this daemon left before a restart that the run_stopper could not
 # reach stays in its record, so a later claim tries it again.
 @pytest.mark.asyncio
 async def test_a_claim_keeps_the_record_of_a_program_it_could_not_reach():
     store = RAMExecutionStore()
     await store.publish("d", {"7": _ran(7)}, 7)
     a = JobTable(store, daemon="d")
-    a.reaper = _unreached
+    a.run_stopper = _unreached
     await a.claim()
 
     async def kept() -> bool:

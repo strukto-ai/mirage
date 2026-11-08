@@ -21,11 +21,11 @@ import {
   ENCODE_OUTPUT,
   MOUNT_GUARD,
   PROCESS,
-  REAP_ABSENT,
-  REAP_PATH,
+  NOT_RUNNING_STATUS,
+  TOOLS_PATH,
   decodeOutput,
   mountField,
-  reapLine,
+  stopLine,
   wrapLine,
 } from './constants.ts'
 
@@ -71,7 +71,7 @@ describe('wrapLine', () => {
 
 // A run's program may ignore TERM, and the config may set a PATH that
 // holds no grep: the stop line still ends every process of the run.
-describe.skipIf(!existsSync('/proc/self'))('reapLine', () => {
+describe.skipIf(!existsSync('/proc/self'))('stopLine', () => {
   it.each([[undefined], ['/nowhere']])(
     'ends a run that ignores TERM (PATH %s)',
     async (path) => {
@@ -95,7 +95,7 @@ describe.skipIf(!existsSync('/proc/self'))('reapLine', () => {
       })
       try {
         await ready
-        const done = spawnSync('/bin/sh', ['-c', reapLine(tag)], {
+        const done = spawnSync('/bin/sh', ['-c', stopLine(tag)], {
           env: path === undefined ? process.env : { PATH: path },
           timeout: 10_000,
         })
@@ -121,8 +121,8 @@ describe.skipIf(!existsSync('/proc/self'))('reapLine', () => {
           resolve()
         })
       })
-      const done = spawnSync('/bin/sh', ['-c', reapLine(`${workspace}:9`)], { timeout: 10_000 })
-      expect(done.status).toBe(REAP_ABSENT)
+      const done = spawnSync('/bin/sh', ['-c', stopLine(`${workspace}:9`)], { timeout: 10_000 })
+      expect(done.status).toBe(NOT_RUNNING_STATUS)
       expect(program.exitCode).toBeNull()
     } finally {
       program.kill('SIGKILL')
@@ -132,10 +132,10 @@ describe.skipIf(!existsSync('/proc/self'))('reapLine', () => {
   // A box that holds no process of the run says so, apart from one whose
   // processes it stopped.
   it('answers a run it does not hold', () => {
-    const done = spawnSync('/bin/sh', ['-c', reapLine(crypto.randomUUID().replaceAll('-', ''))], {
+    const done = spawnSync('/bin/sh', ['-c', stopLine(crypto.randomUUID().replaceAll('-', ''))], {
       timeout: 10_000,
     })
-    expect(done.status).toBe(REAP_ABSENT)
+    expect(done.status).toBe(NOT_RUNNING_STATUS)
   })
 })
 
@@ -260,7 +260,7 @@ describe('MOUNT_GUARD', () => {
   })
 })
 
-// A line the sandbox's own shell writes (no encoder there) is not base64
+// A line the machine's own shell writes (no encoder there) is not base64
 // and comes back as it is, between the decoded lines; a blank line adds
 // nothing.
 describe('decodeOutput', () => {
@@ -283,7 +283,7 @@ describe('ENCODE_OUTPUT', () => {
   it('runs nothing in a sandbox without the encoder', () => {
     const empty = mkdtempSync(join(tmpdir(), 'mirage-noenc-'))
     try {
-      const script = ENCODE_OUTPUT.replaceAll(REAP_PATH, empty)
+      const script = ENCODE_OUTPUT.replaceAll(TOOLS_PATH, empty)
       const done = spawnSync('/bin/sh', ['-c', script, 'sh', '/bin/sh', '-c', 'echo ran'], {
         encoding: 'utf8',
         timeout: 10_000,
@@ -291,7 +291,7 @@ describe('ENCODE_OUTPUT', () => {
       expect([done.status, done.stdout, done.stderr]).toEqual([
         127,
         '',
-        'mirage: the sandbox needs dd and base64 to return output\n',
+        'mirage: the machine needs dd and base64 to return output\n',
       ])
     } finally {
       rmSync(empty, { recursive: true, force: true })

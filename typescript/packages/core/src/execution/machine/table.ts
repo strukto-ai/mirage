@@ -57,21 +57,24 @@ export class MachineTable {
   // The runs whose program has ended that a scan has looked at since, by
   // tag; one not yet looked at is scanned once more for what it left
   // running.
-  private swept = new Set<string>()
+  private scannedAfterEnd = new Set<string>()
   // One scan at a time, so an older answer never lands after a newer one
   // and ends what the newer one found.
   private scanning: Promise<void> = Promise.resolve()
+  // One signal at a time on each machine, in the order they were asked
+  // for, so a parent hears it before its children.
+  private readonly signaling = new Map<string, Promise<void>>()
 
   /**
    * @param machines each machine's handle or its config entry, by name.
-   * @param hostStatus scans the host programs' process groups; null leaves
+   * @param scanHost scans the host programs' process groups; null leaves
    *   the host unscanned.
-   * @param hostSignal sends a signal to a host process; null sends none.
+   * @param signalHost sends a signal to a host process; null sends none.
    */
   constructor(
     machines: Record<string, MachineHandle | Record<string, unknown>> = {},
-    private readonly hostStatus: HostStatus | null = null,
-    private readonly hostSignal: HostSignal | null = null,
+    private readonly scanHost: HostStatus | null = null,
+    private readonly signalHost: HostSignal | null = null,
   ) {
     for (const [name, spec] of Object.entries(machines)) {
       const handle = buildMachine(name, spec)
@@ -85,7 +88,7 @@ export class MachineTable {
    * workspace that failed to build holds none, and another cannot take
    * one until `close`.
    */
-  claim(): void {
+  holdHandles(): void {
     for (const handle of this.byName.values()) HOLDERS.set(handle, this)
   }
 
@@ -121,7 +124,7 @@ export class MachineTable {
    *
    * @param machine a machine id as a process record names it.
    */
-  find(machine: string): MachineHandle | null {
+  byId(machine: string): MachineHandle | null {
     return this.handles().find((h) => h.id.toString() === machine) ?? null
   }
 
@@ -154,14 +157,14 @@ export class MachineTable {
    * @param workspace the workspace's id, which each run's tag starts with.
    */
   scan(processes: ProcessTable, workspace: string): Promise<void> {
-    const run = this.scanning.then(() => this.scanNow(processes, workspace))
+    const run = this.scanning.then(() => this.scanMachines(processes, workspace))
     this.scanning = run.catch((error: unknown) => {
       console.debug('scan failed:', error)
     })
     return run
   }
 
-  private async scanNow(processes: ProcessTable, workspace: string): Promise<void> {
+  private async scanMachines(processes: ProcessTable, workspace: string): Promise<void> {
     const live = new Map(processes.live().map((handle) => [handle.record.id.toString(), handle]))
     const host = processes.machine.toString()
     const runs = new Map(
@@ -171,32 +174,33 @@ export class MachineTable {
         .map((record) => [record.id.toString(), record]),
     )
     const ended = new Set([...runs.keys()].filter((tag) => !live.has(tag)))
-    const fresh = new Set([...ended].filter((tag) => !this.swept.has(tag)))
-    const swept = new Set([...this.swept].filter((tag) => ended.has(tag)))
-    const held = new Set([...this.found.values()].map((entry) => entry.tag))
-    const shown = new Set([...this.found.values()].map((entry) => entry.machine))
-    for (const tag of fresh) {
+    const unscanned = new Set([...ended].filter((tag) => !this.scannedAfterEnd.has(tag)))
+    const stillScanned = new Set([...this.scannedAfterEnd].filter((tag) => ended.has(tag)))
+    const foundTags = new Set([...this.found.values()].map((entry) => entry.tag))
+    const machinesToScan = new Set([...this.found.values()].map((entry) => entry.machine))
+    for (const tag of unscanned) {
       const machine = runs.get(tag)?.machine.toString()
-      if (machine !== undefined && machine !== host) shown.add(machine)
+      if (machine !== undefined && machine !== host) machinesToScan.add(machine)
     }
     const scans: [MachineId, Promise<MachineProcess[]>][] = this.handles()
-      .filter((handle) => handle.executing || shown.has(handle.id.toString()))
+      .filter((handle) => handle.executing || machinesToScan.has(handle.id.toString()))
       .map((handle) => [handle.id, handle.status(workspace)])
-    if (this.hostStatus !== null) {
+    if (this.scanHost !== null) {
       const groups = new Map<number, readonly [string, number]>()
       for (const [tag, record] of runs) {
         if (
           record.machine.toString() === host &&
           record.machinePid !== null &&
-          (live.has(tag) || fresh.has(tag) || held.has(tag))
+          (live.has(tag) || unscanned.has(tag) || foundTags.has(tag))
         )
           groups.set(record.machinePid.pid, [tag, record.machinePid.started])
       }
-      if (groups.size > 0 || shown.has(host))
-        scans.push([processes.machine, this.hostStatus(groups)])
+      if (groups.size > 0 || machinesToScan.has(host))
+        scans.push([processes.machine, this.scanHost(groups)])
     }
     const found = await Promise.allSettled(scans.map(([, scan]) => scan))
     const failed = new Set<string>()
+    const finishing: ProcessHandle[] = []
     found.forEach((rows, at) => {
       const machine = scans[at]?.[0]
       if (machine === undefined) return
@@ -205,13 +209,14 @@ export class MachineTable {
         failed.add(machine.toString())
         return
       }
-      this.settle(processes, machine, rows.value, live, runs)
+      finishing.push(...this.applyScan(processes, machine, rows.value, live, runs))
     })
-    for (const tag of fresh) {
+    for (const tag of unscanned) {
       const machine = runs.get(tag)?.machine.toString()
-      if (machine === undefined || !failed.has(machine)) swept.add(tag)
+      if (machine === undefined || !failed.has(machine)) stillScanned.add(tag)
     }
-    this.swept = swept
+    this.scannedAfterEnd = stillScanned
+    await Promise.allSettled(finishing.map((handle) => handle.task))
   }
 
   /**
@@ -233,13 +238,13 @@ export class MachineTable {
     if (record.state !== 'running') return null
     const target = record.machinePid
     if (record.machine.toString() === processes.machine.toString()) {
-      if (this.hostSignal === null || target === null || target.exited != null) return null
+      if (this.signalHost === null || target === null || target.exited != null) return null
     } else if (
-      this.find(record.machine.toString()) === null ||
+      this.byId(record.machine.toString()) === null ||
       (target === null && record.runtime === null)
     )
       return null
-    return this.sent(handle, record.machine, target ?? record.id.toString(), signum)
+    return this.deliverSignal(handle, record.machine, target ?? record.id.toString(), signum)
   }
 
   /**
@@ -247,7 +252,7 @@ export class MachineTable {
    * its machine does not answer, for the next scan to settle; only one the
    * machine no longer shows leaves.
    */
-  private async sent(
+  private async deliverSignal(
     handle: ProcessHandle,
     machine: MachineId,
     target: string | MachinePid,
@@ -255,7 +260,7 @@ export class MachineTable {
   ): Promise<boolean> {
     let sent: boolean
     try {
-      sent = await this.signal(machine, target, signum)
+      sent = await this.signalOn(machine, target, signum)
     } catch (error) {
       console.debug(`${machine.toString()}: signal ${String(signum)} not sent:`, error)
       if (handle.record.runtime === null) return false
@@ -266,7 +271,7 @@ export class MachineTable {
       return true
     }
     if (handle.record.runtime === null) {
-      this.end(handle)
+      this.endFound(handle)
       return false
     }
     if (CONTINUE_SIGNALS.has(signum) || STOP_SIGNALS.has(signum)) return true
@@ -274,15 +279,28 @@ export class MachineTable {
   }
 
   /** Send `signum` to one process on `machine`. */
-  private async signal(
+  private signalOn(
     machine: MachineId,
     target: string | MachinePid,
     signum: number,
   ): Promise<boolean> {
-    const handle = this.find(machine.toString())
-    if (handle !== null) return handle.signal(target, signum)
-    if (this.hostSignal === null || typeof target === 'string') return false
-    return this.hostSignal(target, signum)
+    const key = machine.toString()
+    const sent = (this.signaling.get(key) ?? Promise.resolve()).then(() => {
+      const handle = this.byId(key)
+      if (handle !== null) return handle.signal(target, signum)
+      if (this.signalHost === null || typeof target === 'string') return false
+      return this.signalHost(target, signum)
+    })
+    this.signaling.set(
+      key,
+      sent.then(
+        () => undefined,
+        (error: unknown) => {
+          console.debug(`${key}: signal ${String(signum)} failed:`, error)
+        },
+      ),
+    )
+    return sent
   }
 
   /**
@@ -290,13 +308,13 @@ export class MachineTable {
    * machine entry is left out: two entries that reach one machine both see
    * its processes, which are the other run's.
    */
-  private settle(
+  private applyScan(
     processes: ProcessTable,
     machine: MachineId,
     rows: readonly MachineProcess[],
     live: ReadonlyMap<string, ProcessHandle>,
     runs: ReadonlyMap<string, Process>,
-  ): void {
+  ): ProcessHandle[] {
     const seen = new Set<string>()
     const tagged = new Map<string, MachineProcess[]>()
     for (const row of rows) tagged.set(row.tag, [...(tagged.get(row.tag) ?? []), row])
@@ -312,7 +330,7 @@ export class MachineTable {
         handle.record.machine.toString() === machine.toString()
       ) {
         const known = handle.record.machinePid
-        const root = rootOf(run, pids, known)
+        const root = programRow(run, pids, known)
         if (root !== null) {
           placed.set(root.pid, handle.record.id.pid)
           if (known?.pid !== root.pid)
@@ -326,7 +344,7 @@ export class MachineTable {
         const batch = ready.length > 0 ? ready : waiting
         for (const row of batch) {
           const parent = placed.get(row.ppid) ?? handle?.record.id.pid ?? null
-          const found = this.foundProcess(processes, machine, row, parent, owner)
+          const found = this.placeFound(processes, machine, row, parent, owner)
           if (found !== null) {
             placed.set(row.pid, found.record.id.pid)
             seen.add(foundKey(machine, row))
@@ -335,11 +353,14 @@ export class MachineTable {
         waiting = waiting.filter((row) => !batch.includes(row))
       }
     }
+    const finishing: ProcessHandle[] = []
     for (const [key, entry] of [...this.found]) {
       if (entry.machine !== machine.toString() || seen.has(key)) continue
       this.found.delete(key)
       entry.end(0)
+      finishing.push(entry.handle)
     }
+    return finishing
   }
 
   /**
@@ -349,7 +370,7 @@ export class MachineTable {
    * run the table no longer keeps. A run whose session was closed or
    * re-profiled since places nothing.
    */
-  private foundProcess(
+  private placeFound(
     processes: ProcessTable,
     machine: MachineId,
     row: MachineProcess,
@@ -389,7 +410,7 @@ export class MachineTable {
         run: () => ended,
         cancel: () => {
           const signum = handle?.signal ?? 15
-          void this.stop(machine, target, signum).finally(() => {
+          void this.stopFound(machine, target, signum).finally(() => {
             end(128 + signum)
           })
         },
@@ -407,16 +428,16 @@ export class MachineTable {
   }
 
   /** Stop a process a scan found, as Mirage stops what it runs. */
-  private async stop(machine: MachineId, target: MachinePid, signum: number): Promise<void> {
+  private async stopFound(machine: MachineId, target: MachinePid, signum: number): Promise<void> {
     try {
-      await this.signal(machine, target, signum)
+      await this.signalOn(machine, target, signum)
     } catch (error) {
       console.debug(`${machine.toString()}: process ${String(target.pid)} not stopped:`, error)
     }
   }
 
   /** End a process a scan found, which its machine no longer runs. */
-  private end(handle: ProcessHandle): void {
+  private endFound(handle: ProcessHandle): void {
     for (const [key, entry] of [...this.found]) {
       if (entry.handle !== handle) continue
       this.found.delete(key)
@@ -443,7 +464,7 @@ function foundKey(machine: MachineId, row: MachineProcess): string {
  * The first process of a run: the one carrying its tag whose parent carries
  * none, the one already known if it still shows, else the first to start.
  */
-function rootOf(
+function programRow(
   run: readonly MachineProcess[],
   pids: ReadonlySet<number>,
   known: MachinePid | null,

@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export const MICROSANDBOX_HINT =
-  'the microsandbox runtime needs `msb` on PATH (https://microsandbox.dev); ' +
-  'start the sandbox before connecting'
+  'the microsandbox machine needs `msb` on PATH (https://microsandbox.dev); ' +
+  'start the machine before connecting'
 
 export const RUNNING_STATE = 'Running'
 export const INSPECT_TIMEOUT_SECONDS = 10

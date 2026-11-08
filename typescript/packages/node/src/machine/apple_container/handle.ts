@@ -12,17 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { MachineHandle } from '@struktoai/mirage-core/machine/handle'
-import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/machine/mixin'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
-import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { requireId } from '@struktoai/mirage-core/machine/config'
 import { APPLE_CONTAINER_CONFIG_FIELDS, type AppleContainerConfig } from './config.ts'
 import { APPLE_CONTAINER_HINT, RUNNING_STATE, STATE_HINTS } from './constants.ts'
 import { notRunningHint } from '@struktoai/mirage-core/machine/constants'
-import { execArgs, openProgramPipe, reportedState, runProgram } from '../program.ts'
+import { reportedState } from '../program.ts'
+import { ProgramMachine } from '../transport.ts'
 
 /**
  * A container under Apple's `container` tool.
@@ -43,32 +40,19 @@ import { execArgs, openProgramPipe, reportedState, runProgram } from '../program
  * One machine is one container, so an agent gets a VM of its own as a
  * machine of its own, which a policy route sends its session to.
  */
-export class AppleContainerMachine
-  extends MachineHandle<AppleContainerConfig>
-  implements PipeTransport
-{
+export class AppleContainerMachine extends ProgramMachine<AppleContainerConfig> {
   static override readonly configFields: ConfigFields = APPLE_CONTAINER_CONFIG_FIELDS
-  readonly [PIPE_TRANSPORT] = true as const
   static override readonly provider = 'apple_container'
+  protected readonly program = 'container'
+  protected readonly installHint = APPLE_CONTAINER_HINT
 
   constructor(name: string, config?: AppleContainerConfig) {
     super(name, config, AppleContainerMachine.configFields)
     requireId('apple_container', 'container', this.config.container)
   }
 
-  /** Run `container` once; the seam tests override. */
-  protected container(
-    args: string[],
-    stdin: ByteSource | null = null,
-    output: OutputFn | null = null,
-    signal?: AbortSignal,
-    errors: OutputFn | null = null,
-  ): Promise<RunResult> {
-    return runProgram('container', APPLE_CONTAINER_HINT, args, stdin, {
-      ...(signal !== undefined ? { signal } : {}),
-      ...(output !== null ? { output } : {}),
-      ...(errors !== null ? { errors } : {}),
-    })
+  protected execWords(): readonly [readonly string[], readonly string[]] {
+    return [['exec', '-i'], [this.config.container]]
   }
 
   /**
@@ -79,30 +63,10 @@ export class AppleContainerMachine
    */
   async connect(): Promise<void> {
     const container = this.config.container
-    const status = await this.container(['inspect', container])
+    const status = await this.execProgram(['inspect', container])
     const state = reportedState(status, 'container inspect', [0, 'status', 'state'])
     if (state !== RUNNING_STATE)
       throw new Error(notRunningHint('container', container, state, STATE_HINTS))
-  }
-
-  protected override async execArgv(
-    argv: readonly string[],
-    stdin: ByteSource | null,
-    env: Record<string, string>,
-    cwd: string,
-    output: OutputFn | null,
-    errors: OutputFn | null,
-    signal?: AbortSignal,
-  ): Promise<RunResult> {
-    const args = execArgs(['exec', '-i'], [this.config.container], env, cwd, argv)
-    return this.container(args, stdin, output, signal, errors)
-  }
-
-  openPipe(command: string): Promise<SandboxPipe> {
-    return openProgramPipe(
-      'container',
-      execArgs(['exec', '-i'], [this.config.container], {}, null, ['/bin/sh', '-c', command]),
-    )
   }
 }
 

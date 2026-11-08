@@ -24,9 +24,9 @@ import {
   PROCESS,
   FAKETIME_PROBE_SECONDS,
   faketimeProbe,
-  REAP_ABSENT,
-  REAP_WAIT_SECONDS,
-  reapLine,
+  NOT_RUNNING_STATUS,
+  MACHINE_STOP_WAIT_SECONDS,
+  stopLine,
 } from './constants.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import { isLineExecutor } from '../runtime/mixin.ts'
@@ -45,7 +45,7 @@ function lineOf(argv: readonly string[]): string {
   return argv[0] === '/bin/sh' && argv[1] === '-c' ? (argv[2] ?? '') : shellJoin(argv)
 }
 
-class RecordingSandbox extends MachineHandle {
+class RecordingMachine extends MachineHandle {
   static override readonly provider = 'recbox'
   readonly captures: readonly string[] | undefined
   readonly execs: [string, Uint8Array | null, Record<string, string>, string][] = []
@@ -81,7 +81,7 @@ class RecordingSandbox extends MachineHandle {
   }
 }
 
-function sandboxWorkspace(box: RecordingSandbox): Workspace {
+function sandboxWorkspace(box: RecordingMachine): Workspace {
   return new Workspace(
     { '/data': new RAMVFS() },
     {
@@ -95,7 +95,7 @@ describe('MachineHandle', () => {
   it.each(['python3 --version', 'python -V', 'node --version', 'node -v', 'tsc --version'])(
     'passes %s and its output through the remote environment',
     async (line) => {
-      const box = new RecordingSandbox({ captures: line.split(' ', 1) })
+      const box = new RecordingMachine({ captures: line.split(' ', 1) })
       const ws = sandboxWorkspace(box)
       try {
         const io = await ws.shell(line)
@@ -108,9 +108,9 @@ describe('MachineHandle', () => {
     },
   )
 
-  it('hands a program the system time through the libfaketime the sandbox holds', async () => {
+  it('hands a program the system time through the libfaketime the machine holds', async () => {
     // Answers the probe as a sandbox holding `holds`, or none when empty.
-    class FaketimeBox extends RecordingSandbox {
+    class FaketimeBox extends RecordingMachine {
       constructor(private readonly holds: string) {
         super({ captures: ['python3'] })
       }
@@ -161,7 +161,7 @@ describe('MachineHandle', () => {
 
   it('asks a machine once, shares a probe in flight and asks again after a failure', async () => {
     // `answers` is what its probes exit with, in turn.
-    class CountedBox extends RecordingSandbox {
+    class CountedBox extends RecordingMachine {
       readonly answers: number[] = [1, 0]
       probes = 0
 
@@ -205,7 +205,7 @@ describe('MachineHandle', () => {
 
   it('gives up on a probe its provider does not stop, and asks again', async () => {
     // The first probe never answers and ignores its signal, as Daytona's lines do.
-    class StalledBox extends RecordingSandbox {
+    class StalledBox extends RecordingMachine {
       probes = 0
 
       constructor() {
@@ -250,7 +250,7 @@ describe('MachineHandle', () => {
   })
 
   it('connects on the first line only', async () => {
-    const box = new RecordingSandbox({ captures: ['python3'] })
+    const box = new RecordingMachine({ captures: ['python3'] })
     const ws = sandboxWorkspace(box)
     try {
       const io = await ws.shell('python3 x')
@@ -265,7 +265,7 @@ describe('MachineHandle', () => {
   })
 
   it('a failed connect retries on the next line', async () => {
-    class FlakyBox extends RecordingSandbox {
+    class FlakyBox extends RecordingMachine {
       override connect(): Promise<void> {
         this.connectedCount += 1
         if (this.connectedCount === 1) return Promise.reject(new Error('sandbox not running'))
@@ -287,7 +287,7 @@ describe('MachineHandle', () => {
   })
 
   it('connects again when another workspace takes the handle', async () => {
-    const box = new RecordingSandbox({ captures: ['python3'] })
+    const box = new RecordingMachine({ captures: ['python3'] })
     for (let round = 0; round < 2; round++) {
       const ws = sandboxWorkspace(box)
       try {
@@ -300,7 +300,7 @@ describe('MachineHandle', () => {
   })
 
   it('passes cwd through verbatim and merges env', async () => {
-    const box = new RecordingSandbox({ captures: ['@line'], config: { env: { BASE: '1' } } })
+    const box = new RecordingMachine({ captures: ['@line'], config: { env: { BASE: '1' } } })
     const result = await machineRuntime(box).runLine(undefined, [], [], {
       flags: { c: 'nvidia-smi' },
       stdin: null,
@@ -322,7 +322,7 @@ describe('MachineHandle', () => {
   })
 
   it('passes stdin bytes through to execLine', async () => {
-    const box = new RecordingSandbox({ captures: ['@line'] })
+    const box = new RecordingMachine({ captures: ['@line'] })
     const ws = sandboxWorkspace(box)
     try {
       await ws.shell('wc -l', { stdin: ENC.encode('a\nb\n') })
@@ -336,13 +336,13 @@ describe('MachineHandle', () => {
   it('machines take lines, not stages', () => {
     // A machine's runtime is a line executor, never the engine inside one
     // command: it carries the line entry point and no interpreter entry point.
-    const runtime = machineRuntime(new RecordingSandbox())
+    const runtime = machineRuntime(new RecordingMachine())
     expect(isLineExecutor(runtime)).toBe(true)
     expect(runtime).not.toBeInstanceOf(LanguageRuntime)
   })
 
   it('a line timeout answers 124', async () => {
-    class SlowBox extends RecordingSandbox {
+    class SlowBox extends RecordingMachine {
       override async execLine(
         line: string,
         stdin: Uint8Array | null,
@@ -376,7 +376,7 @@ describe('MachineHandle', () => {
   // program running in the box, so every process it started is stopped by
   // the run's id, with one more exec that carries no id of its own.
   it('stops what a cancelled run left in the box', async () => {
-    class StuckBox extends RecordingSandbox {
+    class StuckBox extends RecordingMachine {
       protected override async execArgv(
         argv: readonly string[],
         stdin: ByteSource | null,
@@ -417,13 +417,13 @@ describe('MachineHandle', () => {
     await rejected
     const tag = box.execs[0]?.[2][PROCESS] ?? ''
     expect(tag).not.toBe('')
-    expect(box.execs.map(([line]) => line)).toEqual(['yes', reapLine(tag)])
+    expect(box.execs.map(([line]) => line)).toEqual(['yes', stopLine(tag)])
     expect(box.execs[1]?.[2]).not.toHaveProperty(PROCESS)
   })
 
   // A run a `kill` stopped is stopped in the box with the signal it named.
   it('stops a killed run in the box with its signal', async () => {
-    class StuckBox extends RecordingSandbox {
+    class StuckBox extends RecordingMachine {
       protected override async execArgv(
         argv: readonly string[],
         stdin: ByteSource | null,
@@ -472,14 +472,14 @@ describe('MachineHandle', () => {
     expect(box.execs[0]?.[2][PROCESS]).toBe(runner.record.id.toString())
     expect(box.execs.map(([line]) => line)).toEqual([
       'yes',
-      reapLine(runner.record.id.toString(), 2),
+      stopLine(runner.record.id.toString(), 2),
     ])
   })
 
   // A run in the box carries the id of the process it runs as, which a
   // workspace that outlives this one stops it by.
   it('tags a run in the box with its process', async () => {
-    const box = new RecordingSandbox({ captures: ['yes'] })
+    const box = new RecordingMachine({ captures: ['yes'] })
     const ctx = { stdin: null, flags: { c: 'yes' }, env: {}, cwd: PathSpec.fromStrPath('/') }
     const runner = new ProcessTable('w1', undefined, runAsProcess).start({
       sessionId: 's',
@@ -498,9 +498,9 @@ describe('MachineHandle', () => {
   // throws, so neither counts as having stopped it.
   it.each([
     [0, true],
-    [REAP_ABSENT, false],
+    [NOT_RUNNING_STATUS, false],
   ])('reaps a left run by its tag (box answers %i)', async (code, held) => {
-    class AnsweringBox extends RecordingSandbox {
+    class AnsweringBox extends RecordingMachine {
       override async execLine(
         line: string,
         stdin: Uint8Array | null,
@@ -512,22 +512,22 @@ describe('MachineHandle', () => {
       }
     }
     const box = new AnsweringBox({ captures: ['yes'] })
-    expect(await box.reap('t1', 15)).toBe(held)
+    expect(await box.stopRun('t1', 15)).toBe(held)
     expect(box.connectedCount).toBe(1)
-    expect(box.execs.map(([line]) => line)).toEqual([reapLine('t1', 15)])
+    expect(box.execs.map(([line]) => line)).toEqual([stopLine('t1', 15)])
   })
 
   it('throws for a reap that failed', async () => {
-    class FailingBox extends RecordingSandbox {
+    class FailingBox extends RecordingMachine {
       override execLine(): Promise<RunResult> {
         return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 127 })
       }
     }
-    await expect(new FailingBox({ captures: ['yes'] }).reap('t1', 15)).rejects.toThrow()
+    await expect(new FailingBox({ captures: ['yes'] }).stopRun('t1', 15)).rejects.toThrow()
   })
 
   it('holds a cancel only so long when the box stops answering', async () => {
-    class DeadBox extends RecordingSandbox {
+    class DeadBox extends RecordingMachine {
       protected override async execArgv(
         argv: readonly string[],
         stdin: ByteSource | null,
@@ -570,14 +570,14 @@ describe('MachineHandle', () => {
       abort.abort()
       await rejected
       expect(box.execs).toHaveLength(2)
-      expect(wait).toHaveBeenCalledWith(REAP_WAIT_SECONDS * 1000)
+      expect(wait).toHaveBeenCalledWith(MACHINE_STOP_WAIT_SECONDS * 1000)
     } finally {
       wait.mockRestore()
     }
   })
 
   it('line output caps truncate with a notice', async () => {
-    class ChattyBox extends RecordingSandbox {
+    class ChattyBox extends RecordingMachine {
       override execLine(): Promise<RunResult> {
         return Promise.resolve({ stdout: ENC.encode('a\nb\nc\n'), stderr: null, exitCode: 0 })
       }
@@ -602,7 +602,7 @@ describe('MachineHandle', () => {
     // The line may have written anywhere in its view of the workspace, so the
     // next stat or listing asks the backend again. Mirrors Python's
     // `test_remote_line_invalidates_local_read_caches`.
-    const box = new RecordingSandbox({ captures: ['python3'] })
+    const box = new RecordingMachine({ captures: ['python3'] })
     const ws = sandboxWorkspace(box)
     try {
       const mount = ws.registry.allMounts().find((m) => m.prefix === '/data/')
@@ -619,6 +619,6 @@ describe('MachineHandle', () => {
 
   it('rejects unknown config keys', () => {
     const config = { snapshot: 'mirage-fuse' } as MachineConfig
-    expect(() => new RecordingSandbox({ config })).toThrow("unknown machine config key 'snapshot'")
+    expect(() => new RecordingMachine({ config })).toThrow("unknown machine config key 'snapshot'")
   })
 })

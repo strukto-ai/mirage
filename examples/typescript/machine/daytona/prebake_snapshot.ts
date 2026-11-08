@@ -18,7 +18,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __HERE = dirname(fileURLToPath(import.meta.url))
-dotenv.config({ path: resolve(__HERE, '../../../../../.env.development') })
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
 
 const SNAPSHOT_NAME = 'mirage-fuse'
 

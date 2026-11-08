@@ -13,23 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from mirage.io.types import ByteSource
 from mirage.machine.constants import not_running_hint
 from mirage.machine.docker.config import DockerConfig
 from mirage.machine.docker.constants import DOCKER_HINT, RUNNING_STATE
-from mirage.machine.handle import MachineHandle
-from mirage.machine.mixin import PipeTransportMixin
-from mirage.machine.program import (
-    exec_args,
-    open_program_pipe,
-    reported_state,
-    run_program,
-)
-from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
+from mirage.machine.program import reported_state
+from mirage.machine.transport import ProgramMachine
 
 
-class DockerMachine(MachineHandle, PipeTransportMixin):
-    """A container the user runs as a whole-line runtime.
+class DockerMachine(ProgramMachine):
+    """A running container, reached through ``docker exec``.
 
     You start the container yourself; mirage only connects to it and
     execs lines. The `docker` program is the transport (Docker Desktop,
@@ -40,33 +32,21 @@ class DockerMachine(MachineHandle, PipeTransportMixin):
 
     Args:
         name (str): the machine's name, its key under ``machines:``.
-        config (DockerConfig | dict[str, Any] | None): how to reach the sandbox.
+        config (DockerConfig | dict[str, Any] | None): how to reach the machine.
     """
 
     provider = "docker"
     config_cls = DockerConfig
     config: DockerConfig
+    program = "docker"
+    install_hint = DOCKER_HINT
 
-    async def _docker(
-        self,
-        args: list[str],
-        stdin: ByteSource | None = None,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
-    ) -> RunResult:
-        """Run `docker` once; the seam tests override."""
-        return await run_program(
-            "docker",
-            DOCKER_HINT,
-            args,
-            stdin,
-            output=output,
-            errors=errors,
-        )
+    def exec_words(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return ("exec", "-i"), (self.config.container,)
 
     async def connect(self) -> None:
         container = self.config.container
-        status = await self._docker(
+        status = await self._exec_program(
             ["inspect", "--format", "{{json .State}}", container]
         )
         state = reported_state(status, "docker inspect", ("Status",))
@@ -74,33 +54,3 @@ class DockerMachine(MachineHandle, PipeTransportMixin):
             raise RuntimeError(
                 not_running_hint("container", container, state, {})
             )
-
-    async def _exec_argv(
-        self,
-        argv: tuple[str, ...],
-        stdin: ByteSource | None,
-        env: dict[str, str],
-        cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
-    ) -> RunResult:
-        return await self._docker(
-            exec_args(
-                ("exec", "-i"), (self.config.container,), env, cwd, argv
-            ),
-            stdin=stdin,
-            output=output,
-            errors=errors,
-        )
-
-    async def open_pipe(self, command: str) -> SandboxPipe:
-        return await open_program_pipe(
-            "docker",
-            exec_args(
-                ("exec", "-i"),
-                (self.config.container,),
-                {},
-                None,
-                ("/bin/sh", "-c", command),
-            ),
-        )

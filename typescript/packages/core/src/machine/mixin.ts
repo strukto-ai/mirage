@@ -12,27 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SandboxPipe } from '../runtime/types.ts'
+import type { MachinePipe } from './types.ts'
 
 /** The nominal pipe-transport brand (Python's PipeTransportMixin). */
 export const PIPE_TRANSPORT: unique symbol = Symbol.for('mirage.pipeTransport')
 
 /**
- * A sandbox that holds a command's stdin and stdout open, byte for byte:
+ * A machine that holds a command's stdin and stdout open, byte for byte:
  * what a `mountType` serves the workspace through.
  */
 export interface PipeTransport {
   readonly [PIPE_TRANSPORT]: true
   /**
-   * Start a command in the sandbox with its stdin and stdout held open,
+   * Start a command in the machine with its stdin and stdout held open,
    * for a `mountType`'s SFTP.
    *
    * @param command the shell command.
    */
-  openPipe(command: string): Promise<SandboxPipe>
+  openPipe(command: string): Promise<MachinePipe>
 }
 
-/** Whether this sandbox carries the pipe transport. */
-export function isPipeTransport<T extends object>(sandbox: T): sandbox is T & PipeTransport {
-  return (sandbox as Partial<PipeTransport>)[PIPE_TRANSPORT] === true
+/** Whether this machine carries the pipe transport. */
+export function isPipeTransport<T extends object>(machine: T): machine is T & PipeTransport {
+  return (machine as Partial<PipeTransport>)[PIPE_TRANSPORT] === true
 }

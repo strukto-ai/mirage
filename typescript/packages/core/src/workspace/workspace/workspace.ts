@@ -387,7 +387,7 @@ export class Workspace {
       this.clock,
       options.daemonId ?? null,
     )
-    this.jobTable.reaper = (record, signum) => this.reapProcess(record, signum)
+    this.jobTable.runStopper = (record, signum) => this.stopLapsedRun(record, signum)
     this.jobTable.ended = (record) => {
       const machine =
         this.processTable.records().find((process) => process.id.pid === record.pid)?.machine ??
@@ -754,7 +754,7 @@ export class Workspace {
     )
     this.machineTable = new MachineTable(
       options.machines,
-      (groups) => this.hostStatus(groups),
+      (groups) => this.scanHost(groups),
       (target, signum) => this.signalHost(target, signum),
     )
     this.processTable.scanner = () => this.machineTable.scan(this.processTable, this.workspaceId)
@@ -774,7 +774,7 @@ export class Workspace {
       this.registry.policies.place(new RoutePolicy(options.routePolicy, this.scriptPolicy))
     }
     this.registry.bindClocks()
-    this.machineTable.claim()
+    this.machineTable.holdHandles()
   }
 
   /**
@@ -820,27 +820,27 @@ export class Workspace {
   /**
    * Stop the program a lapsed workspace's process ran past the workspace,
    * answering whether this workspace reached it: a host program by its pid
-   * when it ran on this host (`reapHostRun`), a machine's run through the
+   * when it ran on this host (`stopHostRun`), a machine's run through the
    * machine it ran on, which stops what the process's tag marks there. It
    * counts as reached only once the machine held it and it was stopped: one
    * that holds none of it, or one that could not be reached, leaves it to a
    * workspace that reaches its own. Mirrors Python's
-   * `Workspace._reap_process`.
+   * `Workspace._stop_lapsed_run`.
    *
    * @param record the process, as its workspace published it.
    * @param signum the first signal.
    */
-  private async reapProcess(record: RecordFields, signum: number): Promise<boolean> {
+  private async stopLapsedRun(record: RecordFields, signum: number): Promise<boolean> {
     const { machine, pid } = record
     const found = record.machine_pid as MachinePid | null | undefined
     const seen = record.seen_at
     if (typeof pid !== 'number') return false
     if (machine === this.processTable.machine.toString() && found != null)
-      return this.reapHostRun(found, typeof seen === 'number' ? seen : null, signum)
-    const handle = typeof machine === 'string' ? this.machineTable.find(machine) : null
+      return this.stopHostRun(found, typeof seen === 'number' ? seen : null, signum)
+    const handle = typeof machine === 'string' ? this.machineTable.byId(machine) : null
     if (handle === null) return false
     try {
-      return await handle.reap(new ProcessId(this.workspaceId, pid).toString(), signum)
+      return await handle.stopRun(new ProcessId(this.workspaceId, pid).toString(), signum)
     } catch (err) {
       console.debug(`${String(machine)}: run not reaped:`, err)
       return false
@@ -852,7 +852,7 @@ export class Workspace {
    * whether it is stopped or gone. A host whose processes this package
    * cannot reach (a browser) reaches none; Node's workspace does.
    */
-  protected reapHostRun(
+  protected stopHostRun(
     _machinePid: MachinePid,
     _seenAt: number | null,
     _signum: number,
@@ -865,7 +865,7 @@ export class Workspace {
    * Mirage process whose program leads it. A host whose processes this
    * package cannot see (a browser) shows none; Node's workspace does.
    */
-  protected hostStatus(
+  protected scanHost(
     _groups: ReadonlyMap<number, readonly [string, number]>,
   ): Promise<MachineProcess[]> {
     return Promise.resolve([])

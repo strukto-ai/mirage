@@ -12,17 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { MachineHandle } from '@struktoai/mirage-core/machine/handle'
-import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/machine/mixin'
 import { requireId } from '@struktoai/mirage-core/machine/config'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
-import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { SMOLVM_CONFIG_FIELDS, type SmolvmConfig } from './config.ts'
 import { notRunningHint } from '@struktoai/mirage-core/machine/constants'
 import { RUNNING_STATE, SMOLVM_HINT, STATE_HINTS } from './constants.ts'
-import { execArgs, openProgramPipe, reportedState, runProgram } from '../program.ts'
+import { reportedState } from '../program.ts'
+import { ProgramMachine } from '../transport.ts'
 
 /**
  * A microVM the user runs as a whole-line runtime.
@@ -39,29 +36,19 @@ import { execArgs, openProgramPipe, reportedState, runProgram } from '../program
  * the guest at the host's mount prefixes, the same contract every
  * provider in this family carries.
  */
-export class SmolvmMachine extends MachineHandle<SmolvmConfig> implements PipeTransport {
+export class SmolvmMachine extends ProgramMachine<SmolvmConfig> {
   static override readonly configFields: ConfigFields = SMOLVM_CONFIG_FIELDS
-  readonly [PIPE_TRANSPORT] = true as const
   static override readonly provider = 'smolvm'
+  protected readonly program = 'smolvm'
+  protected readonly installHint = SMOLVM_HINT
 
   constructor(name: string, config?: SmolvmConfig) {
     super(name, config, SmolvmMachine.configFields)
     requireId('smolvm', 'machine', this.config.machine)
   }
 
-  // Run `smolvm` once; the seam tests override.
-  protected smolvm(
-    args: string[],
-    stdin: ByteSource | null = null,
-    output: OutputFn | null = null,
-    signal?: AbortSignal,
-    errors: OutputFn | null = null,
-  ): Promise<RunResult> {
-    return runProgram('smolvm', SMOLVM_HINT, args, stdin, {
-      ...(signal !== undefined ? { signal } : {}),
-      ...(output !== null ? { output } : {}),
-      ...(errors !== null ? { errors } : {}),
-    })
+  protected execWords(): readonly [readonly string[], readonly string[]] {
+    return [['machine', 'exec', '--name', this.config.machine, '-i'], ['--']]
   }
 
   /**
@@ -73,33 +60,10 @@ export class SmolvmMachine extends MachineHandle<SmolvmConfig> implements PipeTr
    */
   async connect(): Promise<void> {
     const machine = this.config.machine
-    const status = await this.smolvm(['machine', 'status', '--name', machine, '--json'])
+    const status = await this.execProgram(['machine', 'status', '--name', machine, '--json'])
     const state = reportedState(status, 'smolvm machine status', ['state'])
     if (state !== RUNNING_STATE)
       throw new Error(notRunningHint('machine', machine, state, STATE_HINTS))
-  }
-
-  protected override execArgv(
-    argv: readonly string[],
-    stdin: ByteSource | null,
-    env: Record<string, string>,
-    cwd: string,
-    output: OutputFn | null,
-    errors: OutputFn | null,
-    signal?: AbortSignal,
-  ): Promise<RunResult> {
-    return this.smolvm(execArgs(this.head(), ['--'], env, cwd, argv), stdin, output, signal, errors)
-  }
-
-  async openPipe(command: string): Promise<SandboxPipe> {
-    return openProgramPipe(
-      'smolvm',
-      execArgs(this.head(), ['--'], {}, null, ['/bin/sh', '-c', command]),
-    )
-  }
-
-  private head(): string[] {
-    return ['machine', 'exec', '--name', this.config.machine, '-i']
   }
 }
 

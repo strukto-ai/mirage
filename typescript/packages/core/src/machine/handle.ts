@@ -19,7 +19,8 @@ import { MachineId, type MachinePid } from '../execution/types.ts'
 import type { ByteSource } from '../io/types.ts'
 import type { WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
-import type { MountType, OutputFn, RunResult } from '../runtime/types.ts'
+import type { MountType } from './types.ts'
+import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 import { abortable } from '../utils/abort.ts'
 import { concat } from '../utils/bytes.ts'
@@ -39,27 +40,27 @@ import {
   faketimeEnv,
   faketimeProbe,
   PROCESS,
-  REAP_ABSENT,
-  REAP_WAIT_SECONDS,
-  reapLine,
+  NOT_RUNNING_STATUS,
+  MACHINE_STOP_WAIT_SECONDS,
+  stopLine,
   SCAN_MARK,
   SCAN_WAIT_SECONDS,
   scanLine,
   signalLine,
 } from './constants.ts'
 import { isPipeTransport } from './mixin.ts'
-import { SandboxMounts } from './mounts.ts'
+import { MachineMounts } from './mounts.ts'
 
 /**
  * One machine a workspace runs programs on, reached through its provider:
  * the live connection, held once per workspace.
  *
  * Mirage never creates, provisions, or deletes a machine: you bring your
- * own (a running container, a live Daytona or E2B sandbox, an SSH host)
+ * own (a running container, a live Daytona or E2B machine, an SSH host)
  * and its config says how to reach it. The workspace reaches the machine
  * at the same prefixes as the host's, so the session cwd and every path in
  * a line resolve unchanged: a machine with a `mountType` is served them
- * (SandboxMounts), otherwise serve them inside it yourself (`mirage
+ * (MachineMounts), otherwise serve them inside it yourself (`mirage
  * workspace create` in the image entrypoint or by hand). Subclasses adapt
  * one provider by implementing connect() and execArgv(), and PipeTransport
  * for a `mountType`; everything Mirage does there derives from execArgv: a
@@ -81,7 +82,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // Single-flight so concurrent first runs share one connect, and a failed
   // connect clears the slot so the next run retries.
   private connecting: Promise<void> | null = null
-  private mounts: SandboxMounts | null = null
+  private mounts: MachineMounts | null = null
   // The libfaketime the machine holds, asked once the first program runs
   // there under a system_time: null for none. Concurrent first runs share
   // the probe; a failed probe clears it so a later run asks again.
@@ -144,7 +145,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * deadline stopped the program or its exit's landing) is logged.
    */
   async settle(): Promise<void> {
-    for (const lost of (await this.mounts?.sync()) ?? []) console.warn(lost)
+    for (const lost of (await this.mounts?.finishLine()) ?? []) console.warn(lost)
   }
 
   /**
@@ -168,12 +169,12 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     // Served here rather than in the constructor, which runs before a
     // subclass names itself.
     if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
-    const unseen = this.mounts?.enter(binding, ctx.cwd.virtual) ?? null
+    const unseen = this.mounts?.beginLine(binding, ctx.cwd.virtual) ?? null
     if (unseen !== null) return unseen
     await this.ensureConnected(ctx.signal)
-    const refusal = (await this.mounts?.admit(binding, ctx.signal)) ?? null
+    const refusal = (await this.mounts?.prepareLine(binding, ctx.signal)) ?? null
     if (refusal !== null) return refusal
-    const run = this.mounts?.guarded(argv) ?? argv
+    const run = this.mounts?.withMountGuard(argv) ?? argv
     const given = { ...this.config.env, ...ctx.env }
     const clock = await this.systemTimeEnv(given, ctx.signal)
     // A deadline that passed during the probe starts nothing.
@@ -196,15 +197,15 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       )
     } catch (error) {
       if (ctx.signal?.aborted === true)
-        await this.reapRun(tag, runner?.signal ?? runner?.interrupted ?? 15)
+        await this.stopRunBounded(tag, runner?.signal ?? runner?.interrupted ?? 15)
       throw error
     } finally {
       this.runs -= 1
     }
-    if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forget()
+    if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forgetMounts()
     // sshfs acknowledged the writes before they landed.
     const lost =
-      this.mounts === null ? [] : await abortable(this.mounts.land(ctx.signal), ctx.signal)
+      this.mounts === null ? [] : await abortable(this.mounts.landWrites(ctx.signal), ctx.signal)
     if (lost.length === 0) return done
     const said = new TextEncoder().encode(lost.map((line) => `${line}\n`).join(''))
     return {
@@ -222,9 +223,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * `MachineHandle.check`.
    */
   async check(): Promise<boolean> {
-    const deadline = AbortSignal.timeout(CHECK_WAIT_SECONDS * 1000)
-    await this.ensureConnected(deadline)
-    const ran = await abortable(this.execLine(CHECK_LINE, null, {}, '/', deadline), deadline)
+    const ran = await this.connectedLine(CHECK_LINE, CHECK_WAIT_SECONDS)
     if (!new TextDecoder().decode(ran.stdout).includes(CHECK_MARK))
       throw new Error(`${this.id.toString()}: check did not run: exit ${String(ran.exitCode)}`)
     return ran.exitCode === 0
@@ -244,22 +243,17 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param workspace the workspace's id.
    */
   async status(workspace: string): Promise<MachineProcess[]> {
-    const deadline = AbortSignal.timeout(SCAN_WAIT_SECONDS * 1000)
-    await this.ensureConnected(deadline)
-    const done = await abortable(
-      this.execLine(scanLine(workspace), null, { ...this.config.env }, '/', deadline),
-      deadline,
-    )
+    const done = await this.connectedLine(scanLine(workspace), SCAN_WAIT_SECONDS)
     if (done.exitCode !== 0)
       throw new Error(`${this.id.toString()}: scan exited ${String(done.exitCode)}`)
-    return scanned(done.stdout)
+    return parseScanRows(done.stdout)
   }
 
   /**
    * Send `signum` to one process on the machine, as `kill` sent it
    * (`signalLine`): the program a run's tag names, or the process a machine
    * pid names while it is the one that started then. Connecting and sending
-   * are bounded as a stop is (`REAP_WAIT_SECONDS`). Answers true once sent,
+   * are bounded as a stop is (`MACHINE_STOP_WAIT_SECONDS`). Answers true once sent,
    * false when no such process runs there; throws when the machine could
    * not be reached or the line failed. Mirrors Python's
    * `MachineHandle.signal`.
@@ -268,13 +262,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param signum the signal.
    */
   async signal(target: string | MachinePid, signum: number): Promise<boolean> {
-    const deadline = AbortSignal.timeout(REAP_WAIT_SECONDS * 1000)
-    await this.ensureConnected(deadline)
-    const done = await abortable(
-      this.execLine(signalLine(target, signum), null, { ...this.config.env }, '/', deadline),
-      deadline,
-    )
-    if (done.exitCode !== 0 && done.exitCode !== REAP_ABSENT)
+    const done = await this.connectedLine(signalLine(target, signum), MACHINE_STOP_WAIT_SECONDS)
+    if (done.exitCode !== 0 && done.exitCode !== NOT_RUNNING_STATUS)
       throw new Error(
         `${this.id.toString()}: signal ${String(signum)} not sent: exit ${String(done.exitCode)}`,
       )
@@ -284,7 +273,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   /**
    * Stop a run a lapsed workspace left on the machine: every process its
    * `PROCESS` tag marks gets `signum`, then KILL a second later. Connecting
-   * is bounded as the stop is (`REAP_WAIT_SECONDS`). Answers true once the
+   * is bounded as the stop is (`MACHINE_STOP_WAIT_SECONDS`). Answers true once the
    * machine held the run's processes and they were stopped, false when it
    * holds none of them, as a machine other than the run's does; throws when
    * the machine could not be reached or the stop failed.
@@ -292,40 +281,29 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param tag the id of the process the run is, as `PROCESS` carries it.
    * @param signum the first signal.
    */
-  async reap(tag: string, signum: number): Promise<boolean> {
-    await this.ensureConnected(AbortSignal.timeout(REAP_WAIT_SECONDS * 1000))
-    const code = await this.reapRun(tag, signum)
-    if (code !== 0 && code !== REAP_ABSENT)
+  async stopRun(tag: string, signum: number): Promise<boolean> {
+    await this.ensureConnected(AbortSignal.timeout(MACHINE_STOP_WAIT_SECONDS * 1000))
+    const code = await this.stopRunBounded(tag, signum)
+    if (code !== 0 && code !== NOT_RUNNING_STATUS)
       throw new Error(`${this.id.toString()}: run ${tag} not stopped`)
     return code === 0
   }
 
   /**
    * Stop what a cancelled or failed run left on the machine (`PROCESS`), for
-   * at most `REAP_WAIT_SECONDS`: a machine that stopped answering would hold
+   * at most `MACHINE_STOP_WAIT_SECONDS`: a machine that stopped answering would hold
    * the cancel or the error.
    *
    * @param tag the run's tag.
    * @param signum the signal the run is stopped with first.
-   * @returns the stop line's status (`reapLine`); null when the machine did
+   * @returns the stop line's status (`stopLine`); null when the machine did
    *   not answer.
    */
-  protected async reapRun(tag: string, signum: number): Promise<number | null> {
-    const signal = AbortSignal.timeout(REAP_WAIT_SECONDS * 1000)
+  protected async stopRunBounded(tag: string, signum: number): Promise<number | null> {
+    const signal = AbortSignal.timeout(MACHINE_STOP_WAIT_SECONDS * 1000)
     try {
-      const done = await abortable(
-        this.execArgv(
-          ['/bin/sh', '-c', reapLine(tag, signum)],
-          null,
-          { ...this.config.env },
-          '/',
-          null,
-          null,
-          signal,
-        ),
-        signal,
-      )
-      if (done.exitCode !== 0 && done.exitCode !== REAP_ABSENT) {
+      const done = await abortable(this.controlLine(stopLine(tag, signum), signal), signal)
+      if (done.exitCode !== 0 && done.exitCode !== NOT_RUNNING_STATUS) {
         console.debug(
           `${this.id.toString()}: run ${tag} not stopped: exit ${String(done.exitCode)}`,
         )
@@ -342,12 +320,24 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     if (mountType === null) return
     if (!isPipeTransport(this))
       throw new Error(`${this.provider}: mountType needs a pipe transport`)
-    this.mounts = new SandboxMounts(
+    this.mounts = new MachineMounts(
       this.provider,
       mountType,
-      (line, signal) => this.execLine(line, null, { ...this.config.env }, '/', signal),
+      this.controlLine.bind(this),
       this.openPipe.bind(this),
     )
+  }
+
+  /** Run one of Mirage's own lines on the machine: its environment, at `/`. */
+  private controlLine(line: string, signal?: AbortSignal): Promise<RunResult> {
+    return this.execLine(line, null, { ...this.config.env }, '/', signal)
+  }
+
+  /** Connect, then run one of Mirage's own lines, within `seconds` in all. */
+  private async connectedLine(line: string, seconds: number): Promise<RunResult> {
+    const deadline = AbortSignal.timeout(seconds * 1000)
+    await this.ensureConnected(deadline)
+    return abortable(this.controlLine(line, deadline), deadline)
   }
 
   protected disconnected(): void {
@@ -371,10 +361,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       // Its own deadline, not the first caller's: every waiting run shares it.
       // It is also raced, as a provider may not stop a line on its signal.
       const deadline = AbortSignal.timeout(FAKETIME_PROBE_SECONDS * 1000)
-      probe = abortable(
-        this.execLine(faketimeProbe(), null, { ...this.config.env }, '/', deadline),
-        deadline,
-      ).then((found) => {
+      probe = abortable(this.controlLine(faketimeProbe(), deadline), deadline).then((found) => {
         if (found.exitCode !== 0)
           throw new Error(
             `${this.id.toString()}: libfaketime probe exited ${String(found.exitCode)}`,
@@ -471,7 +458,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
  *
  * @param stdout what the scan printed.
  */
-function scanned(stdout: Uint8Array | null): MachineProcess[] {
+function parseScanRows(stdout: Uint8Array | null): MachineProcess[] {
   const found: MachineProcess[] = []
   const digits = /^[0-9]+$/
   for (const line of new TextDecoder().decode(stdout ?? new Uint8Array()).split('\n')) {

@@ -25,14 +25,15 @@ from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.program import read_into
 from mirage.machine.ssh import sdk
 from mirage.machine.ssh.config import SSHMachineConfig
-from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
+from mirage.machine.types import MachinePipe
+from mirage.runtime.types import OutputFn, RunResult
 from mirage.utils.ssh import connect_options
 
 logger = logging.getLogger(__name__)
 
 
 class SSHMachine(MachineHandle, PipeTransportMixin):
-    """A machine reached over SSH as a whole-line runtime.
+    """A host reached over SSH.
 
     You run the machine and its sshd yourself; mirage only connects
     (keys or agent, never a password) and execs lines. One connection
@@ -173,7 +174,7 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
             exit_code=128 - code if code < 0 else code,
         )
 
-    async def open_pipe(self, command: str) -> SandboxPipe:
+    async def open_pipe(self, command: str) -> MachinePipe:
         process = await self._conn.create_process(
             command, encoding=None, stderr=asyncio.subprocess.DEVNULL
         )
@@ -182,7 +183,7 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
             process.close()
             await process.wait_closed()
 
-        return SandboxPipe(process.stdout, process.stdin, stop)
+        return MachinePipe(process.stdout, process.stdin, stop)
 
     async def close(self) -> None:
         await super().close()

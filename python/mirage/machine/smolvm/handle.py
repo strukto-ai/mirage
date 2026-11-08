@@ -13,27 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from mirage.io.types import ByteSource
 from mirage.machine.constants import not_running_hint
-from mirage.machine.handle import MachineHandle
-from mirage.machine.mixin import PipeTransportMixin
-from mirage.machine.program import (
-    exec_args,
-    open_program_pipe,
-    reported_state,
-    run_program,
-)
+from mirage.machine.program import reported_state
 from mirage.machine.smolvm.config import SmolvmConfig
 from mirage.machine.smolvm.constants import (
     RUNNING_STATE,
     SMOLVM_HINT,
     STATE_HINTS,
 )
-from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
+from mirage.machine.transport import ProgramMachine
 
 
-class SmolvmMachine(MachineHandle, PipeTransportMixin):
-    """A microVM the user runs as a whole-line runtime.
+class SmolvmMachine(ProgramMachine):
+    """A running microVM, reached through ``smolvm machine exec``.
 
     You start the machine yourself; mirage only connects to it and
     execs lines. The `smolvm` program is the transport, so there is no SDK
@@ -49,28 +41,18 @@ class SmolvmMachine(MachineHandle, PipeTransportMixin):
 
     Args:
         name (str): the machine's name, its key under ``machines:``.
-        config (SmolvmConfig | dict[str, Any] | None): how to reach the sandbox.
+        config (SmolvmConfig | dict[str, Any] | None): how to reach the machine.
     """
 
     provider = "smolvm"
     config_cls = SmolvmConfig
     config: SmolvmConfig
+    program = "smolvm"
+    install_hint = SMOLVM_HINT
 
-    async def _smolvm(
-        self,
-        args: list[str],
-        stdin: ByteSource | None = None,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
-    ) -> RunResult:
-        """Run `smolvm` once; the seam tests override."""
-        return await run_program(
-            "smolvm",
-            SMOLVM_HINT,
-            args,
-            stdin,
-            output=output,
-            errors=errors,
+    def exec_words(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return ("machine", "exec", "--name", self.config.machine, "-i"), (
+            "--",
         )
 
     async def connect(self) -> None:
@@ -81,7 +63,7 @@ class SmolvmMachine(MachineHandle, PipeTransportMixin):
         is not already running is an error rather than a boot.
         """
         machine = self.config.machine
-        status = await self._smolvm(
+        status = await self._exec_program(
             ["machine", "status", "--name", machine, "--json"]
         )
         state = reported_state(status, "smolvm machine status", ("state",))
@@ -89,30 +71,3 @@ class SmolvmMachine(MachineHandle, PipeTransportMixin):
             raise RuntimeError(
                 not_running_hint("machine", machine, state, STATE_HINTS)
             )
-
-    async def _exec_argv(
-        self,
-        argv: tuple[str, ...],
-        stdin: ByteSource | None,
-        env: dict[str, str],
-        cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
-    ) -> RunResult:
-        return await self._smolvm(
-            exec_args(self._head(), ("--",), env, cwd, argv),
-            stdin=stdin,
-            output=output,
-            errors=errors,
-        )
-
-    async def open_pipe(self, command: str) -> SandboxPipe:
-        return await open_program_pipe(
-            "smolvm",
-            exec_args(
-                self._head(), ("--",), {}, None, ("/bin/sh", "-c", command)
-            ),
-        )
-
-    def _head(self) -> tuple[str, ...]:
-        return ("machine", "exec", "--name", self.config.machine, "-i")

@@ -329,6 +329,38 @@ async def test_a_group_signal_reaches_a_shells_program_as_sent():
 
 
 @pytest.mark.asyncio
+async def test_a_group_signal_reaches_a_parent_before_its_child():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        await ws.shell("( train 1; true ) &")
+        await _started(box)
+        await ws.shell("kill -QUIT -- -$$")
+        assert box.sent == [
+            (MachinePid(412, 100.0), 3),
+            (MachinePid(413, 101.0), 3),
+        ]
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_process_a_scan_no_longer_sees_is_gone_from_that_ps():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        await ws.shell("train 1 &")
+        await _started(box)
+        assert b"413" in (await ws.shell("ps -o mpid")).stdout
+        box.rows = box.rows[:1]
+        assert b"413" not in (await ws.shell("ps -o mpid")).stdout
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_kept_signal_reaches_a_program_as_sent():
     box = _Sleeper("a")
     ws = _sleepers(a=box)

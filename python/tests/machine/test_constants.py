@@ -21,12 +21,12 @@ import pytest
 from mirage.machine.constants import (
     ENCODE_OUTPUT,
     MOUNT_GUARD,
+    NOT_RUNNING_STATUS,
     PROCESS,
-    REAP_ABSENT,
-    REAP_PATH,
+    TOOLS_PATH,
     decode_output,
     mount_field,
-    reap_line,
+    stop_line,
     wrap_line,
 )
 
@@ -84,9 +84,9 @@ def test_a_path_without_sh_still_runs_the_line(tmp_path):
 @pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="needs /proc")
 def test_the_stop_line_answers_a_run_it_does_not_hold():
     done = subprocess.run(
-        ["/bin/sh", "-c", reap_line(uuid.uuid4().hex)], check=False, timeout=10
+        ["/bin/sh", "-c", stop_line(uuid.uuid4().hex)], check=False, timeout=10
     )
-    assert done.returncode == REAP_ABSENT
+    assert done.returncode == NOT_RUNNING_STATUS
 
 
 # A run's program may ignore TERM, and the config may set a PATH that
@@ -108,7 +108,7 @@ def test_the_stop_line_ends_a_run_that_ignores_term(path):
     try:
         assert program.stdout.readline() == b"ready\n"
         done = subprocess.run(
-            ["/bin/sh", "-c", reap_line(tag)],
+            ["/bin/sh", "-c", stop_line(tag)],
             env=dict(os.environ) if path is None else {"PATH": path},
             check=False,
             timeout=10,
@@ -135,11 +135,11 @@ def test_the_stop_line_matches_its_process_tag_whole():
     try:
         assert program.stdout.readline() == b"ready\n"
         done = subprocess.run(
-            ["/bin/sh", "-c", reap_line(f"{workspace}:9")],
+            ["/bin/sh", "-c", stop_line(f"{workspace}:9")],
             check=False,
             timeout=10,
         )
-        assert done.returncode == REAP_ABSENT
+        assert done.returncode == NOT_RUNNING_STATUS
         assert program.poll() is None
     finally:
         program.kill()
@@ -283,7 +283,7 @@ def test_the_mount_guard_refuses_without_a_mount_table(tmp_path):
     )
 
 
-# A line the sandbox's own shell writes (no encoder there) is not base64
+# A line the machine's own shell writes (no encoder there) is not base64
 # and comes back as it is, between the decoded lines; a blank line adds
 # nothing.
 def test_decode_output_keeps_a_plain_line_as_it_is():
@@ -294,7 +294,7 @@ def test_decode_output_keeps_a_plain_line_as_it_is():
 # A sandbox without dd or base64 runs nothing: the script says so in
 # plain text and exits 127.
 def test_a_sandbox_without_the_encoder_runs_nothing(tmp_path):
-    script = ENCODE_OUTPUT.replace(REAP_PATH, str(tmp_path))
+    script = ENCODE_OUTPUT.replace(TOOLS_PATH, str(tmp_path))
     done = subprocess.run(
         ["/bin/sh", "-c", script, "sh", "/bin/sh", "-c", "echo ran"],
         capture_output=True,
@@ -304,5 +304,5 @@ def test_a_sandbox_without_the_encoder_runs_nothing(tmp_path):
     assert (done.returncode, done.stdout, done.stderr) == (
         127,
         b"",
-        b"mirage: the sandbox needs dd and base64 to return output\n",
+        b"mirage: the machine needs dd and base64 to return output\n",
     )
