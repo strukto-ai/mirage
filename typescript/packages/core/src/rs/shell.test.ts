@@ -216,6 +216,38 @@ describe('Shell', () => {
     shell.close()
   })
 
+  it('sends its lists again after the engine refuses a frame', () => {
+    const shell = Shell.create(() => 7)
+    const frame = {
+      positional: ['a', 'b'],
+      calls: [],
+      status: 0,
+      pid: 1,
+      lastJob: null,
+      argv0: 'bash',
+      options: new Map<string, boolean>(),
+      shopts: new Map<string, boolean>(),
+      envLimit: null,
+      outside: 0,
+      pipeStatus: [],
+      functionNames: null,
+      callLines: [],
+      paren: false,
+      memoryRoom: null,
+      line: 1,
+      bashPid: 1,
+      voice: 'bash: ',
+    }
+    shell.frame({ ...frame, status: 2 ** 40 })
+    expect(() => shell.has('x')).toThrow('out of range')
+    shell.frame(frame)
+    const [result] = run(shell.expand(word('echo $#'), 'fields', false), () => {
+      throw new Error('nothing to ask')
+    })
+    expect(result).toEqual(['ok', ['2']])
+    shell.close()
+  })
+
   it('expands a word on its variables, asking the host for a substitution', () => {
     const shell = Shell.create(() => 7)
     shell.seed('x', 'a b')

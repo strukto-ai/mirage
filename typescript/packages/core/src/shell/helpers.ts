@@ -404,10 +404,6 @@ export function getWhileParts(node: TSNodeLike): [TSNodeLike[], TSNodeLike[]] {
   return [test, body !== undefined ? [...body.namedChildren] : []]
 }
 
-/**
- * Get (variable, values, bodyCommands) from for/select. `values` is null for
- * a header with no `in` (`for f do`), which loops over `"$@"`.
- */
 /** The node holding a loop's body: its `do ... done`, or the brace group bash takes in its place after `for`. */
 export function loopGroup(node: TSNodeLike): TSNodeLike | null {
   return (
@@ -415,6 +411,10 @@ export function loopGroup(node: TSNodeLike): TSNodeLike | null {
   )
 }
 
+/**
+ * Get (variable, values, bodyCommands) from for/select. `values` is null for
+ * a header with no `in` (`for f do`), which loops over `"$@"`.
+ */
 export function getForParts(node: TSNodeLike): [string, TSNodeLike[] | null, TSNodeLike[]] {
   const nc = node.namedChildren
   const first = nc[0]
