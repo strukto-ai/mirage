@@ -231,6 +231,8 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '500':
+          $ref: '#/components/responses/500'
       tags:
         - Workspaces
       x-hosts:
@@ -743,6 +745,8 @@ paths:
           $ref: '#/components/responses/409'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
       tags:
         - Snapshots
       x-hidden: true
@@ -2076,6 +2080,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '499':
+          $ref: '#/components/responses/499'
+        '500':
+          $ref: '#/components/responses/500'
       tags:
         - Shell
       x-hosts:
@@ -2545,6 +2555,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2611,6 +2627,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2672,6 +2694,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2733,6 +2761,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2799,6 +2833,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2859,6 +2899,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2914,6 +2960,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -2969,6 +3021,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3024,6 +3082,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3082,6 +3146,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3137,6 +3207,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3192,6 +3268,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3247,6 +3329,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3302,6 +3390,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3357,6 +3451,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3416,6 +3516,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3476,6 +3582,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3516,8 +3628,7 @@ paths:
               schema:
                 anyOf:
                   - type: object
-                    description: The fields the backend could not keep, which Mirage stores
-                      instead.
+                    description: The fields the backend could not keep, which Mirage stores instead.
                   - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
@@ -3533,6 +3644,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3604,6 +3721,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3667,6 +3790,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3724,6 +3853,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3795,6 +3930,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3856,6 +3997,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
       tags:
         - VFS
       x-hosts:
@@ -3963,10 +4110,15 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: >-
-        Call a declared VFS function using the ordinary session and policy gate.
-        The selected function defines the returned JSON value; there is no shared
-        response shape. The example shows response headers only.
+        '413':
+          $ref: '#/components/responses/413'
+        '500':
+          $ref: '#/components/responses/500'
+        '507':
+          $ref: '#/components/responses/507'
+      description: Call a declared VFS function using the ordinary session and policy gate. The
+        selected function defines the returned JSON value; there is no shared response shape.
+        The example shows response headers only.
       tags:
         - VFS
       x-hosts:
@@ -7754,6 +7906,33 @@ components:
       description: The server's token (MIRAGE_AUTH_TOKEN) or a JWT. A daemon in the default
         local mode with no token accepts requests without one.
   responses:
+    '413':
+      description: The request body, multipart part, or stdin exceeds its size limit.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    '499':
+      description: The running shell job was canceled.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            detail: job canceled
+    '500':
+      description: The job or server operation failed internally. Inspect detail and server logs
+        before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    '507':
+      description: The filesystem operation exceeds its storage capacity or quota.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     '400':
       description: 'Bad request: malformed, a host not allowed, or a browser page from another
         origin'

@@ -19,10 +19,14 @@ so check `Content-Type` before parsing. Requests past a limit answer `429` with
 | `403` | A policy or mount mode refused the call. | Check workspace policies and mount permissions. |
 | `404` | The workspace, session, job or file does not exist. | Verify the identifier or file path. |
 | `409` | An identifier is taken, the workspace is busy or a file changed since it was read. | Resolve the conflict before retrying; see the workspace example below. |
+| `413` | A request body, multipart part, or stdin exceeds its size limit. | Reduce the input size and check the endpoint's limits. |
 | `422` | Request fields failed validation. | Correct the fields named in `detail`. |
 | `429` | A rate limit or session limit was reached. | Respect `Retry-After` when present; reduce the request rate or close unused sessions. |
+| `499` | A running shell job was canceled. | Check its output and any side effects before rerunning it. |
+| `500` | A job or server operation failed internally. | Inspect `detail` and the server logs; check for side effects before retrying. |
 | `501` | A saved-config operation requires a server configured for one account. | Check the deployment's saved-configuration support. |
 | `503` | The server reached its workspace limit or is shutting down. | Retry after capacity or availability recovers. |
+| `507` | A filesystem operation exceeds its backend's storage capacity or quota. | Free space or increase the backend's capacity before retrying. |
 
 Each endpoint's **Errors** section lists its documented failures. The complete
 [OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml)
