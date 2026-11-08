@@ -1859,7 +1859,9 @@ async def test_a_stopped_workspace_whose_store_cannot_be_read_is_listed(
         r = await client.post("/v1/workspaces", json=body)
         assert r.status_code == 201, r.text
         ram = {"mounts": {"/": {"vfs": "ram"}}}
-        r = await client.post("/v1/workspaces", json={"id": "on", "config": ram})
+        r = await client.post(
+            "/v1/workspaces", json={"id": "on", "config": ram}
+        )
         assert r.status_code == 201, r.text
         await client.post("/v1/workspaces/mine/stop")
         shutil.rmtree(own)
@@ -1867,7 +1869,11 @@ async def test_a_stopped_workspace_whose_store_cannot_be_read_is_listed(
         listed = await client.get("/v1/workspaces")
         assert listed.status_code == 200, listed.text
         rows = [
-            (w["id"], w["status"], w["created_at"] if w["id"] == "mine" else None)
+            (
+                w["id"],
+                w["status"],
+                w["created_at"] if w["id"] == "mine" else None,
+            )
             for w in listed.json()
         ]
         assert rows == [("on", "running", None), ("mine", "stopped", 0)]
