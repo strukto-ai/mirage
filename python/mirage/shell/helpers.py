@@ -31,6 +31,7 @@ from mirage.shell.escapes import (
     unescape_dquoted,
     unescape_unquoted,
 )
+from mirage.shell.parse.constants import ALIAS_WORD_TYPES
 from mirage.shell.parse.program import ProgramNode
 from mirage.shell.types import (
     FunctionBody,
@@ -1158,11 +1159,6 @@ def get_function_body(node: TSNodeLike) -> FunctionBody:
             ),
         )
     ]
-
-
-# What an unquoted plain word parses as: the only words bash checks for an
-# alias, a name of digits included.
-ALIAS_WORD_TYPES = frozenset({NT.WORD, NT.NUMBER})
 
 
 def alias_rewrite(

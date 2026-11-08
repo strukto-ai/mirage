@@ -116,14 +116,17 @@ def command_words(
         node (TSNodeLike): root node from parse().
         skip (frozenset[str]): further node types whose subtrees the
             caller walks on their own.
-        plain (bool): only the heads written as a bare word, the ones an
-            alias can expand (a quoted ``'echo'`` runs past an alias).
+        plain (bool): only the heads written as a bare word or number,
+            the ones an alias can expand (a quoted ``'echo'`` runs past
+            an alias).
     """
     out: set[str] = set()
     for n in walk_named_outside_defs(node, skip):
         if n.type == "command_name":
             inner = n.named_children
-            if plain and not (len(inner) == 1 and inner[0].type == "word"):
+            if plain and not (
+                len(inner) == 1 and inner[0].type in constants.ALIAS_WORD_TYPES
+            ):
                 continue
             head = command_head(n)
             if head:

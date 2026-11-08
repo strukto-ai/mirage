@@ -107,7 +107,8 @@ export function referencedNames(node: TSNodeLike): ReadonlySet<string> {
  * body is skipped: those commands run at invocation, where the fill
  * layer walks the stored body instead, and so is any `skip` type the
  * caller walks on its own. `plain` keeps only the heads written as a bare
- * word, the ones an alias can expand (a quoted `'echo'` runs past an alias).
+ * word or number, the ones an alias can expand (a quoted `'echo'` runs past an
+ * alias).
  */
 export function commandWords(
   node: TSNodeLike,
@@ -118,7 +119,8 @@ export function commandWords(
   for (const current of walkNamedOutsideDefs(node, skip)) {
     if (current.type === 'command_name') {
       const inner = current.namedChildren
-      if (plain && !(inner.length === 1 && inner[0]?.type === 'word')) continue
+      if (plain && !(inner.length === 1 && constants.ALIAS_WORD_TYPES.has(inner[0]?.type ?? '')))
+        continue
       const head = commandHead(current)
       if (head !== '') out.add(head)
     } else if (constants.DECLARING_NODES.has(current.type)) {

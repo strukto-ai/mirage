@@ -76,7 +76,6 @@ from mirage.shell.errors import (
     TooManyMatches,
 )
 from mirage.shell.helpers import (
-    ALIAS_WORD_TYPES,
     get_command_name,
     get_parts,
     get_text,
@@ -84,7 +83,7 @@ from mirage.shell.helpers import (
     split_env_prefix,
 )
 from mirage.shell.join import shell_join
-from mirage.shell.parse.constants import WORD_BREAKS
+from mirage.shell.parse.constants import ALIAS_WORD_TYPES, WORD_BREAKS
 from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import AliasExpansion, TSNodeLike
