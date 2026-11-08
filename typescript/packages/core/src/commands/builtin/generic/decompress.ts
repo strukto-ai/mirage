@@ -509,8 +509,8 @@ export async function decompressInputs(
     if (!(warning && quiet)) note(line)
     if (io.exitCode !== 1) io.exitCode = code
   }
-  function fail(err: GzipDataError, shown: string): void {
-    report(err.render(shown), err.exitCode, err.exitCode === 2)
+  function fail(err: GzipDataError, shown: string, started = ''): void {
+    report(started + err.render(shown), err.exitCode, err.exitCode === 2)
   }
   async function* run(): AsyncIterable<Uint8Array> {
     for await (const [operand, walk] of walked(operands, report, options)) {
@@ -581,8 +581,10 @@ export async function decompressInputs(
           report(existsLine(outName), 2)
           continue
         }
+        let started = ''
         if (failure !== null) {
-          fail(failure, shown)
+          if (verbose && failure.keepsOutput && stored !== null) started = `${shown}:\t`
+          fail(failure, shown, started)
           if (failure.fatal) return
           if (!failure.keepsOutput) continue
         }
@@ -602,7 +604,8 @@ export async function decompressInputs(
           await inputInfo(options.stat, path, link, resolver),
           options.restore === true && stored !== null ? stored.mtime : 0,
         )
-        if (verbose && stored !== null) note(decodedLine(shown, stored, keep, outName))
+        if (verbose && stored !== null)
+          note(decodedLine(shown, stored, keep, outName).slice(started.length))
         if (!keep) await removeInput(path, link, options.unlink, resolver)
       } finally {
         await spool.close()

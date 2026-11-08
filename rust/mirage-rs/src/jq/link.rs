@@ -141,22 +141,45 @@ fn documents(bytes: &[u8]) -> Result<Vec<Value>, String> {
     }
 }
 
-/// `path` made absolute against `cwd`, with no `.` or `..` left in it, as
-/// jq_realpath leaves one that exists.
-pub(crate) fn resolve(cwd: &str, path: &str) -> String {
-    let mut parts: Vec<&str> = Vec::new();
+/// Each symlink in the namespace and what it points at.
+pub(crate) type Links = HashMap<String, String>;
+
+/// How many links one path may pass through, as the kernel allows.
+const MAX_LINKS: usize = 40;
+
+/// `path` made absolute against `cwd`, with no `.`, `..` or link left in
+/// it, as jq_realpath leaves one that exists: a `..` after a link goes up
+/// from where the link leads.
+pub(crate) fn resolve(links: &Links, cwd: &str, path: &str) -> String {
     let whole = if path.starts_with('/') {
         path.to_owned()
     } else {
         format!("{cwd}/{path}")
     };
-    for part in whole.split('/') {
-        match part {
+    let mut pending: VecDeque<String> = whole.split('/').map(str::to_owned).collect();
+    let mut parts: Vec<String> = Vec::new();
+    let mut hops = 0;
+    while let Some(part) = pending.pop_front() {
+        match part.as_str() {
             "" | "." => {}
             ".." => {
                 parts.pop();
             }
-            part => parts.push(part),
+            _ => {
+                parts.push(part);
+                let target = links.get(&format!("/{}", parts.join("/")));
+                let Some(target) = target.filter(|_| hops < MAX_LINKS) else {
+                    continue;
+                };
+                hops += 1;
+                parts.pop();
+                if target.starts_with('/') {
+                    parts.clear();
+                }
+                for step in target.rsplit('/') {
+                    pending.push_front(step.to_owned());
+                }
+            }
         }
     }
     format!("/{}", parts.join("/"))
@@ -190,6 +213,8 @@ struct Config {
     home: Option<String>,
     #[serde(default)]
     memory: Option<usize>,
+    #[serde(default)]
+    links: Links,
 }
 
 #[derive(Deserialize)]
@@ -235,6 +260,7 @@ struct Link {
     /// The bytes the run may hold, and those of the files kept so far.
     memory: usize,
     held: usize,
+    links: Links,
 }
 
 /// Takes the linker's answer while it fits the room left.
@@ -266,6 +292,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         cwd,
         home,
         memory,
+        links,
     } = parse_config(config)?;
     let cwd = cwd.unwrap_or_else(|| "/".to_owned());
     let search = if library_paths.is_empty() {
@@ -273,7 +300,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     } else {
         library_paths
             .iter()
-            .map(|path| resolve(&cwd, path))
+            .map(|path| resolve(&links, &cwd, path))
             .collect()
     };
     // A program jq refuses has nothing to link: the run words its report.
@@ -303,6 +330,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         stopped: false,
         memory: memory.unwrap_or(usize::MAX),
         held: 0,
+        links,
     };
     link.walk();
     Ok(Box::new(link))
@@ -329,11 +357,11 @@ impl Link {
                 Some(if word == "." {
                     self.cwd.clone()
                 } else if let Some(rest) = word.strip_prefix("$ORIGIN/") {
-                    resolve(&self.cwd, &format!("{JQ_ORIGIN}/{rest}"))
+                    resolve(&self.links, &self.cwd, &format!("{JQ_ORIGIN}/{rest}"))
                 } else if word.starts_with('/') {
-                    resolve(&self.cwd, &word)
+                    resolve(&self.links, &self.cwd, &word)
                 } else {
-                    resolve(&self.cwd, &format!("{origin}/{word}"))
+                    resolve(&self.links, &self.cwd, &format!("{origin}/{word}"))
                 })
             })
             .collect()
@@ -347,8 +375,12 @@ impl Link {
             .into_iter()
             .flat_map(|dir| {
                 [
-                    resolve(&dir, &format!("{}{suffix}", import.path)),
-                    resolve(&dir, &format!("{}/{base}{suffix}", import.path)),
+                    resolve(&self.links, &dir, &format!("{}{suffix}", import.path)),
+                    resolve(
+                        &self.links,
+                        &dir,
+                        &format!("{}/{base}{suffix}", import.path),
+                    ),
                 ]
             })
             .collect()
@@ -709,6 +741,16 @@ mod tests {
         ] {
             assert_eq!(run(program, &["lib"], &files), Ok(expected.to_owned()));
         }
+    }
+
+    #[test]
+    fn a_search_path_goes_up_from_where_a_link_leads() {
+        let links: Links = [("/w/libs/current".to_owned(), "../releases/v1".to_owned())].into();
+        assert_eq!(resolve(&links, "/w", "libs/current/.."), "/w/releases");
+        assert_eq!(resolve(&links, "/w", "libs/current/x"), "/w/releases/v1/x");
+        assert_eq!(resolve(&links, "/w", "libs/other/.."), "/w/libs");
+        let looped: Links = [("/l".to_owned(), "/l".to_owned())].into();
+        assert_eq!(resolve(&looped, "/", "/l"), "/l");
     }
 
     /// The linker over `files` with room for `memory` bytes.

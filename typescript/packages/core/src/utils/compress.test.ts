@@ -301,6 +301,23 @@ describe('gunzipStream', () => {
   })
 })
 
+it('still tells the facts when a warning keeps the output', async () => {
+  const heard: number[] = []
+  const header = [0x1f, 0x8b, 8, 0, 0x72, 0x83, 0x7b, 0x3a, 0, 3]
+  const body = [0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0xe7, 0x02, 0x00]
+  const trailer = [0x20, 0x30, 0x3a, 0x36, 6, 0, 0, 0]
+  const junk = [...new TextEncoder().encode('junk')]
+  const data = new Uint8Array([...header, ...body, ...trailer, ...junk])
+  await expect(
+    materialize(
+      gunzipStream(yieldBytes(data), false, false, (facts) => {
+        heard.push(facts.mtime)
+      }),
+    ),
+  ).rejects.toMatchObject({ keepsOutput: true })
+  expect(heard).toEqual([0x3a7b8372])
+})
+
 it('preserves buffered output in a large member', async () => {
   const text = 'x'.repeat(GZIP_CHUNK_SIZE * 20 + 13)
   const [out, failure] = await gunzipPartial(await gzip(ENC.encode(text)))

@@ -19,7 +19,7 @@ from mirage.commands.builtin.generic.program import (
     program_file_refusal,
     read_program_file,
 )
-from mirage.commands.builtin.utils.links import dispatch_of
+from mirage.commands.builtin.utils.links import dispatch_of, links_of
 from mirage.commands.builtin.utils.stream import is_stdin, stdin_stream
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -48,8 +48,9 @@ from mirage.rs.stream import (
 )
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view
-from mirage.types import JsonValue, PathSpec, ReadStreamFn
+from mirage.types import LINK_TARGET_KEY, JsonValue, PathSpec, ReadStreamFn
 from mirage.utils.clock import system_now
+from mirage.view.types import LinkView
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +220,30 @@ class ModuleFiles:
             )
 
 
+def _link_table(
+    expression: str,
+    options: Mapping[str, JsonValue],
+    links: LinkView | None,
+) -> dict[str, JsonValue]:
+    """Each symlink in the namespace and what it points at, which jq's
+    search paths resolve through; empty for a program with no search.
+
+    Args:
+        expression (str): jq program text.
+        options (Mapping[str, JsonValue]): what the option loop decided.
+        links (LinkView | None): the namespace's symlink facts.
+    """
+    if links is None or not (
+        options.get("library_paths")
+        or any(word in expression for word in MODULE_WORDS)
+    ):
+        return {}
+    return {
+        path: str(stat.extra.get(LINK_TARGET_KEY, ""))
+        for path, stat in links.subtree("/")
+    }
+
+
 async def link_modules(
     expression: str,
     options: Mapping[str, JsonValue],
@@ -226,6 +251,7 @@ async def link_modules(
     cwd: str | None,
     home: str | None,
     read: Callable[[PathSpec], Awaitable[bytes]],
+    links: Mapping[str, JsonValue] | None = None,
 ) -> JsonValue:
     """The modules a program imports, read for the run to compile, or None
     for a program that cannot import one.
@@ -238,6 +264,8 @@ async def link_modules(
         cwd (str | None): the working directory.
         home (str | None): the session's ``HOME``.
         read (Callable): byte reader for one path.
+        links (Mapping[str, JsonValue] | None): each symlink and its
+            target.
 
     Raises:
         StreamRefusal: an import jq could not load, in jq's report.
@@ -254,6 +282,7 @@ async def link_modules(
             "origin": origin,
             "cwd": cwd,
             "home": home,
+            "links": dict(links or {}),
             **({} if limit is None else {"memory": limit}),
         },
     )
@@ -522,6 +551,7 @@ async def jq_generic(
         dispatch_of(ctx),
         ctx.env,
         ctx.cwd,
+        links_of(ctx),
     )
 
 
@@ -547,6 +577,7 @@ async def _jq(
     dispatch: DispatchFn | None,
     env: Mapping[str, str] | None,
     cwd: PathSpec | None,
+    links: LinkView | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one jq invocation.
 
@@ -564,6 +595,8 @@ async def _jq(
             process environment, and whose `TZ` local time reads.
         cwd (PathSpec | None): the session's working directory, which
             `get_prog_origin` answers without -f.
+        links (LinkView | None): the namespace's symlink facts, which a
+            search path resolves through.
     """
     fl = FlagView(flags, spec=SPECS["jq"])
     read_input = stdin_stream(stream, stdin)
@@ -619,9 +652,11 @@ async def _jq(
         # The run compiles it again when it starts, so nothing is held
         # open for a stream no one reads.
         working = None if cwd is None else cwd.virtual
+        table = _link_table(expression, options, links)
         options = {
             **options,
             "cwd": working,
+            "links": table,
             "linked": await link_modules(
                 expression,
                 options,
@@ -629,6 +664,7 @@ async def _jq(
                 working,
                 (env or {}).get("HOME"),
                 read_flag_file,
+                table,
             ),
         }
         checked = open_stream(

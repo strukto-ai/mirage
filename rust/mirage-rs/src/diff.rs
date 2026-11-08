@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use crate::regex::{Options as RegexOptions, Regex, Step, Syntax};
+use crate::regex::{Options as RegexOptions, Regex, STEPS, Step, Syntax};
 use crate::width::char_width;
 use crate::{Stream, StreamError, number};
 use serde::Deserialize;
@@ -221,6 +221,10 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         functions,
         found: None,
         scanned: 0,
+        searching: None,
+        pattern: 0,
+        paused: false,
+        marking: None,
         inputs: [Vec::new(), Vec::new()],
         ended: [false; 2],
         pieces: VecDeque::new(),
@@ -270,10 +274,16 @@ struct Diff {
     layout: Layout,
     ignore: Vec<Regex>,
     functions: Vec<Regex>,
-    /// The old line a hunk header last named, and how far the search for
-    /// one has read.
+    /// The old line a hunk header last named, how far the search for one
+    /// has read, and where a search that ran out of steps stopped.
     found: Option<usize>,
     scanned: usize,
+    searching: Option<usize>,
+    pattern: usize,
+    /// Whether the last hunk has to wait for a search to resume.
+    paused: bool,
+    /// The pass over the changes `-B` and `-I` set aside, while it runs.
+    marking: Option<Marking>,
     inputs: [Vec<u8>; 2],
     ended: [bool; 2],
     pieces: VecDeque<Piece>,
@@ -283,6 +293,15 @@ struct Diff {
     stderr: Vec<u8>,
     status: i32,
     equal: bool,
+}
+
+/// How far `-B` and `-I` have read through a comparison's changes.
+struct Marking {
+    ops: Vec<DiffOp>,
+    marked: Vec<(DiffOp, bool)>,
+    at: usize,
+    line: usize,
+    pattern: usize,
 }
 
 /// How a printed line that lacks its newline ends: with the marker after a
@@ -428,35 +447,32 @@ fn record<'a>(
     &inputs[input][records[input][index]..records[input][index + 1]]
 }
 
-fn matches(regex: &mut Regex, text: &[u8]) -> bool {
-    let mut budget = u64::MAX;
-    matches!(
-        regex.matches(text, 0, text.len(), &mut budget),
-        Step::Done(true)
-    )
-}
-
-/// Whether every line an operation takes out or puts in is ignorable.
-fn ignorable(
+/// Whether `-B` or `-I` set a line aside: blank once compared, or matched
+/// by a pattern from `pattern` on, which holds its place when the search
+/// runs out of steps.
+fn ignorable_line(
     config: &Config,
     ignore: &mut [Regex],
-    inputs: &[Vec<u8>; 2],
-    records: &[Vec<usize>; 2],
-    op: &DiffOp,
-) -> bool {
-    op.old_range()
-        .all(|i| ignorable_line(config, ignore, record(inputs, records, 0, i)))
-        && op
-            .new_range()
-            .all(|i| ignorable_line(config, ignore, record(inputs, records, 1, i)))
-}
-
-/// Whether `-B` or `-I` set a line aside: blank once compared, or matched
-/// by a pattern.
-fn ignorable_line(config: &Config, ignore: &mut [Regex], line: &[u8]) -> bool {
+    line: &[u8],
+    pattern: &mut usize,
+    budget: &mut u64,
+) -> Step<bool> {
     let text = line.strip_suffix(b"\n").unwrap_or(line);
-    (config.ignore_blank_lines && key(&text, config).is_empty())
-        || ignore.iter_mut().any(|regex| matches(regex, text))
+    if config.ignore_blank_lines && key(&text, config).is_empty() {
+        return Step::Done(true);
+    }
+    while let Some(regex) = ignore.get_mut(*pattern) {
+        match regex.matches(text, 0, text.len(), budget) {
+            Step::Paused => return Step::Paused,
+            Step::Done(true) => {
+                *pattern = 0;
+                return Step::Done(true);
+            }
+            Step::Done(false) => *pattern += 1,
+        }
+    }
+    *pattern = 0;
+    Step::Done(false)
 }
 
 impl Diff {
@@ -466,36 +482,56 @@ impl Diff {
 
     /// The old line a hunk starting at `start` names: the last one before
     /// it that a pattern matches, read back to where the last search
-    /// stopped, else the one found before.
-    fn function(&mut self, start: usize) -> Option<Vec<u8>> {
+    /// stopped, else the one found before. Paused when the steps run out,
+    /// and the same call picks the search back up.
+    fn function(&mut self, start: usize) -> Step<Option<Vec<u8>>> {
         let Self {
             functions,
             inputs,
             records,
             scanned,
             found,
+            searching,
+            pattern,
             ..
         } = self;
         if functions.is_empty() {
-            return None;
+            return Step::Done(None);
         }
-        for index in (*scanned..start).rev() {
-            let line = record(inputs, records, 0, index);
+        let mut budget = STEPS;
+        let mut index = searching.take().unwrap_or(start);
+        'lines: while index > *scanned {
+            let line = record(inputs, records, 0, index - 1);
             let text = line.strip_suffix(b"\n").unwrap_or(line);
-            if functions.iter_mut().any(|regex| matches(regex, text)) {
-                *found = Some(index);
-                break;
+            while let Some(regex) = functions.get_mut(*pattern) {
+                match regex.matches(text, 0, text.len(), &mut budget) {
+                    Step::Paused => {
+                        *searching = Some(index);
+                        return Step::Paused;
+                    }
+                    Step::Done(true) => {
+                        *pattern = 0;
+                        *found = Some(index - 1);
+                        break 'lines;
+                    }
+                    Step::Done(false) => *pattern += 1,
+                }
             }
+            *pattern = 0;
+            index -= 1;
         }
         *scanned = (*scanned).max(start);
-        let line = record(inputs, records, 0, (*found)?);
+        let Some(found) = *found else {
+            return Step::Done(None);
+        };
+        let line = record(inputs, records, 0, found);
         let text = line.strip_suffix(b"\n").unwrap_or(line);
         let text = &text[..text.len().min(FUNCTION_BYTES)];
         let kept = text
             .iter()
             .rposition(|b| !b.is_ascii_whitespace())
             .map_or(0, |i| i + 1);
-        Some(text[..kept].to_vec())
+        Step::Done(Some(text[..kept].to_vec()))
     }
 
     fn compute(&mut self) {
@@ -558,22 +594,62 @@ impl Diff {
                 self.records[index].push(offset);
             }
         }
+        if filters {
+            self.marking = Some(Marking {
+                marked: Vec::with_capacity(ops.len()),
+                ops,
+                at: 0,
+                line: 0,
+                pattern: 0,
+            });
+        } else {
+            self.settle(ops.into_iter().map(|op| (op, false)).collect());
+        }
+    }
+
+    /// Mark what `-B` and `-I` set aside, a bounded slice of pattern work
+    /// at a time, and settle the comparison once every change is read.
+    fn mark(&mut self) {
+        let Some(mut marking) = self.marking.take() else {
+            return;
+        };
         let Diff {
-            ref config,
-            ref mut ignore,
-            ref inputs,
-            ref records,
+            config,
+            ignore,
+            inputs,
+            records,
             ..
-        } = *self;
-        let marked: Vec<(DiffOp, bool)> = ops
-            .into_iter()
-            .map(|op| {
-                let set_aside = filters
-                    && op.tag() != DiffTag::Equal
-                    && ignorable(config, ignore, inputs, records, &op);
-                (op, set_aside)
-            })
-            .collect();
+        } = self;
+        let mut budget = STEPS;
+        while let Some(op) = marking.ops.get(marking.at).copied() {
+            let (old, new) = (op.old_range(), op.new_range());
+            let mut set_aside = op.tag() != DiffTag::Equal;
+            while set_aside && marking.line < old.len() + new.len() {
+                let (input, index) = if marking.line < old.len() {
+                    (0, old.start + marking.line)
+                } else {
+                    (1, new.start + marking.line - old.len())
+                };
+                let line = record(inputs, records, input, index);
+                match ignorable_line(config, ignore, line, &mut marking.pattern, &mut budget) {
+                    Step::Paused => {
+                        self.marking = Some(marking);
+                        return;
+                    }
+                    Step::Done(true) => marking.line += 1,
+                    Step::Done(false) => set_aside = false,
+                }
+            }
+            marking.marked.push((op, set_aside));
+            marking.at += 1;
+            marking.line = 0;
+        }
+        self.settle(marking.marked);
+    }
+
+    /// What follows once every change is marked: the status, and the
+    /// hunks left to print.
+    fn settle(&mut self, marked: Vec<(DiffOp, bool)>) {
         self.equal = marked
             .iter()
             .all(|(op, ignorable)| op.tag() == DiffTag::Equal || *ignorable);
@@ -597,11 +673,8 @@ impl Diff {
         }
         match self.config.mode {
             Mode::Unified | Mode::Context => {
-                let context = self
-                    .config
-                    .context
-                    .min(old.len().max(new.len()))
-                    .min(usize::MAX / 2);
+                let lines = self.records[0].len().max(self.records[1].len()) - 1;
+                let context = self.config.context.min(lines).min(usize::MAX / 2);
                 let ignorable: std::collections::HashSet<(usize, usize)> = marked
                     .iter()
                     .filter(|(_, ignorable)| *ignorable)
@@ -711,8 +784,12 @@ impl Diff {
 
     fn prepare(&mut self) {
         if self.ops.is_empty() {
-            if let Some(group) = self.groups.pop_front() {
-                let function = self.function(group[0].old_range().start);
+            if let Some(start) = self.groups.front().map(|group| group[0].old_range().start) {
+                let Step::Done(function) = self.function(start) else {
+                    self.paused = true;
+                    return;
+                };
+                let group = self.groups.pop_front().expect("a group is queued");
                 let suffix = function.map(|text| [b" ".as_slice(), &text].concat());
                 if self.config.mode == Mode::Context {
                     self.context_hunk(&group, suffix.unwrap_or_default());
@@ -985,6 +1062,9 @@ impl Diff {
             steps += 1;
             let Some(piece) = self.pieces.pop_front() else {
                 self.prepare();
+                if std::mem::take(&mut self.paused) {
+                    return;
+                }
                 continue;
             };
             match piece {
@@ -1108,10 +1188,16 @@ impl Stream for Diff {
         (0..2).find(|index| !self.ended[*index])
     }
     fn busy(&self) -> bool {
-        !self.pieces.is_empty() || !self.ops.is_empty() || !self.groups.is_empty()
+        self.marking.is_some()
+            || !self.pieces.is_empty()
+            || !self.ops.is_empty()
+            || !self.groups.is_empty()
     }
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.render(out);
+        self.mark();
+        if self.marking.is_none() {
+            self.render(out);
+        }
         Ok(())
     }
     fn status(&self) -> i32 {

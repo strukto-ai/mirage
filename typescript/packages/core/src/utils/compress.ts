@@ -82,10 +82,30 @@ function failure(stream: OpenStream): GzipDataError | null {
   )
 }
 
-function* output(stream: OpenStream, data: Uint8Array): Generator<Uint8Array> {
+function facts(stream: OpenStream, onFacts?: (facts: GzipFacts) => void): void {
+  if (onFacts !== undefined)
+    onFacts(gzipFacts.parse(JSON.parse(new TextDecoder().decode(stream.metadata()))))
+}
+
+// `error`, the facts told first when the output is kept, since gunzip -N still
+// names and dates it from the header. Mirrors Python's `_raised`.
+function raised(
+  stream: OpenStream,
+  error: GzipDataError,
+  onFacts?: (facts: GzipFacts) => void,
+): GzipDataError {
+  if (error.keepsOutput) facts(stream, onFacts)
+  return error
+}
+
+function* output(
+  stream: OpenStream,
+  data: Uint8Array,
+  onFacts?: (facts: GzipFacts) => void,
+): Generator<Uint8Array> {
   const error = failure(stream)
   if (data.byteLength > 0) yield data
-  if (error !== null) throw error
+  if (error !== null) throw raised(stream, error, onFacts)
 }
 
 async function* codecStream(
@@ -96,13 +116,11 @@ async function* codecStream(
   const stream = await openStream('compress', config)
   try {
     for await (const data of streamOutputChunks(stream, source, undefined, false)) {
-      yield* output(stream, data)
+      yield* output(stream, data, onFacts)
     }
     const error = failure(stream)
-    if (error !== null) throw error
-    if (onFacts !== undefined) {
-      onFacts(gzipFacts.parse(JSON.parse(new TextDecoder().decode(stream.metadata()))))
-    }
+    if (error !== null) throw raised(stream, error, onFacts)
+    facts(stream, onFacts)
   } catch (error) {
     if (!(error instanceof StreamRefusal)) throw error
     if (error.output.byteLength > 0) yield error.output

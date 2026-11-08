@@ -36,13 +36,15 @@ import { ByteSpool } from '../../../io/spool.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { PathSpec, type JsonValue, type ReadStreamFn } from '../../../types.ts'
+import { LINK_TARGET_KEY, PathSpec, type JsonValue, type ReadStreamFn } from '../../../types.ts'
+import type { LinkView } from '../../../view/types.ts'
 import { fsStrerror, isEisdir, isEnoent, isEnotdir, isFsError } from '../../../errors/fs.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import { parent } from '../../../utils/path.ts'
 import { type CommandFnResult, type Context } from '../../config.ts'
 import { helpPage, versionLine } from '../../spec/standard.ts'
 import type { FlagValue } from '../../spec/types.ts'
+import { linksOf } from '../utils/links.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { programFileRefusal, readProgramFile } from './program.ts'
 import { systemNow } from '../../../utils/clock.ts'
@@ -186,6 +188,27 @@ class ModuleFiles {
  * program that cannot import one. Throws StreamRefusal for an import jq could
  * not load, in jq's report. Mirrors Python's link_modules.
  */
+// Each symlink in the namespace and what it points at, which jq's search paths
+// resolve through; empty for a program with no search. Mirrors Python's
+// _link_table.
+function linkTable(
+  expression: string,
+  options: Readonly<Record<string, JsonValue>>,
+  links: LinkView | undefined,
+): Record<string, string> {
+  const paths = options.library_paths
+  const searches =
+    (Array.isArray(paths) && paths.length > 0) ||
+    MODULE_WORDS.some((word) => expression.includes(word))
+  if (links === undefined || !searches) return {}
+  const table: Record<string, string> = {}
+  for (const [path, stat] of links.subtree('/')) {
+    const target = stat.extra[LINK_TARGET_KEY]
+    table[path] = typeof target === 'string' ? target : ''
+  }
+  return table
+}
+
 export async function linkModules(
   expression: string,
   options: Readonly<Record<string, JsonValue>>,
@@ -193,6 +216,7 @@ export async function linkModules(
   cwd: string,
   home: string | null,
   read: (path: PathSpec) => Promise<Uint8Array>,
+  links: Readonly<Record<string, string>> = {},
 ): Promise<JsonValue> {
   if (!MODULE_WORDS.some((word) => expression.includes(word))) return null
   const limit = memoryRoom()
@@ -202,6 +226,7 @@ export async function linkModules(
     origin,
     cwd,
     home,
+    links: { ...links },
     ...(limit === null ? {} : { memory: limit }),
   })
   const host = new ModuleFiles(read)
@@ -477,9 +502,11 @@ export async function jqGeneric(
     // reading the program as typed, so its lines and columns are jq's. The
     // run compiles it again when it starts, so nothing is held open for a
     // stream no one reads.
+    const table = linkTable(expression, planned, linksOf(ctx))
     options = {
       ...planned,
       cwd: ctx.cwd.virtual,
+      links: table,
       linked: await linkModules(
         expression,
         planned,
@@ -487,6 +514,7 @@ export async function jqGeneric(
         ctx.cwd.virtual,
         ctx.env?.HOME ?? null,
         readFlagFile,
+        table,
       ),
     }
     const checked = await openStream('jq', runConfig(expression, options, env, zone, origin, names))

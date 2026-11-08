@@ -406,3 +406,39 @@ fn widths_and_patterns_are_refused_as_typed() {
         ("diff: a[: Invalid regular expression".into(), 2)
     );
 }
+
+/// How many turns the host gets, and what the comparison prints.
+fn turns(config: &str, old: &[u8], new: &[u8]) -> (usize, Vec<u8>) {
+    let mut stream = open("diff", config.as_bytes()).expect("open diff");
+    let mut output = Vec::new();
+    for (index, input) in [old, new].into_iter().enumerate() {
+        stream.feed_input(index, input, &mut output).unwrap();
+        stream.end_input(index, &mut output).unwrap();
+    }
+    stream.finish(&mut output).unwrap();
+    let mut count = 0;
+    while stream.busy() {
+        count += 1;
+        stream.drain(&mut output).unwrap();
+    }
+    (count, output)
+}
+
+#[test]
+fn a_heavy_ignore_pattern_gives_the_host_turns() {
+    let line = format!("{}\n", "a".repeat(22));
+    let config = r#"{"ignore_lines":["\\(a*\\)*\\1b"]}"#;
+    let (count, output) = turns(config, line.as_bytes(), b"b\n");
+    assert!(count > 1, "{count} turns");
+    assert_eq!(output, format!("1c1\n< {line}---\n> b\n").into_bytes());
+}
+
+#[test]
+fn a_heavy_function_pattern_gives_the_host_turns() {
+    let line = "a".repeat(22);
+    let old = format!("{line}\nx\n");
+    let config = r#"{"mode":"unified","context":0,"old_label":"a","new_label":"b","function_lines":["\\(a*\\)*\\1b"]}"#;
+    let (count, output) = turns(config, old.as_bytes(), format!("{line}\ny\n").as_bytes());
+    assert!(count > 1, "{count} turns");
+    assert!(output.ends_with(b"@@ -2 +2 @@\n-x\n+y\n"), "{output:?}");
+}

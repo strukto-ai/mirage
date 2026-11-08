@@ -135,12 +135,41 @@ def _failure(stream: OpenStream) -> GzipDataError | None:
     )
 
 
-def _output(stream: OpenStream, data: bytes) -> Iterator[bytes]:
+def _facts(
+    stream: OpenStream, on_facts: Callable[[GzipFacts], None] | None
+) -> None:
+    if on_facts is not None:
+        on_facts(GzipFacts.model_validate_json(stream.metadata()))
+
+
+def _raised(
+    stream: OpenStream,
+    failure: GzipDataError,
+    on_facts: Callable[[GzipFacts], None] | None,
+) -> GzipDataError:
+    """``failure``, the facts told first when the output is kept, since
+    gunzip -N still names and dates it from the header.
+
+    Args:
+        stream (OpenStream): the decoder.
+        failure (GzipDataError): what it reported.
+        on_facts (Callable | None): hears the input's facts.
+    """
+    if failure.keeps_output:
+        _facts(stream, on_facts)
+    return failure
+
+
+def _output(
+    stream: OpenStream,
+    data: bytes,
+    on_facts: Callable[[GzipFacts], None] | None,
+) -> Iterator[bytes]:
     failure = _failure(stream)
     if data:
         yield data
     if failure is not None:
-        raise failure
+        raise _raised(stream, failure, on_facts)
 
 
 async def _codec_stream(
@@ -159,12 +188,11 @@ async def _codec_stream(
             stream_output_chunks(stream, input_chunks(), owns_stream=False)
         ) as parts:
             async for data in parts:
-                for part in _output(stream, data):
+                for part in _output(stream, data, on_facts):
                     yield part
         if failure := _failure(stream):
-            raise failure
-        if on_facts is not None:
-            on_facts(GzipFacts.model_validate_json(stream.metadata()))
+            raise _raised(stream, failure, on_facts)
+        _facts(stream, on_facts)
     except StreamRefusal as exc:
         if exc.output:
             yield exc.output

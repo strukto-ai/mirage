@@ -618,8 +618,8 @@ async def decompress_inputs(
         if io.exit_code != 1:
             io.exit_code = code
 
-    def fail(exc: GzipDataError, shown: str) -> None:
-        report(exc.render(shown), exc.exit_code, exc.exit_code == 2)
+    def fail(exc: GzipDataError, shown: str, started: str = "") -> None:
+        report(started + exc.render(shown), exc.exit_code, exc.exit_code == 2)
 
     async def run() -> AsyncIterator[bytes]:
         async for operand, found in walked(
@@ -715,8 +715,11 @@ async def decompress_inputs(
                 if existed and not force:
                     report(exists_line(out_name), 2)
                     continue
+                started = ""
                 if failure is not None:
-                    fail(failure, shown)
+                    if verbose and failure.keeps_output and stored is not None:
+                        started = f"{shown}:\t"
+                    fail(failure, shown, started)
                     if failure.fatal:
                         return
                     if not failure.keeps_output:
@@ -739,7 +742,11 @@ async def decompress_inputs(
                     stored.mtime if restore and stored is not None else 0,
                 )
                 if verbose and stored is not None:
-                    note(_decoded_line(shown, stored, keep, out_name))
+                    note(
+                        _decoded_line(
+                            shown, stored, keep, out_name
+                        ).removeprefix(started)
+                    )
                 if not keep:
                     await remove_input(path, link, unlink, resolver)
             finally:

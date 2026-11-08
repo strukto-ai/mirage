@@ -9,7 +9,7 @@ use crate::{Stream, StreamError};
 
 use super::eval::{self, DEBUG, ERROR, Eval, Formatting, HALT, PRINT, Position, STDERR};
 use super::format;
-use super::link::{Linked, resolve};
+use super::link::{Linked, Links, resolve};
 use super::meter::{self, Meter};
 use super::parse::{Scanned, Scanner};
 use super::unicode::{Bytes, DecodeCursor, WORK};
@@ -65,6 +65,7 @@ pub(super) struct Config {
     /// The working directory, which a relative `-L` is read against.
     pub(super) cwd: Option<String>,
     pub(super) library_paths: Vec<String>,
+    pub(super) links: Links,
     /// What the linker found for the program's imports.
     pub(super) linked: Option<Linked>,
     /// The bytes jq may hold, the workspace's room; None for jq_eval's
@@ -104,6 +105,7 @@ impl Default for Config {
             prog_origin: None,
             cwd: None,
             library_paths: Vec::new(),
+            links: Links::new(),
             linked: None,
             memory: None,
             steps: None,
@@ -727,7 +729,11 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     });
     let cwd = config.cwd.as_deref().unwrap_or("/");
     let search_list = (!config.library_paths.is_empty()).then(|| {
-        let resolved = config.library_paths.iter().map(|path| resolve(cwd, path));
+        let links = &config.links;
+        let resolved = config
+            .library_paths
+            .iter()
+            .map(|path| resolve(links, cwd, path));
         resolved.collect::<Vec<String>>()
     });
     let mut eval_config = serde_json::json!({
