@@ -17,6 +17,9 @@ import { IOResult, materialize } from '../../../../io/types.ts'
 import { EvaluationContext } from '../../../evaluation.ts'
 import { SessionState } from '../../../session/session.ts'
 import { handleXargs } from './xargs.ts'
+import { RAMVFS } from '../../../../vfs/ram/ram.ts'
+import { MountMode } from '../../../../types.ts'
+import { Workspace } from '../../../workspace/workspace.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import type * as BytesModule from '../../../../utils/bytes.ts'
 
@@ -218,5 +221,19 @@ describe('xargs size bounds', () => {
     expect(result.lines).toEqual(lines)
     expect(result.stderr).toBe(stderr)
     expect(result.exitCode).toBe(code)
+  })
+})
+
+describe('xargs exec refusals', () => {
+  it('stops with 126 on a path exec refuses, as spelled', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('echo x > /data/a.txt')
+      const result = await ws.shell('cd /data; echo a | xargs ./a.txt/child')
+      expect(result.stderrText).toBe('xargs: ./a.txt/child: Not a directory\n')
+      expect(result.exitCode).toBe(126)
+    } finally {
+      await ws.close()
+    }
   })
 })

@@ -700,6 +700,20 @@ async def test_explicit_process_command_captures_reach_the_runtime(name, args):
         ]
 
 
+# bash's `builtin kill` is the shell's own, so a runtime that captures kill
+# never sees it, while `command kill` still reaches the runtime.
+@pytest.mark.asyncio
+async def test_builtin_runs_the_shell_kill_past_a_capture():
+    probe = ProcessProbe(captures=("kill",))
+    async with workspace(
+        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[probe]
+    ) as ws:
+        assert (await ws.shell('builtin kill -0 "$BASHPID"')).exit_code == 0
+        assert probe.requests == []
+        assert (await ws.shell("command kill -0 456")).exit_code == 0
+        assert [r.argv for r in probe.requests] == [("kill", "-0", "456")]
+
+
 class FailingProcess(ProcessProbe):
     async def run_process(
         self, engine, paths, texts, ctx, output, errors=None

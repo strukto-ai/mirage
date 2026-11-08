@@ -7,11 +7,17 @@
 mod arithmetic;
 mod arrays;
 mod braces;
+mod fields;
+mod lookup;
+mod operators;
 mod patterns;
 mod substitution;
 mod substring;
 #[cfg(test)]
 mod tests;
+mod tilde;
+
+pub use fields::{Field, ifs_joiner, join, marked, splat, split_fields};
 
 use std::future::Future;
 
@@ -19,12 +25,11 @@ use super::brace::{self, Tok, expand_template};
 use super::escapes::{decode_ansi_c, unescape_dquoted, unquoted_runs};
 use super::parameter::scan_parameter;
 use super::pattern::{Pattern, Replacement};
-use super::shell::{IFS_DEFAULT, Shell};
+use super::shell::Shell;
 pub(super) use super::voiced;
 use super::write::{Fault, Gate, Writer};
 use super::{Diagnostic, Signal};
 use crate::shell::Tree;
-use crate::vars::RANDOM;
 
 /// One stretch of an expanded word: its text, whether quoting made its
 /// glob characters literal, and whether field splitting reads it, which
@@ -72,190 +77,6 @@ impl Chunk {
             split: !quoted,
         })
     }
-}
-
-/// The characters the glob matcher reads specially, each a quoted run's
-/// mark at `0xFDD0` plus its place here, as the hosts' `mark_globs` spells
-/// them.
-const GLOB_SPECIALS: &[u8] = b"*?[@+!()|";
-
-/// Runs as the hosts' globbing reads them: each quoted glob character
-/// under its mark, everything else as it is.
-pub fn marked(runs: &[(Vec<u8>, bool)]) -> Vec<u8> {
-    let mut out = Vec::new();
-    for (text, quoted) in runs {
-        if !quoted {
-            out.extend_from_slice(text);
-            continue;
-        }
-        for &byte in text {
-            match GLOB_SPECIALS.iter().position(|&c| c == byte) {
-                Some(at) => {
-                    let mark = char::from_u32(0xFDD0 + at as u32).unwrap_or('\u{FFFD}');
-                    let mut buf = [0; 4];
-                    out.extend_from_slice(mark.encode_utf8(&mut buf).as_bytes());
-                }
-                None => out.push(byte),
-            }
-        }
-    }
-    out
-}
-
-/// A field after splitting: its runs, each quoted or live for globbing.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Field(pub Vec<(Vec<u8>, bool)>);
-
-impl Field {
-    fn push(&mut self, text: &[u8], quoted: bool) {
-        if text.is_empty() {
-            return;
-        }
-        match self.0.last_mut() {
-            Some((run, q)) if *q == quoted => run.extend_from_slice(text),
-            _ => self.0.push((text.to_vec(), quoted)),
-        }
-    }
-
-    /// The field's text, quoting removed.
-    pub fn text(&self) -> Vec<u8> {
-        self.0
-            .iter()
-            .flat_map(|(run, _)| run.iter().copied())
-            .collect()
-    }
-}
-
-/// What `"$*"` joins the parameters with: IFS's first character, a space
-/// when IFS is unset and nothing when it is empty. A character is a whole
-/// UTF-8 sequence when `utf8`, else a byte.
-pub fn ifs_joiner(ifs: Option<&[u8]>, utf8: bool) -> Vec<u8> {
-    match ifs {
-        None => b" ".to_vec(),
-        Some(ifs) => char_at(ifs, utf8).to_vec(),
-    }
-}
-
-/// The character `text` starts with: its UTF-8 sequence when `utf8` and
-/// the bytes form one, else its first byte; empty for empty text.
-fn char_at(text: &[u8], utf8: bool) -> &[u8] {
-    if text.is_empty() {
-        return text;
-    }
-    &text[..if utf8 { patterns::char_len(text) } else { 1 }]
-}
-
-/// A splat's elements, a field boundary between each two.
-pub fn splat(elements: &[Vec<u8>], joiner: &[u8], quoted: bool) -> Vec<Chunk> {
-    let mut out = Vec::with_capacity(elements.len() * 2);
-    for (index, element) in elements.iter().enumerate() {
-        if index > 0 {
-            out.push(Chunk::Break(joiner.to_vec()));
-        }
-        out.push(Chunk::value(element.clone(), quoted));
-    }
-    out
-}
-
-/// A word's text where no field splitting happens (an assignment, a `case`
-/// word, `[[ ]]`): a splat boundary reads as its joiner.
-pub fn join(chunks: &[Chunk]) -> Vec<u8> {
-    let mut out = Vec::new();
-    for chunk in chunks {
-        match chunk {
-            Chunk::Piece(piece) => out.extend_from_slice(&piece.text),
-            Chunk::Break(joiner) => out.extend_from_slice(joiner),
-        }
-    }
-    out
-}
-
-/// Split a word's pieces into fields on IFS, as bash does. Only split
-/// pieces split. An IFS whitespace run delimits a field and is dropped at
-/// either end; any other IFS character, with the whitespace around it,
-/// delimits exactly one, so `a,,b` under `IFS=,` is three fields and `a,`
-/// one. A splat boundary always ends a field. A field exists once literal
-/// or quoted text, or a split value that is not empty, opened it, so an
-/// unquoted expansion that comes back empty is no word while `""` is one.
-/// Under `utf8` a separator is a whole character, so `IFS=é` splits on
-/// `é` alone and never inside `à`. A long value pauses through `pause`
-/// as it is scanned, so a cancel or the line's deadline lands inside it.
-pub async fn split_fields(
-    chunks: &[Chunk],
-    ifs: Option<&[u8]>,
-    utf8: bool,
-    pause: &mut impl AsyncFnMut() -> Result<(), Fault>,
-) -> Result<Vec<Field>, Fault> {
-    let separators = ifs.unwrap_or(IFS_DEFAULT);
-    let mut set: Vec<&[u8]> = Vec::new();
-    let mut rest = separators;
-    while !rest.is_empty() {
-        let c = char_at(rest, utf8);
-        set.push(c);
-        rest = &rest[c.len()..];
-    }
-    let separator = |text: &[u8]| set.contains(&char_at(text, utf8));
-    let blank = |text: &[u8]| IFS_DEFAULT.contains(&text[0]) && separator(text);
-    let mut fields = Vec::new();
-    let mut current = Field::default();
-    let mut started = false;
-    for chunk in chunks {
-        let piece = match chunk {
-            Chunk::Break(_) => {
-                if started {
-                    fields.push(std::mem::take(&mut current));
-                }
-                current = Field::default();
-                started = false;
-                continue;
-            }
-            Chunk::Piece(piece) => piece,
-        };
-        if !piece.split || separators.is_empty() {
-            current.push(&piece.text, piece.quoted);
-            started = started || !piece.split || !piece.text.is_empty();
-            continue;
-        }
-        let text = &piece.text;
-        let mut index = 0;
-        let mut paused = 0;
-        while index < text.len() {
-            if index - paused >= SPLIT_SLICE {
-                pause().await?;
-                paused = index;
-            }
-            let mut end = index;
-            while end < text.len() && !separator(&text[end..]) {
-                end += char_at(&text[end..], utf8).len();
-            }
-            if end > index {
-                current.push(&text[index..end], false);
-                started = true;
-                index = end;
-                continue;
-            }
-            while end < text.len() && blank(&text[end..]) {
-                end += 1;
-            }
-            let hard = end < text.len() && separator(&text[end..]);
-            if hard {
-                end += char_at(&text[end..], utf8).len();
-                while end < text.len() && blank(&text[end..]) {
-                    end += 1;
-                }
-            }
-            if started || hard {
-                fields.push(std::mem::take(&mut current));
-            }
-            current = Field::default();
-            started = false;
-            index = end;
-        }
-    }
-    if started {
-        fields.push(current);
-    }
-    Ok(fields)
 }
 
 /// A command substitution's run: its output, its stderr, which joins the
@@ -363,9 +184,6 @@ struct Operands {
 /// The brace words made between two pauses.
 const BRACE_SLICE: usize = 1024;
 
-/// The bytes of a value field splitting scans between two pauses.
-const SPLIT_SLICE: usize = 64 * 1024;
-
 const PATTERN_OPS: [&str; 14] = [
     "#", "##", "%", "%%", "/", "//", "/#", "/%", "^", "^^", ",", ",,", "~", "~~",
 ];
@@ -400,15 +218,7 @@ impl<H: Host> Expander<'_, H> {
     }
 
     fn writer(&mut self) -> Writer<'_, H> {
-        Writer {
-            allexport: self.shell.option("allexport"),
-            nounset: self.shell.option("nounset"),
-            limit: self.shell.env_limit,
-            outside: self.shell.outside,
-            store: &mut self.shell.vars,
-            gate: self.host,
-            diagnostics: Some(self.diagnostics),
-        }
+        Writer::of(self.shell, self.host, Some(self.diagnostics))
     }
 
     fn text(&self, node: usize) -> &[u8] {
@@ -447,96 +257,6 @@ impl<H: Host> Expander<'_, H> {
     fn fold(&self, node: usize) -> Vec<u8> {
         let text = self.text(node);
         text[..text.len() - trim_start(text).len()].to_vec()
-    }
-
-    /// A word in a command's argument list: its pieces, its tilde prefix
-    /// expanded, split into fields on IFS.
-    pub async fn fields(&mut self, node: usize) -> Result<Vec<Field>, Fault> {
-        if matches!(self.kind(node), "concatenation" | "brace_expression")
-            && self.shell.option("braceexpand")
-        {
-            if let Some(words) = self.brace_words(node).await? {
-                let mut out = Vec::new();
-                for mut chunks in words {
-                    self.tilde(&mut chunks);
-                    out.extend(self.split(&chunks).await?);
-                }
-                return Ok(out);
-            }
-        }
-        let mut chunks = self.chunks(node, false).await?;
-        self.tilde(&mut chunks);
-        self.assignment_tildes(&mut chunks);
-        self.split(&chunks).await
-    }
-
-    /// Split a word's pieces into fields on the shell's IFS, pausing as a
-    /// long value is scanned.
-    async fn split(&mut self, chunks: &[Chunk]) -> Result<Vec<Field>, Fault> {
-        let (host, shell) = (&mut *self.host, &*self.shell);
-        let pause = &mut async || host.pause(shell).await;
-        split_fields(chunks, shell.ifs(), shell.utf8(), pause).await
-    }
-
-    /// An argument shaped like an assignment (`a=~/x`, `a+=~`, `a[$k]=~`):
-    /// bash expands a tilde prefix after its `=` and after each unquoted
-    /// `:` in it, as in an assignment's value, so `echo a=~` names the home
-    /// directory while `echo --a=~` and a word brace expansion made do not.
-    fn assignment_tildes(&self, chunks: &mut Vec<Chunk>) {
-        let mut merged: Vec<Chunk> = Vec::with_capacity(chunks.len());
-        for chunk in std::mem::take(chunks) {
-            if let (Some(Chunk::Piece(prev)), Chunk::Piece(next)) = (merged.last_mut(), &chunk) {
-                if plain(prev) && plain(next) {
-                    prev.text.extend_from_slice(&next.text);
-                    continue;
-                }
-            }
-            merged.push(chunk);
-        }
-        *chunks = merged;
-        let Some((value_chunk, value_at)) = assignment_value_at(chunks) else {
-            return;
-        };
-        let count = chunks.len();
-        let mut out = Vec::with_capacity(count + 2);
-        for (index, chunk) in std::mem::take(chunks).into_iter().enumerate() {
-            let piece = match chunk {
-                Chunk::Piece(piece) if index >= value_chunk && plain(&piece) => piece,
-                other => {
-                    out.push(other);
-                    continue;
-                }
-            };
-            let text = piece.text;
-            let last = index + 1 == count;
-            let mut from = 0;
-            let mut i = if index == value_chunk { value_at } else { 0 };
-            let mut start = index == value_chunk;
-            while i < text.len() {
-                if start && text[i] == b'~' {
-                    let end = (i + 1..text.len())
-                        .find(|&j| matches!(text[j], b'/' | b':'))
-                        .unwrap_or(text.len());
-                    if end < text.len() || last {
-                        if let Some(named) = self.tilde_prefix(&text[i..end]) {
-                            out.push(Chunk::literal(text[from..i].to_vec()));
-                            out.push(Chunk::quoted(named));
-                            from = end;
-                            i = end;
-                            start = false;
-                            continue;
-                        }
-                    }
-                }
-                start = text[i] == b':';
-                i += 1;
-            }
-            out.push(Chunk::literal(text[from..].to_vec()));
-        }
-        out.retain(|chunk| {
-            !matches!(chunk, Chunk::Piece(piece) if piece.text.is_empty() && !piece.quoted && !piece.split)
-        });
-        *chunks = out;
     }
 
     /// A word where no field splitting happens (a `case` word, a `[[`
@@ -722,32 +442,6 @@ impl<H: Host> Expander<'_, H> {
         }
         flush_literal(&mut literal, &mut out);
         Ok(out)
-    }
-
-    /// Expand a word's tilde prefix: a `~` the word starts with, unquoted,
-    /// up to the first unquoted slash. A prefix that holds a quoted
-    /// character or an expansion is no tilde prefix (`~"/x"`, `\~`), and
-    /// what it names is quoted, so it neither splits nor globs.
-    pub fn tilde(&self, chunks: &mut Vec<Chunk>) {
-        let Some(Chunk::Piece(first)) = chunks.first() else {
-            return;
-        };
-        if first.quoted || first.split || !first.text.starts_with(b"~") {
-            return;
-        }
-        let slash = first.text.iter().position(|b| *b == b'/');
-        if slash.is_none() && chunks.len() > 1 {
-            return;
-        }
-        let end = slash.unwrap_or(first.text.len());
-        let Some(named) = self.tilde_prefix(&first.text[..end]) else {
-            return;
-        };
-        let rest = first.text[end..].to_vec();
-        chunks[0] = Chunk::quoted(named);
-        if !rest.is_empty() {
-            chunks.insert(1, Chunk::literal(rest));
-        }
     }
 
     /// Expand a node to the pieces field splitting reads; what an
@@ -939,114 +633,6 @@ impl<H: Host> Expander<'_, H> {
             _ => false,
         }
     }
-
-    /// A parameter's value where nothing splits. `strict` is `set -u`'s
-    /// refusal of an unset name or positional; the defaulting operators
-    /// pass false. The specials never refuse.
-    fn lookup(&mut self, name: &[u8], strict: bool) -> Result<Vec<u8>, Fault> {
-        let nounset = strict && self.shell.option("nounset");
-        let params = self.shell.params();
-        match name {
-            b"@" => return Ok(params.join(&b' ')),
-            b"*" => {
-                return Ok(params.join(ifs_joiner(self.shell.ifs(), self.shell.utf8()).as_slice()));
-            }
-            b"#" => return Ok(params.len().to_string().into_bytes()),
-            b"?" => return Ok(self.shell.status.to_string().into_bytes()),
-            b"$" => return Ok(self.shell.pid.to_string().into_bytes()),
-            b"-" => return Ok(self.shell.flags()),
-            b"!" => {
-                return Ok(self
-                    .shell
-                    .last_job
-                    .map(|job| job.to_string().into_bytes())
-                    .unwrap_or_default());
-            }
-            _ => {}
-        }
-        if name.iter().all(u8::is_ascii_digit) && !name.is_empty() {
-            let index: usize = std::str::from_utf8(name)
-                .ok()
-                .and_then(|n| n.parse().ok())
-                .unwrap_or(usize::MAX);
-            if index == 0 {
-                return Ok(self.shell.argv0.clone());
-            }
-            if let Some(param) = params.get(index - 1) {
-                return Ok(param.clone());
-            }
-            if nounset {
-                return Err(Signal::unbound(
-                    self.shell.vars.voice(),
-                    &String::from_utf8_lossy(name),
-                )
-                .into());
-            }
-            return Ok(Vec::new());
-        }
-        let name = String::from_utf8_lossy(name).into_owned();
-        if name == RANDOM {
-            if let Some(value) = self.shell.vars.next_random().map_err(Fault::Arith)? {
-                return Ok(value.to_string().into_bytes());
-            }
-        }
-        let vars = &self.shell.vars;
-        let found = if let Some(array) = self.shell.indexed(&name) {
-            array.get(0).map(<[u8]>::to_vec)
-        } else if let Some(map) = vars.assoc(&name) {
-            map.get(b"0").map(<[u8]>::to_vec)
-        } else if let Some(value) = vars.dynamic(&name) {
-            Some(value)
-        } else {
-            vars.scalar(&name).map(<[u8]>::to_vec)
-        };
-        match found {
-            Some(value) => Ok(value),
-            None if nounset => Err(Signal::unbound(self.shell.vars.voice(), &name).into()),
-            None => Ok(Vec::new()),
-        }
-    }
-
-    /// One `$name` as pieces: `$@` is one field per positional parameter,
-    /// quoted or not, and so is an unquoted `$*`; inside double quotes `$*`
-    /// is the parameters joined on IFS's first character.
-    fn parameter_chunks(&mut self, name: &[u8], quoted: bool) -> Result<Vec<Chunk>, Fault> {
-        if name != b"@" && name != b"*" {
-            let positional = name.iter().all(u8::is_ascii_digit) && name != b"0";
-            if positional && self.shell.option("nounset") && !self.positional_set(name) {
-                let spelled = format!("${}", String::from_utf8_lossy(name));
-                return Err(Signal::unbound(self.shell.vars.voice(), &spelled).into());
-            }
-            return Ok(vec![Chunk::value(self.lookup(name, true)?, quoted)]);
-        }
-        let params = self.shell.params().to_vec();
-        let joiner = if name == b"@" {
-            b" ".to_vec()
-        } else {
-            ifs_joiner(self.shell.ifs(), self.shell.utf8())
-        };
-        if name == b"*" && quoted {
-            return Ok(vec![Chunk::value(params.join(joiner.as_slice()), true)]);
-        }
-        Ok(splat(&params, &joiner, quoted))
-    }
-
-    /// What a word's tilde prefix names: `~` and `~/rest` the home
-    /// directory (`HOME=/` makes `~/x` `//x`), `~+` `$PWD`, `~-` `$OLDPWD`;
-    /// None for any other prefix, a user name (no user database) or a
-    /// variable that is unset.
-    pub fn tilde_prefix(&self, text: &[u8]) -> Option<Vec<u8>> {
-        let rest = text.strip_prefix(b"~")?;
-        let slash = rest.iter().position(|b| *b == b'/').unwrap_or(rest.len());
-        let (prefix, tail) = rest.split_at(slash);
-        let base = match prefix {
-            b"" => self.shell.home()?,
-            b"+" => self.shell.vars.scalar("PWD")?,
-            b"-" => self.shell.vars.scalar("OLDPWD")?,
-            _ => return None,
-        };
-        Some([base, tail].concat())
-    }
 }
 
 /// Text outside an expansion: literal, its glob characters quoted when it
@@ -1091,54 +677,4 @@ fn discard(voice: &[u8], message: &str) -> Fault {
 
 fn bad_subscript(voice: &[u8], p: &Braces) -> Fault {
     discard(voice, &format!("{}: bad array subscript\n", reference(p)))
-}
-
-/// A piece as typed: unquoted, and no expansion's value.
-fn plain(piece: &Piece) -> bool {
-    !piece.quoted && !piece.split
-}
-
-/// Where the value of an assignment-shaped word starts, as a chunk and a
-/// byte in it: past a typed `name=`, `name+=` or `name[subscript]=`, the
-/// subscript's brackets balanced and its text free to be quoted or
-/// expanded (`c[$k]=~`); None when the first typed `=` ends anything else.
-fn assignment_value_at(chunks: &[Chunk]) -> Option<(usize, usize)> {
-    let Some(Chunk::Piece(first)) = chunks.first() else {
-        return None;
-    };
-    if !plain(first)
-        || !first
-            .text
-            .first()
-            .is_some_and(|b| *b == b'_' || b.is_ascii_alphabetic())
-    {
-        return None;
-    }
-    let mut depth = 0usize;
-    let mut closed = false;
-    let mut plus = false;
-    for (index, chunk) in chunks.iter().enumerate() {
-        let piece = match chunk {
-            Chunk::Piece(piece) if plain(piece) => piece,
-            _ if depth > 0 => continue,
-            _ => return None,
-        };
-        for (at, &byte) in piece.text.iter().enumerate() {
-            match byte {
-                b'=' if depth == 0 => return Some((index, at + 1)),
-                b'=' => return None,
-                _ if plus => return None,
-                b'[' if depth > 0 || !closed => depth += 1,
-                b']' if depth > 0 => {
-                    depth -= 1;
-                    closed = depth == 0;
-                }
-                _ if depth > 0 => {}
-                b'+' => plus = true,
-                b'_' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' if !closed => {}
-                _ => return None,
-            }
-        }
-    }
-    None
 }

@@ -269,6 +269,7 @@ async def returning(
     frame.closed = frame.sourced
     if session.function_names is not None:
         session.function_names = call_stack.function_names()
+    session.call_lines = call_stack.call_lines()
     outputs = [stdout]
     try:
         io = await land(

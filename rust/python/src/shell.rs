@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString};
-use streams::shell::{FIELDS, Heredoc, KINDS, Node, Options, Tree, field_id};
+use streams::shell::{FIELDS, Heredoc, KINDS, Node, Options, Tree, field_id, reread_lines};
 
 /// Gives each tree a number, so node ids differ across trees.
 static TREES: AtomicU64 = AtomicU64::new(0);
@@ -306,6 +306,16 @@ impl ShellNode {
     #[getter]
     fn inlined<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         PyBytes::new(py, &self.tree.inlined(self.index as usize))
+    }
+
+    /// Each node under this one, a `$( )` body bash reads again as it
+    /// prints it: its id, the line `$LINENO` numbers it by and the line it
+    /// ends on, from 0.
+    fn reread_lines(&self) -> Vec<(u64, u32, u32)> {
+        reread_lines(&self.tree, self.index as usize)
+            .into_iter()
+            .map(|(index, line, end)| ((self.serial << 32) | u64::from(index), line, end))
+            .collect()
     }
 
     /// Where each byte of the tree's source came from in the line as

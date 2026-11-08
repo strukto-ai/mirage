@@ -106,7 +106,7 @@ describe('lsGeneric', () => {
       return new FileStat({ name: key(p).split('/').pop() ?? '', type: FileType.FILE })
     }
     const result = await lsGeneric([spec('/')], ctx({}), () => Promise.resolve(names), slowStat)
-    expect(DEC.decode((result?.[0] ?? new Uint8Array()) as Uint8Array).split('\n')).toHaveLength(41)
+    expect(DEC.decode(await materialize(result?.[0] ?? null)).split('\n')).toHaveLength(41)
     expect(peak).toBe(1)
   })
 })
@@ -149,6 +149,23 @@ async function drained(pending: Promise<CommandFnResult>): Promise<[Uint8Array, 
   if (result === null) return [new Uint8Array(), new IOResult()]
   const [out, io] = result
   return [await materialize(out), io]
+}
+
+// What a terminal shows: each stderr line said on `io` before the chunk it
+// precedes. Mirrors test_ls.py's _merged.
+async function merged(result: CommandFnResult): Promise<string> {
+  if (result === null) return ''
+  const [out, io] = result
+  let text = ''
+  let said = 0
+  for await (const chunk of out === null || out instanceof Uint8Array
+    ? [out ?? new Uint8Array()]
+    : out) {
+    const err = await materialize(io.stderr)
+    text += DEC.decode(err.subarray(said)) + DEC.decode(chunk)
+    said = err.byteLength
+  }
+  return text + DEC.decode((await materialize(io.stderr)).subarray(said))
 }
 
 async function status(
@@ -284,6 +301,51 @@ describe('structure-only directories', () => {
     )
   })
 
+  // GNU 9.7 (ls -1 z missing m a, then ls -1R, m mode 000): a missing operand
+  // is reported first, a directory that will not open where its listing would
+  // have printed, with no blank line before it. Mirrors test_ls.py.
+  it('reports a directory it cannot open in its place', async () => {
+    const tree: Record<string, string[]> = {
+      '/t': ['/t/a', '/t/m', '/t/z'],
+      '/t/a': ['/t/a/f1'],
+      '/t/z': ['/t/z/f2'],
+    }
+    const placeReaddir = (p: PathSpec): Promise<string[]> => {
+      if (key(p) === '/t/m') return eacces()
+      const names = tree[key(p)]
+      return names === undefined ? enoent() : Promise.resolve(names)
+    }
+    const placeStat = (p: PathSpec): Promise<FileStat> =>
+      key(p) === '/t/missing'
+        ? enoent()
+        : Promise.resolve(
+            new FileStat({
+              name: key(p).split('/').pop() ?? '',
+              type: key(p) in tree || key(p) === '/t/m' ? FileType.DIRECTORY : FileType.FILE,
+            }),
+          )
+    const plain = await lsGeneric(
+      ['/t/z', '/t/missing', '/t/m', '/t/a'].map(spec),
+      ctx({}),
+      placeReaddir,
+      placeStat,
+    )
+    expect(await merged(plain)).toBe(
+      "ls: cannot access '/t/missing': No such file or directory\n" +
+        '/t/a:\nf1\n' +
+        "ls: cannot open directory '/t/m': Permission denied\n" +
+        '\n/t/z:\nf2\n',
+    )
+    expect(plain?.[1].exitCode).toBe(LS_FAILURE)
+    const walked = await lsGeneric([spec('/t')], ctx({ recursive: true }), placeReaddir, placeStat)
+    expect(await merged(walked)).toBe(
+      '/t:\na\nm\nz\n\n/t/a:\nf1\n' +
+        "ls: cannot open directory '/t/m': Permission denied\n" +
+        '\n/t/z:\nf2\n',
+    )
+    expect(walked?.[1].exitCode).toBe(LS_MINOR_PROBLEM)
+  })
+
   // Absence of the dispatcher can only mean "nobody can answer", so the row keeps
   // the shape every caller outside a workspace already saw.
   it('falls back to a directory row with no dispatcher', async () => {
@@ -301,7 +363,7 @@ describe('structure-only directories', () => {
       ),
     )
     expect(result?.[1].exitCode).toBe(LS_OK)
-    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('deep/\n')
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe('deep/\n')
   })
 })
 
@@ -321,7 +383,7 @@ describe('honest per-entry errors', () => {
     const result = await lsGeneric([spec('/')], ctx(flags), readdir, statFailingEntries(err))
     return {
       code: result?.[1].exitCode,
-      stdout: DEC.decode(result?.[0] as Uint8Array),
+      stdout: DEC.decode(await materialize(result?.[0] ?? null)),
       stderr: DEC.decode((result?.[1].stderr ?? new Uint8Array()) as Uint8Array),
     }
   }
@@ -377,7 +439,7 @@ describe('honest per-entry errors', () => {
       key(p) === '/' ? stat(p) : Promise.reject(stamped(key(p), 'EACCES'))
     const result = await lsGeneric([spec('/')], ctx({ S: true }), marking, denying)
     expect(result?.[1].exitCode).toBe(LS_MINOR_PROBLEM)
-    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('afile\nzdir\n')
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe('afile\nzdir\n')
   })
 
   it('still ends the command on a timeout or an abort', async () => {
@@ -639,7 +701,7 @@ describe('dot entries respect mount boundaries', () => {
           )
           expect(result?.[1].exitCode).toBe(0)
           expect(result?.[1].stderr).toBeNull()
-          const output = DEC.decode(result?.[0] as Uint8Array)
+          const output = DEC.decode(await materialize(result?.[0] ?? null))
           const dotMode = subdir ? 'drwxr-x---' : 'drwxr-x--x'
           const parentMode =
             subdir || !prefix ? 'drwxr-x--x' : namespace ? 'drwx------' : 'drwxr-xr-x'
@@ -876,6 +938,8 @@ describe('ls formats, quoting and ignore patterns', () => {
       read({}, env),
     )
     expect(result?.[1].exitCode).toBe(LS_FAILURE)
+    // What ls reports goes before what it lists, said as the listing is read.
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe('/q:\na\n')
     expect(DEC.decode(await materialize(result?.[1].stderr ?? null))).toBe(
       "ls: ignoring invalid value of environment variable QUOTING_STYLE: 'bogus'\n" +
         "ls: cannot access '/nope': No such file or directory\n",

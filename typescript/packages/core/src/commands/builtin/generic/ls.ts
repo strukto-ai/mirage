@@ -15,7 +15,8 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { mountKey, mountPrefixOf, underPath } from '../../../utils/key_prefix.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { atOffsets, say } from '../utils/operands.ts'
+import { IOResult } from '../../../io/types.ts'
 import {
   LINK_TARGET_KEY,
   FileStat,
@@ -144,10 +145,14 @@ interface WalkOpts {
 // a directory: GNU prints those first, as one block with no header. `groups`
 // holds the operand's own [dir, entries] listing; under -R what lies below is
 // walked as it prints. Both empty means the operand could not be accessed.
+// `notes` holds a directory the operand could not list, with the number of
+// groups listed before it: GNU reports one where its listing would have
+// printed.
 interface Operand {
   readonly path: PathSpec
   readonly row: FileStat | null
   readonly groups: [PathSpec, FileStat[]][]
+  readonly notes?: readonly (readonly [number, LsWarning])[]
 }
 
 function errText(err: unknown): string {
@@ -773,11 +778,17 @@ async function probeOperand(
     // it names, and a directory it may not read is worded apart, the entry
     // being there.
     const verb = found !== null && isEacces(err) ? 'cannot open directory' : 'cannot access'
-    warnings.push({
+    const refusal: LsWarning = {
       message: `ls: ${verb} '${path.rawPath}': ${errText(refused ?? err)}`,
       serious: commandLineArg,
-    })
-    return { path, row: null, groups: [] }
+    }
+    if (commandLineArg && verb === 'cannot access') {
+      warnings.push(refusal)
+      return { path, row: null, groups: [] }
+    }
+    // A directory that is there but will not open is reported where its
+    // listing would have printed (GNU 9.7).
+    return { path, row: null, groups: [], notes: [[0, refusal]] }
   }
   if (stats.length === 0 && !structureOnly) {
     let row: FileStat | null = null
@@ -1196,18 +1207,25 @@ function statNeeded(flags: LsFlags): boolean {
   )
 }
 
+// GNU looks at every operand before it lists one, so what it reports comes
+// before what it lists (`ls d missing 2>&1`), all but a directory it does not
+// list (one that will not open, one -L already listed), reported where that
+// listing would have printed: `placed` holds each such warning with the index
+// in `lines` it is written before, in order.
+// Mirrors Python's _finish.
 function finish(
   lines: string[],
   warnings: readonly LsWarning[],
   notices: readonly string[],
 ): CommandFnResult {
-  const out: ByteSource = formatRecords(lines)
+  const out = formatRecords(lines)
   const exitCode = exitStatusFor(warnings)
-  if (warnings.length > 0 || notices.length > 0) {
-    const stderr = formatRecords([...notices, ...warnings.map((w) => w.message)])
-    return [out, new IOResult({ stderr, exitCode })]
-  }
-  return [out, new IOResult({ exitCode })]
+  const leading = [...notices, ...warnings.map((w) => w.message)]
+  if (leading.length === 0) return [out, new IOResult({ exitCode })]
+  const stderr = formatRecords(leading)
+  if (out.byteLength === 0) return [out, new IOResult({ stderr, exitCode })]
+  const io = new IOResult({ exitCode })
+  return [atOffsets(out, [[0, stderr]], io), io]
 }
 
 // `statPath` stats a mount root or dot entry across mounts; the cross-mount relay passes none.
@@ -1328,15 +1346,18 @@ export async function lsGeneric(
   const operands =
     probed.length > 1 ? await sortOperands(probed, sortBy, reverse, stat, timeKind, quote) : probed
 
+  type Walked = [PathSpec, FileStat[]] | LsWarning
+
   // -R lists each directory below an operand as the walk reaches it, in
-  // pre-order, so a reader that stops early stops the walk.
+  // pre-order, so a reader that stops early stops the walk; what the walk
+  // reports goes out where the walk meets it.
   async function* below(
     path: PathSpec,
     entries: readonly FileStat[],
     chain: readonly string[],
     spell: (virtual: string) => string,
     opts: WalkOpts,
-  ): AsyncGenerator<[PathSpec, FileStat[]]> {
+  ): AsyncGenerator<Walked> {
     const real = deref && links !== null ? (virtual: string) => links.resolve(virtual) : null
     const open = real !== null && chain.length === 0 ? [real(path.virtual)] : chain
     for (const s of entries) {
@@ -1355,23 +1376,26 @@ export async function lsGeneric(
         // this one is never listed again (exit 2).
         const here = real(childPath)
         if (open.includes(here)) {
-          warnings.push({
+          yield {
             message: `ls: ${spell(childPath)}: not listing already-listed directory`,
             serious: true,
-          })
+          }
           continue
         }
         under = [...open, here]
       }
+      const found: LsWarning[] = []
       const child = await probeOperand(
         readdir,
         stat,
         childSpec(childPath, mountPrefixOf(path.virtual, path.vfsPath)),
         opts,
-        warnings,
+        found,
         false,
         spell,
       )
+      yield* found
+      for (const [, note] of child.notes ?? []) yield note
       for (const [dirSpec, listed] of child.groups) {
         yield [dirSpec, listed]
         yield* below(dirSpec, listed, under, spell, opts)
@@ -1379,21 +1403,24 @@ export async function lsGeneric(
     }
   }
 
-  async function* groups(operand: Operand): AsyncGenerator<[PathSpec, FileStat[]]> {
+  async function* groups(operand: Operand): AsyncGenerator<Walked> {
     const spell = (virtual: string): string =>
       respellOne(virtual, operand.path.virtual, operand.path.rawPath)
     const budget = budgets.get(operand)
     const opts = budget === undefined ? walkOpts : { ...walkOpts, budget }
+    for (const [, note] of operand.notes ?? []) yield note
     for (const [dirSpec, entries] of operand.groups) {
       yield [dirSpec, entries]
       if (recursive) yield* below(dirSpec, entries, [], spell, opts)
     }
-    for (const line of budget?.stopped ?? []) {
-      warnings.push({ message: `ls: ${line}`, serious: false })
-    }
+    for (const line of budget?.stopped ?? []) yield { message: `ls: ${line}`, serious: false }
   }
 
-  async function withDots(dirSpec: PathSpec, entries: FileStat[]): Promise<FileStat[]> {
+  async function withDots(
+    dirSpec: PathSpec,
+    entries: FileStat[],
+    found: LsWarning[],
+  ): Promise<FileStat[]> {
     const dots: FileStat[] = []
     const prefix = mountPrefixOf(dirSpec.virtual, dirSpec.vfsPath)
     for (const name of ['.', '..']) {
@@ -1404,16 +1431,13 @@ export async function lsGeneric(
       // Without `statPath`, keep the synthetic directory row.
       if (statNeeded(flags) && (statPath !== null || underPath(target, prefix))) {
         try {
-          const found =
+          const stated =
             statPath !== null ? await statPath(target) : await stat(childSpec(target, prefix))
-          if (found !== null) row = found.with({ name })
+          if (stated !== null) row = stated.with({ name })
         } catch (err) {
           if (!isWalkError(err)) throw err
           row = statFailedRow(name)
-          warnings.push({
-            message: `ls: cannot access '${name}': ${errText(err)}`,
-            serious: false,
-          })
+          found.push({ message: `ls: cannot access '${name}': ${errText(err)}`, serious: false })
         }
       }
       dots.push(row)
@@ -1421,54 +1445,106 @@ export async function lsGeneric(
     return sortStats([...dots, ...entries], sortBy, reverse, timeKind, groupDirsFirst, quote)
   }
 
-  const io = new IOResult()
-  async function* blocks(): AsyncGenerator<Uint8Array> {
-    try {
-      // ls names every listed directory once there is more than one operand
-      // (or under -R); a lone directory operand is listed bare.
-      const headed = recursive || targets.length > 1
-      const rowed = operands.filter((o) => o.row !== null)
-      const rows = rowed.flatMap((o) => (o.row !== null ? [o.row] : []))
-      const rowPaths = rowed.map((o) => o.path.virtual)
-      await renderGroup(
-        rows,
-        render,
-        lines,
-        flags.hyperlink ? rowPaths : null,
-        await linkTargets(rows, rowPaths, links, render),
-      )
-      let printed = rows.length > 0
-      for (const operand of operands) {
-        for await (const [dirSpec, group] of groups(operand)) {
-          const entries = flags.showDotEntries ? await withDots(dirSpec, group) : group
-          if (headed) {
-            if (printed) lines.push('')
-            const header = respellOne(dirSpec.virtual, operand.path.virtual, operand.path.rawPath)
-            lines.push(`${quote === null ? header : quote(header)}:`)
-          }
-          // ls prints allocated blocks; VFS has no allocation metadata.
-          if (long || flags.columns.blocks) lines.push(entries.length > 0 ? 'total ?' : 'total 0')
-          const entryPaths = entries.map((e) => `${rstripSlash(dirSpec.virtual)}/${e.name}`)
-          await renderGroup(
-            entries,
-            render,
-            lines,
-            flags.hyperlink ? entryPaths : null,
-            await linkTargets(entries, entryPaths, links, render),
-          )
-          printed = true
-          if (lines.length > 0) yield formatRecords(lines.splice(0))
+  // The listing a block at a time, each warning the walk meets between the
+  // blocks it falls between.
+  async function* pieces(): AsyncGenerator<Uint8Array | LsWarning> {
+    // ls names every listed directory once there is more than one operand
+    // (or under -R); a lone directory operand is listed bare.
+    const headed = recursive || targets.length > 1
+    const rowed = operands.filter((o) => o.row !== null)
+    const rows = rowed.flatMap((o) => (o.row !== null ? [o.row] : []))
+    const rowPaths = rowed.map((o) => o.path.virtual)
+    await renderGroup(
+      rows,
+      render,
+      lines,
+      flags.hyperlink ? rowPaths : null,
+      await linkTargets(rows, rowPaths, links, render),
+    )
+    let printed = rows.length > 0
+    if (lines.length > 0) yield formatRecords(lines.splice(0))
+    for (const operand of operands) {
+      for await (const item of groups(operand)) {
+        if (!Array.isArray(item)) {
+          yield item
+          continue
         }
+        const [dirSpec, group] = item
+        let entries = group
+        if (flags.showDotEntries) {
+          const found: LsWarning[] = []
+          entries = await withDots(dirSpec, group, found)
+          yield* found
+        }
+        if (headed) {
+          if (printed) lines.push('')
+          const header = respellOne(dirSpec.virtual, operand.path.virtual, operand.path.rawPath)
+          lines.push(`${quote === null ? header : quote(header)}:`)
+        }
+        // ls prints allocated blocks; VFS has no allocation metadata.
+        if (long || flags.columns.blocks) lines.push(entries.length > 0 ? 'total ?' : 'total 0')
+        const entryPaths = entries.map((e) => `${rstripSlash(dirSpec.virtual)}/${e.name}`)
+        await renderGroup(
+          entries,
+          render,
+          lines,
+          flags.hyperlink ? entryPaths : null,
+          await linkTargets(entries, entryPaths, links, render),
+        )
+        printed = true
+        if (lines.length > 0) yield formatRecords(lines.splice(0))
       }
-      if (lines.length > 0) yield formatRecords(lines.splice(0))
-    } finally {
-      if (warnings.length > 0 || notices.length > 0)
-        io.stderr = formatRecords([...notices, ...warnings.map((w) => w.message)])
-      io.exitCode = exitStatusFor(warnings)
     }
   }
-  if (recursive) return [blocks(), io]
-  const parts: Uint8Array[] = []
-  for await (const part of blocks()) parts.push(part)
-  return [concat(parts), io]
+
+  // GNU looks at every operand before it lists one, so what that found goes
+  // first; the rest goes where the walk met it.
+  const reported = [...warnings]
+  const pending = [...notices, ...warnings.map((w) => w.message)]
+  if (recursive) {
+    const io = new IOResult()
+    const stream = async function* (): AsyncGenerator<Uint8Array> {
+      try {
+        for await (const piece of pieces()) {
+          if (!(piece instanceof Uint8Array)) {
+            reported.push(piece)
+            pending.push(piece.message)
+            continue
+          }
+          if (pending.length > 0) await say(io, formatRecords(pending.splice(0)))
+          yield piece
+        }
+      } finally {
+        if (pending.length > 0) await say(io, formatRecords(pending.splice(0)))
+        io.exitCode = exitStatusFor(reported)
+      }
+    }
+    return [stream(), io]
+  }
+  const body: Uint8Array[] = []
+  const notes: [number, Uint8Array][] = []
+  let offset = 0
+  for await (const piece of pieces()) {
+    if (!(piece instanceof Uint8Array)) {
+      reported.push(piece)
+      pending.push(piece.message)
+      continue
+    }
+    if (pending.length > 0) notes.push([offset, formatRecords(pending.splice(0))])
+    body.push(piece)
+    offset += piece.byteLength
+  }
+  const out = concat(body)
+  const exitCode = exitStatusFor(reported)
+  if (out.byteLength === 0) {
+    return [
+      out,
+      new IOResult(
+        pending.length > 0 ? { stderr: formatRecords(pending), exitCode } : { exitCode },
+      ),
+    ]
+  }
+  if (pending.length > 0) notes.push([offset, formatRecords(pending)])
+  const io = new IOResult({ exitCode })
+  return [atOffsets(out, notes, io), io]
 }

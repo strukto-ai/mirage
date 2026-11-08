@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cat sub/missing.txt 2>&1",
+      "command": "cat sub/missing.txt 2>&1; echo a | cat - qnf7 2>&1; echo a | cat qnf7 - 2>&1; echo a | head -n1 - qnf7 2>&1; echo a | wc -l - qnf7 2>&1; echo a | tac - qnf7 2>&1; echo a | md5sum - qnf7 2>&1; echo rc=$?; head . ./ 2>&1; tail . ./ 2>&1; echo rc=$?",
       "expect": {
-        "exit": 1,
-        "stdout": "cat: sub/missing.txt: No such file or directory\n",
+        "exit": 0,
+        "stdout": "cat: sub/missing.txt: No such file or directory\na\ncat: qnf7: No such file or directory\ncat: qnf7: No such file or directory\na\n==> standard input <==\na\nhead: cannot open 'qnf7' for reading: No such file or directory\n      1 -\nwc: qnf7: No such file or directory\n      1 total\ntac: failed to open 'qnf7' for reading: No such file or directory\na\n60b725f10c9c85c70d97880dfe8191b3  -\nmd5sum: qnf7: No such file or directory\nrc=1\n==> . <==\nhead: error reading '.': Is a directory\n\n==> ./ <==\nhead: error reading './': Is a directory\n==> . <==\ntail: error reading '.': Is a directory\n\n==> ./ <==\ntail: error reading './': Is a directory\nrc=1\n",
         "stderr": ""
       }
     },
@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "grep hello sub/missing.txt 2>&1",
+      "command": "grep hello sub/missing.txt 2>&1; echo a | grep -H a - qnf7 2>&1; shuf qnf7 qnf8 2>&1; echo rc=$?; echo x | xargs ./qnf7 2>&1; echo rc=$?",
       "expect": {
-        "exit": 2,
-        "stdout": "grep: sub/missing.txt: No such file or directory\n",
+        "exit": 0,
+        "stdout": "grep: sub/missing.txt: No such file or directory\n(standard input):a\ngrep: qnf7: No such file or directory\nshuf: extra operand 'qnf8'\nTry 'shuf --help' for more information.\nrc=1\nxargs: ./qnf7: No such file or directory\nrc=127\n",
         "stderr": ""
       }
     }

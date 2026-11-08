@@ -178,7 +178,7 @@ async def handle_pipe(
             stdout, io, ran = await execute_node(
                 cmd, child_evaluation, input_stream, stage_stack, sink=output
             )
-            await pump(output, Channel.STDOUT, stdout)
+            await pump(output, Channel.STDOUT, stdout, io)
             return None, io, ran
 
         try:
@@ -189,7 +189,7 @@ async def handle_pipe(
                 stage_stack,
                 run_program(cmd, child_evaluation, statement),
             )
-            await pump(output, Channel.STDOUT, stdout)
+            await pump(output, Channel.STDOUT, stdout, io)
             await pump(output, Channel.STDERR, io.stderr)
             if waits is not None:
                 await waits.join(rest)

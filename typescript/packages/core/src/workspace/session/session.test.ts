@@ -307,6 +307,28 @@ describe('SessionState.fromJSON', () => {
     const bare = SessionState.fromDict({ session_id: 's', env: { A: '1' } })
     expect(bare.vars.get('OPTIND')).toEqual(makeVar('1', new Set([VarAttr.Integer])))
   })
+
+  it('keeps the names declared and never assigned', () => {
+    const record = {
+      session_id: 'rt',
+      env: {},
+      arrays: { y: {}, w: { 0: '1' } },
+      assocs: { m: {} },
+      var_attrs: { z: 'i' },
+      unassigned: ['m', 'x', 'y', 'z'],
+    }
+    const restored = SessionState.fromDict(
+      SessionState.fromDict(record).toDict() as Parameters<typeof SessionState.fromDict>[0],
+    )
+    expect(['m', 'w', 'x', 'y', 'z'].map((name) => restored.vars.shell.declaration(name))).toEqual([
+      'declare -A m',
+      'declare -a w=([0]="1")',
+      'declare -- x',
+      'declare -a y',
+      'declare -i z',
+    ])
+    expect(restored.toDict().unassigned).toEqual(['m', 'x', 'y', 'z'])
+  })
 })
 
 describe('SessionState.newShell', () => {

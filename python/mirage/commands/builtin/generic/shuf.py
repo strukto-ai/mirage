@@ -415,6 +415,12 @@ async def shuf_generic(
             draws, items, count, with_replacement, ord(sep)
         )
     else:
+        if len(paths) > 1:
+            # GNU: shuf reads one input, so a second file is one too many.
+            word = paths[1].raw_path or paths[1].virtual
+            raise ValueError(
+                f"shuf: extra operand '{quote_text(word)}'" + _TRY_HELP
+            )
         rendered = await _sample_records(
             draws, paths, read, stdin, sep, count, with_replacement
         )

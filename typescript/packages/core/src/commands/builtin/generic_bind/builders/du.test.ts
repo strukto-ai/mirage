@@ -116,10 +116,11 @@ describe('du walk fallback (no native du op)', () => {
 
   // Mirrors test_each_operand_walks_under_its_own_limit.
   it('walks each operand under its own limit', async () => {
-    const [out, io] = await runScoped({ ...OPS, walkLimit: 2 }, [
-      PathSpec.fromStrPath('/db'),
-      PathSpec.fromStrPath('/db/sub'),
-    ])
+    const [out, io] = await runScoped(
+      { ...OPS, walkLimit: 2 },
+      [PathSpec.fromStrPath('/db'), PathSpec.fromStrPath('/db/sub')],
+      { flags: { count_links: true } },
+    )
     expect([DEC.decode(out), io.exitCode, DEC.decode(io.stderr ?? new Uint8Array())]).toEqual([
       '0\t/db/sub\n3\t/db\n2\t/db/sub\n',
       1,
@@ -163,9 +164,16 @@ const TREED: Table = {
 async function runScoped(
   ops: Table,
   paths: PathSpec[],
+  ctx: Partial<Context> = {},
 ): Promise<[Uint8Array, { exitCode: number; stderr: Uint8Array | null }]> {
-  const result = await du(ops, paths)
-  return result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
+  const result = await du(ops, paths, ctx)
+  if (result === null) throw new Error('no result')
+  const [out, io] = result
+  // The stdout first: a line said among it lands on io as it is read.
+  return [await materialize(out), io] as [
+    Uint8Array,
+    { exitCode: number; stderr: Uint8Array | null },
+  ]
 }
 
 describe('du walk fallback under a path rule', () => {
@@ -380,9 +388,10 @@ describe('du -L through a directory it may not list', () => {
       { flags: { all: true, dereference: true } },
       ONE_LINK,
     )
-    const [out, io] = result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
-    expect(DEC.decode(out)).toBe('6\t/db/link\n0\t/db/private\n6\t/db\n')
-    expect([io.exitCode, DEC.decode(io.stderr ?? new Uint8Array())]).toEqual([
+    if (result === null) throw new Error('no result')
+    const [out, io] = result
+    expect(DEC.decode(await materialize(out))).toBe('6\t/db/link\n0\t/db/private\n6\t/db\n')
+    expect([io.exitCode, DEC.decode(await io.materializeStderr())]).toEqual([
       1,
       "du: cannot read directory '/db/private': Permission denied\n",
     ])

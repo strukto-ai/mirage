@@ -124,6 +124,23 @@ def routed_consumer(
     return Consumer.EXTERNAL, dataclasses.replace(routing, bindings=bindings)
 
 
+def without_capture(
+    routing: RouteDecision[RuntimeIdentity] | None, name: str
+) -> RouteDecision[RuntimeIdentity] | None:
+    """The line's placement with no runtime capturing ``name``, which is
+    how ``builtin`` runs its target: the shell's own builtin, though a
+    runtime takes the name by itself (``builtin kill``).
+
+    Args:
+        routing (RouteDecision | None): the line's placement.
+        name (str): the builtin's name.
+    """
+    if routing is None or name not in routing.bindings:
+        return routing
+    bindings = {k: v for k, v in routing.bindings.items() if k != name}
+    return dataclasses.replace(routing, bindings=bindings)
+
+
 def mirage_program_at(
     name: str,
     args: Sequence[str],

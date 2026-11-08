@@ -45,22 +45,14 @@ import { expandAndClassify } from '../expand/parts.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { appended, conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
-
-/** `subscriptIndex` whose failure ends the line, in bash's words. */
-async function fatalIndex(
-  context: EvaluationContext,
-  subscript: string,
-  policies: Policies | null,
-): Promise<bigint> {
-  const session = context.session
-  try {
-    return await subscriptIndex(session, subscript, policies)
-  } catch (err) {
-    if (err instanceof ArithError) throw err.signal('', true)
-    throw err
-  }
-}
+import {
+  appended,
+  conversionScalar,
+  deref,
+  fatalSubscriptIndex,
+  sessionView,
+  subscriptIndex,
+} from '../session/state.ts'
 
 /** `buildIndexedLiteral` whose subscript failure ends the line. */
 async function fatalIndexLiteral(
@@ -323,7 +315,7 @@ export async function executeAssignment(
       const scalar = conversionScalar(session, key)
       arr = makeArray(scalar === null ? [] : [scalar])
     }
-    let idx = await fatalIndex(context, subText, policies)
+    let idx = await fatalSubscriptIndex(context.session, subText, policies)
     if (idx < 0n) idx += arrayExtent(arr)
     if (idx < 0n) {
       // Same fatal shape as the empty subscript above.

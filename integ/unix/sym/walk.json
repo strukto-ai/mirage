@@ -168,10 +168,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/sywd/d1 /data/sywd/d2 && printf 'hello\\n' > /data/sywd/ext && cd /data/sywd && printf 'a\\n' > d1/a && printf 'b\\n' > d2/b && ln -s ../ext d1/l && ln -s ../ext d2/l && du -aLc d1 d2 | cut -f2 | sort; du -L d1 d1 | cut -f2)",
+      "command": "(mkdir -p /data/sywd/d1 /data/sywd/d2 && printf 'hello\\n' > /data/sywd/ext && cd /data/sywd && printf 'a\\n' > d1/a && printf 'b\\n' > d2/b && ln -s ../ext d1/l && ln -s ../ext d2/l && du -aLc d1 d2 | cut -f2 | sort; du -L d1 d1 | cut -f2); (cd /data/sywd && ln -s a d1/m && ln -s . d1/self && du -alL d1 | cut -f2 | sort; du -slL d1 d1 | cut -f2)",
       "expect": {
         "exit": 0,
-        "stdout": "d1\nd1/a\nd1/l\nd2\nd2/b\ntotal\nd1\n",
+        "stdout": "d1\nd1/a\nd1/l\nd2\nd2/b\ntotal\nd1\nd1\nd1/a\nd1/l\nd1/m\nd1\nd1\n",
         "stderr": ""
       }
     },
@@ -273,10 +273,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw11/d/sub /data/syw11/o && printf 'hello\\n' > /data/syw11/o/f && cd /data/syw11 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s .. d/sub/up && ln -s ../d d/self && { ls -RL d; echo rc=$?; })",
+      "command": "(mkdir -p /data/syw11/d/sub /data/syw11/o && printf 'hello\\n' > /data/syw11/o/f && cd /data/syw11 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s .. d/sub/up && ln -s ../d d/self && { ls -RL d; echo rc=$?; ls -RL d 2>&1; echo rc=$?; })",
       "expect": {
         "exit": 0,
-        "stdout": "d:\na\nld\nlf\nself\nsub\n\nd/ld:\nf\n\nd/sub:\nb\nup\nrc=2\n",
+        "stdout": "d:\na\nld\nlf\nself\nsub\n\nd/ld:\nf\n\nd/sub:\nb\nup\nrc=2\nd:\na\nld\nlf\nself\nsub\n\nd/ld:\nf\nls: d/self: not listing already-listed directory\n\nd/sub:\nb\nup\nls: d/sub/up: not listing already-listed directory\nrc=2\n",
         "stderr": "ls: d/self: not listing already-listed directory\nls: d/sub/up: not listing already-listed directory\n"
       }
     },

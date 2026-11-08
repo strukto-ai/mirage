@@ -26,7 +26,11 @@ from mirage.workspace.executor.builtins.lookup.constants import (
     WHICH_USAGE,
 )
 from mirage.workspace.executor.builtins.lookup.types import NameKind
-from mirage.workspace.executor.builtins.shared import builtin_usage, result
+from mirage.workspace.executor.builtins.shared import (
+    builtin_usage,
+    result,
+    written,
+)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.lookup import program
 from mirage.workspace.mount import MountRegistry
@@ -67,39 +71,39 @@ def handle_type(
     mode = last_of(scan.letters, "tpP")
     all_mode = "a" in scan.letters
     hidden = NameKind.FUNCTION if "f" in scan.letters else None
-    out_lines: list[str] = []
-    err_lines: list[str] = []
+    pieces: list[tuple[bool, str]] = []
     all_found = True
     for name in scan.operands:
         if mode == "P":
             if program(name, session, registry) is None:
                 all_found = False
             else:
-                out_lines.append(f"{program_file(name)}\n")
+                pieces.append((False, f"{program_file(name)}\n"))
             continue
         kinds = locations(name, session, registry, all_mode, hidden)
         if not kinds:
             all_found = False
             if mode is None:
-                err_lines.append(f"{shell_voice()}type: {name}: not found\n")
+                pieces.append(
+                    (True, f"{shell_voice()}type: {name}: not found\n")
+                )
             continue
         if mode == "t":
-            out_lines.extend(f"{kind.value}\n" for kind in kinds)
+            pieces.extend((False, f"{kind.value}\n") for kind in kinds)
         elif mode == "p":
-            out_lines.extend(
-                f"{program_file(name)}\n"
+            pieces.extend(
+                (False, f"{program_file(name)}\n")
                 for kind in kinds
                 if kind is NameKind.FILE
             )
         else:
-            out_lines.extend(
-                f"{describe(name, kind, session)}\n" for kind in kinds
+            pieces.extend(
+                (False, f"{describe(name, kind, session)}\n") for kind in kinds
             )
-    out = encode_text("".join(out_lines)) if out_lines else None
     # One call, so the diagnostics never ride on the status: a partial
     # miss both warns and reports through the exit code.
     code = 0 if (not scan.operands or all_found) else 1
-    return result("type", out=out, exit_code=code, stderr="".join(err_lines))
+    return written("type", pieces, code)
 
 
 def handle_which(

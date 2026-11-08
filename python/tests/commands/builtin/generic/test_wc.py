@@ -113,7 +113,7 @@ async def test_format_multi_accepts_a_sync_or_async_iterator_read(read):
     paths = [PathSpec.from_str_path("/a.txt")]
     assert await format_multi(paths, read=read, lines=True) == (
         b"1 /a.txt\n",
-        b"",
+        [],
         [PathRecord(paths[0], values=(1,))],
     )
 
@@ -123,9 +123,9 @@ async def test_format_multi_empty_paths_returns_empty():
     async def fake_read(_path):
         return b""
 
-    out, err, _ = await format_multi([], read=fake_read, lines=True)
+    out, notes, _ = await format_multi([], read=fake_read, lines=True)
     assert out == b""
-    assert err == b""
+    assert notes == []
 
 
 @pytest.mark.asyncio
@@ -138,13 +138,13 @@ async def test_format_multi_all_missing_zero_total():
     async def fake_read(path):
         raise FileNotFoundError(path.virtual)
 
-    out, err, runs = await format_multi(paths, read=fake_read, lines=True)
+    out, notes, runs = await format_multi(paths, read=fake_read, lines=True)
     assert runs == []
     assert out == b"0 total\n"
-    assert err == (
-        b"wc: /m1.txt: No such file or directory\n"
-        b"wc: /m2.txt: No such file or directory\n"
-    )
+    assert notes == [
+        (0, b"wc: /m1.txt: No such file or directory\n"),
+        (0, b"wc: /m2.txt: No such file or directory\n"),
+    ]
 
 
 # GNU's word-choice refusal names the refused word quoted, so a byte
@@ -213,11 +213,11 @@ async def test_format_multi_asks_line_count_for_lines_alone():
     async def line_count(path):
         return 5 if path.virtual == "/a" else None
 
-    out, err, _ = await format_multi(
+    out, notes, _ = await format_multi(
         paths, read=read, lines=True, line_count=line_count
     )
     assert read_paths == ["/bb"]
-    assert (out, err) == (b"    5 /a\n12345 /bb\n12350 total\n", b"")
+    assert (out, notes) == (b"    5 /a\n12345 /bb\n12350 total\n", [])
     out, _, _ = await format_multi(
         paths, read=read, lines=True, words=True, line_count=line_count
     )
@@ -246,10 +246,10 @@ async def test_bytes_alone_come_from_the_size(flags, sized, read):
         return 4
 
     p = PathSpec.from_str_path("/f", "")
-    body, err, _ = await format_multi(
+    body, notes, _ = await format_multi(
         [p], read=stream, size_of=size_of, **flags
     )
-    assert err == b""
+    assert notes == []
     assert body.split()[0] in (b"4", b"1")
     assert (bool(asked), bool(reads)) == (sized, read)
 

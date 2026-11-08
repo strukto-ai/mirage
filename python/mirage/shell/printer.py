@@ -20,7 +20,6 @@ from mirage._rs import ShellHeredoc
 from mirage.shell.bytes import decode_text
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import (
-    ALIAS_WORD_TYPES,
     REDIRECT_NODE_TYPES,
     alias_rewrite,
     get_case_items,
@@ -29,7 +28,7 @@ from mirage.shell.helpers import (
     get_text,
     parse_function,
 )
-from mirage.shell.parse.constants import BASH_KEYWORDS
+from mirage.shell.parse.constants import ALIAS_WORD_TYPES, BASH_KEYWORDS
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import FunctionBody, TSNodeLike
 from mirage.shell.types import NodeType as NT

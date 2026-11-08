@@ -110,6 +110,9 @@ export class ProgramNode implements ShellNode {
   get inlined() {
     return this.node.inlined
   }
+  rereadLines(): ReadonlyMap<number, readonly [number, number]> {
+    return this.node.rereadLines?.() ?? new Map()
+  }
   get type(): string {
     return this.node.type
   }

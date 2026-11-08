@@ -15,8 +15,8 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { operandStat } from '../utils/operands.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { atOffsets, operandStat } from '../utils/operands.ts'
+import { IOResult } from '../../../io/types.ts'
 import {
   CapacityState,
   DEVICE_NUMBERS_KEY,
@@ -434,40 +434,47 @@ function escape(fmt: string, start: number, warnings: string[]): [string, number
 }
 
 // Expand a format string, each directive through `render`. `warnings` is
-// --printf's, which reads the backslash escapes and adds its warnings there;
-// null reads a backslash as itself.
+// --printf's, which reads the backslash escapes and adds each warning there
+// with where in the report it was said; null reads a backslash as itself.
 function format(
   fmt: string,
   halves: string,
   render: (d: FormatDirective) => string,
-  warnings: string[] | null = null,
+  warnings: [number, string][] | null = null,
 ): string {
   const parts: string[] = []
+  let length = 0
+  const put = (text: string): void => {
+    parts.push(text)
+    length += text.length
+  }
   let cursor = 0
   while (cursor < fmt.length) {
     const start = fmt.indexOf('%', cursor)
     if (warnings !== null) {
       const slash = fmt.indexOf('\\', cursor)
       if (slash !== -1 && (start === -1 || slash < start)) {
-        parts.push(fmt.slice(cursor, slash))
-        const [text, next] = escape(fmt, slash, warnings)
-        parts.push(text)
+        put(fmt.slice(cursor, slash))
+        const said: string[] = []
+        const [text, next] = escape(fmt, slash, said)
+        for (const line of said) warnings.push([length, line])
+        put(text)
         cursor = next
         continue
       }
     }
     if (start === -1) {
-      parts.push(fmt.slice(cursor))
+      put(fmt.slice(cursor))
       break
     }
-    parts.push(fmt.slice(cursor, start))
+    put(fmt.slice(cursor, start))
     const directive = parseFormatDirective(fmt, start, halves)
     if (directive === null) {
-      parts.push('%')
+      put('%')
       cursor = start + 1
       continue
     }
-    parts.push(render(directive))
+    put(render(directive))
     cursor = directive.end
   }
   return parts.join('')
@@ -478,7 +485,7 @@ function formatStat(
   s: FileStat,
   name: string,
   identity: Identity | null,
-  warnings: string[] | null = null,
+  warnings: [number, string][] | null = null,
 ): string {
   return format(fmt, DEVICE_HALVES, (d) => renderDirective(d, s, name, identity), warnings)
 }
@@ -527,7 +534,7 @@ function renderOne(
   name: string,
   fmt: string | null,
   identity: Identity | null,
-  warnings: string[] | null = null,
+  warnings: [number, string][] | null = null,
 ): string {
   if (fmt !== null) return formatStat(fmt, s, name, identity, warnings)
   return renderStat(s, name, identity)
@@ -539,12 +546,45 @@ function records(lines: readonly string[], printf: boolean): Uint8Array {
   return printf ? encodeText(lines.join('')) : formatRecords(lines)
 }
 
-// The warnings one report raised, leaving the list empty.
-function drained(warnings: string[] | null): string {
-  if (warnings === null || warnings.length === 0) return ''
-  const text = warnings.join('')
-  warnings.length = 0
-  return text
+// Add one report, each warning it raised noted where in it it was said (GNU
+// prints `/f` before a `\q` warning and `q` after it), leaving the warnings
+// empty. Mirrors Python's _report.
+function report(
+  lines: string[],
+  notes: [number, number, string][],
+  line: string,
+  warnings: [number, string][] | null,
+): void {
+  for (const [at, text] of warnings ?? []) notes.push([lines.length, at, text])
+  if (warnings !== null) warnings.length = 0
+  lines.push(line)
+}
+
+// The reports as output, each stderr line where it was said. Mirrors
+// Python's _noted.
+function noted(
+  lines: readonly string[],
+  notes: readonly [number, number, string][],
+  printf: boolean,
+  failed: boolean,
+): CommandFnResult {
+  const io = new IOResult({ exitCode: failed ? 1 : 0 })
+  if (lines.length === 0) {
+    const err = notes.map(([, , line]) => line).join('')
+    if (err !== '') io.stderr = encodeText(err)
+    return [null, io]
+  }
+  const starts = [0]
+  for (const line of lines) starts.push((starts.at(-1) ?? 0) + records([line], printf).byteLength)
+  const placed = notes.map(
+    ([row, at, text]) =>
+      [
+        (starts[row] ?? 0) +
+          (row < lines.length ? encodeText((lines[row] ?? '').slice(0, at)).byteLength : 0),
+        encodeText(text),
+      ] as const,
+  )
+  return [atOffsets(records(lines, printf), placed, io), io]
 }
 
 // Report the file system each operand is on, GNU `stat -f`. The operand stat
@@ -555,14 +595,14 @@ async function fileSystems(
   fmt: string,
   probe: (p: PathSpec) => Promise<FileStat>,
   statfs: StatfsFn | null,
-  warnings: string[] | null = null,
+  warnings: [number, string][] | null = null,
 ): Promise<CommandFnResult> {
   const lines: string[] = []
-  let err = ''
+  const notes: [number, number, string][] = []
   let failed = false
   for (const p of paths) {
     if (p.rawPath === '-') {
-      err += `stat: ${FS_STDIN}\n`
+      notes.push([lines.length, 0, `stat: ${FS_STDIN}\n`])
       failed = true
       continue
     }
@@ -573,22 +613,24 @@ async function fileSystems(
     } catch (e) {
       if (!isFsError(e)) throw e
       const strerror = fsStrerror(e)
-      err +=
+      notes.push([
+        lines.length,
+        0,
         `stat: cannot read file system information for ${shellQuoteAlways(p.rawPath)}` +
-        `${strerror !== null ? `: ${strerror}` : ''}\n`
+          `${strerror !== null ? `: ${strerror}` : ''}\n`,
+      ])
       failed = true
       continue
     }
     const [kind, cap] = found
-    lines.push(format(fmt, '', (d) => renderFsDirective(d, kind, cap, p.rawPath), warnings))
-    err += drained(warnings)
+    report(
+      lines,
+      notes,
+      format(fmt, '', (d) => renderFsDirective(d, kind, cap, p.rawPath), warnings),
+      warnings,
+    )
   }
-  const io = new IOResult({
-    exitCode: failed ? 1 : 0,
-    stderr: err === '' ? null : encodeText(err),
-  })
-  if (lines.length === 0) return [null, io]
-  return [records(lines, warnings !== null), io]
+  return noted(lines, notes, warnings !== null, failed)
 }
 
 // statfs through the dispatcher.
@@ -629,7 +671,7 @@ export async function statGeneric(
   const parsed = parseFlags(ctx.flags)
   if (paths.length === 0) throw missingOperandError('stat', null)
   const fmt = parsed.format ?? (parsed.terse ? (parsed.fileSystem ? TERSE_FS : TERSE) : null)
-  const warnings: string[] | null = parsed.printf ? [] : null
+  const warnings: [number, string][] | null = parsed.printf ? [] : null
   const statPath = vfsStatPath(ctx.vfs)
   if (parsed.fileSystem) {
     const dispatch = dispatchOf(ctx)
@@ -640,7 +682,7 @@ export async function statGeneric(
     return fileSystems(paths, fmt ?? FS_LAYOUT, probe, statfs, warnings)
   }
   const lines: string[] = []
-  let err = ''
+  const notes: [number, number, string][] = []
   let failed = false
   const links = parsed.deref ? null : (linksOf(ctx) ?? null)
   const identity = identityOf(ctx)
@@ -650,8 +692,7 @@ export async function statGeneric(
     // inode, so the namespace is the only authority for it.
     const linked = links?.statAt(p.virtual) ?? null
     if (linked !== null) {
-      lines.push(renderOne(linked, p.rawPath, fmt, identity, warnings))
-      err += drained(warnings)
+      report(lines, notes, renderOne(linked, p.rawPath, fmt, identity, warnings), warnings)
       continue
     }
     let s: FileStat
@@ -660,20 +701,13 @@ export async function statGeneric(
     } catch (e) {
       // GNU stat keeps reporting the remaining operands, exit 1.
       if (!isFsError(e)) throw e
-      err += fsErrorLine('stat', p, e)
+      notes.push([lines.length, 0, fsErrorLine('stat', p, e)])
       failed = true
       continue
     }
-    lines.push(renderOne(s, p.rawPath, fmt, identity, warnings))
-    err += drained(warnings)
+    report(lines, notes, renderOne(s, p.rawPath, fmt, identity, warnings), warnings)
   }
-  const io = new IOResult({
-    exitCode: failed ? 1 : 0,
-    stderr: err === '' ? null : encodeText(err),
-  })
-  if (lines.length === 0) return [null, io]
-  const out: ByteSource = records(lines, parsed.printf)
-  return [out, io]
+  return noted(lines, notes, parsed.printf, failed)
 }
 
 /** A stat line reports a link itself unless `-L`. Mirrors Python's `facts`. */

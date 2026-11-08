@@ -3,8 +3,10 @@
 //! a session write clears first of all.
 
 pub mod brace;
+pub mod codec;
 pub mod escapes;
 pub mod expand;
+pub mod host;
 pub mod job;
 pub mod listing;
 pub mod parameter;

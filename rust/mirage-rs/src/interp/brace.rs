@@ -3,6 +3,8 @@
 //! expands braces before parameters (`{a,$v}` alternates on the atom and
 //! `{1..$n}` stays literal).
 
+use crate::integer::parse_decimal;
+
 /// One element of a template: a byte as typed, or an expansion's atom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tok {
@@ -297,7 +299,7 @@ fn integer(text: &[u8]) -> Option<i64> {
     if digits.len() > 19 {
         return None;
     }
-    let magnitude: i128 = std::str::from_utf8(digits).ok()?.parse().unwrap_or(0);
+    let magnitude: i128 = parse_decimal(digits).unwrap_or(0);
     let value = if negative { -magnitude } else { magnitude };
     i64::try_from(value).ok()
 }

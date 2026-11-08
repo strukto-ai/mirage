@@ -308,10 +308,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "QAI=(1 2); QAI=x; declare -p QAI",
+      "command": "QAI=(1 2); QAI=x; declare -p QAI; ( declare -A qac; k=']'; declare qac[$k]=v 2>&1; echo rc=$?; declare qac[\"$(printf '\"')\"]=w 2>&1; echo rc=$?; k='x]=y'; declare qac[$k]=v; declare -p qac )",
       "expect": {
         "exit": 0,
-        "stdout": "declare -a QAI=([0]=\"x\" [1]=\"2\")\n",
+        "stdout": "declare -a QAI=([0]=\"x\" [1]=\"2\")\nbash: line 1: declare: `qac[]]=v': not a valid identifier\nrc=1\nbash: line 1: declare: `qac[\"]=w': not a valid identifier\nrc=1\ndeclare -A qac=([x]=\"y]=v\" )\n",
         "stderr": ""
       }
     },

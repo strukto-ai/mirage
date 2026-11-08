@@ -28,6 +28,7 @@ import { usageHint, wordRefusalError } from '../../spec/usage.ts'
 import { matchWord } from '../../spec/word_choice.ts'
 import { listedNames } from '../utils/files0.ts'
 import { guardInput } from '../utils/limit.ts'
+import { atOffsets } from '../utils/operands.ts'
 import { formatRecords } from '../utils/output.ts'
 import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
 
@@ -179,13 +180,28 @@ export function formatCountRows(
   total: WcFlags['total'],
   width: number | null = null,
 ): ByteSource | null {
-  if (total === 'only') return encodeText(`${totalValues.join(' ')}\n`)
+  const lines = countLines(rows, totalValues, operandCount, total, width)
+  return lines.length === 0 ? null : formatRecords(lines)
+}
+
+/**
+ * The lines formatCountRows prints, one per row and the total, without
+ * terminators. Mirrors Python's count_lines.
+ */
+export function countLines(
+  rows: WcRow[],
+  totalValues: number[],
+  operandCount: number,
+  total: WcFlags['total'],
+  width: number | null = null,
+): string[] {
+  if (total === 'only') return [totalValues.join(' ')]
   const out = [...rows]
   if (total === 'always' || (total === 'auto' && operandCount > 1)) {
     out.push({ values: totalValues, label: 'total' })
   }
-  if (out.length === 0) return null
-  return formatRecords(formatWcLines(out, width))
+  if (out.length === 0) return []
+  return formatWcLines(out, width)
 }
 
 /** The line refusing one `--files0-from` entry, empty for none. */
@@ -268,7 +284,7 @@ export async function wcGeneric(
     const records: PathRecord[] = []
     const sizes: (number | null)[] = []
     const total: WcCounts = { lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
-    let err = ''
+    const notes: [number, string][] = []
     // A listed name may sit on another mount than the one that counts lines,
     // so a list reads every file it names.
     const counted =
@@ -289,7 +305,7 @@ export async function wcGeneric(
       if (listedFrom !== null) {
         const refusal = listedRefusal(listedFrom, p, run)
         if (refusal !== '') {
-          err += refusal
+          notes.push([rows.length, refusal])
           continue
         }
       }
@@ -307,15 +323,15 @@ export async function wcGeneric(
         }
       } catch (e) {
         if (!isFsError(e)) throw e
-        err += fsErrorLine('wc', p, e)
         // GNU opens a directory and fails only to read it, so it prints a row
-        // of zeros beside the error and pads as for a stream.
+        // of zeros, then the error, and pads as for a stream.
         if (isEisdir(e)) {
           const zero = { lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
           rows.push({ values: selectedValues(zero, parsed), label: p.rawPath })
           records.push({ path: p, run, values: selectedValues(zero, parsed) })
           sizes.push(null)
         }
+        notes.push([rows.length, fsErrorLine('wc', p, e)])
         continue
       }
       rows.push({ values: selectedValues(counts, parsed), label: p.rawPath })
@@ -328,15 +344,25 @@ export async function wcGeneric(
       : listedFrom === '-'
         ? 1
         : numberWidth(sizes, paths.length, shownCounts(parsed))
-    const io = new IOResult({
-      exitCode: err === '' ? 0 : 1,
-      stderr: err === '' ? null : encodeText(err),
-      records,
-    })
-    return [
-      formatCountRows(rows, selectedValues(total, parsed), paths.length, parsed.total, width),
-      io,
-    ]
+    const io = new IOResult({ exitCode: notes.length > 0 ? 1 : 0, records })
+    const printed = countLines(
+      rows,
+      selectedValues(total, parsed),
+      paths.length,
+      parsed.total,
+      width,
+    )
+    const starts = [0]
+    for (const line of printed) starts.push((starts.at(-1) ?? 0) + formatRecords([line]).byteLength)
+    const placed = notes.map(
+      ([row, line]) =>
+        [
+          parsed.total === 'only' ? 0 : (starts[Math.min(row, printed.length)] ?? 0),
+          encodeText(line),
+        ] as const,
+    )
+    if (printed.length === 0 && placed.length === 0) return [null, io]
+    return [atOffsets(formatRecords(printed), placed, io), io]
   }
   const counts = await wc(resolveSource(ctx.stdin), ctx, parsed)
   const values = selectedValues(counts, parsed)

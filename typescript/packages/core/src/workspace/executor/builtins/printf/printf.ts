@@ -29,6 +29,7 @@ import { TARGET_RE } from '../constants.ts'
 import type { SubscriptFn } from '../../../expand/types.ts'
 import {
   builtinUsage,
+  deniedLine,
   fail,
   identifierLine,
   readonlyLine,
@@ -153,8 +154,7 @@ export async function handlePrintf(
     return fail('printf', errors + `${shellVoice()}${err.message}\n`)
   }
   if (status === 'readonly') return fail('printf', `${errors}${readonlyLine('printf', base)}\n`)
-  if (status === 'denied')
-    return fail('printf', errors + `${shellVoice()}${base}: permission denied\n`)
+  if (status === 'denied') return fail('printf', errors + `${deniedLine(base)}\n`)
   if (status !== 'ok')
     return fail('printf', errors + `${shellVoice()}${target}: bad array subscript\n`)
   return result('printf', { exitCode, stderr: errors })

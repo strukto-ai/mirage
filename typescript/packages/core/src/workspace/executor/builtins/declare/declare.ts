@@ -28,13 +28,7 @@ import { shellJoin } from '../../../../shell/join.ts'
 import { ArithError, DiscardSignal } from '../../../../shell/errors.ts'
 import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import { storedFunctionText } from '../../../../shell/printer.ts'
-import {
-  attrLetters,
-  type ShellValue,
-  type ShellVar,
-  VarAttr,
-  VarKind,
-} from '../../../../shell/variable.ts'
+import { type ShellValue, type ShellVar, VarAttr, VarKind } from '../../../../shell/variable.ts'
 import { traceAssignment } from '../../../../shell/xtrace.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { varHidden } from '../../../../utils/hidden.ts'
@@ -63,10 +57,10 @@ import {
   refusal,
   requireView,
   result,
+  written,
 } from '../shared.ts'
 import {
   EXPORT_FLAGS,
-  LISTED_ATTRIBUTES,
   NAME_BRACKET_RE,
   READONLY_FLAGS,
   SUBSCRIPT_RE,
@@ -449,15 +443,17 @@ export function splitDeclFlags(
  * A declaration operand as its name, whether it appends, and its value, null
  * for a bare name: `X+=y` appends `y` to `X`. An element's subscript runs to
  * its matching `]`, so an `=` inside it is the subscript's (`a[x=5]=1`,
- * `a[b[0]=1]=v`). Mirrors Python's operand_parts.
+ * `a[b[0]=1]=v`). bash finds that `]` in the word as expanded, so one whose
+ * subscript never closes, or closes anywhere but before its `=` (`c[]]=v`
+ * from `c[$k]=v`), assigns nothing. Mirrors Python's operand_parts.
  */
 export function operandParts(word: string): [string, boolean, string | null] {
-  const end = subscriptEnd(word)
-  if (end !== null) {
-    const rest = word.slice(end)
-    if (rest === '') return [word, false, null]
-    if (rest.startsWith('+=')) return [word.slice(0, end), true, rest.slice(2)]
-    if (rest.startsWith('=')) return [word.slice(0, end), false, rest.slice(1)]
+  if (NAME_BRACKET_RE.test(word)) {
+    const end = subscriptEnd(word)
+    const rest = end === null ? '' : word.slice(end)
+    if (end !== null && rest.startsWith('+=')) return [word.slice(0, end), true, rest.slice(2)]
+    if (end !== null && rest.startsWith('=')) return [word.slice(0, end), false, rest.slice(1)]
+    return [word, false, null]
   }
   const eq = word.indexOf('=')
   if (eq < 0) return [word, false, null]
@@ -547,31 +543,9 @@ export function declarationResult(
 }
 
 /**
- * Whether a no-name `declare` listing's letters keep `name`: `-a` / `-A`
- * narrow it to that array kind (`kindListed`), and any of `-i -l -n -r -t
- * -u -x` keeps a name carrying one of them. A running command's temporary
- * is never listed.
- */
-export function declarationListed(
-  session: SessionState,
-  name: string,
-  flags: ReadonlySet<string>,
-): boolean {
-  const v = session.vars.get(name)
-  if (
-    v === undefined ||
-    !kindListed(session, name, flags) ||
-    prefixTemporaries(session).includes(name)
-  )
-    return false
-  const letters = new Set(attrLetters(v))
-  const wanted = [...flags].filter((c) => LISTED_ATTRIBUTES.has(c))
-  return wanted.length === 0 || wanted.some((c) => letters.has(c))
-}
-
-/**
  * Run `declare -p`: render declarations for names, or for all; with no
- * names the declaration's letters narrow the list (`declarationListed`).
+ * names every visible one prints, the ones the shell computes too, narrowed
+ * by the declaration's letters (`Shell.listing`).
  */
 export function handleDeclarePrint(
   names: string[],
@@ -579,25 +553,27 @@ export function handleDeclarePrint(
   flags: ReadonlySet<string> = new Set(),
   cmd = 'declare',
 ): RedirectResult {
-  const targets =
-    names.length > 0
-      ? names
-      : session.vars
-          .names()
-          .filter((name) => declarationListed(session, name, flags))
-          .sort(compareCodePoints)
-  const lines: string[] = []
-  const errors: string[] = []
-  for (const name of targets) {
-    const line = session.vars.shell.declaration(name)
-    if (line === null) errors.push(`${shellVoice()}${cmd}: ${name}: not found`)
-    else lines.push(line)
+  if (names.length === 0) {
+    const listed = session.vars.shell.listing(
+      [...flags].sort(compareCodePoints).join(''),
+      [...prefixTemporaries(session)].sort(compareCodePoints),
+    )
+    return written(
+      cmd,
+      listed.map((line): [boolean, string] => [false, `${line}\n`]),
+      0,
+    )
   }
-  return result(cmd, {
-    out: encodeText(lines.map((line) => `${line}\n`).join('')),
-    exitCode: errors.length > 0 ? 1 : 0,
-    stderr: errors.map((error) => `${error}\n`).join(''),
-  })
+  const pieces: [boolean, string][] = []
+  let failed = false
+  for (const name of names) {
+    const line = session.vars.shell.declaration(name)
+    if (line === null) {
+      failed = true
+      pieces.push([true, `${shellVoice()}${cmd}: ${name}: not found\n`])
+    } else pieces.push([false, `${line}\n`])
+  }
+  return written(cmd, pieces, failed ? 1 : 0)
 }
 
 /**
@@ -668,7 +644,7 @@ export function handleDeclareFunctions(
 ): RedirectResult {
   const printing = flags.has('p')
   const wanted = ['r', 'x'].filter((c) => flags.has(c))
-  let present = names.filter((name) => name in session.functions)
+  const present = names.filter((name) => name in session.functions)
   const missing = names.filter((name) => !(name in session.functions))
   if (names.length > 0 && !printing && (wanted.length > 0 || plus.has('r') || plus.has('x'))) {
     const frozen = present.filter((name) => plus.has('r') && session.readonlyFunctions.has(name))
@@ -683,28 +659,29 @@ export function handleDeclareFunctions(
       stderr: frozen.map((name) => `${shellVoice()}${cmd}: ${name}: readonly function\n`).join(''),
     })
   }
-  if (names.length === 0) {
-    present = Object.keys(session.functions)
-      .sort(compareCodePoints)
-      .filter(
-        (name) =>
-          wanted.length === 0 || wanted.some((c) => functionFlags(session, name).includes(c)),
-      )
+  const listing = names.length === 0
+  const shown = listing
+    ? Object.keys(session.functions)
+        .sort(compareCodePoints)
+        .filter(
+          (name) =>
+            wanted.length === 0 || wanted.some((c) => functionFlags(session, name).includes(c)),
+        )
+    : names
+  const pieces: [boolean, string][] = []
+  for (const name of shown) {
+    if (name in session.functions) {
+      for (const line of functionLines(
+        session,
+        [name],
+        !flags.has('F'),
+        printing || listing,
+        parser,
+      ))
+        pieces.push([false, `${line}\n`])
+    } else if (printing) pieces.push([true, `${shellVoice()}${cmd}: ${name}: not found\n`])
   }
-  const lines = functionLines(
-    session,
-    present,
-    !flags.has('F'),
-    printing || names.length === 0,
-    parser,
-  )
-  return result(cmd, {
-    out: encodeText(lines.map((line) => `${line}\n`).join('')),
-    exitCode: missing.length > 0 ? 1 : 0,
-    stderr: printing
-      ? missing.map((name) => `${shellVoice()}${cmd}: ${name}: not found\n`).join('')
-      : '',
-  })
+  return written(cmd, pieces, missing.length > 0 ? 1 : 0)
 }
 
 /**

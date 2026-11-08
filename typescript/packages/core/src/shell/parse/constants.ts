@@ -110,3 +110,7 @@ export const ARITH_TEST_OPERATORS: ReadonlySet<string> = new Set([
 
 // A shell identifier, as the names a word reads are found.
 export const IDENTIFIER_RE = /[A-Za-z_][A-Za-z0-9_]*/g
+
+// What an unquoted plain word parses as: the only words bash checks for an
+// alias, a name of digits included.
+export const ALIAS_WORD_TYPES: ReadonlySet<string> = new Set(['word', 'number'])

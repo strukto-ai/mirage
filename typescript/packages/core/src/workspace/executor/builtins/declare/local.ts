@@ -36,7 +36,7 @@ import {
   visibleArrays,
   visibleAssocs,
 } from '../../../session/state.ts'
-import { fail, isValidName, ok, readonlyLine, refusal, requireView } from '../shared.ts'
+import { deniedLine, fail, isValidName, ok, readonlyLine, refusal, requireView } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 import { SUBSCRIPT_RE } from './constants.ts'
 import {
@@ -362,7 +362,7 @@ async function declareElement(
   await premark(view, name, shaping)
   const status = await assignElement(session, policies, name, subscript, given, append)
   if (status === 'readonly') return readonlyLine(cmd, name)
-  if (status === 'denied') return `${shellVoice()}${name}: permission denied`
+  if (status === 'denied') return deniedLine(name)
   if (status !== 'ok') return `${shellVoice()}${key}: bad array subscript`
   await stampMarks(session, view, name, name, marks)
   return null

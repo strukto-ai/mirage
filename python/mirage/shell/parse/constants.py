@@ -108,3 +108,7 @@ ARITH_TEST_OPERATORS = frozenset({"-eq", "-ne", "-lt", "-le", "-gt", "-ge"})
 
 # A shell identifier, as the names a word reads are found.
 IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+# What an unquoted plain word parses as: the only words bash checks for an
+# alias, a name of digits included.
+ALIAS_WORD_TYPES = frozenset({"word", "number"})

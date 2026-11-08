@@ -33,7 +33,7 @@ import type { ProcessView } from '../../../execution/process/view.ts'
 import { enoent, fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { shellQuote } from '../../../utils/quote.ts'
-import { reportFsError, splitOpened } from '../utils/operands.ts'
+import { operandLines, reportFsError, say, splitOpened } from '../utils/operands.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
 import { checkMemory } from '../../../io/memory.ts'
@@ -407,46 +407,58 @@ async function* tail(source: ByteSource, rawCounts: TailCounts): AsyncIterable<U
 // is reported and the next operand still prints. Mirrors Python's
 // `tail_multi`.
 async function* tailMulti(
-  paths: readonly PathSpec[],
+  paths: readonly (PathSpec | string)[],
   read: ReadStreamFn,
   counts: TailCounts,
   showHeaders: boolean,
-  unread: ReadonlySet<string>,
+  unread: ReadonlyMap<string, string>,
   io: IOResult,
   selected = false,
 ): AsyncIterable<Uint8Array> {
+  const said = operandLines(paths, unread)
   let printed = 0
-  for (const p of paths) {
-    let pending = showHeaders ? operandHeader(p, printed > 0) : null
-    if (unread.has(p.virtual)) {
-      if (pending !== null) {
-        yield pending
-        printed++
+  try {
+    for (const [i, p] of paths.entries()) {
+      if (typeof p === 'string') {
+        await say(io, p)
+        said.delete(i)
+        continue
       }
-      continue
-    }
-    const source = read(p)
-    try {
-      for await (const part of selected ? chunks(source) : tail(source, counts)) {
+      let pending = showHeaders ? operandHeader(p, printed > 0) : null
+      if (unread.has(p.rawPath)) {
         if (pending !== null) {
           yield pending
-          pending = null
+          printed++
         }
-        yield part
+        await say(io, unread.get(p.rawPath) ?? '')
+        said.delete(i)
+        continue
       }
-      if (pending !== null) yield pending
-      printed++
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      const code = (err as { code?: string }).code
-      await reportFsError(io, 'tail', p, err)
-      if (pending !== null && code !== undefined && READ_FAILURES.has(code)) {
-        yield pending
+      const source = read(p)
+      try {
+        for await (const part of selected ? chunks(source) : tail(source, counts)) {
+          if (pending !== null) {
+            yield pending
+            pending = null
+          }
+          yield part
+        }
+        if (pending !== null) yield pending
         printed++
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        const code = (err as { code?: string }).code
+        await reportFsError(io, 'tail', p, err)
+        if (pending !== null && code !== undefined && READ_FAILURES.has(code)) {
+          yield pending
+          printed++
+        }
+      } finally {
+        await closeQuietly(source)
       }
-    } finally {
-      await closeQuietly(source)
     }
+  } finally {
+    if (said.size > 0) await say(io, [...said.values()].join(''))
   }
 }
 
@@ -538,7 +550,7 @@ async function* follow(
   try {
     for (const entry of [...active]) {
       const [slot, p] = entry
-      if (unread.has(p.virtual)) {
+      if (unread.has(p.rawPath)) {
         if (showHeaders) yield operandHeader(p, last !== null)
         last = slot
         active.splice(active.indexOf(entry), 1)
@@ -895,27 +907,33 @@ export async function tailGeneric(
   }
   if (paths.length > 0) {
     const showHeaders = showsHeaders(vFlag, qFlag, paths.length)
-    const [opened, unread, err] = await splitOpened(paths, stat, 'tail')
+    const [order, unreadLines] = await splitOpened(paths, stat, 'tail')
+    const opened = order.filter((p): p is PathSpec => typeof p !== 'string')
+    const unread = new Set(unreadLines.keys())
+    const err =
+      following.follow || opened.length === 0
+        ? [...operandLines(order, unreadLines).values()].join('')
+        : ''
     const io = new IOResult({
-      exitCode: err === '' ? 0 : 1,
+      exitCode: err === '' && opened.length === order.length && unread.size === 0 ? 0 : 1,
       stderr: warnings + err === '' ? null : encodeText(warnings + err),
     })
     if (!following.follow) {
       if (opened.length === 0) return [null, io]
       return [
         tailMulti(
-          opened,
+          order,
           (p) => tailFile(p, stream, stat, readRange, lastLines, counts),
           counts,
           showHeaders,
-          unread,
+          unreadLines,
           io,
           true,
         ),
         io,
       ]
     }
-    const readable = opened.filter((p) => !unread.has(p.virtual))
+    const readable = opened.filter((p) => !unread.has(p.rawPath))
     const pending = await unfollowable(
       paths,
       new Set(readable.map((p) => p.virtual)),
