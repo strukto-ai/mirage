@@ -1525,6 +1525,22 @@ async def test_post_command_sees_each_command_once_with_its_result():
         await ws.close()
 
 
+@pytest.mark.asyncio
+async def test_post_command_hears_the_errors_a_reader_took_from_printf():
+    # A reader keeping errors among the output takes printf's as they
+    # come; the policy still hears every one.
+    policy = AfterCommands()
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        ws.policies.add(policy)
+        await ws.shell("printf '%d\\n' bad 2>&1 | cat")
+        said = [c.stderr for c in policy.seen if c.command == "printf"]
+        assert len(said) == 1
+        assert said[0].count("invalid number") == 1
+    finally:
+        await ws.close()
+
+
 class NoVaultShown(Policy):
     async def post_command(self, ctx: CommandResultContext) -> Action | None:
         if any(r["path"].startswith("/data/vault/") for r in ctx.records):

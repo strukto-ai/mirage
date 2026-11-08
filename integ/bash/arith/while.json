@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "n=0; while (( n < 3 )); do (( n++ )); done; echo n=$n; unset n",
+      "command": "n=0; while (( n < 3 )); do (( n++ )); done; echo n=$n; unset n; ( i=0; while ((i<10001)); do ((i++)); done; echo $i; for ((j=0;j<10002;j++)); do :; done; echo $j )",
       "expect": {
         "exit": 0,
-        "stdout": "n=3\n",
+        "stdout": "n=3\n10001\n10002\n",
         "stderr": ""
       }
     }

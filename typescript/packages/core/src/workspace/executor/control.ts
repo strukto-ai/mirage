@@ -52,8 +52,6 @@ import {
 } from './statement.ts'
 import { errTrapArmed, runErrTrap, runReturnTrap } from './traps.ts'
 
-const MAX_WHILE = 10_000
-
 /** Runs a list of statements: `executeBody` bound to the walk. */
 export type BodyRun = (
   nodes: readonly TSNodeLike[],
@@ -154,6 +152,17 @@ export async function executeBody(
     }
   }
   return [chainStreams(allStdout), mergedIo, lastExec]
+}
+
+/**
+ * Add what one turn of a loop wrote to the loop's output, nothing for a turn
+ * that wrote nothing, so a loop with no end holds no more for it. Mirrors
+ * Python's _keep.
+ */
+function keep(allStdout: (ByteSource | null)[], stdout: ByteSource | null): void {
+  if (stdout !== null && !(stdout instanceof Uint8Array && stdout.byteLength === 0)) {
+    allStdout.push(stdout)
+  }
 }
 
 function chainStreams(sources: readonly (ByteSource | null)[]): ByteSource | null {
@@ -314,7 +323,7 @@ async function absorbed(
   allStdout: (ByteSource | null)[],
   mergedIo: IOResult,
 ): Promise<IOResult> {
-  allStdout.push(sig.stdout)
+  keep(allStdout, sig.stdout)
   const merged = await mergedIo.merge(sig.io)
   if (sig.levels > 1) {
     sig.stdout = chainStreams(allStdout)
@@ -370,8 +379,10 @@ export async function handleIf(
 // `set -n` inside a loop body has to stop the *driver* too, not only the
 // statements: `executeNode` refuses every node while the option is on, so
 // the `break` or the false condition the driver is waiting for is one of
-// the refused nodes and it would spin to MAX_WHILE. GNU never runs the
-// loop at all, which is what falling straight out of it produces.
+// the refused nodes and it would spin forever. GNU never runs the
+// loop at all, which is what falling straight out of it produces. A
+// `set -e` failure in a body stops the driver the same way: the body has
+// stopped at it, and another turn would run the shell on.
 export async function handleFor(
   run: BodyRun,
   variable: string,
@@ -412,6 +423,7 @@ export async function handleFor(
       const [stdout, io] = await run(body, bound)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
+      if (session.errexitExiting) break
     } catch (sig) {
       if (!(sig instanceof LoopSignal)) throw sig
       mergedIo = await absorbed(sig, allStdout, mergedIo)
@@ -438,19 +450,18 @@ export async function handleWhile(
   // Each test and body reads the fd 0 the loop started with, so an
   // `exec < f` in one reaches the rest.
   const bound = fd0Binding(session)
-  let i = 0
-  for (; i < MAX_WHILE; i++) {
-    if (session.shellOptions.noexec === true) break
+  while (session.shellOptions.noexec !== true) {
     try {
       const [condStdout, condIo] = await ignoringErrexit(session, () => run(test, bound))
-      allStdout.push(condStdout)
+      keep(allStdout, condStdout)
       mergedIo = await mergedIo.merge(
         new IOResult({ stderr: condIo.stderr, exitCode: mergedIo.exitCode }),
       )
       if ((condIo.exitCode === 0) === until) break
       const [stdout, io] = await run(body, bound)
-      allStdout.push(stdout)
+      keep(allStdout, stdout)
       mergedIo = await mergedIo.merge(io)
+      if (session.errexitExiting) break
     } catch (sig) {
       if (!(sig instanceof LoopSignal)) {
         if (isUnwinding(sig)) throw await carried(sig, chainStreams(allStdout), mergedIo)
@@ -461,20 +472,7 @@ export async function handleWhile(
       continue
     }
   }
-  if (i === MAX_WHILE) capped(mergedIo, label)
   return collectLoopResult(allStdout, mergedIo, label)
-}
-
-/**
- * Say on stderr that a loop stopped at MAX_WHILE iterations, mirage's own
- * cap (bash has none), so a runaway loop or a `while read` over a longer
- * stream is never cut short silently. Mirrors Python's _capped.
- */
-function capped(io: IOResult, label: string): void {
-  const warn = encodeText(
-    `warning: ${label} loop terminated after ${MAX_WHILE.toString()} iterations\n`,
-  )
-  io.stderr = io.stderr instanceof Uint8Array ? concat([io.stderr, warn]) : warn
 }
 
 export type CforEval = (exprs: readonly TSNodeLike[], dflt: number) => Promise<number>
@@ -502,14 +500,13 @@ export async function handleCfor(
   const bound = fd0Binding(session)
   try {
     await evalExpr(exprs[0] ?? [], 0)
-    let i = 0
-    for (; i < MAX_WHILE; i++) {
-      if (session.shellOptions.noexec === true) break
+    while (session.shellOptions.noexec !== true) {
       if ((await evalExpr(exprs[1] ?? [], 1)) === 0) break
       try {
         const [stdout, io] = await run(body, bound)
-        allStdout.push(stdout)
+        keep(allStdout, stdout)
         mergedIo = await mergedIo.merge(io)
+        if (session.errexitExiting) break
       } catch (sig) {
         if (!(sig instanceof LoopSignal)) throw sig
         mergedIo = await absorbed(sig, allStdout, mergedIo)
@@ -519,7 +516,6 @@ export async function handleCfor(
       }
       await evalExpr(exprs[2] ?? [], 0)
     }
-    if (i === MAX_WHILE) capped(mergedIo, 'for')
   } catch (err) {
     if (
       !(err instanceof ArithError) &&
@@ -646,8 +642,7 @@ export async function handleSelect(
   const bound = fd0Binding(session)
   const words = values.map((v) => wordText(v))
   let showMenu = words.length > 0
-  for (let i = 0; i < (words.length > 0 ? MAX_WHILE : 0); i++) {
-    if (session.shellOptions.noexec === true) break
+  while (words.length > 0 && session.shellOptions.noexec !== true) {
     const env = visibleEnv(session)
     const menu = showMenu ? selectMenu(words, env.COLUMNS ?? '') : ''
     const prompt = menu + (env.PS3 ?? '#? ')
@@ -689,6 +684,7 @@ export async function handleSelect(
       const [stdout, io] = await run(body, bound)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
+      if (session.errexitExiting) break
     } catch (sig) {
       if (!(sig instanceof LoopSignal)) throw sig
       mergedIo = await absorbed(sig, allStdout, mergedIo)

@@ -2698,26 +2698,24 @@ def test_bare_wait_reaps_so_jobs_is_empty_after_it():
     assert _stdout(io) == b"hi\n"
 
 
-# ── while loop limit warning ───────────────────────────────────────────
+# ── while loop turns ───────────────────────────────────────────────────
 
 
-def test_while_loop_warns_on_max_iterations():
-    """while loop emits stderr warning when hitting iteration limit."""
+def test_while_loop_runs_past_ten_thousand_turns():
+    """A while loop has no limit of its own, as bash's has none."""
     ws = _ws()
 
     async def _run():
-        # _MAX_WHILE = 10000; loop unconditionally to trigger the cap
-        io = await ws.shell("while true; do export X=$X.; done")
-        return await io.stderr_str()
+        io = await ws.shell(
+            "i=0; while ((i<10001)); do ((i++)); done; echo $i"
+        )
+        return await io.stdout_str(), await io.stderr_str()
 
-    err = asyncio.run(_run())
-    assert "warning" in err
-    assert "terminated after" in err
-    assert "10000" in err
+    assert asyncio.run(_run()) == ("10001\n", "")
 
 
-def test_while_loop_under_limit_no_warning():
-    """while loop under limit produces no stderr warning."""
+def test_while_loop_warns_of_nothing():
+    """A while loop that ends says nothing on stderr."""
     ws = _ws()
 
     async def _run():

@@ -1174,6 +1174,22 @@ describe('postCommand', () => {
     }
   })
 
+  it('postCommand hears the errors a reader took from printf', async () => {
+    // A reader keeping errors among the output takes printf's as they
+    // come; the policy still hears every one.
+    const policy = new AfterCommands()
+    const ws = executableWorkspace()
+    try {
+      ws.policies.add(policy)
+      await ws.shell("printf '%d\\n' bad 2>&1 | cat")
+      const said = policy.seen.filter((c) => c.command === 'printf').map((c) => c.stderr)
+      expect(said).toHaveLength(1)
+      expect(said[0]?.split('invalid number')).toHaveLength(2)
+    } finally {
+      await ws.close()
+    }
+  })
+
   class NoVaultShown implements Policy {
     postCommand(ctx: CommandResultContext): Action | null {
       const vault = ctx.records.some(

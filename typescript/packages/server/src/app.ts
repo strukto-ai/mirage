@@ -24,7 +24,7 @@ import {
   loadPolicyFile,
   Workspace,
 } from '@struktoai/mirage-node'
-import { buildCliEntries } from '@struktoai/mirage-node/config'
+import { buildCliEntries, configStateStore } from '@struktoai/mirage-node/config'
 import { CONFIG_SCHEMAS } from '@struktoai/mirage-node/vfs/registry'
 import { watchNetwork } from '@struktoai/mirage-node/io/network'
 import { quoteName } from '@struktoai/mirage-node/workspace/record/disk'
@@ -195,7 +195,9 @@ export function buildApp(options: BuildAppOptions = {}) {
     loadProfile: loadProfilePolicy,
     // Daemon default is disk (a created workspace survives restart with
     // zero infrastructure, like git init); the library default stays ram.
-    stateStore: () => new DiskWorkspaceStateStore({ root: stateRoot }),
+    stateStore: (cfg) =>
+      (cfg === undefined ? undefined : configStateStore(cfg)) ??
+      new DiskWorkspaceStateStore({ root: stateRoot }),
     daemonId: () => loadDaemonId(stateRoot),
     quoteName,
     reservedIds: DOT_IDS,

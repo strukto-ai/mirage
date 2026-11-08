@@ -16,6 +16,7 @@ import errno
 import hashlib
 import io
 import json
+import logging
 import time
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
@@ -34,6 +35,7 @@ from mirage.config import (
     WorkspaceConfig,
     _load_profile_policy,
     build_mcp_clis,
+    config_state_store,
     resolve_secrets,
 )
 from mirage.io.network import NetworkRule, run_with_network
@@ -66,7 +68,7 @@ from mirage.server.multipart import (
     part_events,
 )
 from mirage.server.paths import load_daemon_id
-from mirage.server.registry import Claim, WorkspaceEntry
+from mirage.server.registry import Claim, Forget, WorkspaceEntry
 from mirage.server.resources.policies import with_policies
 from mirage.server.resources.strukto import with_entries
 from mirage.server.routers.templates import (
@@ -88,13 +90,21 @@ from mirage.server.schemas import (
     WorkspaceDetail,
     check_config,
 )
-from mirage.server.summary import make_brief, make_detail
-from mirage.types import Ceilings
+from mirage.server.summary import (
+    make_brief,
+    make_detail,
+    make_stopped_brief,
+    make_stopped_detail,
+)
+from mirage.types import Ceilings, JsonValue
 from mirage.utils.ids import check_name, new_workspace_id
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.snapshot.utils import is_safe_blob_path
 from mirage.workspace.store import DiskWorkspaceStateStore
+from mirage.workspace.store.base import WorkspaceStateStore
 from mirage.workspace.store.disk import DOT_IDS
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/workspaces")
 
@@ -116,6 +126,69 @@ async def _has_state(request: Request, workspace_id: str) -> bool:
         return await store.load_meta(workspace_id) is not None
     finally:
         await store.close()
+
+
+def _store_of(
+    request: Request, config: dict[str, JsonValue] | None
+) -> WorkspaceStateStore:
+    """The store a workspace built from ``config`` keeps its state in:
+    the one its ``store:`` block names, else the server's. A config that
+    no longer checks names none the server can open, so the server's is
+    read.
+
+    Args:
+        request (Request): the request, for the app's state root.
+        config (dict[str, JsonValue] | None): the saved config.
+    """
+    if config is not None and config.get("store") is not None:
+        try:
+            named = config_state_store(check_config(config))
+        except ValueError as exc:
+            logger.debug(
+                "mirage: a saved config's store did not open: %s", exc
+            )
+        else:
+            if named is not None:
+                return named
+    return DiskWorkspaceStateStore(str(request.app.state.state_root))
+
+
+async def _kept(
+    request: Request, workspace_id: str
+) -> tuple[dict[str, JsonValue], float] | None:
+    """What the caller's stopped ``workspace_id`` keeps: the config it
+    starts from and when it was first created, or None when no config is
+    saved. State alone, as a rejected create leaves, is not a workspace
+    to list or start. A store that cannot be read, such as a Redis that
+    is down, leaves the config with no creation time.
+
+    Args:
+        request (Request): the request, for the registry and its account.
+        workspace_id (str): the id asked about.
+    """
+    registry = request.app.state.registry
+    account = request.state.account
+    if not await registry.allows(workspace_id, account, 0.0):
+        return None
+    config = await registry.saved_config(workspace_id, account)
+    if config is None:
+        return None
+    store = _store_of(request, config)
+    try:
+        meta = await store.load_meta(workspace_id)
+    except Exception as exc:
+        logger.warning(
+            "mirage: workspace %s's store could not be read: %s",
+            workspace_id,
+            exc,
+        )
+        meta = None
+    finally:
+        await store.close()
+    created_at = (meta or {}).get("created_at")
+    return config, (
+        float(created_at) if isinstance(created_at, (int, float)) else 0.0
+    )
 
 
 async def _stopped(request: Request, workspace_id: str) -> bool:
@@ -594,23 +667,43 @@ async def create_workspace(
 
 @router.get("", response_model=list[WorkspaceBrief])
 async def list_workspaces(request: Request) -> list[WorkspaceBrief]:
+    """The running workspaces, then the stopped ones.
+
+    Args:
+        request (Request): the request, for the registry and its account.
+    """
     registry = request.app.state.registry
     account = request.state.account
-    return [
+    briefs = [
         make_brief(e)
         for e in registry.list()
         if registry.visible(e.id, account) is not None
     ]
+    # One that stops while this reads is listed once, as it was first read.
+    listed = {brief.id for brief in briefs}
+    for wid in await registry.stopped_ids(account):
+        if wid in listed:
+            continue
+        kept = await _kept(request, wid)
+        if kept is not None:
+            briefs.append(make_stopped_brief(wid, *kept))
+    return briefs
 
 
 @router.get("/{workspace_id}", response_model=WorkspaceDetail)
 async def get_workspace(
     workspace_id: str, request: Request, verbose: bool = Query(False)
 ) -> WorkspaceDetail:
-    entry = require_entry(request, workspace_id)
+    registry = request.app.state.registry
+    entry = registry.visible(workspace_id, request.state.account)
+    if entry is None:
+        kept = await _kept(request, workspace_id)
+        if kept is None:
+            raise HTTPException(status_code=404, detail="workspace not found")
+        return make_stopped_detail(workspace_id, *kept)
     # A workspace being deleted keeps its id until the deletion is done,
     # but its runner has stopped answering: it is gone to a reader.
-    if request.app.state.registry.removing(workspace_id):
+    if registry.removing(workspace_id):
         raise HTTPException(status_code=404, detail="workspace not found")
     return await make_detail(entry, verbose=verbose)
 
@@ -668,8 +761,38 @@ async def workspace_logs(
 async def delete_workspace(
     workspace_id: str, request: Request
 ) -> DeleteWorkspaceResponse:
+    """Delete the workspace, running or stopped: its state, config and
+    owner go.
+
+    Args:
+        workspace_id (str): the workspace.
+        request (Request): the request, for the registry and its account.
+    """
     registry = request.app.state.registry
-    require_entry(request, workspace_id)
+    if registry.visible(workspace_id, request.state.account) is None:
+        kept = await _kept(request, workspace_id)
+        if kept is None:
+            raise HTTPException(status_code=404, detail="workspace not found")
+        store = _store_of(request, kept[0])
+        try:
+            forgot = await registry.forget(
+                workspace_id, request.state.account, kept[0], store
+            )
+        finally:
+            await store.close()
+        if forgot is Forget.GONE:
+            raise HTTPException(status_code=404, detail="workspace not found")
+        if forgot is Forget.HELD:
+            raise HTTPException(
+                status_code=409,
+                detail="workspace is running on another server",
+            )
+        if forgot is Forget.BUSY:
+            raise HTTPException(
+                status_code=409,
+                detail="workspace is starting or stopping; try again",
+            )
+        return DeleteWorkspaceResponse(id=workspace_id, closed_at=time.time())
     try:
         await registry.remove(workspace_id)
     except Exception as exc:

@@ -985,7 +985,9 @@ async def _run_argv(
                 CommandResultContext(
                     **facts,
                     exit_code=io.exit_code,
-                    stderr=stderr.decode(errors="replace"),
+                    stderr=(stderr + b"".join(io.stderr_pieces or ())).decode(
+                        errors="replace"
+                    ),
                     records=tuple(r.to_dict() for r in mine),
                 ),
                 claimant,

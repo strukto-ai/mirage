@@ -351,9 +351,11 @@ impl<'a> Writer<'a> {
     /// (`a+=(x y)`): each lands in place as `set_element` writes it, as
     /// bash's do, so an `-i` word's own write to the array stands
     /// (`b+=(2 'b[1]=9,1')` leaves `b[1]` at 9). A word refused takes back
-    /// the slots the append filled before it, but under `-i`, where the
+    /// the slots the append filled before it, with what they held when
+    /// it wrapped onto them, but under `-i`, where the
     /// words before it are evaluated and may write the array, the array
-    /// stays as they left it, as bash's does.
+    /// stays as they left it, as bash's does. An index past the largest
+    /// wraps to the most negative, as bash's does.
     pub fn push(&mut self, name: &str, words: Vec<Vec<u8>>) -> Result<(), Fault> {
         let name = self.store.target(name);
         self.writable(&name)?;
@@ -368,12 +370,8 @@ impl<'a> Writer<'a> {
         let slots = words
             .into_iter()
             .zip(array.extent()..)
-            .map(|(word, index)| {
-                i64::try_from(index)
-                    .map(|index| (index, word))
-                    .map_err(|_| Fault::Host("an index past the largest"))
-            })
-            .collect::<Result<Vec<_>, Fault>>()?;
+            .map(|(word, index)| (index as i64, word))
+            .collect::<Vec<_>>();
         if slots.is_empty() {
             let assigned = Assigned::Indexes(HashSet::new());
             let array = Value::Indexed(array.clone());
@@ -382,10 +380,11 @@ impl<'a> Writer<'a> {
         let mut filled = Vec::new();
         for (index, word) in slots {
             let slot = Slot::Index(index);
+            let replaced = self.store.element(&name, &slot).map(<[u8]>::to_vec);
             if let Err(fault) = self.set_element(&name, slot.clone(), Some(word), None) {
                 if !integer {
-                    for slot in filled.into_iter().rev() {
-                        self.store.put_element(&name, &slot, None, false);
+                    for (slot, replaced) in filled.into_iter().rev() {
+                        self.store.put_element(&name, &slot, replaced, false);
                     }
                     let (attrs, managed) = marks;
                     let changed = self
@@ -400,7 +399,7 @@ impl<'a> Writer<'a> {
                 }
                 return Err(fault);
             }
-            filled.push(slot);
+            filled.push((slot, replaced));
         }
         Ok(())
     }
@@ -1117,6 +1116,23 @@ mod tests {
         assert!(matches!(failed, Err(Fault::Arith(_))));
         let kept: Vec<_> = writer.store.indexed("n").unwrap().iter().collect();
         assert_eq!(kept, [(0, &b"1"[..]), (1, &b"2"[..])]);
+        let mut wrapped = Indexed::default();
+        wrapped.set(i64::MAX, b"x".to_vec());
+        writer.store.seed("w", Value::Indexed(wrapped));
+        writer.push("w", vec![b"a longer value".to_vec()]).unwrap();
+        let grown = writer.store.held();
+        writer.limit = Some(grown);
+        writer.push("w", vec![b"y".to_vec()]).unwrap();
+        writer.limit = None;
+        assert!(writer.store.held() < grown);
+        let kept: Vec<_> = writer.store.indexed("w").unwrap().iter().collect();
+        assert_eq!(kept, [(i64::MIN, &b"y"[..]), (i64::MAX, &b"x"[..])]);
+        writer.limit = Some(writer.store.held());
+        let failed = writer.push("w", vec![b"z".to_vec(), b"far too long".to_vec()]);
+        writer.limit = None;
+        assert!(failed.is_err());
+        let kept: Vec<_> = writer.store.indexed("w").unwrap().iter().collect();
+        assert_eq!(kept, [(i64::MIN, &b"y"[..]), (i64::MAX, &b"x"[..])]);
         let counted: usize = writer
             .store
             .records()

@@ -191,17 +191,18 @@ def _printed(
     io = IOResult()
     node = ExecutionNode(command="printf")
     voice = shell_voice()
+    said: list[bytes] = []
 
     async def output() -> AsyncIterator[bytes]:
         try:
             async with aclosing(
-                printf_output(fmt, args, io, program, posix, utf8, voice)
+                printf_output(fmt, args, io, program, posix, utf8, voice, said)
             ) as parts:
                 async for part in parts:
                     yield part
         finally:
             node.exit_code = io.exit_code
-            node.stderr = io.stderr if isinstance(io.stderr, bytes) else b""
+            node.stderr = b"".join(said)
 
     return output(), io, node
 

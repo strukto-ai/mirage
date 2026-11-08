@@ -259,7 +259,7 @@
     {"id": "lists_what_is_left", "input": {"step": "list"}, "expect": {"text": "w2"}},
     {"id": "creates_a_third", "input": {"step": "create", "id": "w3"}, "expect": {"text": "w3"}},
     {"id": "stops_it", "input": {"step": "stop_workspace", "id": "w3"}, "expect": {"text": "stopped"}},
-    {"id": "lists_without_it", "input": {"step": "list"}, "expect": {"text": "w2"}},
+    {"id": "lists_after_it_stops", "input": {"step": "list"}, "expect": {"text": "w2"}, "expect_by_access": {"http": {"text": "w2 w3"}, "cli": {"text": "w2 w3"}}},
     {"id": "starts_it", "input": {"step": "start_workspace", "id": "w3"}, "expect": {"text": "w3"}},
     {"id": "deletes_the_third", "input": {"step": "delete", "id": "w3"}, "expect": {"text": "deleted"}},
     {"id": "deletes_the_clone", "input": {"step": "delete", "id": "w2"}, "expect": {"text": "deleted"}}
@@ -634,7 +634,7 @@
   "status_reports": "running=True workspaces=1",
   "ssh_is_on": "ok\n",
   "restart_stops": "stopped",
-  "restart_drops_workspaces": "b",
+  "restart_stops_workspaces": "a:stopped b:running",
   "restart_eager": "running 0",
   "stop": "1 stopped",
   "kill": "killed",

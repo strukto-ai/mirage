@@ -26,6 +26,7 @@ from mirage.workspace.executor.statement import (
     finish_statement,
     forks,
     ignoring_errexit,
+    interleaved,
     land,
     land_late,
     record_jobs,
@@ -199,3 +200,40 @@ async def test_a_job_writing_once_its_statement_stopped_recording_waits():
     await jobs.emit(Channel.STDOUT, b"c\n")
     await landing
     assert b"".join([data for _, data in await shell.take()]) == b"a\nb\nc\n"
+
+
+@pytest.mark.asyncio
+async def test_interleaved_puts_handed_errors_among_the_output():
+    io = IOResult()
+
+    async def stream():
+        io.stderr_pieces.append(b"e1")
+        yield b"o1"
+        io.stderr_pieces.append(b"e2")
+        yield b"o2"
+        io.stderr_pieces.append(b"e3")
+
+    assert [pair async for pair in interleaved(stream(), io)] == [
+        (Channel.STDERR, b"e1"),
+        (Channel.STDOUT, b"o1"),
+        (Channel.STDERR, b"e2"),
+        (Channel.STDOUT, b"o2"),
+        (Channel.STDERR, b"e3"),
+    ]
+    assert io.stderr_pieces is None
+    assert not io.stderr
+
+
+@pytest.mark.asyncio
+async def test_interleaved_stopped_early_keeps_what_it_did_not_say():
+    io = IOResult()
+
+    async def stream():
+        io.stderr_pieces.extend([b"e1", b"e2"])
+        yield b"o1"
+
+    pairs = interleaved(stream(), io)
+    assert await anext(pairs) == (Channel.STDERR, b"e1")
+    await pairs.aclose()
+    assert io.stderr == b"e2"
+    assert io.stderr_pieces is None

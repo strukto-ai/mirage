@@ -20,6 +20,12 @@ import { ENV_WORKER_TOKEN } from '../env.ts'
 import { type WorkerPoolOptions, WorkerType } from './types.ts'
 import { ProcessWorker, ThreadWorker, type Worker } from './worker.ts'
 
+/** The worker an id being created goes to, and how many requests claim it. */
+interface Claim {
+  worker: Worker
+  claims: number
+}
+
 /**
  * The workers and which holds each workspace. A workspace's worker
  * outlives its stop, so a create or start of its id reaches the worker that
@@ -38,8 +44,11 @@ export class WorkerPool {
   /** Called when a worker's workspaces are gone with it. */
   onLost: () => void = () => undefined
   private readonly homes = new Map<string, Worker>()
-  /** The worker each id being created goes to, until its create ends. */
-  private readonly pending = new Map<string, Worker>()
+  /**
+   * The worker each id being created goes to, and how many requests claim
+   * it, until the last of them ends.
+   */
+  private readonly pending = new Map<string, Claim>()
   private readonly directory: string
   private stopping = false
 
@@ -87,19 +96,29 @@ export class WorkerPool {
 
   /** The worker now creating `id`, else undefined. */
   building(id: string): Worker | undefined {
-    return this.pending.get(id)
+    return this.pending.get(id)?.worker
   }
 
   /** The worker holding, last holding or now creating `id`, else undefined. */
   home(id: string): Worker | undefined {
-    return this.homes.get(id) ?? this.pending.get(id)
+    return this.homes.get(id) ?? this.pending.get(id)?.worker
   }
 
-  /** Send the creates of `id` to `worker` until `settle` is called. */
+  /**
+   * Send the creates of `id` to `worker` until `settle` is called. Claims of
+   * one id on one worker overlap: it stays claimed until each is settled.
+   */
   claim(id: string, worker: Worker): () => void {
-    this.pending.set(id, worker)
+    const held = this.pending.get(id)
+    const entry = held?.worker === worker ? held : { worker, claims: 0 }
+    entry.claims += 1
+    this.pending.set(id, entry)
+    let settled = false
     return () => {
-      if (this.pending.get(id) === worker) this.pending.delete(id)
+      if (settled) return
+      settled = true
+      entry.claims -= 1
+      if (entry.claims === 0 && this.pending.get(id) === entry) this.pending.delete(id)
     }
   }
 

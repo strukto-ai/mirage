@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -44,8 +44,14 @@ class WorkspaceInternals(BaseModel):
     in_flight_jobs: int
 
 
+# Running while the server holds it in memory; stopped while only its
+# config and state are kept.
+WorkspaceStatus = Literal["running", "stopped"]
+
+
 class WorkspaceBrief(BaseModel):
     id: str
+    status: WorkspaceStatus
     mode: str
     mount_count: int
     session_count: int
@@ -54,6 +60,7 @@ class WorkspaceBrief(BaseModel):
 
 class WorkspaceDetail(BaseModel):
     id: str
+    status: WorkspaceStatus
     mode: str
     created_at: float
     fuse_mountpoints: dict[str, str] = Field(default_factory=dict)

@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
-import { Workspace } from '@struktoai/mirage-node'
+import { DiskWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 import { readSnapshotTar, writeSnapshotTar } from '@struktoai/mirage-core/workspace/snapshot/tar_io'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode, type JsonValue } from '@struktoai/mirage-core/types'
@@ -728,7 +728,8 @@ describe('workspaces router', () => {
 
   describe.each(['initModule', 'init_module'])('request runtime %s', (key) => {
     it.each(['local', 'token'] as const)('rejects host initializers with %s auth', async (mode) => {
-      const app = buildApp({ authConfig: { mode, bearerToken: 'test-token' } })
+      const stateRoot = mkdtempSync(join(tmpdir(), 'mir-init-'))
+      const app = buildApp({ stateRoot, authConfig: { mode, bearerToken: 'test-token' } })
       const headers = mode === 'token' ? { authorization: 'Bearer test-token' } : {}
       try {
         const res = await app.inject({
@@ -756,6 +757,7 @@ describe('workspaces router', () => {
         expect(list.json()).toEqual([])
       } finally {
         await app.close()
+        rmSync(stateRoot, { recursive: true, force: true })
       }
     })
   })
@@ -1472,10 +1474,14 @@ describe('workspace cancel, kill, stop and start', () => {
       })
       expect(made.json<{ exit_code: number }>().exit_code).toBe(0)
       expect((await post(app, '/v1/workspaces/keep/stop')).statusCode).toBe(200)
-      expect((await app.inject({ method: 'GET', url: '/v1/workspaces/keep' })).statusCode).toBe(404)
+      const off = await app.inject({ method: 'GET', url: '/v1/workspaces/keep' })
+      expect(off.json<{ status: string }>().status).toBe('stopped')
       const started = await post(app, '/v1/workspaces/keep/start')
       expect(started.statusCode).toBe(200)
-      expect(started.json<{ id: string }>().id).toBe('keep')
+      expect(started.json<{ id: string; status: string }>()).toMatchObject({
+        id: 'keep',
+        status: 'running',
+      })
       const r = await post(app, '/v1/workspaces/keep/shell?session_id=s', {
         command: 'pwd && cat f.txt',
       })
@@ -1496,7 +1502,8 @@ describe('workspace cancel, kill, stop and start', () => {
         expect(r.statusCode).toBe(200)
         expect(r.json<{ id: string }>().id).toBe('keep')
       }
-      expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toEqual([])
+      const listed = await app.inject({ method: 'GET', url: '/v1/workspaces' })
+      expect(listed.json()).toMatchObject([{ id: 'keep', status: 'stopped' }])
       // State kept with no config, as a workspace created before configs
       // were saved: it stops again, and cannot be started.
       rmSync(join(root, 'state', 'configs', 'keep.json'))
@@ -1537,6 +1544,146 @@ describe('workspace cancel, kill, stop and start', () => {
       expect((await post(app, '/v1/workspaces/src/clone', { id: 'w' })).statusCode).toBe(201)
       await post(app, '/v1/workspaces/w/stop')
       expect((await post(app, '/v1/workspaces/w/start')).statusCode).toBe(404)
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('lists, shows and deletes a stopped workspace', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-stopped-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      for (const id of ['off', 'on']) {
+        expect((await post(app, '/v1/workspaces', { ...RAM, id })).statusCode).toBe(201)
+      }
+      await post(app, '/v1/workspaces/off/stop')
+      const listed = (await app.inject({ method: 'GET', url: '/v1/workspaces' })).json<
+        { id: string; status: string; created_at: number }[]
+      >()
+      expect(listed).toMatchObject([
+        { id: 'on', status: 'running', mode: 'write', mount_count: 1, session_count: 1 },
+        { id: 'off', status: 'stopped', mode: 'write', mount_count: 1, session_count: 0 },
+      ])
+      expect(listed[1]?.created_at).toBeGreaterThan(0)
+      const got = await app.inject({ method: 'GET', url: '/v1/workspaces/off' })
+      expect(got.json()).toMatchObject({
+        id: 'off',
+        status: 'stopped',
+        mode: 'write',
+        mounts: [{ prefix: '/', vfs: 'ram', mode: 'write', description: '' }],
+        sessions: [],
+        internals: null,
+      })
+      const deleted = await app.inject({ method: 'DELETE', url: '/v1/workspaces/off' })
+      expect(deleted.statusCode).toBe(200)
+      expect(deleted.json<{ id: string }>().id).toBe('off')
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces/off' })).statusCode).toBe(404)
+      expect((await post(app, '/v1/workspaces/off/start')).statusCode).toBe(404)
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toMatchObject([
+        { id: 'on', status: 'running' },
+      ])
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('deletes a stopped workspace from the store its config names, and reads its mode as written', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-own-store-'))
+    const own = join(root, 'own')
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      const body = {
+        id: 'mine',
+        config: { mounts: { '/': { vfs: 'ram' } }, store: { type: 'disk', root: own } },
+      }
+      expect((await post(app, '/v1/workspaces', body)).statusCode).toBe(201)
+      await post(app, '/v1/workspaces/mine/stop')
+      const got = await app.inject({ method: 'GET', url: '/v1/workspaces/mine' })
+      expect(got.json()).toMatchObject({ status: 'stopped', mode: 'write' })
+      expect(got.json<{ created_at: number }>().created_at).toBeGreaterThan(0)
+      expect(existsSync(join(own, 'workspaces', 'mine'))).toBe(true)
+      const deleted = await app.inject({ method: 'DELETE', url: '/v1/workspaces/mine' })
+      expect(deleted.statusCode).toBe(200)
+      expect(existsSync(join(own, 'workspaces', 'mine'))).toBe(false)
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('answers 404 for an id with state but no saved config, as a rejected create leaves', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-orphan-'))
+    const stateRoot = join(root, 'state')
+    const app = buildApp({ stateRoot })
+    try {
+      const store = new DiskWorkspaceStateStore({ root: stateRoot })
+      await store.replaceMeta('orphan', {})
+      await store.close()
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces/orphan' })).statusCode).toBe(
+        404,
+      )
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toEqual([])
+      expect(
+        (await app.inject({ method: 'DELETE', url: '/v1/workspaces/orphan' })).statusCode,
+      ).toBe(404)
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('lists a stopped workspace whose store cannot be read', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-lost-store-'))
+    const own = join(root, 'own')
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      const body = {
+        id: 'mine',
+        config: { mounts: { '/': { vfs: 'ram' } }, store: { type: 'disk', root: own } },
+      }
+      expect((await post(app, '/v1/workspaces', body)).statusCode).toBe(201)
+      const ram = { mounts: { '/': { vfs: 'ram' } } }
+      expect((await post(app, '/v1/workspaces', { id: 'on', config: ram })).statusCode).toBe(201)
+      await post(app, '/v1/workspaces/mine/stop')
+      rmSync(own, { recursive: true, force: true })
+      writeFileSync(own, 'not a directory')
+      const listed = await app.inject({ method: 'GET', url: '/v1/workspaces' })
+      expect(listed.statusCode).toBe(200)
+      expect(listed.json()).toEqual([
+        expect.objectContaining({ id: 'on', status: 'running' }),
+        expect.objectContaining({ id: 'mine', status: 'stopped', created_at: 0 }),
+      ])
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('shows a stopped workspace with the mode and mounts it ran with', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-same-view-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      const config = {
+        mode: 'rw',
+        mounts: { '/': { vfs: 'ram', mode: 'r' }, '/data': { vfs: 'ram' } },
+      }
+      expect((await post(app, '/v1/workspaces', { id: 'w', config })).statusCode).toBe(201)
+      const view = async () => {
+        const d = (await app.inject({ method: 'GET', url: '/v1/workspaces/w' })).json<{
+          mode: string
+          mounts: { prefix: string; vfs: string; mode: string }[]
+        }>()
+        return {
+          mode: d.mode,
+          mounts: d.mounts.map(({ prefix, vfs, mode }) => ({ prefix, vfs, mode })),
+        }
+      }
+      const running = await view()
+      expect(running.mode).toBe('write')
+      await post(app, '/v1/workspaces/w/stop')
+      expect(await view()).toEqual(running)
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })

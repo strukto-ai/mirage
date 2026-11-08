@@ -246,6 +246,15 @@ class WorkerProxy:
             return await self._create(scope, receive, send, None, workspace_id)
         home = pool.home(workspace_id)
         if home is None or home.dead:
+            # A stopped workspace no worker holds, as after a restart: its
+            # delete claims the id meanwhile, so a start of it goes to the
+            # same worker.
+            if action is None and method == "DELETE":
+                settle = pool.claim(workspace_id, first)
+                try:
+                    return await self._pass(first, scope, receive, send)
+                finally:
+                    settle()
             return await self._pass(first, scope, receive, send)
         if action == "clone" and len(parts) == 4 and method == "POST":
             return await self._create(scope, receive, send, home)
@@ -400,8 +409,22 @@ class WorkerProxy:
         for answer in answers:
             if answer.status != 200:
                 return await send_answer(send, answer)
-        items = [item for a in answers for item in json.loads(a.body)]
-        items.sort(key=lambda item: float(item.get("created_at") or 0))
+        # The workers share one state root, so each lists the workspaces
+        # the others run as stopped: the running one is listed, and each id
+        # once, the running ones first, as each worker lists them.
+        by_id: dict[str, dict[str, Any]] = {}
+        for answer in answers:
+            for item in json.loads(answer.body):
+                seen = by_id.get(str(item["id"]))
+                if seen is None or seen.get("status") != "running":
+                    by_id[str(item["id"])] = item
+        items = sorted(
+            by_id.values(),
+            key=lambda item: (
+                item.get("status") != "running",
+                float(item.get("created_at") or 0),
+            ),
+        )
         await send_json(send, 200, items)
 
     async def _refused(
@@ -430,7 +453,9 @@ class WorkerProxy:
     async def _holds(
         self, worker: Worker, scope: Scope, workspace_id: str
     ) -> bool:
-        """Whether ``worker`` still holds workspace ``workspace_id``."""
+        """Whether ``worker`` still holds workspace ``workspace_id``: it
+        answers for it, and not as stopped, since a worker answers for every
+        workspace in the state root."""
         headers = [
             (k, v)
             for k, v in headers_for(scope)
@@ -447,7 +472,7 @@ class WorkerProxy:
                 "mirage: worker %d did not answer: %s", worker.index, exc
             )
             return True
-        return response.status_code != 404
+        return response.status_code != 404 and not _stopped_in(response)
 
     def _has_room(self, extra: int) -> bool:
         """Whether ``extra`` more workspaces fit under ``max_workspaces``."""
@@ -768,3 +793,19 @@ def build_worker_proxy(
     return ProxyHeadersMiddleware(
         cast(Any, checked), trusted_hosts=list(proxies)
     )
+
+
+def _stopped_in(response: httpx.Response) -> bool:
+    """Whether a workspace answer says it is stopped.
+
+    Args:
+        response (httpx.Response): a worker's answer for one workspace.
+    """
+    try:
+        body = response.json()
+    except ValueError as exc:
+        logger.debug(
+            "mirage: a worker answered a workspace with no JSON: %s", exc
+        )
+        return False
+    return isinstance(body, dict) and body.get("status") == "stopped"
