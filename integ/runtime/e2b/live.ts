@@ -14,19 +14,20 @@
 
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { Workspace, SSHVFS, SSHRuntime } from '@struktoai/mirage-node'
+import { Workspace, SSHVFS, SSHMachine } from '@struktoai/mirage-node'
 import { Limit, MountMode, RAMVFS } from '@struktoai/mirage-core'
-import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
+import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
+import { MachineRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 import { exerciseCancellation, runLine } from '../../fixtures/runtime/e2b_cancel.ts'
 
 const dec = new TextDecoder()
 const hash = (data: Uint8Array) => createHash('sha256').update(data).digest('hex')
 
-async function exercise(runtime: E2BRuntime | SSHRuntime, label: string) {
+async function exercise(machine: E2BMachine | SSHMachine, label: string) {
   const bytes = Uint8Array.from({ length: 262144 }, (_, i) => i % 256)
   for (const data of [null, new Uint8Array(), bytes]) {
     const result = await runLine(
-      runtime,
+      machine,
       "python3 -c 'import sys,hashlib; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'",
       data,
     )
@@ -34,7 +35,7 @@ async function exercise(runtime: E2BRuntime | SSHRuntime, label: string) {
     assert.equal(dec.decode(result.stdout).trim(), hash(data ?? new Uint8Array()))
   }
   for (let i = 0; i < 6; i++) {
-    const result = await runLine(runtime, 'printf out; printf err >&2; exit 7', new Uint8Array([1]))
+    const result = await runLine(machine, 'printf out; printf err >&2; exit 7', new Uint8Array([1]))
     assert.equal(result.exitCode, 7)
     assert.equal(dec.decode(result.stdout), 'out')
     assert.equal(dec.decode(result.stderr ?? undefined), 'err')
@@ -42,7 +43,7 @@ async function exercise(runtime: E2BRuntime | SSHRuntime, label: string) {
   const results = await Promise.all(
     Array.from({ length: 6 }, (_, i) =>
       runLine(
-        runtime,
+        machine,
         "python3 -c 'import sys,time,json; s=time.time(); d=sys.stdin.buffer.read(); time.sleep(2); print(json.dumps([s,time.time(),d.hex()]))'",
         new Uint8Array([i]),
       ),
@@ -57,21 +58,22 @@ async function exercise(runtime: E2BRuntime | SSHRuntime, label: string) {
   console.log(JSON.stringify({ check: label + '_stdin_eof_exit_parallel' }))
 }
 
-const e2b = new E2BRuntime({ config: { sandboxId: process.env.E2B_SANDBOX_ID! } })
+const e2b = new E2BMachine('e2b', { sandboxId: process.env.E2B_SANDBOX_ID! })
 const sshConfig = {
   host: '127.0.0.1',
   port: Number(process.env.E2B_SSH_PORT),
   username: 'user',
   identityFile: process.env.E2B_SSH_IDENTITY!,
 }
-const ssh = new SSHRuntime({ captures: ['python3'], config: sshConfig })
+const ssh = new SSHMachine('ssh', sshConfig)
 try {
   await exercise(e2b, 'typescript_e2b')
   const cancelWorkspace = new Workspace(
     { '/home/user': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      runtimes: [e2b, 'workspace'],
+      machines: { e2b },
+      runtimes: [new MachineRuntime({ captures: ['@line'], machine: 'e2b' }), 'workspace'],
       commandLimits: { '@line': new Limit({ timeoutSeconds: 5 }) },
     },
   )
@@ -84,7 +86,11 @@ try {
   await exercise(ssh, 'typescript_ssh')
   const ws = new Workspace(
     { '/home/user/work': new SSHVFS({ ...sshConfig, root: '/home/user/work' }) },
-    { mode: MountMode.EXEC, runtimes: [ssh, 'workspace'] },
+    {
+      mode: MountMode.EXEC,
+      machines: { ssh },
+      runtimes: [new MachineRuntime({ captures: ['python3'], machine: 'ssh' }), 'workspace'],
+    },
   )
   try {
     let result = await ws.shell('cat > /home/user/work/ts-output.txt', {

@@ -289,6 +289,13 @@ def _format_processes(items: list[dict[str, Any]]) -> str:
     )
 
 
+def _format_machines(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "No machines."
+    rows = [[item["id"], item["state"]] for item in items]
+    return format_table(["MACHINE", "STATE"], rows)
+
+
 def _list_records(
     workspace_id: str, kind: str, params: dict[str, str]
 ) -> dict[str, Any] | list[Any]:
@@ -296,7 +303,7 @@ def _list_records(
 
     Args:
         workspace_id (str): the workspace.
-        kind (str): ``lines``, ``jobs`` or ``processes``.
+        kind (str): ``lines``, ``jobs``, ``processes`` or ``machines``.
         params (dict[str, str]): the list's filters.
     """
     with make_client() as client:
@@ -747,6 +754,14 @@ def list_processes_cmd(
         _list_records(workspace_id, "processes", params),
         human=_format_processes,
     )
+
+
+@app.command("list-machines")
+def list_machines_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+) -> None:
+    """List the machines the workspace runs programs on, each checked now."""
+    emit(_list_records(workspace_id, "machines", {}), human=_format_machines)
 
 
 @app.command("allow")

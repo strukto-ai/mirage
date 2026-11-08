@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from mirage.commands.spec.types import UsageStyle
     from mirage.io import IOResult
     from mirage.io.config import IOConfig
+    from mirage.machine import MachineConfig, MachineHandle
     from mirage.policy import (
         Action,
         Ask,
@@ -72,7 +73,6 @@ if TYPE_CHECKING:
     from mirage.runtime.errors import UnsupportedExecutionError
     from mirage.runtime.language import LanguageRuntime
     from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
-    from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
     from mirage.runtime.table import (
         build_runtime,
         known_runtimes,
@@ -211,7 +211,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.runtime.errors": ("UnsupportedExecutionError",),
     "mirage.runtime.language": ("LanguageRuntime",),
     "mirage.runtime.mixin": ("LineExecutorMixin", "ProcessExecutorMixin"),
-    "mirage.runtime.sandbox": ("RemoteSandbox", "SandboxConfig"),
+    "mirage.machine": ("MachineConfig", "MachineHandle"),
     "mirage.runtime.table": (
         "build_runtime",
         "known_runtimes",
@@ -294,7 +294,7 @@ __all__ = [
     "PathSpec",
     "PolicyDenied",
     "PolicyError",
-    "RemoteSandbox",
+    "MachineHandle",
     "ResponseCache",
     "VFSName",
     "RouteContext",
@@ -309,7 +309,7 @@ __all__ = [
     "RuntimeConfig",
     "EXTERNAL_COMMANDS",
     "SPECS",
-    "SandboxConfig",
+    "MachineConfig",
     "Scope",
     "Session",
     "SessionContext",

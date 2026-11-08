@@ -31,6 +31,8 @@ import {
 import { parseCommandLimits } from './policy/builtin/output_cap.ts'
 import { parseProgram, SessionProfile, type ProfilePolicySpec } from './policy/profile.ts'
 import { statedProcesses } from './execution/process/config.ts'
+import type { MachineHandle } from './machine/handle.ts'
+import { buildMachine } from './machine/registry.ts'
 import { validateDocument } from './rs/document.ts'
 import { Runtime, type RuntimeEntry } from './runtime/base.ts'
 import type { RuntimeOptions } from './runtime/config.ts'
@@ -178,6 +180,33 @@ async function buildRuntimeEntries(
   return out
 }
 
+/**
+ * Turn the `machines:` block into each machine's handle. Mirrors
+ * `_build_machines` in `mirage/config.py`.
+ *
+ * @param machines each entry by name: its `provider` and how to reach it.
+ * @param sources the sources a pointer in an entry reads from.
+ */
+async function buildMachines(
+  machines: Record<string, Record<string, unknown>>,
+  sources: Readonly<Record<string, ResolvedSource>> | undefined,
+): Promise<Record<string, MachineHandle>> {
+  const out = Object.create(null) as Record<string, MachineHandle>
+  for (const [name, entry] of Object.entries(machines)) {
+    const read = await resolveConfigSecrets(entry, sources, `machines.${name}`)
+    try {
+      out[name] = buildMachine(name, read)
+    } catch (err) {
+      // As a runtime entry's: the message must not quote a secret.
+      const message = err instanceof Error ? err.message : String(err)
+      const masked = maskValues(message, fetchedValues(entry, read))
+      if (masked === message) throw err
+      throw new Error(masked)
+    }
+  }
+  return out
+}
+
 function camelizeKeys(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(obj)) out[snakeToCamel(k)] = v
@@ -311,6 +340,12 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   if (raw.profiles !== undefined && raw.profiles !== null) {
     parseProfiles(raw.profiles)
   }
+  if (raw.machines !== undefined && raw.machines !== null) {
+    if (!isPlainObject(raw.machines)) throw new Error('config `machines` must be a mapping')
+    for (const [name, entry] of Object.entries(raw.machines)) {
+      if (!isPlainObject(entry)) throw new Error(`machine \`${name}\` must be a mapping`)
+    }
+  }
   if (raw.route_policy !== undefined && raw.route_policy !== null) {
     parseProgram(raw.route_policy, 'route_policy')
   }
@@ -433,6 +468,16 @@ export function normalizeConfigKeys(raw: Record<string, unknown>): Record<string
       }
       return normalized
     })
+  }
+  if (isPlainObject(out.machines)) {
+    // A machine entry is its handle's config plus `provider`, so its
+    // keys camelize as a runtime's config block does.
+    out.machines = Object.fromEntries(
+      Object.entries(out.machines).map(([name, entry]) => [
+        name,
+        isPlainObject(entry) ? camelizeKeys(entry) : entry,
+      ]),
+    )
   }
   return out
 }
@@ -669,6 +714,8 @@ export interface WorkspaceConfigRaw {
   mounts: Record<string, MountBlock>
   clis?: Record<string, CLIBlock> | null
   runtimes?: (string | Record<string, unknown>)[] | null
+  /** The machines programs run on, by name: a `provider` plus how to reach it. */
+  machines?: Record<string, Record<string, unknown>> | null
   /** The route policy program, `{script, runtime}`; validated by parseProgram. */
   routePolicy?: unknown
   /** The profiles (`profiles:`); every entry validated by parseProfiles. */
@@ -799,6 +846,7 @@ export async function configToWorkspaceArgs(
   const sources = await resolveSourcesFor(cfg.secrets, [
     ...blocks.map((block) => block.config ?? {}),
     ...runtimes,
+    ...Object.values(cfg.machines ?? {}),
   ])
   for (const [prefix, block] of Object.entries(cfg.mounts)) {
     const r = await host.buildVfs(block.vfs, block.config ?? {}, sources)
@@ -841,6 +889,10 @@ export async function configToWorkspaceArgs(
   } finally {
     if (rule !== null && rule !== bound) await host.releaseNetwork(rule)
   }
+  const machines =
+    cfg.machines !== undefined && cfg.machines !== null
+      ? await buildMachines(cfg.machines, sources)
+      : undefined
   const runtimeEntries =
     cfg.runtimes !== undefined && cfg.runtimes !== null
       ? await buildRuntimeEntries(cfg.runtimes, sources, host)
@@ -867,6 +919,7 @@ export async function configToWorkspaceArgs(
       // would ever release. Mirrors the `owns_store` Python's loader
       // sets beside the same store.
       ...(stateStore !== undefined ? { store: stateStore, ownsStore: true } : {}),
+      ...(machines !== undefined ? { machines } : {}),
       ...(runtimeEntries !== undefined ? { runtimes: runtimeEntries } : {}),
       ...(cfg.routePolicy !== undefined && cfg.routePolicy !== null
         ? { routePolicy: loadProgram(parseProgram(cfg.routePolicy, 'route_policy'), host) }

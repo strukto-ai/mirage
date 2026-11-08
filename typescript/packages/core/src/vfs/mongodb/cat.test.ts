@@ -20,8 +20,8 @@ import * as statModule from '../../core/mongodb/stat.ts'
 import { onMount, vfsOver } from '../../test-utils.ts'
 import { PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
-import { MongoDBVFS } from '../../vfs/mongodb/mongodb.ts'
+import { resolveMongoDBConfig } from './config.ts'
+import { MongoDBVFS } from './mongodb.ts'
 
 vi.mock('../../core/mongodb/stat.ts', () => ({
   stat: vi.fn(),

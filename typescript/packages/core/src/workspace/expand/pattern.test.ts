@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { EvaluationContext } from '../evaluation.ts'
-import { varsFromEnv } from '../../workspace/session/session.ts'
+import { varsFromEnv } from '../session/session.ts'
 import { describe, expect, it } from 'vitest'
 import { getCaseItems } from '../../shell/helpers.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'

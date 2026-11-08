@@ -385,6 +385,7 @@ export class JobTable {
       limit: init.limit ?? null,
       ignores: IGNORED_SIGNALS,
       oneCommand: init.simple === true,
+      programIgnores: IGNORED_SIGNALS,
     })
     const { line, group } = process.record
     let jobId: number

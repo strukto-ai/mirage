@@ -18,8 +18,11 @@ import logging
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.commands.config import Context
 from mirage.io.types import materialize
+from mirage.machine.registry import build_machine
 from mirage.runtime.base import Runtime
+from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import Program, RunResult
@@ -248,5 +251,29 @@ async def test_a_capture_that_never_wins_is_logged(caplog):
             "runtime 'b' never runs 'python3': 'box', listed before it, takes it",
             "runtime 'b' never runs 'python': 'a', listed before it, takes it",
         ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_native_entry_another_workspace_holds_keeps_its_machines():
+    runtime = MachineRuntime(["uname"], machine="box")
+    first = build_machine("box", {"provider": "docker", "container": "a"})
+    ws = Workspace(
+        {"/d": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"box": first},
+        runtimes=[runtime],
+    )
+    try:
+        other = build_machine("box", {"provider": "docker", "container": "b"})
+        with pytest.raises(ValueError, match="already bound"):
+            Workspace(
+                {"/d": RAMVFS()},
+                mode=MountMode.EXEC,
+                machines={"box": other},
+                runtimes=[runtime],
+            )
+        assert runtime.handle(Context()) is first
     finally:
         await ws.close()

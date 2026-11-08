@@ -126,6 +126,7 @@ async def test_an_explained_route_carries_its_reason():
         {
             "kind": "route",
             "runtime": "monty",
+            "machine": None,
             "reason": "plain arithmetic",
             "policy": "_OnMonty",
         }

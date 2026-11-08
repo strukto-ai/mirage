@@ -33,6 +33,7 @@ from mirage.policy import (
     CommandWord,
     Deny,
     Pending,
+    Route,
     Scope,
     ask_rule,
     policy_denied,
@@ -48,7 +49,7 @@ from mirage.policy.match import (
     pattern_matches,
     split_pattern,
 )
-from mirage.policy.policies import settled
+from mirage.policy.policies import command_route, settled
 from mirage.shell.helpers import (
     get_redirects,
     literal_word,
@@ -160,12 +161,15 @@ class Admitted:
         granted (tuple[CommandRule, ...]): the ask rules the line runs
             under a grant for: the one the entry point answered for this
             line, and the session's standing ones.
+        route (Route | None): where ``pre_command`` placed the command
+            over its line's placement; None when no policy placed it.
     """
 
     rules: AdmissionRules | None
     ctx: CommandContext
     judged: frozenset[str]
     granted: tuple[CommandRule, ...]
+    route: Route | None = None
 
     def scopes(self, virtual: str) -> bool:
         """Whether anything at or under this path could be refused for
@@ -542,7 +546,7 @@ async def gate(
     every: bool = False,
     rules_only: bool = False,
     line: str = "",
-) -> tuple[CommandContext, Deny | Ask | None, tuple[Deny | Ask, ...]]:
+) -> tuple[CommandContext, Deny | Ask | None, tuple[Deny | Ask | Route, ...]]:
     """Everything the gate decides about one command before anything is
     spent on it: the classified context, and the policy chain's answer
     with the answers it came from.
@@ -660,14 +664,15 @@ async def gate(
     said = await registry.policies.answers(
         "pre_command", ctx, every, rules_only
     )
-    answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
+    answers = tuple(a for a in said if isinstance(a, (Deny, Ask, Route)))
     if unlisted_service(ctx, registry, session):
         refused = Deny(
             f"{' '.join(program)} is not allowed",
             policy=PermissionsPolicy.__name__,
         )
         answers = (refused, *answers)
-    return ctx, settled(answers), answers
+    verdict = settled(answers)
+    return ctx, None if isinstance(verdict, Route) else verdict, answers
 
 
 async def resolved(
@@ -778,7 +783,7 @@ async def admit(
         rules_only=rules_only,
         line=claimant.occurrence.source if claimant is not None else "",
     )
-    ctx, asked, _ = gated
+    ctx, asked, answers = gated
     action = await resolved(ctx, asked, registry, cancel, claimant)
     if action is None:
         granted = [
@@ -793,6 +798,7 @@ async def admit(
             ctx=ctx,
             judged=frozenset(_norm(p.virtual) for p in ctx.paths),
             granted=tuple(granted),
+            route=command_route(answers),
         )
     err, code = await render_command_deny(name, action, ctx)
     return Refused(err, code, refusal_of(action))

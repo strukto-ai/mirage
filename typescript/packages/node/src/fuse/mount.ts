@@ -32,7 +32,7 @@ import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { checkMountpoint, FSKIT_MOUNT_ROOT, prepareBackend } from './backend.ts'
 import { UNMOUNT_POLL_MS, UNMOUNT_TIMEOUT_MS } from './constants.ts'
 import { MirageFS } from './fs.ts'
-import { serve, unserve } from '../runtime/sandbox/program.ts'
+import { serve, unserve } from '../machine/program.ts'
 
 export interface FuseHandle {
   mountpoint: string

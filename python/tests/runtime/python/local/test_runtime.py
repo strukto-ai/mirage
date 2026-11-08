@@ -25,8 +25,8 @@ import pytest
 
 from mirage import RAMVFS, DiskVFS, MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.machine.program import FAKETIME_LIBRARIES, serve, unserve
 from mirage.runtime.python import LocalRuntime
-from mirage.runtime.sandbox.program import FAKETIME_LIBRARIES, serve, unserve
 from mirage.runtime.types import Program, RunResult
 from mirage.types import PathSpec
 

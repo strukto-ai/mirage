@@ -29,7 +29,7 @@ enum Hook {
 impl Hook {
     fn legal(self) -> Vec<&'static str> {
         match self {
-            Self::PreExecute => vec!["ask", "deny", "route"],
+            Self::PreCommand | Self::PreExecute => vec!["ask", "deny", "route"],
             Self::PostExecute | Self::PreNetwork => vec!["ask", "deny", "limit"],
             Self::PreWorkspace => vec!["deny"],
             Self::PostNetwork => vec![],
@@ -119,6 +119,8 @@ struct Response {
 struct RouteValue {
     action: u32,
     runtime: Text,
+    #[serde(default)]
+    machine: Text,
 }
 
 #[derive(Deserialize)]
@@ -633,16 +635,19 @@ impl Composition {
                 }
                 let mut result = evaluation.fold.result();
                 for route in &response.routes {
-                    if route.runtime.iter().any(|point| *point > 0x10ffff) {
+                    if route
+                        .runtime
+                        .iter()
+                        .chain(&route.machine)
+                        .any(|point| *point > 0x10ffff)
+                    {
                         return Err(error("invalid route text"));
                     }
                 }
                 if let Some(first) = response.routes.first() {
-                    if response
-                        .routes
-                        .iter()
-                        .any(|route| route.runtime != first.runtime)
-                    {
+                    if response.routes.iter().any(|route| {
+                        (&route.runtime, &route.machine) != (&first.runtime, &first.machine)
+                    }) {
                         result.conflict = routes;
                         result.action = None;
                     } else {

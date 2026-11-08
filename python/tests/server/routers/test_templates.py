@@ -142,7 +142,10 @@ async def test_a_template_builds_from_a_saved_connection(
     await client.delete("/v1/workspaces/boxed")
     r = await client.post("/v1/workspaces", json={"config": _named("gone")})
     assert r.status_code == 400
-    assert r.json()["detail"] == "gone is not saved as a VFS, CLI or runtime"
+    assert (
+        r.json()["detail"]
+        == "gone is not saved as a VFS, CLI, runtime or machine"
+    )
 
 
 @pytest.mark.asyncio

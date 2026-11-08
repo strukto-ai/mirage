@@ -40,6 +40,7 @@ const KINDS: readonly Kind[] = [
   { name: 'vfs', route: '/v1/vfs', noun: 'VFS' },
   { name: 'cli', route: '/v1/clis', noun: 'CLI' },
   { name: 'runtime', route: '/v1/runtimes', noun: 'runtime' },
+  { name: 'machine', route: '/v1/machines', noun: 'machine' },
 ]
 
 const NO_ARGV_SECRET = (key: string): string =>

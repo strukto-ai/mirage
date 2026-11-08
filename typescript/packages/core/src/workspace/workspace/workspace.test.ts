@@ -16,7 +16,7 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { SessionProfile } from '../../policy/profile.ts'
-import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
+import { MachineHandle } from '../../machine/handle.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { RAMExecutionStore } from '../../execution/ram.ts'
 import type { Process } from '../../execution/process/types.ts'
@@ -394,16 +394,12 @@ describe('a manual clock workspace', () => {
  * was asked to reap, holds those of the pids in `holds`, and does not answer
  * for pid 6.
  */
-class ReapedBox extends RemoteSandbox {
-  readonly name = 'reapbox'
+class ReapedBox extends MachineHandle {
+  static override readonly provider = 'reapbox'
   readonly reaped: [string, number][] = []
 
   constructor(private readonly holds: readonly number[]) {
-    super({ captures: ['never-run'] })
-  }
-
-  override get machine(): MachineId {
-    return new MachineId(this.name, 'b1')
+    super('b1')
   }
 
   connect(): Promise<void> {
@@ -427,13 +423,13 @@ function boxProcess(pid: number, machine = 'reapbox:b1'): Record<string, unknown
 }
 
 // A lapsed workspace's programs are stopped by whatever reaches them here: a
-// sandbox's by each runtime on the machine its record names, reached once
-// that box held it, by its process's tag. One the box does not hold, one
-// whose box did not answer, one on a machine no runtime here reaches and a
-// host program of another host are out of reach.
-it('reaps the programs its runtimes reach', async () => {
+// machine's by the machine its record names, reached once it held it, by its
+// process's tag. One the machine does not hold, one whose machine did not
+// answer, one on a machine this workspace does not declare and a host program
+// of another host are out of reach.
+it('reaps the programs its machines reach', async () => {
   const box = new ReapedBox([2])
-  const ws = new Workspace({}, { runtimes: [box] })
+  const ws = new Workspace({}, { machines: { b1: box } })
   try {
     const wid = ws.processTable.workspaceId
     const reap = (
@@ -464,7 +460,7 @@ it('reaps the programs its runtimes reach', async () => {
 // lists processes.
 it('reaps a lapsed instance as it starts', async () => {
   const box = new ReapedBox([2])
-  const ws = new Workspace({}, { runtimes: [box] })
+  const ws = new Workspace({}, { machines: { b1: box } })
   try {
     const store = new RAMExecutionStore(30)
     ws.jobTable.store = store

@@ -23,19 +23,19 @@ from typing import Any, ClassVar
 from mirage.commands.config import Context
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource
-from mirage.runtime.config import RuntimeConfig, resolve_home
-from mirage.runtime.mixin import ProcessExecutorMixin
-from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.python.execution import prepare_source
-from mirage.runtime.python.flags import init_argv
-from mirage.runtime.python.local.config import LocalConfig
-from mirage.runtime.sandbox.program import (
+from mirage.machine.program import (
     Children,
     close_children,
     cwd_refusal,
     run_program,
     system_time_env,
 )
+from mirage.runtime.config import RuntimeConfig, resolve_home
+from mirage.runtime.mixin import ProcessExecutorMixin
+from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.python.execution import prepare_source
+from mirage.runtime.python.flags import init_argv
+from mirage.runtime.python.local.config import LocalConfig
 from mirage.runtime.types import OutputFn, Program, RunResult, RuntimeReach
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS

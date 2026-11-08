@@ -248,10 +248,10 @@ async def test_types_are_read_off_the_config_schemas(client):
     auth = {f["name"]: f for f in clis["mcp"]}["auth.type"]
     assert auth["group"] == "auth"
     assert auth["options"] == ["bearer", "header"]
-    runtimes = (await client.get("/v1/runtimes/types")).json()
-    key = {f["name"]: f for f in runtimes["daytona"]}["api_key"]
+    machines = (await client.get("/v1/machines/types")).json()
+    key = {f["name"]: f for f in machines["daytona"]}["api_key"]
     assert key["secret"] is True
-    ssh = {f["name"]: f for f in runtimes["ssh"]}
+    ssh = {f["name"]: f for f in machines["ssh"]}
     assert ssh["host"]["type"] == "string"
     assert ssh["host"]["required"] is True
     assert ssh["port"]["type"] == "number"
@@ -263,9 +263,9 @@ async def test_types_are_read_off_the_config_schemas(client):
 
 
 @pytest.mark.asyncio
-async def test_a_runtime_is_checked_against_its_field_types(client):
+async def test_a_machine_is_checked_against_its_field_types(client):
     made = await client.post(
-        "/v1/runtimes",
+        "/v1/machines",
         json={
             "name": "box",
             "type": "ssh",
@@ -275,16 +275,16 @@ async def test_a_runtime_is_checked_against_its_field_types(client):
     assert made.status_code == 201, made.text
     assert made.json()["config"] == {"host": "h", "port": 2222}
     hostless = await client.post(
-        "/v1/runtimes",
+        "/v1/machines",
         json={"name": "box2", "type": "ssh", "fields": {"port": 22}},
     )
     assert hostless.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_a_runtime_answers_with_captures(client):
+async def test_a_machine_keeps_its_credential_sealed(client):
     r = await client.post(
-        "/v1/runtimes",
+        "/v1/machines",
         json={
             "name": "dt",
             "type": "daytona",
@@ -292,5 +292,14 @@ async def test_a_runtime_answers_with_captures(client):
         },
     )
     assert r.status_code == 201, r.text
-    assert r.json()["captures"] == []
     assert r.json()["config"] == {"sandbox_id": "s1"}
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_answers_with_captures(client):
+    r = await client.post(
+        "/v1/runtimes",
+        json={"name": "py", "type": "monty", "fields": {}},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["captures"] == []

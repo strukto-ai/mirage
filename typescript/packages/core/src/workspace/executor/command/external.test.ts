@@ -133,7 +133,7 @@ describe('external program capture', () => {
     }
   })
 
-  it('hands a native runtime chosen for the line the words as typed', async () => {
+  it('hands a machine runtime chosen for the line the words as typed', async () => {
     const probe = new ProcessProbe({ captures: ['python3'] })
     const ws = workspace(new InProcessPython(), [probe])
     try {

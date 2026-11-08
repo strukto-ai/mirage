@@ -313,7 +313,20 @@ function formatProcesses(items: ProcessRecord[]): string {
   )
 }
 
-/** One of the workspace's record lists, by its route: `lines`, `jobs` or `processes`. */
+interface MachineRecord {
+  id: string
+  state: string
+}
+
+function formatMachines(items: MachineRecord[]): string {
+  if (items.length === 0) return 'No machines.'
+  return formatTable(
+    ['MACHINE', 'STATE'],
+    items.map((m) => [m.id, m.state]),
+  )
+}
+
+/** One of the workspace's record lists, by its route: `lines`, `jobs`, `processes` or `machines`. */
 async function listRecords(
   id: string,
   kind: string,
@@ -633,6 +646,13 @@ export function registerWorkspaceCommands(program: Command): Command {
         emit(found as ProcessRecord[], formatProcesses)
       },
     )
+
+  ws.command('list-machines')
+    .description('List the machines the workspace runs programs on, each checked now.')
+    .argument('<id>')
+    .action(async (id: string) => {
+      emit((await listRecords(id, 'machines', {})) as MachineRecord[], formatMachines)
+    })
 
   ws.command('allow')
     .description('Allow a pending ask; the retry of the asked line passes.')

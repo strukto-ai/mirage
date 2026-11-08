@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { varsFromEnv } from '../../workspace/session/session.ts'
+import { varsFromEnv } from './session.ts'
 import { describe, expect, it } from 'vitest'
 import { SessionState } from './session.ts'
 import { changeDir, homeDir, logicalCwd, setCwd } from './shell_dirs.ts'

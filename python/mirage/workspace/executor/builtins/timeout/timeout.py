@@ -419,6 +419,7 @@ async def _supervise(
             started=forked,
             ignores=SHELL_IGNORED_SIGNALS,
             own_group=not foreground,
+            one_command=True,
         )
     except BlockingIOError:
         return _refuse(FORK_FAILED)
@@ -552,6 +553,8 @@ async def _deadline(
         # ends the wait, and not even that once timeout stopped itself.
         if stops:
             await _stop(processes, process, signal, foreground)
+        else:
+            await _forward(processes, process, signal, foreground)
         if kill_after == 0 or (signal == SIGSTOP and not foreground):
             await asyncio.get_running_loop().create_future()
         await asyncio.sleep(kill_after)
@@ -565,6 +568,8 @@ async def _deadline(
             # A shell that ignores the signal lives on past the program
             # it stops; timeout waits for it, and -k's KILL ends the wait.
             await _stop(processes, process, signal, foreground)
+        else:
+            await _forward(processes, process, signal, foreground)
         done, _ = await asyncio.wait(
             {task}, timeout=kill_after if kill_after else None
         )
@@ -574,7 +579,9 @@ async def _deadline(
             return await _ended(console, held, said, 137)
         code = task.result() if preserve else TIMEOUT_STATUS
         return await _ended(console, held, said, code, finished=True)
-    await _stop(processes, process, signal, foreground)
+    if await _stop(processes, process, signal, foreground, kill_after):
+        say(SIGKILL)
+        return await _ended(console, held, said, 137)
     if signal in SELF_KILLING_SIGNALS and (
         not foreground or signal == SIGKILL
     ):
@@ -587,22 +594,52 @@ async def _deadline(
     )
 
 
-async def _stop(
+async def _forward(
     processes: ProcessTable,
     process: ProcessHandle,
     signal: int,
     foreground: bool,
 ) -> None:
+    # A signal a process takes and goes on reaches the programs on machines
+    # as sent, and leaves Mirage's own runners as they are; 0 only probes.
+    if signal == 0:
+        return
+    if not foreground:
+        await processes.send_group(process.record.group, signal)
+        return
+    sending = processes.send(process, signal)
+    if sending is not None:
+        await sending
+
+
+async def _stop(
+    processes: ProcessTable,
+    process: ProcessHandle,
+    signal: int,
+    foreground: bool,
+    kill_after: float = 0,
+) -> bool:
     # timeout signals its own process group unless --foreground, so what
     # the command started ends with it, or, where a shell ignores the
     # signal, the program it runs right now does; the command itself gets
-    # it either way. One the signal stops is waited for.
+    # it either way, a program on a machine as sent. One the signal stops
+    # is waited for, and -k's KILL follows should it outlive kill_after:
+    # True then.
     if foreground:
-        deliver(process, signal)
+        sending = processes.send(process, signal)
+        if sending is None:
+            deliver(process, signal)
+        else:
+            await sending
     else:
-        processes.signal_group(process.record.group, signal)
-    if signal not in process.ignores:
-        await asyncio.wait({process.task})
+        await processes.signal_group(process.record.group, signal)
+    if signal in process.ignores:
+        return False
+    done, _ = await asyncio.wait({process.task}, timeout=kill_after or None)
+    if done:
+        return False
+    await _stop(processes, process, SIGKILL, foreground)
+    return True
 
 
 async def _cancel(task: asyncio.Future[Any]) -> None:

@@ -255,6 +255,17 @@ async def test_a_kill_racing_the_settle_is_the_status_it_reports():
     assert (killed, info.exit) == ([True], 137)
 
 
+def test_a_program_that_takes_a_runner_ignores_only_what_it_inherits():
+    handle = ProcessHandle(
+        _info(), _exits_3, lambda _pid: None, ignores=frozenset({2, 3})
+    )
+    handle.one_command = True
+    handle.program_ignores = frozenset({2})
+    assert 3 in handle.ignores
+    assert handle.take(None, "local")
+    assert handle.ignores == frozenset({2})
+
+
 # A runner started for one command is its program once, on the program's
 # machine and runtime; one started for more, or taken already, is not, and
 # a host program's pid lands on the record.

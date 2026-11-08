@@ -142,8 +142,10 @@ RUNTIME_REQUIRES: dict[str, list[str]] = {
     "apple_container": ["env:MIRAGE_INTEG_APPLE_CONTAINER"],
 }
 # The world entry a runtime is built from, before a case's own `entry`
-# narrows its captures or adds config. A sandbox is reached through
-# config the job provides; a name missing here is built by name alone.
+# narrows its captures or adds config. A machine provider's variant runs
+# the machine runtime on a machine of that provider, reached through the
+# config the job provides, which becomes the machine's `machines:` entry;
+# a name missing here is built by name alone.
 RUNTIME_ENTRY: dict[str, dict[str, Any]] = {
     "sandlock": {"captures": ["python3", "node", "@external"]},
     "docker": {
@@ -176,6 +178,9 @@ RUNTIME_ENTRY: dict[str, dict[str, Any]] = {
         "config": {"container": "${MIRAGE_INTEG_APPLE_CONTAINER}"},
     },
 }
+MACHINE_PROVIDERS = frozenset(
+    {"docker", "ssh", "e2b", "smolvm", "microsandbox", "apple_container"}
+)
 # Runtimes that need a host the hosted runners do not give every job
 # (a live sandbox, a hypervisor, Landlock): an unmet requirement skips
 # their variants even under INTEG_RUNTIME_STRICT.
@@ -848,8 +853,8 @@ def _build_entry(entry: Any) -> Any:
     """One world runtimes entry: a name string or the uniform mapping.
 
     Args:
-        entry (Any): ``"monty"`` or ``{"name", "captures", "config"}``,
-            the same contract as a yaml entry.
+        entry (Any): ``"monty"`` or ``{"name", "captures", "config",
+            "machine"}``, the same contract as a yaml entry.
     """
     if isinstance(entry, str):
         return entry
@@ -858,6 +863,8 @@ def _build_entry(entry: Any) -> Any:
         options["captures"] = tuple(entry["captures"])
     if "config" in entry:
         options["config"] = _expand(entry["config"])
+    if "machine" in entry:
+        options["machine"] = entry["machine"]
     return build_runtime(entry["name"], **options)
 
 
@@ -929,6 +936,8 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     kwargs: dict[str, Any] = {}
     if "session_id" in world:
         kwargs["session_id"] = world["session_id"]
+    if "machines" in world:
+        kwargs["machines"] = _expand(world["machines"])
     if "runtimes" in world:
         kwargs["runtimes"] = [_build_entry(e) for e in world["runtimes"]]
     if "route_policy" in world:
@@ -1440,10 +1449,12 @@ def _for_runtime(case: dict[str, Any], runtime: str) -> dict[str, Any] | None:
         return None
     world = copy.deepcopy(case.get("world", {}))
     if not on_host:
-        world["runtimes"] = [
-            _entry(runtime, case.get("entry", {})),
-            "workspace",
-        ]
+        entry = _entry(runtime, case.get("entry", {}))
+        if runtime in MACHINE_PROVIDERS and isinstance(entry, dict):
+            config = entry.pop("config", {})
+            world["machines"] = {runtime: {"provider": runtime, **config}}
+            entry = {**entry, "name": "machine", "machine": runtime}
+        world["runtimes"] = [entry, "workspace"]
     variant = {
         **case,
         "id": f"{case['id']}@{runtime}",

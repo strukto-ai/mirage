@@ -22,7 +22,7 @@ import pytest
 
 from mirage import FuseManager, Mount, MountBackend, MountMode, Workspace
 from mirage.bridge.sync import BLOCKED
-from mirage.runtime.sandbox.program import SERVED
+from mirage.machine.program import SERVED
 from mirage.vfs.ram import RAMVFS
 
 

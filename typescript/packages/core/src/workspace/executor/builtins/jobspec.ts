@@ -14,6 +14,7 @@
 
 import type { RedirectResult } from '../../../context/session_context.ts'
 import { IOResult } from '../../../io/types.ts'
+import type { Process } from '../../../execution/process/types.ts'
 import type { ProcessView } from '../../../execution/process/view.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import type { JobHandle, JobTable } from '../../../execution/job/index.ts'
@@ -49,6 +50,63 @@ export function processView(jobTable: JobTable, session: SessionState | null): P
  * The job whose number is `jobId`, the one `%N` names: none once its report
  * was printed, as bash then drops it from its list.
  */
+/**
+ * The process a machine pid names: a number under `FIRST_PID`, which kill,
+ * wait and ps read as the pid of a program on its machine. The view is
+ * brought in step with the machines first (`scan`). Answers the one process
+ * the view sees whose program has that pid on its machine, null for none,
+ * and whether processes on more than one machine have it, which bash's
+ * `ambiguous job spec` refuses. Mirrors Python's `machine_process`.
+ *
+ * @param processes the session's view of the processes.
+ * @param number the pid as typed.
+ */
+export async function machineProcess(
+  processes: ProcessView,
+  number: number,
+): Promise<[Process | null, boolean]> {
+  await processes.scan()
+  const found = processes
+    .list()
+    .filter(
+      (process) =>
+        process.machinePid !== null &&
+        process.machinePid.pid === number &&
+        process.machinePid.exited == null,
+    )
+  const machines = new Set(found.map((process) => process.machine.toString()))
+  if (machines.size > 1) return [null, true]
+  return [found[0] ?? null, false]
+}
+
+/**
+ * The job whose own process ran the program a machine pid names, which
+ * `wait` reads as the pid of a program on its machine. A job whose program
+ * has ended still answers until the job is collected. The view is brought
+ * in step with the machines first (`scan`), which learns a program's pid
+ * there. Returns the job, a running program's before an ended one's, null
+ * for none, and whether jobs on more than one machine ran a program with
+ * that pid, which bash's `ambiguous job spec` refuses.
+ */
+export async function jobWithMachinePid(
+  processes: ProcessView,
+  jobs: readonly JobHandle[],
+  number: number,
+): Promise<[JobHandle | null, boolean]> {
+  await processes.scan()
+  const held: [JobHandle, boolean][] = []
+  const machines = new Set<string>()
+  for (const job of jobs) {
+    const record = job.process?.record
+    if (record === undefined || record.machinePid?.pid !== number) continue
+    held.push([job, record.machinePid.exited != null])
+    machines.add(record.machine.toString())
+  }
+  if (machines.size > 1) return [null, true]
+  held.sort((a, b) => Number(a[1]) - Number(b[1]))
+  return [held[0]?.[0] ?? null, false]
+}
+
 export function jobNumbered(jobs: readonly JobHandle[], jobId: number): JobHandle | null {
   return jobs.find((j) => j.id === jobId && !j.reported) ?? null
 }

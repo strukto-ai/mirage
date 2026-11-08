@@ -14,7 +14,7 @@
 
 import type { ExecuteFn } from './types.ts'
 import { EvaluationContext } from '../evaluation.ts'
-import { varsFromEnv } from '../../workspace/session/session.ts'
+import { varsFromEnv } from '../session/session.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import { getParts } from '../../shell/helpers.ts'

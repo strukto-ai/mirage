@@ -21,6 +21,7 @@ import { registerRpcRoutes } from './rpc/http.ts'
 import { registerAsksRoutes } from './routers/asks.ts'
 import { registerJobsRoutes } from './routers/jobs.ts'
 import { registerLinesRoutes } from './routers/lines.ts'
+import { registerMachinesRoutes } from './routers/machines.ts'
 import { registerProcessesRoutes } from './routers/processes.ts'
 import { registerDocumentsRoutes } from './routers/documents.ts'
 import { registerHealthRoutes } from './routers/health.ts'
@@ -77,6 +78,7 @@ export function registerApi(app: RouteApp, deps: ApiDeps): McpEndpoint {
   registerLinesRoutes(app, { registry })
   registerJobsRoutes(app, { registry })
   registerProcessesRoutes(app, { registry })
+  registerMachinesRoutes(app, { registry })
   registerShellRoutes(app, { registry, jobs })
   const mcp = registerMcpRoutes(app, registry, jobs)
   registerRpcRoutes(app, registry, jobs, mcp)

@@ -23,6 +23,7 @@ import type { AskHandler, Policy } from '../../policy/index.ts'
 import type { SessionProfile } from '../../policy/profile.ts'
 import type { ProcessesBlock } from '../../execution/process/config.ts'
 import type { HandOff } from '../../policy/types.ts'
+import type { MachineHandle } from '../../machine/handle.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import type { RouteRule } from '../../runtime/routing/index.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
@@ -164,6 +165,13 @@ export interface WorkspaceOptions {
    * command. Unset = the default world (pyodide, quickjs, workspace).
    */
   runtimes?: RuntimeEntry[]
+  /**
+   * The machines its programs run on, by name: each a handle, or its
+   * provider plus how to reach it (`{ provider: 'docker', container:
+   * 'tools' }`). A machine runtime entry's `machine` names one. Mirrors
+   * Python's `machines`.
+   */
+  machines?: Record<string, MachineHandle | Record<string, unknown>>
   /**
    * The global route policy: a function taking the RouteContext naming
    * the runtime for a line, or null to leave each command on its first
@@ -337,6 +345,13 @@ export interface ExecuteOptions {
    */
   runtime?: string
   /**
+   * Explicit machine for this line, by its `machines:` name: the native
+   * runtime runs what it serves on it, over its entry's own machine, for
+   * this line only (nested evals inherit it). Throws for a name that is
+   * not a workspace machine.
+   */
+  machine?: string
+  /**
    * Stream the line's output into this console as it is produced,
    * instead of returning it whole. Each statement of a compound line
    * emits as it finishes (a single command still lands in one chunk,
@@ -347,7 +362,7 @@ export interface ExecuteOptions {
    * and decides when to `finish()` it (typically once this call
    * resolves, with the exit outcome). Every path answers this way, so
    * the console is the line's whole output: a line a whole-line runtime
-   * (a RemoteSandbox) served, a syntax error, a policy denial and a
+   * (a MachineHandle) served, a syntax error, a policy denial and a
    * failed line all arrive there rather than in the result.
    */
   sink?: JobConsole

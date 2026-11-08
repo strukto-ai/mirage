@@ -60,6 +60,8 @@ import { commandName } from './utils.ts'
  */
 export async function runWholeLine(
   runtime: Runtime & LineExecutorMixin,
+  // The machine the line's placement names.
+  machine: string | undefined,
   command: string,
   stdin: ByteSource | null,
   session: SessionState,
@@ -92,6 +94,7 @@ export async function runWholeLine(
     stdin,
     env: envSnapshot(session),
     cwd: PathSpec.fromStrPath(session.cwd),
+    ...(machine !== undefined ? { machine } : {}),
   }
   const run = async (output: OutputFn, errors: OutputFn, stop: AbortSignal): Promise<RunResult> => {
     const deadline = new AbortController()
