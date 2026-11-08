@@ -208,7 +208,7 @@ export interface TransferPolicy {
  * Mirrors Python's `Keeper`.
  */
 export class Keeper {
-  // Each directory made and its source, in the order made.
+  // Each directory made or merged into and its source, in the order met.
   readonly dirs: [PathSpec, PathSpec][] = []
 
   // `keep`: mode, ownership, timestamps and xattr, those asked for; `stat`,
@@ -249,6 +249,7 @@ export class Keeper {
       }
     } catch (err) {
       if (!isFsError(err)) throw err
+      console.debug(`cp: attributes of ${src.virtual} not kept on ${dst.virtual}: ${String(err)}`)
     }
   }
 
@@ -302,6 +303,18 @@ async function emptyWrite(stat: StatFn, dispatch: DispatchFn, dst: PathSpec): Pr
  * write stay empty. Mirrors Python's `attributes_only`.
  */
 export function attributesOnly(
+  strategy: PrimitiveCopy,
+  stat: StatFn,
+  dispatch: DispatchFn,
+  umask: number,
+): PrimitiveCopy
+export function attributesOnly(
+  strategy: CopyStrategy,
+  stat: StatFn,
+  dispatch: DispatchFn,
+  umask: number,
+): CopyStrategy
+export function attributesOnly(
   strategy: CopyStrategy,
   stat: StatFn,
   dispatch: DispatchFn,
@@ -342,15 +355,17 @@ export function parentedTargets(sources: PathSpec[], dst: PathSpec): [PathSpec, 
 
 /**
  * Make the directories --parents puts a source under, each named as the
- * source was typed; false when one could not be made. A backend without
- * `mkdir` has its directories implied; `keeper` notes each one made, whose
- * attributes -p takes from the source's own. Mirrors Python's `made_parents`.
+ * source was typed and resolved against `cwd`; false when one could not be
+ * made. A backend without `mkdir` has its directories implied; `keeper` notes
+ * each one made, whose attributes -p takes from the source's own. Mirrors
+ * Python's `made_parents`.
  */
 export async function madeParents(
   strategy: CopyStrategy,
   stat: StatFn,
   src: PathSpec,
   dst: PathSpec,
+  cwd: string,
   errors: string[],
   lines: string[] | undefined,
   keeper: Keeper | null,
@@ -375,10 +390,7 @@ export async function madeParents(
       return false
     }
     lines?.push(`${typed} -> ${named}`)
-    keeper?.dirs.push([
-      respelled(PathSpec.fromStrPath(resolvePath(typed, src.directory)), typed),
-      made,
-    ])
+    keeper?.dirs.push([respelled(PathSpec.fromStrPath(resolvePath(typed, cwd)), typed), made])
   }
   return true
 }
@@ -397,8 +409,10 @@ export function relativeLinkError(src: PathSpec, target: PathSpec): string | nul
 
 /**
  * -s: link a source rather than copy it, the link reading the source as
- * typed. A file at the destination stays, with `File exists`, unless -f or
- * --remove-destination replaces it. Mirrors Python's `symlinked`.
+ * typed. The link goes at the destination's own name, a link standing there
+ * included, once the overwrite gates, a backup and --remove-destination have
+ * run; a file still at the name stays, with `File exists`, unless -f replaces
+ * it. Mirrors Python's `symlinked`.
  */
 export async function symlinked(
   dispatch: DispatchFn,
@@ -406,6 +420,8 @@ export async function symlinked(
   src: PathSpec,
   target: PathSpec,
   flags: CpFlags,
+  policy: TransferPolicy,
+  copies: TransferLinks | undefined,
   errors: string[],
   lines: string[] | undefined,
 ): Promise<void> {
@@ -414,14 +430,34 @@ export async function symlinked(
     errors.push(refusal)
     return
   }
+  const name = (copies === undefined ? null : linkName(copies, target)) ?? target
+  if (!(await overwriteGate(policy, stat, src, name, errors))) return
+  if (await isDirectory(stat, name)) {
+    errors.push(ontoDirectory('cp', src, name, flags.backup))
+    return
+  }
+  const { backup, ok } = await makeBackup(
+    policy,
+    { rename: (a: PathSpec, b: PathSpec) => renamed(dispatch, a, b) },
+    stat,
+    undefined,
+    name,
+    errors,
+    copies,
+  )
+  if (!ok) return
+  if (
+    flags.removeDestination &&
+    !(await removedFirst((path) => unlinked(dispatch, path), stat, name, errors, lines))
+  ) {
+    return
+  }
   try {
-    if (await pathExists(stat, target)) {
-      if (!(flags.force || flags.removeDestination)) {
-        throw Object.assign(new Error('File exists'), { code: 'EEXIST' })
-      }
-      await dispatch('unlink', target)
+    if (await pathExists(stat, name)) {
+      if (!flags.force) throw Object.assign(new Error('File exists'), { code: 'EEXIST' })
+      await dispatch('unlink', name)
     }
-    await dispatch('symlink', target, [], { target: src.rawPath })
+    await dispatch('symlink', name, [], { target: src.rawPath })
   } catch (err) {
     if (!isFsError(err)) throw err
     errors.push(
@@ -429,13 +465,14 @@ export async function symlinked(
     )
     return
   }
-  lines?.push(transferLine(src, target, null))
+  lines?.push(transferLine(src, target, backup))
 }
 
 /**
  * -s -r: make a source tree's directories and link each file in it, each entry
  * spelled under the source as typed, so a relative source is refused file by
- * file, as a single file is. Mirrors Python's `symlinked_tree`.
+ * file, as a single file is. A destination inside the source is left out of
+ * the walk. Mirrors Python's `symlinked_tree`.
  */
 export async function symlinkedTree(
   dispatch: DispatchFn,
@@ -444,6 +481,8 @@ export async function symlinkedTree(
   src: PathSpec,
   target: PathSpec,
   flags: CpFlags,
+  policy: TransferPolicy,
+  copies: TransferLinks | undefined,
   errors: string[],
   lines: string[] | undefined,
 ): Promise<void> {
@@ -464,6 +503,7 @@ export async function symlinkedTree(
     }
     for (const name of [...names].reverse()) {
       const entry = spelledFrom(PathSpec.fromStrPath(name), here)
+      if (within(entry.virtual, target.virtual)) continue
       const leaf = rstripSlash(name).split('/').at(-1) ?? ''
       const landing = respelled(
         PathSpec.fromStrPath(`${rstripSlash(there.virtual)}/${leaf}`),
@@ -471,7 +511,7 @@ export async function symlinkedTree(
       )
       const { kind } = await sourceKind(stat, entry)
       if (kind === FileType.DIRECTORY) stack.push([entry, landing])
-      else await symlinked(dispatch, stat, entry, landing, flags, errors, lines)
+      else await symlinked(dispatch, stat, entry, landing, flags, policy, copies, errors, lines)
     }
   }
 }
@@ -479,6 +519,11 @@ export async function symlinkedTree(
 // Unlink one path through the dispatcher, a link itself.
 async function unlinked(dispatch: DispatchFn, path: PathSpec): Promise<void> {
   await dispatch('unlink', path)
+}
+
+// Rename one path through the dispatcher, a link itself.
+async function renamed(dispatch: DispatchFn, src: PathSpec, dst: PathSpec): Promise<void> {
+  await dispatch('rename', src, [dst])
 }
 
 /**
@@ -1511,7 +1556,10 @@ async function mirrorDirs(
       // A directory meets a link at its name as the link itself, where a file
       // writes through it (GNU's lstat for a directory source, coreutils 9.7).
       const { exists, isDir } = await entryKind(stat, entryDst)
-      if (isDir) continue
+      if (isDir) {
+        keeper?.dirs.push([entry, entryDst])
+        continue
+      }
       if (
         !exists ||
         (await clearForDirectory(policy, copies, stat, entry, entryDst, errors, lines)) !== null
@@ -1640,7 +1688,10 @@ export async function copyEntries(
     if (kind === FileType.DIRECTORY) {
       try {
         const { exists, isDir } = await entryKind(stat, entryDstSpec)
-        if (isDir) continue
+        if (isDir) {
+          opts.keeper?.dirs.push([entrySpec, entryDstSpec])
+          continue
+        }
         const free =
           !exists ||
           (await clearForDirectory(
@@ -1848,6 +1899,8 @@ export async function cpGeneric(
   // The session's creation mask, which a file --attributes-only makes is
   // under; the live sessions' when undefined.
   umask?: number,
+  // The working directory a typed --parents prefix resolves against.
+  cwd = '/',
 ): Promise<[ByteSource | null, IOResult]> {
   const keyOf = backendKey ?? backendKeyDefault
   const [sources, dst] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
@@ -1893,7 +1946,13 @@ export async function cpGeneric(
   )
   const keeper = kept.size > 0 && dispatch !== undefined ? new Keeper(kept, stat, dispatch) : null
   if (flags.attributesOnly && dispatch !== undefined) {
-    strategy = attributesOnly(strategy, stat, dispatch, umask ?? sessionUmask())
+    const mask = umask ?? sessionUmask()
+    strategy = attributesOnly(strategy, stat, dispatch, mask)
+    // The relay copies where a link leads off the copy's mount, which moves
+    // no bytes either.
+    if (copies !== undefined) {
+      copies = { ...copies, relay: attributesOnly(copies.relay, copies.relayStat, dispatch, mask) }
+    }
   }
   // A backup under --attributes-only renames the destination aside, so the
   // copy then makes a new empty file: copying it would go
@@ -1995,6 +2054,7 @@ export async function cpGeneric(
         stat,
         src,
         dst,
+        cwd,
         errors,
         flags.verbose ? lines : undefined,
         keeper,
@@ -2026,20 +2086,36 @@ export async function cpGeneric(
       if (flags.link !== 'hard' || srcIsDir) errors.push(sameFileError('cp', src, target))
       continue
     }
-    if (flags.link === 'symbolic' && dispatch !== undefined) {
-      const sink = flags.verbose ? lines : undefined
-      if (srcIsDir && flags.recursive && versionReaddir !== undefined) {
-        await symlinkedTree(dispatch, stat, versionReaddir, src, target, flags, errors, sink)
-        continue
-      }
-      if (!srcIsDir) {
-        await symlinked(dispatch, stat, src, target, flags, errors, sink)
-        continue
-      }
-    }
     // GNU copies a directory into its own subtree too: everything but the
     // new copy itself, before it says it could not (cp -r d d).
     const intoItself = flags.recursive && keyOf(target).startsWith(keyOf(src) + '/')
+    if (flags.link === 'symbolic' && dispatch !== undefined) {
+      const sink = flags.verbose ? lines : undefined
+      if (srcIsDir && flags.recursive && versionReaddir !== undefined) {
+        await symlinkedTree(
+          dispatch,
+          stat,
+          versionReaddir,
+          src,
+          target,
+          flags,
+          policy,
+          copies,
+          errors,
+          sink,
+        )
+        if (intoItself) {
+          errors.push(
+            `cp: cannot copy a directory, '${src.rawPath}', into itself, '${target.rawPath}'`,
+          )
+        }
+        continue
+      }
+      if (!srcIsDir) {
+        await symlinked(dispatch, stat, src, target, flags, policy, copies, errors, sink)
+        continue
+      }
+    }
     if (!flags.recursive && srcIsDir) {
       errors.push(`cp: -r not specified; omitting directory '${src.rawPath}'`)
       continue
@@ -2076,10 +2152,21 @@ export async function cpGeneric(
       errors.push(mismatch)
       continue
     }
-    if (!targetExists && linkAt !== undefined && linkAt(target) !== null) {
+    const displaced =
+      copies !== undefined &&
+      !srcIsDir &&
+      (backupDisplaces(flags.backup) || unlink !== null) &&
+      !targetExists
+        ? linkName(copies, target)
+        : null
+    if (displaced !== null) {
+      // A backup moves, and --remove-destination removes, a dangling link
+      // itself, and the copy then lands at its name.
+      target = displaced
+    } else if (!targetExists && linkAt !== undefined && linkAt(target) !== null) {
       // A dangling link: the stat followed it to nothing, but the name is
-      // taken. GNU will not create the file it points at (POSIX would), and
-      // the link is a non-directory to a tree.
+      // taken. The reference will not create the file it points at (POSIX
+      // would), and the link is a non-directory to a tree.
       if (srcIsDir) {
         errors.push(typeMismatchError('cp', src, target, true))
         continue

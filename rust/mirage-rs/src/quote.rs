@@ -70,7 +70,7 @@ impl Stream for Quote {
             Style::Literal => raw(&text, self.hide, out),
             Style::C => c_style(&text, b"\"", b"\"", true, out),
             Style::CMaybe => {
-                if characters(&text).any(|(c, _)| escaped(c) || c == Some('"')) {
+                if characters(&text).any(|(c, _)| unprintable(c) || c == Some('"')) {
                     c_style(&text, b"\"", b"\"", true, out);
                 } else {
                     out.extend_from_slice(&text);
@@ -88,7 +88,7 @@ impl Stream for Quote {
                     if matches!(c, Some(' ' | '\\')) {
                         out.push(b'\\');
                         out.extend_from_slice(bytes);
-                    } else if c.is_none() || escaped(c) {
+                    } else if unprintable(c) {
                         escape(c, bytes, out);
                     } else {
                         out.extend_from_slice(bytes);
@@ -116,6 +116,12 @@ pub(crate) fn escaped(c: Option<char>) -> bool {
     c.is_some_and(|c| matches!(u32::from(c), 0..=0x1f | 0x7f..=0x9f | 0x2028 | 0x2029))
 }
 
+/// What an ls style escapes, or hides under `-q`: a control, and a byte
+/// that is no UTF-8.
+fn unprintable(c: Option<char>) -> bool {
+    c.is_none() || escaped(c)
+}
+
 fn escape(c: Option<char>, bytes: &[u8], out: &mut Vec<u8>) {
     match c {
         Some('\x07') => out.extend_from_slice(b"\\a"),
@@ -135,10 +141,10 @@ pub(crate) fn shell_quoted(text: &[u8]) -> Vec<u8> {
     shell(text, false, true)
 }
 
-/// Each character as itself, a control as `?` when `hide` asks.
+/// Each character as itself, an unprintable one as `?` when `hide` asks.
 fn raw(text: &[u8], hide: bool, out: &mut Vec<u8>) {
     for (c, bytes) in characters(text) {
-        if hide && escaped(c) {
+        if hide && unprintable(c) {
             out.push(b'?');
         } else {
             out.extend_from_slice(bytes);
@@ -147,15 +153,15 @@ fn raw(text: &[u8], hide: bool, out: &mut Vec<u8>) {
 }
 
 /// `"..."` (or `open` and `close`) around C escapes: a backslash doubled,
-/// a control as its escape, and a `"` escaped where `quote` says it ends
-/// the quotes.
+/// an unprintable character as its escape, and a `"` escaped where `quote`
+/// says it ends the quotes.
 fn c_style(text: &[u8], open: &[u8], close: &[u8], quote: bool, out: &mut Vec<u8>) {
     out.extend_from_slice(open);
     for (c, bytes) in characters(text) {
         if c == Some('\\') || (quote && c == Some('"')) {
             out.push(b'\\');
             out.extend_from_slice(bytes);
-        } else if escaped(c) {
+        } else if unprintable(c) {
             escape(c, bytes, out);
         } else {
             out.extend_from_slice(bytes);
@@ -165,9 +171,9 @@ fn c_style(text: &[u8], open: &[u8], close: &[u8], quote: bool, out: &mut Vec<u8
 }
 
 /// ls's `shell` and `shell-always`: the shell-escape choice of bare,
-/// `"..."` or `'...'`, but a control stays itself, or `?` under `hide`,
-/// and of the controls only a tab, a newline and a carriage return call
-/// for quotes.
+/// `"..."` or `'...'`, but a control stays itself, or `?` under `hide`
+/// as a byte that is no UTF-8 does, and of the controls only a tab, a
+/// newline and a carriage return call for quotes.
 fn shell_raw(text: &[u8], always: bool, hide: bool) -> Vec<u8> {
     const ALWAYS: &[u8] = b" !\"$&'()*;<=>?[\\^`|\t\n\r";
     const DOUBLE_BLOCKERS: &[u8] = b"!\"#$&()*;<=>?[\\^`{|}~";
@@ -196,7 +202,7 @@ fn shell_raw(text: &[u8], always: bool, hide: bool) -> Vec<u8> {
     for (c, bytes) in characters(text) {
         if bytes == b"'" {
             out.extend_from_slice(b"'\\''");
-        } else if hide && escaped(c) {
+        } else if hide && unprintable(c) {
             out.push(b'?');
         } else {
             out.extend_from_slice(bytes);
@@ -206,37 +212,45 @@ fn shell_raw(text: &[u8], always: bool, hide: bool) -> Vec<u8> {
     out
 }
 
-/// `text` in shell-escape quoting, as a diagnostic names a word (`colon`,
-/// which quotes a `:` too) or ls a name: bare
+/// `text` in shell-escape quoting, as a diagnostic names a word
+/// (`diagnostic`, which quotes a `:` too) or ls a name: bare
 /// when a shell reads it back as itself, else `'...'` with a quote as
 /// `'\''` and a run of controls as one `$'...'` group, or `"..."` for a
 /// word whose only trouble is a quote. A character past ASCII is ordinary,
 /// as under a UTF-8 locale, except the C1 controls and U+2028 and U+2029;
-/// a byte that is no UTF-8 is ordinary too.
-fn shell(text: &[u8], always: bool, colon: bool) -> Vec<u8> {
+/// a byte that is no UTF-8 is ordinary in a diagnostic and escaped in a
+/// name.
+fn shell(text: &[u8], always: bool, diagnostic: bool) -> Vec<u8> {
     const ALWAYS: &[u8] = b" !\"$&'()*;<=>?[\\^`|";
     const DOUBLE_BLOCKERS: &[u8] = b"!\"#$&()*;<=>?[\\^`{|}~";
     let special =
         |c: Option<char>, set: &[u8]| c.is_some_and(|c| c.is_ascii() && set.contains(&(c as u8)));
+    let odd = |c: Option<char>| {
+        if diagnostic {
+            escaped(c)
+        } else {
+            unprintable(c)
+        }
+    };
     let bare = !always
         && !text.is_empty()
         && text != b"{"
         && text != b"}"
         && !matches!(text.first(), Some(b'#' | b'~'))
         && characters(text)
-            .all(|(c, _)| !escaped(c) && !special(c, ALWAYS) && !(colon && c == Some(':')));
+            .all(|(c, _)| !odd(c) && !special(c, ALWAYS) && !(diagnostic && c == Some(':')));
     if bare {
         return text.to_vec();
     }
     if text.contains(&b'\'')
-        && characters(text).all(|(c, _)| !escaped(c) && !special(c, DOUBLE_BLOCKERS))
+        && characters(text).all(|(c, _)| !odd(c) && !special(c, DOUBLE_BLOCKERS))
     {
         return [b"\"", text, b"\""].concat();
     }
     let mut out = vec![b'\''];
     let mut in_escape = false;
     for (c, bytes) in characters(text) {
-        if escaped(c) {
+        if odd(c) {
             if !in_escape {
                 out.extend_from_slice(b"'$'");
                 in_escape = true;
@@ -303,6 +317,32 @@ mod tests {
             stream.feed(input.as_bytes(), &mut out).unwrap();
             stream.finish(&mut out).unwrap();
             assert_eq!(out, expected.as_bytes());
+        }
+    }
+
+    // A name with a byte that is no UTF-8, pinned the same way.
+    #[test]
+    fn ls_styles_escape_or_hide_a_byte_that_is_no_utf8() {
+        for (style, hide, expected) in [
+            ("c", false, &b"\"a\\377b\""[..]),
+            ("c_maybe", false, b"\"a\\377b\""),
+            ("locale", false, "\u{2018}a\\377b\u{2019}".as_bytes()),
+            ("escape", false, b"a\\377b"),
+            ("literal", false, b"a\xffb"),
+            ("literal", true, b"a?b"),
+            ("ls_shell", false, b"a\xffb"),
+            ("ls_shell", true, b"a?b"),
+            ("ls_shell_always", false, b"'a\xffb'"),
+            ("ls_shell_escape", false, b"'a'$'\\377''b'"),
+            ("ls_shell_escape_always", false, b"'a'$'\\377''b'"),
+            ("shell", false, b"a\xffb"),
+        ] {
+            let config = serde_json::json!({"style": style, "hide": hide}).to_string();
+            let mut stream = open("quote", config.as_bytes()).unwrap();
+            let mut out = Vec::new();
+            stream.feed(b"a\xffb", &mut out).unwrap();
+            stream.finish(&mut out).unwrap();
+            assert_eq!(out, expected, "{style}, hide {hide}");
         }
     }
 

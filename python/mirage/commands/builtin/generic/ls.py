@@ -1420,7 +1420,8 @@ def _decorated_names(
 
     Where ``align`` asks and a name of the group is quoted, every bare one
     takes a space before it, so the names line up past the opening
-    quotes; a hyperlink goes inside a name's quotes.
+    quotes. A lined-up name keeps its quotes outside its hyperlink;
+    any other name is linked whole, quotes and all.
 
     Args:
         entries (list[FileStat]): the rows.
@@ -1441,7 +1442,7 @@ def _decorated_names(
         if hrefs is not None:
             name = (
                 name[0] + _hyperlinked(name[1:-1], hrefs[i]) + name[-1]
-                if opened[i]
+                if spaced and opened[i]
                 else _hyperlinked(name, hrefs[i])
             )
         if spaced and not opened[i]:

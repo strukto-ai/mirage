@@ -152,4 +152,5 @@ async def run_cp(
         ),
         stdin=stdin,
         dispatch=dispatch,
+        cwd=cwd,
     )

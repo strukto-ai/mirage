@@ -293,7 +293,8 @@ const QUOTES = ["'", '"', '\u2018']
 // The name column quoted, lined up and hyperlinked, null when every name
 // prints as it is. Where `align` asks and a name of the group is quoted,
 // every bare one takes a space before it, so the names line up past the
-// opening quotes; a hyperlink goes inside a name's quotes. Mirrors Python's
+// opening quotes. A lined-up name keeps its quotes outside its hyperlink; any
+// other name is linked whole, quotes and all. Mirrors Python's
 // _decorated_names.
 function decoratedNames(
   stats: readonly FileStat[],
@@ -311,7 +312,7 @@ function decoratedNames(
     if (hrefs !== null) {
       const href = hrefs[i] ?? ''
       name =
-        opened[i] === true
+        spaced && opened[i] === true
           ? name.slice(0, 1) + hyperlinked(name.slice(1, -1), href) + name.slice(-1)
           : hyperlinked(name, href)
     }

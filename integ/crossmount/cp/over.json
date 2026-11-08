@@ -63,12 +63,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(printf old > /data/xmb_f && printf new > /data/xmb_s && ln -s /data/xmb_f /data2/xmb_l && cp -b /data/xmb_s /data2/xmb_l; echo rc=$?; cat /data/xmb_f; echo; readlink /data2/xmb_l~; cat /data2/xmb_l; echo); rm -f /data/xmb_f /data/xmb_s /data2/xmb_l /data2/xmb_l~",
+      "command": "(printf old > /data/xmb_f && printf new > /data/xmb_s && ln -s /data/xmb_f /data2/xmb_l && cp -b /data/xmb_s /data2/xmb_l; echo rc=$?; cat /data/xmb_f; echo; readlink /data2/xmb_l~; cat /data2/xmb_l; echo); rm -f /data/xmb_f /data/xmb_s /data2/xmb_l /data2/xmb_l~; (printf old > /data/xma_f && printf new > /data/xma_s && ln -s /data/xma_f /data2/xma_l && cp --attributes-only --remove-destination /data/xma_s /data2/xma_l; echo rc=$?; test -L /data2/xma_l; echo link=$?; wc -c < /data2/xma_l; cat /data/xma_f; echo); rm -f /data/xma_f /data/xma_s /data2/xma_l",
       "expect": {
         "exit": 0,
-        "stdout": "rc=0\nold\n/data/xmb_f\nnew\n",
+        "stdout": "rc=0\nold\n/data/xmb_f\nnew\nrc=0\nlink=1\n0\nold\n",
         "stderr": ""
-      }
+      },
+      "flags": [
+        "attributes-only",
+        "remove-destination"
+      ]
     }
   ]
 }

@@ -175,6 +175,7 @@ async def cp(
         umask=session_umask(
             ctx.session.access() if ctx.session is not None else None
         ),
+        cwd=cwd,
     )
 
 

@@ -116,6 +116,7 @@ export const BUILDER: GenericCommand = {
       ctx.stdin,
       dispatchOf(ctx),
       sessionUmask(ctx.session?.access()),
+      cwd,
     )
   },
 }

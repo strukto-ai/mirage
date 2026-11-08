@@ -212,7 +212,7 @@ fn line_width(raw: &[u8]) -> Option<Option<u64>> {
 }
 
 /// `-T`: a count as `-w` reads one, refused when it is none or too large to
-/// keep.
+/// keep. A stop past any listing is kept as `WIDEST`, which it lays out as.
 fn tab_size(raw: &[u8]) -> Result<u64, StreamError> {
     let parts = number::parts(raw, true);
     let refused = |clause: &str| {
@@ -226,7 +226,8 @@ fn tab_size(raw: &[u8]) -> Result<u64, StreamError> {
     }
     parts
         .value()
-        .and_then(|size| u64::try_from(size).ok())
+        .filter(|&size| size <= i64::MAX as u128)
+        .map(|size| (size as u64).min(WIDEST))
         .ok_or_else(|| refused(&format!(": {}", number::EOVERFLOW)))
 }
 
@@ -619,6 +620,7 @@ mod tests {
             (b"0x3", 3),
             (b" 3", 3),
             (b"0", 0),
+            (b"9223372036854775807", super::WIDEST),
         ] {
             assert_eq!(
                 values(&[("tabsize", raw)])["tabsize"],
@@ -629,10 +631,12 @@ mod tests {
         for raw in [&b"3k"[..], b"-0", b""] {
             assert_eq!(refusal("ls", &[("tabsize", raw)]).1, 2, "{raw:?}");
         }
-        assert_eq!(
-            refusal("ls", &[("tabsize", b"99999999999999999999")]).0,
-            "ls: invalid tab size: '99999999999999999999': Value too large for defined data type"
-        );
+        for raw in ["9223372036854775808", "99999999999999999999"] {
+            assert_eq!(
+                refusal("ls", &[("tabsize", raw.as_bytes())]).0,
+                format!("ls: invalid tab size: '{raw}': Value too large for defined data type")
+            );
+        }
         let typed: &[(&str, &[u8])] = &[("width", b"x"), ("format", b"y")];
         assert_eq!(refusal("ls", typed).1, 2);
     }

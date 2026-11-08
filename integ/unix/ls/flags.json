@@ -2148,14 +2148,18 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/crlh && printf x > /data/crlh/a.txt && ls --hyperlink=always /data/crlh; ls --hyperlink=auto /data/crlh",
+      "command": "mkdir -p /data/crlh && printf x > /data/crlh/a.txt && ls --hyperlink=always /data/crlh; ls --hyperlink=auto /data/crlh; mkdir -p /data/crlq && touch '/data/crlq/a b' /data/crlq/plain \"/data/crlq/'\" && cd /data/crlq && ls --quoting-style=shell-escape --hyperlink=always; ls -Q --hyperlink=always; ls --quoting-style=shell-escape -C --hyperlink=always; ls -b --hyperlink=always; cd /; rm -r /data/crlq",
       "expect": {
         "exit": 0,
-        "stdout": "\u001b]8;;file:///data/crlh/a.txt\u0007a.txt\u001b]8;;\u0007\na.txt\n",
+        "stdout": "\u001b]8;;file:///data/crlh/a.txt\u0007a.txt\u001b]8;;\u0007\na.txt\n\u001b]8;;file:///data/crlq/%27\u0007\"'\"\u001b]8;;\u0007\n\u001b]8;;file:///data/crlq/a%20b\u0007'a b'\u001b]8;;\u0007\n\u001b]8;;file:///data/crlq/plain\u0007plain\u001b]8;;\u0007\n\u001b]8;;file:///data/crlq/%27\u0007\"'\"\u001b]8;;\u0007\n\u001b]8;;file:///data/crlq/a%20b\u0007\"a b\"\u001b]8;;\u0007\n\u001b]8;;file:///data/crlq/plain\u0007\"plain\"\u001b]8;;\u0007\n\"\u001b]8;;file:///data/crlq/%27\u0007'\u001b]8;;\u0007\"  '\u001b]8;;file:///data/crlq/a%20b\u0007a b\u001b]8;;\u0007'   \u001b]8;;file:///data/crlq/plain\u0007plain\u001b]8;;\u0007\n\u001b]8;;file:///data/crlq/%27\u0007'\u001b]8;;\u0007\n\u001b]8;;file:///data/crlq/a%20b\u0007a\\ b\u001b]8;;\u0007\n\u001b]8;;file:///data/crlq/plain\u0007plain\u001b]8;;\u0007\n",
         "stderr": ""
       },
       "flags": [
-        "hyperlink"
+        "hyperlink",
+        "quoting-style",
+        "Q",
+        "C",
+        "b"
       ]
     },
     {
