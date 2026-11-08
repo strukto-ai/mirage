@@ -78,6 +78,7 @@ export async function loadProfileArgument(path: string): Promise<JsonValue> {
 
 interface WorkspaceBrief {
   id: string
+  status: string
   mode: string
   mount_count: number
   session_count: number
@@ -104,6 +105,7 @@ interface Internals {
 
 interface WorkspaceDetail {
   id: string
+  status: string
   mode: string
   created_at: number
   mounts?: MountSummary[]
@@ -125,20 +127,22 @@ function formatWorkspaceExplanation(said: {
 }
 
 function formatWorkspaceList(items: WorkspaceBrief[]): string {
-  if (items.length === 0) return 'No active workspaces.'
+  if (items.length === 0) return 'No workspaces.'
   const rows = items.map((w) => [
     w.id,
+    w.status,
     w.mode,
     String(w.mount_count),
     String(w.session_count),
     formatAge(w.created_at),
   ])
-  return formatTable(['ID', 'MODE', 'MOUNTS', 'SESSIONS', 'AGE'], rows)
+  return formatTable(['ID', 'STATUS', 'MODE', 'MOUNTS', 'SESSIONS', 'AGE'], rows)
 }
 
 function formatWorkspaceDetail(d: WorkspaceDetail): string {
   const lines: string[] = [
     `ID:        ${d.id}`,
+    `Status:    ${d.status}`,
     `Mode:      ${d.mode}`,
     `Created:   ${formatAge(d.created_at)} ago`,
   ]
@@ -430,11 +434,12 @@ export function registerWorkspaceCommands(program: Command): Command {
     .action(async (id: string) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
+      // The console answers a delete with no body, so the id is the one asked for.
       const deleted = (await handleResponse(
         await c.request('DELETE', `/v1/workspaces/${encodeURIComponent(id)}`),
-      )) as { id: string }
+      )) as Record<string, unknown>
       header(`deleted ${id}`)
-      emit(deleted, (d) => `Deleted workspace ${d.id}.`)
+      emit({ id, ...deleted }, () => `Deleted workspace ${id}.`)
     })
 
   ws.command('stop')

@@ -28,6 +28,7 @@ from mirage.cli.workspace import (
     _format_logs,
     _format_processes,
     _format_workspace_explanation,
+    _format_workspace_list,
     _load_config_argument,
 )
 
@@ -305,6 +306,50 @@ def test_stop_and_start_post_to_the_workspace(fake, verb):
     result = _invoke(verb, "w")
     assert result.exit_code == 0, result.output
     assert fake.calls[0][:2] == ("POST", f"/v1/workspaces/w/{verb}")
+
+
+def test_delete_names_the_workspace_when_the_answer_has_no_body(fake):
+    # The console answers a delete with 204 and no body.
+    fake.answer = _FakeResponse(204, b"")
+    result = _invoke("delete", "my-ws")
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0][:2] == ("DELETE", "/v1/workspaces/my-ws")
+    assert json.loads(result.output) == {"id": "my-ws"}
+
+
+def test_the_list_shows_each_workspace_status():
+    rows = unstyle(
+        _format_workspace_list(
+            [
+                {
+                    "id": "on",
+                    "status": "running",
+                    "mode": "write",
+                    "mount_count": 1,
+                    "session_count": 1,
+                    "created_at": 0,
+                },
+                {
+                    "id": "off",
+                    "status": "stopped",
+                    "mode": "read",
+                    "mount_count": 2,
+                    "session_count": 0,
+                    "created_at": 0,
+                },
+            ]
+        )
+    ).splitlines()
+    assert rows[0].split() == [
+        "ID",
+        "STATUS",
+        "MODE",
+        "MOUNTS",
+        "SESSIONS",
+        "AGE",
+    ]
+    assert rows[1].split()[:2] == ["on", "running"]
+    assert rows[2].split()[:2] == ["off", "stopped"]
 
 
 @pytest.mark.parametrize("gone", ["close", "cancel", "kill"])

@@ -117,10 +117,11 @@ def load_profile_argument(path: Path) -> dict[str, Any]:
 
 def _format_workspace_list(items: list[dict[str, Any]]) -> str:
     if not items:
-        return "No active workspaces."
+        return "No workspaces."
     rows = [
         [
             item["id"],
+            item["status"],
             item["mode"],
             str(item["mount_count"]),
             str(item["session_count"]),
@@ -128,12 +129,15 @@ def _format_workspace_list(items: list[dict[str, Any]]) -> str:
         ]
         for item in items
     ]
-    return format_table(["ID", "MODE", "MOUNTS", "SESSIONS", "AGE"], rows)
+    return format_table(
+        ["ID", "STATUS", "MODE", "MOUNTS", "SESSIONS", "AGE"], rows
+    )
 
 
 def _format_workspace_detail(detail: dict[str, Any]) -> str:
     lines = [
         f"ID:        {detail['id']}",
+        f"Status:    {detail['status']}",
         f"Mode:      {detail['mode']}",
         f"Created:   {format_age(detail['created_at'])} ago",
     ]
@@ -409,9 +413,14 @@ def delete_cmd(workspace_id: str = typer.Argument(...)) -> None:
         r = client.request(
             "DELETE", f"/v1/workspaces/{quote(workspace_id, safe='')}"
         )
-    deleted = handle_response(r)
+    # The console answers a delete with no body, so the id is the one asked
+    # for.
+    deleted = cast(dict[str, Any], handle_response(r))
     header(f"deleted {workspace_id}")
-    emit(deleted, human=lambda d: f"Deleted workspace {d['id']}.")
+    emit(
+        {"id": workspace_id, **deleted},
+        human=lambda d: f"Deleted workspace {workspace_id}.",
+    )
 
 
 @app.command("stop")

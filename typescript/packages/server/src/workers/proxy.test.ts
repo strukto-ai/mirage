@@ -37,6 +37,8 @@ interface Daemon {
   apps: MirageApp[]
   url: string
   exited: () => number
+  /** The state root the servers share, as a daemon's workers do. */
+  root: string
 }
 
 async function daemon(
@@ -53,8 +55,9 @@ async function daemon(
     gracefulTimeout: 0,
   })
   vi.stubEnv(ENV_WORKER_TOKEN, pool.token)
+  const root = await mkdtemp(join(tmpdir(), 'mir-proxy-'))
   const apps = pool.workers.map(() =>
-    buildApp({ maxWorkspaces: Number.MAX_SAFE_INTEGER, rateLimits }),
+    buildApp({ stateRoot: root, maxWorkspaces: Number.MAX_SAFE_INTEGER, rateLimits }),
   )
   await Promise.all(apps.map((app, i) => app.listen({ path: pool.workers[i]?.socket ?? '' })))
   let exits = 0
@@ -70,7 +73,14 @@ async function daemon(
   })
   await proxy.listen(0, '127.0.0.1')
   const { port } = proxy.server.address() as AddressInfo
-  return { proxy, pool, apps, url: `http://127.0.0.1:${String(port)}`, exited: () => exits }
+  return {
+    proxy,
+    pool,
+    apps,
+    url: `http://127.0.0.1:${String(port)}`,
+    exited: () => exits,
+    root,
+  }
 }
 
 async function call(
@@ -132,6 +142,7 @@ describe('WorkerProxy', () => {
     vi.restoreAllMocks()
     await d.proxy.close()
     await Promise.all(d.apps.map((app) => app.close()))
+    await rm(d.root, { recursive: true, force: true })
     vi.unstubAllEnvs()
   })
 

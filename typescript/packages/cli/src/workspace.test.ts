@@ -91,6 +91,11 @@ async function fakeServer(): Promise<{ url: string; seen: Seen[]; server: Server
         }
         return
       }
+      // As the console answers a delete: no body.
+      if (req.method === 'DELETE') {
+        res.writeHead(204).end()
+        return
+      }
       if (req.method === 'GET' && /\/(lines|jobs|processes)(\?|$)/.test(url)) {
         res.writeHead(200, { 'content-type': 'application/json' }).end('[]')
         return
@@ -199,6 +204,28 @@ describe('mirage workspace set-profile', () => {
         expect(await mirage(url, dir, 'set-profile', 'w', 'reader', profile)).toBe(2)
       }
       expect(seen).toEqual([])
+    } finally {
+      server.close()
+    }
+  })
+})
+
+describe('mirage workspace delete', () => {
+  it('names the workspace it deleted when the server answers with no body', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mirage-delete-'))
+    tempDirs.push(home)
+    const { url, seen, server } = await fakeServer()
+    try {
+      const child = spawn(process.execPath, [BIN, 'workspace', 'delete', 'my-ws'], {
+        env: { ...process.env, MIRAGE_HOME: home, MIRAGE_DAEMON_URL: url },
+      })
+      let stdout = ''
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString()
+      })
+      expect(await new Promise<number | null>((resolve) => child.on('close', resolve))).toBe(0)
+      expect(seen[0]).toMatchObject({ method: 'DELETE', url: '/v1/workspaces/my-ws' })
+      expect(JSON.parse(stdout)).toEqual({ id: 'my-ws' })
     } finally {
       server.close()
     }

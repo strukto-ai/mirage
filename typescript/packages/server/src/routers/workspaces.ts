@@ -59,10 +59,11 @@ import {
   type CloneWorkspaceRequest,
   type CreateWorkspaceRequest,
   type LoadWorkspaceRequest,
+  type WorkspaceBrief,
 } from '../schemas.ts'
 import { withPolicies } from '../resources/policies.ts'
 import { withEntries } from '../resources/strukto.ts'
-import { makeBrief, makeDetail } from '../summary.ts'
+import { makeBrief, makeDetail, makeStoppedBrief, makeStoppedDetail } from '../summary.ts'
 import { NO_WORKSPACE_ID, requireOneAccount, storeRefusal } from './templates.ts'
 import { queryFlag } from './vfs.ts'
 
@@ -238,6 +239,35 @@ async function hasState(host: ServerHost, id: string): Promise<boolean> {
   }
 }
 
+/** What a stopped workspace keeps: the config it starts from, and when it was first created. */
+interface Kept {
+  config: Record<string, JsonValue> | null
+  createdAt: number
+}
+
+/**
+ * What `account`'s `id`, not live, keeps: its config or its state, null
+ * when it keeps neither. Mirrors Python's `_kept`.
+ */
+async function kept(
+  deps: WorkspaceRoutesDeps,
+  id: string,
+  account: string | null,
+): Promise<Kept | null> {
+  if (!(await deps.registry.allows(id, account, 0))) return null
+  const config = await deps.registry.savedConfig(id, account)
+  const store = deps.host.stateStore()
+  let meta: Record<string, unknown> | null
+  try {
+    meta = await store.loadMeta(id)
+  } finally {
+    await store.close()
+  }
+  if (config === null && meta === null) return null
+  const createdAt = meta?.created_at
+  return { config, createdAt: typeof createdAt === 'number' ? createdAt : 0 }
+}
+
 /**
  * Whether `account`'s `id`, not live, is stopped: its state or its config
  * is kept. Mirrors Python's `_stopped`.
@@ -247,9 +277,7 @@ async function stopped(
   id: string,
   account: string | null,
 ): Promise<boolean> {
-  if (!(await deps.registry.allows(id, account, 0))) return false
-  if (await hasState(deps.host, id)) return true
-  return (await deps.registry.savedConfig(id, account)) !== null
+  return (await kept(deps, id, account)) !== null
 }
 
 /**
@@ -569,12 +597,19 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
     },
   )
 
-  app.get('/v1/workspaces', (req) =>
-    deps.registry
+  // The running workspaces, then the stopped ones.
+  app.get('/v1/workspaces', async (req) => {
+    const running = deps.registry
       .list()
       .filter((e) => deps.registry.visible(e.id, req.account) !== null)
-      .map(makeBrief),
-  )
+      .map(makeBrief)
+    const idle: WorkspaceBrief[] = []
+    for (const id of await deps.registry.stoppedIds(req.account)) {
+      const k = await kept(deps, id, req.account)
+      if (k !== null) idle.push(makeStoppedBrief(id, k.config, k.createdAt))
+    }
+    return [...running, ...idle]
+  })
 
   app.post('/v1/workspaces/load', async (req, reply) => {
     const multipart = (req.headers['content-type'] ?? '').startsWith('multipart/')
@@ -679,9 +714,14 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
     '/v1/workspaces/:id',
     async (req, reply) => {
       const entry = deps.registry.visible(req.params.id, req.account)
+      if (entry === null) {
+        const k = await kept(deps, req.params.id, req.account)
+        if (k === null) return reply.status(404).send({ detail: 'workspace not found' })
+        return makeStoppedDetail(req.params.id, k.config, k.createdAt)
+      }
       // A workspace being deleted keeps its id until the deletion is done,
       // but its runner has stopped answering: it is gone to a reader.
-      if (entry === null || deps.registry.removing(req.params.id)) {
+      if (deps.registry.removing(req.params.id)) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
       const verbose = req.query.verbose === 'true'
@@ -716,10 +756,23 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
     },
   )
 
+  // A stopped workspace is deleted as a running one is: its state, config
+  // and owner go.
   app.delete<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id', async (req, reply) => {
     const { id } = req.params
     if (deps.registry.visible(id, req.account) === null) {
-      return reply.status(404).send({ detail: 'workspace not found' })
+      if (!(await stopped(deps, id, req.account))) {
+        return reply.status(404).send({ detail: 'workspace not found' })
+      }
+      const store = deps.host.stateStore()
+      try {
+        if (!(await deps.registry.forget(id, store))) {
+          return reply.status(409).send({ detail: 'workspace is starting or stopping; try again' })
+        }
+      } finally {
+        await store.close()
+      }
+      return { id, closed_at: Date.now() / 1000 }
     }
     try {
       await deps.registry.remove(id)

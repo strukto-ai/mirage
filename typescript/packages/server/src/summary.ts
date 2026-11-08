@@ -15,6 +15,8 @@
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { BIN_PREFIX } from '@struktoai/mirage-core/shell/constants'
 import { HISTORY_PREFIX } from '@struktoai/mirage-core/vfs/history/history'
+import type { JsonValue } from '@struktoai/mirage-core/types'
+import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import { normDir } from '@struktoai/mirage-core/utils/slash'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceEntry } from './registry.ts'
@@ -68,6 +70,7 @@ export function makeBrief(entry: WorkspaceEntry): WorkspaceBrief {
   const mounts = userMounts(ws)
   return {
     id: entry.id,
+    status: 'running',
     mode: mounts[0]?.mode ?? 'read',
     mount_count: mounts.length,
     session_count: ws.listSessions().length,
@@ -91,6 +94,7 @@ export async function makeDetail(entry: WorkspaceEntry, verbose = false): Promis
   const fuseMountpoints = (ws as { fuseMountpoints?: Record<string, string> }).fuseMountpoints ?? {}
   return {
     id: entry.id,
+    status: 'running',
     mode: mounts[0]?.mode ?? 'read',
     created_at: entry.createdAt,
     fuse_mountpoints: fuseMountpoints,
@@ -98,5 +102,68 @@ export async function makeDetail(entry: WorkspaceEntry, verbose = false): Promis
     mounts: mountSummaries,
     sessions,
     internals: verbose ? await buildInternals(ws) : null,
+  }
+}
+
+/**
+ * The mounts a stopped workspace's config names, as a running one's would
+ * list them: a mount with no mode of its own takes the config's, and a mode
+ * reads in lower case, as a config may write it in any.
+ */
+function configMounts(config: Record<string, JsonValue> | null): MountSummary[] {
+  const mounts = config?.mounts
+  if (!isPlainObject(mounts)) return []
+  const mode = typeof config?.mode === 'string' ? config.mode.toLowerCase() : 'read'
+  return Object.entries(mounts)
+    .map(([prefix, mount]) => {
+      const spec = isPlainObject(mount) ? mount : {}
+      return {
+        prefix: normDir(prefix),
+        vfs: typeof spec.vfs === 'string' ? spec.vfs : '',
+        mode: typeof spec.mode === 'string' ? spec.mode.toLowerCase() : mode,
+        description: '',
+      }
+    })
+    .filter((m) => !isAutoPrefix(m.prefix))
+}
+
+/**
+ * A stopped workspace's brief, from the config it starts from (null when
+ * it kept none) and when it was first created. Mirrors Python's
+ * `make_stopped_brief`.
+ */
+export function makeStoppedBrief(
+  id: string,
+  config: Record<string, JsonValue> | null,
+  createdAt: number,
+): WorkspaceBrief {
+  const mounts = configMounts(config)
+  return {
+    id,
+    status: 'stopped',
+    mode: mounts[0]?.mode ?? 'read',
+    mount_count: mounts.length,
+    session_count: 0,
+    created_at: createdAt,
+  }
+}
+
+/** A stopped workspace's detail, as `makeStoppedBrief`. Mirrors Python's `make_stopped_detail`. */
+export function makeStoppedDetail(
+  id: string,
+  config: Record<string, JsonValue> | null,
+  createdAt: number,
+): WorkspaceDetail {
+  const mounts = configMounts(config)
+  return {
+    id,
+    status: 'stopped',
+    mode: mounts[0]?.mode ?? 'read',
+    created_at: createdAt,
+    fuse_mountpoints: {},
+    system_time: null,
+    mounts,
+    sessions: [],
+    internals: null,
   }
 }

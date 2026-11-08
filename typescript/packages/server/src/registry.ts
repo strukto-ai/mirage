@@ -32,6 +32,8 @@ import { parseLimit } from '@struktoai/mirage-core/utils/size'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
 import type { RecordClient } from '@struktoai/mirage-core/workspace/record/types'
+import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { resolve } from 'node:path'
 import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
@@ -270,6 +272,8 @@ export class WorkspaceRegistry {
   readonly jobs = new RequestTable()
   private entries = new Map<string, WorkspaceEntry>()
   private readonly removals = new Map<string, Promise<WorkspaceEntry>>()
+  // Stopped workspaces being deleted, whose ids stay reserved meanwhile.
+  private readonly forgets = new Set<string>()
   private readonly creates = new Map<string, { digest: string; done: Promise<unknown> }>()
   private readonly idleGraceSeconds: number
   private readonly onIdleExit: (() => void) | null
@@ -458,7 +462,7 @@ export class WorkspaceRegistry {
 
   /** Whether `id` is being deleted or stopped. */
   removing(id: string): boolean {
-    return this.removals.has(id)
+    return this.removals.has(id) || this.forgets.has(id)
   }
 
   get(id: string): WorkspaceEntry {
@@ -554,6 +558,40 @@ export class WorkspaceRegistry {
     return record === null ? null : (record.config as Record<string, JsonValue>)
   }
 
+  /**
+   * The ids of the stopped workspaces `account` may use, in order: those
+   * whose config is kept and that are not live. A workspace that is
+   * stopping is among them.
+   */
+  async stoppedIds(account: string | null): Promise<string[]> {
+    if (this.configs === null) return []
+    const ids: string[] = []
+    for (const id of (await this.configs.listNames()).sort(compareCodePoints)) {
+      if (!this.entries.has(id) && (await this.allows(id, account, 0))) ids.push(id)
+    }
+    return ids
+  }
+
+  /**
+   * Delete stopped `id`: drop its state from `store`, and its config, owner
+   * and jobs, as `remove` does a live one's. False, with nothing dropped,
+   * while it is live, being built, stopped or deleted. The id stays
+   * reserved until it is done. Mirrors Python's `forget`.
+   */
+  async forget(id: string, store: WorkspaceStateStore): Promise<boolean> {
+    if (this.entries.has(id) || this.creates.has(id) || this.removing(id)) return false
+    this.forgets.add(id)
+    try {
+      await store.drop(id)
+      if (this.configs !== null) await this.configs.delete([id])
+      if (this.owners !== null) await this.owners.delete([id])
+    } finally {
+      this.jobs.discardWorkspace(id)
+      this.forgets.delete(id)
+    }
+    return true
+  }
+
   /** Drop the owner a failed create recorded, freeing the id. */
   async release(id: string): Promise<void> {
     if (this.owners !== null) await this.owners.delete([id])
@@ -587,7 +625,7 @@ export class WorkspaceRegistry {
     restoredWith: readonly Policy[] = [],
   ): WorkspaceEntry {
     const wid = id ?? newWorkspaceId()
-    if (this.entries.has(wid) || this.removals.has(wid))
+    if (this.entries.has(wid) || this.removals.has(wid) || this.forgets.has(wid))
       throw new Error(`workspace id already exists: ${wid}`)
     for (const policy of restoredWith) ws.policies.remove(policy)
     for (const policy of this.policies) ws.policies.add(policy)

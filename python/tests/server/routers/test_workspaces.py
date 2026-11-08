@@ -1702,10 +1702,11 @@ async def test_a_stopped_workspace_starts_with_its_files_and_cwd(tmp_path):
         assert r.json()["exit_code"] == 0, r.text
         r = await client.post("/v1/workspaces/keep/stop")
         assert r.status_code == 200, r.text
-        assert (await client.get("/v1/workspaces/keep")).status_code == 404
+        r = await client.get("/v1/workspaces/keep")
+        assert r.json()["status"] == "stopped"
         r = await client.post("/v1/workspaces/keep/start")
         assert r.status_code == 200, r.text
-        assert r.json()["id"] == "keep"
+        assert (r.json()["id"], r.json()["status"]) == ("keep", "running")
         r = await client.post(
             "/v1/workspaces/keep/shell?session_id=s",
             json={"command": "pwd && cat f.txt"},
@@ -1728,7 +1729,10 @@ async def test_a_second_stop_answers_as_the_first(tmp_path):
             r = await client.post("/v1/workspaces/keep/stop")
             assert r.status_code == 200, r.text
             assert r.json()["id"] == "keep"
-        assert (await client.get("/v1/workspaces")).json() == []
+        listed = (await client.get("/v1/workspaces")).json()
+        assert [(w["id"], w["status"]) for w in listed] == [
+            ("keep", "stopped")
+        ]
         # State kept with no config, as a workspace created before configs
         # were saved: it stops again, and cannot be started.
         (tmp_path / "state" / "configs" / "keep.json").unlink()
@@ -1772,6 +1776,39 @@ async def test_a_clone_under_a_stopped_id_drops_its_config(tmp_path):
         assert r.status_code == 201, r.text
         await client.post("/v1/workspaces/w/stop")
         assert (await client.post("/v1/workspaces/w/start")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_workspace_is_listed_shown_and_deleted(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for wid in ("off", "on"):
+            body = {**_minimal_config(), "id": wid}
+            r = await client.post("/v1/workspaces", json=body)
+            assert r.status_code == 201, r.text
+        await client.post("/v1/workspaces/off/stop")
+        listed = (await client.get("/v1/workspaces")).json()
+        assert [
+            (w["id"], w["status"], w["mount_count"], w["session_count"])
+            for w in listed
+        ] == [("on", "running", 1, 1), ("off", "stopped", 1, 0)]
+        assert listed[1]["created_at"] > 0
+        got = (await client.get("/v1/workspaces/off")).json()
+        assert got["status"] == "stopped"
+        assert got["sessions"] == [] and got["internals"] is None
+        assert [(m["prefix"], m["vfs"], m["mode"]) for m in got["mounts"]] == [
+            ("/", "ram", "write")
+        ]
+        r = await client.delete("/v1/workspaces/off")
+        assert (r.status_code, r.json()["id"]) == (200, "off")
+        assert (await client.get("/v1/workspaces/off")).status_code == 404
+        r = await client.post("/v1/workspaces/off/start")
+        assert r.status_code == 404
+        listed = (await client.get("/v1/workspaces")).json()
+        assert [w["id"] for w in listed] == ["on"]
+        await client.delete("/v1/workspaces/on")
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,7 @@ from mirage.server.schemas import (
     WorkspaceInternals,
 )
 from mirage.shell.constants import BIN_PREFIX
+from mirage.types import JsonValue
 from mirage.utils.path import norm_dir
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
@@ -67,6 +68,7 @@ def make_brief(entry: WorkspaceEntry) -> WorkspaceBrief:
     workspace_mode = user_mounts[0].mode.value if user_mounts else "read"
     return WorkspaceBrief(
         id=entry.id,
+        status="running",
         mode=workspace_mode,
         mount_count=len(user_mounts),
         session_count=len(ws.list_sessions()),
@@ -107,6 +109,7 @@ async def make_detail(
         ]
         return WorkspaceDetail(
             id=entry.id,
+            status="running",
             mode=workspace_mode,
             created_at=entry.created_at,
             fuse_mountpoints=ws.fuse_mountpoints,
@@ -117,3 +120,78 @@ async def make_detail(
         )
 
     return await entry.runner.call(detail())
+
+
+def _config_mounts(config: dict[str, JsonValue] | None) -> list[MountSummary]:
+    """The mounts a stopped workspace's config names, as a running one's
+    would list them: a mount with no mode of its own takes the config's,
+    and a mode reads in lower case, as a config may write it in any.
+
+    Args:
+        config (dict[str, JsonValue] | None): the config it starts from.
+    """
+    mounts = (config or {}).get("mounts")
+    if not isinstance(mounts, dict):
+        return []
+    mode = (config or {}).get("mode")
+    fallback = mode.lower() if isinstance(mode, str) else "read"
+    out: list[MountSummary] = []
+    for prefix, mount in mounts.items():
+        spec = mount if isinstance(mount, dict) else {}
+        vfs, own = spec.get("vfs"), spec.get("mode")
+        summary = MountSummary(
+            prefix=norm_dir(prefix),
+            vfs=vfs if isinstance(vfs, str) else "",
+            mode=own.lower() if isinstance(own, str) else fallback,
+            description="",
+        )
+        if not _is_auto_prefix(summary.prefix):
+            out.append(summary)
+    return out
+
+
+def make_stopped_brief(
+    workspace_id: str,
+    config: dict[str, JsonValue] | None,
+    created_at: float,
+) -> WorkspaceBrief:
+    """A stopped workspace's brief.
+
+    Args:
+        workspace_id (str): the workspace.
+        config (dict[str, JsonValue] | None): the config it starts from,
+            None when it kept none.
+        created_at (float): when it was first created.
+    """
+    mounts = _config_mounts(config)
+    return WorkspaceBrief(
+        id=workspace_id,
+        status="stopped",
+        mode=mounts[0].mode if mounts else "read",
+        mount_count=len(mounts),
+        session_count=0,
+        created_at=created_at,
+    )
+
+
+def make_stopped_detail(
+    workspace_id: str,
+    config: dict[str, JsonValue] | None,
+    created_at: float,
+) -> WorkspaceDetail:
+    """A stopped workspace's detail, as ``make_stopped_brief``.
+
+    Args:
+        workspace_id (str): the workspace.
+        config (dict[str, JsonValue] | None): the config it starts from,
+            None when it kept none.
+        created_at (float): when it was first created.
+    """
+    mounts = _config_mounts(config)
+    return WorkspaceDetail(
+        id=workspace_id,
+        status="stopped",
+        mode=mounts[0].mode if mounts else "read",
+        created_at=created_at,
+        mounts=mounts,
+    )

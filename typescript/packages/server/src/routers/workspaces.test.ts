@@ -766,7 +766,8 @@ describe('workspaces router', () => {
 
   describe.each(['initModule', 'init_module'])('request runtime %s', (key) => {
     it.each(['local', 'token'] as const)('rejects host initializers with %s auth', async (mode) => {
-      const app = buildApp({ authConfig: { mode, bearerToken: 'test-token' } })
+      const stateRoot = mkdtempSync(join(tmpdir(), 'mir-init-'))
+      const app = buildApp({ stateRoot, authConfig: { mode, bearerToken: 'test-token' } })
       const headers = mode === 'token' ? { authorization: 'Bearer test-token' } : {}
       try {
         const res = await app.inject({
@@ -794,6 +795,7 @@ describe('workspaces router', () => {
         expect(list.json()).toEqual([])
       } finally {
         await app.close()
+        rmSync(stateRoot, { recursive: true, force: true })
       }
     })
   })
@@ -1510,10 +1512,14 @@ describe('workspace cancel, kill, stop and start', () => {
       })
       expect(made.json<{ exit_code: number }>().exit_code).toBe(0)
       expect((await post(app, '/v1/workspaces/keep/stop')).statusCode).toBe(200)
-      expect((await app.inject({ method: 'GET', url: '/v1/workspaces/keep' })).statusCode).toBe(404)
+      const off = await app.inject({ method: 'GET', url: '/v1/workspaces/keep' })
+      expect(off.json<{ status: string }>().status).toBe('stopped')
       const started = await post(app, '/v1/workspaces/keep/start')
       expect(started.statusCode).toBe(200)
-      expect(started.json<{ id: string }>().id).toBe('keep')
+      expect(started.json<{ id: string; status: string }>()).toMatchObject({
+        id: 'keep',
+        status: 'running',
+      })
       const r = await post(app, '/v1/workspaces/keep/shell?session_id=s', {
         command: 'pwd && cat f.txt',
       })
@@ -1534,7 +1540,8 @@ describe('workspace cancel, kill, stop and start', () => {
         expect(r.statusCode).toBe(200)
         expect(r.json<{ id: string }>().id).toBe('keep')
       }
-      expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toEqual([])
+      const listed = await app.inject({ method: 'GET', url: '/v1/workspaces' })
+      expect(listed.json()).toMatchObject([{ id: 'keep', status: 'stopped' }])
       // State kept with no config, as a workspace created before configs
       // were saved: it stops again, and cannot be started.
       rmSync(join(root, 'state', 'configs', 'keep.json'))
@@ -1575,6 +1582,45 @@ describe('workspace cancel, kill, stop and start', () => {
       expect((await post(app, '/v1/workspaces/src/clone', { id: 'w' })).statusCode).toBe(201)
       await post(app, '/v1/workspaces/w/stop')
       expect((await post(app, '/v1/workspaces/w/start')).statusCode).toBe(404)
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('lists, shows and deletes a stopped workspace', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-stopped-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      for (const id of ['off', 'on']) {
+        expect((await post(app, '/v1/workspaces', { ...RAM, id })).statusCode).toBe(201)
+      }
+      await post(app, '/v1/workspaces/off/stop')
+      const listed = (await app.inject({ method: 'GET', url: '/v1/workspaces' })).json<
+        { id: string; status: string; created_at: number }[]
+      >()
+      expect(listed).toMatchObject([
+        { id: 'on', status: 'running', mode: 'write', mount_count: 1, session_count: 1 },
+        { id: 'off', status: 'stopped', mode: 'write', mount_count: 1, session_count: 0 },
+      ])
+      expect(listed[1]?.created_at).toBeGreaterThan(0)
+      const got = await app.inject({ method: 'GET', url: '/v1/workspaces/off' })
+      expect(got.json()).toMatchObject({
+        id: 'off',
+        status: 'stopped',
+        mode: 'write',
+        mounts: [{ prefix: '/', vfs: 'ram', mode: 'write', description: '' }],
+        sessions: [],
+        internals: null,
+      })
+      const deleted = await app.inject({ method: 'DELETE', url: '/v1/workspaces/off' })
+      expect(deleted.statusCode).toBe(200)
+      expect(deleted.json<{ id: string }>().id).toBe('off')
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces/off' })).statusCode).toBe(404)
+      expect((await post(app, '/v1/workspaces/off/start')).statusCode).toBe(404)
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toMatchObject([
+        { id: 'on', status: 'running' },
+      ])
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })

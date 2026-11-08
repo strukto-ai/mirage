@@ -56,6 +56,7 @@ from mirage.types import Ceilings, JsonValue
 from mirage.utils.ids import new_workspace_id
 from mirage.utils.size import parse_limit
 from mirage.workspace.record.disk import DiskRecordClient
+from mirage.workspace.store.base import WorkspaceStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -387,6 +388,9 @@ class WorkspaceRegistry:
         self._owners = owners
         self._configs = configs
         self._removals: dict[str, asyncio.Task[WorkspaceEntry]] = {}
+        # Stopped workspaces being deleted, whose ids stay reserved
+        # meanwhile.
+        self._forgets: set[str] = set()
         self._creates: dict[str, tuple[str, asyncio.Future[None]]] = {}
         self.idle_grace_seconds = idle_grace_seconds
         self.exit_event = (
@@ -538,9 +542,10 @@ class WorkspaceRegistry:
             workspace_id (str): id to check.
 
         Returns:
-            bool: True while a ``remove`` or ``stop`` of it is in flight.
+            bool: True while a ``remove``, ``stop`` or ``forget`` of it is
+                in flight.
         """
-        return workspace_id in self._removals
+        return workspace_id in self._removals or workspace_id in self._forgets
 
     def get(self, workspace_id: str) -> WorkspaceEntry:
         if workspace_id not in self._entries:
@@ -678,6 +683,57 @@ class WorkspaceRegistry:
         record, _ = await self._configs.get(workspace_id)
         return None if record is None else record["config"]
 
+    async def stopped_ids(self, account: str | None) -> Sequence[str]:
+        """The ids of the stopped workspaces ``account`` may use, in
+        order: those whose config is kept and that are not live. A
+        workspace that is stopping is among them.
+
+        Args:
+            account (str | None): the caller's account.
+        """
+        if self._configs is None:
+            return []
+        return [
+            wid
+            for wid in sorted(await self._configs.list_names())
+            if wid not in self._entries
+            and await self.allows(wid, account, 0.0)
+        ]
+
+    async def forget(
+        self, workspace_id: str, store: WorkspaceStateStore
+    ) -> bool:
+        """Delete stopped ``workspace_id``: drop its state from ``store``,
+        and its config, owner and jobs, as ``remove`` does a live one's.
+
+        The id stays reserved until it is done.
+
+        Args:
+            workspace_id (str): the stopped workspace.
+            store (WorkspaceStateStore): where its state is kept.
+
+        Returns:
+            bool: False, with nothing dropped, while it is live, being
+                built, stopped or deleted.
+        """
+        if (
+            workspace_id in self._entries
+            or workspace_id in self._creates
+            or self.removing(workspace_id)
+        ):
+            return False
+        self._forgets.add(workspace_id)
+        try:
+            await store.drop(workspace_id)
+            if self._configs is not None:
+                await self._configs.delete([workspace_id])
+            if self._owners is not None:
+                await self._owners.delete([workspace_id])
+        finally:
+            self.jobs.discard_workspace(workspace_id)
+            self._forgets.discard(workspace_id)
+        return True
+
     async def release(self, workspace_id: str) -> None:
         """Drop the owner a failed create recorded, freeing the id.
 
@@ -735,7 +791,7 @@ class WorkspaceRegistry:
         else:
             runner, ws = None, workspace
         wid = workspace_id or new_workspace_id()
-        if wid in self._entries or wid in self._removals:
+        if wid in self._entries or self.removing(wid):
             raise ValueError(f"workspace id already exists: {wid!r}")
         for policy in restored_with:
             ws.policies.remove(policy)
