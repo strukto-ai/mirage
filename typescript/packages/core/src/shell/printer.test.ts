@@ -27,6 +27,14 @@ it('reads the definition under its redirects', () => {
   expect(body === null ? null : functionText('f', body)).toBe('f () \n{ \n    echo a\n} > o 2>&1')
 })
 
+it('prints a brace loop body as do and done', () => {
+  const source = 'f() { for ((;;)); { a; }; for x in y; { b; }; }'
+  expect(storedFunctionText('f', source, new ParseScope())).toBe(
+    'f () \n{ \n    for ((1; 1; 1))\n    do\n        a;\n    done;\n' +
+      '    for x in y;\n    do\n        b;\n    done\n}',
+  )
+})
+
 // bash prints a definition's heredoc bodies after its closing line.
 it("prints the definition's own heredocs", () => {
   const scope = new ParseScope()

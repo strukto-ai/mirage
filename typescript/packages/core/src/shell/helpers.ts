@@ -414,7 +414,12 @@ export function getForParts(node: TSNodeLike): [string, TSNodeLike[] | null, TSN
   const last = nc[nc.length - 1]
   if (first === undefined || last === undefined) throw new Error('for: missing parts')
   const values = node.children.some((c) => c.type === NT.IN)
-    ? nc.slice(1).filter((c) => c.type !== NT.DO_GROUP && c.type !== NT.COMMENT)
+    ? nc
+        .slice(1)
+        .filter(
+          (c) =>
+            c.type !== NT.DO_GROUP && c.type !== NT.COMPOUND_STATEMENT && c.type !== NT.COMMENT,
+        )
     : null
   return [getText(first), values, [...last.namedChildren]]
 }
@@ -447,7 +452,9 @@ export function getCforParts(node: TSNodeLike): [TSNodeLike[][], TSNodeLike[]] {
       else if (slot < 3) exprs[slot]?.push(child)
       continue
     }
-    if (child.type === NT.DO_GROUP) body = [...child.namedChildren]
+    if (child.type === NT.DO_GROUP || child.type === NT.COMPOUND_STATEMENT) {
+      body = [...child.namedChildren]
+    }
   }
   return [exprs, body]
 }

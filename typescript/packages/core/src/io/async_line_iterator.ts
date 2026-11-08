@@ -397,59 +397,53 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     delim: number | null,
     signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
-    // The characters taken are the first `run` bytes of `buf`, set aside
-    // into `parts` whole before each wait, so none is copied twice and no
-    // other reader of the descriptor takes them meanwhile.
-    const parts: Uint8Array[] = []
-    let held = 0
-    let run = 0
-    const setAside = (): void => {
-      if (run === 0) return
-      parts.push(this.buf.subarray(0, run))
-      held += run
-      this.buf = this.buf.subarray(run)
-      run = 0
-    }
+    // What a batch takes leaves `buf` before the next wait, so no other
+    // reader of the descriptor takes it meanwhile.
+    const out: Uint8Array[] = []
+    let size = 0
     const room = memoryRoom()
+    const joined = (): Uint8Array<ArrayBuffer> => new Uint8Array(concat(out))
     try {
       let taken = 0
       while (taken < count) {
         const pending = this.check(signal)
-        if (pending !== undefined) {
-          setAside()
-          await pending
-        }
+        if (pending !== undefined) await pending
         // One pull can split a character across chunks, so top the buffer
         // up to the widest one before reading its first byte as a whole.
-        if (this.buf.byteLength - run < 4 && !this.exhausted) {
-          setAside()
+        if (this.buf.byteLength < 4 && !this.exhausted) {
           const result = await this.pull(signal)
           if (result.done === true) this.exhausted = true
           else this.buf = concat([this.buf, result.value])
           continue
         }
-        if (this.buf.byteLength === run) {
-          setAside()
+        if (this.buf.byteLength === 0) {
           this.trim()
-          return [concat(parts), false]
+          return [joined(), false]
         }
-        if (delim !== null && this.buf[run] === delim) {
-          setAside()
+        const buf = this.buf
+        const whole = this.exhausted ? buf.byteLength : buf.byteLength - 3
+        let at = 0
+        while (at < whole && taken < count && !(delim !== null && buf[at] === delim)) {
+          const width = charWidth(buf, at)
+          if (room !== null && size + at + width > room) throw new MemoryExhausted()
+          at += width
+          taken++
+        }
+        if (at > 0) {
+          out.push(buf.subarray(0, at))
+          size += at
+          this.buf = buf.subarray(at)
+        }
+        if (taken < count && delim !== null && this.buf[0] === delim) {
           this.buf = this.buf.subarray(1)
           this.trim()
-          return [concat(parts), true]
+          return [joined(), true]
         }
-        const width = charWidth(this.buf, run)
-        if (room !== null && held + run + width > room) throw new MemoryExhausted()
-        run += width
-        taken++
       }
-      setAside()
       this.trim()
-      return [concat(parts), true]
+      return [joined(), true]
     } catch (error) {
-      setAside()
-      await this.failed(error, parts)
+      await this.failed(error, out)
       throw error
     }
   }

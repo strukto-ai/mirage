@@ -25,6 +25,14 @@ def test_function_text_reads_the_definition_under_its_redirects():
     assert function_text("f", body) == "f () \n{ \n    echo a\n} > o 2>&1"
 
 
+def test_stored_function_text_prints_a_brace_loop_body_as_do_done():
+    source = "f() { for ((;;)); { a; }; for x in y; { b; }; }"
+    assert stored_function_text("f", source) == (
+        "f () \n{ \n    for ((1; 1; 1))\n    do\n        a;\n    done;\n"
+        "    for x in y;\n    do\n        b;\n    done\n}"
+    )
+
+
 def test_stored_function_text_prints_the_definitions_own_heredocs():
     # bash prints a definition's heredoc bodies after its closing line.
     source = "f() { cat; } <<A >/dev/null <<B\na\nA\nb\nB"

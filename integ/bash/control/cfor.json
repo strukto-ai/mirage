@@ -203,10 +203,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "for ((i=0;i<5;i++)); do if ((i==2)); then break; fi; echo $i; done",
+      "command": "for ((i=0;i<5;i++)); do if ((i==2)); then break; fi; echo $i; done; ( for ((;;)); { break; }; echo \"b$?\"; for ((qi=0;qi<2;qi++)) { echo \"c$qi\"; }; for qx in p q; { echo \"$qx\"; }; f() { for ((;;)); { a; }; for x in y; { b; }; }; declare -f f )",
       "expect": {
         "exit": 0,
-        "stdout": "0\n1\n",
+        "stdout": "0\n1\nb0\nc0\nc1\np\nq\nf () \n{ \n    for ((1; 1; 1))\n    do\n        a;\n    done;\n    for x in y;\n    do\n        b;\n    done\n}\n",
         "stderr": ""
       }
     },

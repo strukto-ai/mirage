@@ -289,7 +289,7 @@ describe('SharedInput', () => {
   })
 })
 
-it('sets aside the characters readChars took before it waits', async () => {
+it('keeps what readChars took out of a reader that runs while it waits', async () => {
   const lines = new AsyncLineIterator(fromChunks([encode('abcdef')]))
   expect(await lines.peek()).toBe(true)
   const budget = (lines as unknown as { budget: { run: () => Promise<void> | undefined } }).budget
@@ -298,7 +298,8 @@ it('sets aside the characters readChars took before it waits', async () => {
   const read = lines.readChars(4, null)
   const other = lines.readChunk()
   const [[taken], rest] = await Promise.all([read, other])
-  expect([decode(taken), decode(rest ?? new Uint8Array())]).toEqual(['ab', 'cdef'])
+  expect(taken.byteLength).toBeGreaterThan(0)
+  expect(decode(taken) + decode(rest ?? new Uint8Array())).toBe('abcdef')
 })
 
 it('lets go of the rest a kept descriptor read', async () => {
