@@ -34,6 +34,9 @@ retains every response schema. JSON errors can
 include `errno` and `refusal` alongside `detail`. Those fields describe filesystem
 errors and policy refusals when available.
 
+For oversized JSON requests, TypeScript can return HTTP `413` with `statusCode`,
+`code`, `error`, and `message` fields. Read `message` when `detail` is absent.
+
 The readiness endpoint uses a different body: HTTP `503` returns
 `{"status": "full"}` or `{"status": "shutting_down"}` when the server cannot
 accept new workspaces.

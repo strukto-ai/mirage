@@ -7911,7 +7911,37 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/Error'
+            anyOf:
+              - $ref: '#/components/schemas/Error'
+              - title: TypeScript JSON body limit
+                type: object
+                properties:
+                  statusCode:
+                    type: integer
+                    const: 413
+                  code:
+                    type: string
+                  error:
+                    type: string
+                  message:
+                    type: string
+                required:
+                  - statusCode
+                  - code
+                  - error
+                  - message
+          examples:
+            request_part:
+              summary: Python or multipart request limit
+              value:
+                detail: request body too large
+            typescript_json:
+              summary: TypeScript JSON body limit
+              value:
+                statusCode: 413
+                code: FST_ERR_CTP_BODY_TOO_LARGE
+                error: Payload Too Large
+                message: Request body is too large
     '499':
       description: The running shell job was canceled.
       content:

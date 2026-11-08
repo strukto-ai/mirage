@@ -24,9 +24,7 @@ def check_examples(doc: dict[str, Any]) -> int:
             .get("content", {})
             .get("application/json", {})
         ]
-        for code, response in op["responses"].items():
-            if not code.startswith("2"):
-                continue
+        for response in op["responses"].values():
             if "$ref" in response:
                 response = doc["components"]["responses"][
                     response["$ref"].rsplit("/", 1)[-1]
