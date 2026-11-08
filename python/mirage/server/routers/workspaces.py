@@ -68,7 +68,7 @@ from mirage.server.multipart import (
     part_events,
 )
 from mirage.server.paths import load_daemon_id
-from mirage.server.registry import Claim, WorkspaceEntry
+from mirage.server.registry import Claim, Forget, WorkspaceEntry
 from mirage.server.resources.policies import with_policies
 from mirage.server.resources.strukto import with_entries
 from mirage.server.routers.templates import (
@@ -775,10 +775,19 @@ async def delete_workspace(
             raise HTTPException(status_code=404, detail="workspace not found")
         store = _store_of(request, kept[0])
         try:
-            forgotten = await registry.forget(workspace_id, store)
+            forgot = await registry.forget(
+                workspace_id, request.state.account, kept[0], store
+            )
         finally:
             await store.close()
-        if not forgotten:
+        if forgot is Forget.GONE:
+            raise HTTPException(status_code=404, detail="workspace not found")
+        if forgot is Forget.HELD:
+            raise HTTPException(
+                status_code=409,
+                detail="workspace is running on another server",
+            )
+        if forgot is Forget.BUSY:
             raise HTTPException(
                 status_code=409,
                 detail="workspace is starting or stopping; try again",

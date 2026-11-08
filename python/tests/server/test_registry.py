@@ -35,6 +35,7 @@ from mirage.server.env import (
 )
 from mirage.server.registry import (
     Claim,
+    Forget,
     WorkspaceRegistry,
     resolve_ceilings,
     resolve_graceful_timeout,
@@ -45,6 +46,12 @@ from mirage.server.registry import (
 from mirage.types import Ceilings
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.record.disk import DiskRecordClient
+from mirage.workspace.store import RAMWorkspaceStateStore
+
+
+class _NoLease:
+    async def holder(self) -> None:
+        return None
 
 
 class _GatedStore:
@@ -52,24 +59,55 @@ class _GatedStore:
 
     def __init__(self) -> None:
         self.gate = asyncio.Event()
+        self.dropped = False
+
+    def execution(self, workspace_id: str) -> _NoLease:
+        return _NoLease()
 
     async def drop(self, workspace_id: str) -> None:
         await self.gate.wait()
+        self.dropped = True
 
 
 @pytest.mark.asyncio
 async def test_a_stopped_id_being_deleted_takes_no_build_nor_the_reverse():
     registry = WorkspaceRegistry(idle_grace_seconds=10.0)
     store = _GatedStore()
-    deleting = asyncio.create_task(registry.forget("w", store))
+    deleting = asyncio.create_task(registry.forget("w", None, None, store))
     await asyncio.sleep(0)
     async with registry.creating("w", "a") as admitted:
         assert admitted is False
     store.gate.set()
-    assert await deleting is True
+    assert await deleting is Forget.DONE
     async with registry.creating("w", "a") as admitted:
         assert admitted is True
-        assert await registry.forget("w", store) is False
+        assert await registry.forget("w", None, None, store) is Forget.BUSY
+
+
+@pytest.mark.asyncio
+async def test_a_delete_keeps_a_workspace_made_under_the_id_meanwhile(
+    tmp_path,
+):
+    registry = WorkspaceRegistry(
+        idle_grace_seconds=10.0,
+        configs=DiskRecordClient(str(tmp_path), "configs"),
+    )
+    await registry.save_config("w", {"mounts": {"/": {"vfs": "ram"}}})
+    store = _GatedStore()
+    store.gate.set()
+    found = {"mounts": {"/": {"vfs": "disk"}}}
+    assert await registry.forget("w", None, found, store) is Forget.GONE
+    assert store.dropped is False
+    assert await registry.saved_config("w", None) is not None
+
+
+@pytest.mark.asyncio
+async def test_a_delete_keeps_a_workspace_another_server_runs():
+    registry = WorkspaceRegistry(idle_grace_seconds=10.0)
+    store = RAMWorkspaceStateStore()
+    assert await store.execution("w").lease("other-daemon") is None
+    assert await registry.forget("w", None, None, store) is Forget.HELD
+    assert await store.execution("w").holder() == "other-daemon"
 
 
 @pytest.mark.asyncio

@@ -76,6 +76,15 @@ class Claim(StrEnum):
     TAKEN = "taken"
 
 
+class Forget(StrEnum):
+    """What a delete of a stopped workspace did."""
+
+    DONE = "done"
+    BUSY = "busy"
+    GONE = "gone"
+    HELD = "held"
+
+
 class WorkspaceEntry:
     """One registered workspace.
 
@@ -712,20 +721,33 @@ class WorkspaceRegistry:
         ]
 
     async def forget(
-        self, workspace_id: str, store: WorkspaceStateStore
-    ) -> bool:
+        self,
+        workspace_id: str,
+        account: str | None,
+        config: dict[str, JsonValue] | None,
+        store: WorkspaceStateStore,
+    ) -> Forget:
         """Delete stopped ``workspace_id``: drop its state from ``store``,
         and its config, owner and jobs, as ``remove`` does a live one's.
 
-        The id stays reserved until it is done.
+        The id is reserved first, then checked again: ``account`` may
+        still reach it and its saved config is still ``config``, so a
+        delete that waited cannot drop a workspace created under the id
+        meanwhile. A lease another server holds in a shared store means
+        that server runs it, so its state stays.
 
         Args:
             workspace_id (str): the stopped workspace.
+            account (str | None): the caller's account.
+            config (dict[str, JsonValue] | None): the config the caller
+                found saved.
             store (WorkspaceStateStore): where its state is kept.
 
         Returns:
-            bool: False, with nothing dropped, while it is live, being
-                built, stopped or deleted.
+            Forget: ``DONE`` once dropped; ``BUSY`` while it is live,
+                being built, stopped or deleted here; ``GONE`` when it is
+                no longer the one the caller found; ``HELD`` while
+                another server holds its lease.
         """
         if (
             workspace_id in self._entries
@@ -733,18 +755,27 @@ class WorkspaceRegistry:
             or self.removing(workspace_id)
             or self.forgetting(workspace_id)
         ):
-            return False
+            return Forget.BUSY
         self._forgets.add(workspace_id)
         try:
-            await store.drop(workspace_id)
-            if self._configs is not None:
-                await self._configs.delete([workspace_id])
-            if self._owners is not None:
-                await self._owners.delete([workspace_id])
+            if (
+                not await self.allows(workspace_id, account, 0.0)
+                or await self.saved_config(workspace_id, account) != config
+            ):
+                return Forget.GONE
+            if await store.execution(workspace_id).holder() is not None:
+                return Forget.HELD
+            try:
+                await store.drop(workspace_id)
+                if self._configs is not None:
+                    await self._configs.delete([workspace_id])
+                if self._owners is not None:
+                    await self._owners.delete([workspace_id])
+            finally:
+                self.jobs.discard_workspace(workspace_id)
         finally:
-            self.jobs.discard_workspace(workspace_id)
             self._forgets.discard(workspace_id)
-        return True
+        return Forget.DONE
 
     async def release(self, workspace_id: str) -> None:
         """Drop the owner a failed create recorded, freeing the id.

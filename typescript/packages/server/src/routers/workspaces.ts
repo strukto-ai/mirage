@@ -53,7 +53,7 @@ import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
 import { explanationToDict } from '../io_serde.ts'
 import { refused } from '../metrics.ts'
 import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, MultipartError, partEvents } from '../multipart.ts'
-import { Claim, type WorkspaceRegistry } from '../registry.ts'
+import { Claim, Forget, type WorkspaceRegistry } from '../registry.ts'
 import {
   checkConfig,
   SnapshotWorkspaceRequest,
@@ -795,7 +795,12 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       if (k === null) return reply.status(404).send({ detail: 'workspace not found' })
       const store = storeOf(deps, k.config)
       try {
-        if (!(await deps.registry.forget(id, store))) {
+        const forgot = await deps.registry.forget(id, req.account, k.config, store)
+        if (forgot === Forget.Gone) return reply.status(404).send({ detail: 'workspace not found' })
+        if (forgot === Forget.Held) {
+          return reply.status(409).send({ detail: 'workspace is running on another server' })
+        }
+        if (forgot === Forget.Busy) {
           return reply.status(409).send({ detail: 'workspace is starting or stopping; try again' })
         }
       } finally {

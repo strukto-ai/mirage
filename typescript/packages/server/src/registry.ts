@@ -69,6 +69,14 @@ export enum Claim {
   Taken = 'taken',
 }
 
+/** What a delete of a stopped workspace did. */
+export enum Forget {
+  Done = 'done',
+  Busy = 'busy',
+  Gone = 'gone',
+  Held = 'held',
+}
+
 export class WorkspaceEntry {
   readonly id: string
   readonly runner: WorkspaceRunner
@@ -581,24 +589,42 @@ export class WorkspaceRegistry {
 
   /**
    * Delete stopped `id`: drop its state from `store`, and its config, owner
-   * and jobs, as `remove` does a live one's. False, with nothing dropped,
-   * while it is live, being built, stopped or deleted. The id stays
-   * reserved until it is done. Mirrors Python's `forget`.
+   * and jobs, as `remove` does a live one's. The id is reserved first, then
+   * checked again: `account` may still reach it and its saved config is
+   * still `config`, so a delete that waited cannot drop a workspace created
+   * under the id meanwhile. A lease another server holds in a shared store
+   * means that server runs it, so its state stays. Mirrors Python's
+   * `forget`.
    */
-  async forget(id: string, store: WorkspaceStateStore): Promise<boolean> {
+  async forget(
+    id: string,
+    account: string | null,
+    config: Record<string, JsonValue> | null,
+    store: WorkspaceStateStore,
+  ): Promise<Forget> {
     if (this.entries.has(id) || this.creates.has(id) || this.removing(id) || this.forgets.has(id)) {
-      return false
+      return Forget.Busy
     }
     this.forgets.add(id)
     try {
-      await store.drop(id)
-      if (this.configs !== null) await this.configs.delete([id])
-      if (this.owners !== null) await this.owners.delete([id])
+      if (
+        !(await this.allows(id, account, 0)) ||
+        JSON.stringify(await this.savedConfig(id, account)) !== JSON.stringify(config)
+      ) {
+        return Forget.Gone
+      }
+      if ((await store.execution(id).holder()) !== null) return Forget.Held
+      try {
+        await store.drop(id)
+        if (this.configs !== null) await this.configs.delete([id])
+        if (this.owners !== null) await this.owners.delete([id])
+      } finally {
+        this.jobs.discardWorkspace(id)
+      }
     } finally {
-      this.jobs.discardWorkspace(id)
       this.forgets.delete(id)
     }
-    return true
+    return Forget.Done
   }
 
   /** Drop the owner a failed create recorded, freeing the id. */

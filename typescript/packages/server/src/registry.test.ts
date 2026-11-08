@@ -34,6 +34,7 @@ import {
 } from './env.ts'
 import {
   Claim,
+  Forget,
   resolveGracefulTimeout,
   resolveCeilings,
   resolveMaxSessions,
@@ -43,6 +44,7 @@ import {
 } from './registry.ts'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
+import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import type { CommandContext, VfsContext } from '@struktoai/mirage-core/policy/types'
 
 describe('newWorkspaceId', () => {
@@ -93,16 +95,49 @@ describe('WorkspaceRegistry', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    const store = { drop: () => gate } as unknown as WorkspaceStateStore
-    const deleting = r.forget('w', store)
+    const store = {
+      drop: () => gate,
+      execution: () => ({ holder: () => Promise.resolve(null) }),
+    } as unknown as WorkspaceStateStore
+    const deleting = r.forget('w', null, null, store)
     expect(await r.creating('w', 'a', (admitted) => Promise.resolve(admitted))).toBe(false)
     release()
-    expect(await deleting).toBe(true)
+    expect(await deleting).toBe(Forget.Done)
     const built = await r.creating('w', 'a', async (admitted) => {
-      expect(await r.forget('w', store)).toBe(false)
+      expect(await r.forget('w', null, null, store)).toBe(Forget.Busy)
       return admitted
     })
     expect(built).toBe(true)
+  })
+
+  it('keeps a workspace made under the id while its delete waited', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'configs-'))
+    try {
+      const r = new WorkspaceRegistry({ configs: new DiskRecordClient(dir, 'configs') })
+      await r.saveConfig('w', { mounts: { '/': { vfs: 'ram' } } })
+      let dropped = false
+      const store = {
+        drop: () => {
+          dropped = true
+          return Promise.resolve()
+        },
+        execution: () => ({ holder: () => Promise.resolve(null) }),
+      } as unknown as WorkspaceStateStore
+      const found = { mounts: { '/': { vfs: 'disk' } } }
+      expect(await r.forget('w', null, found, store)).toBe(Forget.Gone)
+      expect(dropped).toBe(false)
+      expect(await r.savedConfig('w', null)).not.toBeNull()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps a workspace another server runs', async () => {
+    const r = new WorkspaceRegistry()
+    const store = new RAMWorkspaceStateStore()
+    expect(await store.execution('w').lease('other-daemon')).toBeNull()
+    expect(await r.forget('w', null, null, store)).toBe(Forget.Held)
+    expect(await store.execution('w').holder()).toBe('other-daemon')
   })
 
   it('joins an overlapping remove instead of deleting the id again', async () => {
