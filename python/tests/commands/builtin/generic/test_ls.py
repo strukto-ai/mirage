@@ -329,6 +329,28 @@ async def test_recursive_ls_lists_each_directory_as_the_walk_reaches_it():
     assert listed == ["/dir", "/dir/a", "/dir/b"]
 
 
+@pytest.mark.asyncio
+async def test_recursive_ls_closed_early_reports_an_operand_it_never_reached():
+    tree = {
+        "/a": _dir("a"),
+        "/a/x": _file("x"),
+        "/z": _dir("z"),
+        "/z/y": _file("y"),
+    }
+    readdir, stat = _make_fs_backend(tree)
+    denying = partial(_readdir_denying, readdir=readdir, blocked="/z")
+    out, io = await ls(
+        [_spec("/a"), _spec("/z")],
+        readdir=denying,
+        stat=stat,
+        recursive=True,
+    )
+    assert await anext(out) == b"/a:\nx\n"
+    await out.aclose()
+    assert io.stderr == b"ls: cannot open directory '/z': Permission denied\n"
+    assert io.exit_code == LS_FAILURE
+
+
 def test_exit_status_for_ratchets_like_gnu():
     minor = LsWarning("ls: cannot access 'x': Permission denied", False)
     serious = LsWarning("ls: cannot access '/nope': No such file", True)

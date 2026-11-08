@@ -1682,6 +1682,8 @@ async def ls(
                 ):
                     yield item
 
+    finished: set[int] = set()
+
     async def groups(
         operand: Operand,
     ) -> AsyncIterator[tuple[PathSpec, list[FileStat]] | LsWarning]:
@@ -1701,6 +1703,7 @@ async def ls(
         if budget is not None:
             for line in budget.stopped:
                 yield LsWarning(f"ls: {line}", False)
+        finished.add(id(operand))
 
     async def with_dots(
         dir_spec: PathSpec, entries: list[FileStat], found: list[LsWarning]
@@ -1834,6 +1837,20 @@ async def ls(
                             pending.clear()
                         yield piece
             finally:
+                # A reader that stops early still gets what was found for
+                # the operands it never finished, after what it read.
+                for operand in operands:
+                    if id(operand) in finished:
+                        continue
+                    budget = budgets.get(id(operand))
+                    stopped = budget.stopped if budget is not None else ()
+                    for warning in (
+                        *(note for _, note in operand.notes),
+                        *(LsWarning(f"ls: {line}", False) for line in stopped),
+                    ):
+                        if all(warning is not seen for seen in reported):
+                            reported.append(warning)
+                            pending.append(warning.message)
                 if pending:
                     await say(io, format_records(pending))
                 io.exit_code = exit_status_for(reported)

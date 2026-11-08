@@ -230,6 +230,24 @@ describe('lsGeneric -R', () => {
       .split('\n')
     expect(lines.map((line) => line.split("'")[1])).toEqual(['/bad', '/deep/sub'])
   })
+
+  it('reports an operand it never reached when its reader stops early', async () => {
+    // -r puts /good first, so the refused /deep/sub is never reached.
+    const result = await lsGeneric(
+      [spec('/good'), spec('/deep/sub')],
+      ctx({ recursive: true, reverse: true }),
+      codeReaddir,
+      codeStat,
+    )
+    const [out, io] = result as [AsyncIterable<Uint8Array>, IOResult]
+    const pulled = out[Symbol.asyncIterator]()
+    expect(DEC.decode((await pulled.next()).value as Uint8Array)).toBe('/good:\nb.txt\na.txt\n')
+    await pulled.return?.()
+    expect(DEC.decode(io.stderr as Uint8Array)).toMatch(
+      /^ls: cannot open directory '\/deep\/sub': /,
+    )
+    expect(io.exitCode).toBe(LS_FAILURE)
+  })
 })
 
 describe('structure-only directories', () => {

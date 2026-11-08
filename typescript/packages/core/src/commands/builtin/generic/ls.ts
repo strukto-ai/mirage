@@ -1403,6 +1403,8 @@ export async function lsGeneric(
     }
   }
 
+  const finished = new Set<Operand>()
+
   async function* groups(operand: Operand): AsyncGenerator<Walked> {
     const spell = (virtual: string): string =>
       respellOne(virtual, operand.path.virtual, operand.path.rawPath)
@@ -1414,6 +1416,7 @@ export async function lsGeneric(
       if (recursive) yield* below(dirSpec, entries, [], spell, opts)
     }
     for (const line of budget?.stopped ?? []) yield { message: `ls: ${line}`, serious: false }
+    finished.add(operand)
   }
 
   async function withDots(
@@ -1515,6 +1518,20 @@ export async function lsGeneric(
           yield piece
         }
       } finally {
+        // A reader that stops early still gets what was found for the
+        // operands it never finished, after what it read.
+        for (const operand of operands) {
+          if (finished.has(operand)) continue
+          const stopped = budgets.get(operand)?.stopped ?? []
+          for (const warning of [
+            ...(operand.notes ?? []).map(([, note]) => note),
+            ...stopped.map((line) => ({ message: `ls: ${line}`, serious: false })),
+          ]) {
+            if (reported.includes(warning)) continue
+            reported.push(warning)
+            pending.push(warning.message)
+          }
+        }
         if (pending.length > 0) await say(io, formatRecords(pending.splice(0)))
         io.exitCode = exitStatusFor(reported)
       }
