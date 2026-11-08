@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from contextlib import aclosing
+from typing import Any
 
 import pytest
 
@@ -21,10 +22,11 @@ from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, PathSpec
 
 
-async def _file(op: str, path: PathSpec, **_: object) -> tuple[FileStat, None]:
-    return FileStat(
-        name=path.virtual.rsplit("/", 1)[-1], type=FileType.FILE
-    ), None
+async def _file(
+    op: str, path: PathSpec, **_: Any
+) -> tuple[FileStat, IOResult]:
+    name = path.virtual.rsplit("/", 1)[-1]
+    return FileStat(name=name, type=FileType.FILE), IOResult()
 
 
 async def _reporting_run(cmd, operands, words, bag, stdin=None):
