@@ -13,12 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
+import { POLICY_NAME } from '@struktoai/mirage-core/resources/constants'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
 import type { JsonObject } from '@struktoai/mirage-core/types'
 import { isRecord } from '@struktoai/mirage-core/utils/records'
-
-/** A saved policy's name: a file name mirage reads as Python. */
-export const POLICY_NAME = /^[a-z0-9][a-z0-9._-]{0,59}\.py$/
 
 /**
  * `written` with each profile program whose `script` names a saved policy

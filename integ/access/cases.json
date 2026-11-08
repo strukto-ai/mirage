@@ -571,7 +571,7 @@
    "whoami": null,
    "list": "ok",
    "logout": "Logged out of {url}.",
-   "after_logout": "daemon error 401: Unauthorized"
+   "after_logout": "error 401: Unauthorized"
   },
   "jwt": {
    "resource": 200,
@@ -583,7 +583,7 @@
    "refreshed": true,
    "after_30_days": "the login is 30 days old",
    "logout": "Logged out of {url}.",
-   "after_logout": "daemon error 401: Unauthorized"
+   "after_logout": "error 401: Unauthorized"
   }
  },
  "codex_exec": {
