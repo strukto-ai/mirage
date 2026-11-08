@@ -18,7 +18,6 @@ import { PolicyDenied, preSessionGate, type Policies } from '../../policy/index.
 import type { ShellVars } from '../../rs/session.ts'
 import { rawValue, varOf } from '../../rs/session.ts'
 import type { Item, ShellTask } from '../../rs/shell.ts'
-import { plainDecimal } from '../../shell/arith.ts'
 import { arrayGet, ShellArray } from '../../shell/array.ts'
 import { joinBytes } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -233,9 +232,9 @@ export async function subscriptIndex(
   subscript: string,
   policies: Policies | null = null,
 ): Promise<bigint> {
-  const plain = plainDecimal(subscript)
-  if (plain !== null) return plain
   const shell = session.vars.shell
+  const plain = shell.plainIndex(subscript)
+  if (plain !== null) return plain
   return runWrite(session, policies, (heard) => shell.index(subscript, { listens: heard }))
 }
 

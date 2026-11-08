@@ -256,3 +256,12 @@ def test_a_fresh_generator_seeds_from_its_shells_id_source() -> None:
     assert drawn == [12345, 999]
     first.subshell().next_random()
     assert drawn == [12345, 999, 12345]
+
+
+def test_plain_index_reads_a_plain_decimal_only():
+    shell = Shell(lambda: 7)
+    assert shell.plain_index(" 42\t") == 42
+    assert shell.plain_index("99999999999999999999999") == 200376420520689663
+    assert shell.plain_index("042") is None
+    assert shell.plain_index("4+2") is None
+    assert shell.plain_index(" ") is None

@@ -20,6 +20,7 @@ import {
   getForParts,
   getFunctionRedirects,
   getText,
+  loopGroup,
   parseFunction,
 } from './helpers.ts'
 import type { ParseScope } from './parse/scope.ts'
@@ -415,8 +416,7 @@ class Printer {
   private forStatement(node: TSNodeLike, indent: string): string {
     const [variable, values] = getForParts(node)
     const words = values === null ? '"$@"' : values.map((v) => this.word(v)).join(' ')
-    const group =
-      node.children.find((c) => c.type === NT.DO_GROUP || c.type === NT.COMPOUND_STATEMENT) ?? null
+    const group = loopGroup(node)
     const head = node.children[0]?.type ?? 'for'
     return `${head} ${variable} in ${words};\n${indent}do${this.group(group, indent)}`
   }
@@ -436,8 +436,7 @@ class Printer {
       if (child.type === '))') break
       begin = end(child)
     }
-    const group =
-      node.children.find((c) => c.type === NT.DO_GROUP || c.type === NT.COMPOUND_STATEMENT) ?? null
+    const group = loopGroup(node)
     return `for ((${slots.join('; ')}))\n${indent}do${this.group(group, indent)}`
   }
 

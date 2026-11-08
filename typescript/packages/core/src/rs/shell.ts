@@ -1080,6 +1080,10 @@ export class Shell {
   }
 
   /** Resolve an indexed array's subscript, what it assigns landed. */
+  plainIndex(subscript: string): bigint | null {
+    return this.call('plain_index', subscript) as bigint | null
+  }
+
   index(subscript: string, options: Heard = {}): ShellTask {
     return this.task('index', null, subscript, options.listens ?? false)
   }

@@ -408,6 +408,13 @@ export function getWhileParts(node: TSNodeLike): [TSNodeLike[], TSNodeLike[]] {
  * Get (variable, values, bodyCommands) from for/select. `values` is null for
  * a header with no `in` (`for f do`), which loops over `"$@"`.
  */
+/** The node holding a loop's body: its `do ... done`, or the brace group bash takes in its place after `for`. */
+export function loopGroup(node: TSNodeLike): TSNodeLike | null {
+  return (
+    node.children.find((c) => c.type === NT.DO_GROUP || c.type === NT.COMPOUND_STATEMENT) ?? null
+  )
+}
+
 export function getForParts(node: TSNodeLike): [string, TSNodeLike[] | null, TSNodeLike[]] {
   const nc = node.namedChildren
   const first = nc[0]
@@ -437,7 +444,6 @@ export function getCforParts(node: TSNodeLike): [TSNodeLike[][], TSNodeLike[]] {
   const exprs: TSNodeLike[][] = [[], [], []]
   let slot = 0
   let inside = false
-  let body: TSNodeLike[] = []
   for (const child of node.children) {
     if (child.type === NT.ARITH_OPEN) {
       inside = true
@@ -452,11 +458,8 @@ export function getCforParts(node: TSNodeLike): [TSNodeLike[][], TSNodeLike[]] {
       else if (slot < 3) exprs[slot]?.push(child)
       continue
     }
-    if (child.type === NT.DO_GROUP || child.type === NT.COMPOUND_STATEMENT) {
-      body = [...child.namedChildren]
-    }
   }
-  return [exprs, body]
+  return [exprs, [...(loopGroup(node)?.namedChildren ?? [])]]
 }
 
 /**

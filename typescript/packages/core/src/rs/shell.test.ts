@@ -178,6 +178,16 @@ describe('Shell', () => {
     return node
   }
 
+  it('reads only a plain decimal as a plain index', () => {
+    const shell = Shell.create(() => 7)
+    expect(shell.plainIndex(' 42\t')).toBe(42n)
+    expect(shell.plainIndex('99999999999999999999999')).toBe(200376420520689663n)
+    expect(shell.plainIndex('042')).toBeNull()
+    expect(shell.plainIndex('4+2')).toBeNull()
+    expect(shell.plainIndex(' ')).toBeNull()
+    shell.close()
+  })
+
   it('seeds a fresh generator from its own id source, a subshell too', () => {
     const drawn: number[] = []
     const source = (seed: number) => () => {
