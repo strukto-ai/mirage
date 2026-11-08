@@ -405,6 +405,34 @@ async def test_a_kept_signal_to_a_group_that_then_ends_is_sent():
         await ws.close()
 
 
+class _Gone(_Leaver):
+    """A leaver whose machine answers a signal only while a row shows."""
+
+    async def signal(self, target, signum):
+        self.sent.append((target, signum))
+        return bool(self.rows)
+
+
+@pytest.mark.asyncio
+async def test_a_kept_signal_to_a_group_gone_by_its_scan_fails():
+    box = _Gone("a")
+    ws = _sleepers(a=box)
+    try:
+        assert (await ws.shell("train 1")).exit_code == 0
+        listed = (await ws.shell("ps -o pgid=,mpid=")).stdout.decode()
+        group = next(
+            row.split()[0]
+            for row in listed.splitlines()
+            if row.split()[1:] == ["413"]
+        )
+        box.rows = []
+        said = await ws.shell(f"kill -WINCH -- -{group}")
+        assert said.exit_code == 1
+        assert "No such process" in await said.stderr_str()
+    finally:
+        await ws.close()
+
+
 class _Dropping(_Leaver):
     """A leaver whose first scan loses the connection."""
 

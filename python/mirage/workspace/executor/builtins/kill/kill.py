@@ -278,7 +278,8 @@ async def _kill_group(
         session_id (str): the calling session.
 
     Returns:
-        bool: whether the group had a runner the view sees.
+        bool: whether the group had a runner the view sees; for a kept
+        signal, one of Mirage's own or a program that took it.
     """
     if signal in KEPT_SIGNALS:
         if signal == 0 or not processes.probe_group(group):
@@ -289,8 +290,8 @@ async def _kill_group(
             for record in processes.list()
             if record.group == group
         ]
-        await asyncio.gather(*(s for s in sending if s is not None))
-        return True
+        sent = await asyncio.gather(*(s for s in sending if s is not None))
+        return any(s is None for s in sending) or any(sent)
     if not processes.probe_group(group):
         return False
     found = await processes.signal_group(group, signal)

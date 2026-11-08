@@ -189,6 +189,14 @@ class Quitter extends Sleeper {
   }
 }
 
+/** A leaver whose machine answers a signal only while a row shows. */
+class Gone extends Leaver {
+  override signal(target: string | MachinePid, signum: number): Promise<boolean> {
+    this.sent.push([target, signum])
+    return Promise.resolve(this.rows.length > 0)
+  }
+}
+
 /** A leaver whose first scan loses the connection. */
 class Dropping extends Leaver {
   private dropped = false
@@ -461,6 +469,25 @@ describe('MachineTable scans', () => {
       expect([said.exitCode, DEC.decode(said.stderr)]).toEqual([0, ''])
     } finally {
       box.finish()
+      await ws.close()
+    }
+  })
+
+  it('fails a kept signal to a group gone by its scan', async () => {
+    const box = new Gone('a')
+    const ws = sleepers({ a: box })
+    try {
+      expect((await ws.shell('train 1')).exitCode).toBe(0)
+      const listed = DEC.decode((await ws.shell('ps -o pgid=,mpid=')).stdout)
+      const group = listed
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/))
+        .find((row) => row[1] === '413')?.[0]
+      box.rows = []
+      const said = await ws.shell(`kill -WINCH -- -${group ?? ''}`)
+      expect(said.exitCode).toBe(1)
+      expect(DEC.decode(said.stderr)).toContain('No such process')
+    } finally {
       await ws.close()
     }
   })

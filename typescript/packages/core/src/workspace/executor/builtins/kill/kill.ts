@@ -210,8 +210,8 @@ export async function handleKill(
  * Signal a process group as killpg(2) does, its jobs Mirage stops recorded
  * as killed by the signal; a program on a machine gets it as sent, a kept
  * signal (`KEPT_SIGNALS`) too, which leaves Mirage's own runners as they
- * are. Returns
- * whether the group had a runner the view sees. Mirrors Python's
+ * are. Returns whether the group had a runner the view sees; for a kept
+ * signal, one of Mirage's own or a program that took it. Mirrors Python's
  * _kill_group.
  */
 async function killGroup(
@@ -229,8 +229,8 @@ async function killGroup(
       .list()
       .filter((record) => record.group === group)
       .map((record) => processes.send(record.id.pid, signal))
-    await Promise.all(sending.filter((sent) => sent !== null))
-    return true
+    const sent = await Promise.all(sending.filter((one) => one !== null))
+    return sending.includes(null) || sent.includes(true)
   }
   if (!processes.probeGroup(group)) return false
   const found = await processes.signalGroup(group, signal)
