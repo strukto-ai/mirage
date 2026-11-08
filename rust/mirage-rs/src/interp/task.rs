@@ -72,8 +72,6 @@ struct Slot {
     asked: Option<Ask>,
     answer: Option<Answer>,
     slices: u32,
-    /// Whether a policy hears the session's writes, which the host tells
-    /// again each time it answers.
     listens: bool,
 }
 
