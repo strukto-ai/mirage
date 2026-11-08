@@ -150,10 +150,13 @@ async def _past_functions(
 ) -> Result:
     """Run ``words`` past a shell function or alias of their head's name.
 
-    The name is masked in the session tables for the inner run, so a
-    shadowing function is skipped while builtins and mount commands
-    still resolve; a function never shadows a builtin, so one named like
-    a builtin stays.
+    The line's head is single-quoted, which bash never expands as an
+    alias or reads as a keyword, so the alias table stays whole for the
+    builtin to read (``builtin alias alias``), and still reads as the
+    literal word it is (``command bash -c`` is a nested shell). A shadowing function is
+    masked in the session for the inner run while builtins and mount
+    commands still resolve; a function never shadows a builtin, so one
+    named like a builtin stays.
 
     Args:
         cmd (str): the builtin that runs them, named on the node.
@@ -165,20 +168,18 @@ async def _past_functions(
             the target as a line of its own.
     """
     inner_name = words[0]
-    inner = shell_join(words)
-    # A function never shadows a shell builtin here, so one of a builtin's
-    # name stays for the builtin to read or remove (`builtin unset -f
-    # unset`). Function bodies are never None, so popping with a None
-    # default lets `is not None` mean "a shadowing function was masked"
-    # for restore. An alias is masked the same way: bash expands an alias
-    # only as a command's first word, which `command` is, so `command cat`
-    # runs the program past `alias cat=...` too.
+    rest = shell_join(words[1:])
+    inner = single_quote(inner_name) + (f" {rest}" if rest else "")
+    # A function never shadows a bash builtin mirage runs, so one of such
+    # a name stays for the builtin to read or remove (`builtin unset -f
+    # unset`); an interpreter's (`python3`) is still masked. Function
+    # bodies are never None, so popping with a None default lets `is not
+    # None` mean "a shadowing function was masked" for restore.
     saved_fn = (
         None
-        if inner_name in SHELL_NAMES
+        if inner_name in BASH_BUILTINS and inner_name in SHELL_NAMES
         else session.functions.pop(inner_name, None)
     )
-    saved_alias = session.aliases.pop(inner_name, None)
     try:
         io = await execute_fn(
             inner,
@@ -189,8 +190,6 @@ async def _past_functions(
     finally:
         if saved_fn is not None:
             session.functions[inner_name] = saved_fn
-        if saved_alias is not None:
-            session.aliases[inner_name] = saved_alias
     return (
         io.stdout,
         io,

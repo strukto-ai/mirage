@@ -168,10 +168,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/sywd/d1 /data/sywd/d2 && printf 'hello\\n' > /data/sywd/ext && cd /data/sywd && printf 'a\\n' > d1/a && printf 'b\\n' > d2/b && ln -s ../ext d1/l && ln -s ../ext d2/l && du -aLc d1 d2 | cut -f2 | sort; du -L d1 d1 | cut -f2)",
+      "command": "(mkdir -p /data/sywd/d1 /data/sywd/d2 && printf 'hello\\n' > /data/sywd/ext && cd /data/sywd && printf 'a\\n' > d1/a && printf 'b\\n' > d2/b && ln -s ../ext d1/l && ln -s ../ext d2/l && du -aLc d1 d2 | cut -f2 | sort; du -L d1 d1 | cut -f2); (cd /data/sywd && ln -s a d1/m && ln -s . d1/self && du -alL d1 | cut -f2 | sort; du -slL d1 d1 | cut -f2)",
       "expect": {
         "exit": 0,
-        "stdout": "d1\nd1/a\nd1/l\nd2\nd2/b\ntotal\nd1\n",
+        "stdout": "d1\nd1/a\nd1/l\nd2\nd2/b\ntotal\nd1\nd1\nd1/a\nd1/l\nd1/m\nd1\nd1\n",
         "stderr": ""
       }
     },

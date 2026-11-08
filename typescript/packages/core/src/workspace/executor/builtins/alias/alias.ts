@@ -123,7 +123,8 @@ export function handleUnalias(
   return finish('unalias', errors)
 }
 
-function aliasesOn(session: SessionState): boolean {
+/** Whether `expand_aliases` is on, which bash -c starts with off. */
+export function aliasesOn(session: SessionState): boolean {
   return session.shopts.expand_aliases ?? SHOPT_DEFAULTS.get('expand_aliases') ?? false
 }
 

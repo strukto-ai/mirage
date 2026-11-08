@@ -123,10 +123,13 @@ export async function handleCommandBuiltin(
 }
 
 /**
- * Run `words` past a shell function or alias of their head's name: the name
- * is masked in the session tables for the inner run, so a shadowing function
- * is skipped while builtins and mount commands still resolve. `cmd` is the
- * builtin that runs them, named on the node. Mirrors Python's _past_functions.
+ * Run `words` past a shell function or alias of their head's name. The line's
+ * head is single-quoted, which bash never expands as an alias or reads as a
+ * keyword, so the alias table stays whole for the builtin to read (`builtin
+ * alias alias`), and still reads as the literal word it is (`command bash -c`
+ * is a nested shell). A shadowing function is masked in the session for the inner
+ * run while builtins and mount commands still resolve. `cmd` is the builtin
+ * that runs them, named on the node. Mirrors Python's _past_functions.
  */
 async function pastFunctions(
   cmd: string,
@@ -137,20 +140,19 @@ async function pastFunctions(
   callStack: CallStack | null,
 ): Promise<RedirectResult> {
   const innerName = words[0] ?? ''
-  const inner = shellJoin(words)
-  // A function never shadows a shell builtin here, so one of a builtin's name
-  // stays for the builtin to read or remove (`builtin unset -f unset`). Function
-  // bodies are never undefined, so a defined captured value means a shadowing
-  // function was masked and must be restored after the run.
-  const savedFn = SHELL_NAMES.has(innerName) ? undefined : session.functions[innerName]
+  const rest = shellJoin(words.slice(1))
+  const inner = singleQuote(innerName) + (rest === '' ? '' : ` ${rest}`)
+  // A function never shadows a bash builtin mirage runs, so one of such a name
+  // stays for the builtin to read or remove (`builtin unset -f unset`); an
+  // interpreter's (`python3`) is still masked. Function bodies are never
+  // undefined, so a defined captured value means a shadowing function was
+  // masked and must be restored after the run.
+  const savedFn =
+    BASH_BUILTINS.has(innerName) && SHELL_NAMES.has(innerName)
+      ? undefined
+      : session.functions[innerName]
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   if (savedFn !== undefined) delete session.functions[innerName]
-  // An alias is masked the same way: bash expands an alias only as a
-  // command's first word, which `command` is, so `command cat` runs the
-  // program past `alias cat=...` too.
-  const savedAlias = session.aliases[innerName]
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-  delete session.aliases[innerName]
   try {
     const io = await executeFn(inner, {
       sessionId: session.sessionId,
@@ -160,7 +162,6 @@ async function pastFunctions(
     return [io.stdout, io, new ExecutionNode({ command: cmd, exitCode: io.exitCode })]
   } finally {
     if (savedFn !== undefined) session.functions[innerName] = savedFn
-    if (savedAlias !== undefined) session.aliases[innerName] = savedAlias
   }
 }
 

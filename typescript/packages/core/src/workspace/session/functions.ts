@@ -86,8 +86,9 @@ export function calledLines(
   lines: readonly (readonly [number, number] | null)[] | null | undefined,
   body: readonly TSNodeLike[],
 ): Map<number, readonly [number, number]> | null {
+  if (lines === null || lines === undefined) return null
   const nodes = preorder(body)
-  if (nodes.length !== lines?.length) return null
+  if (nodes.length !== lines.length) return null
   const out = new Map<number, readonly [number, number]>()
   nodes.forEach((node, i) => {
     const line = lines[i]

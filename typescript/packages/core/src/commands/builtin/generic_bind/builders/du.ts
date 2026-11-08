@@ -151,7 +151,10 @@ function treeOf(files: CommandFiles, listing: (path: PathSpec) => Promise<string
  * readdir order may reach the link first), and a directory the walk may not
  * list leaves the link the one name that reaches the file, which GNU then
  * counts it under. Under `-x` a link that leads onto another mount is left out
- * whole, as GNU leaves out what stat(2) places on another device.
+ * whole, as GNU leaves out what stat(2) places on another device. Under `-l`
+ * GNU counts a file each time a name reaches it, its own tree's links and
+ * every operand included, and leaves out only a link back to a directory the
+ * walk is inside, the loop it would repeat.
  */
 class Dereference {
   constructor(
@@ -166,18 +169,32 @@ class Dereference {
     readonly home: string | null = null,
     // The walk's links into its tree, each with the path it resolves to.
     readonly waiting: [PathSpec, string][] = [],
-    // Under `-l`, each operand counts on its own, as GNU then counts a file
-    // each time the line names it; its walk still counts a file once, which
-    // keeps a loop from repeating.
-    readonly fresh = false,
+    // `-l`, which counts a file under every name.
+    readonly countLinks = false,
+    // Under `-l`, the directories the walk is inside, each as the path it
+    // resolves to.
+    readonly inside: readonly string[] = [],
   ) {}
 
   /** This invocation's state, walking one operand. */
   operand(path: PathSpec): Dereference {
     const tree = this.links.resolve(path.virtual)
     const home = this.mounts === null ? null : this.mounts.rootOf(tree)
-    const counted = this.fresh ? new Set<string>() : this.counted
-    return new Dereference(this.links, this.mounts, counted, tree, home, [], this.fresh)
+    return new Dereference(this.links, this.mounts, this.counted, tree, home, [], this.countLinks)
+  }
+
+  /** The same walk, inside one more directory, as the path it resolves to. */
+  into(real: string): Dereference {
+    return new Dereference(
+      this.links,
+      this.mounts,
+      this.counted,
+      this.tree,
+      this.home,
+      this.waiting,
+      this.countLinks,
+      [...this.inside, real],
+    )
   }
 
   /** The same walk, settling a link into its tree under the link's name. */
@@ -189,7 +206,8 @@ class Dereference {
       link.virtual,
       this.home,
       this.waiting,
-      this.fresh,
+      this.countLinks,
+      this.inside,
     )
   }
 
@@ -225,6 +243,7 @@ async function counted(
     return null
   }
   if (follow.home !== null && follow.mounts?.rootOf(real) !== follow.home) return null
+  if (follow.countLinks) return follow.inside.includes(real) ? null : target
   if (info.type === FileType.SYMLINK && underPath(real, follow.tree)) {
     follow.waiting.push([path, real])
     return null
@@ -270,6 +289,7 @@ async function duWalk(
   }
   tally.directories.push(path.virtual)
   if (!scan.opens(path.virtual)) return 0
+  if (follow?.countLinks === true) follow = follow.into(follow.links.resolve(path.virtual))
   const limit = scan.listingLimit(path.virtual)
   let children: string[]
   try {

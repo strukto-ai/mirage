@@ -59,7 +59,7 @@ describe('command option handling', () => {
   it('leaves a flag after the target name to the target', async () => {
     const shell = vi.fn(() => Promise.resolve(new IOResult()))
     await handleCommandBuiltin(shell, ['ls', '-l'], makeSession(), makeRegistry())
-    expect(shell).toHaveBeenCalledWith('ls -l', expect.anything())
+    expect(shell).toHaveBeenCalledWith("'ls' -l", expect.anything())
   })
 })
 
@@ -212,7 +212,7 @@ describe('handleCommandBuiltin run mode', () => {
       makeSession(),
       makeRegistry(),
     )
-    expect(shell).toHaveBeenCalledWith('echo hello', expect.objectContaining({ sessionId: 's1' }))
+    expect(shell).toHaveBeenCalledWith("'echo' hello", expect.objectContaining({ sessionId: 's1' }))
     expect(io.exitCode).toBe(0)
     expect(await body(out)).toBe('hello\n')
   })
@@ -220,14 +220,14 @@ describe('handleCommandBuiltin run mode', () => {
   it('shell-quotes operands so they survive re-parsing', async () => {
     const shell = vi.fn(() => Promise.resolve(new IOResult()))
     await handleCommandBuiltin(shell, ['echo', 'a b', '$x'], makeSession(), makeRegistry())
-    expect(shell).toHaveBeenCalledWith("echo 'a b' '$x'", expect.anything())
+    expect(shell).toHaveBeenCalledWith("'echo' 'a b' '$x'", expect.anything())
   })
 
   it('forwards pipe stdin to the inner command', async () => {
     const shell = vi.fn(() => Promise.resolve(new IOResult()))
     const piped = new TextEncoder().encode('piped\n')
     await handleCommandBuiltin(shell, ['cat'], makeSession(), makeRegistry(), piped)
-    expect(shell).toHaveBeenCalledWith('cat', expect.objectContaining({ stdin: piped }))
+    expect(shell).toHaveBeenCalledWith("'cat'", expect.objectContaining({ stdin: piped }))
   })
 
   it("runs the target in the caller's frames", async () => {
@@ -242,7 +242,7 @@ describe('handleCommandBuiltin run mode', () => {
       frames,
     )
     expect(shell).toHaveBeenCalledWith(
-      "eval 'exit 7'",
+      "'eval' 'exit 7'",
       expect.objectContaining({ callStack: frames }),
     )
   })

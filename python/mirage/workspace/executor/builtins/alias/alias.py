@@ -160,7 +160,12 @@ async def handle_unalias(
     return finish("unalias", errors)
 
 
-def _aliases_on(session: SessionState) -> bool:
+def aliases_on(session: SessionState) -> bool:
+    """Whether ``expand_aliases`` is on, which bash -c starts with off.
+
+    Args:
+        session (SessionState): shell session state.
+    """
     return bool(
         session.shopts.get("expand_aliases", SHOPT_DEFAULTS["expand_aliases"])
     )
@@ -192,7 +197,7 @@ def _expanding(session: SessionState, mark: AliasMark) -> bool:
     began = session._expand_aliases_marks.get(mark)
     if began is not None:
         return began
-    return _aliases_on(session)
+    return aliases_on(session)
 
 
 def note_expanding(session: SessionState, mark: AliasMark) -> None:
@@ -271,7 +276,7 @@ def expanding_aliases(session: SessionState) -> frozenset[str]:
     view = session._alias_view
     if view is not None:
         return frozenset(view) - blocked
-    if not _aliases_on(session):
+    if not aliases_on(session):
         return frozenset()
     return frozenset(session.aliases) - blocked
 
@@ -303,7 +308,7 @@ def body_alias_values(session: SessionState, name: str) -> dict[str, str]:
         and site.aliases is not None
     ):
         return dict(site.aliases)
-    if not _aliases_on(session):
+    if not aliases_on(session):
         return {}
     return dict(session.aliases)
 

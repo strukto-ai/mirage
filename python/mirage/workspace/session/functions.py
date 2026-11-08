@@ -109,8 +109,10 @@ def called_lines(
         lines (Sequence[tuple[int, int] | None] | None): the site's lines.
         body (FunctionBody): the call's body statements.
     """
+    if lines is None:
+        return None
     nodes = _preorder(body)
-    if lines is None or len(nodes) != len(lines):
+    if len(nodes) != len(lines):
         return None
     return {
         node.id: line

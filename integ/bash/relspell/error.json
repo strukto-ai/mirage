@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cat sub/missing.txt 2>&1; echo a | cat - qnf7 2>&1; echo a | cat qnf7 - 2>&1; echo a | head -n1 - qnf7 2>&1; echo a | wc -l - qnf7 2>&1; echo a | tac - qnf7 2>&1; echo a | md5sum - qnf7 2>&1; echo rc=$?; head sub sub/ 2>&1; tail sub sub/ 2>&1; echo rc=$?",
+      "command": "cat sub/missing.txt 2>&1; echo a | cat - qnf7 2>&1; echo a | cat qnf7 - 2>&1; echo a | head -n1 - qnf7 2>&1; echo a | wc -l - qnf7 2>&1; echo a | tac - qnf7 2>&1; echo a | md5sum - qnf7 2>&1; echo rc=$?; head . ./ 2>&1; tail . ./ 2>&1; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "cat: sub/missing.txt: No such file or directory\na\ncat: qnf7: No such file or directory\ncat: qnf7: No such file or directory\na\n==> standard input <==\na\nhead: cannot open 'qnf7' for reading: No such file or directory\n      1 -\nwc: qnf7: No such file or directory\n      1 total\ntac: failed to open 'qnf7' for reading: No such file or directory\na\n60b725f10c9c85c70d97880dfe8191b3  -\nmd5sum: qnf7: No such file or directory\nrc=1\n==> sub <==\nhead: error reading 'sub': Is a directory\n\n==> sub/ <==\nhead: error reading 'sub/': Is a directory\n==> sub <==\ntail: error reading 'sub': Is a directory\n\n==> sub/ <==\ntail: error reading 'sub/': Is a directory\nrc=1\n",
+        "stdout": "cat: sub/missing.txt: No such file or directory\na\ncat: qnf7: No such file or directory\ncat: qnf7: No such file or directory\na\n==> standard input <==\na\nhead: cannot open 'qnf7' for reading: No such file or directory\n      1 -\nwc: qnf7: No such file or directory\n      1 total\ntac: failed to open 'qnf7' for reading: No such file or directory\na\n60b725f10c9c85c70d97880dfe8191b3  -\nmd5sum: qnf7: No such file or directory\nrc=1\n==> . <==\nhead: error reading '.': Is a directory\n\n==> ./ <==\nhead: error reading './': Is a directory\n==> . <==\ntail: error reading '.': Is a directory\n\n==> ./ <==\ntail: error reading './': Is a directory\nrc=1\n",
         "stderr": ""
       }
     },

@@ -159,7 +159,10 @@ class Dereference:
     first), and a directory the walk may not list leaves the link the one
     name that reaches the file, which GNU then counts it under. Under
     ``-x`` a link that leads onto another mount is left out whole, as GNU
-    leaves out what stat(2) places on another device.
+    leaves out what stat(2) places on another device. Under ``-l`` GNU
+    counts a file each time a name reaches it, its own tree's links and
+    every operand included, and leaves out only a link back to a
+    directory the walk is inside, the loop it would repeat.
 
     Args:
         links (LinkView): the namespace's symlink facts.
@@ -171,9 +174,9 @@ class Dereference:
         home (str | None): under ``-x``, the mount that operand lies on.
         waiting (list[tuple[PathSpec, str]]): the walk's links into its
             tree, each with the path it resolves to.
-        fresh (bool): under ``-l``, each operand counts on its own, as
-            GNU then counts a file each time the line names it; its walk
-            still counts a file once, which keeps a loop from repeating.
+        count_links (bool): ``-l``, which counts a file under every name.
+        inside (tuple[str, ...]): under ``-l``, the directories the walk
+            is inside, each as the path it resolves to.
     """
 
     links: LinkView
@@ -182,7 +185,8 @@ class Dereference:
     tree: str = "/"
     home: str | None = None
     waiting: list[tuple[PathSpec, str]] = field(default_factory=list)
-    fresh: bool = False
+    count_links: bool = False
+    inside: tuple[str, ...] = ()
 
     def operand(self, path: PathSpec) -> "Dereference":
         """This invocation's state, walking one operand.
@@ -192,8 +196,7 @@ class Dereference:
         """
         tree = self.links.resolve(path.virtual)
         home = self.mounts.root_of(tree) if self.mounts is not None else None
-        counted = set() if self.fresh else self.counted
-        return replace(self, counted=counted, tree=tree, home=home, waiting=[])
+        return replace(self, tree=tree, home=home, waiting=[], inside=())
 
     def repeated(self, path: PathSpec) -> bool:
         """Whether an earlier operand's walk already counted this one.
@@ -234,6 +237,8 @@ async def _counted(
         and follow.mounts.root_of(real) != follow.home
     ):
         return None
+    if follow.count_links:
+        return None if real in follow.inside else target
     if info.type == FileType.SYMLINK and under_path(real, follow.tree):
         follow.waiting.append((path, real))
         return None
@@ -293,6 +298,9 @@ async def _du_walk(
     tally.directories.append(path.virtual)
     if not scan.opens(path.virtual):
         return 0
+    if follow is not None and follow.count_links:
+        real = follow.links.resolve(path.virtual)
+        follow = replace(follow, inside=(*follow.inside, real))
     limit = scan.listing_limit(path.virtual)
     try:
         children = await (
@@ -445,7 +453,7 @@ async def du(
         Dereference(
             links,
             mounts if fl.as_bool("one_file_system") else None,
-            fresh=fl.as_bool("count_links"),
+            count_links=fl.as_bool("count_links"),
         )
         if links is not None
         and fl.typed_order(

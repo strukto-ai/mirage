@@ -73,7 +73,7 @@ async def test_a_flag_after_the_target_belongs_to_the_target():
     await handle_command_builtin(
         shell, ["ls", "-l"], make_session(), make_registry()
     )
-    assert shell.lines == ["ls -l"]
+    assert shell.lines == ["'ls' -l"]
 
 
 @pytest.mark.asyncio
@@ -191,7 +191,7 @@ async def test_run_mode_joins_and_runs():
     out, io, _ = await handle_command_builtin(
         shell, ["echo", "hello"], make_session(), make_registry()
     )
-    assert shell.lines == ["echo hello"]
+    assert shell.lines == ["'echo' hello"]
     assert io.exit_code == 0
     assert out == b"hello\n"
 
@@ -217,7 +217,7 @@ async def test_run_mode_shlex_quotes_operands():
     await handle_command_builtin(
         shell, ["echo", "a b", "$x"], make_session(), make_registry()
     )
-    assert shell.lines == ["echo 'a b' '$x'"]
+    assert shell.lines == ["'echo' 'a b' '$x'"]
 
 
 @pytest.mark.asyncio

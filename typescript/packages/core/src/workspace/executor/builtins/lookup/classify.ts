@@ -23,7 +23,7 @@ import { BIN_PREFIX } from '../../../../shell/constants.ts'
 import { DESCRIPTIONS } from './constants.ts'
 import { NameKind } from './types.ts'
 import { sessionEntry } from '../../../session/session.ts'
-import { bodyAliasValues } from '../alias/alias.ts'
+import { aliasesOn, bodyAliasValues } from '../alias/alias.ts'
 
 // The kind one layer reports a name as. A function is a function and one
 // of bash's own builtins is a builtin; every other layer runs a program,
@@ -47,7 +47,7 @@ export function classify(
   session: SessionState,
   registry: MountRegistry,
 ): NameKind | null {
-  if (sessionEntry(session.aliases, name) !== undefined) return NameKind.ALIAS
+  if (sessionEntry(session.aliases, name) !== undefined && aliasesOn(session)) return NameKind.ALIAS
   if (KEYWORDS.has(name)) return NameKind.KEYWORD
   const consumer = lookup(name, session, registry)
   if (consumer === Consumer.UNKNOWN) return null
@@ -80,11 +80,11 @@ export function classifyAll(
   session: SessionState,
   registry: MountRegistry,
 ): NameKind[] {
-  // An alias is reported first and whether or not `expand_aliases` is
-  // on, as bash does: `type` describes the definition, not whether the
-  // parser is currently applying it.
+  // An alias is reported first, and only while `expand_aliases` is on, as
+  // bash does: with it off (bash -c's default) `type` and `command -v` look
+  // past the definition as the parser does.
   const kinds: NameKind[] =
-    sessionEntry(session.aliases, name) !== undefined ? [NameKind.ALIAS] : []
+    sessionEntry(session.aliases, name) !== undefined && aliasesOn(session) ? [NameKind.ALIAS] : []
   if (KEYWORDS.has(name)) kinds.push(NameKind.KEYWORD)
   const hasFile = program(name, session, registry) !== null
   for (const consumer of lookupAll(name, session, registry)) {
