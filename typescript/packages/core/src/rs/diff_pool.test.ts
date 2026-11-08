@@ -59,6 +59,23 @@ function gate(): { wait: Promise<void>; release: () => void } {
 async function tick(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0))
 }
+function closable(
+  text: string,
+  close: () => Promise<IteratorResult<Uint8Array>>,
+): AsyncIterableIterator<Uint8Array> {
+  const pending = [new TextEncoder().encode(text), new TextEncoder().encode('more')]
+  const iterator: AsyncIterableIterator<Uint8Array> = {
+    next: () => {
+      const value = pending.shift()
+      return Promise.resolve(
+        value === undefined ? { done: true, value: undefined } : { done: false, value },
+      )
+    },
+    return: close,
+    [Symbol.asyncIterator]: () => iterator,
+  }
+  return iterator
+}
 
 afterEach(async () => {
   await Promise.allSettled(pools.splice(0).map((owner) => owner.close()))
@@ -248,29 +265,12 @@ describe('diff pool with its Rust worker', () => {
   it('closes both -q inputs when one close fails', async () => {
     const owner = pool()
     let closed = false
-    const source = (
-      text: string,
-      close: () => Promise<IteratorResult<Uint8Array>>,
-    ): AsyncIterableIterator<Uint8Array> => {
-      const pending = [new TextEncoder().encode(text), new TextEncoder().encode('more')]
-      const iterator: AsyncIterableIterator<Uint8Array> = {
-        next: () => {
-          const value = pending.shift()
-          return Promise.resolve(
-            value === undefined ? { done: true, value: undefined } : { done: false, value },
-          )
-        },
-        return: close,
-        [Symbol.asyncIterator]: () => iterator,
-      }
-      return iterator
-    }
     await expect(
       owner.compare(
         { ...options, brief: true },
-        () => source('a\n', () => Promise.reject(new Error('close failed'))),
+        () => closable('a\n', () => Promise.reject(new Error('close failed'))),
         () =>
-          source('b\n', () => {
+          closable('b\n', () => {
             closed = true
             return Promise.resolve({ done: true, value: undefined })
           }),

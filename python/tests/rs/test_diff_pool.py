@@ -23,6 +23,18 @@ async def _unexpected_metadata(path):
     raise AssertionError(f"unexpected metadata read for {path.virtual}")
 
 
+async def _failing_close():
+    try:
+        yield b"a\n"
+        yield b"more"
+    finally:
+        raise OSError("close failed")
+
+
+async def _failing_close_input():
+    return _failing_close()
+
+
 async def _standalone_diff_cleanup():
     diff_pool.RETIRE_BYTES = 0
     original = asyncio.create_subprocess_exec
@@ -557,13 +569,6 @@ async def test_brief_closes_both_inputs_when_one_close_fails():
     pool = DiffPool()
     closed = []
 
-    async def failing():
-        try:
-            yield b"a\n"
-            yield b"more"
-        finally:
-            raise OSError("close failed")
-
     async def tracked():
         try:
             yield b"b\n"
@@ -571,15 +576,14 @@ async def test_brief_closes_both_inputs_when_one_close_fails():
         finally:
             closed.append(True)
 
-    async def old():
-        return failing()
-
     async def new():
         return tracked()
 
     try:
         with pytest.raises(OSError, match="close failed"):
-            await pool.compare(DiffOptions(brief=True), old, new)
+            await pool.compare(
+                DiffOptions(brief=True), _failing_close_input, new
+            )
         assert closed == [True]
     finally:
         await pool.close()

@@ -135,6 +135,11 @@ export class DiffPool implements DiffComputer {
     }
   }
 
+  private static wants(reply: DiffReply): 0 | 1 | null {
+    if (reply.kind !== 'output') throw new Error('diff worker returned an invalid reply')
+    return reply.wants
+  }
+
   private async run(
     options: DiffOptions,
     old: InputFactory,
@@ -175,12 +180,8 @@ export class DiffPool implements DiffComputer {
       }
       return reply
     }
-    const wantsOf = (reply: DiffReply): 0 | 1 | null => {
-      if (reply.kind !== 'output') throw new Error('diff worker returned an invalid reply')
-      return reply.wants
-    }
     try {
-      let wants = wantsOf(await call({ kind: 'open', options }))
+      let wants = DiffPool.wants(await call({ kind: 'open', options }))
       const sources: (AsyncIterableIterator<Uint8Array> | undefined)[] = [undefined, undefined]
       try {
         // The engine names the input it reads next: one after the other for
@@ -194,10 +195,10 @@ export class DiffPool implements DiffComputer {
             sources[index] = source
           }
           const pulled = await source.next()
-          if (pulled.done === true) wants = wantsOf(await call({ kind: 'end', index }))
+          if (pulled.done === true) wants = DiffPool.wants(await call({ kind: 'end', index }))
           else {
             bytes += pulled.value.byteLength
-            wants = wantsOf(
+            wants = DiffPool.wants(
               await call({ kind: 'feed', index, chunk: new Uint8Array(pulled.value) }),
             )
           }
