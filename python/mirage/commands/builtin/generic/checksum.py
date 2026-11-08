@@ -5,6 +5,7 @@ from collections.abc import (
     Awaitable,
     Callable,
     Mapping,
+    Sequence,
 )
 from contextlib import aclosing
 from dataclasses import dataclass
@@ -18,9 +19,9 @@ from mirage.commands.builtin.utils.constants import (
     STDIN_OPERAND,
 )
 from mirage.commands.builtin.utils.operands import (
-    merge_split_errors,
+    in_order,
     normalized_read,
-    split_readable,
+    split_in_order,
 )
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
@@ -242,7 +243,7 @@ async def _report(
 
 
 async def hash_operands(
-    paths: list[PathSpec],
+    paths: Sequence[PathSpec | bytes],
     read: Callable[[PathSpec], ByteSource],
     algorithm: str,
     prog: str,
@@ -250,10 +251,12 @@ async def hash_operands(
     stored: StoredDigest | None = None,
 ) -> tuple[AsyncIterator[bytes], IOResult]:
     """One line per operand, its digest asked of ``stored`` before the
-    file is read; one that fails is reported and the rest still print.
+    file is read; one that fails is reported where it stood and the rest
+    still print.
 
     Args:
-        paths (list[PathSpec]): the operands, stdin as ``-``.
+        paths (Sequence[PathSpec | bytes]): the operands, stdin as
+            ``-``, and the stderr line of each that did not read.
         read (Callable[[PathSpec], ByteSource]): an operand's bytes,
             opened now, inside the command's cache scope.
         algorithm (str): the digest name.
@@ -263,8 +266,26 @@ async def hash_operands(
         stored (StoredDigest | None): the mount's stored digest.
     """
     io = IOResult()
-    pending: list[tuple[PathSpec, str | None, ByteSource]] = []
+
+    async def hashed(
+        p: PathSpec, digest: str | None, source: ByteSource
+    ) -> AsyncIterator[bytes]:
+        try:
+            yield render(
+                digest
+                if digest is not None
+                else await hash_source(source, algorithm),
+                p.raw_path,
+            )
+        except FS_ERRORS as exc:
+            await _report(io, prog, p, exc)
+
+    parts: list[AsyncIterator[bytes] | bytes] = []
     for p in paths:
+        if isinstance(p, bytes):
+            parts.append(p)
+            io.exit_code = 1
+            continue
         try:
             digest = (
                 await stored(p, algorithm)
@@ -272,23 +293,11 @@ async def hash_operands(
                 else None
             )
         except FS_ERRORS as exc:
-            await _report(io, prog, p, exc)
+            parts.append(encode_text(fs_error_line(prog, p, exc)))
+            io.exit_code = 1
             continue
-        pending.append((p, digest, b"" if digest is not None else read(p)))
-
-    async def output() -> AsyncIterator[bytes]:
-        for p, digest, source in pending:
-            try:
-                yield render(
-                    digest
-                    if digest is not None
-                    else await hash_source(source, algorithm),
-                    p.raw_path,
-                )
-            except FS_ERRORS as exc:
-                await _report(io, prog, p, exc)
-
-    return output(), io
+        parts.append(hashed(p, digest, b"" if digest is not None else read(p)))
+    return in_order(parts, io), io
 
 
 def _hash_line(
@@ -310,6 +319,7 @@ class CheckLine(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
     line: int
     parsed: tuple[str, str, str] | None
+    error: str | None = None
 
 
 async def _check_lines(
@@ -322,6 +332,9 @@ async def _check_lines(
     try:
         async for line in lines:
             yield CheckLine.model_validate_json(line)
+    except StreamRefusal as refusal:
+        # A line too long to hold ends the list as a read error does.
+        yield CheckLine(line=0, parsed=None, error=refusal.message)
     finally:
         await lines.discard()
 
@@ -437,6 +450,11 @@ async def _hash_check(
     try:
         async for record in records:
             lineno, parsed = record.line, record.parsed
+            if record.error is not None:
+                await _check_note(
+                    stderr_lines, f"{prog}: {check_label}: {record.error}"
+                )
+                return await lines.output(), await stderr_lines.output(), 1
             if parsed is None:
                 malformed += 1
                 if warn:
@@ -536,7 +554,7 @@ async def _hash_check(
 
 
 async def checksum(
-    paths: list[PathSpec],
+    paths: Sequence[PathSpec | bytes],
     *,
     algorithm: str,
     read_list: PolymorphicReadFn,
@@ -560,7 +578,9 @@ async def checksum(
     under ``check`` is always verified against the bytes.
 
     Args:
-        paths (list[PathSpec]): the operands, none for stdin.
+        paths (Sequence[PathSpec | bytes]): the operands, none for
+            stdin, and when hashing the stderr line of each that did not
+            read, where it stood.
         algorithm (str): the digest name, e.g. ``"md5"``.
         read_list (PolymorphicReadFn): checksum-list bytes or chunks.
         read_stream (Callable): bound streamed reader, stdin for ``-``.
@@ -589,6 +609,8 @@ async def checksum(
             # Every operand is its own checksum list: GNU verifies each in
             # turn and keeps going when one cannot be read (coreutils 9.7).
             for p in paths:
+                if isinstance(p, bytes):
+                    continue
                 try:
                     out, stderr, code = await _hash_check(
                         p,
@@ -684,22 +706,22 @@ async def checksum_generic(
             warn=parsed.warn,
             cwd=ctx.cwd,
         )
-    readable, err = await split_readable(paths, stat, name)
-    if err and not readable:
-        return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await checksum(
-            readable,
-            algorithm=parsed.algorithm,
-            read_list=normalized_read(stream),
-            read_stream=normalized_read(stream),
-            binary=parsed.binary,
-            tag=parsed.tag,
-            zero=parsed.zero,
-            cwd=ctx.cwd,
-            stored=stored,
-        ),
-        err,
+    order = await split_in_order(paths, stat, name)
+    if order and all(isinstance(p, bytes) for p in order):
+        return None, IOResult(
+            exit_code=1,
+            stderr=b"".join(p for p in order if isinstance(p, bytes)),
+        )
+    return await checksum(
+        order,
+        algorithm=parsed.algorithm,
+        read_list=normalized_read(stream),
+        read_stream=normalized_read(stream),
+        binary=parsed.binary,
+        tag=parsed.tag,
+        zero=parsed.zero,
+        cwd=ctx.cwd,
+        stored=stored,
     )
 
 

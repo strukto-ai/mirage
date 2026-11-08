@@ -30,6 +30,7 @@ from mirage.cli.output import (
     handle_response,
     show,
 )
+from mirage.cli.policy import keep_policy_names
 from mirage.cli.settings import header
 from mirage.utils.yaml import dump_yaml, parse_yaml
 
@@ -49,7 +50,8 @@ def read_template(path: Path) -> dict[str, Any]:
     and ``config`` are read; the fields a server fills in are dropped.
     Saved as written, with no ``${NAME}`` read from the environment; a
     relative ``script`` or code path is rebased onto the file's folder,
-    as ``workspace create`` does.
+    as ``workspace create`` does, except a policy ``script`` that names a
+    saved policy.
 
     Args:
         path (Path): the YAML or JSON file.
@@ -76,7 +78,9 @@ def read_template(path: Path) -> dict[str, Any]:
         fail(f"{path}: description must be a string", 2)
     if not isinstance(config, dict):
         fail(f"{path}: config must hold a mapping", 2)
-    _absolutize_scripts(config, path.resolve().parent)
+    keep_policy_names(
+        config, lambda: _absolutize_scripts(config, path.resolve().parent)
+    )
     return {"description": description, "config": config}
 
 

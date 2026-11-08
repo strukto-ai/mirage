@@ -392,7 +392,7 @@ fn scatter_memory(bytes: usize, record: usize, surplus: bool) {
 
 fn shuffle_plan_memory() {
     let record = 17 * 1024 * 1024 + 1usize;
-    let config = serde_json::json!({"mode":"records", "separator":10, "size":2*record, "available":2, "need":1}).to_string();
+    let config = serde_json::json!({"mode":"records", "separator":10, "size":2*record, "available":2, "need":"1"}).to_string();
     let mut stream = mirage_rs::open("shuf", config.as_bytes()).unwrap();
     let mut spools = std::collections::HashMap::<u64, Vec<u8>>::from([(0, Vec::new())]);
     let mut out = Vec::new();

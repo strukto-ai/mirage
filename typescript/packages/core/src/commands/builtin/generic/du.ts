@@ -16,13 +16,14 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { Follow, LineFacts, PathSpec, type LsTimeKind } from '../../../types.ts'
 import type { Context } from '../../config.ts'
-import { IOResult, type PathRecord } from '../../../io/types.ts'
+import { IOResult, type ByteSource, type PathRecord } from '../../../io/types.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
 import { ZERO_LENGTH_NAME } from '../../../errors/render.ts'
 import { fsStrerror, isDotWalkError, isMissingPath } from '../../../errors/fs.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellOne, respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { atOffsets } from '../utils/operands.ts'
 import { formatRecords } from '../utils/output.ts'
 import {
   fullIsoTime,
@@ -102,6 +103,8 @@ export interface DuOutput {
   stdout: Uint8Array
   /** Diagnostics: unreadable operands, then the truncation notice. */
   stderr: Uint8Array
+  /** Each stderr line with the offset in `stdout` it goes before (`atOffsets`). */
+  notes: (readonly [number, Uint8Array])[]
   /**
    * 0, or 1 when an operand could not be read or a walk was cut short, as GNU
    * does for a tree it could not fully account for.
@@ -405,16 +408,16 @@ async function duOperands(
   // An operand an --exclude pattern matches is dropped before it is stat'ed,
   // so a missing one is not reported either.
   excludes: readonly string[] = [],
-): Promise<{ present: PathSpec[]; missing: [string, string][] }> {
+): Promise<{ present: PathSpec[]; missing: [string, string, number][] }> {
   const targets = paths.length > 0 ? paths : [cwdSpec(cwd)]
   const resolved = await resolveGlob(targets)
   const present: PathSpec[] = []
-  const missing: [string, string][] = []
+  const missing: [string, string, number][] = []
   // An unmatched glob reaches GNU as the literal pattern, which it then
   // reports as unreadable.
   if (resolved.length === 0) {
     for (const p of targets) {
-      if (!excluded(excludes, p.rawPath)) missing.push([p.rawPath, posixPhrase('ENOENT')])
+      if (!excluded(excludes, p.rawPath)) missing.push([p.rawPath, posixPhrase('ENOENT'), 0])
     }
   }
   for (const path of resolved) {
@@ -430,13 +433,13 @@ async function duOperands(
       // directory. Unreadable like a missing one, but GNU reports the
       // errno it got, so the two cannot share a wording.
       if ((err as { code?: string }).code === 'ENOTDIR') {
-        missing.push([path.rawPath, posixPhrase('ENOTDIR')])
+        missing.push([path.rawPath, posixPhrase('ENOTDIR'), present.length])
         continue
       }
       // The operand did not resolve, so no channel asked about the path
       // it simplifies to can find it there.
       if (isDotWalkError(err)) {
-        missing.push([path.rawPath, fsStrerror(err) ?? posixPhrase('ENOENT')])
+        missing.push([path.rawPath, fsStrerror(err) ?? posixPhrase('ENOENT'), present.length])
         continue
       }
       if (!isMissingPath(err)) throw err
@@ -449,11 +452,11 @@ async function duOperands(
       // The dispatcher refuses to stat it: GNU names the errno it got
       // (`du: cannot access 'P': Permission denied`).
       if ((err as { code?: string }).code !== 'EACCES') throw err
-      missing.push([path.rawPath, fsStrerror(err) ?? posixPhrase('EACCES')])
+      missing.push([path.rawPath, fsStrerror(err) ?? posixPhrase('EACCES'), present.length])
       continue
     }
     if (!exists) {
-      missing.push([path.rawPath, posixPhrase('ENOENT')])
+      missing.push([path.rawPath, posixPhrase('ENOENT'), present.length])
       continue
     }
     present.push(path)
@@ -771,7 +774,7 @@ export async function du(
   flags: DuFlags,
   computeSize: ComputeSize,
   computeEntries: ComputeEntries,
-  missing: [string, string][] = [],
+  missing: [string, string, number][] = [],
   stopped?: () => readonly string[],
   mounts: MountView | null = null,
   unreadable?: () => readonly string[],
@@ -788,7 +791,17 @@ export async function du(
   let grand = 0
   let latest: Newest | undefined
   let records: PathRecord[] | null = []
+  const notes: [number, string][] = []
+  if (flags.warning !== undefined) notes.push([0, flags.warning])
+  let exitCode = missing.length > 0 ? 1 : 0
+  const left = [...missing]
+  let saidUnreadable = 0
+  let saidInaccessible = 0
   for (const [run, root] of paths.entries()) {
+    while (left.length > 0 && (left[0]?.[2] ?? 0) <= run) {
+      const [raw, detail] = left.shift() ?? ['', '']
+      notes.push([lines.length, unreadOperand(raw, detail)])
+    }
     if (repeated?.(root) === true) continue
     const [block, total, measured, newest] = await duOne(
       root,
@@ -800,43 +813,56 @@ export async function du(
       directories,
       times,
     )
+    // What a walk could not open GNU names as it goes, before the rows it
+    // prints once it is done there.
+    const unread = unreadable?.() ?? []
+    for (const virtual of unread.slice(saidUnreadable)) {
+      notes.push([
+        lines.length,
+        `du: cannot read directory '${respellUnder(virtual, paths)}': ${posixPhrase('EACCES')}`,
+      ])
+      exitCode = 1
+    }
+    saidUnreadable = unread.length
+    const lost = inaccessible?.() ?? []
+    for (const [virtual, detail] of lost.slice(saidInaccessible)) {
+      const shown = respellUnder(virtual, paths)
+      notes.push([
+        lines.length,
+        `du: cannot access '${shown}'` + (detail === null ? '' : `: ${detail}`),
+      ])
+      exitCode = 1
+    }
+    saidInaccessible = lost.length
     for (const item of block) lines.push(item)
     grand += total
     if (newest !== undefined && (latest === undefined || newest[0] > latest[0])) latest = newest
     if (measured === null) records = null
     else if (records !== null) for (const record of measured) records.push(record)
   }
+  for (const [raw, detail] of left) notes.push([lines.length, unreadOperand(raw, detail)])
   // GNU still prints the grand total when every operand failed ("0 total"), so
   // this stays outside the loop guard.
   if (flags.c) lines.push(line(grand, flags, 'total', latest))
+  for (const stop of stopped?.() ?? []) {
+    notes.push([lines.length, `du: ${stop}`])
+    exitCode = 1
+  }
+  const rows =
+    flags.null === true
+      ? lines.map((one) => encodeText(`${one}\0`))
+      : lines.map((one) => formatRecords([one]))
+  const starts = [0]
+  for (const row of rows) starts.push((starts.at(-1) ?? 0) + row.byteLength)
+  const placed = notes.map(([row, text]) => [starts[row] ?? 0, encodeText(`${text}\n`)] as const)
+  const stderr = concat(placed.map(([, note]) => note))
+  return { stdout: concat(rows), stderr, exitCode, records, notes: placed }
+}
 
-  const notes = flags.warning === undefined ? [] : [flags.warning]
-  notes.push(
-    ...missing.map(([raw, detail]) =>
-      raw === '' ? `du: ${ZERO_LENGTH_NAME}` : `du: cannot access '${raw}': ${detail}`,
-    ),
-  )
-  let exitCode = missing.length > 0 ? 1 : 0
-  for (const virtual of unreadable?.() ?? []) {
-    notes.push(
-      `du: cannot read directory '${respellUnder(virtual, paths)}': ${posixPhrase('EACCES')}`,
-    )
-    exitCode = 1
-  }
-  for (const [virtual, detail] of inaccessible?.() ?? []) {
-    const shown = respellUnder(virtual, paths)
-    notes.push(`du: cannot access '${shown}'` + (detail === null ? '' : `: ${detail}`))
-    exitCode = 1
-  }
-  for (const line of stopped?.() ?? []) {
-    notes.push(`du: ${line}`)
-    exitCode = 1
-  }
-  const stderr =
-    notes.length > 0 ? new TextEncoder().encode(`${notes.join('\n')}\n`) : new Uint8Array(0)
-  const stdout =
-    flags.null === true ? concat(lines.map((one) => encodeText(`${one}\0`))) : formatRecords(lines)
-  return { stdout, stderr, exitCode, records }
+/** GNU's line for an operand du could not read. Mirrors Python's _unread_operand. */
+function unreadOperand(raw: string, detail: string): string {
+  if (raw === '') return `du: ${ZERO_LENGTH_NAME}`
+  return `du: cannot access '${raw}': ${detail}`
 }
 
 /**
@@ -873,7 +899,7 @@ export async function duGeneric(
   inaccessible?: () => readonly (readonly [string, string | null])[],
   repeated?: (p: PathSpec) => boolean,
   times?: () => ReadonlyMap<string, string>,
-): Promise<[Uint8Array, IOResult]> {
+): Promise<[ByteSource, IOResult]> {
   const { present, missing } = await duOperands(
     paths,
     ctx.cwd,
@@ -897,10 +923,8 @@ export async function duGeneric(
     repeated,
     times,
   )
-  return [
-    out.stdout,
-    new IOResult({ stderr: out.stderr, exitCode: out.exitCode, records: out.records }),
-  ]
+  const io = new IOResult({ exitCode: out.exitCode, records: out.records })
+  return [atOffsets(out.stdout, out.notes, io), io]
 }
 
 // Spell a walked path as the operand it lies under was typed.

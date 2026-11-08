@@ -22,6 +22,8 @@ import type { HandOff } from '../../policy/types.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../execution/job/index.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { RouteDecision } from '../../runtime/types.ts'
 /**
  * The executor's entry point for a nested line. `node` is the node whose text
  * the line is: the command running it (bound by the dispatcher for
@@ -52,6 +54,7 @@ export type ExecuteFn = (
     sink?: JobConsole
     callStack?: CallStack
     jobTable?: JobTable
+    routingDecision?: RouteDecision<Runtime>
   },
 ) => Promise<IOResult>
 

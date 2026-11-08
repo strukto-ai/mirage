@@ -3,6 +3,7 @@ import tracemalloc
 
 import pytest
 
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.io import IOResult
 from mirage.io.pipe import CAPACITY
 from mirage.io.stream import materialize
@@ -1355,3 +1356,17 @@ async def test_no_room_after_the_command(args, data, lines, stderr, code):
     assert shell.lines == lines
     assert (await materialize(io.stderr) or b"") == stderr
     assert io.exit_code == code
+
+
+@pytest.mark.asyncio
+async def test_a_path_exec_refuses_stops_with_126_as_spelled():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("echo x > /data/a.txt")
+        result = await ws.shell("cd /data; echo a | xargs ./a.txt/child")
+        assert await result.stderr_str() == (
+            "xargs: ./a.txt/child: Not a directory\n"
+        )
+        assert result.exit_code == 126
+    finally:
+        await ws.close()

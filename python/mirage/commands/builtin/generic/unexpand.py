@@ -2,9 +2,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import (
-    merge_split_errors,
+    in_order,
     reported_stream,
-    split_readable,
+    split_in_order,
 )
 from mirage.commands.builtin.utils.stream import (
     resolve_source,
@@ -16,7 +16,6 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import close_stream, open_stream
@@ -80,19 +79,32 @@ async def unexpand_generic(
     except (ValueError, StreamRefusal) as exc:
         return None, IOResult(exit_code=1, stderr=f"{exc}\n".encode())
     try:
-        readable, err = await split_readable(paths, stat, "unexpand")
+        order = await split_in_order(paths, stat, "unexpand")
     except BaseException:
         await close_stream(engine)
         raise
-    if err and not readable:
+    if order and all(isinstance(p, bytes) for p in order):
         await close_stream(engine)
-        return None, IOResult(exit_code=1, stderr=err)
-    io = IOResult()
+        return None, IOResult(
+            exit_code=1,
+            stderr=b"".join(p for p in order if isinstance(p, bytes)),
+        )
+    io = IOResult(exit_code=int(any(isinstance(p, bytes) for p in order)))
     read = stdin_stream(stream, ctx.stdin)
-    sources = [reported_stream(read(p), io, p, "unexpand") for p in readable]
-    source = async_chain(sources) if readable else resolve_source(ctx.stdin)
-    output = stream_output(engine, source)
-    return await merge_split_errors((output, io), err)
+    source = (
+        in_order(
+            [
+                p
+                if isinstance(p, bytes)
+                else reported_stream(read(p), io, p, "unexpand")
+                for p in order
+            ],
+            io,
+        )
+        if order
+        else resolve_source(ctx.stdin)
+    )
+    return stream_output(engine, source), io
 
 
 __all__ = ["unexpand_generic"]

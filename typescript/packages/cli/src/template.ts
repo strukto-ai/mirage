@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
+import { keepPolicyNames } from './policy.ts'
 import { header } from './settings.ts'
 import {
   emit,
@@ -44,7 +45,8 @@ async function asYaml(obj: unknown): Promise<string> {
  * it, or a bare workspace config. Only `description` and `config` are read;
  * the fields a server fills in are dropped. Saved as written, with no `${NAME}` read from the
  * environment; a relative `script` or code path is rebased onto the file's
- * folder, as `workspace create` does.
+ * folder, as `workspace create` does, except a policy `script` that names a
+ * saved policy.
  */
 async function readTemplate(
   path: string,
@@ -73,7 +75,10 @@ async function readTemplate(
   if (config === null || typeof config !== 'object' || Array.isArray(config)) {
     fail(`${path}: config must hold a mapping`, 2)
   }
-  absolutizeScripts(config as Record<string, unknown>, dirname(resolve(path)))
+  const raw = config as Record<string, unknown>
+  keepPolicyNames(raw, () => {
+    absolutizeScripts(raw, dirname(resolve(path)))
+  })
   return { description, config }
 }
 

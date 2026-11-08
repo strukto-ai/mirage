@@ -267,8 +267,12 @@ fn unit_power(byte: u8) -> Option<u32> {
     }
 }
 
+/// A refusal of the options or a value, which exits 2 once input is read.
 fn refusal(message: String) -> StreamError {
-    StreamError::new(format!("numfmt: {message}"))
+    StreamError {
+        message: format!("numfmt: {message}"),
+        status: 2,
+    }
 }
 
 /// A blank between fields: newline too, which only `-z` puts inside one.
@@ -842,7 +846,9 @@ impl Stream for Numfmt {
         if self.failed || !self.config.operands.is_empty() {
             return Ok(());
         }
-        self.records.push(input);
+        self.records.push(input).map_err(|_| {
+            StreamError::refusal(b"numfmt: error reading input: Cannot allocate memory", 1)
+        })?;
         self.checked(out)
     }
 

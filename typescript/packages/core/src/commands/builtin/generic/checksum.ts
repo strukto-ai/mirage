@@ -32,6 +32,7 @@ import { fsStrerror, isEisdir, isFsError, isMissingPath, isWalkError } from '../
 import { fsErrorLine } from '../../../errors/render.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { STDIN_HEADER_NAME, STDIN_OPERAND } from '../utils/constants.ts'
+import { inOrder } from '../utils/operands.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { callerStream } from '../generic_bind/dispatch.ts'
 import { currentCaller } from '../../../context/session_context.ts'
@@ -91,8 +92,8 @@ async function report(io: IOResult, prog: string, path: PathSpec, err: unknown):
 
 /**
  * One line per operand, its digest asked of `stored` (once `stat` has found a
- * file there) before the file is read; one that fails is reported and the
- * rest still print. `read` opens an operand now, inside the command's cache
+ * file there) before the file is read; one that fails is reported where it
+ * stood and the rest still print. `read` opens an operand now, inside the command's cache
  * scope. Mirrors Python's hash_operands.
  */
 export async function hashOperands(
@@ -105,32 +106,35 @@ export async function hashOperands(
   stored?: StoredDigest,
 ): Promise<[AsyncIterable<Uint8Array>, IOResult]> {
   const io = new IOResult()
-  const pending: [PathSpec, string | null, ByteSource][] = []
-  for (const p of paths) {
-    let digest: string | null = null
+  async function* hashed(
+    p: PathSpec,
+    digest: string | null,
+    source: ByteSource,
+  ): AsyncIterable<Uint8Array> {
     try {
-      if (stored !== undefined && !isStdin(p)) {
-        await stat?.(p)
-        digest = await stored(p, algorithm)
-      }
+      yield ENC.encode(render(digest ?? (await hashSource(source, algorithm)), p.rawPath))
     } catch (err) {
       if (!isFsError(err)) throw err
       await report(io, prog, p, err)
+    }
+  }
+  const parts: (AsyncIterable<Uint8Array> | Uint8Array)[] = []
+  for (const p of paths) {
+    let digest: string | null = null
+    try {
+      if (!isStdin(p)) {
+        await stat?.(p)
+        if (stored !== undefined) digest = await stored(p, algorithm)
+      }
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      parts.push(ENC.encode(fsErrorLine(prog, p, err)))
+      io.exitCode = 1
       continue
     }
-    pending.push([p, digest, digest === null ? read(p) : new Uint8Array()])
+    parts.push(hashed(p, digest, digest === null ? read(p) : new Uint8Array()))
   }
-  async function* output(): AsyncIterable<Uint8Array> {
-    for (const [p, digest, source] of pending) {
-      try {
-        yield ENC.encode(render(digest ?? (await hashSource(source, algorithm)), p.rawPath))
-      } catch (err) {
-        if (!isFsError(err)) throw err
-        await report(io, prog, p, err)
-      }
-    }
-  }
-  return [output(), io]
+  return [inOrder(parts, io), io]
 }
 
 // The last of -b, -t and --tag (which reads in binary mode), as GNU's option
@@ -285,7 +289,11 @@ async function hashCheck(
   let malformed = 0
   let parsedAny = false
   try {
-    for await (const { line: lineno, parsed } of checkLines(stream(p), algorithm)) {
+    for await (const { line: lineno, parsed, error } of checkLines(stream(p), algorithm)) {
+      if (error !== undefined) {
+        await checkNote(errors, `${name}: ${checkLabel}: ${error}`)
+        return [await output.output(), await errors.output(), 1]
+      }
       if (parsed === null) {
         malformed += 1
         if (flags.warn) {
@@ -379,10 +387,14 @@ const CheckLine = z
 async function* checkLines(
   source: ByteSource,
   algorithm: string,
-): AsyncGenerator<z.infer<typeof CheckLine>> {
+): AsyncGenerator<z.infer<typeof CheckLine> & { error?: string }> {
   const lines = new AsyncLineIterator(runStream('digest', { algorithm, check_lines: true }, source))
   try {
     for await (const line of lines) yield CheckLine.parse(JSON.parse(DEC.decode(line)))
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    // A line too long to hold ends the list as a read error does.
+    yield { line: 0, parsed: null, error: err.message }
   } finally {
     await lines.discard()
   }

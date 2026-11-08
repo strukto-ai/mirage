@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { asyncChain } from '../../../io/stream.ts'
+import { closeQuietly } from '../../../io/stream.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import type { LinkView, MountView, StatPath } from '../../../view/types.ts'
 import type { FileStat, PathSpec, StatFn } from '../../../types.ts'
 import { FileType } from '../../../types.ts'
@@ -110,42 +111,115 @@ export async function splitReadable(
   stat: StatFn,
   cmdName: string,
 ): Promise<[PathSpec[], string]> {
-  const readable: PathSpec[] = []
-  let err = ''
+  const order = await splitInOrder(paths, stat, cmdName)
+  return [
+    order.filter((p): p is PathSpec => typeof p !== 'string'),
+    order.filter((p): p is string => typeof p === 'string').join(''),
+  ]
+}
+
+/**
+ * splitReadable's partition kept in operand order: each operand that reads,
+ * or the stderr line of one that failed, where it stood, for inOrder to say
+ * when the output reaches it. Mirrors Python's split_in_order.
+ */
+export async function splitInOrder(
+  paths: readonly PathSpec[],
+  stat: StatFn,
+  cmdName: string,
+): Promise<(PathSpec | string)[]> {
+  const order: (PathSpec | string)[] = []
   for (const p of paths) {
     let st: FileStat
     try {
       st = await stat(p)
     } catch (e) {
       if (!isFsError(e)) throw e
-      err += fsErrorLine(cmdName, p, e)
+      order.push(fsErrorLine(cmdName, p, e))
       continue
     }
     if (st.type === FileType.DIRECTORY) {
-      err += fsErrorLine(cmdName, p, eisdir(p))
+      order.push(fsErrorLine(cmdName, p, eisdir(p)))
       continue
     }
-    readable.push(p)
+    order.push(p)
   }
-  return [readable, err]
+  return order
 }
 
 /**
- * splitReadable for the commands that head each operand. GNU head and tail
+ * The parts' streams one after another, each bytes part a failed operand's
+ * stderr line said on `io` when the output reaches it, as GNU reports an
+ * operand and goes on (`cat a missing b`). A reader that stops early still
+ * finds the lines it never reached on `io`, after what it read. Lines that
+ * meet with no output between them are said together, so a run of them costs
+ * one copy of what `io` holds. Mirrors Python's in_order.
+ */
+export async function* inOrder(
+  parts: readonly (AsyncIterable<Uint8Array> | Uint8Array)[],
+  io: IOResult,
+): AsyncIterable<Uint8Array> {
+  const lines = parts.filter((p): p is Uint8Array => p instanceof Uint8Array)
+  let reached = 0
+  let said = 0
+  try {
+    for (const part of parts) {
+      if (part instanceof Uint8Array) {
+        reached++
+        continue
+      }
+      if (said < reached) {
+        await say(io, concat(lines.slice(said, reached)))
+        said = reached
+      }
+      yield* part
+    }
+  } finally {
+    if (said < lines.length) await say(io, concat(lines.slice(said)))
+    for (const part of parts) {
+      if (!(part instanceof Uint8Array)) await closeQuietly(part)
+    }
+  }
+}
+
+/**
+ * `body` with each note, a stderr line and the offset in `body` it was
+ * written before, said on `io` when the output reaches it, for a command that
+ * renders all it prints before it prints (`wc a missing b`); `body` itself
+ * when there is no note. Mirrors Python's at_offsets.
+ */
+export function atOffsets(
+  body: Uint8Array,
+  notes: readonly (readonly [number, Uint8Array])[],
+  io: IOResult,
+): ByteSource {
+  if (notes.length === 0) return body
+  const parts: (AsyncIterable<Uint8Array> | Uint8Array)[] = []
+  let start = 0
+  for (const [offset, line] of notes) {
+    if (offset > start) parts.push(chunks(body.subarray(start, offset)))
+    parts.push(line)
+    start = Math.max(start, offset)
+  }
+  parts.push(chunks(body.subarray(start)))
+  return inOrder(parts, io)
+}
+
+/**
+ * splitInOrder for the commands that head each operand. GNU head and tail
  * open an operand before they read it, and a directory opens: its `==> name
  * <==` header prints and only the read after it fails. So a directory keeps
- * its place among the opened operands, named in the unread set, while one
- * that does not open at all (a missing name) is dropped as splitReadable
- * drops it. Mirrors Python's split_opened.
+ * its place among the opened operands, its line said after its header, while
+ * one that does not open at all (a missing name) leaves its line where it
+ * stood, as splitInOrder does. Mirrors Python's split_opened.
  */
 export async function splitOpened(
   paths: readonly PathSpec[],
   stat: StatFn,
   cmdName: string,
-): Promise<[PathSpec[], ReadonlySet<string>, string]> {
-  const opened: PathSpec[] = []
-  const unread = new Set<string>()
-  let err = ''
+): Promise<[(PathSpec | string)[], Map<string, string>]> {
+  const order: (PathSpec | string)[] = []
+  const unread = new Map<string, string>()
   for (const p of paths) {
     let failure: unknown = null
     try {
@@ -155,14 +229,42 @@ export async function splitOpened(
       failure = e
     }
     if (failure !== null) {
-      err += fsErrorLine(cmdName, p, failure)
+      const line = fsErrorLine(cmdName, p, failure)
       const code = (failure as { code?: string }).code
-      if (code === undefined || !READ_FAILURES.has(code)) continue
-      unread.add(p.virtual)
+      if (code === undefined || !READ_FAILURES.has(code)) {
+        order.push(line)
+        continue
+      }
+      unread.set(p.rawPath, line)
     }
-    opened.push(p)
+    order.push(p)
   }
-  return [opened, unread, err]
+  return [order, unread]
+}
+
+/**
+ * Each stderr line of a splitOpened partition by its operand's index, in
+ * operand order: a command takes each as it says it, and says what is left
+ * once its reader stops. Mirrors Python's operand_lines.
+ */
+export function operandLines(
+  order: readonly (PathSpec | string)[],
+  unread: ReadonlyMap<string, string>,
+): Map<number, string> {
+  const lines = new Map<number, string>()
+  order.forEach((p, i) => {
+    const line = typeof p === 'string' ? p : unread.get(p.rawPath)
+    if (line !== undefined && line !== '') lines.set(i, line)
+  })
+  return lines
+}
+
+/** Put an operand's stderr line on `io` after what it holds. Mirrors Python's say. */
+export async function say(io: IOResult, line: Uint8Array | string): Promise<void> {
+  io.stderr = concat([
+    await materialize(io.stderr),
+    typeof line === 'string' ? encodeText(line) : line,
+  ])
 }
 
 // IOResult carrying operand-split stderr lines: exit 1 when any operand
@@ -211,9 +313,13 @@ export async function reportFsError(
   io.exitCode = 1
 }
 
-/** `each` over every operand in turn, or over stdin without one. Mirrors Python's per_operand. */
+/**
+ * `each` over every operand in turn, or over stdin without one; a failed
+ * operand's line (splitInOrder) is said where it stood. Mirrors Python's
+ * per_operand.
+ */
 export function perOperand(
-  paths: readonly PathSpec[],
+  paths: readonly (PathSpec | string)[],
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   stdin: ByteSource | null,
   io: IOResult,
@@ -221,5 +327,28 @@ export function perOperand(
   each: (source: ByteSource) => AsyncIterable<Uint8Array>,
 ): AsyncIterable<Uint8Array> {
   if (paths.length === 0) return each(stdin ?? new Uint8Array())
-  return asyncChain(paths.map((p) => each(reportedStream(stream(p), io, p, cmdName))))
+  return inOrder(
+    paths.map((p) =>
+      typeof p === 'string' ? encodeText(p) : each(reportedStream(stream(p), io, p, cmdName)),
+    ),
+    io,
+  )
+}
+
+/**
+ * Put the split's lines before the output, as GNU's land when it holds its
+ * output until it ends (`rev`, `tac`). Mirrors Python's errors_first.
+ */
+export async function errorsFirst(
+  result: [ByteSource | null, IOResult],
+  err: string,
+): Promise<[ByteSource | null, IOResult]> {
+  const [out, io] = result
+  if (err === '') return result
+  io.exitCode = 1
+  if (out === null) {
+    await say(io, err)
+    return [null, io]
+  }
+  return [inOrder([encodeText(err), chunks(out)], io), io]
 }

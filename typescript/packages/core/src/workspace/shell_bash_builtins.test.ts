@@ -163,8 +163,15 @@ const CASES: [string, string, string, string, number][] = [
     0,
   ],
   [
-    'alias_type_and_command_v',
+    'alias_type_and_command_v_need_expand_aliases',
     "alias x='echo hi'\ntype -t x; command -v x",
+    '',
+    '',
+    1,
+  ],
+  [
+    'alias_type_and_command_v',
+    "shopt -s expand_aliases\nalias x='echo hi'\ntype -t x; command -v x",
     "alias\nalias x='echo hi'\n",
     '',
     0,

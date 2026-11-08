@@ -279,6 +279,76 @@
         "stdout": "-rw-r--r-- 0/0               3 1970-01-01 00:00 m\n-rw-r--r-- 0/0               3 1970-01-01 00:00 after\nrc=2\nrc=2\n0 z/m\n3 z/after\n3 total\n-rw-r--r-- 0/0 9223372036854775807 1970-01-01 00:00 m\n-rw-r--r-- 0/0                   3 1970-01-01 00:00 after\nrc=0\n0000000   A\n0000001\nrc=0\n",
         "stderr": "tar: m: malformed sparse archive member\ntar: Exiting with failure status due to previous errors\ntar: m: malformed sparse archive member\ntar: Exiting with failure status due to previous errors\n"
       }
+    },
+    {
+      "id": "tar_fails_a_sparse_member_whose_holes_pass_what_a_run_writes_and_reads_on",
+      "seq": 15100080,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf %s 'H4sIAAAAAAACA+3YMQ6CMBTG8cfqKXqE0jY4k3gDvQAkqKyIu0f2BhVsJODAQAJN9P9bvuYtL/mSLq+sL7I23cmce2fnK9PxLLxTa5wVdZQN3G9t0Sgl0TxCeO+fk0bCPBka/LSzcEEiAAAAAADgDx3yU16c26pZec/8/adnp/cfne2NEaW3KCH6/Seua73jIwAAAAAAAAA/6gWfEvZ0ACgAAA==' | base64 -d | gzip -d | tar -tvf -; echo rc=$?; mkdir h; printf %s 'H4sIAAAAAAACA+3YMQ6CMBTG8cfqKXqE0jY4k3gDvQAkqKyIu0f2BhVsJODAQAJN9P9bvuYtL/mSLq+sL7I23cmce2fnK9PxLLxTa5wVdZQN3G9t0Sgl0TxCeO+fk0bCPBka/LSzcEEiAAAAAADgDx3yU16c26pZec/8/adnp/cfne2NEaW3KCH6/Seua73jIwAAAAAAAAA/6gWfEvZ0ACgAAA==' | base64 -d | gzip -d | tar -xf - -C h; echo rc=$?; wc -c h/big h/after; printf %s 'H4sIAAAAAAACA+3YMQ6CMBTG8cfqKXqE0jY4k3gDvQAkqKyIu0f2BhVsJODAQAJN9P9bvuYtL/mSLq+sL7I23cmce2fnK9PxLLxTa5wVdZQN3G9t0Sgl0TxCeO+fk0bCPBka/LSzcEEiAAAAAADgDx3yU16c26pZec/8/adnp/cfne2NEaW3KCH6/Seua73jIwAAAAAAAAA/6gWfEvZ0ACgAAA==' | base64 -d | gzip -d | tar -xOf - big > h/o; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 0/0   1099511627776 1970-01-01 00:00 big\n-rw-r--r-- 0/0               3 1970-01-01 00:00 after\nrc=0\nrc=2\n0 h/big\n3 h/after\n3 total\nrc=2\n",
+        "stderr": "tar: big: Cannot write: File too large\ntar: Exiting with failure status due to previous errors\ntar: big: Cannot write: File too large\ntar: Exiting with failure status due to previous errors\n"
+      }
+    },
+    {
+      "id": "tar_runs_out_of_memory_at_a_meta_header_claiming_past_what_a_run_holds",
+      "seq": 15100081,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf %s 'H4sIAAAAAAACA9PT19N38MnPS/fJzMtmoA0wAAIzExMwDQRwugEox/tg2+blKQwwMYi8oYG5gRGDgg8DHUBpcUlikYICwwgFeaNgFIyCEQsA3Gl9PwAGAAA=' | base64 -d | gzip -d | tar -tf -; echo rc=$?; printf %s 'H4sIAAAAAAACA9PTD0is8EhNTEktKtbPZaAJMAACMxMTMA0EcLoBKMf7YNvm5SkMMDGIvKGhkZkJg0IFAx1AaXFJYpGCAsMIBYYGhhYKyfm5ual5JbaJo2AUjIIRAbggJR4AoeusugAGAAA=' | base64 -d | gzip -d | tar -xf -; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\n",
+        "stderr": "tar: memory exhausted\ntar: Error is not recoverable: exiting now\ntar: memory exhausted\ntar: Error is not recoverable: exiting now\n"
+      }
     }
   ]
 }

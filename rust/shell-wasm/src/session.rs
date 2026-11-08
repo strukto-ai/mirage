@@ -2,22 +2,22 @@
 //! is for Python: shells and the tasks running on them, each held here under
 //! a handle, expanding the trees `mirage_rs_shell_parse` keeps. Every call is
 //! one request, a list naming its target and operation then the arguments,
-//! and one reply, in `codec`'s layout.
+//! and one reply, in `mirage_rs::interp::codec`'s layout.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use mirage_rs::arith;
-use mirage_rs::interp::expand::{Substitution, marked};
-use mirage_rs::interp::job::{Job, Output, Running, Step};
+use mirage_rs::interp::codec::{Args, Item, one};
+use mirage_rs::interp::expand::Substitution;
+use mirage_rs::interp::host::{self, Held};
+use mirage_rs::interp::job::{Job, Running, Step};
 use mirage_rs::interp::shell::{Frame, Shell as Inner};
-use mirage_rs::interp::task::{self, Answer, Ask, Expanded, Mode, Write};
-use mirage_rs::interp::write::{Denied, Fault, Verb};
-use mirage_rs::interp::{Diagnostic, Signal, listing, quote};
+use mirage_rs::interp::task::{self, Answer, Ask, Mode, Write};
+use mirage_rs::interp::write::{Denied, Fault};
+use mirage_rs::interp::{listing, quote};
 use mirage_rs::vars::{self, Assigned, Indexed, Kind, Managed, Store, Value, Var};
 
-use crate::codec::{Args, Item, one};
 use crate::{ARGS, shell_tree};
 
 #[link(wasm_import_module = "mirage")]
@@ -56,26 +56,15 @@ fn ids(source: u32) -> vars::Ids {
     })
 }
 
-struct Shell {
-    inner: Option<Inner>,
-    /// The bytes the records held when a task took the shell.
-    parked: usize,
-}
+struct Shell(Held);
 
 impl Shell {
-    fn wrap(inner: Inner) -> Self {
-        Self {
-            inner: Some(inner),
-            parked: 0,
-        }
-    }
-
     fn shell(&self) -> Result<&Inner, String> {
-        self.inner.as_ref().ok_or_else(running)
+        self.0.shell().ok_or_else(running)
     }
 
     fn shell_mut(&mut self) -> Result<&mut Inner, String> {
-        self.inner.as_mut().ok_or_else(running)
+        self.0.shell_mut().ok_or_else(running)
     }
 
     fn store(&self) -> Result<&Store, String> {
@@ -112,7 +101,7 @@ impl Engine {
 
     fn adopt(&mut self, inner: Inner) -> u32 {
         let handle = self.handle();
-        self.shells.insert(handle, Shell::wrap(inner));
+        self.shells.insert(handle, Shell(Held::new(inner)));
         handle
     }
 
@@ -132,8 +121,7 @@ impl Engine {
     /// its end: the task's handle and where it stopped.
     fn start(&mut self, owner: u32, run: impl FnOnce(Inner) -> Running) -> Reply {
         let shell = self.shell(owner)?;
-        let inner = shell.inner.take().ok_or_else(running)?;
-        shell.parked = inner.vars.held();
+        let inner = shell.0.take().ok_or_else(running)?;
         let (job, step) = Job::start(run(inner));
         let handle = self.handle();
         self.jobs.insert(handle, Owned { job, owner });
@@ -148,16 +136,12 @@ impl Engine {
             Step::Asked(ask) => return Item::list([Item::text("ask"), ask_out(self, ask)]),
             Step::Ended(ended) => ended,
         };
-        let result = match &ended.result {
-            Ok(Output::Expanded(done)) => Item::list([Item::text("ok"), expanded_out(done)]),
-            Ok(Output::Wrote(value)) => Item::list([Item::text("ok"), Item::Big(*value)]),
-            Err(fault) => fault_out(fault),
-        };
+        let result = host::result_out(&ended.result);
         let more = self.jobs.get(&handle).is_some_and(|owned| owned.job.more());
         if let Some(owned) = self.jobs.get(&handle) {
             let owner = owned.owner;
             if let Some(shell) = self.shells.get_mut(&owner) {
-                shell.inner = Some(ended.shell);
+                shell.0.give_back(ended.shell);
             }
         }
         if !more {
@@ -166,7 +150,7 @@ impl Engine {
         Item::list([
             Item::text("done"),
             result,
-            diagnostics_out(&ended.diagnostics),
+            host::diagnostics_out(&ended.diagnostics),
             Item::Bool(more),
         ])
     }
@@ -180,23 +164,6 @@ impl Engine {
 
 thread_local! {
     static ENGINE: RefCell<Engine> = RefCell::new(Engine::default());
-}
-
-fn value_out(value: &Value) -> Item {
-    match value {
-        Value::Scalar(text) => Item::text(text),
-        Value::Indexed(array) => Item::Map(
-            array
-                .iter()
-                .map(|(index, element)| (Item::Big(index), Item::text(element)))
-                .collect(),
-        ),
-        Value::Assoc(map) => Item::Map(
-            map.iter()
-                .map(|(key, element)| (Item::text(key), Item::text(element)))
-                .collect(),
-        ),
-    }
 }
 
 /// A value from the host: text, or a map, an associative array's when
@@ -218,25 +185,6 @@ fn value_in(item: Item, assoc: bool) -> Result<Value, String> {
         array.set(one(index, Args::int)?, one(element, Args::bytes)?);
     }
     Ok(Value::Indexed(array))
-}
-
-/// A record as the host reads it: the value, none for declared but unset,
-/// the cluster `declare -p` prints (`a`/`A` leading for an array), and a
-/// managed variable's pointer.
-fn record_out(var: &Var) -> Item {
-    let managed = Item::opt(var.managed.as_ref(), |managed| {
-        Item::list([
-            Item::text(&managed.source),
-            Item::text(&managed.reference),
-            Item::text(&managed.key),
-            Item::Bool(managed.eager),
-        ])
-    });
-    Item::list([
-        Item::opt(var.value.as_ref(), value_out),
-        Item::text(var.cluster()),
-        managed,
-    ])
 }
 
 fn record_in(item: Item) -> Result<Var, String> {
@@ -263,89 +211,6 @@ fn record_in(item: Item) -> Result<Var, String> {
         attrs: vars::attrs_of(&cluster),
         managed,
     })
-}
-
-fn arith_error(error: &arith::Error) -> Item {
-    match error {
-        arith::Error::Arith {
-            reason,
-            expression,
-            token,
-            subscript,
-        } => Item::list([
-            Item::text("arith"),
-            Item::text(reason),
-            Item::text(expression),
-            Item::opt(token.as_ref(), Item::text),
-            Item::Bool(*subscript),
-        ]),
-        arith::Error::Readonly { name, subscript } => Item::list([
-            Item::text("readonly"),
-            Item::text(name),
-            Item::Bool(*subscript),
-        ]),
-        arith::Error::Unbound(name) => Item::list([Item::text("unbound"), Item::text(name)]),
-        arith::Error::Halt { subscript } => {
-            Item::list([Item::text("halt"), Item::Bool(*subscript)])
-        }
-    }
-}
-
-/// Why an operation stopped, as a tagged list the host maps to its own
-/// errors.
-fn fault_out(fault: &Fault) -> Item {
-    match fault {
-        Fault::Hidden(name) => Item::list([Item::text("hidden"), Item::text(name)]),
-        Fault::Denied(Denied { name, record }) => {
-            Item::list([Item::text("denied"), Item::text(name), Item::int(*record)])
-        }
-        Fault::Readonly { name, subscript } => Item::list([
-            Item::text("readonly"),
-            Item::text(name),
-            Item::Bool(*subscript),
-        ]),
-        Fault::Arith(error) => Item::list([Item::text("arith"), arith_error(error)]),
-        Fault::Signal(Signal::Exit {
-            status,
-            stderr,
-            contained,
-        }) => Item::list([
-            Item::text("exit"),
-            Item::int(*status),
-            Item::Raw(stderr.clone()),
-            Item::int(*contained),
-        ]),
-        Fault::Signal(Signal::Discard { stderr, contained }) => Item::list([
-            Item::text("discard"),
-            Item::Raw(stderr.clone()),
-            Item::int(*contained),
-        ]),
-        Fault::Bad { text, fixed } => {
-            Item::list([Item::text("bad"), Item::text(text), Item::Bool(*fixed)])
-        }
-        Fault::Memory => Item::list([Item::text("memory")]),
-        Fault::Host(what) => Item::list([Item::text("host"), Item::text(what)]),
-    }
-}
-
-fn expanded_out(expanded: &Expanded) -> Item {
-    match expanded {
-        Expanded::Fields(fields) => {
-            Item::list(fields.iter().map(|field| Item::Text(marked(&field.0))))
-        }
-        Expanded::Text(text) => Item::text(text),
-        Expanded::Runs(runs) => Item::list(
-            runs.iter()
-                .map(|(text, quoted)| Item::list([Item::text(text), Item::Bool(*quoted)])),
-        ),
-    }
-}
-
-fn diagnostics_out(diagnostics: &[Diagnostic]) -> Item {
-    Item::list(diagnostics.iter().map(|diagnostic| match diagnostic {
-        Diagnostic::Text(text) => Item::text(text),
-        Diagnostic::Bytes(bytes) => Item::Raw(bytes.clone()),
-    }))
 }
 
 fn texts(items: Vec<Item>) -> Result<Vec<Vec<u8>>, String> {
@@ -525,8 +390,13 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "unset_element" => {
             let name = args.string()?;
             let subscript = args.bytes()?;
+            let every = args.flag()?;
             let listens = args.flag()?;
-            let write = Write::UnsetElement { name, subscript };
+            let write = Write::UnsetElement {
+                name,
+                subscript,
+                every,
+            };
             return engine.write(handle, write, listens, true);
         }
         "arith" => {
@@ -553,12 +423,14 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             shell.store_mut()?.set_ids(ids(source));
             Item::Nil
         }
-        "get" => Item::opt(shell.store()?.record(&args.string()?), record_out),
-        "visible" => Item::opt(shell.store()?.visible(&args.string()?), record_out),
+        "get" => Item::opt(shell.store()?.record(&args.string()?), host::record_out),
+        "visible" => Item::opt(shell.store()?.visible(&args.string()?), host::record_out),
         "place" => {
             let name = args.string()?;
             let var = args.maybe()?.map(record_in).transpose()?.map(Arc::new);
-            Item::opt(shell.store_mut()?.place(&name, var), |old| record_out(&old))
+            Item::opt(shell.store_mut()?.place(&name, var), |old| {
+                host::record_out(&old)
+            })
         }
         "visible_names" => {
             let kind: Kind = args.string()?.parse()?;
@@ -578,7 +450,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             |value| Item::text(value.kind().name()),
         ),
         "indexed" => Item::opt(shell.shell()?.indexed(&args.string()?), |array| {
-            value_out(&Value::Indexed(array.into_owned()))
+            host::value_out(&Value::Indexed(array.into_owned()))
         }),
         "rendered" => Item::opt(
             shell
@@ -592,17 +464,12 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             shell
                 .store()?
                 .records()
-                .map(|(name, var)| Item::list([Item::text(name), record_out(var)])),
+                .map(|(name, var)| Item::list([Item::text(name), host::record_out(var)])),
         ),
         "len" => Item::int(shell.store()?.records().count()),
         "stamp" => Item::int(shell.store()?.stamp()),
         "contains" => Item::Bool(shell.store()?.record(&args.string()?).is_some()),
-        "held" => Item::int(
-            shell
-                .inner
-                .as_ref()
-                .map_or(shell.parked, |inner| inner.vars.held()),
-        ),
+        "held" => Item::int(shell.0.held()),
         "hide" => {
             let names = names_in(args.list()?)?;
             let patterns = names_in(args.list()?)?;
@@ -652,9 +519,18 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .is_some_and(|var| var.has(vars::UNASSIGNED)),
         ),
         "declaration" => Item::opt(
-            listing::declaration(shell.store()?, &args.string()?),
+            listing::declaration(shell.store_mut()?, &args.string()?),
             Item::text,
         ),
+        "listing" => {
+            let letters = args.string()?;
+            let skip = names_in(args.list()?)?;
+            Item::list(
+                listing::listing(shell.store()?, &letters, &skip)
+                    .into_iter()
+                    .map(Item::text),
+            )
+        }
         "assignments" => {
             let skip = names_in(args.list()?)?;
             Item::list(
@@ -702,10 +578,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             shell.store_mut()?.unreach();
             Item::Nil
         }
-        "next_random" => match shell.store_mut()?.next_random() {
-            Ok(drawn) => Item::opt(drawn, Item::int),
-            Err(error) => arith_error(&error),
-        },
+        "next_random" => host::random_out(&shell.store_mut()?.next_random()),
         "frame" => {
             let positional = args
                 .maybe()?
@@ -740,6 +613,11 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .maybe()?
                 .map(|item| texts(one(item, Args::list)?))
                 .transpose()?;
+            let call_lines = args
+                .list()?
+                .into_iter()
+                .map(|item| size(one(item, Args::int)?))
+                .collect::<Result<Vec<_>, String>>()?;
             let frame = Frame {
                 positional,
                 calls,
@@ -753,6 +631,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 outside,
                 pipe_status,
                 function_names,
+                call_lines,
                 paren: args.flag()?,
                 memory_room: optional_size(args.maybe()?)?,
                 line: size(args.int()?)?,
@@ -762,10 +641,9 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             shell.shell_mut()?.apply(frame);
             Item::Nil
         }
-        "conversion_scalar" => match shell.store_mut()?.conversion_scalar(&args.string()?) {
-            Ok(text) => Item::opt(text, Item::text),
-            Err(error) => Item::list([Item::text("error"), arith_error(&error)]),
-        },
+        "conversion_scalar" => {
+            host::conversion_out(&shell.store_mut()?.conversion_scalar(&args.string()?))
+        }
         other => return Err(format!("no shell operation {other}")),
     })
 }
@@ -787,9 +665,7 @@ fn ask_out(engine: &mut Engine, ask: Ask) -> Item {
             Item::opt(span, |(start, end)| {
                 Item::list([Item::int(start), Item::int(end)])
             }),
-            Item::opt(read, |fields| {
-                Item::list(fields.iter().map(|field| Item::Text(marked(&field.0))))
-            }),
+            Item::opt(read, |fields| host::fields_out(&fields)),
         ]),
         Ask::ProcessSubstitution { shell, node } => Item::list([
             Item::text("process"),
@@ -806,10 +682,7 @@ fn ask_out(engine: &mut Engine, ask: Ask) -> Item {
         } => Item::list([
             Item::text("gate"),
             Item::Bool(post),
-            Item::text(match verb {
-                Verb::Set => "set",
-                Verb::Unset => "unset",
-            }),
+            Item::text(host::verb_name(verb)),
             Item::text(key),
             Item::opt(value, Item::text),
             Item::opt(old, Item::text),
@@ -833,13 +706,7 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
     }
     if op == "slice" {
         let owned = engine.job(handle)?;
-        let fields = Item::list(
-            owned
-                .job
-                .slice()
-                .iter()
-                .map(|field| Item::Text(marked(&field.0))),
-        );
+        let fields = host::fields_out(&owned.job.slice());
         let more = owned.job.more();
         if !more {
             engine.jobs.remove(&handle);

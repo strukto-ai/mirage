@@ -40,7 +40,7 @@ export async function relayStdio(url: string, token: () => Promise<string>): Pro
     if (response.status === 204) return
     if (response.status >= 400) {
       const { detail } = (await response.json()) as { detail?: unknown }
-      throw new Error(`daemon error ${String(response.status)}: ${String(detail)}`)
+      throw new Error(`error ${String(response.status)}: ${String(detail)}`)
     }
     write(await response.text())
   }

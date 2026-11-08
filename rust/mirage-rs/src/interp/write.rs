@@ -8,9 +8,12 @@
 
 use std::collections::HashSet;
 use std::future::Future;
+use std::sync::Arc;
 
+use super::shell::Shell;
 use super::{Diagnostic, Signal};
 use crate::arith::{self, plain_decimal};
+use crate::integer::parse_decimal;
 use crate::vars::{
     Assigned, Coercion, Draws, INTEGER, Indexed, NAMEREF, Slot, Store, Value, entry_bytes,
     strip_key_quotes,
@@ -150,7 +153,34 @@ pub struct Writer<'a, G: Gate> {
     pub outside: usize,
 }
 
-impl<G: Gate> Writer<'_, G> {
+impl<'a, G: Gate> Writer<'a, G> {
+    /// A writer over a shell's variables with its options and bounds,
+    /// asking `gate`, its warnings landing in `diagnostics`.
+    pub fn of(
+        shell: &'a mut Shell,
+        gate: &'a mut G,
+        diagnostics: Option<&'a mut Vec<Diagnostic>>,
+    ) -> Self {
+        Writer {
+            allexport: shell.option("allexport"),
+            nounset: shell.option("nounset"),
+            limit: shell.env_limit,
+            outside: shell.outside,
+            store: &mut shell.vars,
+            gate,
+            diagnostics,
+        }
+    }
+
+    /// The name a write lands on: a reference's target when `follow_ref`.
+    fn aim(&self, name: &str, follow_ref: bool) -> String {
+        if follow_ref {
+            self.store.target(name)
+        } else {
+            name.to_owned()
+        }
+    }
+
     fn visible(&self, name: &str) -> Result<(), Fault> {
         if self.store.hidden(name) {
             return Err(Fault::Hidden(name.to_owned()));
@@ -227,11 +257,7 @@ impl<G: Gate> Writer<'_, G> {
         assigned: Option<&Assigned>,
         added: Option<&[u8]>,
     ) -> Result<(), Fault> {
-        let name = if follow_ref {
-            self.store.target(name)
-        } else {
-            name.to_owned()
-        };
+        let name = self.aim(name, follow_ref);
         self.writable(&name)?;
         // A scalar landing on an array is its element 0, the key `0` in an
         // associative one, as bash binds `read a` or `for a in x` there.
@@ -265,6 +291,21 @@ impl<G: Gate> Writer<'_, G> {
                 }
             }
         }
+        if value.is_array() && self.store.seeds_random(&name) {
+            // An element written to RANDOM seeds it, which bash evaluates
+            // there, landing what it assigns (`RANDOM[0]='x=5'`): one that
+            // does not evaluate ends the line.
+            match self
+                .store
+                .coerce(&mut coercion, value, INTEGER, None, assigned)
+            {
+                Ok(shaped) => value = shaped,
+                Err(error) => {
+                    self.land_coercion(&mut coercion).await?;
+                    return Err(fatal(self.store.voice(), error));
+                }
+            }
+        }
         let rendering = self.gate.listens().then(|| value.rendering());
         if let Some(rendering) = &rendering {
             self.gate
@@ -279,11 +320,7 @@ impl<G: Gate> Writer<'_, G> {
         if let Some(word) = seeding {
             match self.store.evaluate_integer(&mut coercion, word, None) {
                 Ok(text) => {
-                    let state = std::str::from_utf8(&text)
-                        .ok()
-                        .and_then(|text| text.parse::<i64>().ok())
-                        .unwrap_or(0)
-                        .rem_euclid(1 << 32) as u32;
+                    let state = parse_decimal::<i64>(&text).unwrap_or(0).rem_euclid(1 << 32) as u32;
                     self.store.seed_random(word.clone(), state);
                 }
                 Err(error) => {
@@ -418,6 +455,7 @@ impl<G: Gate> Writer<'_, G> {
             return Err(Fault::Host("no array to append to"));
         };
         let integer = var.has(INTEGER);
+        let marks = (var.attrs, var.managed.clone());
         let Some(Value::Indexed(array)) = &var.value else {
             return Err(Fault::Host("no array to append to"));
         };
@@ -451,6 +489,16 @@ impl<G: Gate> Writer<'_, G> {
                     for slot in filled.into_iter().rev() {
                         self.store.put_element(&name, &slot, None, false);
                     }
+                    let (attrs, managed) = marks;
+                    let changed = self
+                        .store
+                        .record(&name)
+                        .filter(|var| var.attrs != attrs || var.managed != managed);
+                    if let Some(var) = changed {
+                        let mut var = var.clone();
+                        (var.attrs, var.managed) = (attrs, managed);
+                        self.store.place(&name, Some(Arc::new(var)));
+                    }
                 }
                 return Err(fault);
             }
@@ -467,15 +515,21 @@ impl<G: Gate> Writer<'_, G> {
     /// array the shell computes (`PIPESTATUS`, `FUNCNAME`) clears nothing
     /// whatever a write left on its name, as a read answers from it, but
     /// its subscript is still read, so its writes land and an index before
-    /// the first refuses. `@` and `*` name every element: an indexed array
-    /// is emptied, a scalar refuses as `x[1]` does, and an associative one
-    /// clears nothing, as bash's `unset 'm[@]'` keeps the keys.
-    pub async fn unset_element(&mut self, name: &str, subscript: &[u8]) -> Result<Element, Fault> {
+    /// the first refuses. `every` for a subscript typed as `@` or `*`,
+    /// which names every element, never one only expanding to it: an
+    /// indexed array is emptied, its marks kept, a scalar refuses as `x[1]`
+    /// does, and an associative one takes it as the key it spells, as
+    /// bash's does.
+    pub async fn unset_element(
+        &mut self,
+        name: &str,
+        subscript: &[u8],
+        every: bool,
+    ) -> Result<Element, Fault> {
         let name = self.store.target(name);
         if self.store.hidden(&name) {
             return Ok(Element::Landed);
         }
-        let every = matches!(subscript, b"@" | b"*");
         if let Some(array) = self.store.special(&name) {
             if every {
                 return Ok(Element::Landed);
@@ -487,17 +541,22 @@ impl<G: Gate> Writer<'_, G> {
                 Element::Landed
             });
         }
-        if every {
-            return match self.store.record(&name).and_then(|var| var.value.as_ref()) {
-                Some(Value::Indexed(_)) => {
+        match self.store.record(&name).and_then(|var| var.value.as_ref()) {
+            Some(Value::Indexed(array)) if every => {
+                // An empty array stays as it was declared, and clearing one
+                // marks nothing for export under `set -a`.
+                if !array.is_empty() {
                     let empty = Value::Indexed(Indexed::default());
                     let assigned = Assigned::Indexes(HashSet::new());
-                    self.set(&name, empty, false, Some(&assigned), None).await?;
-                    Ok(Element::Landed)
+                    let allexport = std::mem::replace(&mut self.allexport, false);
+                    let cleared = self.set(&name, empty, false, Some(&assigned), None).await;
+                    self.allexport = allexport;
+                    cleared?;
                 }
-                Some(Value::Scalar(_)) => Ok(Element::NotArray),
-                _ => Ok(Element::Landed),
-            };
+                return Ok(Element::Landed);
+            }
+            Some(Value::Scalar(_)) if every => return Ok(Element::NotArray),
+            _ => {}
         }
         let slot = match self.store.record(&name).and_then(|var| var.value.as_ref()) {
             Some(Value::Assoc(map)) if map.get(subscript).is_none() => {
@@ -533,11 +592,7 @@ impl<G: Gate> Writer<'_, G> {
     /// an enclosing scope's value and is then refused gives that value back
     /// to the scope.
     pub async fn unset(&mut self, name: &str, follow_ref: bool) -> Result<(), Fault> {
-        let name = if follow_ref {
-            self.store.target(name)
-        } else {
-            name.to_owned()
-        };
+        let name = self.aim(name, follow_ref);
         if self.store.hidden(&name) {
             return Ok(());
         }
@@ -587,11 +642,7 @@ impl<G: Gate> Writer<'_, G> {
         on: bool,
         follow_ref: bool,
     ) -> Result<(), Fault> {
-        let name = if follow_ref && attr != Some(NAMEREF) {
-            self.store.target(name)
-        } else {
-            name.to_owned()
-        };
+        let name = self.aim(name, follow_ref && attr != Some(NAMEREF));
         self.visible(&name)?;
         if self.gate.listens() {
             self.gate.pre(Verb::Set, &name, None, self.store).await?;
@@ -650,11 +701,7 @@ impl<G: Gate> Writer<'_, G> {
         text: Vec<u8>,
     ) -> Result<(), Fault> {
         let name = self.store.target(name);
-        let index = |key: Option<&[u8]>| {
-            key.and_then(|key| std::str::from_utf8(key).ok())
-                .and_then(|key| key.parse().ok())
-                .unwrap_or(0)
-        };
+        let index = |key: Option<&[u8]>| key.and_then(parse_decimal).unwrap_or(0);
         match self.store.record(&name).and_then(|var| var.value.as_ref()) {
             Some(Value::Assoc(_)) => {
                 let key = key.unwrap_or_else(|| b"0".to_vec());
@@ -686,8 +733,14 @@ impl<G: Gate> Writer<'_, G> {
         let landed = self.land_writes(std::mem::take(&mut coercion.writes)).await;
         self.store.step_forward(globals);
         landed?;
+        self.settle(&mut coercion.draws)
+    }
+
+    /// Replay an evaluation's `RANDOM` draws; a seed that does not
+    /// evaluate stops the line as a coercion's error does.
+    fn settle(&mut self, draws: &mut Draws) -> Result<(), Fault> {
         self.store
-            .settle(&mut coercion.draws)
+            .settle(draws)
             .map_err(|error| fatal(self.store.voice(), error))
     }
 
@@ -708,9 +761,7 @@ impl<G: Gate> Writer<'_, G> {
             Err(error) => (0, Some(error)),
         };
         self.land_writes(outcome.writes).await?;
-        self.store
-            .settle(&mut draws)
-            .map_err(|error| fatal(self.store.voice(), error))?;
+        self.settle(&mut draws)?;
         match error {
             None => Ok(index),
             Some(arith::Error::Arith {
@@ -897,9 +948,7 @@ impl<G: Gate> Writer<'_, G> {
                 }
             }
         }
-        self.store
-            .settle(&mut draws)
-            .map_err(|error| fatal(self.store.voice(), error))?;
+        self.settle(&mut draws)?;
         landed?;
         value.map_err(|error| match error {
             arith::Error::Unbound(name) => Signal::unbound(self.store.voice(), &name).into(),
@@ -929,7 +978,7 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use super::*;
-    use crate::vars::{INTEGER, RANDOM, READONLY};
+    use crate::vars::{EXPORT, RANDOM, READONLY, UNASSIGNED};
 
     #[derive(Default)]
     struct Recorder {
@@ -1092,6 +1141,16 @@ mod tests {
     }
 
     #[test]
+    fn an_element_seeding_random_lands_what_it_assigns() {
+        let mut store = Store::new(Arc::new(|| 1));
+        let mut gate = Recorder::default();
+        let seeded = Value::Indexed(Indexed::dense([b"x=1+2".to_vec()]));
+        run(writer(&mut store, &mut gate).set(RANDOM, seeded, true, None, None)).unwrap();
+        assert_eq!(text(&store, "x").as_deref(), Some("3"));
+        assert_eq!(store.indexed(RANDOM).unwrap().get(0), Some(&b"3"[..]));
+    }
+
+    #[test]
     fn a_bare_name_over_an_array_assigns_element_zero() {
         let mut store = Store::new(Arc::new(|| 1));
         store.seed(
@@ -1241,11 +1300,11 @@ mod tests {
         let landed = run(writer.element("a", Some(b"x=1"), b"!", true)).unwrap();
         assert_eq!(landed, Element::Landed);
         assert_eq!(
-            run(writer.unset_element("a", b"0")).unwrap(),
+            run(writer.unset_element("a", b"0", false)).unwrap(),
             Element::Landed
         );
         assert_eq!(
-            run(writer.unset_element("a", b"-9")).unwrap(),
+            run(writer.unset_element("a", b"-9", false)).unwrap(),
             Element::Subscript
         );
         let array: Vec<_> = writer.store.indexed("a").unwrap().iter().collect();
@@ -1256,19 +1315,37 @@ mod tests {
         let refused = run(writer.element("i", Some(b"y=2"), b"0", false)).unwrap();
         assert_eq!(refused, Element::Readonly);
         assert_eq!(
-            run(writer.unset_element("s", b"1")).unwrap(),
+            run(writer.unset_element("s", b"1", false)).unwrap(),
             Element::NotArray
         );
         assert_eq!(
-            run(writer.unset_element("s", b"*")).unwrap(),
+            run(writer.unset_element("s", b"*", true)).unwrap(),
             Element::NotArray
         );
         let pair = Indexed::dense([b"x".to_vec(), b"y".to_vec()]);
         writer.store.seed("e", Value::Indexed(pair));
-        run(writer.unset_element("e", b"@")).unwrap();
+        let expanded = run(writer.unset_element("e", b"@", false));
+        assert!(matches!(expanded, Err(Fault::Arith(_))));
+        run(writer.unset_element("e", b"@", true)).unwrap();
         assert_eq!(writer.store.indexed("e").map(Indexed::count), Some(0));
+        let keyed = [
+            (b"@".to_vec(), b"v".to_vec()),
+            (b"k".to_vec(), b"w".to_vec()),
+        ];
+        writer
+            .store
+            .seed("q", Value::Assoc(Box::new(keyed.into_iter().collect())));
+        run(writer.unset_element("q", b"@", true)).unwrap();
+        let left: Vec<_> = writer
+            .store
+            .assoc("q")
+            .unwrap()
+            .iter()
+            .map(|(k, _)| k.to_vec())
+            .collect();
+        assert_eq!(left, [b"k".to_vec()]);
         assert_eq!(
-            run(writer.unset_element("s", b"0")).unwrap(),
+            run(writer.unset_element("s", b"0", false)).unwrap(),
             Element::Landed
         );
         assert_eq!(text(writer.store, "s"), None);
@@ -1276,16 +1353,16 @@ mod tests {
         assert_eq!(text(writer.store, "y").as_deref(), Some("2"));
         writer
             .store
-            .set_specials(vec![1], None, 1, 1, b"bash: ".to_vec());
-        let read = run(writer.unset_element("PIPESTATUS", b"z=4")).unwrap();
+            .set_specials(vec![1], None, Vec::new(), 1, 1, b"bash: ".to_vec());
+        let read = run(writer.unset_element("PIPESTATUS", b"z=4", false)).unwrap();
         assert_eq!(read, Element::Landed);
         assert_eq!(text(writer.store, "z").as_deref(), Some("4"));
-        let before = run(writer.unset_element("PIPESTATUS", b"-5")).unwrap();
+        let before = run(writer.unset_element("PIPESTATUS", b"-5", false)).unwrap();
         assert_eq!(before, Element::Subscript);
-        let every = run(writer.unset_element("PIPESTATUS", b"@")).unwrap();
+        let every = run(writer.unset_element("PIPESTATUS", b"@", true)).unwrap();
         assert_eq!(every, Element::Landed);
         writer.store.seed("PIPESTATUS", scalar("left"));
-        let shadowed = run(writer.unset_element("PIPESTATUS", b"*")).unwrap();
+        let shadowed = run(writer.unset_element("PIPESTATUS", b"*", true)).unwrap();
         assert_eq!(shadowed, Element::Landed);
         let special = run(writer.element("PIPESTATUS", Some(b"-1"), b"0", false)).unwrap();
         assert_eq!(special, Element::Landed);
@@ -1296,6 +1373,14 @@ mod tests {
             Err(Fault::Signal(Signal::Exit { status: 2, .. }))
         ));
         assert_eq!(writer.store.indexed("a").unwrap().count(), 2);
+        writer.store.seed("g", Value::Indexed(Indexed::default()));
+        writer.store.set_attr("g", Some(UNASSIGNED), true);
+        writer.allexport = true;
+        let fresh = run(writer.push("g", vec![b"1".to_vec(), b"far too long".to_vec()]));
+        assert!(fresh.is_err());
+        let g = writer.store.record("g").unwrap();
+        assert!(g.has(UNASSIGNED) && !g.has(EXPORT));
+        writer.allexport = false;
         writer.limit = None;
         writer
             .store

@@ -71,9 +71,11 @@ export async function handleSource(
   cs.admit(name)
   const params = args.length > 0 ? args : [...positionalParams(session, cs)]
   checkEnv(session, 0, argsBytes(params), framesBytes(cs))
-  cs.push(params, 'source', true)
+  cs.push(params, 'source', true, session.lineNumber)
   const outerNames = session.functionNames
   if (outerNames !== null) session.functionNames = cs.functionNames()
+  const outerLines = session.callLines
+  session.callLines = cs.callLines()
   // Its diagnostics name the file, as spelled, and count its own lines.
   const outerName = session.parseName
   const outerHead = session.parseHead
@@ -106,6 +108,7 @@ export async function handleSource(
   } finally {
     const frame = cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
+    session.callLines = outerLines
     if (args.length === 0) setPositionalParams(session, cs, frame.positional)
   }
   return [stdout, io, new ExecutionNode({ command: `source ${raw}`, exitCode: io.exitCode })]

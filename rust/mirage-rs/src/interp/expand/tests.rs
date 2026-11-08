@@ -587,6 +587,22 @@ fn option_letters() {
 }
 
 #[test]
+fn a_braced_read_of_an_array_named_random_draws_nothing() {
+    let mut sh = shell();
+    sh.vars.seed(
+        crate::vars::RANDOM,
+        Value::Indexed(Indexed::dense([b"7".to_vec(), b"9".to_vec()])),
+    );
+    assert_eq!(ok(&mut sh, "echo ${RANDOM:-fallback}"), ["7"]);
+    assert_eq!(
+        sh.vars
+            .indexed(crate::vars::RANDOM)
+            .and_then(|array| array.get(1)),
+        Some(&b"9"[..])
+    );
+}
+
+#[test]
 fn an_array_without_element_zero_is_unset() {
     let mut sh = shell();
     sh.vars.seed("s", Value::Indexed(Indexed::default()));

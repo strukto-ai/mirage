@@ -7,8 +7,10 @@ from mirage.commands.builtin.utils.constants import CHAR_DEVICE_MAX_BYTES
 from mirage.commands.builtin.utils.limit import truncate_stream
 from mirage.commands.builtin.utils.operands import (
     normalized_read,
+    operand_lines,
     operands_io,
     report_fs_error,
+    say,
     split_opened,
 )
 from mirage.commands.builtin.utils.stream import (
@@ -143,14 +145,15 @@ async def head_stream(
 
 
 async def head_multi(
-    paths: list[PathSpec],
+    paths: list[PathSpec | bytes],
     *,
     read: Callable[..., Any],
+    io: IOResult | None = None,
     n: int | None = None,
     c: int | None = None,
     show_headers: bool = False,
     zero_terminated: bool = False,
-    unread: frozenset[str] = frozenset(),
+    unread: Mapping[str, bytes] | None = None,
     refused: Collection[str] = frozenset(),
 ) -> AsyncIterator[bytes]:
     """Run head over multiple already-resolved paths.
@@ -163,40 +166,56 @@ async def head_multi(
     exit (``cat big | head -5``).
 
     Args:
-        paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
+        paths (list[PathSpec | bytes]): Resolved paths, only
+            ``.virtual`` read, and the stderr line of each operand that
+            did not open, said on ``io`` where it stood.
         read (Callable[..., Any]): Bound reader called as ``read(path)``;
             returns bytes, an awaitable of bytes, or an async byte iterator.
-        unread (frozenset[str]): operands that opened but do not read (a
-            directory): each prints its header and nothing else.
+        io (IOResult | None): the result the lines are said on; None
+            when every operand opens and reads.
+        unread (Mapping[str, bytes] | None): operands that opened but do
+            not read (a directory): each prints its header, then its line.
         refused (Collection[str]): filled by ``read`` with the operands
             whose open it refused, which print no header, as GNU opens a
             file before it heads it.
     """
+    unread = unread or {}
+    lines = operand_lines(paths, unread)
     printed = False
-    for p in paths:
-        body: AsyncIterator[bytes] | None = None
-        first: bytes | None = None
-        if p.virtual not in unread:
-            source = read(p)
-            if inspect.isawaitable(source):
-                source = await source
-            body = head_stream(
-                source, n=n, c=c, zero_terminated=zero_terminated
-            )
-            first = await anext(body, None)
-        try:
-            if show_headers and p.virtual not in refused:
-                yield operand_header(p, printed)
-                printed = True
-            if body is None:
+    try:
+        for i, p in enumerate(paths):
+            if isinstance(p, bytes):
+                if io is not None:
+                    await say(io, lines.pop(i))
                 continue
-            if first is not None:
-                yield first
-            async for chunk in body:
-                yield chunk
-        finally:
-            if body is not None:
-                await close_quietly(body)
+            body: AsyncIterator[bytes] | None = None
+            first: bytes | None = None
+            if p.raw_path not in unread:
+                source = read(p)
+                if inspect.isawaitable(source):
+                    source = await source
+                body = head_stream(
+                    source, n=n, c=c, zero_terminated=zero_terminated
+                )
+                first = await anext(body, None)
+            try:
+                if show_headers and p.virtual not in refused:
+                    yield operand_header(p, printed)
+                    printed = True
+                if body is None:
+                    if io is not None:
+                        await say(io, lines.pop(i))
+                    continue
+                if first is not None:
+                    yield first
+                async for chunk in body:
+                    yield chunk
+            finally:
+                if body is not None:
+                    await close_quietly(body)
+    finally:
+        if lines and io is not None:
+            await say(io, b"".join(lines.values()))
 
 
 async def head_generic(
@@ -238,10 +257,14 @@ async def head_generic(
     stream = stdin_stream(stream, ctx.stdin)
     if paths:
         show_headers = shows_headers(parsed.verbose, parsed.quiet, len(paths))
-        opened, unread, err = await split_opened(paths, stat, "head")
-        io = operands_io(err)
-        if not opened:
-            return None, io
+        order, unread = await split_opened(paths, stat, "head")
+        if not any(isinstance(p, PathSpec) for p in order):
+            return None, operands_io(
+                b"".join(operand_lines(order, unread).values())
+            )
+        io = operands_io(b"")
+        if unread or any(isinstance(p, bytes) for p in order):
+            io.exit_code = 1
         read = normalized_read(stream)
         n = parsed.lines if parsed.lines is not None else 10
         pushed = (
@@ -292,8 +315,9 @@ async def head_generic(
             return bounded()
 
         return head_multi(
-            opened,
+            order,
             read=source_for,
+            io=io,
             n=parsed.lines,
             c=parsed.bytes_,
             show_headers=show_headers,

@@ -71,7 +71,9 @@ impl Rev {
 
 impl Stream for Rev {
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.records.push(input);
+        self.records.push(input).map_err(|_| {
+            StreamError::refusal(b"rev: cannot allocate 4 bytes: Cannot allocate memory", 1)
+        })?;
         self.pump(out);
         Ok(())
     }

@@ -81,7 +81,7 @@ export async function handleResponse(r: Response): Promise<unknown> {
     } catch {
       // body wasn't JSON; fall through with the raw text as detail
     }
-    fail(`daemon error ${String(r.status)}: ${detail}`, 2)
+    fail(`error ${String(r.status)}: ${detail}`, 2)
   }
   if (r.status === 204) return {}
   const text = await r.text()

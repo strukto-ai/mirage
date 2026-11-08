@@ -16,14 +16,22 @@ import { diffGeneric, parseFlags } from '../../generic/diff.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
-import { commandFiles, resolveOrEmpty } from '../files.ts'
+import { commandFiles, fileSize, resolveOrEmpty } from '../files.ts'
 
 const diff: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const parsed = parseFlags(ctx.flags)
   if (parsed instanceof IOResult) return [null, parsed]
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return diffGeneric(parsed, resolved, ctx, files.read, files.readdir, files.stat)
+  return diffGeneric(
+    parsed,
+    resolved,
+    ctx,
+    files.read,
+    files.readdir,
+    files.stat,
+    fileSize(files, ctx),
+  )
 }
 
 export const BUILDER: GenericCommand = {

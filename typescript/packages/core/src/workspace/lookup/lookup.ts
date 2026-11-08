@@ -106,6 +106,23 @@ export function routedConsumer(
 }
 
 /**
+ * The line's placement with no runtime capturing `name`, which is how
+ * `builtin` runs its target: the shell's own builtin, though a runtime takes
+ * the name by itself (`builtin kill`). Mirrors Python's `without_capture`.
+ */
+export function withoutCapture(
+  routing: RouteDecision<Runtime> | undefined,
+  name: string,
+): RouteDecision<Runtime> | undefined {
+  if (routing === undefined || !Object.hasOwn(routing.bindings, name)) return routing
+  const bindings = Object.create(null) as Record<string, Runtime | null>
+  for (const [key, bound] of Object.entries(routing.bindings)) {
+    if (key !== name) bindings[key] = bound
+  }
+  return { ...routing, bindings }
+}
+
+/**
  * Where a wrapper's program stands in its words when Mirage runs that
  * program itself, without the wrapper (`nice grep`); null otherwise. Mirrors
  * Python's `mirage_program_at`.

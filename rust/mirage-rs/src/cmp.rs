@@ -97,8 +97,10 @@ fn count(raw: &[u8], option: &str, shown: &[u8]) -> Result<u64, StreamError> {
 /// GNU cmp over two inputs fed side by side: each is skipped, cut at -n,
 /// and compared in lock step, so without -l the reads stop at the first
 /// difference. -l lists every one, its offset column sized by what each
-/// file held. Known sizes let rows drain immediately; unknown file sizes
-/// defer the width until both inputs end.
+/// file held. Known sizes let rows drain immediately; an unknown file size
+/// defers the width until both inputs end, or until a window of rows
+/// waits, which then go out at the widest offset the known sizes allow, as
+/// for a pipe.
 struct Cmp {
     config: Config,
     skip: [u64; 2],
@@ -320,6 +322,7 @@ impl Cmp {
             self.compared += count as u64;
             self.held[0].drain(..count);
             self.held[1].drain(..count);
+            self.known_width |= self.rows.len() >= WINDOW / 16;
             if self.known_width && !self.rows.is_empty() {
                 return;
             }
@@ -561,5 +564,23 @@ mod tests {
         );
         assert_eq!(got.out, "   2 142 130\n");
         assert_eq!(run(r#""verbose":true"#, [&[b"same"], &[b"same"]]).status, 0);
+    }
+
+    #[test]
+    fn l_streams_rows_past_a_window_at_the_widest_offset() {
+        let first = vec![b'a'; 10_000];
+        let second = vec![b'b'; 10_000];
+        let unknown = run(r#""verbose":true"#, [&[&first], &[&second]]);
+        let rows: Vec<&str> = unknown.out.lines().collect();
+        assert_eq!(rows.len(), 10_000);
+        assert_eq!(rows[0], format!("{:>19} 141 142", 1));
+        assert_eq!(rows[9_999], format!("{:>19} 141 142", 10_000));
+        let known = run(
+            r#""verbose":true,"sizes":[10000,null]"#,
+            [&[&first], &[&second]],
+        );
+        assert_eq!(known.out.lines().next(), Some("    1 141 142"));
+        let few = run(r#""verbose":true"#, [&[&first[..3]], &[b"aXa"]]);
+        assert_eq!(few.out, "2 141 130\n");
     }
 }

@@ -27,13 +27,13 @@ import type { ExecutionNode, StatusWriter } from '../types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import {
   Inherited,
-  type Recorder,
+  Recorder,
   type StreamOwner,
   deliver,
   unreadableStdin,
 } from '../../shell/descriptors.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
-import { concat } from '../../utils/bytes.ts'
+import { concat, startsWith } from '../../utils/bytes.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { getNegatedCommand, getParts, getRedirects } from '../../shell/helpers.ts'
 import { literalText } from '../../shell/parse/names.ts'
@@ -518,18 +518,73 @@ export async function statementOutput(
     else if (key.owner === own || !(await deliver(sink, key, data, currentCaller().enclosing)))
       written.push([key.channel, data, true])
   }
-  let out: ByteSource | null
-  let err: ByteSource | null
+  let returned: [Channel | Inherited, ByteSource | null][]
   try {
-    ;[out, err] = await spooledPair(stdout, io.stderr)
+    if (stdout === null || stdout instanceof Uint8Array) {
+      const [out, err] = await spooledPair(stdout, io.stderr)
+      returned = [
+        [Channel.STDOUT, out],
+        [Channel.STDERR, err],
+      ]
+    } else {
+      const order = new Recorder()
+      try {
+        for await (const [channel, chunk] of interleaved(stdout, io))
+          await order.emit(channel, chunk)
+      } catch (error) {
+        await order.close()
+        throw error
+      }
+      returned = [...(await order.take()), [Channel.STDERR, await materialize(io.stderr)]]
+    }
   } catch (error) {
     await discardStreams(...written.map(([, data]) => data))
     throw error
   }
   io.stderr = null
-  if (out !== null) written.push([Channel.STDOUT, out, false])
-  if (err !== null) written.push([Channel.STDERR, err, false])
+  for (const [channel, data] of returned) {
+    if (data === null || channel instanceof Inherited) continue
+    if (data instanceof Uint8Array && data.byteLength === 0) continue
+    written.push([channel, data, false])
+  }
   return written
+}
+
+/**
+ * `stdout`'s chunks, each after the stderr `io` gained while it was read, so
+ * a command's errors keep their place among its output (`cat a missing b
+ * 2>&1`). What `io` held when the stream started waits for what comes next,
+ * or for after the stream: one command that returns both at once keeps no
+ * order between them. What went out is cut off `io.stderr` once the stream
+ * ends. Mirrors Python's interleaved.
+ */
+export async function* interleaved(
+  stdout: AsyncIterable<Uint8Array>,
+  io: IOResult,
+): AsyncGenerator<[Channel, Uint8Array]> {
+  const held = io.stderr
+  const start = held instanceof Uint8Array ? held.byteLength : 0
+  let sent: Uint8Array = new Uint8Array(0)
+  try {
+    for await (const chunk of stdout) {
+      const err = io.stderr
+      if (
+        err instanceof Uint8Array &&
+        err.byteLength > Math.max(sent.byteLength, start) &&
+        startsWith(err, sent)
+      ) {
+        yield [Channel.STDERR, err.subarray(sent.byteLength)]
+        sent = err
+      }
+      yield [Channel.STDOUT, chunk]
+    }
+  } finally {
+    const err = io.stderr
+    if (sent.byteLength > 0 && err instanceof Uint8Array && startsWith(err, sent)) {
+      const rest = err.subarray(sent.byteLength)
+      io.stderr = rest.byteLength > 0 ? rest : null
+    }
+  }
 }
 
 /**

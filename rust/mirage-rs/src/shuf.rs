@@ -8,7 +8,16 @@ use crate::{Stream, StreamError, parse_config};
 const WORK: usize = 16 * 1024;
 const MEMORY: u64 = 1024 * 1024;
 const DRAWS: usize = 16 * 1024;
+/// The most records an indexed shuffle orders in memory; past it the
+/// host's index spool swaps them.
 const MAX_LINES: u64 = 1_000_000;
+/// The most a range shuffle holds, its whole order or the values it has
+/// drawn: past it shuf fails as the real one does once memory runs out.
+const MAX_HELD: u64 = 1 << 30;
+/// What one value costs a range shuffle in its order, and in the set of
+/// values drawn.
+const ORDER_COST: u64 = 8;
+const SEEN_COST: u64 = 32;
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -32,7 +41,7 @@ struct Config {
     size: u64,
     #[serde(default)]
     available: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "decimal_u64")]
     need: u64,
     #[serde(default)]
     repeat: bool,
@@ -40,6 +49,20 @@ struct Config {
     low: u64,
     #[serde(default, deserialize_with = "decimal_u64")]
     high: u64,
+}
+
+impl Config {
+    /// Whether the shuffle holds its whole order: an index while it is
+    /// short, a range while it is short or costs less than the values a
+    /// sample would draw and fits what shuf holds.
+    fn ordered(&self) -> bool {
+        let available = self.available;
+        !self.repeat
+            && (available <= MAX_LINES
+                || self.mode == Mode::Range
+                    && available <= MAX_HELD / ORDER_COST
+                    && available * ORDER_COST < self.need.saturating_mul(SEEN_COST))
+    }
 }
 
 fn decimal_u64<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
@@ -187,7 +210,11 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             .and_then(|n| n.checked_add(1))
             .ok_or_else(|| StreamError::new("shuf: invalid input range"))?;
     }
-    if config.need > MAX_LINES || config.mode == Mode::Shuffle && config.size > MEMORY {
+    let held = config.mode == Mode::Range
+        && !config.repeat
+        && !config.ordered()
+        && config.need > MAX_HELD / SEEN_COST;
+    if held || config.mode == Mode::Shuffle && config.size > MEMORY {
         return Err(StreamError::new("shuf: memory exhausted"));
     }
     if config.mode == Mode::Records {
@@ -248,6 +275,7 @@ impl Shuf {
         self.config.mode == Mode::Indexed
             || self.config.mode == Mode::Draw && self.config.size > MEMORY
     }
+
     fn step(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         let mut work = WORK;
         let output_end = out.len() + WORK;
@@ -329,7 +357,7 @@ impl Shuf {
                     }
                 }
                 Phase::Initialize => {
-                    if !self.config.repeat && self.config.available <= MAX_LINES {
+                    if self.config.ordered() {
                         if (self.order.len() as u64) < self.config.available {
                             self.order.push(self.order.len() as u64);
                             continue;
@@ -404,14 +432,11 @@ impl Shuf {
                         break;
                     }
                     let randomized = self.config.repeat
-                        || self.config.mode == Mode::Range && self.config.available > MAX_LINES;
+                        || self.config.mode == Mode::Range && !self.config.ordered();
                     let pick = if randomized {
                         let Some(pick) = self.random.pop_front() else {
-                            self.draws(
-                                self.config.available,
-                                (self.config.need - self.emitted) as usize,
-                                false,
-                            );
+                            let left = (self.config.need - self.emitted).min(DRAWS as u64);
+                            self.draws(self.config.available, left as usize, false);
                             continue;
                         };
                         if pick >= self.config.available {
@@ -1018,19 +1043,20 @@ mod tests {
             data.push(b'\n');
         }
         let config =
-            json!({"mode":"records", "separator":10, "size":data.len(), "available":3, "need":3});
+            json!({"mode":"records", "separator":10, "size":data.len(), "available":3, "need":"3"});
         let row = MEMORY as usize + 8;
         let expected = [&data[row..], &data[..row]].concat();
         assert_eq!(drive(config, &data, b"").0, expected);
-        let config = json!({"mode":"records", "separator":10, "size":data.len(), "available":3, "need":2, "repeat":true});
+        let config = json!({"mode":"records", "separator":10, "size":data.len(), "available":3, "need":"2", "repeat":true});
         assert_eq!(drive(config, &data, b"").0, data[..row].repeat(2));
-        let config = json!({"mode":"records", "separator":10, "size":row, "available":1, "need":1});
+        let config =
+            json!({"mode":"records", "separator":10, "size":row, "available":1, "need":"1"});
         assert_eq!(drive(config, &data[..row], b"").0, data[..row]);
     }
 
     #[test]
     fn spilled_index_shuffle_keeps_the_injected_permutation_without_an_order_vector() {
-        let config = json!({"mode":"indexed","separator":10,"size":3,"available":3,"need":3});
+        let config = json!({"mode":"indexed","separator":10,"size":3,"available":3,"need":"3"});
         let mut stream = create(serde_json::from_value(config).unwrap());
         stream.phase = Phase::Shuffle;
         stream.shuffle_left = 3;
@@ -1043,7 +1069,7 @@ mod tests {
             drive_stream(Box::new(stream), b"abc", &index).0,
             b"b\nc\na\n"
         );
-        let config = json!({"mode":"indexed","separator":10,"available":MAX_LINES+1,"need":1});
+        let config = json!({"mode":"indexed","separator":10,"available":MAX_LINES+1,"need":"1"});
         let mut stream = create(serde_json::from_value(config).unwrap());
         stream.drain(&mut Vec::new()).unwrap();
         assert!(stream.order.is_empty());
@@ -1125,18 +1151,60 @@ mod tests {
     fn shuffle_and_draw_use_the_same_injected_indices() {
         let data = b"a\nb\nc\n";
         let config =
-            json!({"mode":"shuffle", "separator":10,"size":data.len(),"available":3,"need":3});
+            json!({"mode":"shuffle", "separator":10,"size":data.len(),"available":3,"need":"3"});
         assert_eq!(drive(config, data, b"").0, b"b\nc\na\n");
-        let config = json!({"mode":"draw", "separator":10,"size":data.len(),"available":3,"need":5,"repeat":true});
+        let config = json!({"mode":"draw", "separator":10,"size":data.len(),"available":3,"need":"5","repeat":true});
         assert_eq!(drive(config, data, b"").0, b"a\na\na\na\na\n");
     }
 
     #[test]
     fn output_windows_do_not_drop_a_range_pick() {
         let count = 10_000;
-        let config = json!({"mode":"range","separator":0,"low":u64::MAX.to_string(),"high":u64::MAX.to_string(),"need":count,"repeat":true});
+        let config = json!({"mode":"range","separator":0,"low":u64::MAX.to_string(),"high":u64::MAX.to_string(),"need":count.to_string(),"repeat":true});
         let expected = format!("{}\0", u64::MAX).repeat(count);
         assert_eq!(drive(config, b"", b"").0, expected.as_bytes());
+    }
+
+    #[test]
+    fn only_a_range_past_what_shuf_holds_runs_out_of_memory() {
+        let range = |high: u64, need: u64, repeat: bool| {
+            json!({"mode":"range","separator":10,"low":"1","high":high.to_string(),
+                "need":need.to_string(),"repeat":repeat})
+            .to_string()
+        };
+        let most = MAX_HELD / ORDER_COST;
+        for (high, need, repeat) in [
+            (most, most, false),
+            (u64::MAX, MAX_HELD / SEEN_COST, false),
+            (2, u64::MAX, true),
+        ] {
+            assert!(open(range(high, need, repeat).as_bytes()).is_ok());
+        }
+        let refused = open(range(most + 1, most + 1, false).as_bytes()).err();
+        assert_eq!(refused, Some(StreamError::new("shuf: memory exhausted")));
+        for (available, need, ordered) in [(100_000_000, 3, false), (2_600_000, 2_600_000, true)] {
+            let mut config: Config = serde_json::from_str(&range(available, need, false)).unwrap();
+            config.available = available;
+            assert_eq!(config.ordered(), ordered, "{available} {need}");
+        }
+        let records = json!({"mode":"records","separator":10,"size":1,
+            "available":MAX_LINES + 1,"need":(MAX_LINES + 1).to_string()});
+        assert!(open(records.to_string().as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn a_range_past_a_million_values_is_one_permutation() {
+        let count = MAX_LINES + 1;
+        let config = json!({"mode":"range","separator":10,"low":"1","high":count.to_string(),
+            "need":count.to_string(),"repeat":false});
+        let (out, _) = drive(config, b"", b"");
+        let mut values: Vec<u64> = out
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| std::str::from_utf8(line).unwrap().parse().unwrap())
+            .collect();
+        values.sort_unstable();
+        assert!(values.iter().copied().eq(1..=count));
     }
 
     #[test]
@@ -1157,7 +1225,7 @@ mod tests {
         index.extend_from_slice(&0u64.to_le_bytes());
         index.extend_from_slice(&(data.len() as u64).to_le_bytes());
         let config =
-            json!({"mode":"indexed","separator":10,"size":data.len(),"available":1,"need":1});
+            json!({"mode":"indexed","separator":10,"size":data.len(),"available":1,"need":"1"});
         let mut expected = data.clone();
         expected.push(b'\n');
         assert_eq!(drive(config, &data, &index).0, expected);

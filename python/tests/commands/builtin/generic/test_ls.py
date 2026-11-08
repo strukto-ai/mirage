@@ -27,6 +27,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.types import CommandTimeoutError
+from mirage.io.types import IOResult, materialize
 from mirage.types import (
     ContentType,
     FileStat,
@@ -159,6 +160,7 @@ async def test_ls_unstattable_entry_is_a_minor_problem():
         stat=denying_stat,
         layout=LsFormat.VERBOSE,
     )
+    output = await materialize(output)
     assert io.exit_code == LS_MINOR_PROBLEM
     assert output.decode().endswith("? locked.txt\n")
     assert b"locked.txt" in (io.stderr or b"")
@@ -217,6 +219,7 @@ def _failing_entry(exc: Exception):
 async def test_ls_lists_an_unstattable_entry(exc, flags, row, stderr):
     readdir, stat = _failing_entry(exc)
     output, io = await ls([_spec("/dir")], readdir=readdir, stat=stat, **flags)
+    output = await materialize(output)
     *_, sibling, last = output.decode().splitlines()
     assert sibling.endswith("a.txt") and last == row
     assert (io.stderr or b"") == stderr
@@ -252,7 +255,7 @@ async def test_ls_size_sort_counts_an_unstattable_directory_as_zero():
         sort_by=LsSortBy.SIZE,
     )
     assert io.exit_code == LS_MINOR_PROBLEM
-    assert output == b"afile\nzdir\n"
+    assert await materialize(output) == b"afile\nzdir\n"
 
 
 @pytest.mark.asyncio
@@ -379,10 +382,64 @@ async def test_a_directory_it_may_not_open_lists_nothing_owed_to_it():
         child_mounts=lambda d: ["il"] if d == "/base/sealed" else [],
     )
     assert io.exit_code == LS_MINOR_PROBLEM
-    assert out.decode() == "/base:\nsealed\nx\n"
+    assert (await materialize(out)).decode() == "/base:\nsealed\nx\n"
     assert io.stderr == (
         b"ls: cannot open directory '/base/sealed': Permission denied\n"
     )
+
+
+async def _merged(out, io: IOResult) -> bytes:
+    merged = b""
+    said = 0
+    async for chunk in out:
+        err = io.stderr or b""
+        merged += err[said:] + chunk
+        said = len(err)
+    return merged + (io.stderr or b"")[said:]
+
+
+# GNU 9.7 (ls -1 z missing m a, then ls -1R, m mode 000): a missing
+# operand is reported first, a directory that will not open where its
+# listing would have printed, with no blank line before it.
+@pytest.mark.asyncio
+async def test_a_directory_it_cannot_open_is_reported_in_its_place():
+    tree = {
+        "/t": _dir("t"),
+        "/t/a": _dir("a"),
+        "/t/a/f1": _file("f1"),
+        "/t/m": _dir("m"),
+        "/t/z": _dir("z"),
+        "/t/z/f2": _file("f2"),
+    }
+    readdir, stat = _make_fs_backend(tree)
+
+    async def guarded(p: PathSpec, index=None) -> list[str]:
+        if p.virtual == "/t/m":
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return await readdir(p)
+
+    out, io = await ls(
+        [_spec("/t/z"), _spec("/t/missing"), _spec("/t/m"), _spec("/t/a")],
+        readdir=guarded,
+        stat=stat,
+    )
+    assert await _merged(out, io) == (
+        b"ls: cannot access '/t/missing': No such file or directory\n"
+        b"/t/a:\nf1\n"
+        b"ls: cannot open directory '/t/m': Permission denied\n"
+        b"\n/t/z:\nf2\n"
+    )
+    assert io.exit_code == LS_FAILURE
+
+    out, io = await ls(
+        [_spec("/t")], readdir=guarded, stat=stat, recursive=True
+    )
+    assert await _merged(out, io) == (
+        b"/t:\na\nm\nz\n\n/t/a:\nf1\n"
+        b"ls: cannot open directory '/t/m': Permission denied\n"
+        b"\n/t/z:\nf2\n"
+    )
+    assert io.exit_code == LS_MINOR_PROBLEM
 
 
 _SEALED_DOC = {
@@ -1017,6 +1074,7 @@ async def test_columns_come_from_the_environment_and_notices_lead_stderr():
         stat=stat,
         **ls_options({}, {"QUOTING_STYLE": "bogus"}),
     )
+    await materialize(out)
     assert io.exit_code == LS_FAILURE
     assert io.stderr == (
         b"ls: ignoring invalid value of environment variable "

@@ -101,7 +101,7 @@ def handle_response(r: httpx.Response) -> dict[str, Any] | list[Any]:
             detail = r.json().get("detail", r.text)
         except ValueError:
             detail = r.text
-        fail(f"daemon error {r.status_code}: {detail}", exit_code=2)
+        fail(f"error {r.status_code}: {detail}", exit_code=2)
     if not r.content:
         return {}
     return cast(dict[str, Any] | list[Any], r.json())

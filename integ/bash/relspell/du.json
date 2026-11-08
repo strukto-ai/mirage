@@ -26,10 +26,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "du -s sub/",
+      "command": "du -s sub/; du -s sub/ sub/; du -sl sub/ sub/ | wc -l; du -slL sub/ sub/ | wc -l",
       "expect": {
         "exit": 0,
-        "stdout": "12\tsub/\n",
+        "stdout": "12\tsub/\n12\tsub/\n2\n2\n",
         "stderr": ""
       }
     }

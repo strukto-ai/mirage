@@ -587,6 +587,7 @@ export const SHELL_ONLY_BUILTINS: ReadonlySet<string> = new Set([
   'alias',
   'bg',
   'break',
+  'builtin',
   'cd',
   'command',
   'compgen',

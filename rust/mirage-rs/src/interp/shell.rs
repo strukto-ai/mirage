@@ -63,6 +63,7 @@ pub struct Frame {
     pub outside: usize,
     pub pipe_status: Vec<i32>,
     pub function_names: Option<Vec<Vec<u8>>>,
+    pub call_lines: Vec<usize>,
     pub paren: bool,
     pub memory_room: Option<usize>,
     pub line: usize,
@@ -90,6 +91,7 @@ impl Shell {
         self.vars.set_specials(
             frame.pipe_status,
             frame.function_names,
+            frame.call_lines,
             frame.line,
             frame.bash_pid,
             frame.voice,
@@ -201,10 +203,22 @@ impl Shell {
         if self.vars.hidden(name) {
             return None;
         }
-        match self.vars.special(name) {
-            Some(array) => Some(Cow::Owned(array)),
-            None => self.vars.indexed(name).map(Cow::Borrowed),
+        self.vars.array(name)
+    }
+
+    /// What `$name` reads: element 0 of an array, a map's key `0`, the
+    /// live `LINENO` or `BASHPID`, else the scalar; None when it holds
+    /// none. Drawing `$RANDOM` is the caller's.
+    pub fn zero(&self, name: &str) -> Option<Vec<u8>> {
+        if let Some(array) = self.indexed(name) {
+            return array.get(0).map(<[u8]>::to_vec);
         }
+        if let Some(map) = self.vars.assoc(name) {
+            return map.get(b"0").map(<[u8]>::to_vec);
+        }
+        self.vars
+            .dynamic(name)
+            .or_else(|| self.vars.scalar(name).map(<[u8]>::to_vec))
     }
 
     /// The IFS in scope, None when it is unset, which splits as the

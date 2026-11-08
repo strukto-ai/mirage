@@ -28,6 +28,7 @@ from mirage.shell.arith import plain_decimal
 from mirage.shell.array import ShellArray, array_get
 from mirage.shell.bytes import join_bytes
 from mirage.shell.call_stack import CallStack
+from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellValue, VarAttr
 from mirage.view.types import SessionView
 from mirage.workspace.session.budget import (
@@ -82,6 +83,7 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
         outside=outside,
         pipe_status=list(session.pipe_status),
         function_names=None if names is None else list(names),
+        call_lines=list(session.call_lines),
         paren=call_stack is not None and call_stack.paren,
         memory_room=memory_room(),
         line=session.line_number,
@@ -324,6 +326,23 @@ async def subscript_index(
     )
 
 
+async def fatal_subscript_index(
+    session: SessionState, subscript: str, policies: Policies | None = None
+) -> int:
+    """``subscript_index`` whose failure ends the line, in bash's words:
+    ``unset 'a[1/0]'`` aborts with ``1/0: division by 0``.
+
+    Args:
+        session (SessionState): the session the subscript reads.
+        subscript (str): the raw subscript text.
+        policies (Policies | None): the policies its writes clear.
+    """
+    try:
+        return await subscript_index(session, subscript, policies)
+    except ArithError as exc:
+        raise exc.signal(fatal=True) from exc
+
+
 async def session_arith(
     session: SessionState,
     text: str,
@@ -532,6 +551,7 @@ async def unset_element(
     policies: Policies | None,
     name: str,
     subscript: str,
+    every: bool = False,
 ) -> str:
     """Clear one element (``unset 'a[i]'``) as one gated write, keeping
     the indexes after it: an associative subscript is the key verbatim, an
@@ -544,6 +564,8 @@ async def unset_element(
             subscript's assignments clear.
         name (str): the base variable name.
         subscript (str): the subscript, already expanded.
+        every (bool): the subscript was typed as ``@`` or ``*``, which
+            empties an indexed array and refuses on a scalar.
 
     Returns:
         str: ``"ok"``, ``"subscript"`` for a negative subscript before an
@@ -558,7 +580,9 @@ async def unset_element(
     return await _element_write(
         session,
         policies,
-        lambda heard: shell.unset_element(name, subscript, listens=heard),
+        lambda heard: shell.unset_element(
+            name, subscript, every=every, listens=heard
+        ),
     )
 
 

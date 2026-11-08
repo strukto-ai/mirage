@@ -14,7 +14,7 @@
 
 import { ShellBuiltin as SB } from '../../../shell/types.ts'
 import { aliasBuiltin, unaliasBuiltin } from './alias/alias.ts'
-import { commandBuiltin } from './command/command.ts'
+import { builtinBuiltin, commandBuiltin } from './command/command.ts'
 import { testBuiltin } from './condition/condition.ts'
 import {
   breakBuiltin,
@@ -97,6 +97,7 @@ export const BUILTINS: ReadonlyMap<string, BuiltinFn> = new Map<string, BuiltinF
   [SB.DOT, sourceBuiltin],
   [SB.EVAL, evalBuiltin],
   [SB.COMMAND, commandBuiltin],
+  [SB.BUILTIN, builtinBuiltin],
   [SB.TYPE, typeBuiltin],
   [SB.WHICH, whichBuiltin],
   [SB.HELP, helpBuiltin],

@@ -23,7 +23,7 @@ from mirage.commands.builtin.generic_bind.files import (
     resolve_or_empty,
 )
 from mirage.commands.builtin.utils.operands import (
-    merge_split_errors,
+    errors_first,
     normalized_read,
     reported_stream,
     split_readable,
@@ -120,7 +120,7 @@ async def tac(
     sources: list[ByteSource] = [
         reported_stream(read(path), io, path, "tac") for path in readable
     ] or [resolve_source(ctx.stdin)]
-    return await merge_split_errors((_reversed(engine, sources, io), io), err)
+    return await errors_first((_reversed(engine, sources, io), io), err)
 
 
 BUILDER = GenericCommand("tac", tac, read=True)

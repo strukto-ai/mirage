@@ -212,6 +212,146 @@
       "flags": [
         "r"
       ]
+    },
+    {
+      "id": "xxd_reverse_reads_each_line_as_xxd_does",
+      "seq": 963232,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\n68 65\\n6czz\\n6c' | xxd -r | xxd -p | tail -1; printf '41 42\\n' | xxd -r | wc -c; printf '0: 41 4 2\\n' | xxd -r; printf '0: 41z42\\n' | xxd -r; printf '0:41\\r\\n1:\\r42\\n' | xxd -r; printf '  0: 41\\n\\n\\n0002: 42  B\\n' | xxd -r | xxd -p; printf '00000010:\\n' | xxd -r | wc -c; printf '0: 41\\n2: 42\\n1: 43\\n' | xxd -r | xxd -p; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "000000000000000000000000000065000000\n66\nAABAB410042\n16\n410042\nrc=0\n",
+        "stderr": "xxd: Sorry, cannot seek backwards.\n"
+      }
+    },
+    {
+      "id": "xxd_reverse_takes_columns_and_a_base_offset",
+      "seq": 963233,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '00000000: 4142434445464748494a4b4c4d4e4f505152\\n' | xxd -r; echo; printf '00000000: 4142434445464748494a4b4c4d4e4f505152\\n' | xxd -r -c 4; echo; printf '00000000: 4142\\n' | xxd -r -s 3 | xxd -p; printf '00000004: 4142\\n' | xxd -r -s -2 | xxd -p; printf '00000000: 4142\\n' | xxd -r -s -2; echo rc=$?; printf '41\\n' | xxd -r -p -s 2 | xxd -p; printf '00000000: 41424344\\n' | xxd -r -l 2; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "ABCDEFGHIJKLMNOP\nABCD\n0000004142\n00004142\nrc=5\n000041\nABCD\n",
+        "stderr": "xxd: Sorry, cannot seek backwards.\n"
+      }
+    },
+    {
+      "id": "xxd_reverse_writes_into_outfile_past_a_base_offset",
+      "seq": 963234,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ABCDEFGH' > /data/xxd_rs; printf '00000004: 6869\\n00000001: 41\\n42\\n' | xxd -r - /data/xxd_rs; echo rc=$?; cat /data/xxd_rs; echo; printf '6162\\n' | xxd -r -p -s 2 - /data/xxd_rs; cat /data/xxd_rs; echo; printf '00000004: 6869\\n' | xxd -r -s -6 - /data/xxd_rs; echo rc=$?; cat /data/xxd_rs; echo; rm /data/xxd_rs",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nAACDhiGH\nAAabhiGH\nrc=5\nAAabhiGH\n",
+        "stderr": "xxd: Sorry, cannot seek backwards.\n"
+      }
+    },
+    {
+      "id": "xxd_reverse_streams_long_lines",
+      "seq": 963235,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "{ printf '0: '; head -c 600 /dev/zero | tr '\\0' 4; echo; } | xxd -r -c 256 | wc -c; head -c 100000 /dev/zero | tr '\\0' 7 | xxd -r | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "256\n0\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -568,8 +568,14 @@ async def _check_stream(
             async for _ in checked:
                 pass
     except StreamRefusal as disorder:
-        # The refusal's message is the record's number, its output the
-        # record, which GNU writes with its own terminator.
+        # A disorder's message is the record's number, its output the
+        # record, which sort writes with its own terminator; any other
+        # refusal is sort's own line.
+        if disorder.status != 1:
+            return IOResult(
+                exit_code=disorder.status,
+                stderr=encode_text(f"{disorder.message}\n"),
+            )
         error = None
         if not parsed.check_quiet:
             error = (

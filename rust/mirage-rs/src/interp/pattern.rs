@@ -11,10 +11,8 @@ use serde_json::{Value as Json, json};
 
 use super::write::Fault;
 use crate::Stream;
+use crate::glob;
 
-/// The characters the matcher reads specially, each quoted as its mark.
-const QUOTED: &[u8] = b"*?[@+!()|";
-const MARK: u32 = 0xFDD0;
 const ESCAPE: u32 = 0xDC00;
 
 /// Text as matcher units, and the byte offset each unit starts at, then
@@ -59,11 +57,7 @@ impl Pattern {
     /// Append text, its special characters live or, `quoted`, literal.
     pub fn push(&mut self, text: &[u8], quoted: bool, utf8: bool) {
         for unit in units(text, utf8).0 {
-            let mark = QUOTED
-                .iter()
-                .position(|&c| quoted && unit == u32::from(c))
-                .map_or(unit, |i| MARK + i as u32);
-            self.0.push(mark);
+            self.0.push(if quoted { glob::quote(unit) } else { unit });
         }
     }
 

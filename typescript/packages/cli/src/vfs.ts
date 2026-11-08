@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
+import { Readable } from 'node:stream'
 import { buffer } from 'node:stream/consumers'
+import { pipeline } from 'node:stream/promises'
 import type { Command } from 'commander'
 import {
   BYTES,
@@ -41,20 +43,25 @@ export const WORKSPACE_HELP = 'Workspace id; the current workspace when left out
 
 type Answer = Record<string, unknown>
 
-/** Send one session call to the daemon. Mirrors Python's `post`. */
-export async function post(
-  target: Target,
-  route: string,
-  body: Record<string, unknown>,
-): Promise<Response> {
+/** The path of one session call. Mirrors Python's `_route`. */
+function route(target: Target, call: string): string {
   const workspace = resolveWorkspace(target.workspace)
-  const c = makeClient()
-  await c.ensureRunning({ allowSpawn: false })
   const query = new URLSearchParams()
   if (target.session !== undefined) query.set('session_id', target.session)
   if (target.explain === true) query.set('explain', 'true')
   const suffix = query.size === 0 ? '' : `?${query.toString()}`
-  const path = `/v1/workspaces/${encodeURIComponent(workspace)}/${route}${suffix}`
+  return `/v1/workspaces/${encodeURIComponent(workspace)}/${call}${suffix}`
+}
+
+/** Send one session call to the daemon. Mirrors Python's `post`. */
+export async function post(
+  target: Target,
+  call: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const path = route(target, call)
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
   return c.request('POST', path, { body: JSON.stringify(body) })
 }
 
@@ -94,7 +101,6 @@ const text = (result: unknown): string => Buffer.from(String(result), 'base64').
 const lines = (result: unknown): string => (result as string[]).join('\n')
 
 const HUMAN: Readonly<Record<string, (result: unknown) => string>> = {
-  read: text,
   getxattr: text,
   readdir: lines,
   list_files: lines,
@@ -110,6 +116,16 @@ async function value(call: VfsCall, name: string, given: unknown): Promise<unkno
   if (call.params[name] === OWNER && typeof given === 'string' && /^\d+$/.test(given))
     return Number(given)
   return given
+}
+
+/**
+ * Write a read's bytes to stdout as they arrive, as they are, so a big or
+ * binary file passes through whole. Mirrors Python's `_read_to_stdout`.
+ */
+async function readToStdout(target: Target, body: Record<string, unknown>): Promise<void> {
+  const r = await post(target, 'vfs/read', { ...body, stream: true })
+  if (r.status >= 400 || r.body === null) await answer(r)
+  else await pipeline(Readable.fromWeb(r.body), process.stdout, { end: false })
 }
 
 function camel(name: string): string {
@@ -143,22 +159,29 @@ function command(vfs: Command, call: VfsCall): void {
     .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
     .option('-s, --session <id>', 'Session id')
     .option('--explain', 'Say what the call would do; run nothing')
-    .action(async (...given: unknown[]) => {
-      const opts = given[positional.length] as Target & Record<string, unknown>
-      const body: Record<string, unknown> = {}
-      for (const [i, name] of positional.entries()) {
-        body[name] = call.params[name] === INTEGER ? Number(given[i]) : given[i]
-      }
-      for (const name of Object.keys(call.params)) {
-        if (positional.includes(name)) continue
-        const raw = opts[camel(name)]
-        if (call.params[name] === BYTES || raw !== undefined)
-          body[name] = await value(call, name, raw)
-      }
-      const result = await answer(await post(opts, `vfs/${call.name}`, body))
-      if (result !== null)
-        emit(result, opts.explain === true ? (r) => explained(r as Answer) : HUMAN[call.name])
-    })
+  // A read prints the file's bytes as they arrive; --json keeps the JSON answer.
+  const streams = call.name === 'read'
+  if (streams) cmd.option('--json', 'Print the JSON answer, the bytes in base64')
+  cmd.action(async (...given: unknown[]) => {
+    const opts = given[positional.length] as Target & Record<string, unknown>
+    const body: Record<string, unknown> = {}
+    for (const [i, name] of positional.entries()) {
+      body[name] = call.params[name] === INTEGER ? Number(given[i]) : given[i]
+    }
+    for (const name of Object.keys(call.params)) {
+      if (positional.includes(name)) continue
+      const raw = opts[camel(name)]
+      if (call.params[name] === BYTES || raw !== undefined)
+        body[name] = await value(call, name, raw)
+    }
+    if (streams && opts.json !== true && opts.explain !== true) {
+      await readToStdout(opts, body)
+      return
+    }
+    const result = await answer(await post(opts, `vfs/${call.name}`, body))
+    if (result !== null)
+      emit(result, opts.explain === true ? (r) => explained(r as Answer) : HUMAN[call.name])
+  })
 }
 
 /** `mirage workspace vfs <call>` for each `session.vfs` call. */

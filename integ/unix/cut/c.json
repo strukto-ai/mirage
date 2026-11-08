@@ -151,6 +151,44 @@
       "flags": [
         "c"
       ]
+    },
+    {
+      "id": "cut_c_long_line_streams",
+      "seq": 20070202,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '%9999s\\n' x | tr ' ' a | cut -c 1-3,9997-",
+      "expect": {
+        "exit": 0,
+        "stdout": "aaaaax\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
     }
   ]
 }

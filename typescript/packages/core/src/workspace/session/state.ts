@@ -22,6 +22,7 @@ import { plainDecimal } from '../../shell/arith.ts'
 import { arrayGet, ShellArray } from '../../shell/array.ts'
 import { joinBytes } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { ArithError } from '../../shell/errors.ts'
 import type { ShellValue, VarAttr } from '../../shell/variable.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import type { SessionView } from '../../view/types.ts'
@@ -61,6 +62,7 @@ export function frame(session: SessionState, callStack: CallStack | null = null)
     outside,
     pipeStatus: session.pipeStatus,
     functionNames: session.functionNames,
+    callLines: session.callLines,
     paren: callStack?.paren ?? false,
     memoryRoom: memoryRoom(),
     line: session.lineNumber,
@@ -238,6 +240,24 @@ export async function subscriptIndex(
 }
 
 /**
+ * `subscriptIndex` whose failure ends the line, in bash's words: `unset
+ * 'a[1/0]'` aborts with `1/0: division by 0`. Mirrors Python's
+ * fatal_subscript_index.
+ */
+export async function fatalSubscriptIndex(
+  session: SessionState,
+  subscript: string,
+  policies: Policies | null = null,
+): Promise<bigint> {
+  try {
+    return await subscriptIndex(session, subscript, policies)
+  } catch (err) {
+    if (err instanceof ArithError) throw err.signal('', true)
+    throw err
+  }
+}
+
+/**
  * Evaluate an arithmetic command, a `let` operand or a test's integer
  * operand against the session, its writes landed through the gate in order;
  * `expand` for a `let` operand, whose subscripts expand first. Mirrors
@@ -401,7 +421,8 @@ export async function pushWords(
  * Clear one element (`unset 'a[i]'`) as one gated write, keeping the indexes
  * after it: an associative subscript is the key verbatim, an indexed one
  * arithmetic whose writes land first, and a scalar's element 0 the whole
- * scalar. A hidden or unset name clears nothing. Mirrors Python's
+ * scalar. `every` for a subscript typed as `@` or `*`, which empties an
+ * indexed array. A hidden or unset name clears nothing. Mirrors Python's
  * unset_element.
  */
 export async function unsetElement(
@@ -409,10 +430,11 @@ export async function unsetElement(
   policies: Policies | null,
   name: string,
   subscript: string,
+  every = false,
 ): Promise<(typeof ELEMENT_STATUS)[number]> {
   const shell = session.vars.shell
   return elementWrite(session, policies, (heard) =>
-    shell.unsetElement(name, subscript, { listens: heard }),
+    shell.unsetElement(name, subscript, every, { listens: heard }),
   )
 }
 

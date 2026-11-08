@@ -48,10 +48,10 @@
         "ram-commands"
       ],
       "session": "frozen",
-      "command": "ls -R /scratch/wk",
+      "command": "ls -R /scratch/wk; ls -Rr /scratch/wk 2>&1",
       "expect": {
         "exit": 1,
-        "stdout": "/scratch/wk:\nopen\nsealed\n\n/scratch/wk/open:\no\n",
+        "stdout": "/scratch/wk:\nopen\nsealed\n\n/scratch/wk/open:\no\n/scratch/wk:\nsealed\nopen\nls: cannot open directory '/scratch/wk/sealed': Permission denied\n\n/scratch/wk/open:\no\n",
         "stderr": "ls: cannot open directory '/scratch/wk/sealed': Permission denied\n"
       }
     },

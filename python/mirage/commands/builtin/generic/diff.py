@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -59,6 +60,8 @@ from mirage.utils.timezone import zone_from_env
 from mirage.view.namespace_view import followed_stat
 from mirage.view.types import LinkView, StatPath
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True, slots=True)
 class DiffFlags:
@@ -95,6 +98,8 @@ class _Walk:
     status: int = 0
     # The directory a path resolves to, where diff follows links.
     real: Callable[[str], str] | None = None
+    # A regular file's size, None when unknown, for -q to answer unread.
+    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None
 
 
 Absent = tuple[bool, bool]
@@ -254,6 +259,44 @@ async def _side(walk: _Walk, path: PathSpec, absent: bool) -> ByteSource:
     return b"" if absent else walk.stream(path)
 
 
+async def _sizes_differ(
+    walk: _Walk, paths: tuple[PathSpec, PathSpec], absent: Absent
+) -> bool:
+    """Whether -q knows the pair differs from its sizes alone: with no
+    ignore option it compares bytes, so two known sizes that differ answer
+    it before either file is read. A stdin operand, a size not known, or a
+    stat that fails leaves it to the read, which reports the failure.
+
+    Args:
+        walk (_Walk): the comparison's flags and sizes.
+        paths (tuple[PathSpec, PathSpec]): the pair.
+        absent (Absent): which side -N reads as empty.
+    """
+    flags = walk.flags
+    if walk.size_of is None or (
+        flags.ignore_case
+        or flags.ignore_all_space
+        or flags.ignore_space_change
+    ):
+        return False
+    sizes: list[int] = []
+    for path, gone in zip(paths, absent, strict=True):
+        if gone:
+            sizes.append(0)
+            continue
+        if is_stdin(path):
+            return False
+        try:
+            size = await walk.size_of(path)
+        except FS_ERRORS as exc:
+            logger.debug("diff: no size for %s: %s", path.virtual, exc)
+            return False
+        if size is None:
+            return False
+        sizes.append(size)
+    return sizes[0] != sizes[1]
+
+
 async def _diff_pair(
     path1: PathSpec,
     path2: PathSpec,
@@ -286,11 +329,14 @@ async def _diff_pair(
         if flags.unified
         else "",
     )
-    result = await walk.computer.compare(
-        options,
-        partial(_side, walk, path1, absent[0]),
-        partial(_side, walk, path2, absent[1]),
-    )
+    if flags.brief and await _sizes_differ(walk, (path1, path2), absent):
+        result = PairResult("different", (), 1, ())
+    else:
+        result = await walk.computer.compare(
+            options,
+            partial(_side, walk, path1, absent[0]),
+            partial(_side, walk, path2, absent[1]),
+        )
     if result.outcome == "different" and flags.brief and result.status == 1:
         return PairResult(
             result.outcome,
@@ -498,6 +544,7 @@ async def diff(
     dispatch: DispatchFn | None = None,
     links: LinkView | None = None,
     computer: DiffComputer | None = None,
+    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
         raise extra_operand_error(CommandName.DIFF, paths[2].raw_path)
@@ -529,6 +576,7 @@ async def diff(
             switches="".join(f" {shell_quote(w)}" for w in switch_words(argv)),
             stat_path=stat_path,
             zone=zone,
+            size_of=size_of,
         )
         if any(dashes) and not all(dashes):
             other = paths[1] if dashes[0] else paths[0]
@@ -664,6 +712,7 @@ async def diff_generic(
     stream: ReadStreamFn,
     readdir_fn: Callable[..., Awaitable[list[str]]],
     stat_fn: Callable[..., Awaitable[FileStat]],
+    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     return await diff(
         paths,
@@ -678,4 +727,5 @@ async def diff_generic(
         dispatch=dispatch_of(ctx),
         links=links_of(ctx),
         computer=ctx.diff,
+        size_of=size_of,
     )

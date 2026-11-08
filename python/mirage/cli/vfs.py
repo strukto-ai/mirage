@@ -55,6 +55,21 @@ EXPLAIN = typer.Option(
 )
 
 
+def _route(
+    workspace_id: str | None,
+    route: str,
+    session_id: str | None,
+    explain: bool = False,
+) -> tuple[str, dict[str, str]]:
+    params: dict[str, str] = {}
+    if session_id:
+        params["session_id"] = session_id
+    if explain:
+        params["explain"] = "true"
+    workspace_id = resolve_workspace(workspace_id)
+    return f"/v1/workspaces/{quote(workspace_id, safe='')}/{route}", params
+
+
 def post(
     workspace_id: str | None,
     route: str,
@@ -72,16 +87,38 @@ def post(
         session_id (str | None): the session; None is the default.
         explain (bool): ask what the call would do instead.
     """
-    params: dict[str, str] = {}
-    if session_id:
-        params["session_id"] = session_id
-    if explain:
-        params["explain"] = "true"
-    workspace_id = resolve_workspace(workspace_id)
-    path = f"/v1/workspaces/{quote(workspace_id, safe='')}/{route}"
+    path, params = _route(workspace_id, route, session_id, explain)
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         return client.request("POST", path, json=body, params=params)
+
+
+def _read_to_stdout(
+    workspace_id: str | None, body: dict[str, Any], session_id: str | None
+) -> None:
+    """Write a read's bytes to stdout as they arrive, as they are, so a
+    big or binary file passes through whole.
+
+    Args:
+        workspace_id (str | None): the workspace; the current one when
+            None.
+        body (dict[str, Any]): the read's arguments.
+        session_id (str | None): the session; None is the default.
+    """
+    path, params = _route(workspace_id, "vfs/read", session_id)
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        with client.stream(
+            "POST", path, json={**body, "stream": True}, params=params
+        ) as r:
+            if r.status_code >= 400:
+                r.read()
+                answer(r)
+                return
+            out = sys.stdout.buffer
+            for chunk in r.iter_bytes():
+                out.write(chunk)
+                out.flush()
 
 
 def answer(r: httpx.Response) -> Any:
@@ -125,7 +162,6 @@ def _lines(result: list[str]) -> str:
 
 
 HUMAN: dict[str, Callable[[Any], str]] = {
-    "read": _text,
     "getxattr": _text,
     "readdir": _lines,
     "list_files": _lines,
@@ -177,6 +213,9 @@ def command(call: VfsCall) -> Callable[..., None]:
         workspace_id = given.pop("workspace_id")
         session_id = given.pop("session_id")
         explain = given.pop("explain")
+        # A read prints the file's bytes as they arrive; --json keeps the
+        # JSON answer.
+        as_json = given.pop("json_output", False)
         body = {
             name: _value(call, name, value)
             for name, value in given.items()
@@ -186,6 +225,9 @@ def command(call: VfsCall) -> Callable[..., None]:
                 and not (call.params[name] is FLAG and value is False)
             )
         }
+        if call.name == "read" and not as_json and not explain:
+            _read_to_stdout(workspace_id, body, session_id)
+            return
         result = answer(
             post(workspace_id, f"vfs/{call.name}", body, session_id, explain)
         )
@@ -205,6 +247,19 @@ def command(call: VfsCall) -> Callable[..., None]:
             ("explain", EXPLAIN, bool),
         )
     ]
+    if call.name == "read":
+        parameters.append(
+            inspect.Parameter(
+                "json_output",
+                inspect.Parameter.KEYWORD_ONLY,
+                default=typer.Option(
+                    False,
+                    "--json",
+                    help="Print the JSON answer, the bytes in base64.",
+                ),
+                annotation=bool,
+            )
+        )
     vars(run)["__signature__"] = inspect.Signature(parameters)
     run.__annotations__ = {p.name: p.annotation for p in parameters}
     run.__doc__ = call.description
