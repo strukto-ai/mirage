@@ -356,6 +356,7 @@ export function findGeneric(
           ...(pushMtime && expr.mtimeMin !== null ? { mtimeMin: expr.mtimeMin } : {}),
           ...(pushMtime && expr.mtimeMax !== null ? { mtimeMax: expr.mtimeMax } : {}),
           ...(expr.usesEmpty ? { empty: true } : {}),
+          ...(expr.depthFirst ? { depthFirst: true } : {}),
         }
       : {
           name: nameFlag,
@@ -564,7 +565,9 @@ export function findGeneric(
       const usesEmpty = expr !== null ? expr.usesEmpty : emptyFlag
       const canProbe = !usesEmpty || dirEmpty !== undefined
       let rows = rootMatches
-      if (startIsDir && !mtimePushed && canProbe) {
+      // A walk that reached a -quit has judged the start point already, and
+      // under -depth after what it holds.
+      if (startIsDir && !mtimePushed && canProbe && quitted?.() !== true) {
         const rootEmpty = usesEmpty && dirEmpty !== undefined ? await dirEmpty(root) : null
         rows = withRootRow(
           rootMatches,

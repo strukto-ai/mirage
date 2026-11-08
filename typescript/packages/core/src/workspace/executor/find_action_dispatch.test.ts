@@ -333,6 +333,27 @@ describe('find -execdir, -fprint, -quit and -files0-from', () => {
     ["find d -name '*.txt' -print -quit", 'd/a.txt\n', '', 0],
     ['find d d -name b.txt -print -quit', 'd/b.txt\n', '', 0],
     ['find d -quit -print', '', '', 0],
+    ['find d/a.txt -print -quit -exec echo RAN {} \\;', 'd/a.txt\n', '', 0],
+    ['find d -depth -print -quit', 'd/a.txt\n', '', 0],
+    ['find d -type f -size +2c -print -quit', 'd/b.txt\n', '', 0],
+    [
+      "touch ./-files0-from; printf './-files0-from\\0' > list; find -name -files0-from -files0-from list",
+      './-files0-from\n',
+      '',
+      0,
+    ],
+    [
+      'find -files0-from ""',
+      '',
+      "find: cannot open '' for reading: No such file or directory\n",
+      1,
+    ],
+    [
+      'find d/a.txt -fprint out -exec mv out saved \\;; ls out',
+      '',
+      "ls: cannot access 'out': No such file or directory\n",
+      2,
+    ],
     ["printf 'd/a.txt\\0d/sub\\0' | find -files0-from - -maxdepth 0", 'd/a.txt\nd/sub\n', '', 0],
     [
       "printf 'd/a.txt\\0\\0' > list; find -files0-from list",

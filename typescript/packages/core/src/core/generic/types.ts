@@ -21,6 +21,9 @@ export interface FindEntry {
   // -xtype's kind: what a link leads to when the walk keeps links, 'l'
   // for a link the walk followed, the kind itself for anything else.
   xkind?: string | null
+  // The stat of what a live link the walk keeps leads to, which the access
+  // tests answer through.
+  target?: FileStat | null
 }
 
 export type ActionKind = RowActionKind | 'exec' | 'printf'

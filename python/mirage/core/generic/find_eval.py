@@ -249,12 +249,15 @@ def _test(node: PredNode, entry: FindEntry) -> bool | None:
         )
     if isinstance(node, Access):
         # access(2) follows a link: a live one answers with what it
-        # leads to, which the walk read as the entry's xkind.
-        if st is None or (
-            st.type is FileType.SYMLINK and entry.xkind in (None, "l")
-        ):
+        # leads to, which the walk read as the entry's target.
+        held = (
+            entry.target
+            if st is not None and st.type is FileType.SYMLINK
+            else st
+        )
+        if held is None:
             return False
-        return posix_mode(st) & _ACCESS_BITS[node.mode] != 0
+        return posix_mode(held) & _ACCESS_BITS[node.mode] != 0
     if isinstance(node, Empty):
         return entry.is_empty is True
     return None

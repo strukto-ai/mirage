@@ -566,6 +566,7 @@ export async function mvGeneric(
         target,
         errors,
         copies,
+        src,
       )
       if (made.ok) errors.push(moveError(src, target, posixPhrase('EXDEV')))
       continue
@@ -606,6 +607,7 @@ export async function mvGeneric(
       target,
       errors,
       copies,
+      src,
     )
     if (!made.ok) continue
     if (copies !== undefined && sourceLink) {

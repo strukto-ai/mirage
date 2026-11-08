@@ -24,9 +24,9 @@ import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
 import type { Identity } from '../../commands/builtin/utils/identity.ts'
 import { linkView } from '../../commands/builtin/utils/links.ts'
 import { currentCaller, getCurrentSession, runAsProgram } from '../../context/session_context.ts'
-import { modifiedTs } from '../../core/generic/find.ts'
-import { printfKind, treeHasTime } from '../../core/generic/find_eval.ts'
-import { enoent, strerrorOf } from '../../errors/fs.ts'
+import { compareDepthFirst, modifiedTs } from '../../core/generic/find.ts'
+import { printfKind, treeHas, treeHasTime } from '../../core/generic/find_eval.ts'
+import { enoent, isFsError, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 import { ensureStream, SharedStdin } from '../../io/stream.ts'
 import { type ByteSource, IOResult, materialize, type PathRecord } from '../../io/types.ts'
@@ -41,7 +41,6 @@ import { concat } from '../../utils/bytes.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { shellQuoteAlways } from '../../utils/quote.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
 import { contentSize } from '../../utils/stat_view.ts'
 import type { StatPath } from '../../view/types.ts'
 import type { ExecuteFn } from '../expand/types.ts'
@@ -297,30 +296,6 @@ function startBase(start: PathSpec | undefined): string {
   return start === undefined ? '.' : start.rawPath || start.virtual
 }
 
-/**
- * GNU's `-depth` order over sorted siblings: a directory's contents, each
- * sorted, then the directory. The final component is flagged so a path
- * sorts after its descendants, whose entry at that depth carries the same
- * name unflagged. A start point spelled with a trailing slash prints as
- * `d/` while its descendants print as `d/a`, so the slash is dropped
- * before splitting: kept, it would leave an empty final component that
- * sorts the directory ahead of everything under it, which is the one
- * order `-delete` cannot remove a tree in.
- */
-export function compareDepthFirst(a: string, b: string): number {
-  const pa = rstripSlash(a).split('/')
-  const pb = rstripSlash(b).split('/')
-  const n = Math.min(pa.length, pb.length)
-  for (let i = 0; i < n; i++) {
-    const byName = compareCodePoints(pa[i] ?? '', pb[i] ?? '')
-    if (byName !== 0) return byName
-    const fa = i === pa.length - 1 ? 1 : 0
-    const fb = i === pb.length - 1 ? 1 : 0
-    if (fa !== fb) return fa - fb
-  }
-  return pa.length - pb.length
-}
-
 /** Whether a row is a mount point or a namespace-only ancestor of one,
  * which are not unlinkable entries. Ancestors use the raw mount table
  * like isMountRoot: an ungranted mount still pins its ancestors in the
@@ -346,6 +321,7 @@ function testsStat(expr: FindExpr): boolean {
     expr.mtimeMin !== null ||
     expr.mtimeMax !== null ||
     treeHasTime(expr.tree) ||
+    treeHas(expr.tree, ['perm', 'count', 'owner', 'nouser', 'lname', 'xtype']) ||
     expr.usesEmpty ||
     expr.newer.length > 0
   )
@@ -429,6 +405,7 @@ export async function runListedFind(
   }
   async function* stream(): AsyncGenerator<Uint8Array> {
     let data: ByteSource
+    if (source === '') throw enoent(fileSpec(source, cwd))
     if (source === '-') data = stdin ?? new Uint8Array()
     else if (dispatch === null) throw enoent(fileSpec(source, cwd))
     else {
@@ -465,9 +442,8 @@ export async function runListedFind(
       stderr: concat([encodeText(refused), opened ?? new Uint8Array()]),
     })
   }
-  const rest = words.slice(expr.start)
-  const at = rest.indexOf('-files0-from')
-  rest.splice(at, 2)
+  const dropped = new Set((expr.files0At ?? []).flatMap((at) => [at, at + 1]))
+  const rest = words.slice(expr.start).filter((_, at) => !dropped.has(at))
   const line = shellJoin(['find', ...words.slice(0, expr.start), ...starts, ...rest])
   const io = await executeFn(line, { sessionId, stdin: source === '-' ? null : stdin })
   if (refused !== '') {
@@ -579,7 +555,8 @@ export async function applyFindActions(
   ).map((record): [PathSpec, string] => [record.path, startBase(starts[record.run])])
   // An expression with no action of its own prints, which is the one
   // implicit action -depth reorders.
-  const actions: FindAction[] = expr.actions.length > 0 ? expr.actions : [{ kind: 'print' }]
+  const actions: FindAction[] =
+    expr.actions.length > 0 ? expr.actions.slice(0, expr.reached) : [{ kind: 'print' }]
   const errors: Uint8Array[] = []
   const out: Uint8Array[] = []
   const batches = new Map<number, [string | null, string[]][]>()
@@ -707,8 +684,21 @@ export async function applyFindActions(
     }
     for (const [file, chunks] of sinks) {
       if (STREAMS.includes(resolvePath(file, cwd)) || dispatch === null) continue
+      const spec = fileSpec(file, cwd)
+      if (hasExec) {
+        // The reference writes to the file it opened, wherever a child moves
+        // it; a workspace has no open file to follow, so a file a child moved
+        // or removed is not made again.
+        try {
+          await dispatch('stat', spec)
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          console.debug(`find: ${file} is gone, rows dropped: ${String(err)}`)
+          continue
+        }
+      }
       try {
-        await dispatch('write', fileSpec(file, cwd), [concat(chunks)])
+        await dispatch('write', spec, [concat(chunks)])
       } catch (err) {
         errors.push(encodeText(`find: '${file}': ${strerrorOf(err)}\n`))
         exitCode = 1

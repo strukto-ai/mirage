@@ -215,9 +215,10 @@ class Keeper:
     A file's attributes are set once its copy is made. A directory's
     wait for the end of the line and go the deepest first, so the copies
     made into it do not move its times again, set on the way out of the
-    directory. A field the source does not report is left
-    as the copy has it, and one the destination refuses is logged and
-    the copy kept.
+    directory. A field the source does not report (a folder an object
+    store keeps no time for answers an empty one) is left as the copy
+    has it, and one the destination refuses is logged and the copy
+    kept.
 
     Args:
         keep (frozenset[str]): ``mode``, ``ownership``, ``timestamps``
@@ -249,7 +250,7 @@ class Keeper:
                 fields.update(uid=info.uid, gid=info.gid)
             if "timestamps" in self.keep:
                 fields.update(mtime=info.modified, atime=info.atime)
-            kept = {k: v for k, v in fields.items() if v is not None}
+            kept = {k: v for k, v in fields.items() if v not in (None, "")}
             if kept:
                 await self.dispatch("setattr", dst, **kept)
             if "xattr" in self.keep:
@@ -268,8 +269,13 @@ class Keeper:
             )
 
     async def finish(self) -> None:
-        """Set the directories' attributes, the deepest first."""
+        """Set the directories' attributes, the deepest first, a folder
+        several sources merge into from the last of them."""
+        done: set[str] = set()
         for src, dst in reversed(self.dirs):
+            if dst.virtual in done:
+                continue
+            done.add(dst.virtual)
             await self.copied(src, dst)
 
 
@@ -776,19 +782,15 @@ async def make_link(
         return False
     if not await overwrite_gate(policy, stat, src, target, errors):
         return False
-    backup_strategy = (
-        NativeMove(rename=partial(rename_link, copies))
-        if target_link is not None
-        else copies.relay
-    )
     backup, ok = await make_backup(
         policy,
-        backup_strategy,
+        NativeMove(rename=partial(rename_link, copies)),
         stat,
         copies.relay.readdir,
         target,
         errors,
         copies,
+        src,
     )
     if not ok:
         return False
@@ -898,6 +900,7 @@ async def copy_tree_links(
                 policy=policy,
                 lines=lines,
                 copies=copies,
+                aside=NativeMove(rename=partial(rename_link, copies)),
             )
             continue
         inside = resolved.rstrip("/") or "/"
@@ -929,6 +932,7 @@ async def copy_tree_links(
             lines=lines,
             copies=copies,
             blocked=roots,
+            aside=NativeMove(rename=partial(rename_link, copies)),
         )
         await copy_tree_links(
             copies,
@@ -1327,6 +1331,7 @@ async def _clear_for_directory(
         target,
         errors,
         copies,
+        src,
     )
     return target if ok else None
 
@@ -1507,6 +1512,7 @@ async def make_backup(
     target: PathSpec,
     errors: list[str],
     copies: TransferLinks | None = None,
+    src: PathSpec | None = None,
 ) -> tuple[PathSpec | None, bool]:
     """Back up an existing target before it is overwritten.
 
@@ -1518,6 +1524,8 @@ async def make_backup(
         target (PathSpec): The destination being replaced.
         errors (list[str]): Collected stderr lines, appended in place.
         copies (TransferLinks | None): Namespace facts and transfer calls.
+        src (PathSpec | None): The source, which a backup named like it
+            would destroy, so that transfer is refused.
 
     Returns:
         tuple[PathSpec | None, bool]: The backup path (None when no
@@ -1544,6 +1552,15 @@ async def make_backup(
         return None, False
     if backup is None:
         return None, True
+    if src is not None and backend_key_default(backup) == backend_key_default(
+        src
+    ):
+        verb = "moved" if policy.cmd_name == "mv" else "copied"
+        errors.append(
+            f"{policy.cmd_name}: backing up '{target.raw_path}' might destroy "
+            f"source;  '{src.raw_path}' not {verb}"
+        )
+        return None, False
     backup_link = (
         copies.links.stat_at(backup.virtual)
         if copies is not None and not isinstance(strategy, NativeMove)
@@ -1916,6 +1933,7 @@ async def symlinked(
         name,
         errors,
         copies,
+        src,
     )
     if not ok:
         return
@@ -2487,6 +2505,7 @@ async def copy_entries(
                 entry_dst,
                 errors,
                 copies,
+                entry,
             )
             if not ok:
                 copied_all = False
@@ -3062,6 +3081,7 @@ async def cp_generic(
                     entry_dst,
                     errors,
                     copies,
+                    entry,
                 )
                 if not ok:
                     continue
@@ -3133,7 +3153,7 @@ async def cp_generic(
                 if copies.owns is not None and not copies.owns(target.virtual):
                     copier = copies.relay
         backup, ok = await make_backup(
-            policy, mover, stat, readdir, target, errors, copies
+            policy, mover, stat, readdir, target, errors, copies, src
         )
         if not ok:
             continue

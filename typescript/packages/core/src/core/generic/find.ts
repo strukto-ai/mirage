@@ -58,6 +58,7 @@ export interface FindOptions {
   tree?: PredNode | null
   mtimeMin?: number | null
   mtimeMax?: number | null
+  depthFirst?: boolean | null
 }
 
 export interface WalkFindDeps {
@@ -244,33 +245,47 @@ export async function walkFind(
   const needEmpty = treeHasEmpty(pruneTree)
   const acts = treeHasAction(pruneTree)
   const readsStat = treeReadsStat(pruneTree)
+  const readsLink = treeReadsLink(pruneTree)
+  const needSize = options.minSize != null || options.maxSize != null
+  // Under -depth a directory is judged after what it holds, so its -quit
+  // cannot be met on the way in.
+  const earlyQuit = quits && options.depthFirst !== true
   const readDirectory = async (spec: PathSpec): Promise<string[]> => {
     if (deps.enters !== undefined && !deps.enters(spec.virtual)) return []
     if (quits && quitFired(pruneTree)) return []
-    if (prunes || quits) {
+    if (prunes || earlyQuit) {
       const key = rstripSlash(spec.virtual) || '/'
       const depth =
         rstripSlash(spec.virtual).split('/').length - rstripSlash(rootPath).split('/').length
       const info = await statEntry(deps, spec.virtual)
       const isEmpty = needEmpty ? await isEmptyEntry(deps, spec.virtual, true) : null
       await primeRegexes(pruneTree, [key])
-      keep(
-        {
-          key,
-          name: rstripSlash(spec.virtual).split('/').pop() ?? '',
-          kind: 'd',
-          depth,
-          isEmpty,
-          mtime: info === null ? null : modifiedTs(info.modified),
-          stat: readsStat ? info : null,
-        },
-        pruneTree,
-        options.minDepth,
-        acts,
-      )
+      const [xkind, target] = readsLink
+        ? await otherSide(links ?? null, found.links ?? null, key, 'd')
+        : [null, null]
+      // -size is no node of the tree, so a directory outside its window is
+      // not judged where a -quit could stop the walk.
+      if (!(earlyQuit && needSize && !sized(options, DIR_SIZE))) {
+        keep(
+          {
+            key,
+            name: rstripSlash(spec.virtual).split('/').pop() ?? '',
+            kind: 'd',
+            depth,
+            isEmpty,
+            mtime: info === null ? null : modifiedTs(info.modified),
+            stat: readsStat ? info : null,
+            xkind,
+            target,
+          },
+          pruneTree,
+          options.minDepth,
+          acts,
+        )
+      }
       // A directory that reached -quit is the walk's last: what it holds
       // is never read.
-      if (prunedKeys(pruneTree).includes(key) || (quits && quitFired(pruneTree))) return []
+      if (prunedKeys(pruneTree).includes(key) || (earlyQuit && quitFired(pruneTree))) return []
     }
     return (deps.listing ?? deps.readdir)(spec)
   }
@@ -305,7 +320,6 @@ export async function walkFind(
   }
   const results: string[] = []
   const tree = bindTree(argsToTree(options), '', path.virtual, path.rawPath)
-  const needSize = options.minSize != null || options.maxSize != null
   const windowed = options.mtimeMin != null || options.mtimeMax != null
   const needMtime = windowed || treeHasTime(tree)
   const needStat = needMtime || readsStat
@@ -313,7 +327,11 @@ export async function walkFind(
   const failing = timeTestsFailing(tree)
   const learned = new Map<string, number | null>()
   const statted = new Map<string, FileStat | null>()
-  collected.sort((a, b) => compareCodePoints(a.path, b.path))
+  collected.sort((a, b) =>
+    options.depthFirst === true
+      ? compareDepthFirst(a.path, b.path)
+      : compareCodePoints(a.path, b.path),
+  )
   await primeRegexes(
     tree,
     collected.map((entry) => (entry.path === '' ? '/' : entry.path)),
@@ -338,6 +356,15 @@ export async function walkFind(
       learned.set(key, st !== null ? modifiedTs(st.modified) : null)
       statted.set(key, st)
     }
+    // -size is no node of the tree, so where a -quit could end the walk an
+    // entry outside its window is never judged.
+    if (quits && needSize) {
+      st ??= await statEntry(deps, entry.path)
+      if (st === null || !sized(options, entry.file ? (st.size ?? 0) : DIR_SIZE)) continue
+    }
+    const [xkind, target] = needLink
+      ? await otherSide(links ?? null, found.links ?? null, entry.path, entry.kind)
+      : [null, null]
     const findEntry: FindEntry = {
       key,
       name,
@@ -346,9 +373,8 @@ export async function walkFind(
       isEmpty,
       mtime: learned.get(key) ?? null,
       stat: st,
-      xkind: needLink
-        ? await otherKind(links ?? null, found.links ?? null, entry.path, entry.kind)
-        : null,
+      xkind,
+      target,
     }
     const judged = needMtime && findEntry.mtime === null ? failing : tree
     const kept = keep(findEntry, judged, options.minDepth, acts)
@@ -362,11 +388,7 @@ export async function walkFind(
       st = await statEntry(deps, entry.path)
       if (st === null) continue
     }
-    if (needSize) {
-      const size = entry.file ? (st?.size ?? 0) : DIR_SIZE
-      if (options.minSize != null && size < options.minSize) continue
-      if (options.maxSize != null && size > options.maxSize) continue
-    }
+    if (needSize && !sized(options, entry.file ? (st?.size ?? 0) : DIR_SIZE)) continue
     if (windowed && st !== null) {
       const mt = modifiedTs(st.modified)
       if (mt === null) continue
@@ -379,26 +401,58 @@ export async function walkFind(
   return dropPruned(results, tree)
 }
 
-// -xtype's kind for one entry: a link the walk keeps is what it leads to
-// (`l` when it leads nowhere), a link the walk followed is `l`, and anything
-// else is its own kind.
-async function otherKind(
+/**
+ * The reference's `-depth` order over sorted siblings: a directory's contents, each
+ * sorted, then the directory. The final component is flagged so a path
+ * sorts after its descendants, whose entry at that depth carries the same
+ * name unflagged. A start point spelled with a trailing slash prints as
+ * `d/` while its descendants print as `d/a`, so the slash is dropped
+ * before splitting: kept, it would leave an empty final component that
+ * sorts the directory ahead of everything under it, which is the one
+ * order `-delete` cannot remove a tree in.
+ */
+export function compareDepthFirst(a: string, b: string): number {
+  const pa = rstripSlash(a).split('/')
+  const pb = rstripSlash(b).split('/')
+  const n = Math.min(pa.length, pb.length)
+  for (let i = 0; i < n; i++) {
+    const byName = compareCodePoints(pa[i] ?? '', pb[i] ?? '')
+    if (byName !== 0) return byName
+    const fa = i === pa.length - 1 ? 1 : 0
+    const fb = i === pb.length - 1 ? 1 : 0
+    if (fa !== fb) return fa - fb
+  }
+  return pa.length - pb.length
+}
+
+// Whether a size falls inside -size's window.
+function sized(options: FindOptions, size: number): boolean {
+  return !(
+    (options.minSize != null && size < options.minSize) ||
+    (options.maxSize != null && size > options.maxSize)
+  )
+}
+
+// -xtype's kind for one entry and the stat of what a live link the walk keeps
+// leads to: such a link is what it leads to (`l` when it leads nowhere), a
+// link the walk followed is `l`, and anything else is its own kind.
+async function otherSide(
   follow: LinkView | null,
   links: LinkView | null,
   path: string,
   kind: string,
-): Promise<string> {
+): Promise<[string, FileStat | null]> {
   const view = follow ?? links
-  if (view === null) return kind
-  if (follow !== null) return view.statAt(path) !== null ? 'l' : kind
-  if (kind !== 'l') return kind
+  if (view === null) return [kind, null]
+  if (follow !== null) return [view.statAt(path) !== null ? 'l' : kind, null]
+  if (kind !== 'l') return [kind, null]
   let target: FileStat | null
   try {
     target = await view.targetStat(path)
   } catch (err) {
     // A link whose chain fails to resolve leads nowhere.
     if (!isEntryError(err)) throw err
-    return 'l'
+    return ['l', null]
   }
-  return target !== null ? printfKind(target) : 'l'
+  return target !== null ? [printfKind(target), target] : ['l', null]
 }

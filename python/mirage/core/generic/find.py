@@ -245,13 +245,18 @@ async def walk_find(
     need_empty = find_eval.tree_has_empty(prune_tree)
     acts = find_eval.tree_has_action(prune_tree)
     reads_stat = find_eval.tree_reads_stat(prune_tree)
+    reads_link = find_eval.tree_reads_link(prune_tree)
+    need_size = args.min_size is not None or args.max_size is not None
+    # Under -depth a directory is judged after what it holds, so its
+    # -quit cannot be met on the way in.
+    early_quit = quits and not args.depth_first
 
     async def read_directory(spec: PathSpec) -> list[str]:
         if enters is not None and not enters(spec.virtual):
             return []
         if quits and find_eval.quit_fired(prune_tree):
             return []
-        if prunes or quits:
+        if prunes or early_quit:
             key = spec.virtual.rstrip("/") or "/"
             depth = len(spec.virtual.rstrip("/").split("/")) - len(
                 root_path.rstrip("/").split("/")
@@ -270,24 +275,34 @@ async def walk_find(
                 else None
             )
             await find_eval.prime_regexes(prune_tree, [key])
-            find_eval.keep(
-                find_types.FindEntry(
-                    key=key,
-                    name=spec.virtual.rstrip("/").rsplit("/", 1)[-1],
-                    kind="d",
-                    depth=depth,
-                    is_empty=empty,
-                    mtime=modified_ts(info.modified) if info else None,
-                    stat=info if reads_stat else None,
-                ),
-                prune_tree,
-                args.mindepth,
-                acts,
+            xkind, target = (
+                await _other_side(follow, links, key, "d")
+                if reads_link
+                else (None, None)
             )
+            # -size is no node of the tree, so a directory outside its
+            # window is not judged where a -quit could stop the walk.
+            if not (early_quit and need_size and not _sized(args, DIR_SIZE)):
+                find_eval.keep(
+                    find_types.FindEntry(
+                        key=key,
+                        name=spec.virtual.rstrip("/").rsplit("/", 1)[-1],
+                        kind="d",
+                        depth=depth,
+                        is_empty=empty,
+                        mtime=modified_ts(info.modified) if info else None,
+                        stat=info if reads_stat else None,
+                        xkind=xkind,
+                        target=target,
+                    ),
+                    prune_tree,
+                    args.mindepth,
+                    acts,
+                )
             # A directory that reached -quit is the walk's last: what it
             # holds is never read.
             if key in find_eval.pruned_keys(prune_tree) or (
-                quits and find_eval.quit_fired(prune_tree)
+                early_quit and find_eval.quit_fired(prune_tree)
             ):
                 return []
         return await (listing or readdir)(spec)
@@ -322,7 +337,6 @@ async def walk_find(
         search_path.virtual,
         search_path.raw_path,
     )
-    need_size = args.min_size is not None or args.max_size is not None
     windowed = args.mtime_min is not None or args.mtime_max is not None
     need_mtime = windowed or find_eval.tree_has_time(tree)
     need_stat = need_mtime or reads_stat
@@ -332,7 +346,10 @@ async def walk_find(
     statted: dict[str, FileStat | None] = {}
     results: list[str] = []
     vis = session_visibility()
-    collected.sort()
+    if args.depth_first:
+        collected.sort(key=lambda row: depth_first_key(row[0]))
+    else:
+        collected.sort()
     await find_eval.prime_regexes(tree, (p for p, _ in collected))
     for p, kind in collected:
         if not path_visible(vis, p):
@@ -372,6 +389,20 @@ async def walk_find(
             # test, so another -o arm (-name) can still match the entry.
             learned[key] = modified_ts(st.modified) if st is not None else None
             statted[key] = st
+        # -size is no node of the tree, so where a -quit could end the
+        # walk an entry outside its window is never judged.
+        if quits and need_size:
+            if st is None:
+                st = await _stat_entry(stat, p, unstatted)
+            if st is None or not _sized(
+                args, DIR_SIZE if is_dir else st.size or 0
+            ):
+                continue
+        xkind, target = (
+            await _other_side(follow, links, p, kind)
+            if need_link
+            else (None, None)
+        )
         entry = find_types.FindEntry(
             key=key,
             name=entry_name,
@@ -380,11 +411,8 @@ async def walk_find(
             is_empty=is_empty,
             mtime=learned.get(key),
             stat=st,
-            xkind=(
-                await _other_kind(follow, links, p, kind)
-                if need_link
-                else None
-            ),
+            xkind=xkind,
+            target=target,
         )
         judged = failing if need_mtime and entry.mtime is None else tree
         kept = find_eval.keep(entry, judged, args.mindepth, acts)
@@ -400,14 +428,10 @@ async def walk_find(
             st = await _stat_entry(stat, p, unstatted)
             if st is None:
                 continue
-        if need_size:
-            size = DIR_SIZE
-            if not is_dir:
-                size = (st.size if st is not None else 0) or 0
-            if args.min_size is not None and size < args.min_size:
-                continue
-            if args.max_size is not None and size > args.max_size:
-                continue
+        if need_size and not _sized(
+            args, DIR_SIZE if is_dir or st is None else st.size or 0
+        ):
+            continue
         if windowed and st is not None:
             ts = modified_ts(st.modified)
             if ts is None:
@@ -421,15 +445,48 @@ async def walk_find(
     return sorted(find_eval.drop_pruned(results, tree, ""))
 
 
-async def _other_kind(
+def depth_first_key(path: str) -> tuple[tuple[str, int], ...]:
+    """The sort key for GNU's ``-depth`` order over sorted siblings.
+
+    A directory's contents, each sorted, then the directory: the final
+    component is flagged so a path sorts after its descendants, whose
+    entry at that depth carries the same name unflagged. A start point
+    spelled with a trailing slash prints as ``d/`` while its descendants
+    print as ``d/a``, so the slash is dropped before splitting: kept, it
+    would leave an empty final component that sorts the directory ahead
+    of everything under it, which is the one order ``-delete`` cannot
+    remove a tree in.
+
+    Args:
+        path (str): a row as find printed it.
+    """
+    parts = path.rstrip("/").split("/")
+    return (*((part, 0) for part in parts[:-1]), (parts[-1], 1))
+
+
+def _sized(args: find_types.FindArgs, size: int) -> bool:
+    """Whether a size falls inside ``-size``'s window.
+
+    Args:
+        args (FindArgs): the window's bounds.
+        size (int): the entry's size.
+    """
+    return not (
+        (args.min_size is not None and size < args.min_size)
+        or (args.max_size is not None and size > args.max_size)
+    )
+
+
+async def _other_side(
     follow: LinkView | None,
     links: LinkView | None,
     path: str,
     kind: str,
-) -> str:
-    """``-xtype``'s kind for one entry: a link the walk keeps is what it
-    leads to (``l`` when it leads nowhere), a link the walk followed is
-    ``l``, and anything else is its own kind.
+) -> tuple[str, FileStat | None]:
+    """``-xtype``'s kind for one entry and the stat of what a live link
+    the walk keeps leads to: such a link is what it leads to (``l`` when
+    it leads nowhere), a link the walk followed is ``l``, and anything
+    else is its own kind.
 
     Args:
         follow (LinkView | None): the links the walk follows, under -L.
@@ -439,13 +496,15 @@ async def _other_kind(
     """
     view = follow or links
     if view is None:
-        return kind
+        return kind, None
     if follow is not None:
-        return "l" if view.stat_at(path) is not None else kind
+        return ("l" if view.stat_at(path) is not None else kind), None
     if kind != "l":
-        return kind
+        return kind, None
     try:
         target = await view.target_stat(path)
     except OSError:
-        return "l"
-    return printf_kind(target) if target is not None else "l"
+        return "l", None
+    if target is None:
+        return "l", None
+    return printf_kind(target), target

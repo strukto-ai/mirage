@@ -17,7 +17,9 @@ class FindEntry:
     ``-user``, ``-lname``, ``-atime``...), the link itself unless the
     walk follows links. ``xkind`` is ``-xtype``'s kind: what a link
     leads to when the walk keeps links, ``l`` for a link the walk
-    followed, and the kind itself for anything else.
+    followed, and the kind itself for anything else. ``target`` is the
+    stat of what a live link the walk keeps leads to, which the access
+    tests answer through.
     """
 
     key: str
@@ -28,6 +30,7 @@ class FindEntry:
     mtime: float | None = None
     stat: FileStat | None = None
     xkind: str | None = None
+    target: FileStat | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,3 +333,4 @@ class FindArgs:
     or_names: list[str] | None = None
     empty: bool = False
     tree: PredNode | None = None
+    depth_first: bool = False

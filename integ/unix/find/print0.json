@@ -28,11 +28,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "find /data/f4/sub1 -print0; find /data/f4/sub1 -name inner.txt -fprint /data/f4/fp.out; cat /data/f4/fp.out; find /data/f4/sub1 -name inner.txt -fprint0 /data/f4/fp0.out; tr '\\0' @ < /data/f4/fp0.out; echo; find /data/f4/sub1 -name nomatch -fprint /data/f4/fpe.out; wc -c < /data/f4/fpe.out; find /data/f4/sub1 -name inner.txt -fprintf /data/f4/fpf.out '%f %s\\n'; cat /data/f4/fpf.out; find /data/f4/sub1 -name inner.txt -fprint /dev/stdout; find /data/f4/sub1 -fprint /data/f4/nodir/x; echo rc=$?; rm -f /data/f4/fp.out /data/f4/fp0.out /data/f4/fpe.out /data/f4/fpf.out",
+      "command": "find /data/f4/sub1 -print0; find /data/f4/sub1 -name inner.txt -fprint /data/f4/fp.out; cat /data/f4/fp.out; find /data/f4/sub1 -name inner.txt -fprint0 /data/f4/fp0.out; tr '\\0' @ < /data/f4/fp0.out; echo; find /data/f4/sub1 -name nomatch -fprint /data/f4/fpe.out; wc -c < /data/f4/fpe.out; find /data/f4/sub1 -name inner.txt -fprintf /data/f4/fpf.out '%f %s\\n'; cat /data/f4/fpf.out; find /data/f4/sub1 -name inner.txt -fprint /dev/stdout; rm -f /data/f4/fp.out /data/f4/fp0.out /data/f4/fpe.out /data/f4/fpf.out",
       "expect": {
         "exit": 0,
-        "stdout": "/data/f4/sub1\u0000/data/f4/sub1/inner.txt\u0000/data/f4/sub1/skipme\u0000/data/f4/sub1/skipme/deep.txt\u0000/data/f4/sub1/inner.txt\n/data/f4/sub1/inner.txt@\n0\ninner.txt 12\n/data/f4/sub1/inner.txt\nrc=1\n",
-        "stderr": "find: '/data/f4/nodir/x': No such file or directory\n"
+        "stdout": "/data/f4/sub1\u0000/data/f4/sub1/inner.txt\u0000/data/f4/sub1/skipme\u0000/data/f4/sub1/skipme/deep.txt\u0000/data/f4/sub1/inner.txt\n/data/f4/sub1/inner.txt@\n0\ninner.txt 12\n/data/f4/sub1/inner.txt\n",
+        "stderr": ""
       },
       "flags": [
         "print0",

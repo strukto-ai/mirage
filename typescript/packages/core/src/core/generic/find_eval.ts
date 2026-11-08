@@ -126,12 +126,13 @@ function test(node: PredNode, entry: FindEntry): boolean | null {
       const owner = st === null ? null : node.group ? st.gid : st.uid
       return typeof owner === 'number' || (typeof owner === 'string' && /^[0-9]+$/.test(owner))
     }
-    case 'access':
+    case 'access': {
       // access(2) follows a link: a live one answers with what it leads to,
-      // which the walk read as the entry's xkind.
-      if (st === null) return false
-      if (st.type === FileType.SYMLINK && (entry.xkind ?? 'l') === 'l') return false
-      return (posixMode(st) & ACCESS_BITS[node.mode]) !== 0
+      // which the walk read as the entry's target.
+      const held = st !== null && st.type === FileType.SYMLINK ? (entry.target ?? null) : st
+      if (held === null) return false
+      return (posixMode(held) & ACCESS_BITS[node.mode]) !== 0
+    }
     case 'empty':
       return entry.isEmpty === true
     default:

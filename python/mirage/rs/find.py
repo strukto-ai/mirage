@@ -97,6 +97,10 @@ class FindExpr:
         follow (bool): ``-follow``, which follows links as ``-L`` does.
         files0_from (str | None): ``-files0-from``'s file as typed, which
             names the start points in place of the operands.
+        files0_at (list[int]): where each ``-files0-from`` stands among
+            the expression's words.
+        reached (int | None): how many of the actions, in order, a row can
+            reach: those before a top-level ``-quit``; None for all.
         predicates (list[str]): every predicate word typed, in order.
         warnings (list[str]): the warning lines GNU prints while it
             parses, in order.
@@ -116,6 +120,8 @@ class FindExpr:
     depth_first: bool = False
     follow: bool = False
     files0_from: str | None = None
+    files0_at: list[int] = field(default_factory=list)
+    reached: int | None = None
     predicates: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     start: int = 0
@@ -659,6 +665,8 @@ class FindParse:
             depth_first=_flag(self.values["depth_first"]),
             follow=_flag(self.values["follow"]),
             files0_from=_opt_text(self.values["files0_from"]),
+            files0_at=[_int(at) for at in _array(self.values["files0_at"])],
+            reached=_int(self.values["reached"]),
             predicates=[
                 text_view(_str(w)) for w in _array(self.values["predicates"])
             ],

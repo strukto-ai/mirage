@@ -43,7 +43,10 @@ type Obj = Readonly<Record<string, JsonValue>>
  * GNU runs actions per position; `depthFirst` is GNU's `-depth`, which
  * `-delete` turns on; `follow` is `-follow`, which follows links as `-L`
  * does; `files0From` is `-files0-from`'s file as typed, which names the
- * start points in place of the operands; `files` every file `-fprint`,
+ * start points in place of the operands, and `files0At` where each one stands
+ * among the expression's words; `reached` how many of the actions, in order,
+ * a row can reach, those before a top-level `-quit` (all when absent);
+ * `files` every file `-fprint`,
  * `-fprint0` and `-fprintf` write, each once, in the order first named;
  * `predicates` is every predicate word typed, in order; `warnings` the
  * lines the reference prints while it parses; `start` where the expression begins
@@ -63,6 +66,8 @@ export interface FindExpr {
   depthFirst: boolean
   follow?: boolean
   files0From?: string | null
+  files0At?: number[]
+  reached?: number
   files?: string[]
   predicates: string[]
   warnings: string[]
@@ -513,6 +518,8 @@ export class FindParse {
       depthFirst: flag(this.values.depth_first),
       follow: flag(this.values.follow),
       files0From: optText(this.values.files0_from),
+      files0At: array(this.values.files0_at).map((at) => int(at)),
+      reached: int(this.values.reached),
       files: [...new Set(named)],
       predicates: array(this.values.predicates).map((w) => textView(str(w))),
       warnings: array(this.values.warnings).map((w) => textView(str(w))),

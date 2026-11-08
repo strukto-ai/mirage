@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import replace
 
@@ -34,6 +35,8 @@ from mirage.context import (
     set_program_invocation,
 )
 from mirage.core.generic import find_eval
+from mirage.core.generic import types as find_types
+from mirage.core.generic.find import depth_first_key
 from mirage.errors.classify import is_entry_error
 from mirage.errors.fs import enoent, strerror_of
 from mirage.errors.posix import posix_phrase
@@ -56,6 +59,8 @@ from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecuteLine
+
+logger = logging.getLogger(__name__)
 
 
 def exec_words(action: ExecAction, paths: list[str]) -> list[str]:
@@ -401,9 +406,11 @@ def _reads_stat(action: FindAction) -> bool:
 def _tests_stat(expr: FindExpr) -> bool:
     """Whether the expression's tests made find stat every row it kept.
 
-    GNU reads ``-name``, ``-path`` and ``-type`` off the directory
-    entry and stats only for a test that needs the inode: a size or
-    time window, ``-newer`` and ``-empty``.
+    The reference reads ``-name``, ``-path``, ``-regex``, ``-type`` and
+    the access tests off the directory entry and access(2), and stats
+    only for a test that needs the inode: a size or time window,
+    ``-newer``, ``-empty``, ``-perm``, ``-links``, the owner tests,
+    ``-lname`` and ``-xtype``.
 
     Args:
         expr (FindExpr): the parsed expression.
@@ -414,6 +421,17 @@ def _tests_stat(expr: FindExpr) -> bool:
         or expr.mtime_min is not None
         or expr.mtime_max is not None
         or find_eval.tree_has_time(expr.tree)
+        or find_eval.tree_has(
+            expr.tree,
+            (
+                find_types.Perm,
+                find_types.Count,
+                find_types.Owner,
+                find_types.NoOwner,
+                find_types.Lname,
+                find_types.XType,
+            ),
+        )
         or expr.uses_empty
         or bool(expr.newer)
     )
@@ -510,7 +528,7 @@ async def run_listed_find(
         session_id (str): the session the find runs under.
         stdin (ByteSource | None): find's input, the list under ``-``.
     """
-    source = expr.files0_from or "-"
+    source = "-" if expr.files0_from is None else expr.files0_from
     typed = [w for w in words[: expr.start] if w not in _LINK_OPTIONS]
     if typed:
         return IOResult(
@@ -522,6 +540,8 @@ async def run_listed_find(
         )
 
     async def stream(_: PathSpec) -> AsyncIterator[bytes]:
+        if source == "":
+            raise enoent(_file_spec(source, cwd))
         if source == "-":
             data: ByteSource = stdin if stdin is not None else b""
         elif dispatch is None:
@@ -560,9 +580,12 @@ async def run_listed_find(
             exit_code=1 if refused or opened else 0,
             stderr=encode_text(refused) + (opened or b""),
         )
-    rest = list(words[expr.start :])
-    at = rest.index("-files0-from")
-    del rest[at : at + 2]
+    dropped = {at + step for at in expr.files0_at for step in (0, 1)}
+    rest = [
+        word
+        for at, word in enumerate(words[expr.start :])
+        if at not in dropped
+    ]
     line = shell_join(["find", *words[: expr.start], *starts, *rest])
     io = await execute_fn(
         line,
@@ -574,25 +597,6 @@ async def run_listed_find(
         io.stderr = encode_text(refused) + existing
         io.exit_code = max(io.exit_code, 1)
     return io
-
-
-def depth_first_key(path: str) -> tuple[tuple[str, int], ...]:
-    """The sort key for GNU's ``-depth`` order over sorted siblings.
-
-    A directory's contents, each sorted, then the directory: the final
-    component is flagged so a path sorts after its descendants, whose
-    entry at that depth carries the same name unflagged. A start point
-    spelled with a trailing slash prints as ``d/`` while its descendants
-    print as ``d/a``, so the slash is dropped before splitting: kept, it
-    would leave an empty final component that sorts the directory ahead
-    of everything under it, which is the one order ``-delete`` cannot
-    remove a tree in.
-
-    Args:
-        path (str): a row as find printed it.
-    """
-    parts = path.rstrip("/").split("/")
-    return (*((part, 0) for part in parts[:-1]), (parts[-1], 1))
 
 
 def _structural(path: PathSpec, registry: MountRegistry) -> bool:
@@ -742,7 +746,9 @@ async def _apply_find_actions(
     ]
     # An expression with no action of its own prints, which is the one
     # implicit action -depth reorders.
-    actions = expr.actions or [RowAction("print")]
+    actions = (
+        expr.actions[: expr.reached] if expr.actions else [RowAction("print")]
+    )
     errors: list[bytes] = []
     out: list[bytes] = []
     batches: dict[int, list[tuple[str | None, list[str]]]] = {}
@@ -882,10 +888,20 @@ async def _apply_find_actions(
         for file, chunks in sinks.items():
             if resolve_path(file, cwd) in _STREAMS or dispatch is None:
                 continue
+            spec = _file_spec(file, cwd)
+            if expr.execs:
+                # The reference writes to the file it opened, wherever a
+                # child moves it; a workspace has no open file to follow,
+                # so a file a child moved or removed is not made again.
+                try:
+                    await dispatch("stat", spec)
+                except (OSError, ValueError) as exc:
+                    logger.debug(
+                        "find: %s is gone, rows dropped: %s", file, exc
+                    )
+                    continue
             try:
-                await dispatch(
-                    "write", _file_spec(file, cwd), data=b"".join(chunks)
-                )
+                await dispatch("write", spec, data=b"".join(chunks))
             except (OSError, ValueError) as exc:
                 errors.append(
                     encode_text(f"find: '{file}': {strerror_of(exc)}\n")

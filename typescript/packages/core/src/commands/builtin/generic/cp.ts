@@ -234,7 +234,9 @@ export class Keeper {
         fields.atime = info.atime
       }
       const kept = Object.fromEntries(
-        Object.entries(fields).filter(([, value]) => value !== null && value !== undefined),
+        Object.entries(fields).filter(
+          ([, value]) => value !== null && value !== undefined && value !== '',
+        ),
       )
       if (Object.keys(kept).length > 0) await this.dispatch('setattr', dst, [], kept)
       if (this.keep.has('xattr')) {
@@ -253,9 +255,15 @@ export class Keeper {
     }
   }
 
-  /** Set the directories' attributes, the deepest first. */
+  /** Set the directories' attributes, the deepest first, a folder several
+   * sources merge into from the last of them. */
   async finish(): Promise<void> {
-    for (const [src, dst] of [...this.dirs].reverse()) await this.copied(src, dst)
+    const done = new Set<string>()
+    for (const [src, dst] of [...this.dirs].reverse()) {
+      if (done.has(dst.virtual)) continue
+      done.add(dst.virtual)
+      await this.copied(src, dst)
+    }
   }
 }
 
@@ -444,6 +452,7 @@ export async function symlinked(
     name,
     errors,
     copies,
+    src,
   )
   if (!ok) return
   if (
@@ -813,12 +822,13 @@ export async function makeLink(
   if (!(await overwriteGate(policy, stat, src, target, errors))) return false
   const made = await makeBackup(
     policy,
-    targetLink === null ? copies.relay : { rename: (a, b) => renameLink(copies, a, b) },
+    { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) },
     stat,
     copies.relay.readdir,
     target,
     errors,
     copies,
+    src,
   )
   if (!made.ok) return false
   lines?.push(transferLine(src, target, made.backup, policy.cmdName))
@@ -905,7 +915,12 @@ export async function copyTreeLinks(
         placed,
         [{ path: entry.virtual, kind: leads.type }],
         errors,
-        { policy, lines, copies },
+        {
+          policy,
+          lines,
+          copies,
+          aside: { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) },
+        },
       )
       continue
     }
@@ -929,6 +944,7 @@ export async function copyTreeLinks(
       ...(lines !== undefined ? { lines } : {}),
       copies,
       blocked: roots,
+      aside: { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) },
     })
     await copyTreeLinks(
       copies,
@@ -1207,6 +1223,7 @@ async function clearForDirectory(
     target,
     errors,
     copies,
+    src,
   )
   return made.ok ? target : null
 }
@@ -1350,6 +1367,9 @@ export async function makeBackup(
   target: PathSpec,
   errors: string[],
   copies?: TransferLinks,
+  // The source, which a backup named like it would destroy, so that transfer
+  // is refused.
+  src?: PathSpec,
 ): Promise<{ backup: PathSpec | null; ok: boolean }> {
   if (policy.backup === null) return { backup: null, ok: true }
   if (!(await pathExists(stat, target))) return { backup: null, ok: true }
@@ -1369,6 +1389,13 @@ export async function makeBackup(
     return { backup: null, ok: false }
   }
   if (backup === null) return { backup: null, ok: true }
+  if (src !== undefined && backendKeyDefault(backup) === backendKeyDefault(src)) {
+    const verb = policy.cmdName === 'mv' ? 'moved' : 'copied'
+    errors.push(
+      `${policy.cmdName}: backing up '${target.rawPath}' might destroy source;  '${src.rawPath}' not ${verb}`,
+    )
+    return { backup: null, ok: false }
+  }
   const backupLink =
     copies !== undefined && !('rename' in strategy) ? copies.links.statAt(backup.virtual) : null
   let removedLink = false
@@ -1778,6 +1805,7 @@ export async function copyEntries(
         entryDstSpec,
         errors,
         opts.copies,
+        entrySpec,
       )
       if (!made.ok) {
         copiedAll = false
@@ -2337,6 +2365,7 @@ export async function cpGeneric(
           entryDst,
           errors,
           copies,
+          entry,
         )
         if (!made.ok) continue
         if (
@@ -2400,7 +2429,7 @@ export async function cpGeneric(
         if (copies.owns !== undefined && !copies.owns(target.virtual)) copier = copies.relay
       }
     }
-    const made = await makeBackup(policy, mover, stat, versionReaddir, target, errors, copies)
+    const made = await makeBackup(policy, mover, stat, versionReaddir, target, errors, copies, src)
     if (!made.ok) continue
     if (
       unlink !== null &&

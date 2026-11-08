@@ -24,11 +24,11 @@ import re
 
 import pytest
 
+from mirage.core.generic.find import depth_first_key
 from mirage.io.stream import SharedStdin
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.executor.find_action_dispatch import depth_first_key
 from tests.fixtures.vfs_io import dispatched
 
 
@@ -1150,6 +1150,33 @@ async def test_delete_keeps_a_directory_with_an_unmatched_link():
         ("find d -name '*.txt' -print -quit", "d/a.txt\n", "", 0),
         ("find d d -name b.txt -print -quit", "d/b.txt\n", "", 0),
         ("find d -quit -print", "", "", 0),
+        (
+            r"find d/a.txt -print -quit -exec echo RAN {} \;",
+            "d/a.txt\n",
+            "",
+            0,
+        ),
+        ("find d -depth -print -quit", "d/a.txt\n", "", 0),
+        ("find d -type f -size +2c -print -quit", "d/b.txt\n", "", 0),
+        (
+            "touch ./-files0-from; printf './-files0-from\\0' > list; "
+            "find -name -files0-from -files0-from list",
+            "./-files0-from\n",
+            "",
+            0,
+        ),
+        (
+            'find -files0-from ""',
+            "",
+            "find: cannot open '' for reading: No such file or directory\n",
+            1,
+        ),
+        (
+            r"find d/a.txt -fprint out -exec mv out saved \;; ls out",
+            "",
+            "ls: cannot access 'out': No such file or directory\n",
+            2,
+        ),
         (
             "printf 'd/a.txt\\0d/sub\\0' | find -files0-from - -maxdepth 0",
             "d/a.txt\nd/sub\n",

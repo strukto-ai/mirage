@@ -90,6 +90,7 @@ def parse_find_args(
             mindepth=expr.mindepth,
             empty=expr.uses_empty,
             tree=expr.tree,
+            depth_first=expr.depth_first,
         )
     ftype: FindType | str | None = type
     if type in (FindType.DIRECTORY.value, FindType.FILE.value):

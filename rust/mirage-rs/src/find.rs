@@ -583,6 +583,8 @@ struct Parsed {
     depth_first: bool,
     follow: bool,
     files0_from: Option<Vec<u8>>,
+    files0_at: Vec<usize>,
+    reached: usize,
     predicates: Vec<Vec<u8>>,
     warnings: Vec<Vec<u8>>,
 }
@@ -629,6 +631,8 @@ impl Parsed {
             "files0_from".to_owned(),
             json!(self.files0_from.as_deref().map(byte_text)),
         );
+        values.insert("files0_at".to_owned(), json!(self.files0_at));
+        values.insert("reached".to_owned(), json!(self.reached));
         values.insert(
             "predicates".to_owned(),
             Json::Array(
@@ -668,6 +672,7 @@ struct Parser<'a> {
     depth_first: bool,
     follow: bool,
     files0_from: Option<Vec<u8>>,
+    files0_at: Vec<usize>,
     predicates: Vec<Vec<u8>>,
     warnings: Vec<Vec<u8>>,
 }
@@ -696,6 +701,7 @@ impl<'a> Parser<'a> {
             depth_first: false,
             follow: false,
             files0_from: None,
+            files0_at: Vec::new(),
             predicates: Vec::new(),
             warnings: Vec::new(),
         }
@@ -704,6 +710,11 @@ impl<'a> Parser<'a> {
     fn run(mut self) -> Result<Parsed, StreamError> {
         match self.parse() {
             Ok(tree) => Ok(Parsed {
+                reached: if self.positional {
+                    self.actions.len()
+                } else {
+                    reached(&tree, self.actions.len())
+                },
                 tree,
                 maxdepth: self.maxdepth,
                 mindepth: self.mindepth,
@@ -715,6 +726,7 @@ impl<'a> Parser<'a> {
                 depth_first: self.depth_first,
                 follow: self.follow,
                 files0_from: self.files0_from,
+                files0_at: self.files0_at,
                 predicates: self.predicates,
                 warnings: self.warnings,
             }),
@@ -1097,6 +1109,7 @@ impl<'a> Parser<'a> {
             }
             b"-files0-from" => {
                 self.files0_from = Some(value.to_vec());
+                self.files0_at.push(self.pos - 2);
                 Ok(Node::True)
             }
             b"-maxdepth" => {
@@ -1246,6 +1259,22 @@ impl<'a> Parser<'a> {
         check_exec_result(tree)?;
         self.actions = distinct;
         Ok(())
+    }
+}
+
+/// How many of the actions, in order, a row can reach: all of them, but
+/// for those a top-level chain holds past its `-quit`, since the first row
+/// to reach the `-quit` ends the walk there.
+fn reached(tree: &Node, actions: usize) -> usize {
+    let Node::And(kids) = tree else {
+        return actions;
+    };
+    match kids.iter().position(is_quit) {
+        Some(quit) => kids[..quit]
+            .iter()
+            .filter(|kid| matches!(kid, Node::Act { .. }))
+            .count(),
+        None => actions,
     }
 }
 
@@ -2586,5 +2615,38 @@ mod tests {
             refuse(&["-files0-from"]),
             "find: missing argument to `-files0-from'"
         );
+    }
+
+    #[test]
+    fn actions_past_a_top_level_quit_are_not_reached() {
+        assert_eq!(
+            parse(&["-print", "-quit", "-exec", "rm", "{}", ";"])["reached"],
+            json!(1)
+        );
+        assert_eq!(parse(&["-quit", "-fprint", "out"])["reached"], json!(0));
+        assert_eq!(parse(&["-print", "-fprint", "out"])["reached"], json!(2));
+        assert_eq!(
+            parse(&["-name", "a", "-print", "-quit", "-o", "-print"])["reached"],
+            json!(1)
+        );
+        assert_eq!(
+            parse(&["(", "-name", "a", "-print", ")", "-quit"])["reached"],
+            json!(1)
+        );
+    }
+
+    #[test]
+    fn each_files0_from_is_placed_among_the_expression_words() {
+        let read = parse(&[
+            "-name",
+            "-files0-from",
+            "-files0-from",
+            "a",
+            "-files0-from",
+            "b",
+        ]);
+        assert_eq!(read["files0_at"], json!([2, 4]));
+        assert_eq!(read["files0_from"], json!("b"));
+        assert_eq!(parse(&["d", "-files0-from", "a"])["files0_at"], json!([0]));
     }
 }

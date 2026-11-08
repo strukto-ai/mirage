@@ -86,7 +86,7 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf hi > /data/mtprobe.txt; find /data -name mtprobe.txt -mtime -1; find /data -name mtprobe.txt -mmin -60; find /data -name mtprobe.txt -mmin +60; find /data -name mtprobe.txt -amin -60; find /data -name mtprobe.txt -cmin -60; find /data -name mtprobe.txt -atime 0; find /data -name mtprobe.txt -ctime -1; find /data -name mtprobe.txt -daystart -mtime -2; find /data -name mtprobe.txt -mmin 1.5x; echo rc=$?",
+      "command": "printf hi > /data/mtprobe.txt; find /data -name mtprobe.txt -mtime -1; find /data -name mtprobe.txt -mmin -60; find /data -name mtprobe.txt -mmin +60; find /data -name mtprobe.txt -amin -60; find /data -name mtprobe.txt -cmin -60; find /data -name mtprobe.txt -atime -1; find /data -name mtprobe.txt -ctime -1; find /data -name mtprobe.txt -daystart -mtime -2; find /data -name mtprobe.txt -mmin 1.5x; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "/data/mtprobe.txt\n/data/mtprobe.txt\n/data/mtprobe.txt\n/data/mtprobe.txt\n/data/mtprobe.txt\n/data/mtprobe.txt\n/data/mtprobe.txt\nrc=1\n",
