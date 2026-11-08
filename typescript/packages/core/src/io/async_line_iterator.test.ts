@@ -300,3 +300,15 @@ it('sets aside the characters readChars took before it waits', async () => {
   const [[taken], rest] = await Promise.all([read, other])
   expect([decode(taken), decode(rest ?? new Uint8Array())]).toEqual(['ab', 'cdef'])
 })
+
+it('lets go of the rest a kept descriptor read', async () => {
+  const big = new Uint8Array((1 << 17) + 5).fill(0x78)
+  big.set(encode('\nend\n'), 1 << 17)
+  const lines = new AsyncLineIterator(fromChunks([big]))
+  await lines.loadRest()
+  expect((await lines.readline())?.byteLength).toBe(1 << 17)
+  const buf = (lines as unknown as { buf: Uint8Array }).buf
+  expect([buf.byteLength, buf.byteOffset]).toEqual([4, 0])
+  expect(decode((await lines.readline()) ?? new Uint8Array())).toBe('end')
+  expect((lines as unknown as { buf: Uint8Array }).buf.buffer.byteLength).toBe(0)
+})

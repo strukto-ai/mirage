@@ -274,19 +274,24 @@ export function streamOperands(
         if (head === undefined) break
         const { scope, result } = head
         const [out, branch] = await abortable(result, controller.signal)
-        let first = true
-        for await (const data of operandOutput(cmdName, scope, out, branch, controller.signal)) {
-          if (data.byteLength === 0) continue
-          if (first && printed && separator !== '') yield encodeText(separator)
-          first = false
-          printed = true
-          yield data
-        }
-        io.stderr = concatBytes([await materialize(io.stderr), await materialize(branch.stderr)])
-        io.exitCode = Math.max(io.exitCode, branch.exitCode)
-        if (branch.refusal !== null) io.refusal = branch.refusal
-        records.push(branch.records)
         pending.shift()
+        let first = true
+        try {
+          for await (const data of operandOutput(cmdName, scope, out, branch, controller.signal)) {
+            if (data.byteLength === 0) continue
+            if (first && printed && separator !== '') yield encodeText(separator)
+            first = false
+            printed = true
+            yield data
+          }
+        } finally {
+          // Merged even when the reader stops inside this run, so what the run
+          // reported is not lost.
+          io.stderr = concatBytes([await materialize(io.stderr), await materialize(branch.stderr)])
+          io.exitCode = Math.max(io.exitCode, branch.exitCode)
+          if (branch.refusal !== null) io.refusal = branch.refusal
+          records.push(branch.records)
+        }
         start()
       }
       io.records = records.every((found) => found !== null)

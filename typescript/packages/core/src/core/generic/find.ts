@@ -262,7 +262,12 @@ export async function* walkFind(
     try {
       children = await (deps.listing ?? deps.readdir)(spec)
     } catch (err) {
-      if (isEnoent(err)) return []
+      if (isEnoent(err)) {
+        // Only vanished dirs are skipped; API errors (rate limit, auth)
+        // propagate.
+        console.debug(`find: ${p} vanished before its listing: ${String(err)}`)
+        return []
+      }
       if (isEacces(err) && deps.unreadable !== undefined) {
         if (!deps.unreadable.includes(p)) deps.unreadable.push(p)
         return []

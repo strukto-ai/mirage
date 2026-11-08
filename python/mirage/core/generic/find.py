@@ -264,9 +264,10 @@ async def walk_find(
         )
         try:
             children = await (listing or readdir)(spec)
-        except (FileNotFoundError, NotADirectoryError):
+        except (FileNotFoundError, NotADirectoryError) as exc:
             # Only vanished dirs are skipped; API errors (rate limit, auth)
             # propagate.
+            logger.debug("find: %s vanished before its listing: %s", p, exc)
             return []
         except PermissionError:
             # A directory the session may not open (a rule refused it at

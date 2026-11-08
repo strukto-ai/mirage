@@ -195,6 +195,7 @@ async function rewritten(
     } catch (err) {
       // tee -a creates a missing file: append to empty.
       if (!isEnoent(err)) throw err
+      console.debug(`appending to a new file at ${path.virtual}: ${String(err)}`)
     }
     async function* joined(): AsyncIterable<Uint8Array> {
       yield* spool.stream()

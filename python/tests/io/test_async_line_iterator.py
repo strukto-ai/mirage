@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator
 import pytest
 
 from mirage.io.async_line_iterator import (
+    RELEASE,
     AsyncLineIterator,
     SharedInput,
     char_width,
@@ -477,3 +478,14 @@ async def test_a_second_discard_during_the_close_leaves_it_to_finish():
     await reader.discard()
     closed.set()
     assert await pending == b"b"
+
+
+@pytest.mark.asyncio
+async def test_a_kept_descriptor_lets_go_of_the_rest_it_read():
+    reader = AsyncLineIterator(_chunks([b"x" * (RELEASE * 2) + b"\nend\n"]))
+    await reader.load_rest()
+    assert await reader.readline() == b"x" * (RELEASE * 2)
+    assert len(reader._buf) - reader._pos == 4
+    assert len(reader._buf) < RELEASE
+    assert await reader.readline() == b"end"
+    assert len(reader._buf) == 0

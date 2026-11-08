@@ -21,6 +21,9 @@ import { checkMemory, memoryRoom } from './memory.ts'
 import { type ByteSource, DeviceInput, type PipeEnd, PipeStream } from './types.ts'
 import type { PathSpec } from '../types.ts'
 
+// Read bytes past which a mostly read buffer keeps only what is left.
+const RELEASE = 1 << 16
+
 /**
  * The read end an `exec` keeps on a live pipe (`exec 3<"$1"`). It holds the
  * pipe, not the name it was opened by. Each read takes a stream of its own
@@ -117,6 +120,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
       if (idx >= 0) {
         const line = this.buf.subarray(0, idx)
         this.buf = this.buf.subarray(idx + 1)
+        this.trim()
         return line
       }
     } catch (error) {
@@ -217,6 +221,17 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     await this.close()
   }
 
+  /**
+   * Let go of what reads have consumed once it is most of a large buffer, so
+   * a kept descriptor does not hold a loaded rest it read. Mirrors Python's
+   * `_trim`.
+   */
+  private trim(): void {
+    const buf = this.buf
+    if (buf.byteLength === 0) this.buf = new Uint8Array(0)
+    else if (buf.byteOffset >= RELEASE && buf.byteOffset >= buf.byteLength) this.buf = buf.slice()
+  }
+
   private check(signal?: AbortSignal): Promise<void> | undefined {
     signal?.throwIfAborted()
     const pending = this.budget.run()
@@ -267,6 +282,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
           checkMemory(held + idx)
           const tail = this.buf.subarray(0, idx)
           this.buf = this.buf.subarray(idx + width)
+          this.trim()
           return [parts.length === 0 ? tail : concat([...parts, tail]), true]
         }
         if (this.exhausted) {
@@ -414,11 +430,13 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         }
         if (this.buf.byteLength === run) {
           setAside()
+          this.trim()
           return [concat(parts), false]
         }
         if (delim !== null && this.buf[run] === delim) {
           setAside()
           this.buf = this.buf.subarray(1)
+          this.trim()
           return [concat(parts), true]
         }
         const width = charWidth(this.buf, run)
@@ -427,6 +445,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         taken++
       }
       setAside()
+      this.trim()
       return [concat(parts), true]
     } catch (error) {
       setAside()

@@ -345,26 +345,30 @@ async def stream_operands(
             while pending:
                 scope, task = pending[0]
                 out, branch = await task
-                first = True
-                async with aclosing(
-                    operand_output(cmd_name, scope, out, branch)
-                ) as source:
-                    async for data in source:
-                        if not data:
-                            continue
-                        if first and printed and separator:
-                            yield separator
-                        first = False
-                        printed = True
-                        yield data
-                io.stderr = await materialize(io.stderr) + await materialize(
-                    branch.stderr
-                )
-                io.exit_code = max(io.exit_code, branch.exit_code)
-                if branch.refusal is not None:
-                    io.refusal = branch.refusal
-                records.append(branch.records)
                 pending.popleft()
+                first = True
+                try:
+                    async with aclosing(
+                        operand_output(cmd_name, scope, out, branch)
+                    ) as source:
+                        async for data in source:
+                            if not data:
+                                continue
+                            if first and printed and separator:
+                                yield separator
+                            first = False
+                            printed = True
+                            yield data
+                finally:
+                    # Merged even when the reader stops inside this run, so
+                    # what the run reported is not lost.
+                    io.stderr = await materialize(
+                        io.stderr
+                    ) + await materialize(branch.stderr)
+                    io.exit_code = max(io.exit_code, branch.exit_code)
+                    if branch.refusal is not None:
+                        io.refusal = branch.refusal
+                    records.append(branch.records)
                 start()
             io.records = (
                 [

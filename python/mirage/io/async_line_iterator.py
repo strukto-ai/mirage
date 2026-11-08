@@ -25,6 +25,9 @@ from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
 
+# Read bytes past which a mostly read buffer keeps only what is left.
+RELEASE = 1 << 16
+
 
 def char_width(data: bytes | bytearray, at: int = 0) -> int:
     """How many bytes the character at ``at`` in ``data`` spans, decoded
@@ -112,6 +115,15 @@ class AsyncLineIterator:
         self._buf[: self._pos] = data
         self._pos = 0
 
+    def _trim(self) -> None:
+        """Let go of what reads have consumed once it is most of a large
+        buffer, so a kept descriptor does not hold a loaded rest it read."""
+        if self._pos >= len(self._buf):
+            self._buf, self._pos = bytearray(), 0
+        elif self._pos >= RELEASE and self._pos * 2 >= len(self._buf):
+            del self._buf[: self._pos]
+            self._pos = 0
+
     def _append(self, chunk: bytes) -> None:
         """Put a pulled chunk after what is still unread, dropping what was
         read once it is most of the buffer, so appends stay linear."""
@@ -189,6 +201,7 @@ class AsyncLineIterator:
                     check_memory(held + index - self._pos)
                     parts.append(self._buf[self._pos : index])
                     self._pos = index + len(delim)
+                    self._trim()
                     return b"".join(parts), True
                 if self._exhausted:
                     rest = self._buf[self._pos :]
@@ -392,11 +405,13 @@ class AsyncLineIterator:
                         self._exhausted = True
                     continue
                 if self._pos >= len(self._buf):
+                    self._trim()
                     return bytes(out), False
                 if delim is not None and self._buf.startswith(
                     delim, self._pos
                 ):
                     self._pos += len(delim)
+                    self._trim()
                     return bytes(out), True
                 width = char_width(self._buf, self._pos)
                 if room is not None and len(out) + width > room:
@@ -404,6 +419,7 @@ class AsyncLineIterator:
                 out += self._buf[self._pos : self._pos + width]
                 self._pos += width
                 taken += 1
+            self._trim()
             return bytes(out), True
         except BaseException as exc:
             await self._failed(exc, bytes(out))
