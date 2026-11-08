@@ -642,7 +642,9 @@ impl Checker {
 }
 impl Stream for Checker {
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.records.push(input);
+        self.records
+            .push(input)
+            .map_err(|_| StreamError::refusal(b"sort: memory exhausted", 2))?;
         self.pump(out)
     }
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {

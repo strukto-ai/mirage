@@ -339,7 +339,9 @@ impl Stream for Comm {
         out: &mut Vec<u8>,
     ) -> Result<(), StreamError> {
         let source = self.source(side.min(1));
-        self.inputs[source].push(input);
+        self.inputs[source]
+            .push(input)
+            .map_err(|_| StreamError::refusal(b"comm: memory exhausted", 1))?;
         self.pump(out);
         Ok(())
     }

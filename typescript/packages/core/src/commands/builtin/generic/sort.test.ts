@@ -15,6 +15,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ByteSpool } from '../../../io/spool.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { OpenStream } from '../../../rs/stream.ts'
 import { PathSpec } from '../../../types.ts'
 import { unreadableStdin } from '../../../shell/descriptors.ts'
 import { enoent } from '../../../errors/fs.ts'
@@ -59,6 +61,40 @@ describe('sort quotes the word --check refuses', () => {
   ])('escapes %j in the --check clause', async (value, escaped) => {
     const [stderr] = await stderrOf({ check: value })
     expect(stderr.split('\n')[0]).toBe(`sort: invalid argument '${escaped}' for '--check'`)
+  })
+})
+
+describe('sort --check out of memory', () => {
+  // The engine refuses a line past its cap as sort does out of memory, which
+  // -C does not silence (pinned, coreutils 9.7). Mirrors test_sort.py.
+  it.each([{ c: true }, { C: true }])("is sort's own line under %j", async (flags) => {
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- called with the tested stream
+    const feed = OpenStream.prototype.feed
+    const spy = vi.spyOn(OpenStream.prototype, 'feed').mockImplementation(function (
+      this: OpenStream,
+      chunk: Uint8Array,
+    ) {
+      if (DEC.decode(chunk).endsWith('long')) {
+        throw new StreamRefusal('sort: memory exhausted', new Uint8Array(), 2)
+      }
+      return feed.call(this, chunk)
+    })
+    try {
+      const ctx = {
+        stdin: new TextEncoder().encode('a\nlong'),
+        flags,
+        cwd: PathSpec.fromStrPath('/'),
+        vfs: { kind: 'ram' } as never,
+      } as Context
+      const result = await sortGeneric([], ctx, () => {
+        throw new Error('paths are empty; the source is stdin')
+      })
+      const io = result?.[1]
+      expect(DEC.decode(await materialize(io?.stderr ?? null))).toBe('sort: memory exhausted\n')
+      expect(io?.exitCode).toBe(2)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

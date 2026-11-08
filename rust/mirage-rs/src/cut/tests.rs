@@ -282,111 +282,135 @@ fn a_raw_output_delimiter_byte_is_written_as_typed() {
     assert_eq!(execute(&options, b"a:b:c\n", 1), b"a\0b\n");
 }
 
-fn cancellable_cut() -> Cut {
-    Cut {
-        options: Options {
-            mode: Mode::Bytes,
-            delimiter: Some('\t'),
-            complement: false,
-            only_delimited: false,
-            whitespace: None,
-            no_partial: true,
-            output_delimiter: Vec::new(),
-            separator: b'\n',
-        },
-        ranges: intervals(b"1-", Mode::Bytes, "cut").unwrap(),
-        input: Vec::new(),
-        cursor: 0,
-        record: Record::default(),
-        output: None,
-        ended: false,
-        cancelled: false,
+fn long_line(len: usize) -> Vec<u8> {
+    (0..len).map(|at| b"abcdefghij"[at % 10]).collect()
+}
+
+#[test]
+fn long_records_stream_byte_at_a_time_in_every_mode() {
+    let line = long_line(3 * MAX_HELD);
+    let input = [line.as_slice(), b"\n"].concat();
+    for mode in ["bytes", "characters"] {
+        let mut options = config("2,5-6,100000-", mode);
+        options.push(typed("output_delimiter", b":"));
+        let expected = [b"b:ef:", &line[99_999..], b"\n"].concat();
+        assert_eq!(execute(&options, &input, 1), expected);
+    }
+    let mut options = config("2,5-6", "bytes");
+    options.push(switch("no_partial"));
+    let wide = "é".repeat(2 * MAX_HELD);
+    assert_eq!(
+        execute(&options, format!("{wide}\n").as_bytes(), 1),
+        "éé\n".as_bytes()
+    );
+    let tabbed = [line.as_slice(), b"\t", &line, b"\t", &line, b"\n"].concat();
+    let options = config("1,3", "fields");
+    let expected = [line.as_slice(), b"\t", &line, b"\n"].concat();
+    assert_eq!(execute(&options, &tabbed, 1), expected);
+    let mut options = config("1", "fields");
+    options.push(switch("w"));
+    let spaced = [b"  ".as_slice(), &line, b" \t "].concat();
+    assert_eq!(execute(&options, &spaced, 3), b"\n");
+    options[1] = typed("whitespace_delimited", b"t");
+    assert_eq!(
+        execute(&options, &spaced, 3),
+        [line.as_slice(), b"\n"].concat()
+    );
+}
+
+#[test]
+fn an_undecided_first_field_is_held_and_streams_once_decided() {
+    let line = long_line(MAX_HELD / 4);
+    let raw = [line.as_slice(), b"\xff", &line, b"\n"].concat();
+    let delimited = [line.as_slice(), b"\xff", &line, b"\tz\n"].concat();
+    let lossy = [line.as_slice(), "\u{fffd}".as_bytes(), &line, b"\n"].concat();
+    let mut options = config("1", "fields");
+    assert_eq!(execute(&options, &raw, 1), raw);
+    assert_eq!(execute(&options, &delimited, 1000), lossy);
+    options.push(switch("only_delimited"));
+    assert!(execute(&options, &raw, 1000).is_empty());
+    assert_eq!(execute(&options, &delimited, 1), lossy);
+    let options = config("2", "fields");
+    assert_eq!(execute(&options, &raw, 1000), raw);
+    assert_eq!(execute(&options, &delimited, 1), b"z\n");
+}
+
+#[test]
+fn a_held_field_replays_characters_across_the_blocks_it_set_aside() {
+    let wide = "é".repeat(MAX_HELD / 8);
+    let input = format!("{wide}\tééé\n");
+    for split in [1, 999, 4096] {
+        assert_eq!(
+            execute(&config("2", "fields"), input.as_bytes(), split),
+            "ééé\n".as_bytes()
+        );
+        let mut options = config("1", "fields");
+        options.push(switch("only_delimited"));
+        assert_eq!(
+            execute(&options, input.as_bytes(), split),
+            format!("{wide}\n").as_bytes()
+        );
     }
 }
 
-fn retained_blocks(stream: &Cut) -> usize {
-    let mut count = stream.record.blocks.len() + usize::from(stream.record.tail.capacity() > 0);
-    if let Some(output) = &stream.output {
-        count += output.record.blocks.len()
-            + usize::from(output.record.tail.capacity() > 0)
-            + usize::from(output.reader.bytes.is_some())
-            + usize::from(output.output_reader.bytes.is_some());
+#[test]
+fn a_first_field_past_the_cap_is_refused_after_the_output_before_it() {
+    let input = [b"a\tb\n".as_slice(), &long_line(MAX_HELD + 1), b"\n"].concat();
+    for (list, only_delimited, refused) in [
+        ("2", false, true),
+        ("1", true, true),
+        ("1", false, false),
+        ("2", true, false),
+    ] {
+        let mut options = config(list, "fields");
+        if only_delimited {
+            options.push(switch("only_delimited"));
+        }
+        let config = json!({ "options": options });
+        let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
+        let mut output = Vec::new();
+        let mut result = Ok(());
+        for chunk in input.chunks(4096) {
+            result = stream.feed(chunk, &mut output);
+            while result.is_ok() && stream.busy() {
+                result = stream.drain(&mut output);
+            }
+            if result.is_err() {
+                break;
+            }
+        }
+        let first = if list == "1" { b"a\n" } else { b"b\n" };
+        assert!(output.starts_with(first), "{list} {only_delimited}");
+        let error = result.err();
+        assert_eq!(error.is_some(), refused, "{list} {only_delimited}");
+        if let Some(error) = error {
+            assert_eq!(
+                (error.message.as_str(), error.status),
+                ("cut: memory exhausted", 1)
+            );
+        }
     }
-    count
 }
 
-fn drain_cancellation(stream: &mut Cut) {
-    let mut steps = 0;
+#[test]
+fn cancel_drops_a_held_record_and_ignores_later_input() {
+    let options = config("2", "fields");
+    let config = json!({ "options": options });
+    let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
     let mut out = Vec::new();
-    while stream.busy() {
-        let before = retained_blocks(stream);
-        stream.drain(&mut out).unwrap();
-        let after = retained_blocks(stream);
-        assert!(after <= before);
-        assert!(before - after <= WORK / BLOCK);
-        assert!(out.is_empty());
-        assert_eq!(out.capacity(), 0);
-        steps += 1;
+    for chunk in long_line(MAX_HELD / 2).chunks(WORK) {
+        stream.feed(chunk, &mut out).unwrap();
+        while stream.busy() {
+            stream.drain(&mut out).unwrap();
+        }
     }
-    assert!(steps > 1);
-    assert_eq!(retained_blocks(stream), 0);
+    assert!(out.is_empty());
     assert!(stream.cancel());
     assert!(!stream.busy());
-    stream.feed(b"ignored\n", &mut out).unwrap();
+    stream.feed(b"x\ty\n", &mut out).unwrap();
+    stream.drain(&mut out).unwrap();
     stream.finish(&mut out).unwrap();
     assert!(out.is_empty());
-    assert_eq!(out.capacity(), 0);
-}
-
-#[test]
-fn cancel_retains_a_partial_record_until_bounded_empty_drains_retire_it() {
-    let mut stream = cancellable_cut();
-    let data = vec![b'x'; 2 * 1024 * 1024 + 101];
-    let mut out = Vec::new();
-    for chunk in data.chunks(WORK) {
-        stream.feed(chunk, &mut out).unwrap();
-        while stream.busy() {
-            stream.drain(&mut out).unwrap();
-        }
-    }
-    assert!(out.is_empty());
-    assert_eq!(stream.record.len, data.len());
-    let before = retained_blocks(&stream);
-    let input_capacity = stream.input.capacity();
-    assert!(before > 256);
-    assert!(stream.cancel());
-    assert_eq!(retained_blocks(&stream), before);
-    assert_eq!(stream.input.capacity(), input_capacity);
-    assert!(stream.busy());
-    assert!(stream.cancel());
-    assert_eq!(retained_blocks(&stream), before);
-    stream.feed(b"ignored\n", &mut out).unwrap();
-    assert_eq!(retained_blocks(&stream), before);
-    drain_cancellation(&mut stream);
-}
-
-#[test]
-fn cancel_mid_output_discards_pending_bytes_and_retires_cached_blocks_in_budget() {
-    let mut stream = cancellable_cut();
-    let data = vec![b'x'; 2 * 1024 * 1024];
-    let mut out = Vec::new();
-    for chunk in data.chunks(WORK) {
-        stream.feed(chunk, &mut out).unwrap();
-        while stream.busy() {
-            stream.drain(&mut out).unwrap();
-        }
-    }
-    stream.feed(b"\n", &mut out).unwrap();
-    stream.drain(&mut out).unwrap();
-    assert!(!out.is_empty());
-    let output = stream.output.as_ref().unwrap();
-    assert!(output.reader.bytes.is_some());
-    assert!(output.output_reader.bytes.is_some());
-    let before = retained_blocks(&stream);
-    assert!(before > 256);
-    assert!(stream.cancel());
-    assert_eq!(retained_blocks(&stream), before);
-    drain_cancellation(&mut stream);
 }
 
 #[test]

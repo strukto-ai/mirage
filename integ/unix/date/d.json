@@ -538,6 +538,42 @@
         "u",
         "d"
       ]
+    },
+    {
+      "id": "date_wide_fields_stream_at_the_widest_width",
+      "seq": 15500510,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d @0 '+%99999999999Y' | head -c 5; echo; date -u -d @0 '+%70000Y|%_5a' | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000\n70007\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u",
+        "d"
+      ]
     }
   ]
 }

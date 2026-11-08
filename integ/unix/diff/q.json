@@ -39,6 +39,46 @@
       ]
     },
     {
+      "id": "diff_q_compares_bytes_in_every_output_style",
+      "seq": 601123,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/qdiff && printf 'a' > /data/qdiff/na && printf 'a\\n' > /data/qdiff/nb && diff -q -e /data/qdiff/na /data/qdiff/nb; echo rc=$?; diff -q -w /data/qdiff/na /data/qdiff/nb; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "Files /data/qdiff/na and /data/qdiff/nb differ\nrc=1\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "q",
+        "e",
+        "w"
+      ]
+    },
+    {
       "id": "diff_brief_reports_difference",
       "seq": 1320023,
       "targets": [

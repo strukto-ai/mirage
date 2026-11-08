@@ -25,14 +25,7 @@ import { parseFlags as parseLineFlags } from '../../../workspace/executor/comman
 import { SeededIdSource } from '../../../utils/ids.ts'
 import { sha256Hex } from '../../../utils/hash.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import {
-  MAX_OUTPUT_LINES,
-  MEMORY_EXHAUSTED,
-  emitCount,
-  parseFlags,
-  shufGeneric,
-  type ShufFlags,
-} from './shuf.ts'
+import { emitCount, parseFlags, shufGeneric, type ShufFlags } from './shuf.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -426,37 +419,33 @@ describe('shuf -i samples a huge range without enumerating it', () => {
   })
 })
 
-// A range GNU would enumerate given enough memory, answered with GNU's own
-// `xalloc_die` line for exactly that situation (ground truth SH5). mirage
-// renders one byte object rather than streaming, so the ceiling is stated
-// rather than left to whatever the host survives.
-describe('shuf refuses an output it cannot render', () => {
+// A range whose order or drawn values would pass what shuf holds gets the
+// reference's out-of-memory line, exit 1; nothing else has a ceiling, since
+// records spool and `-r` holds nothing (ground truth SH5).
+describe('shuf memory', () => {
+  it.each([[`1-${String(UINTMAX)}`], ['1-1000000000000']])(
+    'refuses the range %s it cannot hold',
+    async (range) => {
+      const got = await run({ input_range: range })
+      expect(got.exit).toBe(1)
+      expect(got.stdout).toBe('')
+      expect(got.stderr).toBe('shuf: memory exhausted\n')
+    },
+  )
+
   it.each([
-    [{ input_range: `1-${String(UINTMAX)}` }],
-    [{ input_range: '1-1000000000000' }],
-    [{ input_range: `1-${String(MAX_OUTPUT_LINES + 1n)}` }],
-    [{ input_range: `1-${String(UINTMAX)}`, repeat: true }],
-    [{ input_range: '1-3', head_count: String(MAX_OUTPUT_LINES + 1n), repeat: true }],
-  ] as [Record<string, FlagValue>][])('answers memory exhausted for %j', async (flags) => {
-    const got = await run(flags)
-    expect(got.exit).toBe(1)
-    expect(got.stdout).toBe('')
-    expect(got.stderr).toBe('shuf: memory exhausted\n')
-  })
-
-  it('is the same ceiling reached through -r -n on stdin', async () => {
-    const refused = await run({ head_count: String(MAX_OUTPUT_LINES + 1n), repeat: true }, 'a\n')
-    expect(refused.exit).toBe(1)
-    expect(refused.stderr).toBe('shuf: memory exhausted\n')
-    // Without `-r` the same count is just a head count over two lines.
-    const kept = await run({ head_count: String(MAX_OUTPUT_LINES + 1n) }, 'a\nb\n')
-    expect(kept.exit).toBe(0)
-    expect(kept.stdout.split('\n').slice(0, -1).sort()).toEqual(['a', 'b'])
-  })
-
-  it('names the wording once, so the two hosts cannot drift', () => {
-    expect(MEMORY_EXHAUSTED).toBe('shuf: memory exhausted')
-  })
+    [{ input_range: '1-1000001' }, '', 1000001],
+    [{ input_range: `1-${String(UINTMAX)}`, head_count: '3' }, '', 3],
+    [{ input_range: '1-3', head_count: '1000001', repeat: true }, '', 1000001],
+    [{ head_count: '1000001', repeat: true }, 'a\n', 1000001],
+  ] as [Record<string, FlagValue>, string, number][])(
+    'has no line ceiling for %j',
+    async (flags, stdin, lines) => {
+      const got = await run(flags, stdin)
+      expect(got.exit).toBe(0)
+      expect(got.stdout.split('\n').length - 1).toBe(lines)
+    },
+  )
 })
 
 // `-n` past UINTMAX_MAX is CLAMPED to UINTMAX, never refused, which is the

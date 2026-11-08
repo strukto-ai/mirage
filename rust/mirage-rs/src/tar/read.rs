@@ -23,6 +23,20 @@ const FEED: usize = 16 * 1024;
 const NOT_TAR: &str = "tar: This does not look like a tar archive";
 const SKIPPING: &str = "tar: Skipping to next header";
 const UNEXPECTED_EOF: &str = "tar: Unexpected EOF in archive";
+const MEMORY_EXHAUSTED: &str = "tar: memory exhausted";
+/// The most data of one meta header a run holds: past it the run ends as
+/// tar does when it cannot allocate the header.
+#[cfg(not(test))]
+pub(super) const MAX_META: u64 = 1 << 30;
+#[cfg(test)]
+pub(super) const MAX_META: u64 = 1 << 20;
+/// The most zeros a run writes into sparse members' holes, which no host
+/// write skips: a hole past it fails its member as tar's write past a
+/// file size limit does, and the run reads on.
+#[cfg(not(test))]
+const MAX_ZEROS: u64 = 1 << 30;
+#[cfg(test)]
+const MAX_ZEROS: u64 = 1 << 20;
 /// What a sparse member's holes are written from.
 static ZEROS: [u8; WINDOW] = [0; WINDOW];
 
@@ -101,6 +115,10 @@ struct Input<'h> {
     failure: Option<Failure>,
     remaining: Option<u64>,
     limited: bool,
+    /// The zeros the run may still write into holes.
+    room: u64,
+    /// The last member's data met a hole past `room`.
+    oversized: bool,
 }
 
 impl Input<'_> {
@@ -262,11 +280,14 @@ impl Input<'_> {
             next: 0,
             left: 0,
             at: 0,
+            room: self.room,
+            over: false,
         };
         let whole = self.copy(member.size, sink, Some(&mut holes)).await;
         if whole {
             holes.zeros(self.raw.host, sink, end).await;
         }
+        (self.room, self.oversized) = (holes.room, holes.over);
         whole
     }
 
@@ -304,19 +325,27 @@ impl Input<'_> {
 }
 
 /// A sparse member's data on its way to its sink: the runs it fills, each
-/// an offset and a length, the bytes left of the current one and where in
-/// the file it is.
+/// an offset and a length, the bytes left of the current one, where in
+/// the file it is, the zeros the run may still write and whether a hole
+/// needed more.
 struct Holes {
     runs: Vec<u64>,
     next: usize,
     left: u64,
     at: u64,
+    room: u64,
+    over: bool,
 }
 
 impl Holes {
     /// Zeros up to `end` in the file, passed over once the sink takes
-    /// nothing.
+    /// nothing; a hole past the room left writes none, and the sink takes
+    /// nothing more.
     async fn zeros(&mut self, host: &Host, sink: &mut Sink<'_>, end: u64) {
+        if !matches!(sink, Sink::Skip) && end.saturating_sub(self.at) > self.room {
+            self.over = true;
+            *sink = Sink::Skip;
+        }
         if matches!(sink, Sink::Skip) {
             self.at = self.at.max(end);
         }
@@ -324,6 +353,7 @@ impl Holes {
             let n = (end - self.at).min(WINDOW as u64);
             sink.take(host, &ZEROS[..n as usize]).await;
             self.at += n;
+            self.room -= n;
         }
     }
 
@@ -412,6 +442,14 @@ struct Run<'c, 'h> {
 impl Run<'_, '_> {
     fn say(&mut self, line: impl Into<Vec<u8>>) {
         self.notices.push(line.into());
+    }
+
+    /// Say that a member's hole needed more zeros than the run has left.
+    fn oversized(&mut self, input: &mut Input<'_>, shown: &[u8]) {
+        if std::mem::take(&mut input.oversized) {
+            self.say([b"tar: ", shown, b": Cannot write: File too large"].concat());
+            self.failed = true;
+        }
     }
 
     /// Say once a run each prefix a member's name loses.
@@ -503,6 +541,7 @@ impl Run<'_, '_> {
                         self.say(escaped(&member.name));
                     }
                     let whole = input.data(member, &mut Sink::Print).await;
+                    self.oversized(input, &shown);
                     if !whole {
                         self.say(UNEXPECTED_EOF);
                     }
@@ -544,6 +583,7 @@ impl Run<'_, '_> {
                     }
                     None => {}
                 }
+                self.oversized(input, &shown);
                 if !whole {
                     self.say(UNEXPECTED_EOF);
                 }
@@ -627,6 +667,8 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
         failure: None,
         remaining: config.max_decoded_bytes,
         limited: false,
+        room: MAX_ZEROS,
+        oversized: false,
     };
     let mut run = Run {
         config,
@@ -670,6 +712,10 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
         };
         skipping = false;
         if matches!(flag, b'L' | b'K' | b'x' | b'g') {
+            if member.size > MAX_META {
+                host.warn(&[lines(&run.notices), lines(&[MEMORY_EXHAUSTED, FATAL])].concat());
+                return FAILED;
+            }
             let Some(data) = input.whole(member.size).await else {
                 cut = true;
                 break;

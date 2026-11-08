@@ -11,7 +11,7 @@ import type { JsonValue } from '../../../types.ts'
 
 const ENC = new TextEncoder()
 
-// A refusal stops the conversion after the records before it, exit 2.
+// A refusal stops the conversion after the records before it, with its status.
 async function* converted(
   stream: OpenStream,
   source: ByteSource,
@@ -29,7 +29,7 @@ async function* converted(
     }
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
-    io.exitCode = 2
+    io.exitCode = err.status
     io.stderr = ENC.encode(`${err.message}\n`)
     if (err.output.byteLength > 0) yield err.output
     return

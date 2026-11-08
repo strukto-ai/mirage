@@ -15,7 +15,7 @@
 import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
-import { OutputStream, closeQuietly } from '../../../io/stream.ts'
+import { OutputStream, asyncChain, closeQuietly } from '../../../io/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { isoTimestamp, parseDateExprAsync, parsePosixTimeAsync } from '../../../utils/dates.ts'
@@ -23,7 +23,7 @@ import { fsErrorLine } from '../../../errors/render.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { gnuStrftime } from '../utils/strftime.ts'
+import { gnuStrftime, strftimeStream } from '../utils/strftime.ts'
 import { quoteText } from '../../quote.ts'
 import { extraOperandError, usageExitCode, usageHint } from '../../spec/usage.ts'
 import { UsageError } from '../../errors.ts'
@@ -285,7 +285,10 @@ async function date(
   }
   const fmt = formats[0] ?? DEFAULT_FORMAT
   // --resolution names one nanosecond past the epoch.
-  const out = encodeText(gnuStrftime(dt, fmt, zone, resolution ? 1 : undefined) + '\n')
+  const out = asyncChain([
+    await strftimeStream(dt, fmt, zone, resolution ? 1 : undefined),
+    ENC.encode('\n'),
+  ])
   if (setting !== null) return [out, new IOResult({ exitCode: 1, stderr: ENC.encode(CANNOT_SET) })]
   return [out, new IOResult()]
 }

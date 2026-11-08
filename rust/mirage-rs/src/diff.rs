@@ -97,6 +97,16 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     if let Some(typed) = &config.unified {
         config.context = unified_context(typed)?;
     }
+    if config.brief {
+        let ignores = config.ignore_case || config.ignore_all_space || config.ignore_space_change;
+        return Ok(Box::new(Brief {
+            config,
+            held: [Vec::new(), Vec::new()],
+            ended: [false; 2],
+            lines: if ignores { None } else { Some(false) },
+            differ: None,
+        }));
+    }
     Ok(Box::new(Diff {
         config,
         inputs: [Vec::new(), Vec::new()],
@@ -206,7 +216,7 @@ impl Diff {
         {
             self.equal = self.inputs[0] == self.inputs[1];
             self.status = if self.equal { 0 } else { 1 };
-            if !self.equal && !self.config.brief {
+            if !self.equal {
                 self.text(
                     format!(
                         "Binary files {} and {} differ\n",
@@ -224,20 +234,6 @@ impl Diff {
             || self.config.ignore_all_space
             || self.config.ignore_space_change
             || self.config.mode == Mode::Ed;
-        if self.config.brief {
-            self.equal = if normalize {
-                old.len() == new.len()
-                    && old
-                        .iter()
-                        .zip(&new)
-                        .all(|(a, b)| key(a, &self.config) == key(b, &self.config))
-            } else {
-                old == new
-            };
-            self.status = if self.equal { 0 } else { 1 };
-            self.release_inputs();
-            return;
-        }
         let ops = if normalize {
             capture_diff_slices_by_key(Algorithm::Myers, &old, &new, |record| {
                 key(record, &self.config)
@@ -494,6 +490,9 @@ impl Stream for Diff {
         }
         Ok(())
     }
+    fn wants(&self) -> Option<usize> {
+        (0..2).find(|index| !self.ended[*index])
+    }
     fn busy(&self) -> bool {
         !self.pieces.is_empty() || !self.ops.is_empty() || !self.groups.is_empty()
     }
@@ -512,6 +511,161 @@ impl Stream for Diff {
     }
     fn take_stderr(&mut self, out: &mut Vec<u8>) {
         out.append(&mut self.stderr);
+    }
+}
+
+/// `-q`: whether two inputs differ, decided as they come. Without an
+/// ignore option it is their bytes, matched as each arrives, so neither is
+/// held past what the other has reached; with one it is their lines'
+/// keys, a line of each at a time, once the start of each shows neither is
+/// binary (a binary pair compares bytes). Once they differ, neither is
+/// read further.
+struct Brief {
+    config: Config,
+    held: [Vec<u8>; 2],
+    ended: [bool; 2],
+    /// Whether lines' keys decide, None until the binary probe has run.
+    lines: Option<bool>,
+    differ: Option<bool>,
+}
+
+/// The next line `held` holds, through its newline or, once its input has
+/// ended, to its end.
+fn next_line(held: &[u8], ended: bool) -> Option<&[u8]> {
+    match memchr::memchr(b'\n', held) {
+        Some(at) => Some(&held[..=at]),
+        None if ended && !held.is_empty() => Some(held),
+        None => None,
+    }
+}
+
+impl Brief {
+    fn ready(&self, index: usize) -> bool {
+        self.ended[index] || self.held[index].len() >= BINARY_PROBE_BYTES
+    }
+
+    fn settle(&mut self) {
+        if self.lines.is_none() {
+            if !(self.ready(0) && self.ready(1)) {
+                return;
+            }
+            let binary = !self.config.text
+                && self
+                    .held
+                    .iter()
+                    .any(|bytes| bytes[..bytes.len().min(BINARY_PROBE_BYTES)].contains(&0));
+            self.lines = Some(!binary);
+        }
+        let differ = if self.lines == Some(true) {
+            self.settle_lines()
+        } else {
+            self.settle_bytes()
+        };
+        if differ.is_some() {
+            self.differ = differ;
+            self.held = [Vec::new(), Vec::new()];
+        }
+    }
+
+    fn settle_bytes(&mut self) -> Option<bool> {
+        let [old, new] = &mut self.held;
+        let common = old.len().min(new.len());
+        if old[..common] != new[..common] {
+            return Some(true);
+        }
+        old.drain(..common);
+        new.drain(..common);
+        match (old.is_empty(), new.is_empty()) {
+            (true, true) if self.ended == [true, true] => Some(false),
+            (true, false) if self.ended[0] => Some(true),
+            (false, true) if self.ended[1] => Some(true),
+            _ => None,
+        }
+    }
+
+    fn settle_lines(&mut self) -> Option<bool> {
+        let mut at = [0, 0];
+        let differ = loop {
+            let old = next_line(&self.held[0][at[0]..], self.ended[0]);
+            let new = next_line(&self.held[1][at[1]..], self.ended[1]);
+            match (old, new) {
+                (Some(old), Some(new)) => {
+                    if key(&old, &self.config) != key(&new, &self.config) {
+                        break Some(true);
+                    }
+                    at[0] += old.len();
+                    at[1] += new.len();
+                }
+                (None, None) if self.ended == [true, true] => break Some(false),
+                (None, Some(_)) if self.ended[0] => break Some(true),
+                (Some(_), None) if self.ended[1] => break Some(true),
+                _ => break None,
+            }
+        };
+        self.held[0].drain(..at[0]);
+        self.held[1].drain(..at[1]);
+        differ
+    }
+}
+
+impl Stream for Brief {
+    fn feed(&mut self, _: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
+        Err(StreamError::new("use indexed inputs"))
+    }
+    fn finish(&mut self, _: &mut Vec<u8>) -> Result<(), StreamError> {
+        if self.differ.is_none() {
+            return Err(StreamError::new("diff needs both indexed inputs to end"));
+        }
+        Ok(())
+    }
+    fn wants(&self) -> Option<usize> {
+        if self.differ.is_some() {
+            return None;
+        }
+        let short = |index: usize| match self.lines {
+            None => !self.ready(index),
+            Some(false) => self.held[index].is_empty(),
+            Some(true) => next_line(&self.held[index], false).is_none(),
+        };
+        (0..2).find(|index| !self.ended[*index] && short(*index))
+    }
+    fn feed_input(
+        &mut self,
+        index: usize,
+        input: &[u8],
+        _: &mut Vec<u8>,
+    ) -> Result<(), StreamError> {
+        if index > 1 || self.ended[index] {
+            return Err(StreamError::new("invalid or ended input"));
+        }
+        if self.differ.is_none() {
+            self.held[index].extend_from_slice(input);
+            self.settle();
+        }
+        Ok(())
+    }
+    fn end_input(&mut self, index: usize, _: &mut Vec<u8>) -> Result<(), StreamError> {
+        if index > 1 || self.ended[index] {
+            return Err(StreamError::new("invalid or ended input"));
+        }
+        self.ended[index] = true;
+        if self.differ.is_none() {
+            self.settle();
+        }
+        Ok(())
+    }
+    fn status(&self) -> i32 {
+        i32::from(self.differ == Some(true))
+    }
+    /// `{"outcome": "equal" | "different", "context": N}`.
+    fn metadata(&self, out: &mut Vec<u8>) {
+        let outcome = if self.differ == Some(true) {
+            "different"
+        } else {
+            "equal"
+        };
+        let metadata = serde_json::json!({"outcome": outcome, "context": self.config.context});
+        out.extend_from_slice(metadata.to_string().as_bytes());
     }
 }
 
@@ -552,5 +706,162 @@ mod unified_tests {
                 Some((format!("diff: invalid context length '{typed}'{hint}"), 2))
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod brief_tests {
+    use serde_json::{Value, json};
+
+    /// Run `-q` over two inputs fed `chunk` bytes at a time as the stream
+    /// asks: the outcome, the status and how much of each input it read.
+    fn brief(options: Value, inputs: [&[u8]; 2], chunk: usize) -> (String, i32, [usize; 2]) {
+        let mut config = json!({ "brief": true });
+        config
+            .as_object_mut()
+            .unwrap()
+            .extend(options.as_object().unwrap().clone());
+        let mut stream = crate::open("diff", config.to_string().as_bytes()).unwrap();
+        let mut fed = [0; 2];
+        let mut ended = [false; 2];
+        let mut out = Vec::new();
+        while let Some(index) = stream.wants() {
+            assert!(!ended[index]);
+            if fed[index] == inputs[index].len() {
+                stream.end_input(index, &mut out).unwrap();
+                ended[index] = true;
+            } else {
+                let end = (fed[index] + chunk).min(inputs[index].len());
+                stream
+                    .feed_input(index, &inputs[index][fed[index]..end], &mut out)
+                    .unwrap();
+                fed[index] = end;
+            }
+        }
+        stream.finish(&mut out).unwrap();
+        assert!(out.is_empty() && !stream.busy());
+        let mut metadata = Vec::new();
+        stream.metadata(&mut metadata);
+        let outcome: Value = serde_json::from_slice(&metadata).unwrap();
+        (
+            outcome["outcome"].as_str().unwrap().to_owned(),
+            stream.status(),
+            fed,
+        )
+    }
+
+    #[test]
+    fn bytes_decide_without_an_ignore_option() {
+        let cases: [(&[u8], &[u8], &str); 6] = [
+            (b"", b"", "equal"),
+            (b"a\nb\n", b"a\nb\n", "equal"),
+            (b"a\nb\n", b"a\nc\n", "different"),
+            (b"a\nb\n", b"a\nb\nc\n", "different"),
+            (b"a\nb\nc\n", b"a\nb\n", "different"),
+            (b"a\0b\n", b"a\0c\n", "different"),
+        ];
+        for (old, new, outcome) in cases {
+            for chunk in [1, 3, 64] {
+                let (got, status, _) = brief(json!({}), [old, new], chunk);
+                assert_eq!(
+                    (got.as_str(), status),
+                    (outcome, i32::from(outcome != "equal"))
+                );
+            }
+        }
+        // As diffutils 3.10 compares under -q, ed's output style aside.
+        let ed = brief(json!({"mode": "ed"}), [b"a", b"a\n"], 1);
+        assert_eq!((ed.0.as_str(), ed.1), ("different", 1));
+    }
+
+    #[test]
+    fn a_difference_stops_reading_both_inputs() {
+        let old = vec![b'x'; 1 << 20];
+        let mut new = old.clone();
+        new[100] = b'y';
+        let (outcome, _, fed) = brief(json!({}), [&old, &new], 4096);
+        assert_eq!(outcome, "different");
+        assert_eq!(fed, [4096, 4096]);
+        let longer = [old.as_slice(), b"z"].concat();
+        let (outcome, _, fed) = brief(json!({}), [&old, &longer], 4096);
+        assert_eq!(outcome, "different");
+        assert_eq!(fed, [old.len(), old.len() + 1]);
+    }
+
+    #[test]
+    fn ignore_options_compare_line_keys_once_neither_is_binary() {
+        let cases: [(Value, &[u8], &[u8], &str); 8] = [
+            (json!({"ignore_case": true}), b"A\nb\n", b"a\nB\n", "equal"),
+            (json!({"ignore_case": true}), b"a", b"a\n", "different"),
+            (
+                json!({"ignore_all_space": true}),
+                b"a b\n",
+                b"ab\n",
+                "equal",
+            ),
+            (json!({"ignore_all_space": true}), b"a", b"a\n", "equal"),
+            (
+                json!({"ignore_all_space": true}),
+                b"a\n",
+                b"a\n\n",
+                "different",
+            ),
+            (
+                json!({"ignore_space_change": true}),
+                b"a b\n",
+                b"a  b\n",
+                "equal",
+            ),
+            (
+                json!({"ignore_space_change": true}),
+                b"a\n",
+                b"a\nb\n",
+                "different",
+            ),
+            (
+                json!({"ignore_case": true}),
+                b"A\0\n",
+                b"a\0\n",
+                "different",
+            ),
+        ];
+        for (options, old, new, outcome) in cases {
+            for chunk in [1, 2, 4096] {
+                let (got, _, _) = brief(options.clone(), [old, new], chunk);
+                assert_eq!(got, outcome, "{options} {old:?} {new:?} by {chunk}");
+            }
+        }
+        let text = brief(
+            json!({"ignore_case": true, "text": true}),
+            [b"A\0\n", b"a\0\n"],
+            1,
+        );
+        assert_eq!(text.0, "equal");
+    }
+
+    #[test]
+    fn line_keys_hold_a_line_of_each_at_a_time() {
+        let old: Vec<u8> = (0..20_000)
+            .flat_map(|n| format!("Line {n}\n").into_bytes())
+            .collect();
+        let mut new = old.to_ascii_lowercase();
+        let at = new.len() / 2;
+        new[at] = b'#';
+        let (outcome, _, fed) = brief(json!({"ignore_case": true}), [&old, &new], 4096);
+        assert_eq!(outcome, "different");
+        assert!(fed[0] < at + 2 * 4096 && fed[1] < at + 2 * 4096, "{fed:?}");
+    }
+
+    #[test]
+    fn a_whole_diff_reads_one_input_then_the_other() {
+        let mut stream = crate::open("diff", b"{}").unwrap();
+        let mut out = Vec::new();
+        assert_eq!(stream.wants(), Some(0));
+        stream.feed_input(0, b"a\n", &mut out).unwrap();
+        stream.end_input(0, &mut out).unwrap();
+        assert_eq!(stream.wants(), Some(1));
+        stream.end_input(1, &mut out).unwrap();
+        assert_eq!(stream.wants(), None);
+        assert_eq!(stream.status(), 1);
     }
 }

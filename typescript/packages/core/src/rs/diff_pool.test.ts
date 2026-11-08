@@ -37,7 +37,16 @@ function transport() {
         outcome: 'equal',
         stderr: new Uint8Array(),
       })
-    return Promise.resolve({ kind: 'output', output: new Uint8Array() })
+    // Each input in turn, as a whole diff's engine asks for them.
+    const wants =
+      request.kind === 'open'
+        ? 0
+        : request.kind === 'feed'
+          ? request.index
+          : request.kind === 'end' && request.index === 0
+            ? 1
+            : null
+    return Promise.resolve({ kind: 'output', output: new Uint8Array(), wants })
   })
 }
 function gate(): { wait: Promise<void>; release: () => void } {

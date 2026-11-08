@@ -55,17 +55,7 @@ logger = logging.getLogger(__name__)
 # this one through; naming it here is what keeps the two in step.
 NO_WRITE_OP = "shuf: backend provides no write op"
 
-# GNU's own out-of-memory wording, exit 1. It is what real shuf answers
-# with when a range is too large to materialize, so it is borrowed
-# rather than invented. Measured, ground truth SH5.
-MEMORY_EXHAUSTED = "shuf: memory exhausted"
-
 _TRY_HELP = "\n" + usage_hint("shuf")
-
-# Preserve the existing one-million-record output limit. Output now streams;
-# this limit bounds shuffle indexes and sampling state, not rendered bytes.
-# GNU has no fixed ceiling and may enumerate larger populations.
-MAX_OUTPUT_LINES = 1_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,8 +78,8 @@ def emit_count(
     values and GNU answers ``-i 1-18446744073709551615 -n 3`` instantly
     by never building the population (SH5). Knowing the emitted count up
     front is what lets the range path sample instead of enumerate, and
-    what lets an output larger than `MAX_OUTPUT_LINES` be refused
-    without allocating it.
+    what lets mirage-rs refuse a range it cannot hold without
+    allocating it.
 
     ``-r`` draws independently, so it emits exactly the requested count
     however few values it is drawing from -- except from nothing at all,
@@ -165,24 +155,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ShufFlags | IOResult:
         output=outputs[-1] if outputs else None,
         random_source=sources[-1] if sources else None,
     )
-
-
-def _need(available: int, count: int | None, with_replacement: bool) -> int:
-    """`emit_count`, enforcing the existing output-record ceiling.
-
-    Args:
-        available (int): how many values the source holds.
-        count (int | None): the clamped ``-n`` value, or None.
-        with_replacement (bool): whether ``-r`` was given.
-
-    Raises:
-        ValueError: `MEMORY_EXHAUSTED`, which the builder turns into
-            GNU's one-line stderr and exit 1.
-    """
-    need = emit_count(available, count, with_replacement)
-    if need > MAX_OUTPUT_LINES:
-        raise ValueError(MEMORY_EXHAUSTED)
-    return need
 
 
 class ShufHost:
@@ -304,7 +276,7 @@ async def _sample_records(
             )
         ) as output:
             available = int(b"".join([chunk async for chunk in output]))
-        need = _need(available, count, repeat)
+        need = emit_count(available, count, repeat)
         return _engine(
             ids,
             {
@@ -312,7 +284,7 @@ async def _sample_records(
                 "separator": terminator[0],
                 "size": data.size,
                 "available": available,
-                "need": need,
+                "need": str(need),
                 "repeat": repeat,
             },
             {0: data},
@@ -329,7 +301,7 @@ async def _sample_items(
     repeat: bool,
     separator: int,
 ) -> ByteSource:
-    need = _need(len(items), count, repeat)
+    need = emit_count(len(items), count, repeat)
     data, index = ByteSpool(), ByteSpool()
     try:
         budget = YieldBudget()
@@ -348,7 +320,7 @@ async def _sample_items(
                 "separator": separator,
                 "size": data.size,
                 "available": len(items),
-                "need": need,
+                "need": str(need),
                 "repeat": repeat,
             },
             {0: data, 1: index},
@@ -416,18 +388,21 @@ async def shuf_generic(
                 f"shuf: extra operand '{quote_text(word)}'" + _TRY_HELP
             )
         low, high = input_range
-        need = _need(high - low + 1, count, with_replacement)
-        rendered = _engine(
-            draws,
-            {
-                "mode": "range",
-                "separator": ord(sep),
-                "low": str(low),
-                "high": str(high),
-                "need": need,
-                "repeat": with_replacement,
-            },
-        )
+        need = emit_count(high - low + 1, count, with_replacement)
+        try:
+            rendered = _engine(
+                draws,
+                {
+                    "mode": "range",
+                    "separator": ord(sep),
+                    "low": str(low),
+                    "high": str(high),
+                    "need": str(need),
+                    "repeat": with_replacement,
+                },
+            )
+        except StreamRefusal as refusal:
+            return None, refused(refusal)
     elif echo:
         # An operand -e echoes is named below the mount the command runs
         # on, ``root``.
@@ -482,8 +457,6 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
 
 __all__ = [
     "facts",
-    "MAX_OUTPUT_LINES",
-    "MEMORY_EXHAUSTED",
     "NO_WRITE_OP",
     "ShufFlags",
     "emit_count",

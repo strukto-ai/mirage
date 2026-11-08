@@ -1,4 +1,4 @@
-// The plain (-p) reader follows xxd 2024-12-07 from vim, under its
+// The reverse (-r) reader follows xxd 2024-12-07 from vim, under its
 // X11-MIT option (see licenses/third_party/xxd.txt).
 
 use std::collections::VecDeque;
@@ -72,6 +72,11 @@ enum Config {
     Reverse {
         plain: bool,
         segments: bool,
+        /// The most octets a line gives outside -p (`-c`).
+        cols: usize,
+        /// `-s`, added to every offset.
+        #[serde(default)]
+        base: i64,
     },
 }
 
@@ -251,17 +256,12 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             cols,
             column: 0,
         }),
-        Config::Reverse { plain, segments } => Box::new(Reverse {
-            decoder: if plain {
-                Decoder::Plain(Pairs::default())
-            } else {
-                Decoder::Lines(Lines::default())
-            },
+        Config::Reverse {
+            plain,
             segments,
-            position: 0,
-            pending: VecDeque::new(),
-            failed: false,
-        }),
+            cols,
+            base,
+        } => Box::new(Reverse::new(plain, segments, cols, base)),
     })
 }
 
@@ -546,248 +546,153 @@ impl Stream for Plain {
     }
 }
 
-/// A run of decoded bytes and the offset it goes to; None continues where
-/// the last run ended.
-type Run = (Option<u64>, Vec<u8>);
-
-/// The bytes the hex digit pairs at the start of `digits` spell: xxd stops at
-/// the first character that is not a hex digit and drops a digit left without
-/// its pair.
-fn unhex(digits: impl Iterator<Item = u8>) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut high = None;
-    for value in digits.map(|byte| (byte as char).to_digit(16)) {
-        let Some(value) = value else { break };
-        match high.take() {
-            Some(first) => out.push((first << 4 | value) as u8),
-            None => high = Some(value),
-        }
-    }
-    out
-}
-
-/// One hexdump line as the offset its bytes go to and the bytes. A line whose
-/// offset is not hex decodes to nothing, as xxd skips it.
-fn reverse_line(line: &[u8]) -> Run {
-    let (offset, rest) = match memchr::memchr(b':', line) {
-        Some(colon) => {
-            let head = line[..colon].trim_ascii();
-            let offset = std::str::from_utf8(head)
-                .ok()
-                .filter(|head| !head.is_empty() && head.bytes().all(|b| b.is_ascii_hexdigit()))
-                .and_then(|head| u64::from_str_radix(head, 16).ok());
-            match offset {
-                Some(offset) => (Some(offset), &line[colon + 1..]),
-                None => return (None, Vec::new()),
-            }
-        }
-        None => (None, line),
-    };
-    let hex_column = memchr::memmem::find(rest, b"  ").map_or(rest, |end| &rest[..end]);
-    (
-        offset,
-        unhex(hex_column.iter().copied().filter(|&byte| byte != b' ')),
-    )
-}
-
-#[derive(Default)]
-enum Mode {
-    #[default]
-    First,
-    Rows,
-    Whole,
-}
-
-/// The default hexdump, a line at a time. A first line with no offset makes
-/// the whole input one run of digits, unless a later line has an offset.
-#[derive(Default)]
-struct Lines {
-    mode: Mode,
-    line: Vec<u8>,
-    rest: Vec<u8>,
-}
-
-impl Lines {
-    fn decode(&mut self, input: &[u8], eof: bool, runs: &mut Vec<Run>) {
-        let mut data = input;
-        if let Mode::Whole = self.mode {
-            self.rest.extend_from_slice(data);
-            if eof {
-                self.whole(runs);
-            }
-            return;
-        }
-        loop {
-            let (ended, take) = match memchr::memchr(b'\n', data) {
-                Some(end) => (true, end),
-                None => (false, data.len()),
-            };
-            self.line.extend_from_slice(&data[..take]);
-            if !ended && !eof {
-                return;
-            }
-            data = &data[(take + usize::from(ended)).min(data.len())..];
-            let line = std::mem::take(&mut self.line);
-            if line.is_empty() && !ended {
-                return;
-            }
-            if let Mode::First = self.mode {
-                if !line.is_empty() && memchr::memchr(b':', &line).is_none() {
-                    self.mode = Mode::Whole;
-                    self.line = line;
-                    if ended {
-                        self.rest.push(b'\n');
-                        self.rest.extend_from_slice(data);
-                        if !eof {
-                            return;
-                        }
-                    }
-                    self.whole(runs);
-                    return;
-                }
-            }
-            if !line.is_empty() {
-                self.mode = Mode::Rows;
-                runs.push(reverse_line(&line));
-            }
-        }
-    }
-
-    fn whole(&mut self, runs: &mut Vec<Run>) {
-        let mut text = std::mem::take(&mut self.line);
-        text.append(&mut self.rest);
-        let rows: Vec<&[u8]> = text.split(|&byte| byte == b'\n').collect();
-        if rows.iter().any(|row| memchr::memchr(b':', row).is_some()) {
-            runs.extend(
-                rows.iter()
-                    .filter(|row| !row.is_empty())
-                    .map(|row| reverse_line(row)),
-            );
-            return;
-        }
-        let digits = rows.iter().flat_map(|row| {
-            row.iter()
-                .copied()
-                .take_while(|byte| {
-                    byte.is_ascii_hexdigit() || byte.is_ascii_whitespace() || *byte == 0x0b
-                })
-                .filter(|byte| byte.is_ascii_hexdigit())
-        });
-        runs.push((None, unhex(digits)));
-    }
-}
-
-/// A plain (`-p`) hexdump as it arrives. Space, tab, CR and LF never count,
-/// so two digits make a byte across them and across lines. Any other byte is
-/// ignored before the first digit and after a skipped line; past that it
-/// drops a digit left without its pair, and a run of them skips the rest of
-/// the line.
-struct Pairs {
-    high: i8,
-    low: i8,
-    lead: bool,
-    skip: bool,
-}
-
-impl Default for Pairs {
-    fn default() -> Self {
-        Self {
-            high: 0,
-            low: -1,
-            lead: true,
-            skip: false,
-        }
-    }
-}
-
-impl Pairs {
-    fn decode(&mut self, input: &[u8], runs: &mut Vec<Run>) {
-        let mut out = Vec::new();
-        for &byte in input {
-            if self.skip {
-                if byte == b'\n' {
-                    (self.skip, self.lead) = (false, true);
-                }
-                continue;
-            }
-            if matches!(byte, b' ' | b'\t' | b'\r' | b'\n') {
-                continue;
-            }
-            let before = self.high;
-            self.high = self.low;
-            self.low = (byte as char).to_digit(16).map_or(-1, |value| value as i8);
-            if self.low < 0 && self.lead {
-                continue;
-            }
-            self.lead = false;
-            if self.high >= 0 && self.low >= 0 {
-                out.push((self.high << 4 | self.low) as u8);
-                self.low = -1;
-            } else if self.low < 0 && self.high < 0 && before < 0 {
-                self.skip = true;
-            }
-        }
-        if !out.is_empty() {
-            runs.push((None, out));
-        }
-    }
-}
-
-enum Decoder {
-    Lines(Lines),
-    Plain(Pairs),
-}
-
 enum Piece {
     Gap(u64),
     Data(Vec<u8>),
 }
 
-/// `-r`: a hexdump back into bytes. Onto a stream, which only moves
-/// forward, an offset past the bytes written is reached with NUL bytes and
-/// one before them is refused; with `segments`, each run goes out as a
-/// little-endian start and length ahead of its bytes, for a host that
-/// writes them into a file at their offsets.
+/// `-r`: a hexdump back into bytes, read a character at a time as xxd
+/// reads one. A line starts with its offset in hex, which ends at the
+/// first other character, a newline too, and up to `cols` octets follow as
+/// digit pairs; a line's last octet, or three non-digits in a row past its
+/// first digit, skips the rest of the line. With `plain` (-p) there are no
+/// offsets and space, tab and newline never count. Every offset is past
+/// `base` (-s). Onto a stream, which only moves forward, an offset past
+/// the bytes written is reached with NUL bytes and one before them is
+/// refused; with `segments`, each run goes out as a little-endian start
+/// and length ahead of its bytes, for a host that writes them into a file
+/// at their offsets.
 struct Reverse {
-    decoder: Decoder,
+    plain: bool,
     segments: bool,
-    position: u64,
+    cols: usize,
+    base: i64,
+    /// The last three characters as hex digits, newest first, -1 for any
+    /// other.
+    digits: [i8; 3],
+    /// Characters before a line's first digit are dropped.
+    lead: bool,
+    /// The rest of the line is skipped.
+    skip: bool,
+    /// The octets this line gave, `cols` while its offset is read.
+    taken: usize,
+    /// The offset the next octet goes to, before `base`.
+    want: i64,
+    /// The offset the output stands at.
+    have: i64,
+    /// Where `run` starts.
+    start: i64,
+    /// The octets decoded since the output last moved.
+    run: Vec<u8>,
     pending: VecDeque<Piece>,
     failed: bool,
 }
 
 impl Reverse {
-    fn take(&mut self, input: &[u8], eof: bool, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let mut runs = Vec::new();
-        if !self.failed {
-            match &mut self.decoder {
-                Decoder::Lines(lines) => lines.decode(input, eof, &mut runs),
-                Decoder::Plain(pairs) => pairs.decode(input, &mut runs),
-            }
+    fn new(plain: bool, segments: bool, cols: usize, base: i64) -> Self {
+        Self {
+            plain,
+            segments,
+            cols,
+            base,
+            digits: [-1, 0, 0],
+            lead: true,
+            skip: false,
+            taken: cols,
+            want: 0,
+            have: 0,
+            start: 0,
+            run: Vec::new(),
+            pending: VecDeque::new(),
+            failed: false,
         }
-        for (offset, data) in runs {
-            if data.is_empty() {
-                continue;
-            }
+    }
+
+    fn newline(&mut self) {
+        if !self.plain {
+            self.want = 0;
+        }
+        self.taken = self.cols;
+        self.lead = true;
+    }
+
+    /// Hand `run` on, from where it starts.
+    fn flush(&mut self, out: &mut Vec<u8>) {
+        if !self.run.is_empty() {
+            let data = std::mem::take(&mut self.run);
             if self.segments {
-                self.position = offset.unwrap_or(self.position);
-                out.extend_from_slice(&self.position.to_le_bytes());
+                out.extend_from_slice(&(self.start as u64).to_le_bytes());
                 out.extend_from_slice(&(data.len() as u64).to_le_bytes());
                 out.extend_from_slice(&data);
-                self.position += data.len() as u64;
-                continue;
+            } else {
+                self.pending.push_back(Piece::Data(data));
             }
-            let target = offset.unwrap_or(self.position);
-            if target < self.position {
-                self.failed = true;
+        }
+        self.start = self.have;
+    }
+
+    fn take(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        for &byte in input {
+            if self.failed {
                 break;
             }
-            if target > self.position {
-                self.pending.push_back(Piece::Gap(target - self.position));
+            if self.skip {
+                if byte == b'\n' {
+                    self.skip = false;
+                    self.newline();
+                }
+                continue;
             }
-            self.position = target + data.len() as u64;
-            self.pending.push_back(Piece::Data(data));
+            if byte == b'\r' || (self.plain && matches!(byte, b' ' | b'\t' | b'\n')) {
+                continue;
+            }
+            let digit = (byte as char).to_digit(16).map_or(-1, |value| value as i8);
+            self.digits = [digit, self.digits[0], self.digits[1]];
+            if digit < 0 && self.lead {
+                continue;
+            }
+            self.lead = false;
+            if !self.plain && self.taken >= self.cols {
+                if digit < 0 {
+                    self.taken = 0;
+                } else {
+                    self.want = self.want.wrapping_shl(4) | i64::from(digit);
+                }
+                continue;
+            }
+            let target = self.base.wrapping_add(self.want);
+            if target != self.have {
+                if target < 0 || (!self.segments && target < self.have) {
+                    self.failed = true;
+                    break;
+                }
+                self.flush(out);
+                if !self.segments {
+                    self.pending
+                        .push_back(Piece::Gap(target.abs_diff(self.have)));
+                }
+                (self.have, self.start) = (target, target);
+            }
+            let [low, high, before] = self.digits;
+            if high >= 0 && low >= 0 {
+                self.run.push((high as u8) << 4 | low as u8);
+                self.have = self.have.wrapping_add(1);
+                self.want = self.want.wrapping_add(1);
+                self.digits[0] = -1;
+                if !self.plain {
+                    self.taken += 1;
+                    self.skip = self.taken >= self.cols;
+                }
+                continue;
+            }
+            if low < 0 && high < 0 && before < 0 {
+                self.skip = byte != b'\n';
+            }
+            if byte == b'\n' {
+                self.newline();
+            }
         }
+        self.flush(out);
         self.emit(out)
     }
 
@@ -821,11 +726,11 @@ impl Reverse {
 
 impl Stream for Reverse {
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.take(input, false, out)
+        self.take(input, out)
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.take(&[], true, out)
+        self.take(&[], out)
     }
 
     fn busy(&self) -> bool {
@@ -839,6 +744,7 @@ impl Stream for Reverse {
 
 #[cfg(test)]
 mod tests {
+    use super::BACKWARDS;
     use crate::run;
 
     fn dump(config: &str, chunks: &[&[u8]]) -> String {
@@ -848,7 +754,18 @@ mod tests {
     }
 
     fn reverse(plain: bool, chunks: &[&[u8]]) -> (Vec<u8>, Option<String>) {
-        let config = format!(r#"{{"mode":"reverse","plain":{plain},"segments":false}}"#);
+        reverse_at(plain, 16, 0, chunks)
+    }
+
+    fn reverse_at(
+        plain: bool,
+        cols: usize,
+        base: i64,
+        chunks: &[&[u8]],
+    ) -> (Vec<u8>, Option<String>) {
+        let config = format!(
+            r#"{{"mode":"reverse","plain":{plain},"segments":false,"cols":{cols},"base":{base}}}"#
+        );
         let (out, err) = run("xxd", &config, chunks);
         (out, err.map(|err| err.message))
     }
@@ -949,13 +866,71 @@ mod tests {
     }
 
     #[test]
-    fn a_reverse_line_without_an_offset_reads_the_whole_input_as_digits() {
-        assert_eq!(reverse(false, &[b"\n68 65\n6c", b"zz\n6c"]).0, b"hell");
-        assert_eq!(reverse(false, &[b"6869\n00000003: 41  A\n"]).0, b"hi\0A");
-        assert_eq!(
-            reverse(false, &[b"00000000: 68zz 69  h.i\nzz: 41\n6a"]).0,
-            b"hj"
-        );
+    fn a_reverse_reads_each_line_as_xxd_does_at_any_split() {
+        // (input, -c, -s, zeros the output starts with, the rest, refused)
+        let cases = [
+            (
+                b"\n68 65\n6czz\n6c".as_slice(),
+                16,
+                0,
+                104,
+                b"e\0\0\0".as_slice(),
+                false,
+            ),
+            (b"6869\n00000003: 41  A\n", 16, 0, 26732, b"\x03", false),
+            (b"00000000: 68zz 69  h.i\n", 16, 0, 0, b"h", false),
+            (b"0: 41 4 2\n", 16, 0, 0, b"A", false),
+            (b"0: 41 zz 42\n", 16, 0, 0, b"A", false),
+            (b"0: 41z42\n", 16, 0, 0, b"AB", false),
+            (b"0:41\r\n1:\r42\n", 16, 0, 0, b"AB", false),
+            (b"00000010:\n", 16, 0, 16, b"", false),
+            (b"41 42\n", 16, 0, 65, b"B", false),
+            (b"0: 41\n2: 42\n1: 43\n", 16, 0, 0, b"A\0B", true),
+            (b"  0: 41\n\n\n0002: 42  B\n", 16, 0, 0, b"A\0B", false),
+            (
+                b"00000000: 4142434445464748494a4b4c4d4e4f505152\n",
+                16,
+                0,
+                0,
+                b"ABCDEFGHIJKLMNOP",
+                false,
+            ),
+            (
+                b"00000000: 4142434445464748494a4b4c4d4e4f505152\n",
+                4,
+                0,
+                0,
+                b"ABCD",
+                false,
+            ),
+            (b"00000000: 4142\n", 16, 3, 3, b"AB", false),
+            (b"00000004: 4142\n", 16, -2, 2, b"AB", false),
+        ];
+        for (input, cols, base, zeros, rest, refused) in cases {
+            let expected = [vec![0; zeros], rest.to_vec()].concat();
+            let split: Vec<&[u8]> = input.chunks(1).collect();
+            for chunks in [&[input][..], &split] {
+                let (out, err) = reverse_at(false, cols, base, chunks);
+                assert!(out == expected, "{input:?} -c {cols} -s {base}");
+                assert_eq!(err.is_some(), refused, "{input:?}");
+            }
+        }
+        let skipped = reverse(false, &[b"00000000: 68zz 69  h.i\nzz: 41\n6a"]).0;
+        assert_eq!(skipped, [b"h".as_slice(), &[0; 64], b"j"].concat());
+        let (out, err) = reverse_at(false, 16, -2, &[b"00000000: 4142\n"]);
+        assert_eq!((out.len(), err), (0, Some(BACKWARDS.into())));
+        assert_eq!(reverse_at(true, 30, 2, &[b"41\n"]).0, b"\0\0A");
+    }
+
+    #[test]
+    fn a_reverse_holds_no_line() {
+        let line = vec![b'4'; 1 << 20];
+        let mut chunks: Vec<&[u8]> = line.chunks(4096).collect();
+        chunks.push(b"\n");
+        assert_eq!(reverse(false, &chunks), (Vec::new(), None));
+        let data = [b"0: ".as_slice(), &b"41".repeat(300), b"\n"].concat();
+        let pieces: Vec<&[u8]> = data.chunks(7).collect();
+        assert_eq!(reverse_at(false, 256, 0, &pieces).0, vec![b'A'; 256]);
     }
 
     #[test]
@@ -977,7 +952,7 @@ mod tests {
 
     #[test]
     fn segments_carry_each_runs_offset() {
-        let config = r#"{"mode":"reverse","plain":false,"segments":true}"#;
+        let config = r#"{"mode":"reverse","plain":false,"segments":true,"cols":16}"#;
         let (out, err) = run("xxd", config, &[b"00000004: 6869\n00000001: 41\n42\n"]);
         assert!(err.is_none());
         let record = |start: u64, data: &[u8]| {
@@ -988,9 +963,12 @@ mod tests {
             ]
             .concat()
         };
+        assert_eq!(out, [record(4, b"hi"), record(1, b"A")].concat());
+        let config = r#"{"mode":"reverse","plain":false,"segments":true,"cols":16,"base":-6}"#;
+        let (out, err) = run("xxd", config, &[b"00000004: 6869\n"]);
         assert_eq!(
-            out,
-            [record(4, b"hi"), record(1, b"A"), record(2, b"B")].concat()
+            (out.len(), err.map(|err| err.message)),
+            (0, Some(BACKWARDS.into()))
         );
     }
 }

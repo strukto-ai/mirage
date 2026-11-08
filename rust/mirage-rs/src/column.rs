@@ -10,6 +10,13 @@ use crate::{Stream, StreamError, parse_config};
 const WIDTH: u64 = 80;
 const WORK: usize = 4096;
 const OUTPUT: usize = 16384;
+/// The most input column holds, with a row's cell for each line it lays
+/// out across: past it the run fails as the real one does once memory runs
+/// out.
+#[cfg(not(test))]
+const MAX_HELD: usize = 1 << 30;
+#[cfg(test)]
+const MAX_HELD: usize = 1 << 18;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,6 +45,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         inputs: config.inputs,
         config: Some(config),
         text: Vec::new(),
+        rows: 0,
         input: 0,
         engine: None,
     }))
@@ -47,6 +55,7 @@ struct Column {
     config: Option<Config>,
     width: u64,
     text: Vec<u8>,
+    rows: usize,
     input: usize,
     inputs: usize,
     engine: Option<Box<dyn Stream>>,
@@ -131,19 +140,17 @@ impl Cells {
         self.starts.clear();
     }
 
-    async fn next_literal(&mut self, text: &str, separator: u8, meter: &mut Meter) -> Option<Cell> {
+    async fn next_literal(
+        &mut self,
+        text: &[u8],
+        separator: u8,
+        meter: &mut Meter,
+    ) -> Option<Cell> {
         while self.at < self.end {
-            let mut stop = self.end.min(self.at.saturating_add(meter.work));
-            while !text.is_char_boundary(stop) {
-                stop += 1;
-            }
-            let delimiter =
-                memchr::memchr(separator, &text.as_bytes()[self.at..stop]).map(|at| self.at + at);
+            let stop = boundary(text, self.at.saturating_add(meter.work), self.end);
+            let delimiter = memchr::memchr(separator, &text[self.at..stop]).map(|at| self.at + at);
             let end = delimiter.unwrap_or(stop);
-            self.width += text[self.at..end]
-                .chars()
-                .map(|c| char_width(u32::from(c)))
-                .sum::<u64>();
+            self.width += width(&text[self.at..end]);
             let used = end - self.at;
             self.at = end;
             if meter.charge(used) {
@@ -174,7 +181,7 @@ impl Cells {
 
     async fn next(
         &mut self,
-        text: &str,
+        text: &[u8],
         separator: Option<&Separator>,
         meter: &mut Meter,
     ) -> Option<Cell> {
@@ -188,7 +195,7 @@ impl Cells {
                 .next_literal(text, separator.chars[0] as u8, meter)
                 .await;
         }
-        while let Some((c, used)) = next_lossy(text.as_bytes(), self.at, self.end) {
+        while let Some((c, used)) = next_lossy(text, self.at, self.end) {
             let start = self.at;
             self.at += used;
             if meter.charge(used) {
@@ -286,38 +293,102 @@ impl Writer {
             }
         }
     }
-    async fn text(&mut self, text: &str, cell: Cell, meter: &mut Meter) {
+    /// A cell's bytes, each invalid sequence written as U+FFFD.
+    async fn text(&mut self, text: &[u8], cell: Cell, meter: &mut Meter) {
         let mut at = cell.start;
         while at < cell.end {
-            let end = cell.end.min(at.saturating_add(meter.work));
-            self.raw(&text.as_bytes()[at..end]).await;
+            let end = boundary(text, at.saturating_add(meter.work), cell.end);
+            for chunk in text[at..end].utf8_chunks() {
+                self.raw(chunk.valid().as_bytes()).await;
+                if !chunk.invalid().is_empty() {
+                    self.raw("\u{fffd}".as_bytes()).await;
+                }
+            }
             meter.spend(end - at).await;
             at = end;
         }
     }
 }
 
-async fn decode(bytes: Vec<u8>, meter: &mut Meter) -> String {
-    let mut text = String::with_capacity(bytes.len());
-    let mut at = 0;
-    while at < bytes.len() {
-        let end = bytes.len().min(at.saturating_add(meter.work));
-        let valid = match std::str::from_utf8(&bytes[at..end]) {
-            Ok(valid) => valid,
-            Err(error) => std::str::from_utf8(&bytes[at..at + error.valid_up_to()]).unwrap(),
-        };
-        let used = if valid.is_empty() {
-            let (c, used) = next_lossy(&bytes, at, bytes.len()).unwrap();
-            text.push(c);
-            used
-        } else {
-            text.push_str(valid);
-            valid.len()
-        };
-        at += used;
-        meter.spend(used).await;
+/// The first place at or past `at`, and at most `end`, that starts a
+/// lossy UTF-8 unit: no unit takes a byte that is not a continuation byte
+/// past its first.
+fn boundary(text: &[u8], at: usize, end: usize) -> usize {
+    let mut at = at.min(end);
+    while at < end && matches!(text[at], 0x80..=0xbf) {
+        at += 1;
     }
-    text
+    at
+}
+
+/// The columns whole lossy units take, U+FFFD for each invalid sequence.
+fn width(bytes: &[u8]) -> u64 {
+    bytes
+        .utf8_chunks()
+        .map(|chunk| {
+            let valid: u64 = chunk
+                .valid()
+                .chars()
+                .map(|c| char_width(u32::from(c)))
+                .sum();
+            valid + u64::from(!chunk.invalid().is_empty()) * char_width(0xfffd)
+        })
+        .sum()
+}
+
+/// The lines that hold more than blanks, in order: an entry each, its
+/// width counted unless `table` lays its cells out instead.
+#[derive(Default)]
+struct Lines {
+    at: usize,
+}
+
+impl Lines {
+    async fn next(&mut self, text: &[u8], table: bool, meter: &mut Meter) -> Option<Cell> {
+        let (mut start, mut columns, mut nonblank) = (self.at, 0, false);
+        while self.at < text.len() {
+            if table && nonblank {
+                let end = text.len().min(self.at.saturating_add(meter.work));
+                let delimiter = memchr::memchr(b'\n', &text[self.at..end]).map(|at| self.at + at);
+                let stop = delimiter.map_or(end, |at| at + 1);
+                meter.spend(stop - self.at).await;
+                self.at = stop;
+                if let Some(end) = delimiter {
+                    return Some(Cell {
+                        start,
+                        end,
+                        width: 0,
+                    });
+                }
+                continue;
+            }
+            let (c, used) = next_lossy(text, self.at, text.len()).unwrap();
+            let at = self.at;
+            self.at += used;
+            meter.spend(used).await;
+            if c == '\n' {
+                if nonblank {
+                    return Some(Cell {
+                        start,
+                        end: at,
+                        width: columns,
+                    });
+                }
+                start = self.at;
+                columns = 0;
+            } else {
+                if !table {
+                    columns += char_width(u32::from(c));
+                }
+                nonblank = nonblank || !is_space(u32::from(c));
+            }
+        }
+        nonblank.then_some(Cell {
+            start,
+            end: text.len(),
+            width: columns,
+        })
+    }
 }
 
 async fn run(config: Config, width: u64, text: Vec<u8>, host: Host) -> i32 {
@@ -325,66 +396,17 @@ async fn run(config: Config, width: u64, text: Vec<u8>, host: Host) -> i32 {
         host: host.clone(),
         work: WORK,
     };
-    let text = decode(text, &mut meter).await;
     let mut entries = Vec::new();
-    let (mut start, mut at, mut columns, mut nonblank) = (0, 0, 0, false);
     let mut widest = 0;
-    while at < text.len() {
-        if config.table && nonblank {
-            let end = text.len().min(at.saturating_add(meter.work));
-            let delimiter =
-                memchr::memchr(b'\n', &text.as_bytes()[at..end]).map(|offset| at + offset);
-            let stop = delimiter.map_or(end, |offset| offset + 1);
-            if let Some(offset) = delimiter {
-                entries.push(Cell {
-                    start,
-                    end: offset,
-                    width: 0,
-                });
-                start = stop;
-                nonblank = false;
-            }
-            let used = stop - at;
-            at = stop;
-            if meter.charge(used) {
-                meter.pause().await;
-            }
-            continue;
+    if !config.table {
+        let mut lines = Lines::default();
+        while let Some(entry) = lines.next(&text, false, &mut meter).await {
+            widest = widest.max(entry.width);
+            entries.push(entry);
         }
-        let (c, used) = next_lossy(text.as_bytes(), at, text.len()).unwrap();
-        if c == '\n' {
-            if nonblank {
-                entries.push(Cell {
-                    start,
-                    end: at,
-                    width: columns,
-                });
-                widest = widest.max(columns);
-            }
-            start = at + used;
-            columns = 0;
-            nonblank = false;
-        } else {
-            if !config.table {
-                columns += char_width(u32::from(c));
-            }
-            nonblank = nonblank || !is_space(u32::from(c));
+        if entries.is_empty() {
+            return 0;
         }
-        at += used;
-        if meter.charge(used) {
-            meter.pause().await;
-        }
-    }
-    if nonblank {
-        entries.push(Cell {
-            start,
-            end: at,
-            width: columns,
-        });
-        widest = widest.max(columns);
-    }
-    if entries.is_empty() {
-        return 0;
     }
     let separator = config
         .separator
@@ -398,8 +420,9 @@ async fn run(config: Config, width: u64, text: Vec<u8>, host: Host) -> i32 {
     };
     if config.table {
         let mut widths: Vec<u64> = Vec::new();
-        for row in &entries {
-            reader.reset(*row);
+        let mut rows = Lines::default();
+        while let Some(row) = rows.next(&text, true, &mut meter).await {
+            reader.reset(row);
             let mut index = 0;
             while let Some(cell) = reader.next(&text, separator.as_ref(), &mut meter).await {
                 if widths.len() <= index {
@@ -410,7 +433,8 @@ async fn run(config: Config, width: u64, text: Vec<u8>, host: Host) -> i32 {
                 meter.spend(1).await;
             }
         }
-        for row in entries {
+        let mut rows = Lines::default();
+        while let Some(row) = rows.next(&text, true, &mut meter).await {
             reader.reset(row);
             let mut index = 0;
             let mut current = reader.next(&text, separator.as_ref(), &mut meter).await;
@@ -476,6 +500,20 @@ impl Stream for Column {
     fn feed_input(&mut self, _: usize, input: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
         if self.engine.is_some() && !input.is_empty() {
             return Err(StreamError::new("column input has ended"));
+        }
+        if self.config.as_ref().is_some_and(|config| !config.table) {
+            self.rows += memchr::memchr_iter(b'\n', input).count();
+        }
+        let held = self
+            .rows
+            .saturating_mul(size_of::<Cell>())
+            .saturating_add(self.text.len() + input.len());
+        if held > MAX_HELD {
+            self.text = Vec::new();
+            return Err(StreamError::refusal(
+                b"column: read failed: Cannot allocate memory",
+                1,
+            ));
         }
         self.text.extend_from_slice(input);
         Ok(())
@@ -611,6 +649,28 @@ mod tests {
         assert_eq!(
             column(r#"{"table":true,"inputs":2}"#, &[b"h\xc3", b"\xa9"]),
             "h\u{fffd}\n\u{fffd}\n".as_bytes()
+        );
+    }
+
+    #[test]
+    fn input_past_what_column_holds_fails_as_memory_runs_out() {
+        let refused = StreamError::refusal(b"column: read failed: Cannot allocate memory", 1);
+        for (options, input) in [
+            (r#"{"table":true}"#, vec![b'x'; MAX_HELD + 1]),
+            ("{}", b"a\n".repeat(MAX_HELD / (size_of::<Cell>() + 2) + 1)),
+        ] {
+            let mut stream = open(config(DEFAULTS, options).as_bytes()).unwrap();
+            let mut out = Vec::new();
+            let fed = input
+                .chunks(1024)
+                .try_for_each(|chunk| stream.feed(chunk, &mut out));
+            assert_eq!(fed, Err(refused.clone()), "{options}");
+            assert!(out.is_empty());
+        }
+        let table = b"a b\n".repeat(MAX_HELD / 8);
+        assert_eq!(
+            column(r#"{"table":true}"#, &[&table]),
+            b"a  b\n".repeat(MAX_HELD / 8)
         );
     }
 

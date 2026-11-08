@@ -101,7 +101,8 @@ def _mount_failure(
     name: str, paths: list[PathSpec], exc: Exception
 ) -> Failure:
     """A mount command's failure, worded like GNU (``prog: message``),
-    a file error with the path as typed.
+    a file error with the path as typed; an engine's refusal keeps what
+    it wrote before it and its own exit status.
 
     Args:
         name (str): the command name.
@@ -115,6 +116,8 @@ def _mount_failure(
             argument_list_too_long(name, str(exc)),
             CANNOT_EXECUTE_STATUS,
         )
+    if isinstance(exc, StreamRefusal):
+        return exc.output, format_fs_error(name, exc, paths), exc.status
     code = (
         exc.exit_code
         if isinstance(exc, UsageError)
