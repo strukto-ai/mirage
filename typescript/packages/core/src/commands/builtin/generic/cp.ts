@@ -147,6 +147,9 @@ export interface TransferLinks {
   /** Whether the mount the copy runs on serves a path; absent where every path
    * is its own. */
   owns?: (virtual: string) => boolean
+  /** What copies the bytes the relay would, under --attributes-only none;
+   * absent for the relay. A backup always goes through the relay. */
+  content?: PrimitiveCopy
 }
 
 // Each option of cp's link policy, and what it asks for; the last typed wins
@@ -822,7 +825,7 @@ export async function makeLink(
   if (!(await overwriteGate(policy, stat, src, target, errors))) return false
   const made = await makeBackup(
     policy,
-    { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) },
+    targetLink === null ? copies.relay : { rename: (a, b) => renameLink(copies, a, b) },
     stat,
     copies.relay.readdir,
     target,
@@ -868,6 +871,12 @@ export async function copyTreeLinks(
 ): Promise<void> {
   const base = rstripSlash(src.virtual) || '/'
   const dstBase = rstripSlash(target.virtual)
+  // Under --attributes-only a backup renames the destination aside, so the
+  // copy then makes a new empty file, as the line's own copy does.
+  const aside: NativeMove | null =
+    copies.content !== undefined
+      ? { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) }
+      : null
   const shownSrc = rstripSlash(src.rawPath) || src.rawPath
   const shownDst = rstripSlash(target.rawPath) || target.rawPath
   const below = [...copies.links.subtree(base)].sort((a, b) => compareCodePoints(a[0], b[0]))
@@ -909,18 +918,13 @@ export async function copyTreeLinks(
       const entry = respelled(PathSpec.fromStrPath(resolved), shown)
       await copyEntries(
         'cp',
-        copies.relay,
+        copies.content ?? copies.relay,
         copies.relayStat,
         entry,
         placed,
         [{ path: entry.virtual, kind: leads.type }],
         errors,
-        {
-          policy,
-          lines,
-          copies,
-          aside: { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) },
-        },
+        { policy, lines, copies, ...(aside === null ? {} : { aside }) },
       )
       continue
     }
@@ -939,13 +943,22 @@ export async function copyTreeLinks(
       copies.links,
     )
     const roots: string[] = []
-    await copyEntries('cp', copies.relay, copies.relayStat, followed, placed, entries, errors, {
-      policy,
-      ...(lines !== undefined ? { lines } : {}),
-      copies,
-      blocked: roots,
-      aside: { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) },
-    })
+    await copyEntries(
+      'cp',
+      copies.content ?? copies.relay,
+      copies.relayStat,
+      followed,
+      placed,
+      entries,
+      errors,
+      {
+        policy,
+        ...(lines !== undefined ? { lines } : {}),
+        copies,
+        blocked: roots,
+        ...(aside === null ? {} : { aside }),
+      },
+    )
     await copyTreeLinks(
       copies,
       deref,
@@ -1976,10 +1989,13 @@ export async function cpGeneric(
   if (flags.attributesOnly && dispatch !== undefined) {
     const mask = umask ?? sessionUmask()
     strategy = attributesOnly(strategy, stat, dispatch, mask)
-    // The relay copies where a link leads off the copy's mount, which moves
-    // no bytes either.
+    // What the relay copies where a link leads off the copy's mount moves no
+    // bytes either; a backup still copies them.
     if (copies !== undefined) {
-      copies = { ...copies, relay: attributesOnly(copies.relay, copies.relayStat, dispatch, mask) }
+      copies = {
+        ...copies,
+        content: attributesOnly(copies.relay, copies.relayStat, dispatch, mask),
+      }
     }
   }
   // A backup under --attributes-only renames the destination aside, so the
@@ -2426,7 +2442,9 @@ export async function cpGeneric(
       if (linked !== null) {
         target = linked
         mover = { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) }
-        if (copies.owns !== undefined && !copies.owns(target.virtual)) copier = copies.relay
+        if (copies.owns !== undefined && !copies.owns(target.virtual)) {
+          copier = copies.content ?? copies.relay
+        }
       }
     }
     const made = await makeBackup(policy, mover, stat, versionReaddir, target, errors, copies, src)

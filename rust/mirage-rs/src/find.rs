@@ -415,6 +415,11 @@ enum Node {
         group: bool,
     },
     Access(u8),
+    /// `-size` as the inclusive byte bounds it rounds to.
+    Size {
+        min: Option<i128>,
+        max: Option<i128>,
+    },
     Empty,
     True,
     Prune,
@@ -528,6 +533,11 @@ impl Node {
             }
             Node::NoOwner { group } => json!({"op": "nouser", "group": group}),
             Node::Access(mode) => json!({"op": "access", "mode": char::from(*mode).to_string()}),
+            Node::Size { min, max } => json!({
+                "op": "size",
+                "min": min.map_or(Json::Null, |n| Json::from(n.to_string())),
+                "max": max.map_or(Json::Null, |n| Json::from(n.to_string())),
+            }),
             Node::Empty => json!({"op": "empty"}),
             Node::True => json!({"op": "true"}),
             Node::Prune => json!({"op": "prune"}),
@@ -664,7 +674,6 @@ struct Parser<'a> {
     daystart: bool,
     maxdepth: Option<u64>,
     mindepth: Option<u64>,
-    size: (Option<i128>, Option<i128>),
     uses_empty: bool,
     actions: Vec<Action>,
     newer: Vec<Vec<u8>>,
@@ -693,7 +702,6 @@ impl<'a> Parser<'a> {
             daystart: false,
             maxdepth: None,
             mindepth: None,
-            size: (None, None),
             uses_empty: false,
             actions: Vec::new(),
             newer: Vec::new(),
@@ -715,10 +723,10 @@ impl<'a> Parser<'a> {
                 } else {
                     reached(&tree, self.actions.len())
                 },
+                size: size_window(&tree),
                 tree,
                 maxdepth: self.maxdepth,
                 mindepth: self.mindepth,
-                size: self.size,
                 uses_empty: self.uses_empty,
                 actions: self.actions,
                 newer: self.newer,
@@ -1121,8 +1129,8 @@ impl<'a> Parser<'a> {
                 Ok(Node::True)
             }
             b"-size" => {
-                self.size = size(value)?;
-                Ok(Node::True)
+                let (min, max) = size(value)?;
+                Ok(Node::Size { min, max })
             }
             b"-newer" => {
                 self.check_window_placement(tok)?;
@@ -1260,6 +1268,27 @@ impl<'a> Parser<'a> {
         self.actions = distinct;
         Ok(())
     }
+}
+
+/// The bounds every row must meet: those of each `-size` the top-level
+/// `-a` chain holds, which a host can narrow a listing by. A `-size`
+/// under `-o`, `!` or parentheses only the tree decides.
+fn size_window(tree: &Node) -> (Option<i128>, Option<i128>) {
+    let kids = match tree {
+        Node::And(kids) => kids.as_slice(),
+        other => std::slice::from_ref(other),
+    };
+    kids.iter()
+        .fold((None, None), |(low, high), kid| match kid {
+            Node::Size { min, max } => (
+                low.max(*min),
+                match (high, *max) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                },
+            ),
+            _ => (low, high),
+        })
 }
 
 /// How many of the actions, in order, a row can reach: all of them, but
@@ -2615,6 +2644,22 @@ mod tests {
             refuse(&["-files0-from"]),
             "find: missing argument to `-files0-from'"
         );
+    }
+
+    #[test]
+    fn size_is_a_node_and_only_the_top_chain_narrows_the_window() {
+        let both = parse(&["-size", "+1k", "-size", "-10k"]);
+        assert_eq!(both["min_size"], json!("1025"));
+        assert_eq!(both["max_size"], json!("9216"));
+        assert_eq!(
+            both["tree"]["kids"][0],
+            json!({"op": "size", "min": "1025", "max": null})
+        );
+        let either = parse(&["-name", "f", "-o", "-size", "+1k"]);
+        assert_eq!(either["min_size"], Json::Null);
+        assert_eq!(either["tree"]["kids"][1]["op"], json!("size"));
+        let sized = parse(&["-size", "+1k", "-o", "-name", "f"]);
+        assert_eq!(sized["min_size"], Json::Null);
     }
 
     #[test]

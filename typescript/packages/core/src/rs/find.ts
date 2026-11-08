@@ -388,6 +388,8 @@ function node(raw: Obj, binding: Binding, top = true): PredNode {
       return { op: 'nouser', group: flag(raw.group) }
     case 'access':
       return { op: 'access', mode: accessMode(str(raw.mode)) }
+    case 'size':
+      return { op: 'size', min: optBound(raw.min), max: optBound(raw.max) }
     case 'empty':
       return { op: 'empty' }
     case 'true':

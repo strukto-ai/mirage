@@ -50,6 +50,7 @@ from mirage.core.generic.types import (
     Quit,
     Regex,
     RowActionKind,
+    Size,
     TrueNode,
     Type,
     XType,
@@ -462,6 +463,8 @@ def _node(
         return NoOwner(group=_flag(raw["group"]))
     if op == "access":
         return Access(_access_mode(_str(raw["mode"])))
+    if op == "size":
+        return Size(_opt_bound(raw["min"]), _opt_bound(raw["max"]))
     if op == "empty":
         return Empty()
     if op == "true":

@@ -187,6 +187,15 @@ class Or:
 
 
 @dataclass(frozen=True, slots=True)
+class Size:
+    """``-size`` as the inclusive byte bounds it rounds to; a directory
+    weighs ``DIR_SIZE`` and an entry of unknown size nothing."""
+
+    min: int | None = None
+    max: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Empty:
     pass
 
@@ -289,6 +298,7 @@ PredNode = (
     | Owner
     | NoOwner
     | Access
+    | Size
     | Empty
     | Not
     | And

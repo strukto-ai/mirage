@@ -133,6 +133,10 @@ function test(node: PredNode, entry: FindEntry): boolean | null {
       if (held === null) return false
       return (posixMode(held) & ACCESS_BITS[node.mode]) !== 0
     }
+    case 'size': {
+      const size = entry.kind === 'd' ? DIR_SIZE : (st?.size ?? 0)
+      return !((node.min !== null && size < node.min) || (node.max !== null && size > node.max))
+    }
     case 'empty':
       return entry.isEmpty === true
     default:
@@ -279,7 +283,7 @@ export function treeHasTime(node: PredNode): boolean {
  * a link's target.
  */
 export function treeReadsStat(node: PredNode): boolean {
-  return treeHas(node, ['mtime', 'perm', 'count', 'owner', 'nouser', 'access', 'lname'])
+  return treeHas(node, ['mtime', 'size', 'perm', 'count', 'owner', 'nouser', 'access', 'lname'])
 }
 
 /**

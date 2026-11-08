@@ -321,7 +321,7 @@ function testsStat(expr: FindExpr): boolean {
     expr.mtimeMin !== null ||
     expr.mtimeMax !== null ||
     treeHasTime(expr.tree) ||
-    treeHas(expr.tree, ['perm', 'count', 'owner', 'nouser', 'lname', 'xtype']) ||
+    treeHas(expr.tree, ['size', 'perm', 'count', 'owner', 'nouser', 'lname', 'xtype']) ||
     expr.usesEmpty ||
     expr.newer.length > 0
   )

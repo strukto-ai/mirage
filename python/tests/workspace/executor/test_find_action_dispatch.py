@@ -1159,6 +1159,13 @@ async def test_delete_keeps_a_directory_with_an_unmatched_link():
         ("find d -depth -print -quit", "d/a.txt\n", "", 0),
         ("find d -type f -size +2c -print -quit", "d/b.txt\n", "", 0),
         (
+            "find d -name a.txt -o -size +2c",
+            "d\nd/a.txt\nd/b.txt\nd/sub\n",
+            "",
+            0,
+        ),
+        ("find d -prune -size -1k -print", "", "", 0),
+        (
             "touch ./-files0-from; printf './-files0-from\\0' > list; "
             "find -name -files0-from -files0-from list",
             "./-files0-from\n",

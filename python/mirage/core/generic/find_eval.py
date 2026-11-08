@@ -38,6 +38,7 @@ from mirage.core.generic.types import (
     Prune,
     Quit,
     Regex,
+    Size,
     TrueNode,
     Type,
     XType,
@@ -258,6 +259,16 @@ def _test(node: PredNode, entry: FindEntry) -> bool | None:
         if held is None:
             return False
         return posix_mode(held) & _ACCESS_BITS[node.mode] != 0
+    if isinstance(node, Size):
+        size = (
+            DIR_SIZE
+            if entry.kind == "d"
+            else (st.size if st is not None else 0) or 0
+        )
+        return not (
+            (node.min is not None and size < node.min)
+            or (node.max is not None and size > node.max)
+        )
     if isinstance(node, Empty):
         return entry.is_empty is True
     return None
@@ -370,13 +381,15 @@ def tree_has_time(node: PredNode) -> bool:
 
 
 def tree_reads_stat(node: PredNode) -> bool:
-    """Whether a test reads the entry's stat: a time, its mode, links,
-    owner or a link's target.
+    """Whether a test reads the entry's stat: a time, its size, mode,
+    links, owner or a link's target.
 
     Args:
         node (PredNode): the predicate tree.
     """
-    return tree_has(node, (Mtime, Perm, Count, Owner, NoOwner, Access, Lname))
+    return tree_has(
+        node, (Mtime, Size, Perm, Count, Owner, NoOwner, Access, Lname)
+    )
 
 
 def tree_reads_link(node: PredNode) -> bool:

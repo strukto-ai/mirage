@@ -163,6 +163,9 @@ class TransferLinks:
         relay_stat (StatFn): the dispatcher's stat, for the same walk.
         owns (Callable[[str], bool] | None): whether the mount the copy
             runs on serves a path; None where every path is its own.
+        content (PrimitiveCopy | None): what copies the bytes the relay
+            would, under ``--attributes-only`` none; None for the relay.
+            A backup always goes through the relay.
     """
 
     links: LinkView
@@ -171,6 +174,7 @@ class TransferLinks:
     relay: PrimitiveCopy
     relay_stat: StatFn
     owns: Callable[[str], bool] | None = None
+    content: PrimitiveCopy | None = None
 
 
 # Each option of cp's link policy, and what it asks for; the last typed
@@ -784,7 +788,11 @@ async def make_link(
         return False
     backup, ok = await make_backup(
         policy,
-        NativeMove(rename=partial(rename_link, copies)),
+        (
+            NativeMove(rename=partial(rename_link, copies))
+            if target_link is not None
+            else copies.relay
+        ),
         stat,
         copies.relay.readdir,
         target,
@@ -846,6 +854,13 @@ async def copy_tree_links(
     """
     base = src.virtual.rstrip("/") or "/"
     dst_base = target.virtual.rstrip("/")
+    # Under --attributes-only a backup renames the destination aside, so
+    # the copy then makes a new empty file, as the line's own copy does.
+    aside = (
+        NativeMove(rename=partial(rename_link, copies))
+        if copies.content is not None
+        else None
+    )
     shown_src = src.raw_path.rstrip("/") or src.raw_path
     shown_dst = target.raw_path.rstrip("/") or target.raw_path
     below = sorted(copies.links.subtree(base), key=lambda row: row[0])
@@ -891,7 +906,7 @@ async def copy_tree_links(
             entry = replace(PathSpec.from_str_path(resolved), raw_path=shown)
             await copy_entries(
                 "cp",
-                copies.relay,
+                copies.content or copies.relay,
                 copies.relay_stat,
                 entry,
                 placed,
@@ -900,7 +915,7 @@ async def copy_tree_links(
                 policy=policy,
                 lines=lines,
                 copies=copies,
-                aside=NativeMove(rename=partial(rename_link, copies)),
+                aside=aside,
             )
             continue
         inside = resolved.rstrip("/") or "/"
@@ -922,7 +937,7 @@ async def copy_tree_links(
         roots: list[str] = []
         await copy_entries(
             "cp",
-            copies.relay,
+            copies.content or copies.relay,
             copies.relay_stat,
             followed,
             placed,
@@ -932,7 +947,7 @@ async def copy_tree_links(
             lines=lines,
             copies=copies,
             blocked=roots,
-            aside=NativeMove(rename=partial(rename_link, copies)),
+            aside=aside,
         )
         await copy_tree_links(
             copies,
@@ -2620,11 +2635,11 @@ async def cp_generic(
         mask = session_umask() if umask is None else umask
         strategy = attributes_only(strategy, stat, dispatch, mask)
         if copies is not None:
-            # The relay copies where a link leads off the copy's mount,
-            # which moves no bytes either.
+            # What the relay copies where a link leads off the copy's
+            # mount moves no bytes either; a backup still copies them.
             copies = replace(
                 copies,
-                relay=attributes_only(
+                content=attributes_only(
                     copies.relay, copies.relay_stat, dispatch, mask
                 ),
             )
@@ -3151,7 +3166,7 @@ async def cp_generic(
                 target = linked
                 mover = NativeMove(rename=partial(rename_link, copies))
                 if copies.owns is not None and not copies.owns(target.virtual):
-                    copier = copies.relay
+                    copier = copies.content or copies.relay
         backup, ok = await make_backup(
             policy, mover, stat, readdir, target, errors, copies, src
         )

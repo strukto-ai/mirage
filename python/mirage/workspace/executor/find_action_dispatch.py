@@ -424,6 +424,7 @@ def _tests_stat(expr: FindExpr) -> bool:
         or find_eval.tree_has(
             expr.tree,
             (
+                find_types.Size,
                 find_types.Perm,
                 find_types.Count,
                 find_types.Owner,

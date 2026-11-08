@@ -184,6 +184,14 @@ export interface Quit {
   fired: string[]
 }
 
+// -size as the inclusive byte bounds it rounds to; a directory weighs
+// DIR_SIZE and an entry of unknown size nothing.
+export interface Size {
+  op: 'size'
+  min: number | null
+  max: number | null
+}
+
 export interface Empty {
   op: 'empty'
 }
@@ -255,6 +263,7 @@ export type PredNode =
   | Owner
   | NoOwner
   | Access
+  | Size
   | Empty
   | Not
   | And

@@ -246,7 +246,6 @@ export async function walkFind(
   const acts = treeHasAction(pruneTree)
   const readsStat = treeReadsStat(pruneTree)
   const readsLink = treeReadsLink(pruneTree)
-  const needSize = options.minSize != null || options.maxSize != null
   // Under -depth a directory is judged after what it holds, so its -quit
   // cannot be met on the way in.
   const earlyQuit = quits && options.depthFirst !== true
@@ -263,26 +262,22 @@ export async function walkFind(
       const [xkind, target] = readsLink
         ? await otherSide(links ?? null, found.links ?? null, key, 'd')
         : [null, null]
-      // -size is no node of the tree, so a directory outside its window is
-      // not judged where a -quit could stop the walk.
-      if (!(earlyQuit && needSize && !sized(options, DIR_SIZE))) {
-        keep(
-          {
-            key,
-            name: rstripSlash(spec.virtual).split('/').pop() ?? '',
-            kind: 'd',
-            depth,
-            isEmpty,
-            mtime: info === null ? null : modifiedTs(info.modified),
-            stat: readsStat ? info : null,
-            xkind,
-            target,
-          },
-          pruneTree,
-          options.minDepth,
-          acts,
-        )
-      }
+      keep(
+        {
+          key,
+          name: rstripSlash(spec.virtual).split('/').pop() ?? '',
+          kind: 'd',
+          depth,
+          isEmpty,
+          mtime: info === null ? null : modifiedTs(info.modified),
+          stat: readsStat ? info : null,
+          xkind,
+          target,
+        },
+        pruneTree,
+        options.minDepth,
+        acts,
+      )
       // A directory that reached -quit is the walk's last: what it holds
       // is never read.
       if (prunedKeys(pruneTree).includes(key) || (earlyQuit && quitFired(pruneTree))) return []
@@ -320,6 +315,7 @@ export async function walkFind(
   }
   const results: string[] = []
   const tree = bindTree(argsToTree(options), '', path.virtual, path.rawPath)
+  const needSize = options.minSize != null || options.maxSize != null
   const windowed = options.mtimeMin != null || options.mtimeMax != null
   const needMtime = windowed || treeHasTime(tree)
   const needStat = needMtime || readsStat
@@ -355,12 +351,6 @@ export async function walkFind(
       // so another -o arm (-name) can still match the entry.
       learned.set(key, st !== null ? modifiedTs(st.modified) : null)
       statted.set(key, st)
-    }
-    // -size is no node of the tree, so where a -quit could end the walk an
-    // entry outside its window is never judged.
-    if (quits && needSize) {
-      st ??= await statEntry(deps, entry.path)
-      if (st === null || !sized(options, entry.file ? (st.size ?? 0) : DIR_SIZE)) continue
     }
     const [xkind, target] = needLink
       ? await otherSide(links ?? null, found.links ?? null, entry.path, entry.kind)
@@ -452,6 +442,7 @@ async function otherSide(
   } catch (err) {
     // A link whose chain fails to resolve leads nowhere.
     if (!isEntryError(err)) throw err
+    console.debug(`find: link ${path} leads nowhere: ${String(err)}`)
     return ['l', null]
   }
   return target !== null ? [printfKind(target), target] : ['l', null]
