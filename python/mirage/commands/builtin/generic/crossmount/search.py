@@ -414,22 +414,28 @@ async def run_search(
                     footers = footers or cut
                     pieces = byte_chunks(data)
                 first = True
-                async with aclosing(pieces) as pulled:
-                    async for data in pulled:
-                        if not data:
-                            continue
-                        if first and printed and separator:
-                            yield separator
-                        first = False
-                        printed = True
-                        yield data
-                codes.append(run.exit_code)
-                errored.append(run.exit_code != 0 and run.stderr is not None)
-                if run.stderr is not None:
-                    err = await materialize(run.stderr)
-                    said.append(err.removeprefix(noted) if noted else err)
-                if run.refusal is not None:
-                    io.refusal = run.refusal
+                try:
+                    async with aclosing(pieces) as pulled:
+                        async for data in pulled:
+                            if not data:
+                                continue
+                            if first and printed and separator:
+                                yield separator
+                            first = False
+                            printed = True
+                            yield data
+                finally:
+                    # Recorded even when the reader stops inside this run,
+                    # so what it already found is reported.
+                    codes.append(run.exit_code)
+                    errored.append(
+                        run.exit_code != 0 and run.stderr is not None
+                    )
+                    if run.stderr is not None:
+                        err = await materialize(run.stderr)
+                        said.append(err.removeprefix(noted) if noted else err)
+                    if run.refusal is not None:
+                        io.refusal = run.refusal
                 if stops and run.exit_code == 0:
                     break
             if footers:

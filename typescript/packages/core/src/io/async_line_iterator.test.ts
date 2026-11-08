@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   AsyncLineIterator,
   charWidth,
@@ -287,4 +287,16 @@ describe('SharedInput', () => {
     expect(lineBuffer(shared)).toBe(shared.lines)
     expect(decode((await lineBuffer(encode('a\nb\n')).readline()) ?? new Uint8Array())).toBe('a')
   })
+})
+
+it('sets aside the characters readChars took before it waits', async () => {
+  const lines = new AsyncLineIterator(fromChunks([encode('abcdef')]))
+  expect(await lines.peek()).toBe(true)
+  const budget = (lines as unknown as { budget: { run: () => Promise<void> | undefined } }).budget
+  let turn = 0
+  vi.spyOn(budget, 'run').mockImplementation(() => (++turn === 3 ? Promise.resolve() : undefined))
+  const read = lines.readChars(4, null)
+  const other = lines.readChunk()
+  const [[taken], rest] = await Promise.all([read, other])
+  expect([decode(taken), decode(rest ?? new Uint8Array())]).toEqual(['ab', 'cdef'])
 })

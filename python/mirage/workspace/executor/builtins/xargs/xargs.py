@@ -1286,15 +1286,26 @@ async def handle_xargs(
         stop = None
         failed = False
         torn: list[IOResult] = []
-        # Each run's stderr, joined once the runs end.
-        errors = [notes]
+        # Each run's stderr, joined onto ``merged`` only before the output
+        # that follows it, so a trace still precedes its command's output
+        # and a run of stderr with no output between costs one join.
+        said = notes
+        pending: list[bytes] = []
+
+        def publish() -> None:
+            nonlocal said
+            joined = b"".join(pending)
+            pending.clear()
+            if joined:
+                said += joined
+                merged.stderr = said
 
         async def record(io: IOResult) -> None:
             nonlocal failed, stop
             failed = failed or io.exit_code != 0
             if io.exit_code == 255 and stop is None:
                 stop = 124
-            errors.append(await materialize(io.stderr))
+            pending.append(await materialize(io.stderr))
 
         results = _run_lines(
             execute_fn,
@@ -1313,6 +1324,7 @@ async def handle_xargs(
                 for io in ios:
                     async with aclosing(chunks(io.stdout or b"")) as source:
                         async for chunk in source:
+                            publish()
                             yield chunk
                     await record(io)
         finally:
@@ -1324,13 +1336,13 @@ async def handle_xargs(
                 merged.exit_code = stop
             elif sink.failure is not None:
                 text, code = sink.failure
-                errors.append(encode_text(text))
+                pending.append(encode_text(text))
                 # A command that failed outranks xargs's own error: GNU
                 # 4.10 exits 123 on `X1 'c` when X1 fails.
                 merged.exit_code = 123 if failed else code
             else:
                 merged.exit_code = 123 if failed else 0
-            merged.stderr = b"".join(errors) or None
+            publish()
             node.exit_code = merged.exit_code
 
     return output(), merged, node

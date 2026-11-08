@@ -382,7 +382,8 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
     // The characters taken are the first `run` bytes of `buf`, set aside
-    // into `parts` whole before each pull, so none is copied twice.
+    // into `parts` whole before each wait, so none is copied twice and no
+    // other reader of the descriptor takes them meanwhile.
     const parts: Uint8Array[] = []
     let held = 0
     let run = 0
@@ -398,7 +399,10 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
       let taken = 0
       while (taken < count) {
         const pending = this.check(signal)
-        if (pending !== undefined) await pending
+        if (pending !== undefined) {
+          setAside()
+          await pending
+        }
         // One pull can split a character across chunks, so top the buffer
         // up to the widest one before reading its first byte as a whole.
         if (this.buf.byteLength - run < 4 && !this.exhausted) {

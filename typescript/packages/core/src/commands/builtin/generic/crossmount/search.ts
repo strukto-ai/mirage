@@ -299,26 +299,31 @@ export async function runSearch(
           pieces = chunks(head, signal)
         }
         let first = true
-        for await (const data of pieces) {
-          if (data.byteLength === 0) continue
-          if (first && printed && separator !== '') yield encodeText(separator)
-          first = false
-          printed = true
-          yield data
+        try {
+          for await (const data of pieces) {
+            if (data.byteLength === 0) continue
+            if (first && printed && separator !== '') yield encodeText(separator)
+            first = false
+            printed = true
+            yield data
+          }
+        } finally {
+          // Recorded even when the reader stops inside this run, so what it
+          // already found is reported.
+          codes.push(run.exitCode)
+          errored.push(run.exitCode !== 0 && run.stderr !== null)
+          if (run.stderr !== null) {
+            const err = await materialize(run.stderr)
+            said.push(
+              noted.length > 0 &&
+                err.length >= noted.length &&
+                noted.every((byte, i) => err[i] === byte)
+                ? err.subarray(noted.length)
+                : err,
+            )
+          }
+          if (run.refusal !== null) io.refusal = run.refusal
         }
-        codes.push(run.exitCode)
-        errored.push(run.exitCode !== 0 && run.stderr !== null)
-        if (run.stderr !== null) {
-          const err = await materialize(run.stderr)
-          said.push(
-            noted.length > 0 &&
-              err.length >= noted.length &&
-              noted.every((byte, i) => err[i] === byte)
-              ? err.subarray(noted.length)
-              : err,
-          )
-        }
-        if (run.refusal !== null) io.refusal = run.refusal
         if (stops && run.exitCode === 0) break
       }
       if (footers && rg !== null) yield await totalFooter(rg, totals, printed, started)
