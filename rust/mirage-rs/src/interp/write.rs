@@ -402,15 +402,18 @@ impl<G: Gate> Writer<'_, G> {
     /// (`a+=(x y)`): each lands in place as `set_element` writes it, as
     /// bash's do, so an `-i` word's own write to the array stands
     /// (`b+=(2 'b[1]=9,1')` leaves `b[1]` at 9). A word refused takes back
-    /// what the append stored before it, each slot that still holds it.
+    /// what the append stored before it: every slot, or under `-i`, whose
+    /// words may write the array, each that still holds what it stored.
     /// With a policy listening, the whole value lands through `set` as one
     /// write.
     pub async fn push(&mut self, name: &str, words: Vec<Vec<u8>>) -> Result<(), Fault> {
         let name = self.store.target(name);
         self.writable(&name)?;
-        let Some(Value::Indexed(array)) =
-            self.store.record(&name).and_then(|var| var.value.as_ref())
-        else {
+        let Some(var) = self.store.record(&name) else {
+            return Err(Fault::Host("no array to append to"));
+        };
+        let integer = var.has(INTEGER);
+        let Some(Value::Indexed(array)) = &var.value else {
             return Err(Fault::Host("no array to append to"));
         };
         let slots = words
@@ -432,7 +435,7 @@ impl<G: Gate> Writer<'_, G> {
                 .set(&name, Value::Indexed(array), false, Some(&assigned), None)
                 .await;
         }
-        let mut stored: Vec<(Slot, Vec<u8>)> = Vec::new();
+        let mut stored: Vec<(Slot, Option<Vec<u8>>)> = Vec::new();
         for (index, word) in slots {
             let slot = Slot::Index(index);
             if let Err(fault) = self
@@ -440,17 +443,18 @@ impl<G: Gate> Writer<'_, G> {
                 .await
             {
                 for (slot, text) in stored.into_iter().rev() {
-                    if self.store.element(&name, &slot) == Some(&text[..]) {
+                    if text.is_none_or(|text| self.store.element(&name, &slot) == Some(&text[..])) {
                         self.store.put_element(&name, &slot, None, false);
                     }
                 }
                 return Err(fault);
             }
-            let text = self
-                .store
-                .element(&name, &slot)
-                .unwrap_or_default()
-                .to_vec();
+            let text = integer.then(|| {
+                self.store
+                    .element(&name, &slot)
+                    .unwrap_or_default()
+                    .to_vec()
+            });
             stored.push((slot, text));
         }
         Ok(())
