@@ -1,6 +1,6 @@
 ---
 title: Quickstart
-description: Create a workspace and run your first shell command with the hosted API.
+description: Create a workspace and run your first shell command with the OSS Server API.
 icon: bolt
 ---
 
@@ -14,22 +14,21 @@ Create a workspace with an in-memory mount:
 
 ```bash
 curl --request POST \
-  --url 'https://api.strukto.ai/v1/workspaces' \
+  --url 'http://127.0.0.1:8765/v1/workspaces' \
   --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
   --header 'Content-Type: application/json' \
-  --data '{"id":"demo","config":{"mounts":{"/data":{"vfs":"ram","mode":"write"}}}}'
+  --data '{"id":"demo","config":{"mounts":{"/":{"vfs":"ram","mode":"write"}}}}'
 ```
 
-A successful response has status `201` and includes the workspace name `demo`
-and its `uid`. Use either the name or UID in workspace URLs. Supply either
-`config` or a saved `template`. Creating another workspace with the same name
-returns `409`.
+A successful response has status `201` and includes the workspace ID `demo`. Supply either `config` or a saved
+`template`. An identical retry can return `200`; an existing ID with a different
+configuration returns `409`.
 
 Run a shell command:
 
 ```bash
 curl --request POST \
-  --url 'https://api.strukto.ai/v1/workspaces/demo/shell' \
+  --url 'http://127.0.0.1:8765/v1/workspaces/demo/shell' \
   --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
   --header 'Content-Type: application/json' \
   --data '{"command":"echo hello"}'
@@ -38,14 +37,14 @@ curl --request POST \
 The response contains the output and command exit status:
 
 ```json
-{"kind":"io","exit_code":0,"stdout":"hello\n","stderr":"","refusal":null}
+{"kind":"io","exit_code":0,"stdout":"hello\n","stderr":"","refusal":null,"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"}
 ```
 
 Read the workspace's command logs:
 
 ```bash
 curl --request GET \
-  --url 'https://api.strukto.ai/v1/workspaces/demo/logs?limit=50' \
+  --url 'http://127.0.0.1:8765/v1/workspaces/demo/logs?limit=50' \
   --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
 ```
 

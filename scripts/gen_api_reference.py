@@ -21,10 +21,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from api_deployments import deployment_outputs
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "docs" / "openapi.yaml"
+PAGE = ROOT / "docs" / "api" / "reference.mdx"
+OVERLAY = ROOT / "docs" / "api-display.overlay.json"
 TAG_ORDER = (
     "Workspaces",
     "Sessions",
@@ -39,7 +40,11 @@ TAG_ORDER = (
     "Saved runtimes",
     "Policies",
     "Asks",
-    "Server",
+    "Lines",
+    "Jobs",
+    "Processes",
+    "Service",
+    "Daemon",
     "Auth",
 )
 METHOD_ORDER = ("get", "post", "put", "patch", "delete")
@@ -126,7 +131,6 @@ def operation(
     path: str,
     method: str,
     op: dict[str, Any],
-    prefix: str = "api",
 ) -> list[str]:
     """The searchable link to one complete endpoint page.
 
@@ -136,7 +140,7 @@ def operation(
         method (str): its lower-case method.
         op (dict[str, Any]): the operation object.
     """
-    page = f"/{prefix}/operations/{slug(op['tags'][0])}/{slug(op['summary'])}"
+    page = f"/api/operations/{slug(op['tags'][0])}/{slug(op['summary'])}"
     anchor = re.sub(r"[^a-z0-9]+", "-", f"{method} {path}".lower()).strip("-")
     search = " ".join(sorted(search_terms(doc, op, set())))
     return [
@@ -180,29 +184,29 @@ def operations(doc: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
     )
 
 
-def render(
-    doc: dict[str, Any], prefix: str = "api", name: str = "Cloud"
-) -> str:
+def render(doc: dict[str, Any]) -> str:
     """The whole reference page.
 
     Args:
         doc (dict[str, Any]): the OpenAPI document.
     """
-    header = f"""---
+    header = """---
 title: API reference
-description: Find {name} endpoints by resource, path, parameter, or response field.
+description: Find endpoints by resource, path, parameter, or response field.
 icon: list
 ---
 
-import {{ ApiExplorer, Operation }} from "/snippets/api-explorer.jsx"
+import { ApiExplorer, Operation } from "/snippets/api-explorer.jsx"
 
-{{/* Regenerate with scripts/gen_api_reference.py. */}}
+{/* Regenerate with scripts/gen_api_reference.py. */}
 
-Choose Cloud or OSS Server with the filter above the sidebar.
+Browse the resource groups in the sidebar, or search the operations below.
+Each endpoint includes request fields, response schemas, and examples from the
+[OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml).
 """
     lines = [header, "<ApiExplorer>", ""]
     for path, method, op in operations(doc):
-        lines += operation(doc, path, method, op, prefix)
+        lines += operation(doc, path, method, op)
     lines.append("</ApiExplorer>")
     return "\n".join(lines) + "\n"
 
@@ -288,8 +292,7 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
             "",
             "See [error examples and recovery steps](/api/errors). "
             "The [complete OpenAPI contract]("
-            "https://github.com/strukto-ai/mirage/blob/main/docs/api/deployments/"
-            f"{doc.get('x-deployment', 'server')}.json) "
+            "https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) "
             "includes every response schema.",
             "",
             "</Accordion>",
@@ -306,10 +309,6 @@ def render_overlay(doc: dict[str, Any]) -> str:
     actions: list[dict[str, Any]] = []
     for path, method, op in operations(doc):
         content = response_content(doc, op)
-        if doc.get("x-deployment") == "server":
-            content = content.replace(
-                "](/api/errors)", "](/api/server/errors)"
-            )
         if content:
             actions.append(
                 {
@@ -483,18 +482,7 @@ def main() -> int:
         if not args.check:
             return 0
     doc = yaml.safe_load(SPEC.read_text())
-    outputs = deployment_outputs(ROOT, doc)
-    for key, name, prefix in [
-        ("cloud", "Cloud", "api"),
-        ("server", "OSS Server", "api/server"),
-    ]:
-        view = json.loads(outputs[ROOT / f"docs/api/deployments/{key}.json"])
-        outputs[ROOT / f"docs/{prefix}/reference.mdx"] = render(
-            view, prefix, name
-        )
-        outputs[ROOT / f"docs/api/deployments/{key}.overlay.json"] = (
-            render_overlay(view)
-        )
+    outputs = {PAGE: render(doc), OVERLAY: render_overlay(doc)}
     if args.check:
         stale = [
             path

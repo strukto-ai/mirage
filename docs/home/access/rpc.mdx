@@ -70,13 +70,13 @@ the header itself.
 - `?` marks an optional param.
 - `initialize` is optional and creates nothing: it reports the server, and the
   workspace and session the connection uses.
-- `vfs/<call>` is each of the 23 [VFS calls](/api/server/reference),
+- `vfs/<call>` is each of the 23 [VFS calls](/api/reference),
   with the same arguments and results as HTTP. The [tools](/home/access/mcp#tools)
   take the inputs listed on the MCP page.
 - `explain: true` on `shell` or `vfs/<call>` says what it would do and runs
   nothing; see [Explain](/home/policy/explain).
 - Bytes, `stdin` included, are base64 strings. A message is at most 4 MiB, so
-  send larger stdin over [HTTP](/api/server/streaming#send-stdin) or SSH.
+  send larger stdin over [HTTP](/api/streaming#send-stdin) or SSH.
 - A line that exits non-zero is a result, not an error.
 - A `glob` that matches more files than a mount's
   [`walk_limit`](/home/integration/search#walk_limit) is the error

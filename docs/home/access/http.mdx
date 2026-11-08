@@ -6,12 +6,7 @@ icon: globe
 
 Run the Python or TypeScript server to access your Mirage workspaces over HTTP.
 This guide covers setup, authentication, limits, and server operations.
-Use the [API reference](/api/server/reference) for endpoint fields and responses.
-
-<Note>
-This guide is for a server you operate. The hosted service has its own
-[authentication instructions](/api/authentication).
-</Note>
+Use the [API reference](/api/reference) for endpoint fields and responses.
 
 ## Launch a server
 
@@ -61,8 +56,8 @@ Use `http://127.0.0.1:8765` as the base URL for requests to this server and send
 `Authorization: Bearer <your-token>` on authenticated requests.
 
 For workspace creation and command execution, see
-[Create a workspace](/api/server/operations/workspaces/create-a-workspace) and
-[Run a shell line](/api/server/operations/shell/run-a-shell-line).
+[Create a workspace](/api/operations/workspaces/create-a-workspace) and
+[Run a shell line](/api/operations/shell/run-a-shell-line).
 Replace the example API host with your server's base URL.
 
 ## Configure authentication
@@ -229,8 +224,7 @@ Use `/v1/health` for a load balancer's liveness check. Use
 `/v1/daemon/ready` for readiness: it returns `200` while the server accepts new
 workspaces and `503` when it is full or shutting down.
 
-Readiness and shutdown apply to servers you operate. They are not available
-on the hosted service.
+Readiness and shutdown control the server process.
 
 ### Metrics
 
@@ -298,20 +292,20 @@ it keeps serving. See the [Python](/python/access/server) or
 
 ## Lines, jobs and processes
 
-Inspect active and recently completed work with [List lines](/api/server/operations/lines/list-lines),
-[List jobs](/api/server/operations/jobs/list-jobs), and
-[List processes](/api/server/operations/processes/list-processes). A shell result's
-`line_id` identifies its [line record](/api/server/operations/lines/get-a-line).
+Inspect active and recently completed work with [List lines](/api/operations/lines/list-lines),
+[List jobs](/api/operations/jobs/list-jobs), and
+[List processes](/api/operations/processes/list-processes). A shell result's
+`line_id` identifies its [line record](/api/operations/lines/get-a-line).
 Servers using the same workspace store share these records, and snapshots keep
 ended records. See those endpoint pages for retention, filters, and response fields.
 
 ## Streaming and stdin
 
-See [Streaming and stdin](/api/server/streaming) in the API reference for output
+See [Streaming and stdin](/api/streaming) in the API reference for output
 records, cancellation, and multipart input examples.
 
 ## Next steps
 
-<Card title="API reference" icon="list" href="/api/server/reference">
+<Card title="API reference" icon="list" href="/api/reference">
   Look up request fields, response schemas, and endpoint examples.
 </Card>

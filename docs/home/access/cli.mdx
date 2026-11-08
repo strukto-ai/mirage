@@ -116,7 +116,7 @@ mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
 | Command | Does |
 | --- | --- |
 | `mirage workspace shell -c LINE` | Run a line, streaming its stdout and stderr. |
-| `mirage workspace vfs CALL ARGS` | Make one of the 23 [VFS calls](/api/server/reference). |
+| `mirage workspace vfs CALL ARGS` | Make one of the 23 [VFS calls](/api/reference). |
 | `mirage workspace tools TOOL ARGS` | Run one of the [agent tools](/home/access/mcp#tools). |
 
 The workspace is `-w`, else `MIRAGE_WORKSPACE`, else the current one that
@@ -251,7 +251,7 @@ template's ID is its name.
 ### Saved policies
 
 `mirage policy` keeps Python programs by name on the daemon, or on the
-hosted API, through the [`/v1/policies`](/api/server/operations/policies/list-policies)
+hosted API, through the [`/v1/policies`](/api/operations/policies/list-policies)
 routes. A name ends in `.py`. `--source @FILE` reads a file; any other value
 is the program itself. `get`, `update` and `delete` take the policy's ID or
 its name, which works as an ID; on the local daemon the two are the same.
@@ -290,7 +290,7 @@ mirage policy get guard.py -o yaml
 `mirage vfs`, `mirage cli` and `mirage runtime` keep connections on the
 server: a type, its settings and its credentials, saved once under a name. They
 are the [`/v1/vfs`, `/v1/clis` and
-`/v1/runtimes`](/api/server/reference) routes, and work the same
+`/v1/runtimes`](/api/reference) routes, and work the same
 against the local daemon and the hosted API. `ID` is an entry's ID or its
 name: a name is unique, so it works as an ID. On the local daemon an entry's
 ID is its name.
