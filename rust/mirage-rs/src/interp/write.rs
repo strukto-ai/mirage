@@ -463,13 +463,41 @@ impl<G: Gate> Writer<'_, G> {
     /// indexes after it, as one write. An associative subscript is the key
     /// verbatim, and a key not there clears nothing; an indexed one is
     /// arithmetic, its writes landed first; a scalar's element 0 is the
-    /// whole scalar. A hidden or unset name clears nothing, quietly, but a
-    /// subscript of an array the shell computes (`PIPESTATUS`) is still
-    /// read, so its writes land and an index before the first refuses.
+    /// whole scalar. A hidden or unset name clears nothing, quietly. An
+    /// array the shell computes (`PIPESTATUS`, `FUNCNAME`) clears nothing
+    /// whatever a write left on its name, as a read answers from it, but
+    /// its subscript is still read, so its writes land and an index before
+    /// the first refuses. `@` and `*` name every element: an indexed array
+    /// is emptied, a scalar refuses as `x[1]` does, and an associative one
+    /// clears nothing, as bash's `unset 'm[@]'` keeps the keys.
     pub async fn unset_element(&mut self, name: &str, subscript: &[u8]) -> Result<Element, Fault> {
         let name = self.store.target(name);
         if self.store.hidden(&name) {
             return Ok(Element::Landed);
+        }
+        let every = matches!(subscript, b"@" | b"*");
+        if let Some(array) = self.store.special(&name) {
+            if every {
+                return Ok(Element::Landed);
+            }
+            let index = array.back(self.subscript_index(subscript).await?);
+            return Ok(if index < 0 {
+                Element::Subscript
+            } else {
+                Element::Landed
+            });
+        }
+        if every {
+            return match self.store.record(&name).and_then(|var| var.value.as_ref()) {
+                Some(Value::Indexed(_)) => {
+                    let empty = Value::Indexed(Indexed::default());
+                    let assigned = Assigned::Indexes(HashSet::new());
+                    self.set(&name, empty, false, Some(&assigned), None).await?;
+                    Ok(Element::Landed)
+                }
+                Some(Value::Scalar(_)) => Ok(Element::NotArray),
+                _ => Ok(Element::Landed),
+            };
         }
         let slot = match self.store.record(&name).and_then(|var| var.value.as_ref()) {
             Some(Value::Assoc(map)) if map.get(subscript).is_none() => {
@@ -494,17 +522,7 @@ impl<G: Gate> Writer<'_, G> {
                 self.unset(&name, false).await?;
                 return Ok(Element::Landed);
             }
-            None => {
-                let Some(array) = self.store.special(&name) else {
-                    return Ok(Element::Landed);
-                };
-                let index = array.back(self.subscript_index(subscript).await?);
-                return Ok(if index < 0 {
-                    Element::Subscript
-                } else {
-                    Element::Landed
-                });
-            }
+            None => return Ok(Element::Landed),
         };
         self.set_element(&name, slot, None, None).await?;
         Ok(Element::Landed)
@@ -1242,6 +1260,14 @@ mod tests {
             Element::NotArray
         );
         assert_eq!(
+            run(writer.unset_element("s", b"*")).unwrap(),
+            Element::NotArray
+        );
+        let pair = Indexed::dense([b"x".to_vec(), b"y".to_vec()]);
+        writer.store.seed("e", Value::Indexed(pair));
+        run(writer.unset_element("e", b"@")).unwrap();
+        assert_eq!(writer.store.indexed("e").map(Indexed::count), Some(0));
+        assert_eq!(
             run(writer.unset_element("s", b"0")).unwrap(),
             Element::Landed
         );
@@ -1256,6 +1282,11 @@ mod tests {
         assert_eq!(text(writer.store, "z").as_deref(), Some("4"));
         let before = run(writer.unset_element("PIPESTATUS", b"-5")).unwrap();
         assert_eq!(before, Element::Subscript);
+        let every = run(writer.unset_element("PIPESTATUS", b"@")).unwrap();
+        assert_eq!(every, Element::Landed);
+        writer.store.seed("PIPESTATUS", scalar("left"));
+        let shadowed = run(writer.unset_element("PIPESTATUS", b"*")).unwrap();
+        assert_eq!(shadowed, Element::Landed);
         let special = run(writer.element("PIPESTATUS", Some(b"-1"), b"0", false)).unwrap();
         assert_eq!(special, Element::Landed);
         writer.limit = Some(writer.store.held() + 4);

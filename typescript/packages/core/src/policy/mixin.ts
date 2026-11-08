@@ -37,7 +37,15 @@ export const SESSION_SCOPED: unique symbol = Symbol.for('mirage.policy.sessionSc
 export interface SessionScopedMixin {
   readonly [SESSION_SCOPED]: true
 
-  /** Whether this policy's `method` will speak for one session. */
+  /**
+   * Whether this policy's `method` will speak for one session. The answer
+   * follows what the host sets on the session (its profile, the policies
+   * added), never what a line writes: a running task asks it again each time
+   * it waits on its host, not between two of its own writes. A policy that
+   * turns on a session's variables (`ARMED=1`) decides in `preSession`
+   * itself, which every write reaches while the policy speaks for the
+   * session.
+   */
   wantsFor(method: PolicyMethod, sessionId: string): Promise<boolean>
 }
 
