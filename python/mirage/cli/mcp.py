@@ -139,7 +139,7 @@ def delete_workspace(client: DaemonClient, workspace_id: str) -> None:
     if done.status_code >= 400:
         typer.echo(
             f"could not delete workspace {workspace_id}: "
-            f"daemon error {done.status_code}",
+            f"error {done.status_code}",
             err=True,
         )
 

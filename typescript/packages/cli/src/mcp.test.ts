@@ -89,7 +89,7 @@ describe('mirage mcp over stdio', () => {
       child.stdin.end()
       const code = await new Promise<number | null>((resolve) => child.on('close', resolve))
       expect(code).toBe(2)
-      expect(stderr).toBe('daemon error 500: sessions on fire\n')
+      expect(stderr).toBe('error 500: sessions on fire\n')
       expect(calls).toContain('DELETE /v1/workspaces/minted')
     } finally {
       await new Promise((resolve) => stub.close(resolve))

@@ -32,7 +32,7 @@ async function hasSession(
   const r = await client.request('GET', `${workspacePath}/sessions`)
   if (r.status >= 400) {
     const { detail } = (await r.json()) as { detail?: unknown }
-    throw new Error(`daemon error ${String(r.status)}: ${String(detail)}`)
+    throw new Error(`error ${String(r.status)}: ${String(detail)}`)
   }
   const rows: unknown = await r.json()
   return (
@@ -110,7 +110,7 @@ async function deleteWorkspace(client: DaemonClient, workspaceId: string): Promi
   }
   if (!done.ok) {
     process.stderr.write(
-      `could not delete workspace ${workspaceId}: daemon error ${String(done.status)}\n`,
+      `could not delete workspace ${workspaceId}: error ${String(done.status)}\n`,
     )
   }
 }

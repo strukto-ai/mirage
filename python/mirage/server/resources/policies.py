@@ -12,14 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from typing import Any
 
 from mirage.resources.base import ResourceStore
+from mirage.resources.constants import POLICY_NAME
 from mirage.resources.errors import ResourceError
-
-# A saved policy's name: a file name mirage reads as Python.
-POLICY_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,59}\.py")
 
 
 async def with_policies(

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { readFileSync } from 'node:fs'
+import { POLICY_NAME } from '@struktoai/mirage-core/resources/constants'
+import { isRecord } from '@struktoai/mirage-core/utils/records'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import {
@@ -35,6 +37,33 @@ interface PolicyName {
 }
 
 /** The program `--source` names: `@FILE` reads a file, anything else is the program itself. */
+/**
+ * Run `rebase`, which turns a config's relative script paths into absolute
+ * ones, keeping each profile program whose `script` names a saved policy,
+ * such as `guard.py`, as written: the server reads that policy's source. A
+ * path such as `./guard.py` is a file next to the config and is rebased.
+ */
+export function keepPolicyNames(config: Record<string, unknown>, rebase: () => void): void {
+  const kept: [Record<string, unknown>, string][] = []
+  const profiles = isRecord(config.profiles) ? Object.values(config.profiles) : []
+  for (const profile of profiles) {
+    if (!isRecord(profile) || !isRecord(profile.policy)) continue
+    for (const programs of Object.values(profile.policy)) {
+      for (const program of Array.isArray(programs) ? programs : []) {
+        if (
+          isRecord(program) &&
+          typeof program.script === 'string' &&
+          POLICY_NAME.test(program.script)
+        ) {
+          kept.push([program, program.script])
+        }
+      }
+    }
+  }
+  rebase()
+  for (const [program, script] of kept) program.script = script
+}
+
 export function readSource(given: string): string {
   if (!given.startsWith('@')) return given
   const path = given.slice(1)
