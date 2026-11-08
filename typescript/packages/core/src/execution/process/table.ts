@@ -28,7 +28,7 @@ export function deliver(handle: ProcessHandle, signal: number): void {
 export class ProcessTable {
   private nextPid = FIRST_PID
   private readonly runners = new Map<number, { generation: number; handle: ProcessHandle }>()
-  private readonly history = new Map<number, Process>()
+  private readonly history = new Map<number, { generation: number; record: Process }>()
   private readonly ancestors = new Map<number, readonly number[]>()
   private readonly generations = new Map<string, number>()
   private stopped = false
@@ -165,10 +165,11 @@ export class ProcessTable {
         init.cancel()
       },
       (id) => {
-        if (this.runners.get(id)?.handle !== handle) return
+        const entry = this.runners.get(id)
+        if (entry?.handle !== handle) return
         this.runners.delete(id)
         this.history.delete(id)
-        this.history.set(id, handle.record)
+        this.history.set(id, { generation: entry.generation, record: handle.record })
         this.prune()
         try {
           this.ended?.(handle.record)
@@ -357,6 +358,24 @@ export class ProcessTable {
     }
   }
 
+  /**
+   * Whether the record the table keeps under `record`'s pid, live or
+   * ended, started in its session as it is now: one closed or re-profiled
+   * since is not, so a session that reuses the id sees none of its
+   * predecessor's. Mirrors Python's `current`.
+   */
+  current(record: Process): boolean {
+    const live = this.runners.get(record.id.pid)
+    const entry =
+      live === undefined
+        ? this.history.get(record.id.pid)
+        : { generation: live.generation, record: live.handle.record }
+    return (
+      entry?.record.sessionId === record.sessionId &&
+      entry.generation === (this.generations.get(record.sessionId) ?? 0)
+    )
+  }
+
   /** Host-only inventory, including disowned and stopping runners. */
   live(): readonly ProcessHandle[] {
     return [...this.runners.values()].map((entry) => entry.handle)
@@ -369,7 +388,7 @@ export class ProcessTable {
    */
   records(): Process[] {
     this.prune()
-    const kept = new Map(this.history)
+    const kept = new Map([...this.history].map(([pid, { record }]) => [pid, record]))
     for (const [pid, { handle }] of this.runners) kept.set(pid, handle.record)
     return [...kept.entries()].sort(([a], [b]) => a - b).map(([, record]) => record)
   }
@@ -396,7 +415,7 @@ export class ProcessTable {
    */
   private prune(): void {
     const cutoff = this.now() - HISTORY_SECONDS
-    for (const [pid, record] of this.history) {
+    for (const [pid, { record }] of this.history) {
       if (this.history.size <= HISTORY_MAX_RECORDS && (record.endedAt ?? 0) > cutoff) break
       this.history.delete(pid)
       if (!this.runners.has(pid)) this.ancestors.delete(pid)

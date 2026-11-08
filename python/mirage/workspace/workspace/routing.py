@@ -33,7 +33,7 @@ from mirage.policy.types import (
     RouteContext,
 )
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS
+from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import (
     catch_all,
@@ -71,6 +71,25 @@ def _machine_of(
         logger.debug("%s: no machine to explain: %s", runtime.name, exc)
         return ""
     return "" if machine is None else str(machine)
+
+
+def _apart(
+    decision: RouteDecision[RuntimeIdentity],
+) -> RouteDecision[RuntimeIdentity]:
+    """A decision as it places each command on its own, its whole-line
+    runtime left out.
+
+    Args:
+        decision (RouteDecision): the placement.
+    """
+    return dataclasses.replace(
+        decision,
+        bindings={
+            name: runtime
+            for name, runtime in decision.bindings.items()
+            if name != WHOLE_LINE
+        },
+    )
 
 
 class Router:
@@ -306,6 +325,94 @@ class Router:
                 route.runtime,
                 route.machine or decision.machine,
             )
+        return self._serving(one, decision)
+
+    def placements(
+        self,
+        judged: Sequence[Judged],
+        decision: RouteDecision[RuntimeIdentity],
+    ) -> Callable[[Judged], tuple[str, str]]:
+        """``placement_for`` for each of a line's judged commands, one a
+        line runs in turn (``eval``) under the placement a
+        ``pre_command`` route gave the command running it, as its run
+        keeps it.
+
+        Args:
+            judged (Sequence[Judged]): the line's judged commands.
+            decision (RouteDecision): the line's placement.
+        """
+        by_place = {one.occurrence: one for one in judged}
+
+        def placed(one: Judged) -> tuple[str, str]:
+            outer: list[Judged] = []
+            at = one.occurrence.parent
+            while at is not None:
+                held = by_place.get(at)
+                if held is not None:
+                    outer.append(held)
+                at = at.parent
+            line = decision
+            for held in reversed(outer):
+                route = command_route(held.judgment.answers)
+                if route is not None:
+                    line = routed(
+                        self._runtimes.entries,
+                        line.bindings,
+                        route.runtime,
+                        route.machine or line.machine,
+                    )
+            return self.placement_for(one, line)
+
+        return placed
+
+    def off_line(
+        self, one: Judged, decision: RouteDecision[RuntimeIdentity]
+    ) -> bool:
+        """Whether a command's ``pre_command`` route places it off the
+        runtime or machine its line runs whole on, which that one run
+        cannot honor: a route that leaves the command where it stands
+        (a runtime that does not capture it) holds.
+
+        Args:
+            one (Judged): the command's judgment and the session it was
+                judged in.
+            decision (RouteDecision): the line's placement.
+
+        Raises:
+            RouteError: the route names no runtime entry.
+        """
+        route = command_route(one.judgment.answers)
+        whole = whole_line_runtime(decision.bindings)
+        if route is None or not isinstance(whole, Runtime):
+            return False
+        try:
+            placed = routed(
+                self._runtimes.entries,
+                decision.bindings,
+                route.runtime,
+                route.machine or decision.machine,
+            )
+        except ValueError as exc:
+            raise RouteError(str(exc)) from exc
+        return (
+            whole_line_runtime(placed.bindings) is not whole
+            or _machine_of(whole, placed) != _machine_of(whole, decision)
+            or self._serving(one, _apart(placed))
+            != self._serving(one, _apart(decision))
+        )
+
+    def _serving(
+        self, one: Judged, decision: RouteDecision[RuntimeIdentity]
+    ) -> tuple[str, str]:
+        """The runtime entry and machine that serve a command under a
+        decision that places each command on its own, as
+        ``placement_for`` answers them.
+
+        Args:
+            one (Judged): the command's judgment and the session it was
+                judged in.
+            decision (RouteDecision): the placement.
+        """
         command = one.judgment.command
         fallback = decision.fallback
         if one.ctx is not None and one.session is not None:

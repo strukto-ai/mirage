@@ -72,12 +72,18 @@ export class MachineTable {
   ) {
     for (const [name, spec] of Object.entries(machines)) {
       const handle = buildMachine(name, spec)
-      const holder = HOLDERS.get(handle)
-      if (holder !== undefined && holder !== this)
-        throw new Error(`machine '${name}' is already in another workspace`)
-      HOLDERS.set(handle, this)
+      if (HOLDERS.has(handle)) throw new Error(`machine '${name}' is already in another workspace`)
       this.byName.set(name, handle)
     }
+  }
+
+  /**
+   * Hold every handle for this table's workspace, once it is built: a
+   * workspace that failed to build holds none, and another cannot take
+   * one until `close`.
+   */
+  claim(): void {
+    for (const handle of this.byName.values()) HOLDERS.set(handle, this)
   }
 
   /** Every machine's name, in the order `machines:` lists them. */
@@ -318,7 +324,8 @@ export class MachineTable {
    * The process a scan found `row` to be: the one an earlier scan placed,
    * else a new one under `parent` (at the top for null), in its run's
    * session. `owner` is the process its run is, ended or not; null for a
-   * run the table no longer keeps.
+   * run the table no longer keeps. A run whose session was closed or
+   * re-profiled since places nothing.
    */
   private foundProcess(
     processes: ProcessTable,
@@ -330,7 +337,7 @@ export class MachineTable {
     const key = foundKey(machine, row)
     const known = this.found.get(key)
     if (known?.handle.record.state === 'running') return known.handle
-    if (owner === null) return null
+    if (owner === null || !processes.current(owner)) return null
     const session = owner.sessionId
     const placed = processes
       .live()

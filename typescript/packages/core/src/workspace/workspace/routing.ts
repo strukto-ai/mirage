@@ -23,10 +23,10 @@ import type {
   Route,
   RouteContext,
 } from '../../policy/types.ts'
-import { opQuestion } from '../../policy/decisions.ts'
+import { opQuestion, sameOccurrence } from '../../policy/decisions.ts'
 import { agreed, commandRoute, settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
-import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
+import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../runtime/constants.ts'
 import { catchAll, routed, runtimeBindingsFor, wholeLineRuntime } from '../../runtime/table.ts'
 import { PathSpec } from '../../types.ts'
 import { mirageProgramAt, routedConsumer } from '../lookup/lookup.ts'
@@ -86,6 +86,15 @@ function machineOf(runtime: Runtime, decision: RouteDecision<Runtime>): string {
     return ''
   }
   return machine === null ? '' : machine.toString()
+}
+
+/** A decision as it places each command on its own, its whole-line runtime left out. Mirrors Python's `_apart`. */
+function apart(decision: RouteDecision<Runtime>): RouteDecision<Runtime> {
+  const bindings = Object.create(null) as Record<string, Runtime | null>
+  for (const [name, runtime] of Object.entries(decision.bindings)) {
+    if (name !== WHOLE_LINE) bindings[name] = runtime
+  }
+  return { ...decision, bindings }
 }
 
 export class Router {
@@ -225,6 +234,81 @@ export class Router {
       route === null
         ? line
         : routed(this.runtimes.entries, line.bindings, route.runtime, route.machine ?? line.machine)
+    return this.serving(one, placed)
+  }
+
+  /**
+   * `placementFor` for each of a line's judged commands, one a line runs in
+   * turn (`eval`) under the placement a `preCommand` route gave the command
+   * running it, as its run keeps it. Mirrors Python's `Router.placements`.
+   */
+  placements(
+    judged: readonly Judged[],
+    decision: RouteDecision<Runtime>,
+  ): (one: Judged) => [string, string] {
+    return (one) => {
+      const outer: Judged[] = []
+      for (let at = one.occurrence.parent; at !== null; at = at.parent) {
+        const place = at
+        const held = judged.find((other) => sameOccurrence(other.occurrence, place))
+        if (held !== undefined) outer.push(held)
+      }
+      let line = decision
+      for (const held of outer.reverse()) {
+        const route = commandRoute(held.judgment.answers)
+        if (route !== null) {
+          line = routed(
+            this.runtimes.entries,
+            line.bindings,
+            route.runtime,
+            route.machine ?? line.machine,
+          )
+        }
+      }
+      return this.placementFor(one, line)
+    }
+  }
+
+  /**
+   * Whether a command's `preCommand` route places it off the runtime or
+   * machine its line runs whole on, which that one run cannot honor: a
+   * route that leaves the command where it stands (a runtime that does not
+   * capture it) holds. Throws a `RouteError` for a route that names no
+   * runtime entry. Mirrors Python's `Router.off_line`.
+   */
+  offLine(one: Judged, decision: RouteDecision<Runtime>): boolean {
+    const route = commandRoute(one.judgment.answers)
+    const whole = wholeLineRuntime(decision.bindings)
+    if (route === null || whole === null) return false
+    let placed: RouteDecision<Runtime>
+    try {
+      placed = routed(
+        this.runtimes.entries,
+        decision.bindings,
+        route.runtime,
+        route.machine ?? decision.machine,
+      )
+    } catch (caught) {
+      throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
+        cause: caught,
+      })
+    }
+    const [runtime, machine] = this.serving(one, apart(placed))
+    const [lineRuntime, lineMachine] = this.serving(one, apart(decision))
+    return (
+      wholeLineRuntime(placed.bindings) !== whole ||
+      machineOf(whole, placed) !== machineOf(whole, decision) ||
+      runtime !== lineRuntime ||
+      machine !== lineMachine
+    )
+  }
+
+  /**
+   * The runtime entry and machine that serve a command under a decision
+   * that places each command on its own, as `placementFor` answers them.
+   * Mirrors Python's `Router._serving`.
+   */
+  private serving(one: Judged, placed: RouteDecision<Runtime>): [string, string] {
     const command = one.judgment.command
     let decision = placed
     let fallback = placed.fallback

@@ -18,10 +18,6 @@ import { isPending } from '../../policy/decisions.ts'
 import { sourceOf } from '../../policy/match/decide.ts'
 import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
 import { commandRoute, settled } from '../../policy/policies.ts'
-import type { Runtime } from '../../runtime/base.ts'
-import { RouteError } from '../../runtime/routing/index.ts'
-import { wholeLineRuntime } from '../../runtime/table.ts'
-import type { RouteDecision } from '../../runtime/types.ts'
 import {
   Outcome,
   type AdmissionRules,
@@ -1158,7 +1154,7 @@ async function admitted(
  * judged in turn; and what the runtime would do past the gate is refused
  * under a rule that would have read it (`lineRefusal`). A command a
  * `preCommand` route places off the runtime or machine the line runs whole
- * on (`decision`) is refused too, since one run cannot put it elsewhere.
+ * on (`offLine`) is refused too, since one run cannot put it elsewhere.
  * `reparse` parses the text a word runs the way the line reader parsed the
  * line.
  *
@@ -1179,7 +1175,7 @@ export async function admitLine(
   reparse: (line: string) => TSNodeLike,
   signal?: AbortSignal,
   handed: HandOff | null = null,
-  decision: RouteDecision<Runtime> | null = null,
+  offLine: ((one: Judged) => boolean) | null = null,
 ): Promise<Refused | null> {
   for await (const one of judgeLine(
     root,
@@ -1194,47 +1190,34 @@ export async function admitLine(
     false,
     false,
   )) {
-    const refused = await admitted(one, registry, handed, signal)
+    const refused =
+      (await admitted(one, registry, handed, signal)) ??
+      (offLine === null ? null : await offLineRefusal(one, offLine))
     if (refused !== null) return refused
-    const route = commandRoute(one.judgment.answers)
-    if (decision === null || route === null || one.ctx === undefined) continue
-    if (!offLine(route, decision)) continue
-    const command = one.judgment.command
-    const action: Deny = {
-      kind: 'deny',
-      reason: `${route.policy ?? ''} routes ${command} elsewhere, and a line run whole runs in one place`,
-      ...(route.policy === undefined ? {} : { policy: route.policy }),
-    }
-    const [stderr, exitCode] = await renderCommandDeny(command, action, one.ctx)
-    return { stderr, exitCode, refusal: refusalOf(action) }
   }
   return null
 }
 
 /**
- * Whether a command's route places it off the runtime or machine its line
- * runs whole on, which that one run cannot honor. Throws a `RouteError` for
- * a machine the workspace lacks. Mirrors Python's `_off_line`.
+ * The refusal of a command a `preCommand` route places off the runtime or
+ * machine its line runs whole on (`offLine`, `Router.offLine`), which that
+ * one run cannot honor; null for one that stays. Mirrors Python's
+ * `off_line_refusal`.
  */
-function offLine(route: Route, decision: RouteDecision<Runtime>): boolean {
-  const runtime = wholeLineRuntime(decision.bindings)
-  if (runtime === null) return false
-  if (route.runtime !== undefined && route.runtime !== runtime.name) return true
-  if (route.machine === undefined) return false
-  const at = (machine: string | undefined) =>
-    runtime.machineFor({
-      stdin: null,
-      flags: {},
-      cwd: PathSpec.fromStrPath('/'),
-      ...(machine === undefined ? {} : { machine }),
-    })
-  try {
-    return String(at(route.machine)) !== String(at(decision.machine))
-  } catch (caught) {
-    throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
-      cause: caught,
-    })
+export async function offLineRefusal(
+  one: Judged,
+  offLine: (one: Judged) => boolean,
+): Promise<Refused | null> {
+  const route = commandRoute(one.judgment.answers)
+  if (route === null || one.ctx === undefined || !offLine(one)) return null
+  const command = one.judgment.command
+  const action: Deny = {
+    kind: 'deny',
+    reason: `${route.policy ?? ''} routes ${command} elsewhere, and a line run whole runs in one place`,
+    ...(route.policy === undefined ? {} : { policy: route.policy }),
   }
+  const [stderr, exitCode] = await renderCommandDeny(command, action, one.ctx)
+  return { stderr, exitCode, refusal: refusalOf(action) }
 }
 
 /**

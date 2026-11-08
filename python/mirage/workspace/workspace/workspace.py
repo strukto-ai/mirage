@@ -205,6 +205,7 @@ from mirage.workspace.node.explain import (
     explained_line,
     holds,
     line_judgments,
+    off_line_refusal,
 )
 from mirage.workspace.record.types import RecordFields
 from mirage.workspace.session import SessionManager, SessionState
@@ -837,6 +838,7 @@ class Workspace:
         except BaseException:
             self._registry.release_clocks()
             raise
+        self.machine_table.claim()
 
     async def history(
         self,
@@ -1002,10 +1004,28 @@ class Workspace:
             line,
             judged,
             judged if whole_line else verdicts,
-            lambda one: self._router.placement_for(one, placed),
+            self._router.placements(judged, placed),
             whole_line,
             aliases,
         )
+        if whole_line and said.outcome is Outcome.ALLOW:
+            # A command routed off the runtime that runs the line whole
+            # refuses the line, as the run's admission does.
+            off_line = partial(self._router.off_line, decision=placed)
+            for one in judged:
+                off = await off_line_refusal(one, off_line)
+                if off is None or off.refusal is None:
+                    continue
+                return dataclasses.replace(
+                    said,
+                    answers=answers,
+                    outcome=Outcome.DENY,
+                    reason=off.refusal.reason,
+                    source="",
+                    refusal=off.refusal,
+                    exit_code=off.exit_code,
+                    stderr=decode_text(off.stderr),
+                )
         return dataclasses.replace(said, answers=answers)
 
     @property

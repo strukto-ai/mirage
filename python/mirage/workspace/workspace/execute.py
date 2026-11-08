@@ -1076,7 +1076,7 @@ async def run_prepared_line(
                     ws.namespace,
                     cancel,
                     handed,
-                    decision,
+                    partial(ws.router.off_line, decision=decision),
                 )
                 if refused is not None:
                     held = is_pending(refused.refusal)

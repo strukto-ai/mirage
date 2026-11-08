@@ -1241,7 +1241,7 @@ async function runParsedLine(
         reparse,
         killed,
         handed,
-        decision,
+        (one) => env.router.offLine(one, decision),
       )
       if (refused !== null) {
         held = isPending(refused.refusal)

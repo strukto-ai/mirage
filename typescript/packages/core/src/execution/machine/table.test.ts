@@ -300,6 +300,22 @@ describe('MachineTable scans', () => {
     }
   })
 
+  it("leaves a closed session's programs to none that reuses its id", async () => {
+    const box = new Leaver('a')
+    const ws = sleepers({ a: box })
+    try {
+      const old = await ws.session('agent')
+      expect((await old.shell('train 1')).exitCode).toBe(0)
+      await ws.closeSession('agent')
+      const reused = await ws.session('agent')
+      const said = await reused.shell('ps -o mpid=,args=')
+      expect(DEC.decode(said.stdout)).not.toContain('daemon')
+      expect((await reused.shell('kill 413')).exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it("reaches a shell's program with a group signal as sent", async () => {
     const box = new Sleeper('a')
     const ws = sleepers({ a: box })
@@ -329,5 +345,31 @@ describe('MachineTable scans', () => {
     expect(workspace).toThrow('already in another workspace')
     await first.close()
     await workspace().close()
+  })
+
+  it('leaves a handle free when its workspace fails to build', async () => {
+    const box = new Sleeper('a')
+    expect(
+      () =>
+        new Workspace(
+          { '/': new RAMVFS() },
+          { mode: MountMode.EXEC, machines: { a: box, b: { provider: 'nope' } } },
+        ),
+    ).toThrow('nope')
+    expect(
+      () =>
+        new Workspace(
+          { '/': new RAMVFS() },
+          {
+            mode: MountMode.EXEC,
+            machines: { a: box },
+            runtimes: [new MachineRuntime({ machine: 'c' }), 'workspace'],
+          },
+        ),
+    ).toThrow("unknown machine: 'c'")
+    await new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, machines: { a: box } },
+    ).close()
   })
 })

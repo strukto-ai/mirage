@@ -24,7 +24,6 @@ from collections.abc import (
 from dataclasses import dataclass
 from typing import Any
 
-from mirage.commands.config import Context
 from mirage.io.yield_budget import YieldBudget
 from mirage.policy import (
     AdmissionRules,
@@ -51,10 +50,6 @@ from mirage.policy.match import Outcome, has_rules, reads_args, scopes_paths
 from mirage.policy.match.decide import source_of
 from mirage.policy.policies import command_route, settled
 from mirage.rs.session import ShellVars
-from mirage.runtime.base import Runtime
-from mirage.runtime.routing import RouteError
-from mirage.runtime.table import whole_line_runtime
-from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.helpers import (
     get_parts,
@@ -1401,32 +1396,6 @@ async def _admitted(
     return Refused(err, code, refusal_of(action))
 
 
-def _off_line(route: Route, decision: RouteDecision[RuntimeIdentity]) -> bool:
-    """Whether a command's route places it off the runtime or machine
-    its line runs whole on, which that one run cannot honor.
-
-    Args:
-        route (Route): the route the command's answers agree on.
-        decision (RouteDecision): the line's placement.
-
-    Raises:
-        RouteError: the route names a machine the workspace lacks.
-    """
-    runtime = whole_line_runtime(decision.bindings)
-    if not isinstance(runtime, Runtime):
-        return False
-    if route.runtime is not None and route.runtime != runtime.name:
-        return True
-    if route.machine is None:
-        return False
-    try:
-        return runtime.machine_for(
-            Context(machine=route.machine)
-        ) != runtime.machine_for(Context(machine=decision.machine))
-    except ValueError as exc:
-        raise RouteError(str(exc)) from exc
-
-
 async def admit_line(
     ast: Any,
     session: SessionState,
@@ -1434,7 +1403,7 @@ async def admit_line(
     namespace: Namespace | None,
     cancel: asyncio.Event | None = None,
     handed: HandOff | None = None,
-    decision: RouteDecision[RuntimeIdentity] | None = None,
+    off_line: Callable[[Judged], bool] | None = None,
 ) -> Refused | None:
     """Admit every command of a line a runtime takes whole.
 
@@ -1470,12 +1439,9 @@ async def admit_line(
         cancel (asyncio.Event | None): the run's kill channel.
         handed (HandOff | None): the line's hand-off, None outside a
             line (a bare admission with no run behind it).
-        decision (RouteDecision | None): the line's placement, whose
-            whole-line runtime runs it; None reads no command route.
-
-    Raises:
-        RouteError: a command's route names a machine the workspace
-            lacks.
+        off_line (Callable[[Judged], bool] | None): whether a
+            command's route places it off where the line runs whole
+            (``Router.off_line``); None reads no command route.
     """
     async for one in _judge_line(
         ast,
@@ -1487,25 +1453,36 @@ async def admit_line(
         rules_only=False,
     ):
         refused = await _admitted(one, registry, handed, cancel)
+        if refused is None and off_line is not None:
+            refused = await off_line_refusal(one, off_line)
         if refused is not None:
             return refused
-        route = command_route(one.judgment.answers)
-        if (
-            decision is None
-            or route is None
-            or one.ctx is None
-            or not _off_line(route, decision)
-        ):
-            continue
-        command = one.judgment.command
-        action = Deny(
-            f"{route.policy} routes {command} elsewhere, and a line "
-            "run whole runs in one place",
-            policy=route.policy,
-        )
-        err, code = await render_command_deny(command, action, one.ctx)
-        return Refused(err, code, refusal_of(action))
     return None
+
+
+async def off_line_refusal(
+    one: Judged, off_line: Callable[[Judged], bool]
+) -> Refused | None:
+    """The refusal of a command a ``pre_command`` route places off the
+    runtime or machine its line runs whole on, which that one run cannot
+    honor; None for one that stays.
+
+    Args:
+        one (Judged): the command's judgment and its place on the line.
+        off_line (Callable[[Judged], bool]): whether its route places it
+            off the line (``Router.off_line``).
+    """
+    route = command_route(one.judgment.answers)
+    if route is None or one.ctx is None or not off_line(one):
+        return None
+    command = one.judgment.command
+    action = Deny(
+        f"{route.policy} routes {command} elsewhere, and a line "
+        "run whole runs in one place",
+        policy=route.policy,
+    )
+    err, code = await render_command_deny(command, action, one.ctx)
+    return Refused(err, code, refusal_of(action))
 
 
 async def _verdict_refuses(

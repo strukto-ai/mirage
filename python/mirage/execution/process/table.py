@@ -81,7 +81,7 @@ class ProcessTable:
         self._ended_hook = ended
         self._next_pid = FIRST_PID
         self._live: dict[int, tuple[int, ProcessHandle]] = {}
-        self._ended: dict[int, Process] = {}
+        self._ended: dict[int, tuple[int, Process]] = {}
         self._ancestors: dict[int, tuple[int, ...]] = {}
         self._generations: dict[str, int] = {}
         self._lock = RLock()
@@ -346,7 +346,7 @@ class ProcessTable:
                 return
             del self._live[pid]
             self._ended.pop(pid, None)
-            self._ended[pid] = handle.record
+            self._ended[pid] = (entry[0], handle.record)
             self._prune()
         if self._ended_hook is not None:
             try:
@@ -480,6 +480,28 @@ class ProcessTable:
                 process.revoked = True
                 process.terminate()
 
+    def current(self, record: Process) -> bool:
+        """Whether the record the table keeps under ``record``'s pid,
+        live or ended, started in its session as it is now: one closed or
+        re-profiled since is not, so a session that reuses the id sees
+        none of its predecessor's.
+
+        Args:
+            record (Process): the process.
+        """
+        with self._lock:
+            live = self._live.get(record.pid)
+            entry = (
+                (live[0], live[1].record)
+                if live is not None
+                else self._ended.get(record.pid)
+            )
+            return (
+                entry is not None
+                and entry[1].session_id == record.session_id
+                and entry[0] == self._generations.get(record.session_id, 0)
+            )
+
     def live(self) -> tuple[ProcessHandle, ...]:
         """Host-only inventory, including disowned and stopping runners."""
         with self._lock:
@@ -492,7 +514,7 @@ class ProcessTable:
         in turn keeps its latest."""
         with self._lock:
             self._prune()
-            kept = dict(self._ended)
+            kept = {pid: record for pid, (_, record) in self._ended.items()}
             kept.update(
                 (pid, handle.record) for pid, (_, handle) in self._live.items()
             )
@@ -522,7 +544,7 @@ class ProcessTable:
         in the order they ended."""
         cutoff = self._now() - HISTORY_SECONDS
         while self._ended:
-            pid, record = next(iter(self._ended.items()))
+            pid, (_, record) = next(iter(self._ended.items()))
             if (
                 len(self._ended) <= HISTORY_MAX_RECORDS
                 and (record.ended_at or 0) > cutoff

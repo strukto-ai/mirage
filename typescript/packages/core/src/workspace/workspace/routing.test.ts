@@ -15,7 +15,13 @@
 import { describe, expect, it } from 'vitest'
 import { MachineHandle } from '../../machine/handle.ts'
 import type { Policy } from '../../policy/base.ts'
-import type { CommandContext, CommandExplanation, Route, ShellNode } from '../../policy/types.ts'
+import {
+  Outcome,
+  type CommandContext,
+  type CommandExplanation,
+  type Route,
+  type ShellNode,
+} from '../../policy/types.ts'
 import { MachineRuntime } from '../../runtime/machine/runtime.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
 import type { RunResult } from '../../runtime/types.ts'
@@ -80,16 +86,22 @@ class OnA implements Policy {
   }
 }
 
+class HostnameOnMonty implements Policy {
+  preCommand(ctx: CommandContext): Route | null {
+    return ctx.command === 'hostname' ? { kind: 'route', runtime: 'monty' } : null
+  }
+}
+
 class EvalOnB implements Policy {
   preCommand(ctx: CommandContext): Route | null {
     return ctx.command === 'eval' ? { kind: 'route', machine: 'b' } : null
   }
 }
 
-function* commands(node: ShellNode): Generator<CommandExplanation> {
+function* commands(node: ShellNode | CommandExplanation): Generator<CommandExplanation> {
   for (const child of node.children) {
     if ('command' in child) yield child
-    else yield* commands(child)
+    yield* commands(child)
   }
 }
 
@@ -147,6 +159,38 @@ describe('routing on machines', () => {
     }
   })
 
+  it('explains a line run whole refused for a route', async () => {
+    const ws = whole(new ShortOnB())
+    try {
+      const kept = await ws.explain('hostname; hostname')
+      expect([kept.outcome, kept.exitCode]).toEqual([Outcome.ALLOW, 0])
+      const said = await ws.explain('hostname; hostname -s')
+      const run = await ws.shell('hostname; hostname -s')
+      expect([said.outcome, said.exitCode]).toEqual([Outcome.DENY, 126])
+      expect(said.refusal).toEqual(run.refusal)
+      expect(said.stderr).toBe(DEC.decode(run.stderr))
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps a line run whole under a route that moves nothing', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { a: new Box('a') },
+        runtimes: [new MachineRuntime({ captures: ['@line'], machine: 'a' }), 'monty'],
+        policies: [new HostnameOnMonty()],
+      },
+    )
+    try {
+      expect(DEC.decode((await ws.shell('hostname')).stdout)).toBe('a\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('keeps a route to where a line run whole runs', async () => {
     const ws = whole(new OnA())
     try {
@@ -176,6 +220,20 @@ describe('routing on machines', () => {
         ['hostname', 'machine', 'box:a'],
         ['hostname', 'machine', 'box:b'],
         ['ls', '', ''],
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('explains the machine a routed eval runs its line on', async () => {
+    const ws = workspace(new EvalOnB())
+    try {
+      const said = await ws.explain('hostname; eval hostname')
+      expect([...commands(said.node)].map((c) => [c.command, c.machine])).toEqual([
+        ['hostname', 'box:a'],
+        ['eval', ''],
+        ['hostname', 'box:b'],
       ])
     } finally {
       await ws.close()

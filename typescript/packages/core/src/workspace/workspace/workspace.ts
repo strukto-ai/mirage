@@ -157,7 +157,14 @@ import { checkReadCapability } from '../mount/read_policy.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { Mount } from '../mount/spec.ts'
 import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
-import { explainedLine, explainLine, holds, lineJudgments } from '../node/explain.ts'
+import {
+  explainedLine,
+  explainLine,
+  holds,
+  lineJudgments,
+  offLineRefusal,
+} from '../node/explain.ts'
+import { decodeText } from '../../shell/bytes.ts'
 import { DEFAULT_PROFILE, MAX_ENV } from '../session/constants.ts'
 import { checkEnvFits } from '../session/budget.ts'
 import { SessionManager } from '../session/manager.ts'
@@ -767,6 +774,7 @@ export class Workspace {
       this.registry.policies.place(new RoutePolicy(options.routePolicy, this.scriptPolicy))
     }
     this.registry.bindClocks()
+    this.machineTable.claim()
   }
 
   /**
@@ -1713,10 +1721,28 @@ export class Workspace {
         line,
         judged,
         wholeLine ? judged : verdicts,
-        (one) => this.router.placementFor(one, placed),
+        this.router.placements(judged, placed),
         reparse,
         wholeLine,
       )
+      if (wholeLine && said.outcome === Outcome.ALLOW) {
+        // A command routed off the runtime that runs the line whole
+        // refuses the line, as the run's admission does.
+        for (const one of judged) {
+          const off = await offLineRefusal(one, (each) => this.router.offLine(each, placed))
+          if (off?.refusal == null) continue
+          return {
+            ...said,
+            answers,
+            outcome: Outcome.DENY,
+            reason: off.refusal.reason,
+            source: '',
+            refusal: off.refusal,
+            exitCode: off.exitCode,
+            stderr: decodeText(off.stderr),
+          }
+        }
+      }
       return { ...said, answers }
     } finally {
       parser.release()

@@ -16,7 +16,7 @@ import pytest
 
 from mirage import Policy, Workspace
 from mirage.machine.handle import MachineHandle
-from mirage.policy import Route
+from mirage.policy import Outcome, Route
 from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.routing import RouteError
 from mirage.runtime.types import RunResult
@@ -132,6 +132,41 @@ async def test_a_line_run_whole_refuses_a_command_routed_off_it():
         await ws.close()
 
 
+class _HostnameOnMonty(Policy):
+    def pre_command(self, ctx):
+        return Route("monty") if ctx.command == "hostname" else None
+
+
+@pytest.mark.asyncio
+async def test_explain_shows_a_line_run_whole_refused_for_a_route():
+    ws = _whole(_ShortOnB())
+    try:
+        kept = await ws.explain("hostname; hostname")
+        assert (kept.outcome, kept.exit_code) == (Outcome.ALLOW, 0)
+        said = await ws.explain("hostname; hostname -s")
+        run = await ws.shell("hostname; hostname -s")
+        assert (said.outcome, said.exit_code) == (Outcome.DENY, 126)
+        assert said.refusal == run.refusal
+        assert said.stderr == await run.stderr_str()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_line_run_whole_keeps_a_route_that_moves_nothing():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": _Box("a")},
+        runtimes=[MachineRuntime(["@line"], machine="a"), "monty"],
+        policies=[_HostnameOnMonty()],
+    )
+    try:
+        assert (await ws.shell("hostname")).stdout == b"a\n"
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_a_line_run_whole_keeps_a_route_to_where_it_runs():
     ws = _whole(_OnA())
@@ -164,6 +199,21 @@ async def test_explain_names_the_machine_a_command_runs_on():
             ("hostname", "machine", "box:a"),
             ("hostname", "machine", "box:b"),
             ("ls", "", ""),
+        ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explain_names_the_machine_a_routed_eval_runs_on():
+    ws = _workspace(_EvalOnB())
+    try:
+        said = await ws.explain("hostname; eval hostname")
+        commands = [node for node in _commands(said.node) if node.command]
+        assert [(c.command, c.machine) for c in commands] == [
+            ("hostname", "box:a"),
+            ("eval", ""),
+            ("hostname", "box:b"),
         ]
     finally:
         await ws.close()

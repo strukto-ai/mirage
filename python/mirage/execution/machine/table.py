@@ -80,11 +80,10 @@ class MachineTable:
         }
         for name, handle in self._handles.items():
             held = _HOLDERS.get(handle)
-            if held is not None and held() not in (None, self):
+            if held is not None and held() is not None:
                 raise ValueError(
                     f"machine {name!r} is already in another workspace"
                 )
-            _HOLDERS[handle] = weakref.ref(self)
         self._host_status = host_status
         self._host_signal = host_signal
         # The processes scans found, by machine, pid and start, each
@@ -100,6 +99,13 @@ class MachineTable:
         # One scan at a time, so an older answer never lands after a
         # newer one and ends what the newer one found.
         self._scanning = asyncio.Lock()
+
+    def claim(self) -> None:
+        """Hold every handle for this table's workspace, once it is
+        built: a workspace that failed to build holds none, and another
+        cannot take one until ``close``."""
+        for handle in self._handles.values():
+            _HOLDERS[handle] = weakref.ref(self)
 
     def names(self) -> list[str]:
         """Every machine's name, in the order ``machines:`` lists them."""
@@ -386,13 +392,15 @@ class MachineTable:
             row (MachineProcess): what the scan found.
             parent (int | None): the pid of the process it is under.
             owner (Process | None): the process its run is, ended or
-                not; None for a run the table no longer keeps.
+                not; None for a run the table no longer keeps. A run
+                whose session was closed or re-profiled since places
+                nothing.
         """
         key = (str(machine), row.pid, row.started)
         known = self._found.get(key)
         if known is not None and known[0].record.state == ProcessState.RUNNING:
             return known[0]
-        if owner is None:
+        if owner is None or not processes.current(owner):
             return None
         session = owner.session_id
         placed = sum(

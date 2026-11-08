@@ -264,6 +264,22 @@ async def test_a_scan_finds_what_an_ended_program_left_running():
 
 
 @pytest.mark.asyncio
+async def test_a_session_reusing_a_closed_ones_id_finds_none_of_its_own():
+    box = _Leaver("a")
+    ws = _sleepers(a=box)
+    try:
+        old = await ws.session("agent")
+        assert (await old.shell("train 1")).exit_code == 0
+        await ws.close_session("agent")
+        new = await ws.session("agent")
+        said = await new.shell("ps -o mpid=,args=")
+        assert b"daemon" not in said.stdout
+        assert (await new.shell("kill 413")).exit_code == 1
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_host_scan_finds_what_an_ended_program_left_running():
     ws = Workspace(
         {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=["local", "workspace"]
@@ -317,3 +333,24 @@ async def test_a_handle_belongs_to_one_workspace_at_a_time():
         workspace()
     await first.close()
     await workspace().close()
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_that_fails_to_build_holds_no_machine():
+    box = _Box("a", 0)
+    with pytest.raises(ValueError, match="nope"):
+        Workspace(
+            {"/": RAMVFS()},
+            mode=MountMode.EXEC,
+            machines={"a": box, "b": {"provider": "nope"}},
+        )
+    with pytest.raises(ValueError, match="unknown machine: 'c'"):
+        Workspace(
+            {"/": RAMVFS()},
+            mode=MountMode.EXEC,
+            machines={"a": box},
+            runtimes=[MachineRuntime(machine="c"), "workspace"],
+        )
+    await Workspace(
+        {"/": RAMVFS()}, mode=MountMode.EXEC, machines={"a": box}
+    ).close()
