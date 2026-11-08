@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+import sys
 from collections.abc import (
     AsyncGenerator,
     AsyncIterator,
@@ -141,6 +142,30 @@ def owned_task(coro: Coroutine[Any, Any, _R]) -> asyncio.Task[_R]:
     """
     return asyncio.Task(
         coro, loop=asyncio.get_running_loop(), eager_start=True
+    )
+
+
+async def shallow(work: Coroutine[Any, Any, _R]) -> _R:
+    """Await ``work`` in place, or on a task of its own once the running
+    stack is half of Python's recursion limit deep.
+
+    A coroutine resumes on the stack of every coroutine awaiting it, so a
+    shell that re-enters itself (a function calling itself through
+    ``$( )``) piles each level's frames onto one task's stack, and would
+    reach Python's limit before the shell's own nesting cap. A task of
+    its own starts from the loop. It runs in the caller's context, which
+    waits on it, so the caller reads what it sets, as it would in place.
+
+    Args:
+        work (Coroutine): the work, not yet started.
+    """
+    try:
+        sys._getframe(sys.getrecursionlimit() // 2)
+    except ValueError:
+        return await work
+    task = asyncio.current_task()
+    return await asyncio.create_task(
+        work, context=task.get_context() if task is not None else None
     )
 
 

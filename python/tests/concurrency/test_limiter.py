@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
+import contextvars
 import sys
 import threading
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 
@@ -26,7 +28,10 @@ from mirage.concurrency.limiter import (
     owned_task,
     run_blocking,
     settle,
+    shallow,
 )
+
+_SEEN: contextvars.ContextVar[str] = contextvars.ContextVar("_SEEN")
 
 
 @dataclass
@@ -175,6 +180,26 @@ async def test_owned_work_that_waits_goes_on_as_a_task() -> None:
     assert not task.done()
     release.set()
     assert await settle(task) is True
+
+
+async def _mark() -> asyncio.Task[Any] | None:
+    _SEEN.set("set by the work")
+    return asyncio.current_task()
+
+
+async def _at_depth(levels: int) -> asyncio.Task[Any] | None:
+    if levels:
+        return await _at_depth(levels - 1)
+    return await shallow(_mark())
+
+
+@pytest.mark.asyncio
+async def test_shallow_moves_deep_work_to_a_task_in_the_same_context():
+    here = asyncio.current_task()
+    assert await _at_depth(0) is here
+    _SEEN.set("")
+    assert await _at_depth(sys.getrecursionlimit() // 2) is not here
+    assert _SEEN.get() == "set by the work"
 
 
 @pytest.mark.asyncio
