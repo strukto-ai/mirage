@@ -123,6 +123,17 @@ describe('shared printf adapter', () => {
     expect(first.byteLength).toBeGreaterThan(0)
     expect(first.byteLength).toBeLessThanOrEqual(16 * 1024)
   })
+
+  it('lands a long diagnostic whole before the output after it', async () => {
+    const io = new IOResult()
+    const parts = printfOutput('%d|', ['x'.repeat(50000)], io)
+    const first = (await parts.next()).value as Uint8Array
+    expect(new TextDecoder().decode(io.stderr as Uint8Array)).toBe(
+      `bash: printf: ${'x'.repeat(50000)}: invalid number\n`,
+    )
+    await parts.return(undefined)
+    expect(new TextDecoder().decode(first)).toBe('0|')
+  })
 })
 
 it('cancels a preloaded numeric scan before it finishes', async () => {

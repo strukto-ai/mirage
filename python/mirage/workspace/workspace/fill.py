@@ -120,6 +120,7 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
     )
     nodes: list[TSNodeLike] = [node]
     seen: set[tuple[str, int]] = set()
+    expanded: set[tuple[str, int]] = set()
     frontier: list[tuple[TSNodeLike, Mapping[str, str]]] = [(node, live)]
     while frontier:
         current, aliases = frontier.pop()
@@ -130,31 +131,33 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
             for child in outer.named_children
             if child.type in nested
         )
+        plain = command_words(current, nested, plain=True)
         for word in command_words(current, nested):
-            if (word, id(aliases)) in seen:
-                continue
-            seen.add((word, id(aliases)))
-            stored = session.functions.get(word)
-            site = session._function_sites.get(word)
-            saved = (
-                site.aliases
-                if site is not None
-                and site.source == stored
-                and site.aliases is not None
-                else live
-            )
-            found = (
-                [
-                    (body, saved)
-                    for body in parse_function(
-                        stored, partial(parse, aliases=frozenset(saved))
+            key = (word, id(aliases))
+            found: list[tuple[TSNodeLike, Mapping[str, str]]] = []
+            if key not in seen:
+                seen.add(key)
+                stored = session.functions.get(word)
+                site = session._function_sites.get(word)
+                saved = (
+                    site.aliases
+                    if site is not None
+                    and site.source == stored
+                    and site.aliases is not None
+                    else live
+                )
+                if stored is not None:
+                    found.extend(
+                        (body, saved)
+                        for body in parse_function(
+                            stored, partial(parse, aliases=frozenset(saved))
+                        )
                     )
-                ]
-                if stored is not None
-                else []
-            )
-            found.extend((body, live) for body in defined.get(word) or ())
-            if word in aliases:
+                found.extend((body, live) for body in defined.get(word) or ())
+            # A quoted head runs past an alias, so the alias is visited
+            # apart: a bare use later on (a body's) still expands it.
+            if word in aliases and word in plain and key not in expanded:
+                expanded.add(key)
                 # An alias is a textual prefix: dispatch appends the
                 # invocation's rest to the value, so the value's
                 # trailing command is parsed with a dynamic rest-word.

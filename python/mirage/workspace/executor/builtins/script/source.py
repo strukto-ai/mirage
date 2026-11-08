@@ -109,10 +109,12 @@ async def handle_source(
     cs.admit(name)
     params = args or list(positional_params(session, cs))
     check_env(session, 0, args_bytes(params), frames_bytes(cs))
-    cs.push(params, "source", True)
+    cs.push(params, "source", True, session.line_number)
     outer_names = session.function_names
     if outer_names is not None:
         session.function_names = cs.function_names()
+    outer_lines = session.call_lines
+    session.call_lines = cs.call_lines()
     # Its diagnostics name the file, as spelled, and count its own lines.
     outer_name = session._parse_name
     outer_head = session._parse_head
@@ -145,6 +147,7 @@ async def handle_source(
         frame = cs.pop()
         if session.function_names is not None:
             session.function_names = outer_names
+        session.call_lines = outer_lines
         if not args:
             set_positional_params(session, cs, frame.positional)
     return (

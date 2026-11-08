@@ -86,7 +86,7 @@ def _converted(
     Args:
         stream (OpenStream): the opened numfmt stream.
         source (ByteSource): the records, empty when operands are given.
-        io (IOResult): takes the refusal's exit 2 and line.
+        io (IOResult): takes the refusal's exit status and line.
     """
     started = False
 
@@ -98,7 +98,8 @@ def _converted(
                 async for part in parts:
                     yield part
         except StreamRefusal as refusal:
-            io.exit_code, io.stderr = 2, f"{refusal.message}\n".encode()
+            io.exit_code = refusal.status
+            io.stderr = f"{refusal.message}\n".encode()
             if refusal.output:
                 yield refusal.output
         else:

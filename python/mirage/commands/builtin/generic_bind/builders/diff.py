@@ -15,7 +15,10 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.diff import diff_generic, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
-from mirage.commands.builtin.generic_bind.files import command_files
+from mirage.commands.builtin.generic_bind.files import (
+    command_files,
+    file_size,
+)
 from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -40,6 +43,7 @@ async def diff(
         files.read,
         files.readdir,
         files.stat,
+        file_size(files, ctx),
     )
 
 

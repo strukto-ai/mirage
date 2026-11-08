@@ -22,7 +22,7 @@ import { StreamRefusal } from '../../../rs/errors.ts'
 import { refused } from '../../../rs/scan.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import { resolveSource, streamOutput } from '../utils/stream.ts'
-import { operandsIo, reportedStream, splitReadable } from '../utils/operands.ts'
+import { inOrder, operandsIo, reportedStream, splitInOrder } from '../utils/operands.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -83,34 +83,41 @@ export async function cutGeneric(
   stream = stdinStream(stream, ctx.stdin)
   const engine = await openStream('cut', config)
   if (paths.length > 0) {
-    let inspected: Awaited<ReturnType<typeof splitReadable>>
+    let order: (PathSpec | string)[]
     try {
-      inspected = await splitReadable(paths, stdinStat(stat), 'cut')
+      order = await splitInOrder(paths, stdinStat(stat), 'cut')
     } catch (error) {
       engine.close()
       throw error
     }
-    const [ok, err] = inspected
-    const io = operandsIo(err)
-    if (ok.length === 0 && err !== '') {
+    if (order.every((p) => typeof p === 'string')) {
       engine.close()
-      return [null, io]
+      return [null, operandsIo(order.join(''))]
     }
+    const io = new IOResult({ exitCode: order.some((p) => typeof p === 'string') ? 1 : 0 })
+    let fresh = true
+    async function* output(operand: PathSpec, reuse: boolean): AsyncIterable<Uint8Array> {
+      const current = reuse ? engine : await openStream('cut', config)
+      try {
+        yield* reportedStream(
+          streamOutput(current, stream(operand), ctx.signal),
+          io,
+          operand,
+          'cut',
+        )
+      } finally {
+        await closeStream(current)
+      }
+    }
+    const parts = order.map((p) => {
+      if (typeof p === 'string') return ENC.encode(p)
+      const reuse = fresh
+      fresh = false
+      return output(p, reuse)
+    })
     async function* outputs(): AsyncIterable<Uint8Array> {
       try {
-        for (const [index, operand] of ok.entries()) {
-          const current = index === 0 ? engine : await openStream('cut', config)
-          try {
-            yield* reportedStream(
-              streamOutput(current, stream(operand), ctx.signal),
-              io,
-              operand,
-              'cut',
-            )
-          } finally {
-            await closeStream(current)
-          }
-        }
+        yield* inOrder(parts, io)
       } finally {
         await closeStream(engine)
       }

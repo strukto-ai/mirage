@@ -292,7 +292,7 @@ async function replay(seed: number): Promise<string[]> {
     'shuf -n 3 /data/n.txt',
     'shuf -i 1-9',
     'cat /data/n.txt | shuf -n 2',
-    'shuf -n 4 /data/n.txt /more/m.txt',
+    'shuf -n 4 /more/m.txt',
   ]) {
     const result = await ws.shell(line)
     expect(result.exitCode, line).toBe(0)

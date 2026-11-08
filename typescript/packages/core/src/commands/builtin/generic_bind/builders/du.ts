@@ -68,6 +68,12 @@ export class DuTally {
   // operand's walk.
   readonly times = new Map<string, string>()
 
+  // Each path the walks counted, so a later operand counts none of it again,
+  // as GNU counts a file once a line (an operand already counted prints
+  // nothing); null under -l, and under -L, which counts by the file a link
+  // reaches.
+  counted: Set<string> | null = null
+
   // The mount table the limits come from; the --exclude and -X patterns, an
   // entry one matches neither stat'ed nor walked; and under --time the clock
   // each entry's time is read from.
@@ -76,6 +82,11 @@ export class DuTally {
     readonly excludes: readonly string[] = [],
     readonly clock: LsTimeKind | null = null,
   ) {}
+
+  /** Whether an earlier operand's walk already counted this one. Mirrors Python's repeated. */
+  repeated(path: PathSpec): boolean {
+    return this.counted?.has(`/${stripSlash(path.virtual)}`) === true
+  }
 }
 
 /**
@@ -140,7 +151,10 @@ function treeOf(files: CommandFiles, listing: (path: PathSpec) => Promise<string
  * readdir order may reach the link first), and a directory the walk may not
  * list leaves the link the one name that reaches the file, which GNU then
  * counts it under. Under `-x` a link that leads onto another mount is left out
- * whole, as GNU leaves out what stat(2) places on another device.
+ * whole, as GNU leaves out what stat(2) places on another device. Under `-l`
+ * GNU counts a file each time a name reaches it, its own tree's links and
+ * every operand included, and leaves out only a link back to a directory the
+ * walk is inside, the loop it would repeat.
  */
 class Dereference {
   constructor(
@@ -155,13 +169,32 @@ class Dereference {
     readonly home: string | null = null,
     // The walk's links into its tree, each with the path it resolves to.
     readonly waiting: [PathSpec, string][] = [],
+    // `-l`, which counts a file under every name.
+    readonly countLinks = false,
+    // Under `-l`, the directories the walk is inside, each as the path it
+    // resolves to.
+    readonly inside: readonly string[] = [],
   ) {}
 
   /** This invocation's state, walking one operand. */
   operand(path: PathSpec): Dereference {
     const tree = this.links.resolve(path.virtual)
     const home = this.mounts === null ? null : this.mounts.rootOf(tree)
-    return new Dereference(this.links, this.mounts, this.counted, tree, home)
+    return new Dereference(this.links, this.mounts, this.counted, tree, home, [], this.countLinks)
+  }
+
+  /** The same walk, inside one more directory, as the path it resolves to. */
+  into(real: string): Dereference {
+    return new Dereference(
+      this.links,
+      this.mounts,
+      this.counted,
+      this.tree,
+      this.home,
+      this.waiting,
+      this.countLinks,
+      [...this.inside, real],
+    )
   }
 
   /** The same walk, settling a link into its tree under the link's name. */
@@ -173,6 +206,8 @@ class Dereference {
       link.virtual,
       this.home,
       this.waiting,
+      this.countLinks,
+      this.inside,
     )
   }
 
@@ -208,6 +243,7 @@ async function counted(
     return null
   }
   if (follow.home !== null && follow.mounts?.rootOf(real) !== follow.home) return null
+  if (follow.countLinks) return follow.inside.includes(real) ? null : target
   if (info.type === FileType.SYMLINK && underPath(real, follow.tree)) {
     follow.waiting.push([path, real])
     return null
@@ -237,6 +273,10 @@ async function duWalk(
     const row = await counted(follow, path, info, tally)
     if (row === null) return 0
     info = row
+  } else if (tally.counted !== null) {
+    const key = `/${stripSlash(path.virtual)}`
+    if (tally.counted.has(key)) return 0
+    tally.counted.add(key)
   }
   if (tally.clock !== null) {
     const stamp = timeOf(info, tally.clock)
@@ -249,6 +289,7 @@ async function duWalk(
   }
   tally.directories.push(path.virtual)
   if (!scan.opens(path.virtual)) return 0
+  if (follow?.countLinks === true) follow = follow.into(follow.links.resolve(path.virtual))
   const limit = scan.listingLimit(path.virtual)
   let children: string[]
   try {
@@ -355,8 +396,17 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
     links !== undefined &&
     flags.typedOrder('dereference', 'no_dereference', 'dereference_args', 'H').at(-1) ===
       'dereference'
-      ? new Dereference(links, flags.asBool('one_file_system') ? (mountsOf(ctx) ?? null) : null)
+      ? new Dereference(
+          links,
+          flags.asBool('one_file_system') ? (mountsOf(ctx) ?? null) : null,
+          new Set(),
+          '/',
+          null,
+          [],
+          flags.asBool('count_links'),
+        )
       : null
+  if (follow === null && !flags.asBool('count_links')) tally.counted = new Set()
   const computeSize: ComputeSize = (p) => walkSize(treeOf(files, listing), tally, follow, p)
   const computeEntries: ComputeEntries = (p) =>
     walkEntries(treeOf(files, listing), tally, follow, p)
@@ -373,7 +423,7 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
     () => tally.unreadable,
     () => tally.directories,
     () => tally.inaccessible,
-    follow === null ? undefined : (p) => follow.repeated(p),
+    follow === null ? (p) => tally.repeated(p) : (p) => follow.repeated(p),
     () => tally.times,
   )
 }

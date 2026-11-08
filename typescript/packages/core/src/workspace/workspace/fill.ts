@@ -115,6 +115,7 @@ export function lineNodes(node: TSNodeLike, session: SessionState): TSNodeLike[]
       : {}
   const nodes: TSNodeLike[] = [node]
   const seen = new Map<Readonly<Record<string, string>>, Set<string>>()
+  const expanded = new Map<Readonly<Record<string, string>>, Set<string>>()
   const frontier: [TSNodeLike, Readonly<Record<string, string>>][] = [[node, live]]
   for (;;) {
     const next = frontier.pop()
@@ -122,25 +123,32 @@ export function lineNodes(node: TSNodeLike, session: SessionState): TSNodeLike[]
     const [current, aliases] = next
     let done = seen.get(aliases)
     if (done === undefined) seen.set(aliases, (done = new Set()))
+    let spread = expanded.get(aliases)
+    if (spread === undefined) expanded.set(aliases, (spread = new Set()))
     const nested: ReadonlySet<string> = aliases !== live ? SUBSTITUTIONS : new Set()
     for (const outer of walkNamedOutsideDefs(current, nested)) {
       for (const child of outer.namedChildren)
         if (nested.has(child.type)) frontier.push([child, live])
     }
+    const plain = commandWords(current, nested, true)
     for (const word of commandWords(current, nested)) {
-      if (done.has(word)) continue
-      done.add(word)
-      const stored = Object.hasOwn(session.functions, word) ? session.functions[word] : undefined
-      const site = session.functionSites.get(word)
-      const saved = site?.source === stored && site?.aliases != null ? site.aliases : live
-      const found: [TSNodeLike, Readonly<Record<string, string>>][] =
-        stored === undefined
-          ? []
-          : parseFunction(stored, (line) => parse(line, new Set(Object.keys(saved)))).map(
-              (body) => [body, saved],
-            )
-      for (const body of defined.get(word) ?? []) found.push([body, live])
-      const aliased = sessionEntry(aliases, word)
+      const found: [TSNodeLike, Readonly<Record<string, string>>][] = []
+      if (!done.has(word)) {
+        done.add(word)
+        const stored = Object.hasOwn(session.functions, word) ? session.functions[word] : undefined
+        const site = session.functionSites.get(word)
+        const saved = site?.source === stored && site?.aliases != null ? site.aliases : live
+        if (stored !== undefined) {
+          for (const body of parseFunction(stored, (line) =>
+            parse(line, new Set(Object.keys(saved))),
+          ))
+            found.push([body, saved])
+        }
+        for (const body of defined.get(word) ?? []) found.push([body, live])
+      }
+      // A quoted head runs past an alias, so the alias is visited apart: a
+      // bare use later on (a body's) still expands it.
+      const aliased = plain.has(word) && !spread.has(word) ? sessionEntry(aliases, word) : undefined
       // An alias is a textual prefix: dispatch appends the
       // invocation's rest to the value, so the value's trailing
       // command is parsed with a dynamic rest-word. That keeps its
@@ -148,6 +156,7 @@ export function lineNodes(node: TSNodeLike, session: SessionState): TSNodeLike[]
       // "verbs unknowable" (whole spec tree) rather than "no verb
       // selected".
       if (aliased !== undefined) {
+        spread.add(word)
         const others = new Set(Object.keys(aliases).filter((name) => name !== word))
         found.push([parse(aliased + ALIAS_REST, others), aliases])
       }

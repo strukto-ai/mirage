@@ -14,7 +14,6 @@
 
 from collections.abc import Iterable
 
-from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.helpers import alias_rewrite
 from mirage.shell.types import TSNodeLike
@@ -28,7 +27,7 @@ from mirage.workspace.executor.builtins.shared import (
     fail,
     finish,
     ok,
-    result,
+    written,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
@@ -64,11 +63,11 @@ async def handle_alias(
             2,
         )
     operands = scan.operands
-    lines: list[str] = []
-    errors: list[str] = []
+    pieces: list[tuple[bool, str]] = []
+    failed = False
     if not operands or "p" in scan.letters:
-        lines.extend(
-            f"alias {name}={single_quote(session.aliases[name])}"
+        pieces.extend(
+            (False, f"alias {name}={single_quote(session.aliases[name])}\n")
             for name in sorted(session.aliases)
         )
     for word in operands:
@@ -77,11 +76,18 @@ async def handle_alias(
             if not name or BAD_NAME_RE.search(name):
                 # bash quotes the whole word for an empty name (`alias
                 # =x` is `=x: not found`, oddly) and the name otherwise.
+                failed = True
                 if not name:
-                    errors.append(f"{shell_voice()}alias: {word}: not found")
+                    pieces.append(
+                        (True, f"{shell_voice()}alias: {word}: not found\n")
+                    )
                 else:
-                    errors.append(
-                        f"{shell_voice()}alias: `{name}': invalid alias name"
+                    pieces.append(
+                        (
+                            True,
+                            f"{shell_voice()}alias: `{name}': invalid alias"
+                            " name\n",
+                        )
                     )
                 continue
             held = session.aliases.get(name)
@@ -94,20 +100,22 @@ async def handle_alias(
             session.aliases[name] = value
             continue
         if BAD_NAME_RE.search(name):
-            errors.append(
-                f"{shell_voice()}alias: `{name}': invalid alias name"
+            failed = True
+            pieces.append(
+                (True, f"{shell_voice()}alias: `{name}': invalid alias name\n")
             )
             continue
         if name in session.aliases:
-            lines.append(f"alias {name}={single_quote(session.aliases[name])}")
+            pieces.append(
+                (
+                    False,
+                    f"alias {name}={single_quote(session.aliases[name])}\n",
+                )
+            )
         else:
-            errors.append(f"{shell_voice()}alias: {name}: not found")
-    return result(
-        "alias",
-        encode_text("".join(f"{line}\n" for line in lines)) if lines else None,
-        1 if errors else 0,
-        "".join(f"{error}\n" for error in errors),
-    )
+            failed = True
+            pieces.append((True, f"{shell_voice()}alias: {name}: not found\n"))
+    return written("alias", pieces, 1 if failed else 0)
 
 
 async def handle_unalias(
@@ -152,7 +160,12 @@ async def handle_unalias(
     return finish("unalias", errors)
 
 
-def _aliases_on(session: SessionState) -> bool:
+def aliases_on(session: SessionState) -> bool:
+    """Whether ``expand_aliases`` is on, which bash -c starts with off.
+
+    Args:
+        session (SessionState): shell session state.
+    """
     return bool(
         session.shopts.get("expand_aliases", SHOPT_DEFAULTS["expand_aliases"])
     )
@@ -184,7 +197,7 @@ def _expanding(session: SessionState, mark: AliasMark) -> bool:
     began = session._expand_aliases_marks.get(mark)
     if began is not None:
         return began
-    return _aliases_on(session)
+    return aliases_on(session)
 
 
 def note_expanding(session: SessionState, mark: AliasMark) -> None:
@@ -263,7 +276,7 @@ def expanding_aliases(session: SessionState) -> frozenset[str]:
     view = session._alias_view
     if view is not None:
         return frozenset(view) - blocked
-    if not _aliases_on(session):
+    if not aliases_on(session):
         return frozenset()
     return frozenset(session.aliases) - blocked
 
@@ -295,7 +308,7 @@ def body_alias_values(session: SessionState, name: str) -> dict[str, str]:
         and site.aliases is not None
     ):
         return dict(site.aliases)
-    if not _aliases_on(session):
+    if not aliases_on(session):
         return {}
     return dict(session.aliases)
 

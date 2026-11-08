@@ -138,6 +138,8 @@ interface Walk {
   readonly trouble: Uint8Array[]
   // The directory a path resolves to, where diff follows links.
   real: ((virtual: string) => string) | null
+  // A regular file's size, null when unknown, for -q to answer unread.
+  sizeOf: ((p: PathSpec) => Promise<number | null>) | null
 }
 
 type Absent = readonly [boolean, boolean]
@@ -266,6 +268,41 @@ export function switchWords(argv: readonly string[]): string[] {
   return words
 }
 
+// Whether -q knows the pair differs from its sizes alone: with no ignore
+// option it compares bytes, so two known sizes that differ answer it before
+// either file is read. A stdin operand, a size not known, or a stat that
+// fails leaves it to the read, which reports the failure. Mirrors Python's
+// _sizes_differ.
+async function sizesDiffer(
+  walk: Walk,
+  paths: readonly [PathSpec, PathSpec],
+  absent: Absent,
+): Promise<boolean> {
+  const flags = walk.flags
+  const sizeOf = walk.sizeOf
+  if (sizeOf === null || flags.ignoreCase || flags.ignoreAllSpace || flags.ignoreSpaceChange)
+    return false
+  const sizes: number[] = []
+  for (const [index, path] of paths.entries()) {
+    if (absent[index] === true) {
+      sizes.push(0)
+      continue
+    }
+    if (isStdin(path)) return false
+    let size: number | null
+    try {
+      size = await sizeOf(path)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      console.debug(`diff: no size for ${path.virtual}: ${String(err)}`)
+      return false
+    }
+    if (size === null) return false
+    sizes.push(size)
+  }
+  return sizes[0] !== sizes[1]
+}
+
 async function diffPair(
   walk: Walk,
   path1: PathSpec,
@@ -280,24 +317,27 @@ async function diffPair(
           new_header: `${quoteHeaderName(path2.rawPath)}\t${await headerTime(walk, path2, absent[1])}`,
         }
       : {}
-  const result = await walk.computer.compare(
-    {
-      mode: flags.ed ? 'ed' : flags.unified ? 'unified' : 'normal',
-      context: flags.context,
-      ignore_case: flags.ignoreCase,
-      ignore_all_space: flags.ignoreAllSpace,
-      ignore_space_change: flags.ignoreSpaceChange,
-      text: false,
-      brief: flags.brief,
-      old_label: path1.rawPath,
-      new_label: path2.rawPath,
-      old_header: headers.old_header ?? '',
-      new_header: headers.new_header ?? '',
-    },
-    () => (absent[0] ? new Uint8Array() : walk.stream(path1)),
-    () => (absent[1] ? new Uint8Array() : walk.stream(path2)),
-    walk.signal,
-  )
+  const result: PairResult =
+    flags.brief && (await sizesDiffer(walk, [path1, path2], absent))
+      ? { outcome: 'different', output: [], status: 1, stderr: [] }
+      : await walk.computer.compare(
+          {
+            mode: flags.ed ? 'ed' : flags.unified ? 'unified' : 'normal',
+            context: flags.context,
+            ignore_case: flags.ignoreCase,
+            ignore_all_space: flags.ignoreAllSpace,
+            ignore_space_change: flags.ignoreSpaceChange,
+            text: false,
+            brief: flags.brief,
+            old_label: path1.rawPath,
+            new_label: path2.rawPath,
+            old_header: headers.old_header ?? '',
+            new_header: headers.new_header ?? '',
+          },
+          () => (absent[0] ? new Uint8Array() : walk.stream(path1)),
+          () => (absent[1] ? new Uint8Array() : walk.stream(path2)),
+          walk.signal,
+        )
   if (result.outcome === 'equal' && flags.identical && result.status === 0)
     return {
       ...result,
@@ -468,6 +508,7 @@ export async function diffGeneric(
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
   readdir: ReaddirFn,
   backendStat: StatFn,
+  sizeOf: ((p: PathSpec) => Promise<number | null>) | null = null,
 ): Promise<[ByteSource | null, IOResult]> {
   if (paths.length > 2) throw extraOperandError(CommandName.DIFF, paths[2]?.rawPath ?? '')
   if (paths.length < 2)
@@ -507,6 +548,7 @@ export async function diffGeneric(
       zone: zoneFromEnv(ctx.env) ?? UTC_ZONE,
       trouble,
       real: links === undefined ? null : (virtual: string) => links.resolve(virtual),
+      sizeOf,
     }
     if (dash0 !== dash1) {
       if ((await stat(dash0 ? p1 : p0)).type === FileType.DIRECTORY) {

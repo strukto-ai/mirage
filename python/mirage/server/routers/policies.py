@@ -13,17 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-import re
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict
 
 from mirage.resources.errors import ResourceError
 from mirage.resources.types import Policy
+from mirage.server.resources.policies import POLICY_NAME
 from mirage.server.routers.templates import store_refusal
-
-# A policy's name: a file name mirage reads as Python.
-POLICY_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,59}\.py")
 
 # A policy is a script, not a project, so its source is at most 64 KiB.
 MAX_SOURCE = 64 * 1024

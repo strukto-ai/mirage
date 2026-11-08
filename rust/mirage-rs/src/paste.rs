@@ -3,7 +3,7 @@ use serde::Deserialize;
 use crate::records::{Records, Take};
 use crate::{Stream, StreamError, parse_config};
 
-/// The most a call writes past the line it starts.
+/// The most a call writes, past a row's held delimiters.
 const OUTPUT: usize = 64 * 1024;
 
 #[derive(Deserialize)]
@@ -28,6 +28,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         sources: (0..sources).map(|_| Records::default()).collect(),
         at: 0,
         count: 0,
+        open: false,
         row: Vec::new(),
         any: false,
         done: false,
@@ -69,8 +70,9 @@ fn delimiters(raw: &[u8]) -> Vec<Option<u8>> {
 /// GNU paste, byte for byte: each output line joins one record from every
 /// operand, an ended one giving an empty field, until all have ended; with
 /// `serial` one operand's records make one line. The delimiters cycle and
-/// start over on each line. A lone input can come through `feed` and
-/// `finish`, as one `-s` operand does.
+/// start over on each line. Records go out as they come, so a long line is
+/// never held. A lone input can come through `feed` and `finish`, as one
+/// `-s` operand does.
 struct Paste {
     delimiters: Vec<Option<u8>>,
     terminator: u8,
@@ -81,7 +83,10 @@ struct Paste {
     at: usize,
     /// The records on the current serial line.
     count: usize,
-    /// The current line, held until every operand has given its field.
+    /// The current operand's record has begun and not ended.
+    open: bool,
+    /// The delimiters of a row's ended operands, held until one gives a
+    /// record: a row of ended operands is no row.
     row: Vec<u8>,
     any: bool,
     done: bool,
@@ -102,47 +107,61 @@ impl Paste {
                 self.done = true;
                 return;
             };
-            let take = self.sources[source].next_span(self.terminator);
+            let take = self.sources[source].piece(self.terminator, limit - out.len());
             if matches!(take, Take::Wait) {
                 return;
             }
             let field = if self.serial { self.count } else { self.at };
-            let line = if self.serial {
-                &mut *out
-            } else {
-                &mut self.row
-            };
-            if field > 0 && !(self.serial && matches!(take, Take::End)) {
+            if !self.open && field > 0 && !(self.serial && matches!(take, Take::End)) {
+                let line = if self.serial || self.any {
+                    &mut *out
+                } else {
+                    &mut self.row
+                };
                 line.extend(self.delimiters[(field - 1) % self.delimiters.len()]);
             }
             match take {
-                Take::Record(record) if self.serial => {
-                    out.extend_from_slice(record);
-                    self.count += 1;
+                Take::Record((piece, done)) => {
+                    if !self.serial && !self.any {
+                        out.append(&mut self.row);
+                        self.any = true;
+                    }
+                    out.extend_from_slice(piece);
+                    self.open = !done;
+                    if done {
+                        self.next_field(out);
+                    }
                 }
                 Take::End if self.serial => {
                     out.push(self.terminator);
+                    self.open = false;
                     self.at += 1;
                     self.count = 0;
                 }
-                take => {
-                    if let Take::Record(record) = take {
-                        self.row.extend_from_slice(record);
-                        self.any = true;
-                    }
-                    self.at += 1;
-                    if self.at == self.operands.len() {
-                        if !self.any {
-                            self.done = true;
-                            return;
-                        }
-                        out.append(&mut self.row);
-                        out.push(self.terminator);
-                        self.at = 0;
-                        self.any = false;
-                    }
+                _ => {
+                    self.open = false;
+                    self.next_field(out);
                 }
             }
+        }
+    }
+
+    /// Past the current field: the next record on a serial line, else the
+    /// next operand, a row ending after the last.
+    fn next_field(&mut self, out: &mut Vec<u8>) {
+        if self.serial {
+            self.count += 1;
+            return;
+        }
+        self.at += 1;
+        if self.at == self.operands.len() {
+            if !self.any {
+                self.done = true;
+                return;
+            }
+            out.push(self.terminator);
+            self.at = 0;
+            self.any = false;
         }
     }
 }
@@ -177,7 +196,9 @@ impl Stream for Paste {
         out: &mut Vec<u8>,
     ) -> Result<(), StreamError> {
         if let Some(records) = self.sources.get_mut(source) {
-            records.push(input);
+            let Ok(()) = records.push(input) else {
+                unreachable!("a record read in pieces is never searched whole")
+            };
         }
         self.pump(out);
         Ok(())
@@ -235,6 +256,24 @@ mod tests {
         let zero = r#"{"delimiters":",","zero_terminated":true}"#;
         assert_eq!(paste(zero, &[b"a\0b\0", b"1\0"]), b"a,1\0b,\0");
         assert_eq!(paste(r#"{"inputs":[0]}"#, &[b""]), b"");
+    }
+
+    #[test]
+    fn a_record_goes_out_before_its_terminator_comes() {
+        let defaults =
+            r#"{"delimiters":"\t","serial":false,"zero_terminated":false,"inputs":[0,1]}"#;
+        let mut stream = open(defaults.as_bytes()).unwrap();
+        let mut out = Vec::new();
+        stream.feed_input(0, b"x\nab", &mut out).unwrap();
+        stream.feed_input(1, b"1\n2\n", &mut out).unwrap();
+        assert_eq!(out, b"x\t1\nab");
+        stream.feed_input(0, b"c\n", &mut out).unwrap();
+        assert_eq!(out, b"x\t1\nabc\t2\n");
+        let long = vec![b'y'; crate::records::MAX_LEN * 2];
+        assert_eq!(
+            paste(r#"{"serial":true,"inputs":[0]}"#, &[&long]),
+            [long.as_slice(), b"\n"].concat()
+        );
     }
 
     #[test]

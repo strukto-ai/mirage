@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from mirage.resources.memory import memory_resource_store
-from mirage.resources.types import EntryInput, TemplateInput
+from mirage.resources.types import EntryInput, Policy, TemplateInput
 from mirage.server import build_app
 from mirage.server.resources.files import files_resource_store
 
@@ -143,6 +143,42 @@ async def test_a_template_builds_from_a_saved_connection(
     r = await client.post("/v1/workspaces", json={"config": _named("gone")})
     assert r.status_code == 400
     assert r.json()["detail"] == "gone is not saved as a VFS, CLI or runtime"
+
+
+@pytest.mark.asyncio
+async def test_a_template_runs_the_saved_policy_it_names(app, client):
+    await app.state.resources.create_policy(
+        Policy(
+            name="guard.py",
+            source=(
+                "def pre_command(ctx):\n"
+                '    if ctx["command"] == "rm":\n'
+                '        return {"kind": "deny", '
+                '"reason": "deletes are disabled"}\n'
+            ),
+        )
+    )
+    reviewer = {"policy": {"pre_command": [{"script": "guard.py"}]}}
+    config = {
+        "mounts": {"/": {"vfs": "ram", "mode": "WRITE"}},
+        "profiles": {"reviewer": reviewer},
+        "profile": "reviewer",
+    }
+    await client.post(
+        "/v1/templates", json={"name": "guarded", "config": config}
+    )
+    r = await client.post(
+        "/v1/workspaces", json={"id": "guarded", "template": "guarded"}
+    )
+    assert r.status_code == 201, r.text
+    try:
+        ran = await client.post(
+            "/v1/workspaces/guarded/shell",
+            json={"command": "touch /a && rm /a"},
+        )
+        assert ran.json()["refusal"]["reason"] == "deletes are disabled"
+    finally:
+        await client.delete("/v1/workspaces/guarded")
 
 
 @pytest.mark.asyncio

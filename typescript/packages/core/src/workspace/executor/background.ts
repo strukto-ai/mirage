@@ -67,6 +67,7 @@ import {
   failedRead,
   forks,
   nestedShell,
+  interleaved,
   recordStatus,
   reportedCommand,
   statementStdin,
@@ -88,12 +89,14 @@ export const logger: { debug?: (message: string) => void } = {}
  * pulled, so a reader that closed stops the source before it fetches more; a
  * source that reads nothing to make its bytes (`OutputStream.eager`) runs
  * ahead into the pipe's buffer, as bash's `seq 1 | sleep 30` writer does and
- * exits.
+ * exits. With `io`, the stderr the command writes as its stream is read goes
+ * out among the chunks (`interleaved`); the rest stays on `io`.
  */
 export async function pump(
   console_: JobConsole,
   channel: Channel,
   stream: ByteSource | null,
+  io: IOResult | null = null,
 ): Promise<void> {
   if (stream === null) return
   if (stream instanceof Uint8Array) {
@@ -101,18 +104,28 @@ export async function pump(
     return
   }
   const eager = stream instanceof OutputStream && stream.eager
-  for await (const chunk of stream) {
-    if (chunk.byteLength > 0) await console_.emit(channel, chunk)
-    if (!(console_ instanceof PipeConsole)) continue
+  const parts: AsyncIterable<[Channel, Uint8Array]> =
+    io !== null ? interleaved(stream, io) : tagged(channel, stream)
+  for await (const [partChannel, chunk] of parts) {
+    if (chunk.byteLength > 0) await console_.emit(partChannel, chunk)
+    if (partChannel !== channel || !(console_ instanceof PipeConsole)) continue
     if (!eager) await console_.drain()
     if (console_.closedReader) return
   }
 }
 
+async function* tagged(
+  channel: Channel,
+  stream: AsyncIterable<Uint8Array>,
+): AsyncGenerator<[Channel, Uint8Array]> {
+  for await (const chunk of stream) yield [channel, chunk]
+}
+
 /**
- * Write a finished statement's returned output to a sink, its stdout before
- * its stderr, since one command keeps no order between them; what it already
- * wrote there as it ran (a function body, a redirected group) came first. A
+ * Write a finished statement's returned output to a sink, its stderr among
+ * its stdout as the stream wrote it, the rest after (`interleaved`); what it
+ * already wrote there as it ran (a function body, a redirected group) came
+ * first. A
  * read its stream fails is the statement's own failure (`failedRead`). The
  * result carries no output, so nothing lands twice. Mirrors Python's drained.
  */
@@ -123,7 +136,7 @@ export async function drained(
   execNode: ExecutionNode,
 ): Promise<[null, IOResult, ExecutionNode]> {
   try {
-    await pump(sink, Channel.STDOUT, stdout)
+    await pump(sink, Channel.STDOUT, stdout, io)
   } catch (err) {
     if (err instanceof PipeClosed) {
       // SIGPIPE keeps what the writer already said on stderr (`cat /missing

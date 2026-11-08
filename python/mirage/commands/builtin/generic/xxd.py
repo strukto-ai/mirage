@@ -73,8 +73,16 @@ def _forward_stream(
     return stream_output(open_stream("xxd", config), source)
 
 
+def _backwards(refusal: StreamRefusal) -> IOResult:
+    return IOResult(
+        exit_code=SEEK_BACK_EXIT, stderr=f"{refusal.message}\n".encode()
+    )
+
+
 async def _xxd_reverse_stream(
-    source: AsyncIterator[bytes], io: IOResult, plain: bool
+    source: AsyncIterator[bytes],
+    io: IOResult,
+    revert: Mapping[str, JsonValue],
 ) -> AsyncIterator[bytes]:
     """Revert a hexdump onto a stream, which can only move forward.
 
@@ -85,11 +93,10 @@ async def _xxd_reverse_stream(
     Args:
         source (AsyncIterator[bytes]): The hexdump.
         io (IOResult): The result to mark on a backward seek.
-        plain (bool): -p.
+        revert (Mapping[str, JsonValue]): the reverse engine's
+            configuration.
     """
-    stream = open_stream(
-        "xxd", {"mode": "reverse", "plain": plain, "segments": False}
-    )
+    stream = open_stream("xxd", {**revert, "segments": False})
     try:
         async with aclosing(stream_output_chunks(stream, source)) as parts:
             async for part in parts:
@@ -97,8 +104,9 @@ async def _xxd_reverse_stream(
     except StreamRefusal as refusal:
         if refusal.output:
             yield refusal.output
-        io.exit_code = SEEK_BACK_EXIT
-        io.stderr = f"{refusal.message}\n".encode()
+        backwards = _backwards(refusal)
+        io.exit_code = backwards.exit_code
+        io.stderr = backwards.stderr
 
 
 async def _reverse_segments(
@@ -314,8 +322,8 @@ async def xxd(
         stdin (ByteSource | None): standard input.
         render (Mapping[str, JsonValue] | None): the dump's
             configuration as the scan read it; None for the default dump.
-        seek (XxdSeek | None): -s.
-        limit (int | None): -l, None for no limit.
+        seek (XxdSeek | None): -s, which ``-r`` adds to every offset.
+        limit (int | None): -l, None for no limit; ``-r`` reads all.
         name (str | None): -n, the name of -i's array; INFILE's spelling
             without it.
     """
@@ -334,13 +342,17 @@ async def xxd(
         name = paths[0].raw_path or paths[0].virtual
     read = stdin_stream(stream, stdin, sole=True)
     base = 0
+    revert: dict[str, JsonValue] | None = None
     if reverse:
         source: AsyncIterator[bytes] = (
             read(paths[0]) if paths else resolve_source(stdin)
         )
-        if seek.offset or limit:
-            past = await _past(source, max(seek.offset, 0))
-            source = _limited(past or yield_bytes(b""), limit or None)
+        revert = {
+            "mode": "reverse",
+            "plain": plain,
+            "cols": render["cols"],
+            "base": -seek.offset if seek.back else seek.offset,
+        }
     else:
         seeked = await _seeked(
             paths[0] if paths else None,
@@ -362,15 +374,14 @@ async def xxd(
             stream,
             write_bytes,
             pwrite_bytes,
-            reverse=reverse,
-            plain=plain,
+            revert=revert,
             forward=_forward_stream(source, render, base, name)
-            if not reverse
+            if revert is None
             else None,
         )
     io = IOResult()
-    if reverse:
-        return _xxd_reverse_stream(source, io, plain), io
+    if revert is not None:
+        return _xxd_reverse_stream(source, io, revert), io
     return _forward_stream(source, render, base, name), io
 
 
@@ -381,8 +392,7 @@ async def _write_output(
     write_bytes: Callable[..., Awaitable[None]] | None,
     pwrite_bytes: Callable[..., Awaitable[None]] | None,
     *,
-    reverse: bool,
-    plain: bool,
+    revert: Mapping[str, JsonValue] | None,
     forward: OutputStream | None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Write the dump (or with ``-r`` the bytes) to OUTFILE.
@@ -396,31 +406,33 @@ async def _write_output(
         stream (ReadStreamFn): reads OUTFILE for ``-r``.
         write_bytes (Callable | None): writes OUTFILE.
         pwrite_bytes (Callable | None): writes into OUTFILE at an offset.
-        reverse (bool): revert a dump instead of making one.
-        plain (bool): the dump to revert is plain hexdump style.
+        revert (Mapping[str, JsonValue] | None): the reverse engine's
+            configuration for ``-r``, None for a dump.
         forward (OutputStream | None): the dump of INFILE, None for
             ``-r``.
     """
     target = paths[1]
+    reverse = revert is not None
     segments: ByteSource = b""
     data: ByteSource = b""
     read_failed = False
+    done = IOResult()
 
     def failed(exc: Exception) -> None:
         nonlocal read_failed
         read_failed = True
 
     try:
-        if reverse:
+        if revert is not None:
             stored = ByteSpool()
             try:
-                await stored.fill(
-                    run_stream(
-                        "xxd",
-                        {"mode": "reverse", "plain": plain, "segments": True},
-                        source,
+                try:
+                    await stored.fill(
+                        run_stream("xxd", {**revert, "segments": True}, source)
                     )
-                )
+                except StreamRefusal as refusal:
+                    await stored.append(refusal.output)
+                    done = _backwards(refusal)
                 segments = await stored.output()
             except BaseException:
                 await stored.close()
@@ -455,7 +467,7 @@ async def _write_output(
             )
         finally:
             await close_quietly(segments)
-        return None, IOResult()
+        return None, done
     if reverse:
         try:
             data = await _patched(stream(target), segments)
@@ -485,7 +497,7 @@ async def _write_output(
         )
     finally:
         await close_quietly(data)
-    return None, IOResult()
+    return None, done
 
 
 def _names_output(operands: Sequence[str | PathSpec]) -> bool:

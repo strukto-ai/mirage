@@ -14,7 +14,6 @@
 
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
 import { SHOPT_DEFAULTS } from '../../../../shell/constants.ts'
 import { aliasRewrite, getText } from '../../../../shell/helpers.ts'
 import type { TSNodeLike } from '../../../../shell/types.ts'
@@ -27,7 +26,7 @@ import {
   type SessionState,
 } from '../../../session/session.ts'
 import { scanOptions } from '../getopt.ts'
-import { builtinUsage, fail, finish, ok, result } from '../shared.ts'
+import { builtinUsage, fail, finish, ok, written } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 import { BAD_NAME_RE } from './constants.ts'
 import type { AliasMark } from './types.ts'
@@ -49,11 +48,11 @@ export function handleAlias(
       2,
     )
   const operands = scan.operands
-  const lines: string[] = []
-  const errors: string[] = []
+  const pieces: [boolean, string][] = []
+  let failed = false
   if (operands.length === 0 || scan.letters.includes('p')) {
     for (const name of Object.keys(session.aliases).sort(compareCodePoints)) {
-      lines.push(`alias ${name}=${singleQuote(session.aliases[name] ?? '')}`)
+      pieces.push([false, `alias ${name}=${singleQuote(session.aliases[name] ?? '')}\n`])
     }
   }
   for (const word of operands) {
@@ -61,11 +60,13 @@ export function handleAlias(
     if (eq >= 0) {
       const name = word.slice(0, eq)
       if (name === '' || BAD_NAME_RE.test(name)) {
-        errors.push(
+        failed = true
+        pieces.push([
+          true,
           name === ''
-            ? `${shellVoice()}alias: ${word}: not found`
-            : `${shellVoice()}alias: \`${name}': invalid alias name`,
-        )
+            ? `${shellVoice()}alias: ${word}: not found\n`
+            : `${shellVoice()}alias: \`${name}': invalid alias name\n`,
+        ])
         continue
       }
       const value = word.slice(eq + 1)
@@ -76,18 +77,18 @@ export function handleAlias(
       continue
     }
     if (BAD_NAME_RE.test(word)) {
-      errors.push(`${shellVoice()}alias: \`${word}': invalid alias name`)
+      failed = true
+      pieces.push([true, `${shellVoice()}alias: \`${word}': invalid alias name\n`])
       continue
     }
     const val = sessionEntry(session.aliases, word)
-    if (val !== undefined) lines.push(`alias ${word}=${singleQuote(val)}`)
-    else errors.push(`${shellVoice()}alias: ${word}: not found`)
+    if (val !== undefined) pieces.push([false, `alias ${word}=${singleQuote(val)}\n`])
+    else {
+      failed = true
+      pieces.push([true, `${shellVoice()}alias: ${word}: not found\n`])
+    }
   }
-  return result('alias', {
-    out: lines.length > 0 ? encodeText(lines.map((line) => `${line}\n`).join('')) : null,
-    exitCode: errors.length > 0 ? 1 : 0,
-    stderr: errors.map((error) => `${error}\n`).join(''),
-  })
+  return written('alias', pieces, failed ? 1 : 0)
 }
 
 /** Remove aliases: the named ones, or all under `-a`. The commands of the
@@ -122,7 +123,8 @@ export function handleUnalias(
   return finish('unalias', errors)
 }
 
-function aliasesOn(session: SessionState): boolean {
+/** Whether `expand_aliases` is on, which bash -c starts with off. */
+export function aliasesOn(session: SessionState): boolean {
   return session.shopts.expand_aliases ?? SHOPT_DEFAULTS.get('expand_aliases') ?? false
 }
 

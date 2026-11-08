@@ -1,6 +1,13 @@
+use std::collections::VecDeque;
+
 use serde::Deserialize;
 
 use crate::{Stream, StreamError, parse_config};
+
+/// The most a call writes.
+const OUTPUT: usize = 64 * 1024;
+/// The widest field: date reads a wider width as this one.
+const MAX_WIDTH: usize = i32::MAX as usize;
 
 const DAYS: [&str; 7] = [
     "Sunday",
@@ -89,6 +96,7 @@ impl Strftime {
             iso_week,
             format: Vec::new(),
             finished: false,
+            rendered: Rendered::default(),
         })
     }
 
@@ -133,6 +141,7 @@ pub(crate) struct Strftime {
     iso_week: i64,
     format: Vec<u8>,
     finished: bool,
+    rendered: Rendered,
 }
 
 impl Stream for Strftime {
@@ -146,9 +155,109 @@ impl Stream for Strftime {
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         if !std::mem::replace(&mut self.finished, true) {
             let format = std::mem::take(&mut self.format);
-            self.render(&format, out)?;
+            let mut rendered = Rendered::default();
+            self.layout(&format, &mut rendered)?;
+            self.rendered = rendered;
         }
+        self.drain(out)
+    }
+
+    fn busy(&self) -> bool {
+        !self.rendered.pieces.is_empty()
+    }
+
+    fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.rendered.write(out, OUTPUT);
         Ok(())
+    }
+}
+
+enum Piece {
+    Bytes(Vec<u8>),
+    Fill(u8, usize),
+}
+
+/// What a format renders to: bytes, and each field's padding as one byte
+/// and a count, so the widest field date allows is written a window at a
+/// time, as date writes it, rather than held.
+#[derive(Default)]
+struct Rendered {
+    pieces: VecDeque<Piece>,
+    len: usize,
+}
+
+impl Rendered {
+    fn push(&mut self, byte: u8) {
+        self.extend_from_slice(&[byte]);
+    }
+
+    fn extend_from_slice(&mut self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        self.len = self.len.saturating_add(bytes.len());
+        match self.pieces.back_mut() {
+            Some(Piece::Bytes(last)) => last.extend_from_slice(bytes),
+            _ => self.pieces.push_back(Piece::Bytes(bytes.to_vec())),
+        }
+    }
+
+    fn fill(&mut self, byte: u8, count: usize) {
+        if count > 0 {
+            self.len = self.len.saturating_add(count);
+            self.pieces.push_back(Piece::Fill(byte, count));
+        }
+    }
+
+    fn append(&mut self, other: Rendered) {
+        for piece in other.pieces {
+            match piece {
+                Piece::Bytes(bytes) => self.extend_from_slice(&bytes),
+                Piece::Fill(byte, count) => self.fill(byte, count),
+            }
+        }
+    }
+
+    /// Case-map the bytes; padding is blanks or zeros either way.
+    fn map(&mut self, upper: bool) {
+        for piece in &mut self.pieces {
+            if let Piece::Bytes(bytes) = piece {
+                if upper {
+                    bytes.make_ascii_uppercase();
+                } else {
+                    bytes.make_ascii_lowercase();
+                }
+            }
+        }
+    }
+
+    /// Write at most `most` bytes of what is left.
+    fn write(&mut self, out: &mut Vec<u8>, most: usize) {
+        let mut room = most;
+        while room > 0 {
+            let Some(piece) = self.pieces.front_mut() else {
+                break;
+            };
+            match piece {
+                Piece::Bytes(bytes) => {
+                    let taken = bytes.len().min(room);
+                    out.extend(bytes.drain(..taken));
+                    room -= taken;
+                    if bytes.is_empty() {
+                        self.pieces.pop_front();
+                    }
+                }
+                Piece::Fill(byte, count) => {
+                    let taken = (*count).min(room);
+                    out.extend(std::iter::repeat_n(*byte, taken));
+                    room -= taken;
+                    *count -= taken;
+                    if *count == 0 {
+                        self.pieces.pop_front();
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -161,33 +270,24 @@ struct Flags {
 }
 
 impl Flags {
-    fn text(self, text: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+    fn text(self, text: Rendered, out: &mut Rendered) {
         let padding = if self.pad == Some(b'-') {
             0
         } else {
-            self.width.unwrap_or(0).saturating_sub(text.len())
+            self.width.unwrap_or(0).saturating_sub(text.len)
         };
-        reserve(out, padding.saturating_add(text.len()))?;
-        out.extend(std::iter::repeat_n(
+        out.fill(
             if matches!(self.pad, Some(b'0' | b'+')) {
                 b'0'
             } else {
                 b' '
             },
             padding,
-        ));
-        out.extend_from_slice(text);
-        Ok(())
+        );
+        out.append(text);
     }
 
-    fn number(
-        self,
-        value: i64,
-        natural: usize,
-        space: bool,
-        sign: bool,
-        out: &mut Vec<u8>,
-    ) -> Result<(), StreamError> {
+    fn number(self, value: i64, natural: usize, space: bool, sign: bool, out: &mut Rendered) {
         let sign = if value < 0 {
             "-"
         } else if sign {
@@ -195,17 +295,10 @@ impl Flags {
         } else {
             ""
         };
-        self.signed(sign, value.unsigned_abs(), natural, space, out)
+        self.signed(sign, value.unsigned_abs(), natural, space, out);
     }
 
-    fn signed(
-        self,
-        sign: &str,
-        value: u64,
-        natural: usize,
-        space: bool,
-        out: &mut Vec<u8>,
-    ) -> Result<(), StreamError> {
+    fn signed(self, sign: &str, value: u64, natural: usize, space: bool, out: &mut Rendered) {
         let digits = value.to_string();
         let padding = if self.pad == Some(b'-') {
             0
@@ -214,29 +307,29 @@ impl Flags {
                 .unwrap_or(natural)
                 .saturating_sub(digits.len() + sign.len())
         };
-        reserve(out, padding.saturating_add(digits.len() + sign.len()))?;
         let spaces = self.pad == Some(b'_') || self.pad.is_none() && space;
         if spaces {
-            out.extend(std::iter::repeat_n(b' ', padding));
+            out.fill(b' ', padding);
         }
         out.extend_from_slice(sign.as_bytes());
         if !spaces {
-            out.extend(std::iter::repeat_n(b'0', padding));
+            out.fill(b'0', padding);
         }
         out.extend_from_slice(digits.as_bytes());
-        Ok(())
     }
-}
-
-fn reserve(out: &mut Vec<u8>, additional: usize) -> Result<(), StreamError> {
-    out.try_reserve(additional)
-        .map_err(|_| StreamError::new("strftime: output is too large"))
 }
 
 impl Strftime {
     // date's formatter differs from libc's (used by jq): widths replace
     // numeric defaults, '-' suppresses text padding, and '+' signs years.
     pub(crate) fn render(&self, format: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let mut rendered = Rendered::default();
+        self.layout(format, &mut rendered)?;
+        rendered.write(out, usize::MAX);
+        Ok(())
+    }
+
+    fn layout(&self, format: &[u8], out: &mut Rendered) -> Result<(), StreamError> {
         let mut at = 0;
         while at < format.len() {
             let start = at;
@@ -260,14 +353,8 @@ impl Strftime {
                 at += 1;
             }
             while let Some(&digit) = format.get(at).filter(|b| b.is_ascii_digit()) {
-                flags.width = Some(
-                    flags
-                        .width
-                        .unwrap_or(0)
-                        .checked_mul(10)
-                        .and_then(|n| n.checked_add(usize::from(digit - b'0')))
-                        .ok_or_else(|| StreamError::new("strftime: field width is too large"))?,
-                );
+                let width = flags.width.unwrap_or(0).saturating_mul(10);
+                flags.width = Some(MAX_WIDTH.min(width.saturating_add(usize::from(digit - b'0'))));
                 at += 1;
             }
             let colon_start = at;
@@ -303,11 +390,12 @@ impl Strftime {
             // A refused percent conversion is itself the next literal percent.
             // Its width counts the prefix, leaving that last '%' outside it.
             let end = if code == Some(b'%') { at - 1 } else { at };
-            let mut literal = format[start..end].to_vec();
+            let mut literal = Rendered::default();
+            literal.extend_from_slice(&format[start..end]);
             if flags.upper {
-                literal.make_ascii_uppercase();
+                literal.map(true);
             }
-            flags.text(&literal, out)?;
+            flags.text(literal, out);
             if code == Some(b'%') {
                 at -= 1;
             }
@@ -321,12 +409,12 @@ impl Strftime {
         modifier: Option<u8>,
         colons: usize,
         flags: Flags,
-        out: &mut Vec<u8>,
+        out: &mut Rendered,
     ) -> Result<bool, StreamError> {
         let c = &self.config;
         let hour12 = if c.hour % 12 == 0 { 12 } else { c.hour % 12 };
         if code == b'z' {
-            self.offset(colons, flags, out)?;
+            self.offset(colons, flags, out);
             return Ok(true);
         }
         if code == b'N' {
@@ -340,12 +428,11 @@ impl Strftime {
             };
             let kept = trimmed.len().max(usize::from(width > 0));
             let width = if flags.pad == Some(b'-') { kept } else { width };
-            reserve(out, width)?;
             out.extend_from_slice(&digits.as_bytes()[..kept]);
-            out.extend(std::iter::repeat_n(
+            out.fill(
                 if flags.pad == Some(b'_') { b' ' } else { b'0' },
                 width.saturating_sub(kept),
-            ));
+            );
             return Ok(true);
         }
         let numeric = match code {
@@ -405,9 +492,9 @@ impl Strftime {
                 && b"CGYyg".contains(&code)
                 && (value >= 10i64.pow(natural as u32) || flags.width.is_some_and(|w| w > natural));
             if code == b'C' && c.year < 0 && value == 0 {
-                flags.signed("-", 0, natural, space, out)?;
+                flags.signed("-", 0, natural, space, out);
             } else {
-                flags.number(value, natural, space, plus, out)?;
+                flags.number(value, natural, space, plus, out);
             }
             return Ok(true);
         }
@@ -420,16 +507,16 @@ impl Strftime {
             _ => None,
         };
         let mut text = if code == b'D' {
-            let mut date = Vec::new();
-            self.render(b"%m/%d/", &mut date)?;
+            let mut date = Rendered::default();
+            self.layout(b"%m/%d/", &mut date)?;
             Flags {
                 width: None,
                 ..flags
             }
-            .number(c.year.abs() % 100, 2, false, false, &mut date)?;
+            .number(c.year.abs() % 100, 2, false, false, &mut date);
             date
         } else if code == b'F' {
-            let mut date = Vec::new();
+            let mut date = Rendered::default();
             let width = flags
                 .width
                 .map(|w| w.saturating_sub(6))
@@ -446,41 +533,55 @@ impl Strftime {
                 false,
                 plus && (c.year > 9999 || width > 4),
                 &mut date,
-            )?;
-            self.render(b"-%m-%d", &mut date)?;
+            );
+            self.layout(b"-%m-%d", &mut date)?;
             if flags.pad != Some(b'_') {
-                out.extend(date);
+                out.append(date);
                 return Ok(true);
             }
             date
         } else if let Some(format) = composite {
-            let mut text = Vec::new();
-            self.render(format, &mut text)?;
+            let mut text = Rendered::default();
+            self.layout(format, &mut text)?;
             text
         } else {
-            match code {
-                b'a' => DAYS[self.weekday as usize].as_bytes()[..3].to_vec(),
-                b'A' => DAYS[self.weekday as usize].as_bytes().to_vec(),
-                b'b' | b'h' => MONTHS[c.month - 1].as_bytes()[..3].to_vec(),
-                b'B' => MONTHS[c.month - 1].as_bytes().to_vec(),
-                b'n' => vec![b'\n'],
-                b't' => vec![b'\t'],
-                b'p' => if c.hour < 12 { b"AM" } else { b"PM" }.to_vec(),
-                b'P' => if c.hour < 12 { b"am" } else { b"pm" }.to_vec(),
-                b'Z' => c.zone.as_bytes().to_vec(),
+            let mut text = Rendered::default();
+            text.extend_from_slice(match code {
+                b'a' => &DAYS[self.weekday as usize].as_bytes()[..3],
+                b'A' => DAYS[self.weekday as usize].as_bytes(),
+                b'b' | b'h' => &MONTHS[c.month - 1].as_bytes()[..3],
+                b'B' => MONTHS[c.month - 1].as_bytes(),
+                b'n' => b"\n",
+                b't' => b"\t",
+                b'p' => {
+                    if c.hour < 12 {
+                        b"AM"
+                    } else {
+                        b"PM"
+                    }
+                }
+                b'P' => {
+                    if c.hour < 12 {
+                        b"am"
+                    } else {
+                        b"pm"
+                    }
+                }
+                b'Z' => c.zone.as_bytes(),
                 _ => return Ok(false),
-            }
+            });
+            text
         };
         if flags.swap && b"pZ".contains(&code) {
-            text.make_ascii_lowercase();
+            text.map(false);
         } else if flags.upper && code != b'P' || flags.swap && b"aAbBh".contains(&code) {
-            text.make_ascii_uppercase();
+            text.map(true);
         }
-        flags.text(&text, out)?;
+        flags.text(text, out);
         Ok(true)
     }
 
-    fn offset(&self, colons: usize, flags: Flags, out: &mut Vec<u8>) -> Result<(), StreamError> {
+    fn offset(&self, colons: usize, flags: Flags, out: &mut Rendered) {
         let total = self.config.offset.unsigned_abs();
         let sign = if self.config.offset < 0 { "-" } else { "+" };
         let hours = total / 3600;
@@ -500,9 +601,8 @@ impl Strftime {
             width: flags.width.map(|w| w.saturating_sub(tail.len())),
             ..flags
         };
-        hours_flags.signed(sign, hours, 3, false, out)?;
+        hours_flags.signed(sign, hours, 3, false, out);
         out.extend_from_slice(tail.as_bytes());
-        Ok(())
     }
 }
 
@@ -688,10 +788,36 @@ mod tests {
         config["month"] = json!(2);
         config["day"] = json!(29);
         assert!(open("strftime", config.to_string().as_bytes()).is_err());
+    }
+
+    #[test]
+    fn wide_fields_are_written_a_window_at_a_time() {
         let mut stream = open("strftime", moment().to_string().as_bytes()).unwrap();
-        stream
-            .feed(b"%1844674407370955161600Y", &mut Vec::new())
+        stream.feed(b"%70000Y|%_5a", &mut Vec::new()).unwrap();
+        let mut out = Vec::new();
+        stream.finish(&mut out).unwrap();
+        assert_eq!(out.len(), super::OUTPUT);
+        while stream.busy() {
+            let mut window = Vec::new();
+            stream.drain(&mut window).unwrap();
+            assert!(window.len() <= super::OUTPUT);
+            out.extend(window);
+        }
+        let mut expected = vec![b'0'; 69996];
+        expected.extend(b"2026|  Thu");
+        assert!(out == expected);
+    }
+
+    #[test]
+    fn widths_past_what_date_reads_are_its_widest() {
+        let time = super::Strftime::utc(0, 0).unwrap();
+        let mut rendered = super::Rendered::default();
+        time.layout(b"%1844674407370955161600Y", &mut rendered)
             .unwrap();
-        assert!(stream.finish(&mut Vec::new()).is_err());
+        assert_eq!(rendered.len, super::MAX_WIDTH);
+        assert!(matches!(
+            rendered.pieces.front(),
+            Some(super::Piece::Fill(b'0', fill)) if *fill == super::MAX_WIDTH - 4
+        ));
     }
 }

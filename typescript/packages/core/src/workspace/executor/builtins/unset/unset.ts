@@ -16,15 +16,21 @@ import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import type { Policies } from '../../../../policy/index.ts'
-import { FUNCNAME } from '../../../../shell/constants.ts'
-import { ArithError } from '../../../../shell/errors.ts'
+import { BASH_LINENO, FUNCNAME } from '../../../../shell/constants.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { deref, sessionView, unsetElement } from '../../../session/state.ts'
 import { TARGET_RE } from '../constants.ts'
 import { flagHelp } from '../help/help.ts'
 import type { SubscriptFn } from '../../../expand/types.ts'
-import { builtinUsage, fail, finish, requireView, subscriptExpansion } from '../shared.ts'
+import {
+  builtinUsage,
+  fail,
+  finish,
+  identifierLine,
+  requireView,
+  subscriptExpansion,
+} from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 
 /**
@@ -91,7 +97,7 @@ export async function handleUnset(
     const answered = flagHelp('unset')
     if (answered !== null) return answered
   }
-  let mode: 'auto' | 'v' | 'f' | 'n' = 'auto'
+  const letters = new Set<string>()
   let i = 0
   while (i < args.length && (args[i] ?? '').startsWith('-') && args[i] !== '-') {
     const tok = args[i] ?? ''
@@ -100,9 +106,7 @@ export async function handleUnset(
       break
     }
     if (/^-[vfn]+$/.test(tok)) {
-      if (tok.includes('f')) mode = 'f'
-      else if (tok.includes('n')) mode = 'n'
-      else mode = 'v'
+      for (const letter of tok.slice(1)) letters.add(letter)
       i += 1
       continue
     }
@@ -112,15 +116,32 @@ export async function handleUnset(
       2,
     )
   }
+  if (letters.has('f') && letters.has('v')) {
+    return fail(
+      'unset',
+      `${shellVoice()}unset: cannot simultaneously unset a function and a variable\n`,
+    )
+  }
+  const mode = (['f', 'n', 'v'] as const).find((m) => letters.has(m)) ?? 'auto'
   const errors: string[] = []
   for (const name of args.slice(i)) {
     const view = requireView(state)
+    if (letters.has('v') && !TARGET_RE.test(name)) {
+      // Only a variable must be named as one: without -v bash falls back
+      // to the function table, which takes any name.
+      errors.push(`${identifierLine('unset', name)}\n`)
+      continue
+    }
     if (mode === 'n') {
       // `unset -n` drops the reference itself rather than its target;
       // on a plain variable bash unsets it. Ungated-by-target unset. A
       // frozen reference refuses, writable target or not.
       if (view.isReadonly(name, false)) {
         errors.push(readonly(name, 'variable'))
+        continue
+      }
+      if (name === BASH_LINENO) {
+        errors.push(`${shellVoice()}unset: ${name}: cannot unset\n`)
         continue
       }
       try {
@@ -149,6 +170,10 @@ export async function handleUnset(
     const base = match?.[1] ?? name
     if (view.isReadonly(base)) {
       errors.push(readonly(deref(session, base), 'variable'))
+      continue
+    }
+    if (!isElement && deref(session, base) === BASH_LINENO) {
+      errors.push(`${shellVoice()}unset: ${name}: cannot unset\n`)
       continue
     }
     const existed =

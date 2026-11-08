@@ -32,7 +32,7 @@ import {
   runAsProgram,
   runWithEvaluation,
 } from '../../../../context/session_context.ts'
-import { enoent, fsStrerror } from '../../../../errors/fs.ts'
+import { enoent, fsStrerror, isMissingPath } from '../../../../errors/fs.ts'
 import { chunks } from '../../../../io/cooperative.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
 import { SharedStdin, yieldBytes } from '../../../../io/stream.ts'
@@ -42,12 +42,17 @@ import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
 import { Channel } from '../../../../shell/console/types.ts'
-import { NOT_FOUND_STATUS, SIGPIPE_STATUS } from '../../../../shell/constants.ts'
+import {
+  CANNOT_EXECUTE_STATUS,
+  NOT_FOUND_STATUS,
+  SIGPIPE_STATUS,
+} from '../../../../shell/constants.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { mergeSignals } from '../../../../utils/abort.ts'
 import { asyncContextIsolatesTasks } from '../../../../utils/async_context.ts'
 import { concat, findBytes } from '../../../../utils/bytes.ts'
 import { shellQuote } from '../../../../utils/quote.ts'
+import { FileType, PathSpec } from '../../../../types.ts'
 import type { EvaluationContext } from '../../../evaluation.ts'
 import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
@@ -56,6 +61,7 @@ import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { pump } from '../../background.ts'
 import { readScriptBytes } from '../script/script.ts'
+import { absPath } from '../shared.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 
 // The sizes GNU findutils 4.10 reports with --show-limits on Linux with an
@@ -916,6 +922,36 @@ export function xargsMissing(name: string): string {
 }
 
 /**
+ * What xargs says, and the status it stops with, when it cannot exec its
+ * command: 127 for nothing to run, 126 for a directory or a path exec
+ * refuses (`./file/child` is not a directory), as GNU's exec answers; null
+ * when the command runs. Mirrors Python's _unrunnable.
+ */
+async function unrunnable(
+  name: string,
+  session: EvaluationContext['session'],
+  registry: MountRegistry,
+  dispatch: DispatchFn | null,
+): Promise<[string, number] | null> {
+  if (!name.includes('/') || dispatch === null) {
+    return execs(name, session, registry) ? null : [xargsMissing(name), NOT_FOUND_STATUS]
+  }
+  let row: unknown
+  try {
+    ;[row] = await dispatch('stat', PathSpec.fromStrPath(absPath(name, session.cwd)))
+  } catch (err) {
+    if (isMissingPath(err)) return [xargsMissing(name), NOT_FOUND_STATUS]
+    const said = fsStrerror(err)
+    if (said === null) throw err
+    return [`xargs: ${name}: ${said}\n`, CANNOT_EXECUTE_STATUS]
+  }
+  if ((row as { type?: string } | null)?.type === FileType.DIRECTORY) {
+    return [`xargs: ${name}: Permission denied\n`, CANNOT_EXECUTE_STATUS]
+  }
+  return null
+}
+
+/**
  * Run one command into its pipe, keeping its stderr and status when cut
  * short; one cut short before answering died of SIGPIPE.
  */
@@ -958,6 +994,8 @@ async function* runLines(
     trace?: boolean
     slotVar?: string | null
     registry?: MountRegistry | null
+    /** Stats a command named by a path. */
+    dispatch?: DispatchFn | null
     stdin?: ByteSource | null
     /** Filled at teardown with the runs still going, for the caller to record. */
     torn: IOResult[]
@@ -1030,20 +1068,20 @@ async function* runLines(
     results: IOResult[]
     task?: Promise<unknown>
   }
-  const invoke = (event: XargsEvent, signal: AbortSignal): Promise<Run> => {
+  const invoke = async (event: XargsEvent, signal: AbortSignal): Promise<Run> => {
     const slot: IOResult[] = []
-    if (typeof event === 'string')
-      return Promise.resolve({ results: [new IOResult({ stderr: encodeText(event) })] })
+    if (typeof event === 'string') return { results: [new IOResult({ stderr: encodeText(event) })] }
     const words = event.map(decodeText)
     const name = words[0] ?? ''
     if (opts.trace === true) slot.push(new IOResult({ stderr: encodeText(trace(event)) }))
-    if (registry !== null && !execs(name, session, registry)) {
-      slot.push(
-        new IOResult({ stderr: encodeText(xargsMissing(name)), exitCode: NOT_FOUND_STATUS }),
-      )
-      stop = NOT_FOUND_STATUS
+    const refused =
+      registry !== null ? await unrunnable(name, session, registry, opts.dispatch ?? null) : null
+    if (refused !== null) {
+      const [line, code] = refused
+      slot.push(new IOResult({ stderr: encodeText(line), exitCode: code }))
+      stop = code
       stopping.abort()
-      return Promise.resolve({ results: slot })
+      return { results: slot }
     }
     const pipe = new PipeConsole()
     const io = new IOResult({ stdout: pipe.stream() })
@@ -1253,6 +1291,7 @@ export async function handleXargs(
         trace: plan.flags.has('t'),
         slotVar: plan.slotVar,
         registry: options.registry ?? null,
+        dispatch: options.dispatch ?? null,
         stdin: childStdin,
         torn,
       })) {

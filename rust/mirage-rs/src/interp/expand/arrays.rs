@@ -1,7 +1,7 @@
 //! `${a[@]}` and `${a[*]}`: an array's or a map's elements, each
 //! operator applied per element, and the subscripts that select one.
 
-use super::braces::{bad_transformation, write_refusal};
+use super::operators::{bad_transformation, write_refusal};
 use super::{
     Braces, Chunk, Expander, Host, Operands, PATTERN_OPS, bad_subscript, discard, ifs_joiner,
     splat, trim_start, within,

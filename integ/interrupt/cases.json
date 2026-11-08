@@ -97,7 +97,7 @@
     },
     {
       "id": "du-walk",
-      "command": "du -a $(printf '/wide %.0s' {1..200}) >/dev/null",
+      "command": "du -al $(printf '/wide %.0s' {1..200}) >/dev/null",
       "canceled": true
     },
     {

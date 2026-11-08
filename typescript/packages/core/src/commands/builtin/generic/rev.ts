@@ -13,23 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { stdinStream } from '../utils/stream.ts'
-import { perOperand } from '../utils/operands.ts'
+import { stdinStat, stdinStream } from '../utils/stream.ts'
+import { errorsFirst, operandsIo, perOperand, splitReadable } from '../utils/operands.ts'
 import { runStream } from '../../../rs/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 
-export function revGeneric(
+export async function revGeneric(
   paths: PathSpec[],
   ctx: Context,
+  stat: (p: PathSpec) => Promise<FileStat>,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): CommandFnResult {
+): Promise<CommandFnResult> {
+  // util-linux rev opens `-` as a file; only /dev/stdin is stdin.
+  const [readable, err] = await splitReadable(paths, stdinStat(stat, false), 'rev')
+  if (err !== '' && readable.length === 0) return [null, operandsIo(err)]
   stream = stdinStream(stream, ctx.stdin, false, false)
   const io = new IOResult()
   const zero = new FlagView(ctx.flags, specOf('rev')).asBool('zero')
   const config = zero ? { zero: true } : {}
   const each = (source: ByteSource) => runStream('rev', config, source, ctx.signal)
-  return [perOperand(paths, stream, ctx.stdin, io, 'rev', each), io]
+  return errorsFirst([perOperand(readable, stream, ctx.stdin, io, 'rev', each), io], err)
 }

@@ -13,7 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterator, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterator,
+    Sequence,
+)
 from contextlib import aclosing, contextmanager
 from dataclasses import dataclass
 
@@ -29,7 +36,7 @@ from mirage.io.async_line_iterator import SharedInput
 from mirage.io.cooperative import chunks
 from mirage.io.errors import PipeClosed
 from mirage.io.spool import spooled_pair
-from mirage.io.stream import async_chain, discard_streams
+from mirage.io.stream import async_chain, close_quietly, discard_streams
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import encode_text
@@ -665,17 +672,67 @@ async def statement_output(
             sink, key, data, current_caller().enclosing
         ):
             written.append((key.channel, data, True))
+    returned: list[tuple[Channel | Inherited, ByteSource | None]]
     try:
-        out, err = await spooled_pair(stdout, io.stderr)
+        if stdout is None or isinstance(stdout, bytes):
+            out, err = await spooled_pair(stdout, io.stderr)
+            returned = [(Channel.STDOUT, out), (Channel.STDERR, err)]
+        else:
+            order = Recorder()
+            try:
+                async with aclosing(interleaved(stdout, io)) as pairs:
+                    async for channel, chunk in pairs:
+                        await order.emit(channel, chunk)
+            except BaseException:
+                await close_quietly(stdout)
+                await order.close()
+                raise
+            returned = [
+                *await order.take(),
+                (Channel.STDERR, await materialize(io.stderr)),
+            ]
     except BaseException:
         await discard_streams(*(data for _, data, _ in written))
         raise
     io.stderr = None
-    if out:
-        written.append((Channel.STDOUT, out, False))
-    if err:
-        written.append((Channel.STDERR, err, False))
+    for owner, piece in returned:
+        if piece and isinstance(owner, Channel):
+            written.append((owner, piece, False))
     return written
+
+
+async def interleaved(
+    stdout: AsyncIterator[bytes], io: IOResult
+) -> AsyncGenerator[tuple[Channel, bytes], None]:
+    """``stdout``'s chunks, each after the stderr ``io`` gained while it
+    was read, so a command's errors keep their place among its output
+    (``cat a missing b 2>&1``). What ``io`` held when the stream started
+    waits for what comes next, or for after the stream: one command that
+    returns both at once keeps no order between them. What went out is
+    cut off ``io.stderr`` once the stream ends.
+
+    Args:
+        stdout (AsyncIterator[bytes]): the command's output, read here.
+        io (IOResult): its result, whose stderr may grow as it is read.
+    """
+    held = io.stderr
+    start = len(held) if isinstance(held, bytes) else 0
+    sent = b""
+    try:
+        async for chunk in stdout:
+            err = io.stderr
+            if (
+                isinstance(err, bytes)
+                and len(err) > max(len(sent), start)
+                and err.startswith(sent)
+            ):
+                yield Channel.STDERR, err[len(sent) :]
+                sent = err
+            yield Channel.STDOUT, chunk
+    finally:
+        err = io.stderr
+        if sent and isinstance(err, bytes) and err.startswith(sent):
+            io.stderr = err[len(sent) :] or None
 
 
 def write_error_line(command: str, program: bool = False) -> bytes:

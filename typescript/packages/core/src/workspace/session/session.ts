@@ -29,7 +29,7 @@ import { Terminal, type JobOutput } from '../../shell/console/index.ts'
 import { BIN_PREFIX, IFS_DEFAULT, SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 import type { JobTable, JobWaits } from '../../execution/job/index.ts'
-import { lineRow } from '../../shell/helpers.ts'
+import { lineRow, sourceRow } from '../../shell/helpers.ts'
 import type { AliasExpansion, TSNodeLike } from '../../shell/types.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { attrsFromLetters, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
@@ -372,6 +372,7 @@ function restoredVars(
     | undefined,
   arrays: Record<string, Record<string, string>> = {},
   assocs: Record<string, Record<string, string>> = {},
+  unassigned: readonly string[] = [],
 ): Record<string, ShellVar> {
   const out = attrs === undefined ? varsFromEnv(env) : varsFromDict(env, attrs)
   for (const [name, elements] of Object.entries(arrays)) {
@@ -386,6 +387,9 @@ function restoredVars(
   }
   for (const [name, entries] of Object.entries(assocs)) {
     setSessionEntry(out, name, makeVar(ownRecord(entries), attrsFromLetters(attrs?.[name] ?? '')))
+  }
+  for (const name of unassigned) {
+    if (sessionEntry(out, name) === undefined) setSessionEntry(out, name, makeVar(null, new Set()))
   }
   for (const [name, m] of Object.entries(managed ?? {})) {
     const base = sessionEntry(out, name) ?? makeVar(null, new Set([VarAttr.Export]))
@@ -444,6 +448,10 @@ export class SessionState {
   // `unset FUNCNAME` has made it an ordinary name, as bash's unset does for
   // the rest of the shell.
   functionNames: readonly string[] | null = []
+  // `${BASH_LINENO[@]}`: the line each frame on the call stack was called
+  // from, innermost first (`CallStack.callLines`), written beside
+  // `functionNames`; `unset` cannot end it.
+  callLines: readonly number[] = []
   // A pipeline's per-segment statuses, parked by `handlePipe` for the
   // statement boundary that closes it to claim. Null between them.
   pipeStatusPending: readonly number[] | null = null
@@ -545,10 +553,11 @@ export class SessionState {
   // for a shell's own input.
   parseFrom: number | null = null
   // Whether the next nested parse is a `$( )` or `<( )` body, which bash
-  // reads again as it prints it; and that running parse's line per row
-  // (`rereadRows`), null when its rows count as typed.
+  // reads again as it prints it; and that running parse's line per node,
+  // and the line each ends on, by id (`rereadLines`), null when its rows
+  // count as typed.
   reread = false
-  lineRows: readonly number[] | null = null
+  lineRows: ReadonlyMap<number, readonly [number, number]> | null = null
   // Where each function was defined (`FunctionSite`), so its body expands
   // the aliases of that place and its approvals stand under it; a function
   // loaded from a stored session has none and runs as a parse of its own.
@@ -785,6 +794,7 @@ export class SessionState {
     forked.terminalOutput = this.terminalOutput
     forked.pipeStatus = [...this.pipeStatus]
     forked.functionNames = this.functionNames
+    forked.callLines = this.callLines
     forked.exitTrap = this.exitTrap
     forked.exitTrapInherited = this.exitTrapInherited
     forked.errTrap = this.errTrap
@@ -897,6 +907,7 @@ export class SessionState {
     child.pipeStatus = []
     child.lastBgJobId = null
     child.functionNames = []
+    child.callLines = []
     child.getoptsPos = 0
     child.getoptsOptind = null
     child.errexitIgnored = false
@@ -917,15 +928,19 @@ export class SessionState {
    * from where that text's parse starts (`lineRow`).
    */
   get lineNumber(): number {
-    const row = this.lineNode === null ? 0 : this.countedRow(lineRow(this.lineNode))
+    const row = this.lineNode === null ? 0 : this.countedLine(this.lineNode)
     return this.lineRow + row + 1
   }
 
-  /** A row of the running parse's text as its lines count it. */
-  countedRow(row: number): number {
-    const rows = this.lineRows
-    if (rows === null || rows.length === 0) return row
-    return rows[Math.min(row, rows.length - 1)] ?? row
+  /**
+   * The line of the running parse's text a node is numbered by (`lineRow`), or
+   * ends on (`end`), as its lines count it: as typed, or as bash prints a body
+   * it reads again (`lineRows`).
+   */
+  countedLine(node: TSNodeLike, end = false): number {
+    const found = node.id === undefined ? undefined : this.lineRows?.get(node.id)
+    if (found !== undefined) return end ? found[1] : found[0]
+    return end ? sourceRow(node, true) : lineRow(node)
   }
 
   /**
@@ -1014,7 +1029,10 @@ export class SessionState {
     return this.toDict()
   }
 
-  /** The record's keys the variables fill: `env`, `arrays`, `assocs`, `var_attrs` and `managed`. */
+  /**
+   * The record's keys the variables fill: `env`, `arrays`, `assocs`,
+   * `var_attrs`, `unassigned` and `managed`.
+   */
   variablesToDict(): Record<string, unknown> {
     // A managed name serializes as its pointer, never its value: a
     // stored session may leak only where a secret lives. `env` skips
@@ -1066,6 +1084,18 @@ export class SessionState {
     // attribute was cleared) serialize as a process environment, so the
     // reload re-exported everything it held.
     data.var_attrs = letters
+    // A name declared and never assigned (`declare x`, `declare -a y`) holds
+    // no value: with no attribute either it would not be saved at all, and
+    // an array would come back assigned and empty.
+    const shell = this.vars.shell
+    const unassigned = records
+      .filter(
+        ([name, v]) =>
+          !Object.hasOwn(managed, name) && (v.value === null || shell.isUnassigned(name)),
+      )
+      .map(([name]) => name)
+      .sort(compareCodePoints)
+    if (unassigned.length > 0) data.unassigned = unassigned
     if (Object.keys(managed).length > 0) {
       const refs = ownRecord<Record<string, string>>()
       for (const [name, ref] of Object.entries(managed)) {
@@ -1164,6 +1194,7 @@ export class SessionState {
     managed?: Record<string, { from: string; ref: string; key: string; fetch?: string }> | null
     arrays?: Record<string, Record<string, string>>
     assocs?: Record<string, Record<string, string>>
+    unassigned?: string[]
     created_at?: number
     mount_modes?: Record<string, MountMode> | null
     hidden_paths?: { paths?: string[]; patterns?: string[] } | null
@@ -1195,7 +1226,14 @@ export class SessionState {
     const processes = parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS)
     const vars =
       data.env !== undefined || data.var_attrs !== undefined || data.managed != null
-        ? restoredVars(data.env ?? {}, data.var_attrs, data.managed, data.arrays, data.assocs)
+        ? restoredVars(
+            data.env ?? {},
+            data.var_attrs,
+            data.managed,
+            data.arrays,
+            data.assocs,
+            data.unassigned,
+          )
         : undefined
     const session = new SessionState({
       sessionId: data.session_id,
@@ -1252,6 +1290,11 @@ export class SessionState {
       const seeded = session.vars
       session.vars = vars
       seeded.shell.close()
+      for (const name of data.unassigned ?? []) {
+        const value = sessionEntry(vars, name)?.value
+        if (value instanceof ShellArray || (value !== null && typeof value === 'object'))
+          session.vars.shell.unassigned(name)
+      }
     }
     if (data.aliases != null) session.aliases = { ...data.aliases }
     // A function's alias view comes back as its site; where on its line the

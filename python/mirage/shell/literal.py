@@ -43,6 +43,9 @@ class LiteralNode:
     def child_by_field_name(self, name: str) -> TSNodeLike | None:
         return self.children[0] if name == "name" and self.children else None
 
+    def reread_lines(self) -> list[tuple[int, int, int]]:
+        return []
+
 
 def literal_tree(argv: tuple[str, ...]) -> TSNodeLike:
     """Build literal words without parsing or evaluating argv contents.

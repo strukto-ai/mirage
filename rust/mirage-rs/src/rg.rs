@@ -1893,11 +1893,26 @@ impl Input {
             multi: None,
         }
     }
-    fn append(&mut self, input: &[u8]) {
-        if self.pending.values.capacity() == 0
+    /// Whether nothing is pending or queued, so a read can become the
+    /// pending bytes as it is.
+    fn fresh(&self) -> bool {
+        self.pending.values.capacity() == 0
             && self.pending.previous.is_none()
             && self.queued.is_empty()
-        {
+    }
+
+    /// Take a whole read as the pending bytes when nothing is held, so a
+    /// file the haystack held whole to its first newline is not held twice.
+    fn adopt(&mut self, data: &mut Vec<u8>) -> bool {
+        let fresh = self.fresh();
+        if fresh {
+            self.pending.values = std::mem::take(data);
+        }
+        fresh
+    }
+
+    fn append(&mut self, input: &[u8]) {
+        if self.fresh() {
             self.pending.values = input.to_vec();
             return;
         }
@@ -2292,11 +2307,15 @@ impl Rg {
                     state.tally.skipped = read.skipped;
                     state.binary_converted = read.converted;
                     state.done = read.skipped;
-                    let end = read.data.len().min(read.position + 64 * 1024);
-                    state.append(&read.data[read.position..end]);
-                    read.position = end;
-                    if end == read.data.len() {
+                    if read.position == 0 && state.adopt(&mut read.data) {
                         source.ready.pop_front();
+                    } else {
+                        let end = read.data.len().min(read.position + 64 * 1024);
+                        state.append(&read.data[read.position..end]);
+                        read.position = end;
+                        if end == read.data.len() {
+                            source.ready.pop_front();
+                        }
                     }
                 } else if source.stopped {
                     self.ending = true;

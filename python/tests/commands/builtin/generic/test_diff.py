@@ -69,6 +69,37 @@ async def test_brief_comparison_reads_inputs_larger_than_the_default_budget():
     assert read_bytes == 68 << 20
 
 
+@pytest.mark.asyncio
+async def test_brief_answers_from_sizes_and_stops_at_the_first_difference():
+    read_bytes = 0
+    files = {"/d/a": b"x" * 5000, "/d/b": b"x" * 5001, "/d/c": b"y" * 5000}
+
+    async def read(path: PathSpec) -> AsyncIterator[bytes]:
+        nonlocal read_bytes
+        data = files[path.virtual]
+        for at in range(0, len(data), 1000):
+            read_bytes += 1000
+            yield data[at : at + 1000]
+
+    async def size_of(path: PathSpec) -> int | None:
+        return len(files[path.virtual])
+
+    for other, read_total, sizes in (("b", 0, size_of), ("c", 2000, None)):
+        read_bytes = 0
+        out, io = await diff(
+            [_operand("a", "/d/a"), _operand(other, f"/d/{other}")],
+            stream=read,
+            readdir_fn=_readdir,
+            stat_fn=_stat,
+            flags=DiffFlags(brief=True),
+            size_of=sizes,
+        )
+        assert (
+            await materialize(out) == f"Files a and {other} differ\n".encode()
+        )
+        assert (io.exit_code, read_bytes) == (1, read_total)
+
+
 async def _readdir(path: PathSpec) -> list[str]:
     return DIRS[path.virtual]
 

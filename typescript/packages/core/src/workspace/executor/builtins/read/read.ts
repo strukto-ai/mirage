@@ -34,6 +34,7 @@ import { TARGET_RE } from '../constants.ts'
 import {
   builtinUsage,
   countOperand,
+  deniedLine,
   identifierLine,
   isValidName,
   readonlyRefusal,
@@ -446,7 +447,7 @@ async function readStore(
   }
   if (status === 'readonly') return readonlyRefusal('read', base)
   if (status === 'denied') {
-    const err = encodeText(`${shellVoice()}${base}: permission denied\n`)
+    const err = encodeText(`${deniedLine(base)}\n`)
     return [
       null,
       new IOResult({ exitCode: 1, stderr: err }),
