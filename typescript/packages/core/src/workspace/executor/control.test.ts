@@ -37,17 +37,20 @@ function runner(execute: ExecuteNodeFn, session: SessionState): BodyRun {
 }
 
 describe('handleWhile', () => {
-  it('while caps at MAX_WHILE iterations with a stderr warning', async () => {
+  it('runs until its condition fails', async () => {
+    let turns = 0
     const execute: ExecuteNodeFn = (n) => {
-      if (n.text === 'cond')
-        return Promise.resolve([null, new IOResult({ exitCode: 0 }), new ExecutionNode()])
+      if (n.text === 'cond') {
+        turns += 1
+        const exitCode = turns <= 10001 ? 0 : 1
+        return Promise.resolve([null, new IOResult({ exitCode }), new ExecutionNode()])
+      }
       return Promise.resolve([null, new IOResult(), new ExecutionNode()])
     }
     const s = new SessionState({ sessionId: 'test' })
     const [, io] = await handleWhile(runner(execute, s), [node('cond')], [node('body')], s)
-    expect(new TextDecoder().decode(await materialize(io.stderr))).toMatch(
-      /while loop terminated after 10000/,
-    )
+    expect(turns).toBe(10002)
+    expect((await materialize(io.stderr)).byteLength).toBe(0)
   })
 })
 

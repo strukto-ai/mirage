@@ -447,7 +447,8 @@ impl<'a, G: Gate> Writer<'a, G> {
     /// words before it are evaluated and may write the array, the array
     /// stays as they left it, as bash's does. With a policy listening, the
     /// whole value lands through `set` as one write, but under `-i` each
-    /// word is a write of its own, in order.
+    /// word is a write of its own, in order. An index past the largest
+    /// wraps to the most negative, as bash's does.
     pub async fn push(&mut self, name: &str, words: Vec<Vec<u8>>) -> Result<(), Fault> {
         let name = self.store.target(name);
         self.writable(&name)?;
@@ -462,12 +463,8 @@ impl<'a, G: Gate> Writer<'a, G> {
         let slots = words
             .into_iter()
             .zip(array.extent()..)
-            .map(|(word, index)| {
-                i64::try_from(index)
-                    .map(|index| (index, word))
-                    .map_err(|_| Fault::Host("an index past the largest"))
-            })
-            .collect::<Result<Vec<_>, Fault>>()?;
+            .map(|(word, index)| (index as i64, word))
+            .collect::<Vec<_>>();
         if slots.is_empty() || (self.gate.listens() && !integer) {
             let mut array = array.clone();
             let assigned = Assigned::Indexes(slots.iter().map(|(index, _)| *index).collect());
@@ -1390,6 +1387,17 @@ mod tests {
         assert!(matches!(failed, Err(Fault::Arith(_))));
         let kept: Vec<_> = writer.store.indexed("n").unwrap().iter().collect();
         assert_eq!(kept, [(0, &b"1"[..]), (1, &b"2"[..])]);
+        let mut wrapped = Indexed::default();
+        wrapped.set(i64::MAX, b"x".to_vec());
+        writer.store.seed("w", Value::Indexed(wrapped));
+        run(writer.push("w", vec![b"a longer value".to_vec()])).unwrap();
+        let grown = writer.store.held();
+        writer.limit = Some(grown);
+        run(writer.push("w", vec![b"y".to_vec()])).unwrap();
+        writer.limit = None;
+        assert!(writer.store.held() < grown);
+        let kept: Vec<_> = writer.store.indexed("w").unwrap().iter().collect();
+        assert_eq!(kept, [(i64::MIN, &b"y"[..]), (i64::MAX, &b"x"[..])]);
         let counted: usize = writer
             .store
             .records()

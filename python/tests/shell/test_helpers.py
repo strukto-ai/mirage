@@ -212,6 +212,17 @@ def test_get_for_parts():
     assert [get_text(v) for v in values] == ["a", "b", "c"]
 
 
+def test_get_for_parts_reads_a_brace_body():
+    _, values, body = get_for_parts(_first("for f in a b; { c; d; }"))
+    assert [get_text(v) for v in values] == ["a", "b"]
+    assert [get_text(b) for b in body] == ["c", "d"]
+
+
+def test_get_cfor_parts_reads_a_brace_body():
+    _, body = get_cfor_parts(_first("for ((;;)); { c; d; }"))
+    assert [get_text(b) for b in body] == ["c", "d"]
+
+
 def test_get_for_select():
     node = _first("select f in x y; do echo; done")
     assert node.children[0].type == NT.SELECT

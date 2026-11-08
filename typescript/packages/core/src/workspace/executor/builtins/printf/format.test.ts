@@ -3,6 +3,7 @@ import { encodeText } from '../../../../shell/bytes.ts'
 import { YieldBudget } from '../../../../io/yield_budget.ts'
 import { openStream } from '../../../../rs/stream.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import { printfOutput, runPrintf } from './format.ts'
 
 const OCTAL_PINS: [string, string, string][] = [
@@ -124,15 +125,37 @@ describe('shared printf adapter', () => {
     expect(first.byteLength).toBeLessThanOrEqual(16 * 1024)
   })
 
-  it('lands a long diagnostic whole before the output after it', async () => {
+  it('hands a reader a long diagnostic before the output after it', async () => {
     const io = new IOResult()
+    io.stderrPieces = []
     const parts = printfOutput('%d|', ['x'.repeat(50000)], io)
     const first = (await parts.next()).value as Uint8Array
-    expect(new TextDecoder().decode(io.stderr as Uint8Array)).toBe(
+    expect(new TextDecoder().decode(io.stderrPieces[0])).toBe(
       `bash: printf: ${'x'.repeat(50000)}: invalid number\n`,
     )
     await parts.return(undefined)
     expect(new TextDecoder().decode(first)).toBe('0|')
+    expect(io.stderr).toBeNull()
+  })
+
+  it('lands diagnostics once with no reader among the output', async () => {
+    const io = new IOResult()
+    const said: Uint8Array[] = []
+    const parts = printfOutput(
+      '%d|',
+      ['x', 'y'],
+      io,
+      false,
+      false,
+      false,
+      'bash: ',
+      undefined,
+      said,
+    )
+    for await (const part of parts) expect(part.byteLength).toBeGreaterThan(0)
+    const text = 'bash: printf: x: invalid number\nbash: printf: y: invalid number\n'
+    expect(new TextDecoder().decode(io.stderr as Uint8Array)).toBe(text)
+    expect(new TextDecoder().decode(concat(said))).toBe(text)
   })
 })
 

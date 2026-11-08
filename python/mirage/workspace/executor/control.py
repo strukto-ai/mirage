@@ -61,8 +61,6 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view, visible_env
 from mirage.workspace.types import ExecutionNode
 
-_MAX_WHILE = 10000
-
 BodyRun = Callable[
     ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
 ]
@@ -178,6 +176,20 @@ class BreakSignal(LoopSignal):
 
 class ContinueSignal(LoopSignal):
     pass
+
+
+def _keep(
+    all_stdout: list[ByteSource | None], stdout: ByteSource | None
+) -> None:
+    """Add what one turn of a loop wrote to the loop's output, nothing for
+    a turn that wrote nothing, so a loop with no end holds no more for it.
+
+    Args:
+        all_stdout (list[ByteSource | None]): the loop's output so far.
+        stdout (ByteSource | None): what the turn wrote.
+    """
+    if stdout not in (None, b""):
+        all_stdout.append(stdout)
 
 
 def _chain_streams(all_stdout: list[ByteSource | None]) -> ByteSource | None:
@@ -420,8 +432,8 @@ async def handle_if(
 # `set -n` inside a loop body has to stop the *driver* too, not only the
 # statements: `execute_node` refuses every node while the option is on,
 # so the `break` or the false condition the driver is waiting for is one
-# of the refused nodes and it would spin to `_MAX_WHILE`. GNU never runs
-# the loop at all, which is what falling straight out of it produces.
+# of the refused nodes and it would spin forever. GNU never runs the
+# loop at all, which is what falling straight out of it produces.
 async def handle_for(
     run: BodyRun,
     variable: str,
@@ -490,13 +502,11 @@ async def handle_while(
     # Each test and body reads the fd 0 the loop started with, so an
     # `exec < f` in one reaches the rest.
     bound = fd0_binding(session)
-    for _ in range(_MAX_WHILE):
-        if session.shell_options.get("noexec"):
-            break
+    while not session.shell_options.get("noexec"):
         try:
             with ignoring_errexit(session):
                 cond_stdout, cond_io, _ = await run(test, bound=bound)
-            all_stdout.append(cond_stdout)
+            _keep(all_stdout, cond_stdout)
             merged_io = await merged_io.merge(
                 IOResult(stderr=cond_io.stderr, exit_code=merged_io.exit_code)
             )
@@ -511,25 +521,8 @@ async def handle_while(
         except UNWINDING as sig:
             raise await carried(sig, _chain_streams(all_stdout), merged_io)
         merged_io = await merged_io.merge(io)
-        all_stdout.append(stdout)
-    else:
-        _capped(merged_io, label)
+        _keep(all_stdout, stdout)
     return _collect_loop_result(all_stdout, merged_io, label)
-
-
-def _capped(io: IOResult, label: str) -> None:
-    """Say on stderr that a loop stopped at ``_MAX_WHILE`` iterations,
-    mirage's own cap (bash has none), so a runaway loop or a ``while
-    read`` over a longer stream is never cut short silently.
-
-    Args:
-        io (IOResult): the loop's result, its stderr extended in place.
-        label (str): the loop's keyword.
-    """
-    warn = encode_text(
-        f"warning: {label} loop terminated after {_MAX_WHILE} iterations\n"
-    )
-    io.stderr = io.stderr + warn if isinstance(io.stderr, bytes) else warn
 
 
 async def handle_cfor(
@@ -564,9 +557,7 @@ async def handle_cfor(
     bound = fd0_binding(session)
     try:
         await eval_expr(exprs[0], 0)
-        for _ in range(_MAX_WHILE):
-            if session.shell_options.get("noexec"):
-                break
+        while not session.shell_options.get("noexec"):
             if await eval_expr(exprs[1], 1) == 0:
                 break
             try:
@@ -578,10 +569,8 @@ async def handle_cfor(
                 await eval_expr(exprs[2], 0)
                 continue
             merged_io = await merged_io.merge(io)
-            all_stdout.append(stdout)
+            _keep(all_stdout, stdout)
             await eval_expr(exprs[2], 0)
-        else:
-            _capped(merged_io, "for")
     except (ArithError, PolicyDenied, ReadonlyVariableError) as exc:
         if isinstance(exc, ArithError) and exc.in_subscript:
             stdout = _chain_streams(all_stdout)
@@ -710,9 +699,7 @@ async def handle_select(
     bound = fd0_binding(session)
     words = [word_text(v) for v in values]
     show_menu = bool(words)
-    for _ in range(_MAX_WHILE if words else 0):
-        if session.shell_options.get("noexec"):
-            break
+    while words and not session.shell_options.get("noexec"):
         env = visible_env(session)
         menu = _select_menu(words, env.get("COLUMNS", "")) if show_menu else ""
         merged_io = await merged_io.merge(

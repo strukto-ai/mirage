@@ -705,11 +705,13 @@ async def interleaved(
     stdout: AsyncIterator[bytes], io: IOResult
 ) -> AsyncGenerator[tuple[Channel, bytes], None]:
     """``stdout``'s chunks, each after the stderr ``io`` gained while it
-    was read, so a command's errors keep their place among its output
-    (``cat a missing b 2>&1``). What ``io`` held when the stream started
-    waits for what comes next, or for after the stream: one command that
-    returns both at once keeps no order between them. What went out is
-    cut off ``io.stderr`` once the stream ends.
+    was read, or handed over as ``stderr_pieces``, so a command's errors
+    keep their place among its output (``cat a missing b 2>&1``). What
+    ``io`` held when the stream started waits for what comes next, or for
+    after the stream: one command that returns both at once keeps no
+    order between them. What went out is cut off ``io.stderr`` once the
+    stream ends. A piece stays on ``stderr_pieces`` until then, so a
+    ``post_command`` policy hears it.
 
     Args:
         stdout (AsyncIterator[bytes]): the command's output, read here.
@@ -718,8 +720,14 @@ async def interleaved(
     held = io.stderr
     start = len(held) if isinstance(held, bytes) else 0
     sent = b""
+    pieces: list[bytes] = []
+    told = 0
+    io.stderr_pieces = pieces
     try:
         async for chunk in stdout:
+            for piece in pieces[told:]:
+                told += 1
+                yield Channel.STDERR, piece
             err = io.stderr
             if (
                 isinstance(err, bytes)
@@ -729,10 +737,17 @@ async def interleaved(
                 yield Channel.STDERR, err[len(sent) :]
                 sent = err
             yield Channel.STDOUT, chunk
+        for piece in pieces[told:]:
+            told += 1
+            yield Channel.STDERR, piece
     finally:
+        io.stderr_pieces = None
         err = io.stderr
         if sent and isinstance(err, bytes) and err.startswith(sent):
             io.stderr = err[len(sent) :] or None
+        if told < len(pieces):
+            held = io.stderr if isinstance(io.stderr, bytes) else b""
+            io.stderr = held + b"".join(pieces[told:])
 
 
 def write_error_line(command: str, program: bool = False) -> bytes:

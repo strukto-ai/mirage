@@ -25,6 +25,7 @@ import {
   forks,
   ignoringErrexit,
   land,
+  interleaved,
   landLate,
   recordJobs,
   restoreStatus,
@@ -203,4 +204,49 @@ it('keeps a job write made once the recording ended behind what it recorded', as
   const out: string[] = []
   for (const [, data] of await shell.take()) out.push(decode(await materialize(data)))
   expect(out.join('')).toBe('a\nb\nc\n')
+})
+
+describe('interleaved', () => {
+  const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
+  const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
+
+  it('puts handed errors among the output', async () => {
+    const io = new IOResult()
+    async function* stream(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
+      io.stderrPieces?.push(encode('e1'))
+      yield encode('o1')
+      io.stderrPieces?.push(encode('e2'))
+      yield encode('o2')
+      io.stderrPieces?.push(encode('e3'))
+    }
+    const got: [Channel, string][] = []
+    for await (const [channel, chunk] of interleaved(stream(), io)) {
+      got.push([channel, decode(chunk)])
+    }
+    expect(got).toEqual([
+      [Channel.STDERR, 'e1'],
+      [Channel.STDOUT, 'o1'],
+      [Channel.STDERR, 'e2'],
+      [Channel.STDOUT, 'o2'],
+      [Channel.STDERR, 'e3'],
+    ])
+    expect(io.stderrPieces).toBeNull()
+    expect(io.stderr).toBeNull()
+  })
+
+  it('keeps what it did not say when stopped early', async () => {
+    const io = new IOResult()
+    async function* stream(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
+      io.stderrPieces?.push(encode('e1'), encode('e2'))
+      yield encode('o1')
+    }
+    const pairs = interleaved(stream(), io)
+    const first = await pairs.next()
+    expect((first.value as [Channel, Uint8Array])[1]).toEqual(encode('e1'))
+    await pairs.return(undefined)
+    expect(decode(io.stderr as Uint8Array)).toBe('e2')
+    expect(io.stderrPieces).toBeNull()
+  })
 })

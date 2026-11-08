@@ -503,7 +503,11 @@ def get_for_parts(
     """
     nc = node.named_children
     values = (
-        [c for c in nc[1:] if c.type not in (NT.DO_GROUP, NT.COMMENT)]
+        [
+            c
+            for c in nc[1:]
+            if c.type not in (NT.DO_GROUP, NT.COMPOUND_STATEMENT, NT.COMMENT)
+        ]
         if any(c.type == NT.IN for c in node.children)
         else None
     )
@@ -542,7 +546,7 @@ def get_cfor_parts(
             elif slot < 3:
                 exprs[slot].append(child)
             continue
-        if child.type == NT.DO_GROUP:
+        if child.type in (NT.DO_GROUP, NT.COMPOUND_STATEMENT):
             body = list(child.named_children)
     return exprs, body
 

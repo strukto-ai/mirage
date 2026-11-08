@@ -903,17 +903,6 @@ def test_while_true_with_break():
     assert io.exit_code == 0
 
 
-def test_while_cap_emits_warning():
-    """When _MAX_WHILE is hit, stderr carries a clear warning."""
-    _, io, _, _, _, _ = _exec(
-        "while true; do export X=$X.; done", env={"X": ""}
-    )
-    assert io.stderr is not None
-    stderr_bytes = io.stderr if isinstance(io.stderr, bytes) else b""
-    assert b"terminated after" in stderr_bytes
-    assert b"iterations" in stderr_bytes
-
-
 def test_for_continue_skips_body():
     _, _, _, session, _, _ = _exec(
         "for x in a b c; do continue; export NEVER=yes; done"
@@ -1878,11 +1867,11 @@ def test_while_multi_statement_body():
 
 
 def test_while_continue_in_multi_body():
-    """while true; do export N=yes; continue; done → N set, hits MAX_WHILE."""
+    """A body ending in continue runs again until the condition fails."""
     _, io, _, session, _, _ = _exec(
-        "while true; do export N=yes; continue; done"
+        "i=0; while ((i<2)); do ((i++)); export N=$i; continue; done"
     )
-    assert session.env["N"] == "yes"
+    assert session.env["N"] == "2"
     assert io.exit_code == 0
 
 

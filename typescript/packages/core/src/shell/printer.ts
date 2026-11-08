@@ -379,7 +379,9 @@ class Printer {
   }
 
   private group(group: TSNodeLike | null, indent: string): string {
-    const children = (group?.children ?? []).filter((c) => c.type !== 'do' && c.type !== 'done')
+    const children = (group?.children ?? []).filter(
+      (c) => c.type !== 'do' && c.type !== 'done' && c.type !== '{' && c.type !== '}',
+    )
     const inner = indent + INDENT
     return `\n${inner}${this.statements(children, inner, true)}\n${indent}done`
   }
@@ -413,7 +415,8 @@ class Printer {
   private forStatement(node: TSNodeLike, indent: string): string {
     const [variable, values] = getForParts(node)
     const words = values === null ? '"$@"' : values.map((v) => this.word(v)).join(' ')
-    const group = node.children.find((c) => c.type === NT.DO_GROUP) ?? null
+    const group =
+      node.children.find((c) => c.type === NT.DO_GROUP || c.type === NT.COMPOUND_STATEMENT) ?? null
     const head = node.children[0]?.type ?? 'for'
     return `${head} ${variable} in ${words};\n${indent}do${this.group(group, indent)}`
   }
@@ -433,7 +436,8 @@ class Printer {
       if (child.type === '))') break
       begin = end(child)
     }
-    const group = node.children.find((c) => c.type === NT.DO_GROUP) ?? null
+    const group =
+      node.children.find((c) => c.type === NT.DO_GROUP || c.type === NT.COMPOUND_STATEMENT) ?? null
     return `for ((${slots.join('; ')}))\n${indent}do${this.group(group, indent)}`
   }
 

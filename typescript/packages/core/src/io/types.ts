@@ -203,6 +203,10 @@ export class IOResult {
   rows: Rows | null
   stdout: ByteSource | null
   stderr: ByteSource | null
+  // Set while a reader keeps a command's errors among its output
+  // (`interleaved`): a command saying many of them as it streams adds each
+  // here, in order, rather than copying a growing `stderr`.
+  stderrPieces: Uint8Array[] | null = null
   private _exitCode: number
   // Provenance of this result (which command, spanning which
   // mounts); merge keeps the last command for attribution, not

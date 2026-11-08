@@ -23,12 +23,14 @@ import { concat } from '../../../../utils/bytes.ts'
  * Format raw shell arguments through the shared bounded engine. The output
  * comes out as the engine drains it, one bounded step at a time, so a wide
  * field or a long reuse of the format is never held whole, and a reader that
- * stops early stops the engine. A diagnostic lands on `io` where the engine
- * wrote it among the output, and the status settles as the output ends, or as
- * its reader stops: the status the format reached, unless an output limit set
- * one first.
+ * stops early stops the engine. A diagnostic reaches a reader keeping errors
+ * among the output where the engine wrote it (`stderrPieces`), and lands on
+ * `io` once otherwise, and the status settles as the output ends, or as its
+ * reader stops: the status the format reached, unless an output limit set one
+ * first.
  * `voice` leads a builtin diagnostic, read when the builtin ran rather than
- * when its output drains. Mirrors Python's printf_output.
+ * when its output drains; `record` collects every diagnostic, for a caller's
+ * own record of what the command said. Mirrors Python's printf_output.
  */
 export async function* printfOutput(
   fmt: string,
@@ -39,6 +41,7 @@ export async function* printfOutput(
   utf8 = false,
   voice = 'bash: ',
   signal?: AbortSignal,
+  record?: Uint8Array[],
 ): AsyncGenerator<Uint8Array> {
   const stream = await openStream('printf', {
     mode: program ? 'program' : 'builtin',
@@ -49,11 +52,16 @@ export async function* printfOutput(
   })
   const budget = new YieldBudget(signal)
   const errors: Uint8Array[] = []
+  const heard = (): void => {
+    const err = stream.takeStderr()
+    if (err.byteLength === 0) return
+    errors.push(err)
+    record?.push(err)
+  }
   const said = (): void => {
-    if (errors.length === 0) return
-    const err = concat(errors)
+    if (errors.length === 0 || io.stderrPieces === null) return
+    io.stderrPieces.push(concat(errors))
     errors.length = 0
-    io.stderr = io.stderr instanceof Uint8Array ? concat([io.stderr, err]) : err
   }
   try {
     for (const [index, text] of [fmt, ...args].entries()) {
@@ -69,16 +77,14 @@ export async function* printfOutput(
       await budget.run()
     }
     const output = stream.finish()
-    const first = stream.takeStderr()
-    if (first.byteLength > 0) errors.push(first)
+    heard()
     if (output.byteLength > 0) {
       said()
       yield output
     }
     while (stream.busy()) {
       const part = stream.drain()
-      const more = stream.takeStderr()
-      if (more.byteLength > 0) errors.push(more)
+      heard()
       if (part.byteLength > 0) {
         said()
         yield part
@@ -87,6 +93,9 @@ export async function* printfOutput(
     }
   } finally {
     said()
+    if (errors.length > 0) {
+      io.stderr = concat(io.stderr instanceof Uint8Array ? [io.stderr, ...errors] : errors)
+    }
     if (stream.live && io.exitCode === 0) io.exitCode = stream.status()
     await closeStream(stream)
   }

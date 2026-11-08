@@ -763,10 +763,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "ar22=(1 2); ar22+=(3); echo ${#ar22[@]}",
+      "command": "ar22=(1 2); ar22+=(3); echo ${#ar22[@]}; ( unset QBW; QBW[9223372036854775807]=x; QBW+=(y z); declare -p QBW; QBW+=(w); declare -p QBW )",
       "expect": {
         "exit": 0,
-        "stdout": "3\n",
+        "stdout": "3\ndeclare -a QBW=([-9223372036854775808]=\"y\" [-9223372036854775807]=\"z\" [9223372036854775807]=\"x\")\ndeclare -a QBW=([-9223372036854775808]=\"w\" [-9223372036854775807]=\"z\" [9223372036854775807]=\"x\")\n",
         "stderr": ""
       }
     },

@@ -429,6 +429,13 @@ describe('isBackgrounded', () => {
     return parse(line).children[0] as TSNodeLike
   }
 
+  it('reads a brace body as a loop body', () => {
+    const [, values, body] = getForParts(firstOf('for f in a b; { c; d; }'))
+    expect(values?.map(getText)).toEqual(['a', 'b'])
+    expect(body.map(getText)).toEqual(['c', 'd'])
+    expect(getCforParts(firstOf('for ((;;)); { c; d; }'))[1].map(getText)).toEqual(['c', 'd'])
+  })
+
   it("reads the statement's own terminator", () => {
     const [, , body] = getForParts(firstOf('for i in 1; do a & b; c && d; done'))
     expect(body.map(getText)).toEqual(['a', 'b', 'c && d'])
