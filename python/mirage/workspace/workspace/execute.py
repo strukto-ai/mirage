@@ -55,7 +55,7 @@ from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
 from mirage.secrets.types import ResolvedSource
 from mirage.shell.bytes import encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import Channel, JobConsole, Terminal
+from mirage.shell.console import Channel, JobConsole, JobOutput, Terminal
 from mirage.shell.constants import (
     FORK_FAILED,
     FORK_FAILED_STATUS,
@@ -578,7 +578,9 @@ async def execute_line(
     # (started in it, run after it) runs as a process a substitution
     # leaves behind does: in a subshell of the session as it is now,
     # beside the session's lines, and nothing it changes reaches them but
-    # what its jobs write, on the session's terminal.
+    # what its jobs write, which goes on to the session's terminal through
+    # a job output of its own, so a statement of its never takes the
+    # session's jobs' output.
     ambient = get_current_session_for(ws.sessions)
     if ambient is not None and session_id in (None, ambient.session_id):
         session = ambient
@@ -589,6 +591,7 @@ async def execute_line(
             session.process_id = None
             session.job_table = ws.job_table.child()
             session.tty = source.tty
+            session.job_output = JobOutput(source.tty.jobs)
     else:
         if session_id is None:
             session_id = ws.sessions.default_id

@@ -43,7 +43,7 @@ import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord, Recorder } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
-import { Terminal } from '../../shell/console/index.ts'
+import { JobOutput, Terminal } from '../../shell/console/index.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import {
   currentCaller,
@@ -331,7 +331,8 @@ async function runLine(
   // (started in it, run after it) runs as a process a substitution leaves
   // behind does: in a subshell of the session as it is now, beside the
   // session's lines, and nothing it changes reaches them but what its jobs
-  // write, on the session's terminal.
+  // write, which goes on to the session's terminal through a job output of
+  // its own, so a statement of its never takes the session's jobs' output.
   const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(env.sessions) : null
   const inPlace =
     ambient !== null && (options.sessionId === undefined || options.sessionId === ambient.sessionId)
@@ -339,9 +340,11 @@ async function runLine(
     options.session ??
     (inPlace ? ambient : env.sessions.get(options.sessionId ?? env.sessions.defaultId))
   if (options.session === undefined && inPlace && ambient.vars.shell.closed) {
-    targetSession = env.sessions.get(ambient.sessionId).fork()
+    const source = env.sessions.get(ambient.sessionId)
+    targetSession = source.fork()
     targetSession.processId = null
     targetSession.jobTable = env.jobTable.child()
+    targetSession.jobOutput = new JobOutput(source.tty.jobs)
   }
   frame.session = targetSession
   // Whole-invocation policies must approve the result before bytes escape.

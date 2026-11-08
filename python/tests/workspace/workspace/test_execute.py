@@ -567,6 +567,41 @@ async def test_a_task_a_substitution_left_runs_in_a_subshell():
 
 
 @pytest.mark.asyncio
+async def test_a_subshell_task_leaves_the_session_jobs_output_alone():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    gate, hold = asyncio.Event(), asyncio.Event()
+    later: list[asyncio.Task[IOResult]] = []
+
+    async def late() -> IOResult:
+        await gate.wait()
+        return await ws.shell("release; sleep 0.2; echo cb", record=False)
+
+    async def spawn(config, paths, texts, ctx):
+        later.append(asyncio.create_task(late()))
+        return None, IOResult()
+
+    async def held(config, paths, texts, ctx):
+        await hold.wait()
+        return None, IOResult()
+
+    async def release(config, paths, texts, ctx):
+        hold.set()
+        return None, IOResult()
+
+    for name, fn in (("spawn", spawn), ("held", held), ("release", release)):
+        ws.register_cli(
+            name,
+            CLI(spec=CommandSpec(name=name), handlers={"": CLIHandler(fn=fn)}),
+        )
+    await ws.shell("{ held; echo job; } &")
+    await ws.shell("echo $(spawn)")
+    gate.set()
+    assert (await later[0]).stdout == b"cb\n"
+    assert (await ws.shell("echo next")).stdout == b"job\nnext\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_abort_on_the_history_record_restores_status():
     ws = Workspace(
         {"/": RAMVFS()}, mode=MountMode.WRITE, observe=_StalledObserverStore()

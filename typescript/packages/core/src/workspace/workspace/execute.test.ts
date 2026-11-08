@@ -477,6 +477,44 @@ describe('same-session lines run one at a time', () => {
     expect(stdoutStr(io)).toBe('\nv=outer\nj=joined\nlate\nJ=\n')
   })
 
+  it("a subshell task leaves the session jobs' output alone", async () => {
+    const ws = makeWs()
+    let release!: () => void
+    let resume!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const hold = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    const later: Promise<{ stdout: Uint8Array }>[] = []
+    const handlers: Record<string, CLIVerbFn> = {
+      spawn: () => {
+        later.push(gate.then(() => ws.shell('release; sleep 0.2; echo cb', { record: false })))
+        return null
+      },
+      held: async () => {
+        await hold
+        return null
+      },
+      release: () => {
+        resume()
+        return null
+      },
+    }
+    for (const [name, fn] of Object.entries(handlers)) {
+      ws.registerCli(
+        name,
+        new CLI({ spec: new CommandSpec({ name }), handlers: { '': new CLIHandler({ fn }) } }),
+      )
+    }
+    await ws.shell('{ held; echo job; } &')
+    await ws.shell('echo $(spawn)')
+    release()
+    expect(new TextDecoder().decode((await later[0])?.stdout)).toBe('cb\n')
+    expect(stdoutStr(await ws.shell('echo next'))).toBe('job\nnext\n')
+  })
+
   it('a host callback re-entering its own session runs inline', async () => {
     const ws = makeWs()
     ws.registerCli(
