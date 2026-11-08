@@ -72,13 +72,13 @@ struct Slot {
     asked: Option<Ask>,
     answer: Option<Answer>,
     slices: u32,
+    listens: bool,
 }
 
 /// The operation's side of its host.
 #[derive(Clone)]
 pub struct Line {
     slot: Rc<RefCell<Slot>>,
-    listens: bool,
 }
 
 impl Line {
@@ -125,7 +125,7 @@ impl Line {
 
 impl Gate for Line {
     fn listens(&self) -> bool {
-        self.listens
+        self.slot.borrow().listens
     }
 
     async fn pre(
@@ -227,10 +227,12 @@ impl<T: 'static> Task<T> {
         F: FnOnce(Line) -> R,
         R: Future<Output = T> + 'static,
     {
-        let slot = Rc::new(RefCell::new(Slot::default()));
+        let slot = Rc::new(RefCell::new(Slot {
+            listens,
+            ..Slot::default()
+        }));
         let line = Line {
             slot: Rc::clone(&slot),
-            listens,
         };
         Self {
             future: Box::pin(run(line)),
@@ -255,6 +257,13 @@ impl<T: 'static> Task<T> {
             }
             Poll::Pending => self.slot.borrow_mut().asked.take(),
         }
+    }
+
+    /// Whether a policy hears the session's writes from now on: a policy
+    /// added while the host ran a substitution hears what the operation
+    /// writes after it.
+    pub fn listen(&mut self, listens: bool) {
+        self.slot.borrow_mut().listens = listens;
     }
 
     /// Answer what the last step asked.
@@ -426,6 +435,18 @@ pub enum Write {
         value: Vec<u8>,
         append: bool,
     },
+    /// Words appended at an indexed array's extent (`a+=(x y)`).
+    Push {
+        name: String,
+        words: Vec<Vec<u8>>,
+    },
+    /// One element cleared (`unset 'a[i]'`), or every one when `every`
+    /// (`a[@]` as typed); the result is the [`Element`] it came to.
+    UnsetElement {
+        name: String,
+        subscript: Vec<u8>,
+        every: bool,
+    },
 }
 
 /// Run one session write through the gate; an error a `RANDOM=` seed
@@ -484,6 +505,15 @@ pub fn write(shell: Shell, write: Write, listens: bool, warns: bool) -> Task<End
                     append,
                 } => writer
                     .element(&name, subscript.as_deref(), &value, append)
+                    .await
+                    .map(|element| element as i64),
+                Write::Push { name, words } => writer.push(&name, words).await.map(|()| 0),
+                Write::UnsetElement {
+                    name,
+                    subscript,
+                    every,
+                } => writer
+                    .unset_element(&name, &subscript, every)
                     .await
                     .map(|element| element as i64),
                 Write::Integer { text, added } => writer
@@ -597,6 +627,29 @@ mod tests {
         let ended = task.output().unwrap();
         assert!(matches!(ended.result, Err(Fault::Host(_))));
         assert_eq!(ended.shell.vars.scalar("x"), Some(&b"a b"[..]));
+    }
+
+    #[test]
+    fn a_host_that_starts_listening_mid_task_is_asked_about_later_writes() {
+        let tree = Arc::new(crate::shell::parse(b"echo ${y:=$(hi)}"));
+        let word = (0..tree.nodes.len())
+            .find(|&n| tree.kind(n) == "expansion")
+            .unwrap();
+        let mut task = expand(shell(), Arc::clone(&tree), word, Mode::Fields, false);
+        assert!(matches!(task.step(), Some(Ask::Substitute { .. })));
+        task.listen(true);
+        task.answer(Answer::Substituted(Substitution {
+            stdout: b"v".to_vec(),
+            stderr: Vec::new(),
+            status: 0,
+        }));
+        let Some(Ask::Gate {
+            post: false, key, ..
+        }) = task.step()
+        else {
+            panic!("expected pre_session");
+        };
+        assert_eq!(key, "y");
     }
 
     #[test]

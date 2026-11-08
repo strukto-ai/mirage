@@ -183,13 +183,13 @@ fn quoting_and_splitting() {
 #[test]
 fn positional_splats() {
     let mut sh = shell();
-    sh.positional = vec![b"1 2".to_vec(), Vec::new()];
+    sh.positional = Arc::new(vec![b"1 2".to_vec(), Vec::new()]);
     assert_eq!(
         ok(&mut sh, "echo \"$@\" $# \"$*\""),
         ["1 2", "", "2", "1 2 "]
     );
     assert_eq!(ok(&mut sh, "echo $@"), ["1", "2"]);
-    sh.positional.clear();
+    sh.positional = Arc::default();
     assert_eq!(ok(&mut sh, "echo \"$@\" \"${@}\" \"$*\""), [""]);
 }
 
@@ -224,7 +224,7 @@ fn a_multibyte_separator_is_one_character_under_utf8_and_bytes_under_c() {
             .seed("x", Value::Scalar("a\u{e9}b".as_bytes().to_vec()));
         sh.vars
             .seed("y", Value::Scalar("a\u{e0}b".as_bytes().to_vec()));
-        sh.positional = vec![b"p".to_vec(), b"q".to_vec()];
+        sh.positional = Arc::new(vec![b"p".to_vec(), b"q".to_vec()]);
         assert_eq!(ok(&mut sh, "echo $x"), x, "{locale}");
         assert_eq!(ok(&mut sh, "echo $y"), y, "{locale}");
         assert_eq!(ok(&mut sh, "echo \"$*\""), [joined], "{locale}");
@@ -408,7 +408,7 @@ fn substrings_and_slices() {
         ])),
     );
     assert_eq!(ok(&mut sh, "echo ${a[@]:1:2} ${a[@]: -1}"), ["b", "c", "d"]);
-    sh.positional = vec![b"x".to_vec(), b"y".to_vec()];
+    sh.positional = Arc::new(vec![b"x".to_vec(), b"y".to_vec()]);
     assert_eq!(ok(&mut sh, "echo ${@:0:1} ${@:2}"), ["mirage", "y"]);
     assert_eq!(
         words(&mut sh, "echo ${v:1/0}"),

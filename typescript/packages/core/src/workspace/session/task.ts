@@ -66,15 +66,24 @@ export interface TaskHost {
     value: string | null,
     old: string | null,
   ): Promise<void>
+  /** Whether a policy hears the session's writes now, told to a task again each time the host answers it. */
+  listens(): Promise<boolean>
 }
 
 /**
- * Whether a session write asks anyone: a policy that hears session writes,
- * or a dry run deciding, which refuses every write. Mirrors Python's listens.
+ * Whether a session write asks anyone: a policy that hears this session's
+ * writes, or a dry run deciding, which refuses every write. A profile's
+ * programs speak for its own sessions only, so a session none governs writes
+ * without a gate, and an element write lands in place. Mirrors Python's
+ * listens.
  */
-export function listens(policies: Policies | null): boolean {
+export async function listens(policies: Policies | null, sessionId: string): Promise<boolean> {
   if (explaining() === DryRun.DECIDING) return true
-  return policies !== null && (policies.wants('preSession') || policies.wants('postSession'))
+  return (
+    policies !== null &&
+    ((await policies.wantsFor('preSession', sessionId)) ||
+      (await policies.wantsFor('postSession', sessionId)))
+  )
 }
 
 /**
@@ -105,6 +114,10 @@ export class SessionGate implements TaskHost {
     const ctx: SessionContext = { verb, key, value, sessionId: this.session.sessionId }
     if (post) await postSessionGate(this.policies, ctx, old)
     else await preSessionGate(this.policies, ctx)
+  }
+
+  listens(): Promise<boolean> {
+    return listens(this.policies, this.session.sessionId)
   }
 }
 
@@ -176,6 +189,10 @@ export async function drive(
     const held = records.shell
     const lent = ask[0] === 'gate' ? ask[6] : ask[0] === 'pause' ? ask[1] : ask[1].fork()
     records.shell = lent
+    let answer = (): void => {
+      task.answerFailed()
+    }
+    let heard: boolean | null = null
     try {
       switch (ask[0]) {
         case 'substitute': {
@@ -187,16 +204,22 @@ export async function drive(
               ask[4],
               ask[5],
             )
-            task.answerSubstituted(stdout, stderr, status)
+            answer = () => {
+              task.answerSubstituted(stdout, stderr, status)
+            }
           } finally {
             // The child shell ends with its substitution.
             ask[1].close()
           }
           break
         }
-        case 'process':
-          task.answerPath(await host.process(ask[1], ask[2]))
+        case 'process': {
+          const path = await host.process(ask[1], ask[2])
+          answer = () => {
+            task.answerPath(path)
+          }
           break
+        }
         case 'gate': {
           const [, post, verb, key, value, old] = ask
           try {
@@ -205,24 +228,46 @@ export async function drive(
             if (!(err instanceof PolicyDenied)) throw err
             const record = refusals.size + 1
             refusals.set(record, err)
-            task.answerGate([key, record])
+            answer = () => {
+              task.answerGate([key, record])
+            }
             break
           }
-          task.answerGate(null)
+          answer = () => {
+            task.answerGate(null)
+          }
           break
         }
         default:
           budget ??= new YieldBudget(callerSignal())
           await budget.run()
-          task.answerResumed()
+          answer = () => {
+            task.answerResumed()
+          }
       }
+      // Asked while the lent copy stands in for the session, so a policy
+      // reading the session to answer finds one to read.
+      heard = await host.listens()
+    } catch (err) {
+      failure = err
+      failed = true
+      answer = () => {
+        task.answerFailed()
+      }
+    } finally {
+      records.shell = held
+      lent.close()
+    }
+    // The copies the request lent are dropped ahead of the answer, so a
+    // write the task lands shares its records with none and copies nothing;
+    // a policy added while the host answered hears what comes next.
+    try {
+      if (heard !== null) task.listen(heard)
+      answer()
     } catch (err) {
       failure = err
       failed = true
       task.answerFailed()
-    } finally {
-      records.shell = held
-      lent.close()
     }
   }
   const [result, said] = task.finish()

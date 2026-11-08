@@ -411,9 +411,9 @@ export async function handleRead(
  * Store one `read` target, scalar or `name[sub]` element.
  *
  * bash accepts a subscripted target (`read "m[k]"`), which is an
- * element write, not a variable literally named `m[k]`; the readonly
- * guard resolves the base name first, since that is what `readonly`
- * records. `policies` are what a subscript's assignments clear. Returns the
+ * element write, not a variable literally named `m[k]`, its subscript read
+ * before a readonly base refuses (`read 'a[x=3]'` leaves x at 3).
+ * `policies` are what a subscript's assignments clear. Returns the
  * refusal result, or null when the write landed.
  */
 async function readStore(
@@ -427,8 +427,8 @@ async function readStore(
   const match = TARGET_RE.exec(varName)
   const base = match?.[1] ?? varName
   let subscript = match?.[2] ?? null
-  if (view.isReadonly(base)) return readonlyRefusal('read', base)
   if (subscript === null) {
+    if (view.isReadonly(base)) return readonlyRefusal('read', base)
     try {
       await view.set(varName, value)
     } catch (err) {
@@ -438,7 +438,7 @@ async function readStore(
     return null
   }
   if (subscripts !== null) subscript = await subscripts(subscript)
-  let status: 'ok' | 'denied' | 'readonly' | 'subscript'
+  let status: string
   try {
     status = await assignElement(session, policies, base, subscript, value)
   } catch (err) {

@@ -8,13 +8,14 @@
 
 use std::collections::HashSet;
 use std::future::Future;
+use std::sync::Arc;
 
 use super::shell::Shell;
 use super::{Diagnostic, Signal};
 use crate::arith::{self, plain_decimal};
 use crate::integer::parse_decimal;
 use crate::vars::{
-    Assigned, Coercion, Draws, INTEGER, Indexed, NAMEREF, Store, Value, entry_bytes,
+    Assigned, Coercion, Draws, INTEGER, Indexed, NAMEREF, Slot, Store, Value, entry_bytes,
     strip_key_quotes,
 };
 
@@ -44,6 +45,8 @@ pub enum Element {
     Readonly,
     /// The subscript names no element: empty, or before the first.
     Subscript,
+    /// A subscript other than 0 on a scalar, which `unset 'x[1]'` refuses.
+    NotArray,
 }
 
 /// A `name` or `name[sub]` reference split, None when it is neither.
@@ -185,20 +188,43 @@ impl<'a, G: Gate> Writer<'a, G> {
         Ok(())
     }
 
+    /// Refuse a write to a hidden or readonly name.
+    fn writable(&self, name: &str) -> Result<(), Fault> {
+        self.visible(name)?;
+        if self.store.is_readonly(name, false) {
+            return Err(Fault::Readonly {
+                name: name.to_owned(),
+                subscript: false,
+            });
+        }
+        Ok(())
+    }
+
     /// Refuse a write that grows the session past `max_env`, as bash fails
     /// when it cannot allocate, saying the bound is a setting so an agent
     /// does not take it for a broken shell. A write that does not grow
     /// passes unchecked.
     fn check(&self, before: usize, after: usize) -> Result<(), Fault> {
-        let Some(limit) = self.limit else {
-            return Ok(());
-        };
-        if after <= before
-            || (self.store.held() + self.outside + after).saturating_sub(before) <= limit
-        {
+        if self.fits(before, after) {
             return Ok(());
         }
-        Err(Signal::Exit {
+        Err(self.exhausted(after))
+    }
+
+    /// Whether an entry growing from `before` bytes to `after` stays
+    /// within `max_env`.
+    fn fits(&self, before: usize, after: usize) -> bool {
+        self.limit.is_none_or(|limit| {
+            after <= before
+                || (self.store.held() + self.outside + after).saturating_sub(before) <= limit
+        })
+    }
+
+    /// The end of a shell whose entry would grow to `after` bytes past
+    /// `max_env`.
+    fn exhausted(&self, after: usize) -> Fault {
+        let limit = self.limit.unwrap_or_default();
+        Signal::Exit {
             status: ENV_EXHAUSTED_STATUS,
             stderr: format!(
                 "bash: xmalloc: cannot allocate {after} bytes (past max_env of {limit} bytes, a mirage workspace setting)\n"
@@ -206,7 +232,15 @@ impl<'a, G: Gate> Writer<'a, G> {
             .into_bytes(),
             contained: ENV_EXHAUSTED_STATUS,
         }
-        .into())
+        .into()
+    }
+
+    /// The bytes `name` holds, its name included.
+    fn entry(&self, name: &str) -> usize {
+        entry_bytes(
+            name,
+            self.store.record(name).and_then(|var| var.value.as_ref()),
+        )
     }
 
     /// Write one variable through the gate: a reference's target unless
@@ -224,33 +258,26 @@ impl<'a, G: Gate> Writer<'a, G> {
         added: Option<&[u8]>,
     ) -> Result<(), Fault> {
         let name = self.aim(name, follow_ref);
-        self.visible(&name)?;
-        if self.store.is_readonly(&name, false) {
-            return Err(Fault::Readonly {
-                name,
-                subscript: false,
-            });
-        }
-        let existing = self.store.share(&name);
+        self.writable(&name)?;
         // A scalar landing on an array is its element 0, the key `0` in an
         // associative one, as bash binds `read a` or `for a in x` there.
-        let zero;
-        let (mut value, assigned) =
-            match (value, existing.as_ref().and_then(|var| var.value.as_ref())) {
-                (Value::Scalar(text), Some(Value::Indexed(array))) => {
-                    let mut array = array.clone();
-                    array.set(0, text);
-                    zero = Assigned::Indexes(HashSet::from([0]));
-                    (Value::Indexed(array), Some(&zero))
-                }
-                (Value::Scalar(text), Some(Value::Assoc(map))) => {
-                    let mut map = map.clone();
-                    map.set(b"0".to_vec(), text);
-                    zero = Assigned::Keys(HashSet::from([b"0".to_vec()]));
-                    (Value::Assoc(map), Some(&zero))
-                }
-                (value, _) => (value, assigned),
-            };
+        let value = match (
+            value,
+            self.store.record(&name).and_then(|var| var.value.as_ref()),
+        ) {
+            (Value::Scalar(text), Some(Value::Indexed(_))) => {
+                return self
+                    .set_element(&name, Slot::Index(0), Some(text), added)
+                    .await;
+            }
+            (Value::Scalar(text), Some(Value::Assoc(_))) => {
+                let slot = Slot::Key(b"0".to_vec());
+                return self.set_element(&name, slot, Some(text), added).await;
+            }
+            (value, _) => value,
+        };
+        let existing = self.store.share(&name);
+        let mut value = value;
         let mut coercion = Coercion::default();
         if let Some(attrs) = existing.as_ref().map(|var| var.attrs).filter(|&a| a != 0) {
             match self
@@ -279,10 +306,10 @@ impl<'a, G: Gate> Writer<'a, G> {
                 }
             }
         }
-        let rendering = value.rendering();
-        if self.gate.listens() {
+        let rendering = self.gate.listens().then(|| value.rendering());
+        if let Some(rendering) = &rendering {
             self.gate
-                .pre(Verb::Set, &name, Some(&rendering), self.store)
+                .pre(Verb::Set, &name, Some(rendering), self.store)
                 .await?;
         }
         let generator = self.store.generator();
@@ -337,7 +364,7 @@ impl<'a, G: Gate> Writer<'a, G> {
             .map_or(0, |var| entry_bytes(&name, var.value.as_ref()));
         self.check(before, entry_bytes(&name, Some(&value)))?;
         let old = self.store.land(&name, value, self.allexport);
-        if self.gate.listens() {
+        if let Some(rendering) = &rendering {
             let old_rendering = old
                 .as_ref()
                 .and_then(|var| var.value.as_ref())
@@ -347,7 +374,7 @@ impl<'a, G: Gate> Writer<'a, G> {
                 .post(
                     Verb::Set,
                     &name,
-                    Some(&rendering),
+                    Some(rendering),
                     old_rendering.as_deref(),
                     self.store,
                 )
@@ -359,6 +386,205 @@ impl<'a, G: Gate> Writer<'a, G> {
             }
         }
         Ok(())
+    }
+
+    /// Write one element of the array `name` holds, or clear it with None,
+    /// as `set` writes the whole value it makes; `name` is a reference's
+    /// target already. The element is shaped by the name's attributes
+    /// first, so what an `-i` value assigns lands before it, as bash
+    /// evaluates an element in place (`a[0]='a[1]=9,5'` leaves `a[1]` at
+    /// 9). With no policy listening it then lands in place, costing the
+    /// element rather than the array; a listening policy is shown the whole
+    /// value, which lands through `set`.
+    async fn set_element(
+        &mut self,
+        name: &str,
+        slot: Slot,
+        text: Option<Vec<u8>>,
+        added: Option<&[u8]>,
+    ) -> Result<(), Fault> {
+        self.writable(name)?;
+        let none = || Fault::Host("an element of no array");
+        let attrs = self.store.record(name).ok_or_else(none)?.attrs;
+        let text = match text {
+            Some(text) => {
+                let mut coercion = Coercion::default();
+                let shaped = self.store.coerce_text(&mut coercion, text, attrs, added);
+                self.land_coercion(&mut coercion).await?;
+                Some(shaped.map_err(|error| fatal(self.store.voice(), error))?)
+            }
+            None => None,
+        };
+        if self.gate.listens() {
+            // Shaped already, it shapes to itself again in `set`.
+            let assigned = slot.assigned(text.is_some());
+            let var = self.store.record(name).ok_or_else(none)?;
+            let mut value = var.value.clone().ok_or_else(none)?;
+            value.put(&slot, text).ok_or_else(none)?;
+            return Box::pin(self.set(name, value, false, Some(&assigned), None)).await;
+        }
+        if let Some(text) = &text {
+            let old = self
+                .store
+                .element(name, &slot)
+                .map_or(0, |old| slot.bytes(old));
+            let new = slot.bytes(text);
+            if !self.fits(old, new) {
+                return Err(self.exhausted(self.entry(name) + new - old));
+            }
+        }
+        if !self.store.put_element(name, &slot, text, self.allexport) {
+            return Err(none());
+        }
+        Ok(())
+    }
+
+    /// Append `words` at the extent of the indexed array `name` holds
+    /// (`a+=(x y)`): each lands in place as `set_element` writes it, as
+    /// bash's do, so an `-i` word's own write to the array stands
+    /// (`b+=(2 'b[1]=9,1')` leaves `b[1]` at 9). A word refused takes back
+    /// the slots the append filled before it, but under `-i`, where the
+    /// words before it are evaluated and may write the array, the array
+    /// stays as they left it, as bash's does. With a policy listening, the
+    /// whole value lands through `set` as one write, but under `-i` each
+    /// word is a write of its own, in order.
+    pub async fn push(&mut self, name: &str, words: Vec<Vec<u8>>) -> Result<(), Fault> {
+        let name = self.store.target(name);
+        self.writable(&name)?;
+        let Some(var) = self.store.record(&name) else {
+            return Err(Fault::Host("no array to append to"));
+        };
+        let integer = var.has(INTEGER);
+        let marks = (var.attrs, var.managed.clone());
+        let Some(Value::Indexed(array)) = &var.value else {
+            return Err(Fault::Host("no array to append to"));
+        };
+        let slots = words
+            .into_iter()
+            .zip(array.extent()..)
+            .map(|(word, index)| {
+                i64::try_from(index)
+                    .map(|index| (index, word))
+                    .map_err(|_| Fault::Host("an index past the largest"))
+            })
+            .collect::<Result<Vec<_>, Fault>>()?;
+        if slots.is_empty() || (self.gate.listens() && !integer) {
+            let mut array = array.clone();
+            let assigned = Assigned::Indexes(slots.iter().map(|(index, _)| *index).collect());
+            for (index, word) in slots {
+                array.set(index, word);
+            }
+            return self
+                .set(&name, Value::Indexed(array), false, Some(&assigned), None)
+                .await;
+        }
+        let mut filled = Vec::new();
+        for (index, word) in slots {
+            let slot = Slot::Index(index);
+            if let Err(fault) = self
+                .set_element(&name, slot.clone(), Some(word), None)
+                .await
+            {
+                if !integer {
+                    for slot in filled.into_iter().rev() {
+                        self.store.put_element(&name, &slot, None, false);
+                    }
+                    let (attrs, managed) = marks;
+                    let changed = self
+                        .store
+                        .record(&name)
+                        .filter(|var| var.attrs != attrs || var.managed != managed);
+                    if let Some(var) = changed {
+                        let mut var = var.clone();
+                        (var.attrs, var.managed) = (attrs, managed);
+                        self.store.place(&name, Some(Arc::new(var)));
+                    }
+                }
+                return Err(fault);
+            }
+            filled.push(slot);
+        }
+        Ok(())
+    }
+
+    /// Clear one element a builtin names (`unset 'a[i]'`), keeping the
+    /// indexes after it, as one write. An associative subscript is the key
+    /// verbatim, and a key not there clears nothing; an indexed one is
+    /// arithmetic, its writes landed first; a scalar's element 0 is the
+    /// whole scalar. A hidden or unset name clears nothing, quietly. An
+    /// array the shell computes (`PIPESTATUS`, `FUNCNAME`) clears nothing
+    /// whatever a write left on its name, as a read answers from it, but
+    /// its subscript is still read, so its writes land and an index before
+    /// the first refuses. `every` for a subscript typed as `@` or `*`,
+    /// which names every element, never one only expanding to it: an
+    /// indexed array is emptied, its marks kept, a scalar refuses as `x[1]`
+    /// does, and an associative one takes it as the key it spells, as
+    /// bash's does.
+    pub async fn unset_element(
+        &mut self,
+        name: &str,
+        subscript: &[u8],
+        every: bool,
+    ) -> Result<Element, Fault> {
+        let name = self.store.target(name);
+        if self.store.hidden(&name) {
+            return Ok(Element::Landed);
+        }
+        if let Some(array) = self.store.special(&name) {
+            if every {
+                return Ok(Element::Landed);
+            }
+            let index = array.back(self.subscript_index(subscript).await?);
+            return Ok(if index < 0 {
+                Element::Subscript
+            } else {
+                Element::Landed
+            });
+        }
+        match self.store.record(&name).and_then(|var| var.value.as_ref()) {
+            Some(Value::Indexed(array)) if every => {
+                // An empty array stays as it was declared, and clearing one
+                // marks nothing for export under `set -a`.
+                if !array.is_empty() {
+                    let empty = Value::Indexed(Indexed::default());
+                    let assigned = Assigned::Indexes(HashSet::new());
+                    let allexport = std::mem::replace(&mut self.allexport, false);
+                    let cleared = self.set(&name, empty, false, Some(&assigned), None).await;
+                    self.allexport = allexport;
+                    cleared?;
+                }
+                return Ok(Element::Landed);
+            }
+            Some(Value::Scalar(_)) if every => return Ok(Element::NotArray),
+            _ => {}
+        }
+        let slot = match self.store.record(&name).and_then(|var| var.value.as_ref()) {
+            Some(Value::Assoc(map)) if map.get(subscript).is_none() => {
+                return Ok(Element::Landed);
+            }
+            Some(Value::Assoc(_)) => Slot::Key(subscript.to_vec()),
+            Some(Value::Indexed(_)) => {
+                let index = self.subscript_index(subscript).await?;
+                let index = self
+                    .store
+                    .indexed(&name)
+                    .map_or(index, |array| array.back(index));
+                if index < 0 {
+                    return Ok(Element::Subscript);
+                }
+                Slot::Index(index)
+            }
+            Some(Value::Scalar(_)) => {
+                if self.subscript_index(subscript).await? != 0 {
+                    return Ok(Element::NotArray);
+                }
+                self.unset(&name, false).await?;
+                return Ok(Element::Landed);
+            }
+            None => return Ok(Element::Landed),
+        };
+        self.set_element(&name, slot, None, None).await?;
+        Ok(Element::Landed)
     }
 
     /// Drop one variable through the gate; a missing or hidden name is
@@ -475,33 +701,29 @@ impl<'a, G: Gate> Writer<'a, G> {
         text: Vec<u8>,
     ) -> Result<(), Fault> {
         let name = self.store.target(name);
-        let (value, assigned) = if let Some(map) = self.store.assoc(&name) {
-            let key = key.unwrap_or_else(|| b"0".to_vec());
-            let mut map = map.clone();
-            map.set(key.clone(), text);
-            (
-                Value::Assoc(Box::new(map)),
-                Some(Assigned::Keys(HashSet::from([key]))),
-            )
-        } else if key.is_some() || self.store.indexed(&name).is_some() {
-            let index = key.as_deref().and_then(parse_decimal).unwrap_or(0);
-            let mut array = match self.store.indexed(&name) {
-                Some(array) => array.clone(),
-                None => Indexed::dense(
+        let index = |key: Option<&[u8]>| key.and_then(parse_decimal).unwrap_or(0);
+        match self.store.record(&name).and_then(|var| var.value.as_ref()) {
+            Some(Value::Assoc(_)) => {
+                let key = key.unwrap_or_else(|| b"0".to_vec());
+                Box::pin(self.set_element(&name, Slot::Key(key), Some(text), None)).await
+            }
+            Some(Value::Indexed(_)) => {
+                let slot = Slot::Index(index(key.as_deref()));
+                Box::pin(self.set_element(&name, slot, Some(text), None)).await
+            }
+            _ if key.is_some() => {
+                let index = index(key.as_deref());
+                let mut array = Indexed::dense(
                     self.store
                         .conversion_scalar(&name)
                         .map_err(|error| fatal(self.store.voice(), error))?,
-                ),
-            };
-            array.set(index, text);
-            (
-                Value::Indexed(array),
-                Some(Assigned::Indexes(HashSet::from([index]))),
-            )
-        } else {
-            (Value::Scalar(text), None)
-        };
-        Box::pin(self.set(&name, value, true, assigned.as_ref(), None)).await
+                );
+                array.set(index, text);
+                let assigned = Assigned::Indexes(HashSet::from([index]));
+                Box::pin(self.set(&name, Value::Indexed(array), true, Some(&assigned), None)).await
+            }
+            _ => Box::pin(self.set(&name, Value::Scalar(text), true, None, None)).await,
+        }
     }
 
     /// Land what a coercion assigned, in the scope it read (inside a
@@ -603,15 +825,16 @@ impl<'a, G: Gate> Writer<'a, G> {
         Ok(held.get(held.back(index)).is_some())
     }
 
-    /// Write one element a builtin names (`read 'a[k]'`, `printf -v
-    /// 'a[k]'`), or a bare name as element 0 of an array and a scalar
-    /// otherwise, `append` concatenating onto what it holds. The whole
-    /// value it makes lands through `set`, so a rule sees `a[k]=v` as a
-    /// write to `a` and a refusal leaves nothing half done. An associative
-    /// subscript is the key verbatim, an indexed one arithmetic whose
-    /// writes land first. A name hidden, readonly or given a subscript
-    /// that names no element comes back as its [`Element`] for the
-    /// builtin to voice.
+    /// Write one element (`a[k]=v`, `read 'a[k]'`, `printf -v 'a[k]'`),
+    /// or a bare name as element 0 of an array and a scalar otherwise,
+    /// `append` concatenating onto what it holds, or adding under `-i`.
+    /// It lands as one write of the whole value it makes, so a rule sees
+    /// `a[k]=v` as a write to `a` and a refusal leaves nothing half done.
+    /// An associative subscript is the key verbatim, an indexed one
+    /// arithmetic whose writes land first, even on a readonly name, as
+    /// bash's `read 'a[x=3]'` leaves x at 3. A name hidden, readonly or
+    /// given a subscript that names no element comes back as its
+    /// [`Element`] for the caller to voice.
     pub async fn element(
         &mut self,
         name: &str,
@@ -623,60 +846,75 @@ impl<'a, G: Gate> Writer<'a, G> {
         if self.store.hidden(&name) {
             return Ok(Element::Hidden);
         }
-        if self.store.is_readonly(&name, false) {
-            return Ok(Element::Readonly);
-        }
-        let held = self.store.record(&name).and_then(|var| var.value.clone());
-        let joined = |base: &[u8]| {
-            let mut text = if append { base.to_vec() } else { Vec::new() };
-            text.extend_from_slice(value);
-            text
-        };
-        let (stored, assigned) = match held {
-            Some(Value::Assoc(mut map)) => {
-                let key = subscript.unwrap_or(b"0");
-                if key.is_empty() {
-                    return Ok(Element::Subscript);
-                }
-                let text = joined(map.get(key).unwrap_or_default());
-                map.set(key.to_vec(), text);
-                (
-                    Value::Assoc(map),
-                    Some(Assigned::Keys(HashSet::from([key.to_vec()]))),
-                )
-            }
-            Some(Value::Scalar(text)) if subscript.is_none() => {
-                (Value::Scalar(joined(&text)), None)
-            }
-            None if subscript.is_none() => (Value::Scalar(joined(b"")), None),
+        // An existing scalar becomes element 0, even when empty: bash
+        // resolves `x[-1]` against the length-1 array that makes, and a
+        // name with no record against the one the shell computes
+        // (`PIPESTATUS[-1]=0`).
+        let mut converted = None;
+        let slot = match self.store.record(&name).and_then(|var| var.value.as_ref()) {
+            Some(Value::Assoc(_)) => match subscript.unwrap_or(b"0") {
+                [] => return Ok(Element::Subscript),
+                key => Some(Slot::Key(key.to_vec())),
+            },
+            Some(Value::Scalar(_)) | None if subscript.is_none() => None,
             held => {
-                let mut array = match held {
-                    Some(Value::Indexed(array)) => array,
-                    _ => {
-                        // An existing scalar becomes element 0, even when
-                        // empty: bash resolves `x[-1]` against the length-1
-                        // array that makes.
-                        let scalar = self.store.conversion_scalar(&name).map_err(Fault::Arith)?;
-                        Indexed::dense(scalar)
-                    }
-                };
-                let index = array.back(match subscript {
+                if !matches!(held, Some(Value::Indexed(_))) {
+                    let special = held.is_none().then(|| self.store.special(&name)).flatten();
+                    converted = Some(match special {
+                        Some(array) => array,
+                        None => Indexed::dense(
+                            self.store.conversion_scalar(&name).map_err(Fault::Arith)?,
+                        ),
+                    });
+                }
+                let index = match subscript {
                     Some(subscript) => self.subscript_index(subscript).await?,
                     None => 0,
-                });
+                };
+                let index = match (&converted, self.store.indexed(&name)) {
+                    (Some(array), _) | (None, Some(array)) => array.back(index),
+                    (None, None) => index,
+                };
                 if index < 0 {
                     return Ok(Element::Subscript);
                 }
-                let text = joined(array.get(index).unwrap_or_default());
-                array.set(index, text);
-                (
-                    Value::Indexed(array),
-                    Some(Assigned::Indexes(HashSet::from([index]))),
-                )
+                Some(Slot::Index(index))
             }
         };
-        self.set(&name, stored, true, assigned.as_ref(), None)
-            .await?;
+        if self.store.is_readonly(&name, false) {
+            return Ok(Element::Readonly);
+        }
+        let held = match (&slot, &converted) {
+            (None, _) => self
+                .store
+                .record(&name)
+                .and_then(|var| var.value.as_ref())
+                .and_then(|value| match value {
+                    Value::Scalar(text) => Some(text.as_slice()),
+                    _ => None,
+                }),
+            (Some(Slot::Index(index)), Some(array)) => array.get(*index),
+            (Some(slot), _) => self.store.element(&name, slot),
+        };
+        let integer = self.store.record(&name).is_some_and(|var| var.has(INTEGER));
+        let (text, added) = match (append, integer) {
+            (false, _) => (value.to_vec(), None),
+            (true, true) => (held.unwrap_or_default().to_vec(), Some(value)),
+            (true, false) => ([held.unwrap_or_default(), value].concat(), None),
+        };
+        match (slot, converted) {
+            (None, _) => {
+                self.set(&name, Value::Scalar(text), true, None, added)
+                    .await?
+            }
+            (Some(Slot::Index(index)), Some(mut array)) => {
+                array.set(index, text);
+                let assigned = Assigned::Indexes(HashSet::from([index]));
+                self.set(&name, Value::Indexed(array), true, Some(&assigned), added)
+                    .await?;
+            }
+            (Some(slot), _) => self.set_element(&name, slot, Some(text), added).await?,
+        }
         Ok(Element::Landed)
     }
 
@@ -740,7 +978,7 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use super::*;
-    use crate::vars::{RANDOM, READONLY};
+    use crate::vars::{EXPORT, RANDOM, READONLY, UNASSIGNED};
 
     #[derive(Default)]
     struct Recorder {
@@ -791,6 +1029,36 @@ mod tests {
         {
             Poll::Ready(value) => value,
             Poll::Pending => panic!("a gate that answers at once never pends"),
+        }
+    }
+
+    /// A host no policy of which hears session writes.
+    struct Deaf;
+
+    impl Gate for Deaf {
+        fn listens(&self) -> bool {
+            false
+        }
+
+        async fn pre(
+            &mut self,
+            _: Verb,
+            _: &str,
+            _: Option<&[u8]>,
+            _: &Store,
+        ) -> Result<(), Fault> {
+            Ok(())
+        }
+
+        async fn post(
+            &mut self,
+            _: Verb,
+            _: &str,
+            _: Option<&[u8]>,
+            _: Option<&[u8]>,
+            _: &Store,
+        ) -> Result<(), Fault> {
+            Ok(())
         }
     }
 
@@ -988,5 +1256,145 @@ mod tests {
         assert_eq!(refused(&mut writer, "s", b"-9"), Element::Subscript);
         let keys: Vec<_> = gate.heard.iter().map(|(_, key, _)| key.as_str()).collect();
         assert_eq!(keys, ["m", "s", "s", "t"]);
+    }
+
+    #[test]
+    fn a_heard_integer_element_keeps_what_its_value_assigned() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.seed("b", Value::Indexed(Indexed::dense([b"1".to_vec()])));
+        store.set_attr("b", Some(INTEGER), true);
+        let mut gate = Recorder::default();
+        let mut writer = writer(&mut store, &mut gate);
+        run(writer.push("b", vec![b"2".to_vec(), b"b[1]=9,1".to_vec()])).unwrap();
+        run(writer.element("b", Some(b"0"), b"b[2]=7,5", false)).unwrap();
+        let held: Vec<_> = writer.store.indexed("b").unwrap().iter().collect();
+        assert_eq!(held, [(0, &b"5"[..]), (1, &b"9"[..]), (2, &b"7"[..])]);
+        let failed = run(writer.push("b", vec![b"2".to_vec(), b"b[0]=4,1/0".to_vec()]));
+        assert!(matches!(failed, Err(Fault::Arith(_))));
+        let left = Value::Indexed(writer.store.indexed("b").unwrap().clone()).rendering();
+        assert_eq!(left, b"4 9 7 2");
+        assert_eq!(
+            gate.heard.last().and_then(|(_, _, seen)| seen.clone()),
+            Some(left)
+        );
+    }
+
+    #[test]
+    fn unheard_element_writes_land_in_place_as_bash_orders_them() {
+        let mut store = Store::new(Arc::new(|| 1));
+        store.seed("a", Value::Indexed(Indexed::dense([b"1".to_vec()])));
+        store.seed("i", Value::Indexed(Indexed::dense([b"5".to_vec()])));
+        store.set_attr("i", Some(INTEGER), true);
+        store.seed("s", scalar("v"));
+        let mut gate = Deaf;
+        let mut writer = Writer {
+            store: &mut store,
+            gate: &mut gate,
+            allexport: false,
+            nounset: false,
+            diagnostics: None,
+            limit: None,
+            outside: 0,
+        };
+        run(writer.push("a", vec![b"2".to_vec(), b"3".to_vec()])).unwrap();
+        let landed = run(writer.element("a", Some(b"x=1"), b"!", true)).unwrap();
+        assert_eq!(landed, Element::Landed);
+        assert_eq!(
+            run(writer.unset_element("a", b"0", false)).unwrap(),
+            Element::Landed
+        );
+        assert_eq!(
+            run(writer.unset_element("a", b"-9", false)).unwrap(),
+            Element::Subscript
+        );
+        let array: Vec<_> = writer.store.indexed("a").unwrap().iter().collect();
+        assert_eq!(array, [(1, &b"2!"[..]), (2, &b"3"[..])]);
+        run(writer.element("i", Some(b"0"), b"3", true)).unwrap();
+        assert_eq!(writer.store.indexed("i").unwrap().get(0), Some(&b"8"[..]));
+        writer.store.set_attr("i", Some(READONLY), true);
+        let refused = run(writer.element("i", Some(b"y=2"), b"0", false)).unwrap();
+        assert_eq!(refused, Element::Readonly);
+        assert_eq!(
+            run(writer.unset_element("s", b"1", false)).unwrap(),
+            Element::NotArray
+        );
+        assert_eq!(
+            run(writer.unset_element("s", b"*", true)).unwrap(),
+            Element::NotArray
+        );
+        let pair = Indexed::dense([b"x".to_vec(), b"y".to_vec()]);
+        writer.store.seed("e", Value::Indexed(pair));
+        let expanded = run(writer.unset_element("e", b"@", false));
+        assert!(matches!(expanded, Err(Fault::Arith(_))));
+        run(writer.unset_element("e", b"@", true)).unwrap();
+        assert_eq!(writer.store.indexed("e").map(Indexed::count), Some(0));
+        let keyed = [
+            (b"@".to_vec(), b"v".to_vec()),
+            (b"k".to_vec(), b"w".to_vec()),
+        ];
+        writer
+            .store
+            .seed("q", Value::Assoc(Box::new(keyed.into_iter().collect())));
+        run(writer.unset_element("q", b"@", true)).unwrap();
+        let left: Vec<_> = writer
+            .store
+            .assoc("q")
+            .unwrap()
+            .iter()
+            .map(|(k, _)| k.to_vec())
+            .collect();
+        assert_eq!(left, [b"k".to_vec()]);
+        assert_eq!(
+            run(writer.unset_element("s", b"0", false)).unwrap(),
+            Element::Landed
+        );
+        assert_eq!(text(writer.store, "s"), None);
+        assert_eq!(text(writer.store, "x").as_deref(), Some("1"));
+        assert_eq!(text(writer.store, "y").as_deref(), Some("2"));
+        writer
+            .store
+            .set_specials(vec![1], None, Vec::new(), 1, 1, b"bash: ".to_vec());
+        let read = run(writer.unset_element("PIPESTATUS", b"z=4", false)).unwrap();
+        assert_eq!(read, Element::Landed);
+        assert_eq!(text(writer.store, "z").as_deref(), Some("4"));
+        let before = run(writer.unset_element("PIPESTATUS", b"-5", false)).unwrap();
+        assert_eq!(before, Element::Subscript);
+        let every = run(writer.unset_element("PIPESTATUS", b"@", true)).unwrap();
+        assert_eq!(every, Element::Landed);
+        writer.store.seed("PIPESTATUS", scalar("left"));
+        let shadowed = run(writer.unset_element("PIPESTATUS", b"*", true)).unwrap();
+        assert_eq!(shadowed, Element::Landed);
+        let special = run(writer.element("PIPESTATUS", Some(b"-1"), b"0", false)).unwrap();
+        assert_eq!(special, Element::Landed);
+        writer.limit = Some(writer.store.held() + 4);
+        let refused = run(writer.push("a", vec![b"4".to_vec(), b"far too long".to_vec()]));
+        assert!(matches!(
+            refused,
+            Err(Fault::Signal(Signal::Exit { status: 2, .. }))
+        ));
+        assert_eq!(writer.store.indexed("a").unwrap().count(), 2);
+        writer.store.seed("g", Value::Indexed(Indexed::default()));
+        writer.store.set_attr("g", Some(UNASSIGNED), true);
+        writer.allexport = true;
+        let fresh = run(writer.push("g", vec![b"1".to_vec(), b"far too long".to_vec()]));
+        assert!(fresh.is_err());
+        let g = writer.store.record("g").unwrap();
+        assert!(g.has(UNASSIGNED) && !g.has(EXPORT));
+        writer.allexport = false;
+        writer.limit = None;
+        writer
+            .store
+            .seed("n", Value::Indexed(Indexed::dense([b"1".to_vec()])));
+        writer.store.set_attr("n", Some(INTEGER), true);
+        let failed = run(writer.push("n", vec![b"2".to_vec(), b"n[1]=2,1/0".to_vec()]));
+        assert!(matches!(failed, Err(Fault::Arith(_))));
+        let kept: Vec<_> = writer.store.indexed("n").unwrap().iter().collect();
+        assert_eq!(kept, [(0, &b"1"[..]), (1, &b"2"[..])]);
+        let counted: usize = writer
+            .store
+            .records()
+            .map(|(name, var)| entry_bytes(name, var.value.as_ref()))
+            .sum();
+        assert_eq!(writer.store.held(), counted);
     }
 }

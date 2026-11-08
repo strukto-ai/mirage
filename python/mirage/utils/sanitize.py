@@ -61,6 +61,8 @@ def byte_length(text: str) -> int:
     Args:
         text (str): the string to measure.
     """
+    if text.isascii():
+        return len(text)
     return len(text.encode("utf-8", "surrogatepass"))
 
 
