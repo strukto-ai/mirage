@@ -16,6 +16,7 @@ import re
 from typing import Any
 
 from mirage.resources.base import ResourceStore
+from mirage.resources.errors import ResourceError
 
 # A saved policy's name: a file name mirage reads as Python.
 POLICY_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,59}\.py")
@@ -37,7 +38,19 @@ async def with_policies(
     profiles = written.get("profiles")
     if not isinstance(profiles, dict):
         return written
-    saved: dict[str, str] | None = None
+    # Each name is read once; None keeps one that is not saved.
+    saved: dict[str, str | None] = {}
+
+    async def source_of(name: str) -> str | None:
+        if name not in saved:
+            try:
+                saved[name] = (await store.get_policy(name)).source
+            except ResourceError as e:
+                if e.code != "not_found":
+                    raise
+                saved[name] = None
+        return saved[name]
+
     changed = False
     out: dict[str, Any] = {}
     for name, profile in profiles.items():
@@ -59,12 +72,7 @@ async def with_policies(
                     else None
                 )
                 if isinstance(script, str) and POLICY_NAME.fullmatch(script):
-                    if saved is None:
-                        saved = {
-                            p.name: p.source
-                            for p in await store.list_policies()
-                        }
-                    source = saved.get(script)
+                    source = await source_of(script)
                     if source is not None:
                         swapped.append(
                             {

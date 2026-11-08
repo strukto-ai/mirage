@@ -50,6 +50,21 @@ describe('withPolicies', () => {
     })
   })
 
+  it('reads only the policies it names, each once', async () => {
+    const store = memoryResourceStore()
+    await store.createPolicy({ name: 'guard.py', source: SOURCE })
+    const read: string[] = []
+    const getPolicy = store.getPolicy.bind(store)
+    store.getPolicy = (name) => {
+      read.push(name)
+      return getPolicy(name)
+    }
+    store.listPolicies = () => Promise.reject(new Error('an unrelated policy is broken'))
+    const programs = [{ script: 'guard.py' }, { script: 'guard.py' }]
+    await withPolicies(store, { profiles: { a: { policy: { pre_command: programs } } } })
+    expect(read).toEqual(['guard.py'])
+  })
+
   it('answers the config itself when no script names a saved policy', async () => {
     const written = { profiles: { reviewer: { policy: { pre_command: [{ script: 'a.py' }] } } } }
     expect(await withPolicies(memoryResourceStore(), written)).toBe(written)

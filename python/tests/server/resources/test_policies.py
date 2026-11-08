@@ -41,6 +41,26 @@ async def test_a_script_naming_a_saved_policy_gets_its_source():
 
 
 @pytest.mark.asyncio
+async def test_only_the_named_policies_are_read_each_once(monkeypatch):
+    store = memory_resource_store()
+    await store.create_policy(Policy(name="guard.py", source=SOURCE))
+    read: list[str] = []
+    get_policy = store.get_policy
+
+    async def counted(name: str) -> Policy:
+        read.append(name)
+        return await get_policy(name)
+
+    async def broken() -> list[Policy]:
+        raise RuntimeError("an unrelated policy is broken")
+
+    monkeypatch.setattr(store, "get_policy", counted)
+    monkeypatch.setattr(store, "list_policies", broken)
+    await with_policies(store, _programs("guard.py", "guard.py"))
+    assert read == ["guard.py"]
+
+
+@pytest.mark.asyncio
 async def test_the_config_comes_back_when_no_script_is_saved():
     written = _programs("a.py")
     assert await with_policies(memory_resource_store(), written) is written

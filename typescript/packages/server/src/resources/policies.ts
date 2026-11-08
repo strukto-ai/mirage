@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
+import { ResourceError } from '@struktoai/mirage-core/resources/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 
 /** A saved policy's name: a file name mirage reads as Python. */
@@ -21,6 +22,7 @@ export const POLICY_NAME = /^[a-z0-9][a-z0-9._-]{0,59}\.py$/
 type Json = Record<string, JsonValue>
 
 const isObject = (v: unknown): v is Json => v !== null && typeof v === 'object' && !Array.isArray(v)
+
 /**
  * `written` with each profile program whose `script` names a saved policy
  * given that policy's source, so `script: guard.py` in a template means the
@@ -30,7 +32,19 @@ const isObject = (v: unknown): v is Json => v !== null && typeof v === 'object' 
 export async function withPolicies(store: ResourceStore, written: Json): Promise<Json> {
   const profiles = written.profiles
   if (!isObject(profiles)) return written
-  let saved: Map<string, string> | undefined
+  // Each name is read once; null keeps one that is not saved.
+  const saved = new Map<string, string | null>()
+  const sourceOf = async (name: string): Promise<string | null> => {
+    if (!saved.has(name)) {
+      try {
+        saved.set(name, (await store.getPolicy(name)).source)
+      } catch (e) {
+        if (!(e instanceof ResourceError) || e.code !== 'not_found') throw e
+        saved.set(name, null)
+      }
+    }
+    return saved.get(name) ?? null
+  }
   let changed = false
   const out: Json = {}
   for (const [name, profile] of Object.entries(profiles)) {
@@ -48,9 +62,8 @@ export async function withPolicies(store: ResourceStore, written: Json): Promise
       for (const program of programs) {
         const script = isObject(program) ? program.script : undefined
         if (typeof script === 'string' && POLICY_NAME.test(script)) {
-          saved ??= new Map((await store.listPolicies()).map((p) => [p.name, p.source]))
-          const source = saved.get(script)
-          if (source !== undefined) {
+          const source = await sourceOf(script)
+          if (source !== null) {
             swapped.push({ ...(program as Json), script: { source, language: 'python' } })
             changed = true
             continue

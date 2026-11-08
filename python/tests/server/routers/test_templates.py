@@ -171,11 +171,14 @@ async def test_a_template_runs_the_saved_policy_it_names(app, client):
         "/v1/workspaces", json={"id": "guarded", "template": "guarded"}
     )
     assert r.status_code == 201, r.text
-    ran = await client.post(
-        "/v1/workspaces/guarded/shell",
-        json={"command": "touch /a && rm /a"},
-    )
-    assert ran.json()["refusal"]["reason"] == "deletes are disabled"
+    try:
+        ran = await client.post(
+            "/v1/workspaces/guarded/shell",
+            json={"command": "touch /a && rm /a"},
+        )
+        assert ran.json()["refusal"]["reason"] == "deletes are disabled"
+    finally:
+        await client.delete("/v1/workspaces/guarded")
 
 
 @pytest.mark.asyncio
