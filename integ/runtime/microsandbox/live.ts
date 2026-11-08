@@ -342,13 +342,13 @@ async function within<T>(operation: Promise<T>, ms: number): Promise<T> {
 }
 
 class FullInspect extends MicrosandboxMachine {
-  protected override microsandbox(
+  protected override execProgram(
     args: string[],
     stdin: ByteSource | null = null,
     output: OutputFn | null = null,
     signal?: AbortSignal,
   ) {
-    return super.microsandbox(
+    return super.execProgram(
       args[0] === 'status' ? ['inspect', ...args.slice(1)] : args,
       stdin,
       output,
