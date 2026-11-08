@@ -189,7 +189,8 @@ class Or:
 @dataclass(frozen=True, slots=True)
 class Size:
     """``-size`` as the inclusive byte bounds it rounds to; a directory
-    weighs ``DIR_SIZE`` and an entry of unknown size nothing."""
+    weighs ``DIR_SIZE``, a stat of unknown size nothing, and an entry
+    with no stat matches no bound."""
 
     min: int | None = None
     max: int | None = None

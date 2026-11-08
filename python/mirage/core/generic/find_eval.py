@@ -260,11 +260,10 @@ def _test(node: PredNode, entry: FindEntry) -> bool | None:
             return False
         return posix_mode(held) & _ACCESS_BITS[node.mode] != 0
     if isinstance(node, Size):
-        size = (
-            DIR_SIZE
-            if entry.kind == "d"
-            else (st.size if st is not None else 0) or 0
-        )
+        # An entry the walk could not stat has no size to compare.
+        if entry.kind != "d" and st is None:
+            return False
+        size = DIR_SIZE if entry.kind == "d" or st is None else st.size or 0
         return not (
             (node.min is not None and size < node.min)
             or (node.max is not None and size > node.max)

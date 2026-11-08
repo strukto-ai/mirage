@@ -185,7 +185,8 @@ export interface Quit {
 }
 
 // -size as the inclusive byte bounds it rounds to; a directory weighs
-// DIR_SIZE and an entry of unknown size nothing.
+// DIR_SIZE, a stat of unknown size nothing, and an entry with no stat matches
+// no bound.
 export interface Size {
   op: 'size'
   min: number | null

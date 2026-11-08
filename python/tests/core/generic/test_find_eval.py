@@ -30,10 +30,11 @@ from mirage.core.generic.types import (
     Path,
     PendingPrune,
     Prune,
+    Size,
     TrueNode,
     Type,
 )
-from mirage.types import FindType
+from mirage.types import FileStat, FileType, FindType
 from mirage.utils.stat_view import DIR_SIZE
 
 
@@ -53,6 +54,17 @@ def _entry(
         is_empty=is_empty,
         mtime=mtime,
     )
+
+
+def test_size_node_needs_a_stat_for_anything_but_a_directory():
+    small = FileStat(name="a.txt", type=FileType.FILE, size=None)
+    assert evaluate(Size(max=0), _entry(), Effects()) is False
+    assert evaluate(
+        Size(max=0),
+        FindEntry("/data/a.txt", "a.txt", "f", 1, stat=small),
+        Effects(),
+    )
+    assert evaluate(Size(min=DIR_SIZE), _entry(kind="d"), Effects()) is True
 
 
 def test_empty_node():

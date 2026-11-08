@@ -134,7 +134,9 @@ function test(node: PredNode, entry: FindEntry): boolean | null {
       return (posixMode(held) & ACCESS_BITS[node.mode]) !== 0
     }
     case 'size': {
-      const size = entry.kind === 'd' ? DIR_SIZE : (st?.size ?? 0)
+      // An entry the walk could not stat has no size to compare.
+      if (entry.kind !== 'd' && st === null) return false
+      const size = entry.kind === 'd' || st === null ? DIR_SIZE : (st.size ?? 0)
       return !((node.min !== null && size < node.min) || (node.max !== null && size > node.max))
     }
     case 'empty':
