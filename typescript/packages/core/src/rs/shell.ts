@@ -738,10 +738,14 @@ export class Shell {
     const framed = this.framed
     if (framed === null) return engine('shell', op, [this.handle, ...args])
     this.framed = null
-    return batch([
-      ['shell', 'frame', this.handle, ...this.frameItems(framed)],
+    const items = this.frameItems(framed)
+    this.sent = null
+    const answer = batch([
+      ['shell', 'frame', this.handle, ...items],
       ['shell', op, this.handle, ...args],
     ])
+    this.sent = { positional: framed.positional, calls: framed.calls }
+    return answer
   }
 
   /**
@@ -750,7 +754,6 @@ export class Shell {
    */
   private frameItems(frame: ShellFrame): Item[] {
     const sent = this.sent
-    this.sent = { positional: frame.positional, calls: frame.calls }
     const sameCalls =
       sent !== null &&
       sent.calls.length === frame.calls.length &&
@@ -1082,6 +1085,11 @@ export class Shell {
       options.followRef ?? true,
       options.listens ?? false,
     )
+  }
+
+  /** A subscript that is a plain decimal, read without evaluating; null when `index` has to. */
+  plainIndex(subscript: string): bigint | null {
+    return this.call('plain_index', subscript) as bigint | null
   }
 
   /** Resolve an indexed array's subscript, what it assigns landed. */

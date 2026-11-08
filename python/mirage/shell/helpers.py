@@ -492,6 +492,19 @@ def get_while_parts(
     return test, list(body.named_children)
 
 
+def loop_group(node: TSNodeLike) -> TSNodeLike | None:
+    """The node holding a loop's body: its ``do ... done``, or the brace
+    group bash takes in its place after ``for``.
+
+    Args:
+        node (TSNodeLike): the for or C-style for node.
+    """
+    for child in node.children:
+        if child.type in (NT.DO_GROUP, NT.COMPOUND_STATEMENT):
+            return child
+    return None
+
+
 def get_for_parts(
     node: TSNodeLike,
 ) -> tuple[str, list[TSNodeLike] | None, list[TSNodeLike]]:
@@ -532,7 +545,6 @@ def get_cfor_parts(
     exprs: list[list[TSNodeLike]] = [[], [], []]
     slot = 0
     inside = False
-    body: list[TSNodeLike] = []
     for child in node.children:
         if child.type == NT.ARITH_OPEN:
             inside = True
@@ -546,8 +558,8 @@ def get_cfor_parts(
             elif slot < 3:
                 exprs[slot].append(child)
             continue
-        if child.type in (NT.DO_GROUP, NT.COMPOUND_STATEMENT):
-            body = list(child.named_children)
+    group = loop_group(node)
+    body = [] if group is None else list(group.named_children)
     return exprs, body
 
 

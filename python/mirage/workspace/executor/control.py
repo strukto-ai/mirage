@@ -484,7 +484,7 @@ async def handle_for(
                 break
             continue
         merged_io = await merged_io.merge(io)
-        all_stdout.append(stdout)
+        _keep(all_stdout, stdout)
         if session.errexit_exiting:
             break
     # The loop variable is an ordinary variable in bash and keeps its
@@ -761,7 +761,7 @@ async def handle_select(
                 break
         else:
             merged_io = await merged_io.merge(io)
-            all_stdout.append(stdout)
+            _keep(all_stdout, stdout)
             if session.errexit_exiting:
                 break
         show_menu = not visible_env(session).get("REPLY")

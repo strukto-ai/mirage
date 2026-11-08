@@ -26,6 +26,7 @@ from mirage.shell.helpers import (
     get_for_parts,
     get_function_redirects,
     get_text,
+    loop_group,
     parse_function,
 )
 from mirage.shell.parse.constants import ALIAS_WORD_TYPES, BASH_KEYWORDS
@@ -523,14 +524,7 @@ class _Printer:
             if values is None
             else " ".join(self.word(v) for v in values)
         )
-        group = next(
-            (
-                c
-                for c in node.children
-                if c.type in (NT.DO_GROUP, NT.COMPOUND_STATEMENT)
-            ),
-            None,
-        )
+        group = loop_group(node)
         return (
             node.children[0].type
             + f" {variable} in {words};\n"
@@ -556,14 +550,7 @@ class _Printer:
                 begin = child.end_byte if child.type != "))" else None
                 if child.type == "))":
                     break
-        group = next(
-            (
-                c
-                for c in node.children
-                if c.type in (NT.DO_GROUP, NT.COMPOUND_STATEMENT)
-            ),
-            None,
-        )
+        group = loop_group(node)
         return (
             "for (("
             + "; ".join(slots)

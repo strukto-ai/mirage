@@ -1,6 +1,7 @@
 //! The session as arithmetic reads it: the store behind the evaluator's
 //! questions, `RANDOM` drawing through an evaluation's scratch generator.
 
+use super::random::draw;
 use super::*;
 use crate::integer::parse_decimal;
 

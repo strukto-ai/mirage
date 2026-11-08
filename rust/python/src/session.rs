@@ -4,6 +4,7 @@ use std::sync::Arc;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyList, PyTuple};
+use streams::arith;
 use streams::interp::codec::Item;
 use streams::interp::expand::Substitution;
 use streams::interp::host::{self, Held};
@@ -702,6 +703,12 @@ impl Shell {
             follow_ref,
         };
         Self::write_task(slf, write, listens, true)
+    }
+
+    /// A subscript that is a plain decimal, read without evaluating;
+    /// None when it has to be evaluated (`index`).
+    fn plain_index(&self, subscript: Bound<'_, PyAny>) -> PyResult<Option<i64>> {
+        Ok(arith::plain_decimal(&bytes_of(&subscript)?))
     }
 
     /// Resolve an indexed array's subscript, what it assigns landed.
