@@ -19,6 +19,10 @@ import {
   type DuFlags,
   du,
   duGeneric,
+  excluded,
+  excludedStart,
+  inodeCount,
+  newestUnder,
   parseFlags,
   rollup,
   toVirtual,
@@ -86,7 +90,10 @@ describe('du', () => {
     const boom = () => {
       throw new Error('Graph API error 404 (itemNotFound)')
     }
+    const parsed = parseFlags(ctx({ total: true }))
+    if (parsed instanceof IOResult) throw new Error('refused')
     const [out, io] = await duGeneric(
+      parsed,
       [spec('/data/nosuch', 'nosuch')],
       ctx({ total: true }),
       (targets) => Promise.resolve(targets),
@@ -138,6 +145,93 @@ describe('du', () => {
     ]
     expect(rollup(entries, '/', { all: false, maxDepth: null })).toEqual([['/sub', 3]])
     expect(toVirtual([['/dir/a.txt', 1]], spec('/dir', 'dir'))).toEqual([['/dir/a.txt', 1]])
+  })
+
+  // An --exclude pattern matches the path as du prints it, or the
+  // part after any slash, with `*` crossing slashes and case kept (pinned on
+  // debian:stable-slim). Mirrors test_du.py.
+  it('excludes a path a pattern matches whole or after a slash', () => {
+    expect(excluded(['b'], 'd/x/b')).toBe(true)
+    expect(excluded(['x/b'], 'd/x/b')).toBe(true)
+    expect(excluded(['d*b'], 'd/x/b')).toBe(true)
+    expect(excluded(['x'], 'd/x/b')).toBe(false)
+    expect(excluded(['B'], 'd/x/b')).toBe(false)
+    expect(excluded([], 'd')).toBe(false)
+  })
+
+  it('starts no mount under an excluded directory', () => {
+    const operand = spec('/a', 'a')
+    expect(excludedStart(['skip'], operand, spec('/a/skip/inner', ''))).toBe(true)
+    expect(excludedStart(['inner'], operand, spec('/a/skip/inner', ''))).toBe(true)
+    expect(excludedStart(['skip'], operand, spec('/a/keep/in', ''))).toBe(false)
+    expect(excludedStart(['a'], operand, spec('/a/keep/in', ''))).toBe(false)
+    expect(excludedStart([], operand, spec('/a/skip/inner', ''))).toBe(false)
+    expect(excludedStart(['./sub'], spec('/data', 'data', '.'), spec('/data/sub/m', ''))).toBe(true)
+    expect(excludedStart(['sub'], spec('/', ''), spec('/sub/m', ''))).toBe(true)
+  })
+
+  it('keeps the stamp nanoseconds in a time format', async () => {
+    const [size, entries] = backend({ '/dir/f': 1 })
+    const parsed = parseFlags({ ...ctx({ time: true }), env: { TIME_STYLE: '+%s.%N' } })
+    if (parsed instanceof IOResult) throw new Error('du refused --time')
+    const out = await du(
+      [spec('/dir', 'dir')],
+      parsed,
+      size,
+      entries,
+      [],
+      undefined,
+      null,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => new Map([['/dir/f', '1970-01-01T00:00:01.123456789+00:00']]),
+    )
+    expect(DEC.decode(out.stdout)).toBe('1\t1.123456789\t/dir\n')
+  })
+
+  it('compares a threshold past 2^53 exactly', async () => {
+    const [size, entries] = backend({ '/dir/f': 9007199254740992 })
+    const parsed = parseFlags(ctx({ threshold: '9007199254740993' }))
+    if (parsed instanceof IOResult) throw new Error('du refused the threshold')
+    const out = await du([spec('/dir', 'dir')], parsed, size, entries)
+    expect(DEC.decode(out.stdout)).toBe('')
+  })
+
+  it('counts each directory under --inodes, and under -S its own files', () => {
+    const leaves: [string, number][] = [
+      ['/d/a', 1],
+      ['/d/x/b', 1],
+      ['/d/x/bb', 1],
+    ]
+    const dirs = ['/d/x/z']
+    expect(rollup(leaves, '/d', { all: false, maxDepth: null, dirs, inodes: true })).toEqual([
+      ['/d/x/z', 1],
+      ['/d/x', 4],
+    ])
+    expect(
+      rollup(leaves, '/d', { all: false, maxDepth: null, dirs, separateDirs: true, inodes: true }),
+    ).toEqual([
+      ['/d/x/z', 1],
+      ['/d/x', 3],
+    ])
+    expect(inodeCount(leaves, '/d', dirs)).toBe(6)
+  })
+
+  it('shows a directory the newest time in its tree', () => {
+    const late = '2024-03-04T05:06:07.5'
+    const newest = newestUnder(
+      new Map([
+        ['/d', '2023-01-01T00:00:00'],
+        ['/d/x/b', late],
+        ['/d/a', '2024-01-02T03:04:05'],
+        ['/e/f', '2030-01-01T00:00:00'],
+      ]),
+      '/d',
+    )
+    expect([newest.get('/d')?.[1], newest.get('/d/x')?.[1]]).toEqual([late, late])
+    expect(newest.has('/e/f')).toBe(false)
   })
 })
 
@@ -335,4 +429,20 @@ it.each([
   expect(DEC.decode(out.stderr)).toBe('')
   expect(out.exitCode).toBe(0)
   expect(out.records?.map((record) => record.size ?? null)).toEqual([null, total])
+})
+
+it('du leaves no time of an earlier operand in a later one', async () => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.shell(
+      "printf x > /d/skip; touch -d '2030-01-01' /d/skip; printf y > /d/keep; touch -d '2020-01-01' /d/keep",
+    )
+    const result = await ws.shell('cd /; du --time --time-style=+%Y --exclude=/d/skip d/skip /d')
+    const rows = DEC.decode(result.stdout).trimEnd().split('\n')
+    expect(rows[0]?.split('\t').slice(1)).toEqual(['2030', 'd/skip'])
+    expect(rows.at(-1)?.endsWith('\t/d')).toBe(true)
+    expect(rows.at(-1)).not.toContain('2030')
+  } finally {
+    await ws.close()
+  }
 })

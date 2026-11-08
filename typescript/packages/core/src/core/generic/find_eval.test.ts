@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { FileType, type FileStat } from '../../types.ts'
 import { DIR_SIZE } from '../../utils/stat_view.ts'
 import {
   bindTree,
@@ -40,6 +41,19 @@ function effects(): Effects {
 function entry(over: Partial<FindEntry> = {}): FindEntry {
   return { key: '/data/a.txt', name: 'a.txt', kind: 'f', depth: 1, ...over }
 }
+
+describe('size', () => {
+  it('needs a stat for anything but a directory', () => {
+    const unsized = { name: 'a.txt', type: FileType.FILE, size: null } as FileStat
+    expect(evaluate({ op: 'size', min: null, max: 0 }, entry(), effects())).toBe(false)
+    expect(evaluate({ op: 'size', min: null, max: 0 }, entry({ stat: unsized }), effects())).toBe(
+      true,
+    )
+    expect(
+      evaluate({ op: 'size', min: DIR_SIZE, max: null }, entry({ kind: 'd' }), effects()),
+    ).toBe(true)
+  })
+})
 
 describe('empty', () => {
   it('empty node matches only isEmpty entries', () => {

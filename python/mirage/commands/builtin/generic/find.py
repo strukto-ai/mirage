@@ -90,6 +90,7 @@ def parse_find_args(
             mindepth=expr.mindepth,
             empty=expr.uses_empty,
             tree=expr.tree,
+            depth_first=expr.depth_first,
         )
     ftype: FindType | str | None = type
     if type in (FindType.DIRECTORY.value, FindType.FILE.value):
@@ -173,6 +174,8 @@ class StartPoint:
     results: list[str]
     missing: bool = False
     stat: FileStat | None = None
+    # A -quit was reached on the start point itself, which ends the line.
+    quit: bool = False
     # The strerror the diagnostic carries when `missing` is set. A start
     # point that is simply absent keeps GNU's default wording; one under a
     # plain file, or typed with a trailing slash that resolved to a
@@ -305,9 +308,12 @@ async def resolve_start(
     tree = find_eval.bind_tree(
         find_eval.args_to_tree(args), "", search.virtual, search.raw_path
     )
+    await find_eval.prime_regexes(tree, ["/" + search.virtual.strip("/")])
     rows = start_point_results(search, start, args, tree)
     return StartPoint(
-        walk=False, results=respell_raw(rows, search.virtual, search.raw_path)
+        walk=False,
+        results=respell_raw(rows, search.virtual, search.raw_path),
+        quit=find_eval.quit_fired(tree),
     )
 
 
@@ -368,6 +374,7 @@ def start_point_results(
         min_size=args.min_size,
         max_size=args.max_size,
         mtime=ts,
+        stat=start,
     )
     return results
 
@@ -379,6 +386,7 @@ def root_dir_results(
     *,
     is_empty: bool | None,
     mtime: float | None = None,
+    stat: FileStat | None = None,
 ) -> list[str]:
     """Results for the directory start point itself, at depth 0.
 
@@ -396,6 +404,8 @@ def root_dir_results(
             when no listing was taken (``-empty`` then cannot match it).
         mtime (float | None): the start point's epoch-second mtime, None
             when unknown.
+        stat (FileStat | None): the start point's stat, for the tests
+            that read one.
     """
     results: list[str] = []
     find_eval.emit_start_path(
@@ -411,6 +421,7 @@ def root_dir_results(
         min_size=args.min_size,
         max_size=args.max_size,
         mtime=mtime,
+        stat=stat,
     )
     return results
 
@@ -441,6 +452,11 @@ async def early_root(
     tree = find_eval.bind_tree(
         find_eval.args_to_tree(args), "", search.virtual, search.raw_path
     )
+    # A -quit on the root ends the walk before it begins, which only the
+    # walk can tell its caller; -xtype reads past a link it may be.
+    if find_eval.tree_has(tree, (find_types.Quit, find_types.XType)):
+        return []
+    await find_eval.prime_regexes(tree, ["/" + search.virtual.strip("/")])
     ts = None
     windowed = args.mtime_min is not None or args.mtime_max is not None
     if windowed or find_eval.tree_has_time(tree):
@@ -450,7 +466,9 @@ async def early_root(
             ts, args.mtime_min, args.mtime_max
         ):
             return []
-    rows = root_dir_results(search, args, tree, is_empty=None, mtime=ts)
+    rows = root_dir_results(
+        search, args, tree, is_empty=None, mtime=ts, stat=start.stat
+    )
     return respell_raw(rows, search.virtual, search.raw_path)
 
 
@@ -481,8 +499,9 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> FindFlags:
         mindepth=fl.as_str("mindepth"),
         empty=fl.as_bool("empty"),
         # The last of -H, -L and -P decides, as in GNU; only -L follows
-        # the links the walk meets.
-        follow=fl.typed_order("H", "L", "P")[-1:] == ["L"],
+        # the links the walk meets, and -follow is -L wherever it is.
+        follow=fl.typed_order("H", "L", "P")[-1:] == ["L"]
+        or fl.as_bool("follow"),
     )
 
 
@@ -545,7 +564,10 @@ async def find_walk_generic(
 
     async def stream() -> AsyncIterator[bytes]:
         missing: list[str] = []
+        stopped: list[str] = []
         for run, search in enumerate(searches):
+            if stopped:
+                break
             start = await resolve_start(
                 search,
                 args,
@@ -566,6 +588,8 @@ async def find_walk_generic(
                 continue
             if not start.walk:
                 rows = start.results
+                if start.quit:
+                    stopped.append(search.virtual)
             else:
                 unreadable: list[str] = []
                 unstatted: dict[str, Exception] = {}
@@ -595,6 +619,8 @@ async def find_walk_generic(
                     loops=loops,
                     enters=stays if home is not None else None,
                     listing=partial(budget.listing, readdir),
+                    links=links,
+                    stopped=stopped,
                 )
                 rows = respell_raw(walked, search.virtual, search.raw_path)
                 # GNU names a directory it may not open in the walk's own
@@ -645,4 +671,6 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
         if name == OPERAND:
             break
         follows = Follow.NONE if name == "P" else Follow.LAST
+    if fl.as_bool("follow"):
+        follows = Follow.LAST
     return LineFacts(follows=follows, walks=True, reads_subtree=True)

@@ -108,6 +108,18 @@ class LsIndicator(str, Enum):
     CLASSIFY = "classify"
 
 
+class LsFormat(str, Enum):
+    """How `ls` lays its rows out, `--format`'s words: `-l` is `verbose`,
+    `-m` `commas`, `-x` `horizontal`, `-C` `vertical` and `-1`
+    `single-column`."""
+
+    VERBOSE = "verbose"
+    COMMAS = "commas"
+    HORIZONTAL = "horizontal"
+    VERTICAL = "vertical"
+    SINGLE_COLUMN = "single-column"
+
+
 class CopyDeref(str, Enum):
     """Which symlinks `cp` follows: every one (`-L`), only the command
     line's (`-H`), or none, copying each link as a link (`-P`, `-d`,

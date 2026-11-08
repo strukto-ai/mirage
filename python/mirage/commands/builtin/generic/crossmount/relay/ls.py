@@ -117,8 +117,9 @@ async def run_ls(
             contribute that group the way the fan-out does for a
             single-mount run; ``-R`` charges each entry to the mount
             serving it, at that mount's ``walk_limit``.
-        session_view (SessionView | None): The session view,
-            for the profile the group column renders.
+        session_view (SessionView | None): The session view, for the
+            profile the group column renders and the environment ls
+            reads.
     """
     p = functools.partial
     links = link_view(vfs)
@@ -145,5 +146,8 @@ async def run_ls(
         links=links,
         mounts=mount_view(vfs, crossing=True),
         identity=identity_from(session_view),
-        **ls_options(flag_kwargs),
+        **ls_options(
+            flag_kwargs,
+            None if session_view is None else session_view.snapshot(),
+        ),
     )

@@ -15,7 +15,7 @@
 import { expect, it } from 'vitest'
 import { command, type CommandFn } from '../../../config.ts'
 import { SPECS } from '../../../spec/index.ts'
-import { duGeneric } from '../du.ts'
+import { duGeneric, parseFlags } from '../du.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces } from '../../../../errors/fs.ts'
@@ -25,8 +25,11 @@ import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
 
-const measured: CommandFn = (_accessor, paths, _texts, ctx) =>
-  duGeneric(
+const measured: CommandFn = (_accessor, paths, _texts, ctx) => {
+  const parsed = parseFlags(ctx)
+  if (parsed instanceof IOResult) throw new Error('refused')
+  return duGeneric(
+    parsed,
     paths,
     ctx,
     (targets) => Promise.resolve(targets),
@@ -34,6 +37,7 @@ const measured: CommandFn = (_accessor, paths, _texts, ctx) =>
     () => Promise.resolve(1000),
     () => Promise.resolve([[['/big', 1000]], 1000]),
   )
+}
 
 const unmeasured: CommandFn = (_accessor, paths) => [
   ENC.encode(`777\t${paths[0]?.rawPath ?? ''}\n`),
@@ -120,6 +124,47 @@ it.each([
     const result = await ws.shell('du -s /a')
     expect(DEC.decode(result.stdout)).toBe(expected)
     expect(result.exitCode).toBe(1)
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each([
+  ['measured', measured],
+  ['unmeasured', unmeasured],
+])('measures no mount under an excluded path: %s', async (_, fn) => {
+  const ws = workspace(fn)
+  try {
+    const result = await ws.shell('du --exclude=n /a')
+    expect(DEC.decode(result.stdout)).toBe('5\t/a/d\n5\t/a\n')
+    expect(result.exitCode).toBe(0)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('keeps the patterns read from stdin in the one walk', async () => {
+  const ws = workspace(unmeasured)
+  try {
+    const rows = DEC.decode((await ws.shell("printf 'f\\n' | du -c -X - /a")).stdout)
+    expect(rows).not.toContain('777')
+    expect(rows).toContain('0\t/a/d\n')
+    expect(rows.endsWith('3\t/a\n3\ttotal\n')).toBe(true)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('reads TIME_STYLE on a line across mounts', async () => {
+  const ws = workspace(measured)
+  try {
+    const result = await ws.shell('export TIME_STYLE=+%Y; du --time -s /a/d /b')
+    const rows = DEC.decode(result.stdout).trimEnd().split('\n')
+    expect(rows.map((row) => row.split('\t').filter((_, i) => i !== 1))).toEqual([
+      ['5', '/a/d'],
+      ['2', '/b'],
+    ])
+    expect(rows.every((row) => row.split('\t')[1]?.length === 4)).toBe(true)
   } finally {
     await ws.close()
   }

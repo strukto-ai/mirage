@@ -164,6 +164,7 @@ export async function fanOutTraversal(
         signal,
         true,
         follow,
+        sessionView?.snapshot(),
       )
     } else {
       ;[stdout, io] = await handleCrossMount(

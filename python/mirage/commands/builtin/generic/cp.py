@@ -14,10 +14,10 @@
 
 import errno
 import logging
-from collections.abc import Awaitable, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import AsyncIterator, Awaitable, Sequence
+from dataclasses import dataclass, field, replace
 from functools import partial
-from typing import Callable
+from typing import Any, Callable, overload
 
 from mirage.commands.builtin.utils.backup import backup_control, backup_target
 from mirage.commands.builtin.utils.constants import DEFAULT_BACKUP_SUFFIX
@@ -46,6 +46,7 @@ from mirage.commands.spec.usage import (
     word_refusal_error,
 )
 from mirage.commands.spec.word_choice import WordMatch, match_word
+from mirage.context import session_umask
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import enoent, fs_strerror
@@ -85,6 +86,22 @@ from mirage.view.types import LinkView
 _logger = logging.getLogger(__name__)
 
 UPDATE_MODES = ("all", "none", "none-fail", "older")
+# What --preserve and --no-preserve name, in the order cp lists them.
+PRESERVE_ATTRS = (
+    "mode",
+    "timestamps",
+    "ownership",
+    "links",
+    "context",
+    "xattr",
+    "all",
+)
+# What -p and a bare --preserve keep; -a keeps every one.
+_DEFAULT_KEEP = frozenset({"mode", "ownership", "timestamps"})
+_ALL_KEEP = frozenset(PRESERVE_ATTRS) - {"all"}
+_NO_SELINUX = (
+    "cp: cannot preserve security context without an SELinux-enabled kernel"
+)
 SPECIAL_FILE_NOUNS = {
     FileType.FIFO: "fifo",
     FileType.CHAR_DEVICE: "special file",
@@ -95,6 +112,24 @@ SPECIAL_FILE_NOUNS = {
 
 @dataclass(frozen=True, slots=True)
 class CpFlags:
+    """The cp flag bag, parsed once.
+
+    The fields from ``preserve`` on are:
+
+    Args:
+        preserve (frozenset[str]): the attributes ``-p``, ``-a``,
+            ``--preserve`` and ``--no-preserve`` keep, in the order typed.
+        parents (bool): ``--parents``; each source lands under the
+            destination at the name it was typed as.
+        link (str | None): ``hard`` for ``-l``, ``symbolic`` for ``-s``.
+        remove_destination (bool): ``--remove-destination``; a file at
+            the destination is removed before the copy, a link standing
+            there replaced rather than written through.
+        attributes_only (bool): ``--attributes-only``; no bytes move.
+        force (bool): ``-f``; under ``-s``, a file at the destination
+            is replaced by the link.
+    """
+
     recursive: bool = False
     no_clobber: bool = False
     interactive: bool = False
@@ -105,6 +140,12 @@ class CpFlags:
     target_dir: PathSpec | None = None
     no_target_dir: bool = False
     dereference: CopyDeref = CopyDeref.ALWAYS
+    preserve: frozenset[str] = frozenset()
+    parents: bool = False
+    link: str | None = None
+    remove_destination: bool = False
+    attributes_only: bool = False
+    force: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +163,9 @@ class TransferLinks:
         relay_stat (StatFn): the dispatcher's stat, for the same walk.
         owns (Callable[[str], bool] | None): whether the mount the copy
             runs on serves a path; None where every path is its own.
+        content (PrimitiveCopy | None): what copies the bytes the relay
+            would, under ``--attributes-only`` none; None for the relay.
+            A backup always goes through the relay.
     """
 
     links: LinkView
@@ -130,6 +174,7 @@ class TransferLinks:
     relay: PrimitiveCopy
     relay_stat: StatFn
     owns: Callable[[str], bool] | None = None
+    content: PrimitiveCopy | None = None
 
 
 # Each option of cp's link policy, and what it asks for; the last typed
@@ -164,6 +209,189 @@ class TransferPolicy:
     backup: str | None = None
     suffix: str = DEFAULT_BACKUP_SUFFIX
     ask: Callable[[PathSpec], Awaitable[bool]] | None = None
+
+
+@dataclass(slots=True)
+class Keeper:
+    """What ``-p``, ``-a`` and ``--preserve`` carry from a source to its
+    copy, set through the dispatcher from the source's stat.
+
+    A file's attributes are set once its copy is made. A directory's
+    wait for the end of the line and go the deepest first, so the copies
+    made into it do not move its times again, set on the way out of the
+    directory. A field the source does not report (a folder an object
+    store keeps no time for answers an empty one) is left as the copy
+    has it, and one the destination refuses is logged and the copy
+    kept.
+
+    Args:
+        keep (frozenset[str]): ``mode``, ``ownership``, ``timestamps``
+            and ``xattr``, those asked for.
+        stat (StatFn): the sources' stat.
+        dispatch (DispatchFn): sets the attributes.
+        dirs (list[tuple[PathSpec, PathSpec]]): each directory made or
+            merged into and its source, in the order met.
+    """
+
+    keep: frozenset[str]
+    stat: StatFn
+    dispatch: DispatchFn
+    dirs: list[tuple[PathSpec, PathSpec]] = field(default_factory=list)
+
+    async def copied(self, src: PathSpec, dst: PathSpec) -> None:
+        """Set a copy's kept attributes from its source.
+
+        Args:
+            src (PathSpec): the source.
+            dst (PathSpec): its copy.
+        """
+        try:
+            info = await self.stat(src)
+            fields: dict[str, Any] = {}
+            if "mode" in self.keep and info.mode is not None:
+                fields["mode"] = info.mode & 0o7777
+            if "ownership" in self.keep:
+                fields.update(uid=info.uid, gid=info.gid)
+            if "timestamps" in self.keep:
+                fields.update(mtime=info.modified, atime=info.atime)
+            kept = {k: v for k, v in fields.items() if v not in (None, "")}
+            if kept:
+                await self.dispatch("setattr", dst, **kept)
+            if "xattr" in self.keep:
+                names, _ = await self.dispatch("listxattr", src)
+                for name in names:
+                    value, _ = await self.dispatch("getxattr", src, name=name)
+                    await self.dispatch(
+                        "setxattr", dst, name=name, value=value
+                    )
+        except FS_ERRORS as exc:
+            _logger.debug(
+                "cp: attributes of %s not kept on %s: %s",
+                src.virtual,
+                dst.virtual,
+                exc,
+            )
+
+    async def finish(self) -> None:
+        """Set the directories' attributes, the deepest first, a folder
+        several sources merge into from the last of them."""
+        done: set[str] = set()
+        for src, dst in reversed(self.dirs):
+            if dst.virtual in done:
+                continue
+            done.add(dst.virtual)
+            await self.copied(src, dst)
+
+
+async def _nothing(path: PathSpec) -> AsyncIterator[bytes]:
+    """No bytes, for a copy ``--attributes-only`` makes without reading.
+
+    Args:
+        path (PathSpec): the source, never read.
+    """
+    empty: tuple[bytes, ...] = ()
+    for chunk in empty:
+        yield chunk
+
+
+async def _made_empty(
+    stat: StatFn, dispatch: DispatchFn, dst: PathSpec
+) -> bool:
+    """Make an empty file where none stands, and say whether it did;
+    one that stands keeps its bytes, as ``--attributes-only`` leaves them.
+
+    Args:
+        stat (StatFn): stats the destination.
+        dispatch (DispatchFn): writes the empty file.
+        dst (PathSpec): the destination.
+    """
+    if await path_exists(stat, dst):
+        return False
+    await dispatch("write", dst, data=b"")
+    return True
+
+
+async def _empty_copy(
+    stat: StatFn,
+    dispatch: DispatchFn,
+    umask: int,
+    src: PathSpec,
+    dst: PathSpec,
+) -> None:
+    """A copy under ``--attributes-only``: a file it makes takes the
+    source's mode under the umask, as any new copy does, set only where
+    that differs from a new file's own.
+
+    Args:
+        stat (StatFn): stats the source and the destination.
+        dispatch (DispatchFn): writes the empty file and sets its mode.
+        umask (int): the session's creation mask.
+        src (PathSpec): the source, never read.
+        dst (PathSpec): the destination.
+    """
+    if not await _made_empty(stat, dispatch, dst):
+        return
+    info = await stat(src)
+    if info.mode is None:
+        return
+    mode = info.mode & 0o777 & ~umask
+    if mode != 0o666 & ~umask:
+        await dispatch("setattr", dst, mode=mode)
+
+
+async def _empty_write(
+    stat: StatFn,
+    dispatch: DispatchFn,
+    dst: PathSpec,
+    data: ByteSource | None = None,
+) -> None:
+    """A primitive write under ``--attributes-only``.
+
+    Args:
+        stat (StatFn): stats the destination.
+        dispatch (DispatchFn): writes the empty file.
+        dst (PathSpec): the destination.
+        data (ByteSource | None): the source's bytes, none here.
+    """
+    await _made_empty(stat, dispatch, dst)
+
+
+@overload
+def attributes_only(
+    strategy: PrimitiveCopy, stat: StatFn, dispatch: DispatchFn, umask: int
+) -> PrimitiveCopy: ...
+
+
+@overload
+def attributes_only(
+    strategy: CopyStrategy, stat: StatFn, dispatch: DispatchFn, umask: int
+) -> CopyStrategy: ...
+
+
+def attributes_only(
+    strategy: CopyStrategy, stat: StatFn, dispatch: DispatchFn, umask: int
+) -> CopyStrategy:
+    """The copy ``--attributes-only`` makes: no bytes are read or moved,
+    a destination file that is not there is made empty with the mode a
+    new copy gets, and directories are made as any copy makes them. A
+    primitive copy makes each file through its store-to-store ``copy``,
+    which goes first, so its read and write stay empty.
+
+    Args:
+        strategy (CopyStrategy): the copy it stands in for.
+        stat (StatFn): stats a source or a destination.
+        dispatch (DispatchFn): writes an empty file and sets its mode.
+        umask (int): the session's creation mask.
+    """
+    copy = partial(_empty_copy, stat, dispatch, umask)
+    if isinstance(strategy, PrimitiveCopy):
+        return replace(
+            strategy,
+            read=_nothing,
+            write=partial(_empty_write, stat, dispatch),
+            copy=copy,
+        )
+    return replace(strategy, copy=copy, dir_copy=None)
 
 
 def prompter(
@@ -302,16 +530,83 @@ def target_flags(cmd_name: str, fl: FlagView) -> tuple[PathSpec | None, bool]:
     return target_dir, no_target
 
 
+def _attr_words(option: str, text: str) -> tuple[frozenset[str], bool]:
+    """The attributes one ``--preserve`` or ``--no-preserve`` value
+    names, comma-separated, each word or a prefix of one; and whether it
+    names ``context`` itself, which ``all`` does not.
+
+    Args:
+        option (str): ``--preserve`` or ``--no-preserve``, for the refusal.
+        text (str): the value as typed.
+    """
+    named: set[str] = set()
+    context = False
+    for word in text.split(","):
+        match = match_word(word, PRESERVE_ATTRS)
+        if not isinstance(match, WordMatch):
+            raise word_refusal_error(
+                "cp", option, word, PRESERVE_ATTRS, 1, match.kind
+            )
+        if match.word == "all":
+            named |= _ALL_KEEP
+        else:
+            named.add(match.word)
+            context = context or match.word == "context"
+    return frozenset(named), context
+
+
+def preserved(fl: FlagView) -> frozenset[str]:
+    """What ``-p``, ``-a``, ``--preserve`` and ``--no-preserve`` keep, read
+    in the order typed, a later one adding to or taking from what the
+    earlier ones kept. A security context named outright is refused, as
+    it is without SELinux, unless a later option drops it; one
+    ``-a`` or ``all`` keeps is left out quietly. Hard links (``links``)
+    have nothing to keep here.
+
+    Args:
+        fl (FlagView): Flag view constructed with the cp spec.
+    """
+    kept: set[str] = set()
+    required = False
+    for name, value in fl.occurrences(
+        "p", "archive", "preserve", "no_preserve"
+    ):
+        if value is False or value is None:
+            continue
+        if name == "archive":
+            kept |= _ALL_KEEP
+        elif name == "p" or value is True:
+            kept |= _DEFAULT_KEEP
+        elif name == "preserve":
+            named, context = _attr_words("--preserve", str(value))
+            kept |= named
+            required = required or context
+        else:
+            named, _ = _attr_words("--no-preserve", str(value))
+            kept -= named
+            required = required and "context" not in named
+    if required:
+        raise UsageError(_NO_SELINUX, 1)
+    return frozenset(kept)
+
+
 def parse_flags(fl: FlagView) -> CpFlags:
     """Parse the cp flag bag once into a frozen struct.
 
     ``-f`` is an accepted no-op, ``-i`` asks before each overwrite,
     and ``--strip-trailing-slashes`` is a no-op because PathSpec already
-    normalizes trailing slashes.
+    normalizes trailing slashes. ``-l`` makes a hard link, which here is
+    a copy, as ``ln`` makes one; it cannot be typed with ``-s``.
 
     Args:
         fl (FlagView): Flag view constructed with the cp spec.
     """
+    if fl.as_bool("link") and fl.as_bool("symbolic_link"):
+        raise UsageError(
+            "cp: cannot make both hard and symbolic links\n"
+            f"{usage_hint('cp')}",
+            1,
+        )
     update = update_mode("cp", fl)
     suffix = suffix_flag(fl)
     control = backup_control("cp", backup_raw(fl), suffix)
@@ -353,6 +648,18 @@ def parse_flags(fl: FlagView) -> CpFlags:
         target_dir=target_dir,
         no_target_dir=no_target,
         dereference=dereference,
+        preserve=preserved(fl),
+        parents=fl.as_bool("parents"),
+        link=(
+            "symbolic"
+            if fl.as_bool("symbolic_link")
+            else "hard"
+            if fl.as_bool("link")
+            else None
+        ),
+        remove_destination=fl.as_bool("remove_destination"),
+        attributes_only=fl.as_bool("attributes_only"),
+        force=fl.as_bool("force"),
     )
 
 
@@ -479,19 +786,19 @@ async def make_link(
         return False
     if not await overwrite_gate(policy, stat, src, target, errors):
         return False
-    backup_strategy = (
-        NativeMove(rename=partial(rename_link, copies))
-        if target_link is not None
-        else copies.relay
-    )
     backup, ok = await make_backup(
         policy,
-        backup_strategy,
+        (
+            NativeMove(rename=partial(rename_link, copies))
+            if target_link is not None
+            else copies.relay
+        ),
         stat,
         copies.relay.readdir,
         target,
         errors,
         copies,
+        src,
     )
     if not ok:
         return False
@@ -547,6 +854,13 @@ async def copy_tree_links(
     """
     base = src.virtual.rstrip("/") or "/"
     dst_base = target.virtual.rstrip("/")
+    # Under --attributes-only a backup renames the destination aside, so
+    # the copy then makes a new empty file, as the line's own copy does.
+    aside = (
+        NativeMove(rename=partial(rename_link, copies))
+        if copies.content is not None
+        else None
+    )
     shown_src = src.raw_path.rstrip("/") or src.raw_path
     shown_dst = target.raw_path.rstrip("/") or target.raw_path
     below = sorted(copies.links.subtree(base), key=lambda row: row[0])
@@ -592,7 +906,7 @@ async def copy_tree_links(
             entry = replace(PathSpec.from_str_path(resolved), raw_path=shown)
             await copy_entries(
                 "cp",
-                copies.relay,
+                copies.content or copies.relay,
                 copies.relay_stat,
                 entry,
                 placed,
@@ -601,6 +915,7 @@ async def copy_tree_links(
                 policy=policy,
                 lines=lines,
                 copies=copies,
+                aside=aside,
             )
             continue
         inside = resolved.rstrip("/") or "/"
@@ -622,7 +937,7 @@ async def copy_tree_links(
         roots: list[str] = []
         await copy_entries(
             "cp",
-            copies.relay,
+            copies.content or copies.relay,
             copies.relay_stat,
             followed,
             placed,
@@ -632,6 +947,7 @@ async def copy_tree_links(
             lines=lines,
             copies=copies,
             blocked=roots,
+            aside=aside,
         )
         await copy_tree_links(
             copies,
@@ -1030,6 +1346,7 @@ async def _clear_for_directory(
         target,
         errors,
         copies,
+        src,
     )
     return target if ok else None
 
@@ -1210,6 +1527,7 @@ async def make_backup(
     target: PathSpec,
     errors: list[str],
     copies: TransferLinks | None = None,
+    src: PathSpec | None = None,
 ) -> tuple[PathSpec | None, bool]:
     """Back up an existing target before it is overwritten.
 
@@ -1221,6 +1539,8 @@ async def make_backup(
         target (PathSpec): The destination being replaced.
         errors (list[str]): Collected stderr lines, appended in place.
         copies (TransferLinks | None): Namespace facts and transfer calls.
+        src (PathSpec | None): The source, which a backup named like it
+            would destroy, so that transfer is refused.
 
     Returns:
         tuple[PathSpec | None, bool]: The backup path (None when no
@@ -1247,6 +1567,15 @@ async def make_backup(
         return None, False
     if backup is None:
         return None, True
+    if src is not None and backend_key_default(backup) == backend_key_default(
+        src
+    ):
+        verb = "moved" if policy.cmd_name == "mv" else "copied"
+        errors.append(
+            f"{policy.cmd_name}: backing up '{target.raw_path}' might destroy "
+            f"source;  '{src.raw_path}' not {verb}"
+        )
+        return None, False
     backup_link = (
         copies.links.stat_at(backup.virtual)
         if copies is not None and not isinstance(strategy, NativeMove)
@@ -1465,6 +1794,309 @@ def copy_failed(
     )
 
 
+def parented_targets(
+    sources: list[PathSpec], dst: PathSpec
+) -> list[tuple[PathSpec, PathSpec]]:
+    """``--parents``: each source lands under the destination at the
+    name it was typed as, ``cp --parents a/b/f d`` at ``d/a/b/f``.
+
+    Args:
+        sources (list[PathSpec]): the sources.
+        dst (PathSpec): the destination directory.
+    """
+    return [
+        (
+            src,
+            replace(
+                PathSpec.from_str_path(
+                    resolve_path(
+                        dst.virtual.rstrip("/") + "/" + src.raw_path, "/"
+                    )
+                ),
+                raw_path=dst.raw_path.rstrip("/") + "/" + src.raw_path,
+            ),
+        )
+        for src in sources
+    ]
+
+
+async def made_parents(
+    strategy: CopyStrategy,
+    stat: StatFn,
+    src: PathSpec,
+    dst: PathSpec,
+    cwd: str,
+    errors: list[str],
+    lines: list[str] | None,
+    keeper: Keeper | None,
+) -> bool:
+    """Make the directories ``--parents`` puts a source under, each named
+    as the source was typed; False when one could not be made.
+
+    Args:
+        strategy (CopyStrategy): the copy, whose ``mkdir`` makes them; a
+            backend without one has its directories implied.
+        stat (StatFn): stats each one.
+        src (PathSpec): the source.
+        dst (PathSpec): the destination directory.
+        cwd (str): the working directory each typed prefix resolves
+            against.
+        errors (list[str]): collects the error line.
+        lines (list[str] | None): verbose output, which names each one.
+        keeper (Keeper | None): notes each one made, whose attributes
+            ``-p`` takes from the source's own.
+    """
+    words = src.raw_path.split("/")[:-1]
+    for depth in range(1, len(words) + 1):
+        typed = "/".join(words[:depth])
+        if typed.strip("/.") == "":
+            continue
+        named = dst.raw_path.rstrip("/") + "/" + typed
+        made = replace(
+            PathSpec.from_str_path(
+                resolve_path(dst.virtual.rstrip("/") + "/" + typed, "/")
+            ),
+            raw_path=named,
+        )
+        exists, is_dir = await entry_kind(stat, made)
+        if is_dir:
+            continue
+        if strategy.mkdir is None:
+            continue
+        try:
+            if exists:
+                raise FileExistsError(errno.EEXIST, "File exists", named)
+            await strategy.mkdir(made)
+        except FS_ERRORS as exc:
+            errors.append(
+                f"cp: cannot make directory '{named}': {fs_strerror(exc)}"
+            )
+            return False
+        if lines is not None:
+            lines.append(f"{typed} -> {named}")
+        if keeper is not None:
+            source = replace(
+                PathSpec.from_str_path(resolve_path(typed, cwd)),
+                raw_path=typed,
+            )
+            keeper.dirs.append((source, made))
+    return True
+
+
+def relative_link_error(src: PathSpec, target: PathSpec) -> str | None:
+    """The refusal of ``-s`` with a relative source, which it can only
+    link from the working directory.
+
+    Args:
+        src (PathSpec): the source, as typed.
+        target (PathSpec): where the link goes.
+    """
+    if src.raw_path.startswith("/"):
+        return None
+    folder = target.raw_path.rpartition("/")[0]
+    if folder in ("", "."):
+        return None
+    return (
+        f"cp: {target.raw_path}: can make relative symbolic links only in "
+        "current directory"
+    )
+
+
+async def symlinked(
+    dispatch: DispatchFn,
+    stat: StatFn,
+    src: PathSpec,
+    target: PathSpec,
+    flags: CpFlags,
+    policy: TransferPolicy,
+    copies: TransferLinks | None,
+    errors: list[str],
+    lines: list[str] | None,
+) -> None:
+    """``-s``: link a source rather than copy it, the link reading the
+    source as typed. The link goes at the destination's own name, a link
+    standing there included, once the overwrite gates, a backup and
+    ``--remove-destination`` have run; a file still at the name stays,
+    with ``File exists``, unless ``-f`` replaces it.
+
+    Args:
+        dispatch (DispatchFn): makes the link.
+        stat (StatFn): stats the destination.
+        src (PathSpec): the source.
+        target (PathSpec): where the link goes.
+        flags (CpFlags): the parsed flags.
+        policy (TransferPolicy): the overwrite gates and backup.
+        copies (TransferLinks | None): finds a link standing at the name.
+        errors (list[str]): collects the error line.
+        lines (list[str] | None): verbose output.
+    """
+    refusal = relative_link_error(src, target)
+    if refusal is not None:
+        errors.append(refusal)
+        return
+    name = (None if copies is None else link_name(copies, target)) or target
+    if not await overwrite_gate(policy, stat, src, name, errors):
+        return
+    if await is_directory(stat, name):
+        errors.append(_onto_directory("cp", src, name, flags.backup))
+        return
+    backup, ok = await make_backup(
+        policy,
+        NativeMove(rename=partial(renamed, dispatch)),
+        stat,
+        None,
+        name,
+        errors,
+        copies,
+        src,
+    )
+    if not ok:
+        return
+    if flags.remove_destination and not await removed_first(
+        partial(unlinked, dispatch), stat, name, errors, lines
+    ):
+        return
+    try:
+        if await path_exists(stat, name):
+            if not flags.force:
+                raise FileExistsError(
+                    errno.EEXIST, "File exists", name.virtual
+                )
+            await dispatch("unlink", name)
+        await dispatch("symlink", name, target=src.raw_path)
+    except FS_ERRORS as exc:
+        errors.append(
+            f"cp: cannot create symbolic link '{target.raw_path}' to "
+            f"'{src.raw_path}': {fs_strerror(exc)}"
+        )
+        return
+    if lines is not None:
+        lines.append(transfer_line(src, target, backup))
+
+
+async def symlinked_tree(
+    dispatch: DispatchFn,
+    stat: StatFn,
+    readdir: ReaddirFn,
+    src: PathSpec,
+    target: PathSpec,
+    flags: CpFlags,
+    policy: TransferPolicy,
+    copies: TransferLinks | None,
+    errors: list[str],
+    lines: list[str] | None,
+) -> None:
+    """``-s -r``: make a source tree's directories and link each file in
+    it, each entry spelled under the source as typed, so a relative
+    source is refused file by file, as a single file is. A destination
+    inside the source is left out of the walk.
+
+    Args:
+        dispatch (DispatchFn): makes the directories and links.
+        stat (StatFn): stats each entry.
+        readdir (ReaddirFn): lists each directory.
+        src (PathSpec): the source directory.
+        target (PathSpec): where its copy goes.
+        flags (CpFlags): the parsed flags.
+        policy (TransferPolicy): the overwrite gates and backup.
+        copies (TransferLinks | None): finds a link standing at a name.
+        errors (list[str]): collects the error lines.
+        lines (list[str] | None): verbose output.
+    """
+    stack = [(src, target)]
+    while stack:
+        here, there = stack.pop()
+        try:
+            if not await path_exists(stat, there):
+                await dispatch("mkdir", there)
+                if lines is not None:
+                    lines.append(transfer_line(here, there, None))
+            names = sorted(await readdir(here))
+        except FS_ERRORS as exc:
+            errors.append(
+                f"cp: cannot create directory '{there.raw_path}': "
+                f"{fs_strerror(exc)}"
+            )
+            continue
+        for name in reversed(names):
+            entry = spelled_from(PathSpec.from_str_path(name), here)
+            if within(entry.virtual, target.virtual):
+                continue
+            leaf = name.rstrip("/").rpartition("/")[2]
+            landing = replace(
+                PathSpec.from_str_path(there.virtual.rstrip("/") + "/" + leaf),
+                raw_path=there.raw_path.rstrip("/") + "/" + leaf,
+            )
+            kind, _ = await source_kind(stat, entry)
+            if kind == FileType.DIRECTORY:
+                stack.append((entry, landing))
+            else:
+                await symlinked(
+                    dispatch,
+                    stat,
+                    entry,
+                    landing,
+                    flags,
+                    policy,
+                    copies,
+                    errors,
+                    lines,
+                )
+
+
+async def unlinked(dispatch: DispatchFn, path: PathSpec) -> None:
+    """Unlink one path through the dispatcher, a link itself.
+
+    Args:
+        dispatch (DispatchFn): the dispatcher.
+        path (PathSpec): the path.
+    """
+    await dispatch("unlink", path)
+
+
+async def renamed(dispatch: DispatchFn, src: PathSpec, dst: PathSpec) -> None:
+    """Rename one path through the dispatcher, a link itself.
+
+    Args:
+        dispatch (DispatchFn): the dispatcher.
+        src (PathSpec): the path renamed.
+        dst (PathSpec): its new name.
+    """
+    await dispatch("rename", src, dst=dst)
+
+
+async def removed_first(
+    unlink: Callable[[PathSpec], Awaitable[None]],
+    stat: StatFn,
+    dst: PathSpec,
+    errors: list[str],
+    lines: list[str] | None,
+) -> bool:
+    """``--remove-destination``: remove a file at the destination before
+    the copy, a link standing there itself rather than what it leads to;
+    False when it could not be removed.
+
+    Args:
+        unlink (Callable[[PathSpec], Awaitable[None]]): removes a path.
+        stat (StatFn): stats the destination.
+        dst (PathSpec): the destination.
+        errors (list[str]): collects the error line.
+        lines (list[str] | None): verbose output, which names the removal.
+    """
+    if not await path_exists(stat, dst):
+        return True
+    try:
+        await unlink(dst)
+    except FS_ERRORS as exc:
+        errors.append(
+            f"cp: cannot remove '{dst.raw_path}': {fs_strerror(exc)}"
+        )
+        return False
+    if lines is not None:
+        lines.append(f"removed '{dst.raw_path}'")
+    return True
+
+
 async def transfer_file(
     strategy: PrimitiveCopy | PrimitiveMove,
     src: PathSpec,
@@ -1547,6 +2179,7 @@ async def _mirror_dirs(
     into_itself: bool,
     lines: list[str] | None = None,
     unreadable: list[str] | None = None,
+    keeper: Keeper | None = None,
 ) -> tuple[list[str], set[str] | None]:
     """Recreate a source tree's directories under the destination root.
 
@@ -1580,6 +2213,8 @@ async def _mirror_dirs(
         unreadable (list[str] | None): Collects the source directories
             the walk may not open, which are still made at the
             destination; None lets the refusal propagate.
+        keeper (Keeper | None): notes each directory made, whose
+            attributes ``-p`` sets at the end.
 
     Returns:
         tuple[list[str], set[str] | None]: the source directories whose
@@ -1616,6 +2251,8 @@ async def _mirror_dirs(
             # source, coreutils 9.7).
             exists, is_dir = await entry_kind(stat, entry_dst)
             if is_dir:
+                if keeper is not None:
+                    keeper.dirs.append((entry, entry_dst))
                 continue
             free = (
                 not exists
@@ -1634,6 +2271,8 @@ async def _mirror_dirs(
         else:
             if free:
                 made.add(dst_mount)
+                if keeper is not None:
+                    keeper.dirs.append((entry, entry_dst))
                 if lines is not None:
                     lines.append(
                         f"'{entry.raw_path}' -> '{entry_dst.raw_path}'"
@@ -1726,6 +2365,9 @@ async def copy_entries(
     copies: TransferLinks | None = None,
     root_backup: PathSpec | None = None,
     blocked: list[str] | None = None,
+    keeper: Keeper | None = None,
+    remove_first: Callable[[PathSpec], Awaitable[None]] | None = None,
+    aside: NativeMove | None = None,
 ) -> bool:
     """Copy a walked source tree entry by entry with GNU per-entry errors.
 
@@ -1762,6 +2404,10 @@ async def copy_entries(
         blocked (list[str] | None): filled with the source directories
             whose trees were left out, for a caller that copies their
             links next.
+        keeper (Keeper | None): sets each copy's kept attributes.
+        remove_first (Callable[[PathSpec], Awaitable[None]] | None):
+            under ``--remove-destination``, what removes a file standing
+            at an entry's destination first.
 
     Returns:
         bool: Whether every entry landed.
@@ -1781,6 +2427,8 @@ async def copy_entries(
             try:
                 exists, is_dir = await entry_kind(stat, entry_dst)
                 if is_dir:
+                    if keeper is not None:
+                        keeper.dirs.append((entry, entry_dst))
                     continue
                 free = (
                     not exists
@@ -1805,6 +2453,8 @@ async def copy_entries(
             else:
                 if free:
                     made.add(entry_dst.virtual)
+                    if keeper is not None:
+                        keeper.dirs.append((entry, entry_dst))
                     if lines is not None:
                         lines.append(
                             f"created directory '{entry_dst.raw_path}'"
@@ -1864,22 +2514,30 @@ async def copy_entries(
         if policy is not None:
             backup, ok = await make_backup(
                 policy,
-                strategy,
+                aside or strategy,
                 stat,
                 strategy.readdir,
                 entry_dst,
                 errors,
                 copies,
+                entry,
             )
             if not ok:
                 copied_all = False
                 continue
+        if remove_first is not None and not await removed_first(
+            remove_first, stat, entry_dst, errors, lines
+        ):
+            copied_all = False
+            continue
         if lines is not None:
             lines.append(transfer_line(entry, entry_dst, backup, cmd_name))
         if not await transfer_file(
             strategy, entry, entry_dst, cmd_name, errors
         ):
             copied_all = False
+        elif keeper is not None:
+            await keeper.copied(entry, entry_dst)
     return copied_all
 
 
@@ -1895,6 +2553,8 @@ async def cp_generic(
     copies: TransferLinks | None = None,
     stdin: ByteSource | None = None,
     dispatch: DispatchFn | None = None,
+    umask: int | None = None,
+    cwd: str = "/",
 ) -> tuple[ByteSource | None, IOResult]:
     """Copy sources to a destination, fanning out into a directory.
 
@@ -1928,6 +2588,11 @@ async def cp_generic(
         dispatch (DispatchFn | None): the command's dispatcher, which
             lets a source's mount refuse a tree copied file by file;
             None outside a workspace.
+        umask (int | None): the session's creation mask, which a file
+            ``--attributes-only`` makes is under; the current session's
+            when None.
+        cwd (str): the working directory a typed ``--parents`` prefix
+            resolves against.
 
     Returns:
         tuple[ByteSource | None, IOResult]: Verbose output, with
@@ -1952,8 +2617,45 @@ async def cp_generic(
         dst_err = None
     else:
         dst_exists, dst_is_dir, dst_err = await dest_kind(to_dest, dst)
+    if flags.parents and not dst_is_dir:
+        return None, IOResult(
+            stderr=(
+                "cp: with --parents, the destination must be a directory\n"
+                f"{usage_hint('cp')}\n"
+            ).encode(),
+            exit_code=1,
+        )
     if readdir is None and isinstance(strategy, PrimitiveCopy):
         readdir = strategy.readdir
+    kept = flags.preserve & {"mode", "ownership", "timestamps", "xattr"}
+    keeper = (
+        Keeper(kept, stat, dispatch) if kept and dispatch is not None else None
+    )
+    if flags.attributes_only and dispatch is not None:
+        mask = session_umask() if umask is None else umask
+        strategy = attributes_only(strategy, stat, dispatch, mask)
+        if copies is not None:
+            # What the relay copies where a link leads off the copy's
+            # mount moves no bytes either; a backup still copies them.
+            copies = replace(
+                copies,
+                content=attributes_only(
+                    copies.relay, copies.relay_stat, dispatch, mask
+                ),
+            )
+    # A backup under --attributes-only renames the destination aside, so
+    # the copy then makes a new empty file: copying it
+    # would go through the strategy, which moves no bytes.
+    aside = (
+        NativeMove(rename=partial(rename_link, copies))
+        if flags.attributes_only and copies is not None
+        else None
+    )
+    unlink = (
+        partial(unlinked, dispatch)
+        if flags.remove_destination and dispatch is not None
+        else None
+    )
     errors: list[str] = []
     accepted: list[str] = []
     policy = TransferPolicy(
@@ -1973,6 +2675,8 @@ async def cp_generic(
         or flags.interactive
         or update_gates(flags.update)
         or backup_displaces(flags.backup)
+        or keeper is not None
+        or unlink is not None
     )
     lines: list[str] = []
     warned = 0
@@ -1985,9 +2689,14 @@ async def cp_generic(
         or update_gates(flags.update)
         or flags.backup == "numbered"
     )
-    for src, target in copy_targets(
-        sources, dst, dst_is_dir, dst_exists, dst_err, dotdot="."
-    ):
+    pairs = (
+        parented_targets(sources, dst)
+        if flags.parents
+        else copy_targets(
+            sources, dst, dst_is_dir, dst_exists, dst_err, dotdot="."
+        )
+    )
+    for src, target in pairs:
         link = (
             typed_link(copies.links, src, copies.cwd)
             if copies is not None and flags.dereference is CopyDeref.NEVER
@@ -2040,6 +2749,18 @@ async def cp_generic(
             )
             continue
         src_is_dir = src_kind == FileType.DIRECTORY
+        if flags.parents and (flags.recursive or not src_is_dir):
+            if not await made_parents(
+                strategy,
+                stat,
+                src,
+                dst,
+                cwd,
+                errors,
+                lines if flags.verbose else None,
+                keeper,
+            ):
+                continue
         if (
             flags.no_target_dir
             and not src_is_dir
@@ -2053,14 +2774,56 @@ async def cp_generic(
             # name as the working directory is what `walk_error` is for.
             errors.append(type_mismatch_error("cp", src, target, False))
             continue
-        if key_of(src) == key_of(target):
-            errors.append(same_file_error("cp", src, target))
+        if key_of(src) == key_of(target) and not (
+            copies is not None
+            and (backup_displaces(flags.backup) or unlink is not None)
+            and link_name(copies, target) is not None
+        ):
+            # A file is already its own hard link (coreutils 9.7: `cp -l
+            # f f` says nothing). A link to the source standing at the
+            # name is no such file where a backup moves it aside or
+            # --remove-destination removes it: the copy then lands there.
+            if flags.link != "hard" or src_is_dir:
+                errors.append(same_file_error("cp", src, target))
             continue
         # GNU copies a directory into its own subtree too: everything but
         # the new copy itself, before it says it could not (cp -r d d).
         into_itself = flags.recursive and key_of(target).startswith(
             key_of(src) + "/"
         )
+        if flags.link == "symbolic" and dispatch is not None:
+            if src_is_dir and flags.recursive and readdir is not None:
+                await symlinked_tree(
+                    dispatch,
+                    stat,
+                    readdir,
+                    src,
+                    target,
+                    flags,
+                    policy,
+                    copies,
+                    errors,
+                    lines if flags.verbose else None,
+                )
+                if into_itself:
+                    errors.append(
+                        f"cp: cannot copy a directory, '{src.raw_path}', "
+                        f"into itself, '{target.raw_path}'"
+                    )
+                continue
+            if not src_is_dir:
+                await symlinked(
+                    dispatch,
+                    stat,
+                    src,
+                    target,
+                    flags,
+                    policy,
+                    copies,
+                    errors,
+                    lines if flags.verbose else None,
+                )
+                continue
         if not flags.recursive and src_is_dir:
             errors.append(
                 f"cp: -r not specified; omitting directory '{src.raw_path}'"
@@ -2111,14 +2874,27 @@ async def cp_generic(
         if mismatch is not None:
             errors.append(mismatch)
             continue
-        if (
+        displaced = (
+            link_name(copies, target)
+            if copies is not None
+            and not src_is_dir
+            and (backup_displaces(flags.backup) or unlink is not None)
+            and not target_exists
+            else None
+        )
+        if displaced is not None:
+            # A backup moves, and --remove-destination removes, a dangling
+            # link itself, and the copy then lands at its name.
+            target = displaced
+        elif (
             not target_exists
             and link_at is not None
             and link_at(target) is not None
         ):
             # A dangling link: the stat followed it to nothing, but the
-            # name is taken. GNU will not create the file it points at
-            # (POSIX would), and the link is a non-directory to a tree.
+            # name is taken. The reference will not create the file it
+            # points at (POSIX would), and the link is a non-directory
+            # to a tree.
             if src_is_dir:
                 errors.append(type_mismatch_error("cp", src, target, True))
                 continue
@@ -2201,6 +2977,9 @@ async def cp_generic(
                     lines=lines if flags.verbose else None,
                     copies=copies,
                     blocked=left_out,
+                    keeper=keeper,
+                    aside=aside,
+                    remove_first=unlink,
                 )
                 if copies is not None:
                     await copy_tree_links(
@@ -2277,6 +3056,7 @@ async def cp_generic(
                 into_itself,
                 lines if flags.verbose else None,
                 unreadable,
+                keeper,
             )
             files = await strategy.find(src, type="f", unreadable=unreadable)
             errors.extend(
@@ -2310,14 +3090,23 @@ async def cp_generic(
                     continue
                 backup, ok = await make_backup(
                     policy,
-                    strategy,
+                    aside or strategy,
                     stat,
                     readdir,
                     entry_dst,
                     errors,
                     copies,
+                    entry,
                 )
                 if not ok:
+                    continue
+                if unlink is not None and not await removed_first(
+                    unlink,
+                    stat,
+                    entry_dst,
+                    errors,
+                    lines if flags.verbose else None,
+                ):
                     continue
                 if flags.verbose:
                     lines.append(transfer_line(entry, entry_dst, backup))
@@ -2326,6 +3115,8 @@ async def cp_generic(
                 except FS_ERRORS as exc:
                     errors.append(copy_failed("cp", entry, entry_dst, exc))
                     continue
+                if keeper is not None:
+                    await keeper.copied(entry, entry_dst)
             if copies is not None:
                 await copy_tree_links(
                     copies,
@@ -2364,18 +3155,26 @@ async def cp_generic(
             errors.append(refusal)
             continue
         copier: CopyStrategy = strategy
-        mover: CopyStrategy | NativeMove = strategy
-        if copies is not None and policy.backup is not None:
+        mover: CopyStrategy | NativeMove = aside or strategy
+        # A backup moves, and --remove-destination removes, a link
+        # standing at the name rather than what it leads to.
+        if copies is not None and (
+            policy.backup is not None or unlink is not None
+        ):
             linked = link_name(copies, target)
             if linked is not None:
                 target = linked
                 mover = NativeMove(rename=partial(rename_link, copies))
                 if copies.owns is not None and not copies.owns(target.virtual):
-                    copier = copies.relay
+                    copier = copies.content or copies.relay
         backup, ok = await make_backup(
-            policy, mover, stat, readdir, target, errors, copies
+            policy, mover, stat, readdir, target, errors, copies, src
         )
         if not ok:
+            continue
+        if unlink is not None and not await removed_first(
+            unlink, stat, target, errors, lines if flags.verbose else None
+        ):
             continue
         if flags.verbose:
             lines.append(transfer_line(src, target, backup))
@@ -2388,7 +3187,11 @@ async def cp_generic(
             except FS_ERRORS as exc:
                 errors.append(copy_failed("cp", src, target, exc))
                 continue
+        if keeper is not None:
+            await keeper.copied(src, target)
         created.add(key_of(target))
+    if keeper is not None:
+        await keeper.finish()
     output = "\n".join(lines) + "\n" if lines else None
     return output.encode() if output else None, IOResult(
         stderr=stderr_of(errors),

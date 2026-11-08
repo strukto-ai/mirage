@@ -21,11 +21,17 @@ export interface ExecAction {
   readonly kind: 'exec'
   readonly argv: readonly string[]
   readonly batch: boolean
+  // -execdir: the command runs in the match's directory and `{}` is `./`
+  // and the match's name.
+  readonly inDir?: boolean
 }
 
-/** One of find's row actions, in the position it was written. */
+/** One of find's row actions, in the position it was written. `file` is
+ * `-fprint` and `-fprint0`'s file as typed, absent for a row printed to
+ * the output. */
 export interface RowAction {
   readonly kind: RowActionKind
+  readonly file?: string | null
 }
 
 /** A run of `-printf` output that is the same for every row, its escapes
@@ -55,6 +61,8 @@ export interface PrintfAction {
   readonly format: string
   readonly parts: readonly PrintfPart[]
   readonly stat: boolean
+  // -fprintf's file as typed, absent for a row printed to the output.
+  readonly file?: string | null
 }
 
 export type FindAction = ExecAction | RowAction | PrintfAction

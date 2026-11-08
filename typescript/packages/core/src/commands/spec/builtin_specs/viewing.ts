@@ -150,6 +150,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-F', { action: 'store_true' }),
       new Argument('--retry', { action: 'store_true' }),
       new Argument(['-s', '--sleep-interval']),
+      new Argument('--pid'),
+      new Argument('--max-unchanged-stats'),
       PATHS_OPERAND,
     ],
   }),

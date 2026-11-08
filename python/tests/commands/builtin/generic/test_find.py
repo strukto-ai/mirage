@@ -872,3 +872,62 @@ async def test_empty_walk_does_not_treat_unknown_size_as_zero():
         args=FindArgs(empty=True),
     )
     assert result == []
+
+
+async def _tested_ws() -> Workspace:
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    ws.create_session("s")
+    await ws.shell(
+        "mkdir -p /w/d/sub; printf 'a\\n' > /w/d/a.txt; "
+        "printf 'bb\\n' > /w/d/b.txt; printf x > /w/d/sub/c.txt; cd /w",
+        session_id="s",
+    )
+    return ws
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,stdout",
+    [
+        ("find d -regex '.*/[ab]\\.txt'", "d/a.txt\nd/b.txt\n"),
+        ("find d -iregex '.*/A\\.TXT'", "d/a.txt\n"),
+        (
+            "find d -regextype posix-extended -regex 'd/(a|sub)(/.*)?'",
+            "d/sub\nd/sub/c.txt\n",
+        ),
+        ("find d -iwholename 'D/SUB*'", "d/sub\nd/sub/c.txt\n"),
+        ("find d -ipath 'D/S*' -type d", "d/sub\n"),
+        ("find d -type f -perm 644", "d/a.txt\nd/b.txt\nd/sub/c.txt\n"),
+        ("chmod 755 d/b.txt; find d -type f -perm -u=x", "d/b.txt\n"),
+        ("chmod 755 d/b.txt; find d -type f -perm /o=x", "d/b.txt\n"),
+        ("find d -mmin -5 -name a.txt", "d/a.txt\n"),
+        ("find d -mmin +5 -name a.txt", ""),
+        ("find d -amin -5 -name a.txt", "d/a.txt\n"),
+        ("find d -ctime -1 -name a.txt", "d/a.txt\n"),
+        ("find d -daystart -mtime 0 -name a.txt", "d/a.txt\n"),
+        ("ln -s a.txt d/l; find d -xtype f -name l", "d/l\n"),
+        ("ln -s a.txt d/l; find d -lname 'A*'", ""),
+        ("ln -s a.txt d/l; find d -ilname 'A*'", "d/l\n"),
+        ("ln -s gone d/l; find d -xtype l; find -L d -xtype l", "d/l\nd/l\n"),
+        ("find d -links 1 -name a.txt; find d -links +1", "d/a.txt\n"),
+        ("find d -name a.txt -readable -writable ! -executable", "d/a.txt\n"),
+        ("find d -true -name a.txt; find d -false", "d/a.txt\n"),
+        (
+            "chown 7 d/a.txt; find d -nouser; find d -uid 7",
+            "d/a.txt\nd/a.txt\n",
+        ),
+        ("chown 7 d/a.txt; find d -user 007; find d -uid -7", "d/a.txt\n"),
+        (
+            "chown alice d/a.txt; find d -user alice; find d -nouser",
+            "d/a.txt\n",
+        ),
+        ("find d -name a.txt -follow -type f", "d/a.txt\n"),
+    ],
+)
+async def test_find_tests_read_the_entry(line, stdout):
+    ws = await _tested_ws()
+    result = await ws.shell(line, session_id="s")
+    assert (await result.stdout_str(), await result.stderr_str()) == (
+        stdout,
+        "",
+    )

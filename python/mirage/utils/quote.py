@@ -88,6 +88,23 @@ SHELL_QUOTED_COMMANDS: frozenset[str] = frozenset(
 )
 
 
+# Each ``ls --quoting-style`` word and the mirage-rs style that renders
+# it. ls quotes a ``:`` as ordinary, so its shell styles are not the
+# diagnostics' ones.
+LS_STYLES = {
+    "literal": "literal",
+    "shell": "ls_shell",
+    "shell-always": "ls_shell_always",
+    "shell-escape": "ls_shell_escape",
+    "shell-escape-always": "ls_shell_escape_always",
+    "c": "c",
+    "c-maybe": "c_maybe",
+    "escape": "escape",
+    "locale": "locale",
+    "clocale": "locale",
+}
+
+
 def _quote(name: str, style: str) -> str:
     stream = open_stream("quote", {"style": style})
     stream.feed(encode_text(name))
@@ -103,16 +120,24 @@ def quotes_operands(cmd_name: str) -> bool:
     return cmd_name in SHELL_QUOTED_COMMANDS
 
 
-def escape_name(name: str) -> str:
-    """GNU ls -b names: C escapes, with spaces and backslashes protected.
+def quote_name(name: str, style: str, hide: bool = False) -> str:
+    """A name as ``ls --quoting-style`` prints it.
 
     Uses the same UTF-8 locale policy as shell_quote_always, including
-    its documented divergence for unassigned Unicode characters.
+    its documented divergence for unassigned Unicode characters; so
+    ``clocale`` is ``locale``.
 
     Args:
         name (str): the filename or symlink target to display.
+        style (str): the ``--quoting-style`` word.
+        hide (bool): ``-q``, a control as ``?`` where the style prints it
+            raw.
     """
-    return _quote(name, "escape")
+    if style == "literal" and not hide:
+        return name
+    stream = open_stream("quote", {"style": LS_STYLES[style], "hide": hide})
+    stream.feed(encode_text(name))
+    return decode_text(stream.finish())
 
 
 def shell_quote_always(name: str) -> str:

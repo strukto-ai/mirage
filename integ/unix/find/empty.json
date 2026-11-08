@@ -64,12 +64,17 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sle/lonly && mkdir -p /data/sle/vac && ln -s /data/a.txt /data/sle/lonly/lk && find /data/sle/vac -empty && find /data/sle/lonly -empty && rm /data/sle/lonly/lk && rm -r /data/sle",
+      "command": "mkdir -p /data/sle/lonly && mkdir -p /data/sle/vac && ln -s /data/a.txt /data/sle/lonly/lk && find /data/sle/vac -empty && find /data/sle/lonly -empty; find /data/sle -xtype f; find /data/sle -lname '*a.txt'; find /data/sle -ilname '*A.TXT'; find /data/sle -lname 'a*'; find /data/sle -type l -xtype f; find -L /data/sle -xtype l; ln -s nowhere /data/sle/vac/dead; find /data/sle -xtype l; find -L /data/sle -type l; rm /data/sle/vac/dead && rm /data/sle/lonly/lk && rm -r /data/sle",
       "expect": {
         "exit": 0,
-        "stdout": "/data/sle/vac\n",
+        "stdout": "/data/sle/vac\n/data/sle/lonly/lk\n/data/sle/lonly/lk\n/data/sle/lonly/lk\n/data/sle/lonly/lk\n/data/sle/lonly/lk\n/data/sle/vac/dead\n/data/sle/vac/dead\n",
         "stderr": ""
-      }
+      },
+      "flags": [
+        "xtype",
+        "lname",
+        "ilname"
+      ]
     },
     {
       "id": "find_empty_type_d_lists_only_empty_directories",

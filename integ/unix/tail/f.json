@@ -143,15 +143,17 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'l1\\nl2\\n' > /data/tfr.txt && tail -n1 --retry /data/tfr.txt",
+      "command": "printf 'l1\\nl2\\n' > /data/tfr.txt && tail -n1 --retry /data/tfr.txt; tail -n1 --pid=1 /data/tfr.txt; tail --pid=abc /data/tfr.txt; echo code=$?; tail --max-unchanged-stats=x /data/tfr.txt; echo code=$?; tail -f --pid=999999 /data/tfr.txt; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "l2\n",
-        "stderr": "tail: warning: --retry ignored; --retry is useful only when following\n"
+        "stdout": "l2\nl2\ncode=1\ncode=1\nl1\nl2\ncode=0\n",
+        "stderr": "tail: warning: --retry ignored; --retry is useful only when following\ntail: warning: PID ignored; --pid=PID is useful only when following\ntail: invalid PID: 'abc'\ntail: invalid maximum number of unchanged stats between opens: 'x'\n"
       },
       "flags": [
         "n",
-        "retry"
+        "retry",
+        "pid",
+        "max-unchanged-stats"
       ]
     },
     {

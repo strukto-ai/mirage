@@ -12,8 +12,11 @@ from mirage.commands.builtin.generic.ls import (
     LS_OK,
     LsWarning,
     exit_status_for,
+    ignored,
+    laid_out,
     link_mode,
     ls,
+    ls_options,
     parse_flags,
     probe_operand,
     sort_by_version,
@@ -28,6 +31,7 @@ from mirage.types import (
     ContentType,
     FileStat,
     FileType,
+    LsFormat,
     LsIndicator,
     LsLinkMode,
     LsSortBy,
@@ -150,7 +154,10 @@ async def test_ls_unstattable_entry_is_a_minor_problem():
 
     denying_stat = partial(_stat_denying, stat=stat, blocked="/dir/locked.txt")
     output, io = await ls(
-        [_spec("/dir")], readdir=readdir, stat=denying_stat, long=True
+        [_spec("/dir")],
+        readdir=readdir,
+        stat=denying_stat,
+        layout=LsFormat.VERBOSE,
     )
     assert io.exit_code == LS_MINOR_PROBLEM
     assert output.decode().endswith("? locked.txt\n")
@@ -189,7 +196,7 @@ def _failing_entry(exc: Exception):
         (RuntimeError("upstream 502 Bad Gateway"), {}, "b.txt", b""),
         (
             FileNotFoundError("/dir/b.txt"),
-            {"long": True},
+            {"layout": LsFormat.VERBOSE},
             "?????????? ? ? ? ?            ? b.txt",
             b"ls: cannot access '/dir/b.txt': No such file or directory\n",
         ),
@@ -201,7 +208,7 @@ def _failing_entry(exc: Exception):
         ),
         (
             OSError(errno.EIO, "socket hang up"),
-            {"long": True},
+            {"layout": LsFormat.VERBOSE},
             "?????????? ? ? ? ?            ? b.txt",
             b"ls: cannot access '/dir/b.txt': Input/output error\n",
         ),
@@ -554,7 +561,7 @@ async def test_access_time_sorts_and_shows_under_u():
         [_spec("/t")],
         readdir=readdir,
         stat=stat,
-        long=True,
+        layout=LsFormat.VERBOSE,
         columns=LsColumns(
             owner=False,
             group=False,
@@ -781,7 +788,7 @@ async def test_dot_entries_respect_mount_boundary(prefix, subdir, namespace):
         ],
         readdir=readdir,
         stat=stat,
-        long=True,
+        layout=LsFormat.VERBOSE,
         all_files=True,
         show_dot_entries=True,
         stat_path=stat_path if namespace else None,
@@ -832,3 +839,187 @@ def test_type_indicator_marks_by_style(kind, mode, marks):
 
 def test_type_indicator_marks_nothing_it_could_not_stat():
     assert type_indicator(None, LsIndicator.CLASSIFY) == ""
+
+
+def _listing(*names: str) -> dict[str, FileStat]:
+    tree = {"/q": FileStat(name="q", type=FileType.DIRECTORY)}
+    for name in names:
+        tree[f"/q/{name}"] = _file(name, modified="2025-01-15T10:30:00Z")
+    return tree
+
+
+async def _ls_lines(tree: dict[str, FileStat], flags, env=None) -> str:
+    readdir, stat = _make_fs_backend(tree)
+    out, io = await ls(
+        [_spec("/q")], readdir=readdir, stat=stat, **ls_options(flags, env)
+    )
+    assert io.exit_code == 0
+    return out.decode()
+
+
+# The last of each spelling wins, each measured on coreutils 9.7: -f is
+# -a and -U, -1 leaves a long format long, -G drops the group as -o does,
+# and the environment stands in only where no option gave a value.
+@pytest.mark.parametrize(
+    "flags,env,attr,expected",
+    [
+        ({"C": True}, None, "layout", LsFormat.VERTICAL),
+        ({"args_l": True, "args_1": True}, None, "layout", LsFormat.VERBOSE),
+        ({"args_l": True, "m": True}, None, "layout", LsFormat.COMMAS),
+        ({"full_time": True}, None, "layout", LsFormat.VERBOSE),
+        ({"format": "across"}, None, "layout", LsFormat.HORIZONTAL),
+        ({"f": True}, None, "sort_by", LsSortBy.NONE),
+        ({"f": True}, None, "show_dot_entries", True),
+        ({"no_group": True}, None, "columns.group", False),
+        ({"size": True}, None, "columns.blocks", True),
+        ({"quote_name": True}, None, "quoting", "c"),
+        ({"quote_name": True, "literal": True}, None, "quoting", "literal"),
+        ({}, {"QUOTING_STYLE": "shell-a"}, "quoting", "shell-always"),
+        ({"escape": True}, {"QUOTING_STYLE": "c"}, "quoting", "escape"),
+        ({"hide_control_chars": True}, None, "hide_control", True),
+        ({"width": "0x10"}, None, "width", 16),
+        ({"width": "0"}, None, "width", None),
+        ({"C": True}, {"COLUMNS": "30"}, "width", 30),
+        ({}, {"COLUMNS": "30"}, "width", 80),
+        ({"tabsize": "0"}, None, "tabsize", 0),
+    ],
+)
+def test_parse_flags_reads_the_format_quoting_and_width(
+    flags, env, attr, expected
+):
+    assert attrgetter(attr)(parse_flags(flags, env)) == expected
+
+
+@pytest.mark.parametrize(
+    "order,dots,shown",
+    [
+        (("all", "f"), True, True),
+        (("f", "almost_all"), False, True),
+        (("almost_all", "f"), True, True),
+    ],
+)
+def test_the_last_of_a_A_and_f_says_which_dot_entries_show(order, dots, shown):
+    parsed = parse_flags({dest: True for dest in order})
+    assert (parsed.show_dot_entries, parsed.all_files) == (dots, shown)
+
+
+def test_ignore_patterns_gather_i_b_and_a_hide_that_a_overrides():
+    flags = {"ignore": ["v"], "ignore_backups": True, "hide": ["d"]}
+    assert parse_flags(flags).ignore == ("v", "*~", ".*~", "d")
+    assert parse_flags({**flags, "all": True}).ignore == ("v", "*~", ".*~")
+
+
+def test_a_bad_environment_value_is_a_notice_not_a_refusal():
+    parsed = parse_flags({"C": True}, {"QUOTING_STYLE": "x", "COLUMNS": "-5"})
+    assert parsed.notices == (
+        "ls: ignoring invalid value of environment variable "
+        "QUOTING_STYLE: 'x'",
+        "ls: ignoring invalid width in environment variable COLUMNS: '-5'",
+    )
+
+
+def test_a_pattern_skips_a_leading_dot_only_where_it_spells_one():
+    assert ignored(("*",), "v")
+    assert not ignored(("*",), ".h")
+    assert ignored((".*",), ".")
+    assert ignored((".*~",), ".y~")
+    assert not ignored(("*~",), ".y~")
+
+
+def test_rows_lay_out_in_columns_across_or_with_commas():
+    rows = ["aaaa", "bbbb", "cccc", "dddd"]
+    assert laid_out(rows, LsFormat.VERTICAL, 22, 8) == [
+        "aaaa  cccc",
+        "bbbb  dddd",
+    ]
+    assert laid_out(rows, LsFormat.HORIZONTAL, 22, 8) == [
+        "aaaa  bbbb  cccc",
+        "dddd",
+    ]
+    assert laid_out(rows, LsFormat.COMMAS, 17, 8) == [
+        "aaaa, bbbb, cccc,",
+        "dddd",
+    ]
+    assert laid_out(rows, LsFormat.SINGLE_COLUMN, 22, 8) == rows
+    assert laid_out(["a\udcffb"], LsFormat.VERTICAL, None, 8) == ["a\udcffb"]
+
+
+@pytest.mark.asyncio
+async def test_a_bare_name_lines_up_with_quoted_ones_in_columns_and_long():
+    tree = _listing("a b", "c", "it's", "x~")
+    assert (
+        await _ls_lines(tree, {"C": True, "quoting_style": "shell"})
+        == "'a b'   c  \"it's\"   x~\n"
+    )
+    assert (
+        await _ls_lines(tree, {"args_1": True, "quoting_style": "shell"})
+        == "'a b'\nc\n\"it's\"\nx~\n"
+    )
+    assert (
+        await _ls_lines(tree, {"m": True, "quoting_style": "shell"})
+        == "'a b', c, \"it's\", x~\n"
+    )
+    long = await _ls_lines(
+        tree,
+        {"args_l": True, "g": True, "o": True, "time_style": "+T"}
+        | {"quoting_style": "shell"},
+    )
+    assert [row.split(" T ", 1)[1] for row in long.splitlines()[1:]] == [
+        "'a b'",
+        " c",
+        '"it\'s"',
+        " x~",
+    ]
+    assert (
+        await _ls_lines(tree, {"C": True, "quoting_style": "c-maybe"})
+        == "a b  c\tit's  x~\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_ignored_names_and_dot_entries_are_left_out():
+    tree = _listing(".h", ".y~", "v", "w~")
+    assert (
+        await _ls_lines(tree, {"almost_all": True, "ignore_backups": True})
+        == ".h\nv\n"
+    )
+    assert await _ls_lines(tree, {"all": True, "ignore": [".*"]}) == "v\nw~\n"
+    assert await _ls_lines(tree, {"hide": ["v"]}) == "w~\n"
+    assert await _ls_lines(tree, {"all": True, "hide": ["v"]}) == (
+        ".\n..\n.h\n.y~\nv\nw~\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_s_leads_each_row_with_an_unknown_block_count_and_a_total():
+    tree = _listing("a", "b")
+    assert await _ls_lines(tree, {"size": True}) == "total ?\n? a\n? b\n"
+    assert await _ls_lines(tree, {"size": True, "inode": True}) == (
+        "total ?\n? ? a\n? ? b\n"
+    )
+    long = await _ls_lines(
+        tree, {"size": True, "args_l": True, "g": True, "o": True}
+    )
+    assert long.splitlines()[1].startswith("? -rw")
+
+
+@pytest.mark.asyncio
+async def test_columns_come_from_the_environment_and_notices_lead_stderr():
+    tree = _listing("aaaa", "bbbb", "cccc", "dddd")
+    assert (
+        await _ls_lines(tree, {"C": True}, {"COLUMNS": "22"})
+        == "aaaa  cccc\nbbbb  dddd\n"
+    )
+    readdir, stat = _make_fs_backend(tree)
+    out, io = await ls(
+        [_spec("/q"), _spec("/nope")],
+        readdir=readdir,
+        stat=stat,
+        **ls_options({}, {"QUOTING_STYLE": "bogus"}),
+    )
+    assert io.exit_code == LS_FAILURE
+    assert io.stderr == (
+        b"ls: ignoring invalid value of environment variable "
+        b"QUOTING_STYLE: 'bogus'\n"
+        b"ls: cannot access '/nope': No such file or directory\n"
+    )

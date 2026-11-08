@@ -26,14 +26,25 @@
         "opfs",
         "disk"
       ],
-      "command": "ls -b /data/escaped",
+      "command": "ls -b /data/escaped; (mkdir /data/lsq && cd /data/lsq && touch 'a b' c \"it's\" x~ $'t\\tb' && ls -C --quoting-style=shell -w 40; ls -x --quoting-style=c-maybe -w 40; ls -go --time-style=+T --quoting-style=shell | sed 1d | sed 's/^.* T //'; ls -Q; ls -N -Q -q; ls -q --show-control-chars --quoting-style=shell-always; QUOTING_STYLE=escape ls -m; QUOTING_STYLE=bogus ls c; ls --quoting-style=sh c; echo rc=$?); rm -rf /data/lsq",
       "expect": {
         "exit": 0,
-        "stdout": "\\a\\b\\v\\f\\r\\033\\177\na\\ b\na:b\nback\\\\slash\nline\\nhere\nquote'\"\ntab\\there\n\\302\\205\né🌍\n",
-        "stderr": ""
+        "stdout": "\\a\\b\\v\\f\\r\\033\\177\na\\ b\na:b\nback\\\\slash\nline\\nhere\nquote'\"\ntab\\there\n\\302\\205\né🌍\n'a b'   c  \"it's\"  't\tb'   x~\n a b   c   it's  \"t\\tb\"   x~\n'a b'\n c\n\"it's\"\n't\tb'\n x~\n\"a b\"\n\"c\"\n\"it's\"\n\"t\\tb\"\n\"x~\"\n\"a b\"\n\"c\"\n\"it's\"\n\"t\\tb\"\n\"x~\"\n'a b'\n'c'\n\"it's\"\n't\tb'\n'x~'\na\\ b, c, it's, t\\tb, x~\nc\nrc=1\n",
+        "stderr": "ls: ignoring invalid value of environment variable QUOTING_STYLE: 'bogus'\nls: ambiguous argument 'sh' for '--quoting-style'\nValid arguments are:\n  - 'literal'\n  - 'shell'\n  - 'shell-always'\n  - 'shell-escape'\n  - 'shell-escape-always'\n  - 'c'\n  - 'c-maybe'\n  - 'escape'\n  - 'locale'\n  - 'clocale'\nTry 'ls --help' for more information.\n"
       },
       "flags": [
-        "b"
+        "b",
+        "C",
+        "x",
+        "m",
+        "Q",
+        "quote-name",
+        "N",
+        "literal",
+        "quoting-style",
+        "q",
+        "hide-control-chars",
+        "show-control-chars"
       ]
     },
     {
@@ -98,14 +109,15 @@
         "opfs",
         "disk"
       ],
-      "command": "ln -s $'tab\\there' $'/data/escaped/link\\nname'; ls -lb /data/escaped | sed -n '/link/p' | sed 's/^.* link/link/'",
+      "command": "ln -s $'tab\\there' $'/data/escaped/link\\nname'; ls -lb /data/escaped | sed -n '/link/p' | sed 's/^.* link/link/'; ls -lQ /data/escaped | sed -n '/link/p' | sed 's/^.* \"link/\"link/'",
       "expect": {
         "exit": 0,
-        "stdout": "link\\nname -> tab\\there\n",
+        "stdout": "link\\nname -> tab\\there\n\"link\\nname\" -> \"tab\\there\"\n",
         "stderr": ""
       },
       "flags": [
-        "b"
+        "b",
+        "Q"
       ]
     },
     {

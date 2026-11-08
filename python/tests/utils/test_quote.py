@@ -16,7 +16,7 @@ import pytest
 
 from mirage.utils.quote import (
     SHELL_QUOTED_COMMANDS,
-    escape_name,
+    quote_name,
     quotes_operands,
     shell_quote,
     shell_quote_always,
@@ -195,7 +195,36 @@ def test_never_quoting_commands_stay_out_of_the_table():
     ],
 )
 def test_ls_escape_names(name, expected):
-    assert escape_name(name) == expected
+    assert quote_name(name, "escape") == expected
+
+
+# ls --quoting-style over one name, measured on debian:stable-slim under
+# C.UTF-8: a ``:`` stays bare, unlike a diagnostic's quoting.
+@pytest.mark.parametrize(
+    "style,hide,expected",
+    [
+        ("literal", False, "a:b\tc"),
+        ("literal", True, "a:b?c"),
+        ("shell", False, "'a:b\tc'"),
+        ("shell", True, "'a:b?c'"),
+        ("shell-always", False, "'a:b\tc'"),
+        ("shell-escape", False, "'a:b'$'\\t''c'"),
+        ("shell-escape-always", False, "'a:b'$'\\t''c'"),
+        ("c", False, '"a:b\\tc"'),
+        ("c-maybe", False, '"a:b\\tc"'),
+        ("escape", False, "a:b\\tc"),
+        ("locale", False, "\u2018a:b\\tc\u2019"),
+        ("clocale", False, "\u2018a:b\\tc\u2019"),
+    ],
+)
+def test_ls_quoting_styles(style, hide, expected):
+    assert quote_name("a:b\tc", style, hide) == expected
+    assert quote_name("a:b", style, hide) in (
+        "a:b",
+        "'a:b'",
+        '"a:b"',
+        "\u2018a:b\u2019",
+    )
 
 
 def test_quoting_preserves_raw_bytes_and_a_leading_bom():
@@ -208,4 +237,4 @@ def test_quoting_a_word_larger_than_the_wasm_input_window():
     prefix = "a" * (96 * 1024 - 1)
     name = prefix + "\x85\udcff"
     assert shell_quote(name) == f"'{prefix}'$'\\302\\205''\udcff'"
-    assert escape_name(name) == prefix + "\\302\\205\\377"
+    assert quote_name(name, "escape") == prefix + "\\302\\205\\377"

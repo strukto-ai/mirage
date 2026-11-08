@@ -63,12 +63,15 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "find /data/roots1 /data/a.txt -name '*.txt'",
+      "command": "find /data/roots1 /data/a.txt -name '*.txt'; printf '/data/roots1/sub\\0/data/a.txt\\0' > /data/roots1.lst; find -files0-from /data/roots1.lst -name '*.txt'; printf '/data/a.txt\\0\\0/data/b.txt' > /data/roots1.lst; find -files0-from /data/roots1.lst; echo rc=$?; printf '/data/a.txt\\0' | find -files0-from - -name a.txt; find /data/a.txt -files0-from /data/roots1.lst; echo rc=$?; : > /data/roots1.lst; find -files0-from /data/roots1.lst; echo rc=$?; find -files0-from /data/nolist; echo rc=$?; rm /data/roots1.lst",
       "expect": {
         "exit": 0,
-        "stdout": "/data/roots1/r1.txt\n/data/roots1/sub/r2.txt\n/data/a.txt\n",
-        "stderr": ""
-      }
+        "stdout": "/data/roots1/r1.txt\n/data/roots1/sub/r2.txt\n/data/a.txt\n/data/roots1/sub/r2.txt\n/data/a.txt\n/data/a.txt\n/data/b.txt\nrc=1\n/data/a.txt\nrc=1\nrc=0\nrc=1\n",
+        "stderr": "find: '/data/roots1.lst':2: invalid zero-length file name\nfind: extra operand '/data/a.txt'\nfind: file operands cannot be combined with -files0-from\nfind: cannot open '/data/nolist' for reading: No such file or directory\n"
+      },
+      "flags": [
+        "files0-from"
+      ]
     },
     {
       "id": "find_roots_duplicate_walks_twice",

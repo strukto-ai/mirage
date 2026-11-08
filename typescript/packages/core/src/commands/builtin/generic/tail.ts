@@ -29,6 +29,7 @@ import {
   type StatFn,
 } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
+import type { ProcessView } from '../../../execution/process/view.ts'
 import { enoent, fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { shellQuote } from '../../../utils/quote.ts'
@@ -81,12 +82,16 @@ export function normalizeCounts(counts: TailCounts): TailCounts {
   }
 }
 
-/** -f/--follow[=HOW], -F, --retry and -s as tail reads them. */
+/**
+ * -f/--follow[=HOW], -F, --retry, -s and --pid as tail reads them: a follow
+ * ends once `pid`'s process is gone, and 0 names none.
+ */
 export interface FollowFlags {
   readonly follow: boolean
   readonly byName: boolean
   readonly retry: boolean
   readonly interval: number
+  readonly pid: number | null
 }
 
 // -f, --follow[=HOW] and -F as (follow, by name, retry), `how` the --follow
@@ -424,8 +429,10 @@ async function window(
 // keeps polling for it (and for one that was never there) and announces
 // `has appeared` when it turns up, reading it from the start as GNU does
 // after a rotation. The loop ends only when nothing is left to follow
-// (`no files remaining`, exit 1) or the caller's signal fires, which is
-// how `timeout` and a killed job end it. A file whose stat carries no
+// (`no files remaining`, exit 1), when --pid's process is gone (a poll that
+// finds nothing new looks, and once it is gone one more poll reads what it
+// wrote last), or when the caller's signal fires, which is how `timeout` and
+// a killed job end it. A file whose stat carries no
 // size (a backend that cannot know one without reading reports null,
 // never a guess) is polled by reading it whole every interval and
 // measuring that: one read per poll, rather than a follow that never
@@ -439,7 +446,8 @@ async function window(
 // asked of the mount's `follow` first: a mount that is told about new lines
 // (a change stream), or can be asked for only the new ones every -s seconds,
 // hands over the last lines and then each new one as it lands, so the file is
-// not read again on each poll and the two meet at one point.
+// not read again on each poll and the two meet at one point; a line with a
+// --pid polls, since only a poll can look for the process.
 async function* follow(
   paths: readonly PathSpec[],
   pending: readonly [PathSpec, string][],
@@ -460,7 +468,9 @@ async function* follow(
     n: number,
     interval: number,
   ) => Promise<AsyncIterable<Uint8Array> | null>,
+  processes?: ProcessView,
 ): AsyncGenerator<Uint8Array> {
+  const writer = flags.pid === 0 ? null : flags.pid
   const positions = new Map<number, number>()
   let added: AsyncIterable<Uint8Array> | null = null
   const active: [number, PathSpec][] = paths.map((p, i) => [i, p])
@@ -487,6 +497,7 @@ async function* follow(
           paths.length === 1 &&
           pending.length === 0 &&
           !flags.byName &&
+          writer === null &&
           !isStdin(p)
         ) {
           added = await followOp(p, followLines, flags.interval)
@@ -540,9 +551,16 @@ async function* follow(
   }
   for (const entry of active.filter(([, p]) => isStdin(p))) active.splice(active.indexOf(entry), 1)
   if (onlyStdin) return
+  let gone = false
+  let idle = true
   while ((active.length > 0 || waiting.length > 0) && !hasAborted(signal)) {
-    await pause(flags.interval, signal)
+    if (writer !== null && idle) {
+      if (gone) return
+      gone = !writerRuns(processes, writer)
+    }
+    if (!gone) await pause(flags.interval, signal)
     if (hasAborted(signal)) return
+    idle = true
     for (const entry of [...waiting]) {
       const [slot, p, how] = entry
       let found: FileStat
@@ -609,6 +627,7 @@ async function* follow(
       if (data.byteLength > 0) {
         if (showHeaders && last !== slot) yield operandHeader(p, true)
         last = slot
+        idle = false
         yield data
       }
       positions.set(slot, pos)
@@ -617,6 +636,18 @@ async function* follow(
   if (hasAborted(signal)) return
   note(io, 'tail: no files remaining\n')
   io.exitCode = 1
+}
+
+// Whether --pid's process still runs, as kill(pid, 0) answers: one the
+// session cannot see is gone, and one it sees but may not signal still runs.
+function writerRuns(processes: ProcessView | undefined, pid: number): boolean {
+  if (processes === undefined) return false
+  try {
+    return processes.probe(pid)
+  } catch (err) {
+    if ((err as { code?: string }).code === 'EPERM') return true
+    throw err
+  }
 }
 
 // Sort the operands that did not open into the ones --retry waits for and
@@ -660,6 +691,7 @@ async function unfollowable(
 
 const RETRY_IGNORED = 'tail: warning: --retry ignored; --retry is useful only when following\n'
 const RETRY_INITIAL = 'tail: warning: --retry only effective for the initial open\n'
+const PID_IGNORED = 'tail: warning: PID ignored; --pid=PID is useful only when following\n'
 // A name is what -F follows, and standard input has none.
 const STDIN_BY_NAME = "tail: cannot follow '-' by name\n"
 // What a waited-for name is announced as when it turns up: a missing file
@@ -681,7 +713,7 @@ export interface TailFlags {
 export function parseFlags(bag: Record<string, FlagValue>): TailFlags | IOResult {
   const fl = new FlagView(bag, specOf('tail'))
   const raw = fl.raw('follow')
-  const typed = fl.texts('lines', 'bytes', 'sleep_interval')
+  const typed = fl.texts('lines', 'bytes', 'sleep_interval', 'pid', 'max_unchanged_stats')
   if (typeof raw === 'string') typed.push(['follow', raw])
   let values
   try {
@@ -707,6 +739,10 @@ export function parseFlags(bag: Record<string, FlagValue>): TailFlags | IOResult
   if (interval !== null && typeof interval !== 'number') {
     throw new Error(`tail: mirage-rs read -s as ${JSON.stringify(interval)}`)
   }
+  const pid = values.pid
+  if (pid !== null && typeof pid !== 'number') {
+    throw new Error(`tail: mirage-rs read --pid as ${JSON.stringify(pid)}`)
+  }
   return {
     counts: {
       lines,
@@ -722,6 +758,7 @@ export function parseFlags(bag: Record<string, FlagValue>): TailFlags | IOResult
       byName,
       retry,
       interval: interval ?? Number.POSITIVE_INFINITY,
+      pid,
     },
   }
 }
@@ -766,14 +803,14 @@ export async function tailGeneric(
   ) {
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(STDIN_BY_NAME) })]
   }
-  // GNU warns first, then tails as if --retry were not there; a descriptor
-  // it follows only after the initial open says so too.
-  const retryWarning =
-    following.retry && !following.follow
+  // The warnings come first, then tail runs as if --retry and --pid were not
+  // there; a descriptor it follows only after the initial open says so too.
+  const warnings =
+    (following.retry && !following.follow
       ? RETRY_IGNORED
       : following.retry && !following.byName
         ? RETRY_INITIAL
-        : ''
+        : '') + (following.pid !== null && !following.follow ? PID_IGNORED : '')
   // GNU opens nothing when a tail from the end keeps no line or byte.
   if (
     !following.follow &&
@@ -781,14 +818,14 @@ export async function tailGeneric(
     counts.fromByte === null &&
     (counts.byteCount ?? n) === 0
   ) {
-    return [null, new IOResult({ stderr: retryWarning === '' ? null : encodeText(retryWarning) })]
+    return [null, new IOResult({ stderr: warnings === '' ? null : encodeText(warnings) })]
   }
   if (paths.length > 0) {
     const showHeaders = showsHeaders(vFlag, qFlag, paths.length)
     const [opened, unread, err] = await splitOpened(paths, stat, 'tail')
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
-      stderr: retryWarning + err === '' ? null : encodeText(retryWarning + err),
+      stderr: warnings + err === '' ? null : encodeText(warnings + err),
     })
     if (!following.follow) {
       if (opened.length === 0) return [null, io]
@@ -850,6 +887,7 @@ export async function tailGeneric(
         paths.every((p) => isStdin(p)),
         fromEnd ? n : null,
         followOp,
+        ctx.processes,
       ),
       io,
     ]
@@ -859,5 +897,5 @@ export async function tailGeneric(
     if (vFlag && !qFlag) yield operandHeader(null)
     yield* tail(ctx.stdin ?? new Uint8Array(), counts)
   }
-  return [output(), new IOResult({ stderr: retryWarning === '' ? null : encodeText(retryWarning) })]
+  return [output(), new IOResult({ stderr: warnings === '' ? null : encodeText(warnings) })]
 }

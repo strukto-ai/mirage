@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
-from mirage.types import FindType
+from mirage.types import FileStat, FindType
 
 # find's row actions: -print, -print0, -ls and -delete.
 RowActionKind = Literal["print", "print0", "ls", "delete"]
@@ -12,6 +12,14 @@ class FindEntry:
     """One walked entry, as the predicate tree sees it: a mount-relative
     key, the basename (the start point's own name at depth 0) and the
     kind ``f``, ``d``, ``l`` or ``c``.
+
+    ``stat`` is the stat the walk took when a test reads one (``-perm``,
+    ``-user``, ``-lname``, ``-atime``...), the link itself unless the
+    walk follows links. ``xkind`` is ``-xtype``'s kind: what a link
+    leads to when the walk keeps links, ``l`` for a link the walk
+    followed, and the kind itself for anything else. ``target`` is the
+    stat of what a live link the walk keeps leads to, which the access
+    tests answer through.
     """
 
     key: str
@@ -20,6 +28,9 @@ class FindEntry:
     depth: int
     is_empty: bool | None = None
     mtime: float | None = None
+    stat: FileStat | None = None
+    xkind: str | None = None
+    target: FileStat | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,18 +47,128 @@ class Path:
     the operand as typed (``find . -path ./skip`` prints and matches
     ``./skip``), so ``bind_tree`` stamps all three onto the node before
     evaluation and entry keys stay mount-relative (#396). An empty
-    ``root`` leaves the row as the display path.
+    ``root`` leaves the row as the display path. ``icase`` is
+    ``-ipath``.
     """
 
     pattern: str
     prefix: str = ""
     root: str = ""
     raw: str = ""
+    icase: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Regex:
+    """``-regex`` and ``-iregex``: an expression that must match the
+    whole path as ``find`` prints it.
+
+    The path is spelled as ``Path`` spells it, from the same three
+    fields ``bind_tree`` stamps. Evaluation is synchronous and a search
+    is not, so the walk asks every entry's answer before it evaluates
+    (``prime_regexes``) and the node keeps them by entry key.
+
+    Args:
+        pattern (str): the expression as typed.
+        icase (bool): ``-iregex``.
+        dialect (str): ``emacs`` or ``posix``, as ``-regextype`` chose.
+        extended (bool): an extended expression rather than a basic one.
+        utf8 (bool): the session's locale reads paths as UTF-8.
+    """
+
+    pattern: str
+    icase: bool = False
+    dialect: Literal["emacs", "posix"] = "emacs"
+    extended: bool = False
+    utf8: bool = False
+    prefix: str = ""
+    root: str = ""
+    raw: str = ""
+    hits: dict[str, bool] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class Lname:
+    """``-lname`` and ``-ilname``: a glob over a link's target text; no
+    entry that is not a link matches."""
+
+    pattern: str
+    icase: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class Type:
     kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class XType:
+    """``-xtype``: the entry's kind on the other side of a link (see
+    ``FindEntry.xkind``)."""
+
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class Perm:
+    """``-perm``: the entry's permission bits against ``mode``, exactly,
+    with every bit of it set (``all``) or with any (``any``, which an
+    empty mode always holds for).
+    """
+
+    mode: int
+    bits: Literal["exact", "all", "any"] = "exact"
+
+
+@dataclass(frozen=True, slots=True)
+class Count:
+    """``-links``, ``-uid`` and ``-gid``: a number compared more than
+    (``+``), less than (``-``) or equal to (``=``) ``count``."""
+
+    field: Literal["links", "uid", "gid"]
+    cmp: Literal["+", "-", "="]
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class Owner:
+    """``-user`` and ``-group``: the owner or group as ``ls -l`` names
+    it. mirage keeps any name ``chown`` was given, so every name is a
+    user and none is refused; a number also matches the id it spells.
+    ``profile`` is the session's own name, which owns an entry that
+    reports none.
+    """
+
+    name: str
+    group: bool = False
+    profile: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NoOwner:
+    """``-nouser`` and ``-nogroup``: an owner or group known only by its
+    number. mirage keeps no user database, so a number names no one, as
+    ``ls -l`` shows it; a name ``chown`` stored, or the session owning an
+    entry that reports none, is someone."""
+
+    group: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Access:
+    """``-readable``, ``-writable`` and ``-executable``: the owner's
+    bits of the entry's mode, the session owning what it sees; a
+    directory is searchable through its ``x`` bit as the reference's is."""
+
+    mode: Literal["r", "w", "x"]
+
+
+@dataclass(frozen=True, slots=True)
+class Quit:
+    """``-quit``: true, and nothing after it runs, for this entry or any
+    other. The walk reads ``fired`` after each entry to stop."""
+
+    fired: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +184,16 @@ class And:
 @dataclass(frozen=True, slots=True)
 class Or:
     kids: list["PredNode"]
+
+
+@dataclass(frozen=True, slots=True)
+class Size:
+    """``-size`` as the inclusive byte bounds it rounds to; a directory
+    weighs ``DIR_SIZE``, a stat of unknown size nothing, and an entry
+    with no stat matches no bound."""
+
+    min: int | None = None
+    max: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +233,9 @@ class Action:
 @dataclass(frozen=True, slots=True)
 class Mtime:
     """``-mtime``, ``-newermt`` and a resolved ``-newer``: an inclusive
-    epoch-second window over the entry's modification time.
+    epoch-second window over the entry's modification time, or over its
+    access or change time for ``-atime``, ``-ctime`` and their minute
+    twins (``field`` ``a`` or ``c``, read from the entry's stat).
 
     Only a test in the top-level ``-a`` chain also narrows the
     expression's flat window (``FindExpr.mtime_min``/``mtime_max``),
@@ -118,6 +251,7 @@ class Mtime:
 
     lo: float | None
     hi: float | None
+    field: Literal["m", "a", "c"] = "m"
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,7 +290,16 @@ class Prune:
 PredNode = (
     Name
     | Path
+    | Regex
+    | Lname
     | Type
+    | XType
+    | Perm
+    | Count
+    | Owner
+    | NoOwner
+    | Access
+    | Size
     | Empty
     | Not
     | And
@@ -164,6 +307,7 @@ PredNode = (
     | TrueNode
     | Action
     | Prune
+    | Quit
     | Mtime
 )
 
@@ -172,13 +316,15 @@ PredNode = (
 class Effects:
     """What evaluating an expression on one entry did besides answer:
     whether an action was reached, whether a prune node recorded the
-    entry (firm or pending), and the time tests the entry carried no
-    mtime for on the path that decided the answer so far; a branch whose
-    outcome they could not have changed drops them again.
+    entry (firm or pending), whether a ``-quit`` ended the evaluation,
+    and the time tests the entry carried no mtime for on the path that
+    decided the answer so far; a branch whose outcome they could not
+    have changed drops them again.
     """
 
     acted: bool = False
     pruned: bool = False
+    quit: bool = False
     deferred: list[Mtime] = field(default_factory=list)
 
 
@@ -198,3 +344,4 @@ class FindArgs:
     or_names: list[str] | None = None
     empty: bool = False
     tree: PredNode | None = None
+    depth_first: bool = False

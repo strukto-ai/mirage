@@ -92,6 +92,7 @@ async def run_dispatch(
     diff: DiffComputer | None = None,
     ids: IdSource | None = None,
     find: FindExpr | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run the same builder once across every operand's owning mount.
 
@@ -124,6 +125,7 @@ async def run_dispatch(
             None means the system source.
         find (FindExpr | None): find's parsed expression, which its
             builder reads in place of ``texts``.
+        env (dict[str, str] | None): the command's environment.
     """
     ctx = Context(
         flags=virtual_flags(flag_kwargs),
@@ -134,6 +136,7 @@ async def run_dispatch(
         diff=diff,
         ids=ids if ids is not None else SystemIdSource(),
         find=find,
+        env=env,
     )
     # No mount is bound to the run, a line that spans mounts walking
     # through the dispatcher, even inside a command a mount runs (a

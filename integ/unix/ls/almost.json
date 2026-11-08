@@ -105,10 +105,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r10dot/d && touch /data/r10dot/.h /data/r10dot/v /data/r10dot/d/.x && ls /data/r10dot; ls -a /data/r10dot; ls -A /data/r10dot; ls -R /data/r10dot",
+      "command": "mkdir -p /data/r10dot/d && touch /data/r10dot/.h /data/r10dot/v /data/r10dot/d/.x && ls /data/r10dot; ls -a /data/r10dot; ls -A /data/r10dot; ls -R /data/r10dot; touch /data/r10dot/w~ /data/r10dot/.y~ && ls -B /data/r10dot; ls -A -B /data/r10dot; ls -a -I '.*' /data/r10dot; ls -I v --hide=d /data/r10dot; ls -a --hide=d /data/r10dot; ls -A --ignore=d --hide=v /data/r10dot; ls -f /data/r10dot | sort; ls -f -A /data/r10dot | sort; ls -I v /data/r10dot/v",
       "expect": {
         "exit": 0,
-        "stdout": "d\nv\n.\n..\n.h\nd\nv\n.h\nd\nv\n/data/r10dot:\nd\nv\n\n/data/r10dot/d:\n",
+        "stdout": "d\nv\n.\n..\n.h\nd\nv\n.h\nd\nv\n/data/r10dot:\nd\nv\n\n/data/r10dot/d:\nd\nv\n.h\nd\nv\nd\nv\nw~\nw~\n.\n..\n.h\n.y~\nd\nv\nw~\n.h\n.y~\nv\nw~\n.\n..\n.h\n.y~\nd\nv\nw~\n.h\n.y~\nd\nv\nw~\n/data/r10dot/v\n",
         "stderr": ""
       }
     }

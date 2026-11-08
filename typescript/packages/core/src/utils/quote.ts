@@ -85,8 +85,24 @@ export const SHELL_QUOTED_COMMANDS: ReadonlySet<string> = new Set([
   'wc',
 ])
 
-function quote(name: string, style: string): string {
-  const stream = openStreamSync('quote', { style })
+// Each `ls --quoting-style` word and the mirage-rs style that renders it. ls
+// quotes a `:` as ordinary, so its shell styles are not the diagnostics'
+// ones.
+const LS_STYLES: Readonly<Record<string, string>> = {
+  literal: 'literal',
+  shell: 'ls_shell',
+  'shell-always': 'ls_shell_always',
+  'shell-escape': 'ls_shell_escape',
+  'shell-escape-always': 'ls_shell_escape_always',
+  c: 'c',
+  'c-maybe': 'c_maybe',
+  escape: 'escape',
+  locale: 'locale',
+  clocale: 'locale',
+}
+
+function quote(name: string, style: string, hide = false): string {
+  const stream = openStreamSync('quote', { style, hide })
   try {
     stream.feed(encodeText(name))
     return decodeText(stream.finish())
@@ -100,9 +116,15 @@ export function quotesOperands(cmdName: string): boolean {
   return SHELL_QUOTED_COMMANDS.has(cmdName)
 }
 
-/** GNU ls -b, using shellQuoteAlways's documented UTF-8 locale policy. */
-export function escapeName(name: string): string {
-  return quote(name, 'escape')
+/** A name as `ls --quoting-style` prints it, `hide` (-q) printing a control
+ * as `?` where the style prints it raw. Uses shellQuoteAlways's documented
+ * UTF-8 locale policy, so `clocale` is `locale`. Mirrors Python's
+ * quote_name. */
+export function quoteName(name: string, style: string, hide = false): string {
+  if (style === 'literal' && !hide) return name
+  const rendered = LS_STYLES[style]
+  if (rendered === undefined) throw new Error(`ls: no quoting style ${style}`)
+  return quote(name, rendered, hide)
 }
 
 // Wrap a name so a shell would read it back as itself: GNU's

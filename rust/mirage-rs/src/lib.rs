@@ -430,6 +430,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "rg_format" => rg_format::open(config),
         "scan" => scan::open(config),
         "quote" => quote::open(config),
+        "ls_columns" => ls::open_columns(config),
         "width" => width::open(config),
         "date" => date::open(config),
         "expr" => expr::open(config),

@@ -15,7 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { evaluate, treeHasAction } from '../core/generic/find_eval.ts'
 import { UsageError } from '../commands/errors.ts'
-import { mtimeBounds, parseFindExpression } from './find.ts'
+import { ageBounds, mtimeBounds, nextMidnight, parseFind, parseFindExpression } from './find.ts'
+import { UTC_ZONE } from '../utils/timezone.ts'
 
 describe('parseFindExpression', () => {
   it('negation', () => {
@@ -327,8 +328,8 @@ describe('parseFindExpression', () => {
 
   it('throws on unsupported predicates', () => {
     for (const toks of [
-      ['-regex', '.*'],
-      ['-perm', '644'],
+      ['-ok', 'echo', ';'],
+      ['-okdir', 'echo', ';'],
       ['-nam', 'x'],
     ]) {
       expect(() => parseFindExpression(toks)).toThrow('unknown predicate')
@@ -693,4 +694,107 @@ it.each([
   ],
 ])('refuses detached newer tests: %s', (tokens, message) => {
   expect(() => parseFindExpression(tokens)).toThrow(message)
+})
+
+describe('the tests and actions find gained', () => {
+  it('binds the new tests to their nodes', () => {
+    const expr = parseFind([
+      '-regex',
+      'a.*',
+      '-ilname',
+      'x',
+      '-xtype',
+      'l',
+      '-perm',
+      '/u=x',
+      '-links',
+      '+1',
+      '-user',
+      'bob',
+      '-nogroup',
+      '-writable',
+      '-ipath',
+      'D*',
+      '-quit',
+    ]).bind([], undefined, { LC_ALL: 'C.UTF-8' }, 'me')
+    expect(expr.tree).toEqual({
+      op: 'and',
+      kids: [
+        {
+          op: 'regex',
+          pattern: 'a.*',
+          icase: false,
+          dialect: 'emacs',
+          extended: false,
+          utf8: true,
+          hits: new Map(),
+        },
+        { op: 'lname', pattern: 'x', icase: true },
+        { op: 'xtype', kind: 'l' },
+        { op: 'perm', mode: 0o100, bits: 'any' },
+        { op: 'count', field: 'links', cmp: '+', count: 1 },
+        { op: 'owner', name: 'bob', group: false, profile: 'me' },
+        { op: 'nouser', group: true },
+        { op: 'access', mode: 'w' },
+        { op: 'path', pattern: 'D*', icase: true },
+        { op: 'quit', fired: [] },
+      ],
+    })
+    expect(expr.actions).toEqual([])
+  })
+
+  it('carries the file and directory of an action', () => {
+    const expr = parseFindExpression([
+      '-execdir',
+      'echo',
+      '{}',
+      '+',
+      '-fprintf',
+      'out',
+      '%p',
+      '-fprint',
+      'out',
+    ])
+    expect(expr.actions[0]).toEqual({
+      kind: 'exec',
+      argv: ['echo', '{}'],
+      batch: true,
+      inDir: true,
+    })
+    expect(expr.actions[1]).toMatchObject({ kind: 'printf', file: 'out' })
+    expect(expr.files).toEqual(['out'])
+    const listed = parseFindExpression(['-follow', '-files0-from', 'list'])
+    expect([listed.follow, listed.files0From]).toEqual([true, 'list'])
+  })
+
+  it('rounds a minute count up', () => {
+    const now = 10_000
+    const [lo, hi] = ageBounds('=', 2, true, now)
+    expect(lo).toBe(now - 120)
+    expect(hi !== null && hi > now - 61 && hi < now - 60).toBe(true)
+    const [, plus] = ageBounds('+', 2, true, now)
+    expect(plus !== null && plus > now - 121 && plus < now - 120).toBe(true)
+    const [less] = ageBounds('-', 1.5, true, now)
+    expect(less !== null && less > now - 90 && less < now - 89).toBe(true)
+    expect(ageBounds('=', 1, false, now)).toEqual(mtimeBounds('=', 1, now))
+  })
+
+  it('narrows the window by the modification time alone', () => {
+    const expr = parseFindExpression(['-amin', '-5', '-mmin', '-10'])
+    expect(
+      expr.tree.op === 'and' &&
+        expr.tree.kids.map((kid) => kid.op === 'mtime' && (kid.field ?? 'm')),
+    ).toEqual(['a', 'm'])
+    expect(expr.mtimeMin).not.toBeNull()
+    const onlyAccess = parseFindExpression(['-atime', '1'])
+    expect([onlyAccess.mtimeMin, onlyAccess.mtimeMax]).toEqual([null, null])
+  })
+
+  it('measures -daystart from the midnight ending today', () => {
+    const now = Date.UTC(2024, 2, 9, 15, 30) / 1000
+    const midnight = Date.UTC(2024, 2, 10) / 1000
+    expect(nextMidnight(now, UTC_ZONE)).toBe(midnight)
+    const expr = parseFind(['-daystart', '-mtime', '0']).bind([], now, { TZ: 'UTC' })
+    expect(expr.mtimeMax).toBe(midnight)
+  })
 })

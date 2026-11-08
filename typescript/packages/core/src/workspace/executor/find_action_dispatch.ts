@@ -19,27 +19,28 @@ import {
   type PrintfStatFacts,
 } from '../../commands/builtin/find_printf.ts'
 import type { ExecAction, FindAction } from '../../commands/builtin/types.ts'
+import { listedNames } from '../../commands/builtin/utils/files0.ts'
 import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
 import type { Identity } from '../../commands/builtin/utils/identity.ts'
 import { linkView } from '../../commands/builtin/utils/links.ts'
 import { currentCaller, getCurrentSession, runAsProgram } from '../../context/session_context.ts'
-import { modifiedTs } from '../../core/generic/find.ts'
-import { printfKind, treeHasTime } from '../../core/generic/find_eval.ts'
-import { enoent, strerrorOf } from '../../errors/fs.ts'
+import { compareDepthFirst, modifiedTs } from '../../core/generic/find.ts'
+import { printfKind, treeHas, treeHasTime } from '../../core/generic/find_eval.ts'
+import { enoent, isFsError, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
-import { SharedStdin } from '../../io/stream.ts'
-import { type ByteSource, materialize, type PathRecord } from '../../io/types.ts'
+import { ensureStream, SharedStdin } from '../../io/stream.ts'
+import { type ByteSource, IOResult, materialize, type PathRecord } from '../../io/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { FindExpr } from '../../rs/find.ts'
 import type { OpenStream } from '../../rs/stream.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { shellJoin } from '../../shell/join.ts'
-import { type FileStat, FileType, type PathSpec } from '../../types.ts'
+import { type FileStat, FileType, PathSpec } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
 import { resolvePath } from '../../utils/path.ts'
+import { shellQuoteAlways } from '../../utils/quote.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
 import { contentSize } from '../../utils/stat_view.ts'
 import type { StatPath } from '../../view/types.ts'
 import type { ExecuteFn } from '../expand/types.ts'
@@ -63,7 +64,8 @@ import type { SessionState } from '../session/session.ts'
  * substitutes every `{}` inside every word (`x{}y` is `xd/a.txty`), a
  * batched run replaces its one bare `{}` with the matches, one word
  * each. The head is substituted like any other word, which is what lets
- * `-exec {} \;` run each match itself.
+ * `-exec {} \;` run each match itself. `-execdir` hands its matches in
+ * already spelled `./name`.
  */
 export function execWords(action: ExecAction, paths: readonly string[]): string[] {
   const words: string[] = []
@@ -116,6 +118,18 @@ export async function programHead(
   return [!program, shadowed]
 }
 
+/**
+ * Where `-execdir` runs for one row and what `{}` becomes: the directory
+ * the row is printed under and `./` plus its last name, so `d/a.txt` runs
+ * in `d` as `./a.txt` and a start point `.` in `.` as `./.`.
+ */
+export function execDir(path: string): [string, string] {
+  const trimmed = rstripSlash(path) || '/'
+  const at = trimmed.lastIndexOf('/')
+  if (at < 0) return ['.', `./${trimmed}`]
+  return [trimmed.slice(0, at) || '/', `./${trimmed.slice(at + 1)}`]
+}
+
 async function runExec(
   executeFn: ExecuteFn,
   session: SessionState | null,
@@ -127,13 +141,17 @@ async function runExec(
   out: Uint8Array[],
   errors: Uint8Array[],
   stdin: SharedStdin | null,
+  // -execdir's directory as printed, which the run enters first; null runs
+  // where find does.
+  where: string | null = null,
 ): Promise<boolean> {
   // GNU substitutes the matches into the words and only then hands them
   // to execvp, so the head looked up is the substituted one: `-exec {}
   // \;` runs each match itself.
   const words = execWords(action, paths)
   const head = words[0] ?? action.argv[0] ?? ''
-  const [missing, shadowed] = await programHead(head, session, registry, cwd, statPath)
+  const here = where === null ? cwd : resolvePath(where, cwd)
+  const [missing, shadowed] = await programHead(head, session, registry, here, statPath)
   if (missing) {
     errors.push(encodeText(`find: '${head}': No such file or directory\n`))
     return false
@@ -142,7 +160,8 @@ async function runExec(
   // line runs the program past it, as `command` does. The run is marked a
   // program run for the session, so a builtin that doubles as a program
   // answers as the program (`printf -v` is a format).
-  const line = (shadowed ? 'command ' : '') + shellJoin(words)
+  const joined = (shadowed ? 'command ' : '') + shellJoin(words)
+  const line = where === null ? joined : `cd -- ${shellJoin([where])} && ${joined}`
   // find stays its process and forks each program as a child of it.
   const process = currentCaller().process
   if (process != null) process.oneCommand = false
@@ -277,30 +296,6 @@ function startBase(start: PathSpec | undefined): string {
   return start === undefined ? '.' : start.rawPath || start.virtual
 }
 
-/**
- * GNU's `-depth` order over sorted siblings: a directory's contents, each
- * sorted, then the directory. The final component is flagged so a path
- * sorts after its descendants, whose entry at that depth carries the same
- * name unflagged. A start point spelled with a trailing slash prints as
- * `d/` while its descendants print as `d/a`, so the slash is dropped
- * before splitting: kept, it would leave an empty final component that
- * sorts the directory ahead of everything under it, which is the one
- * order `-delete` cannot remove a tree in.
- */
-export function compareDepthFirst(a: string, b: string): number {
-  const pa = rstripSlash(a).split('/')
-  const pb = rstripSlash(b).split('/')
-  const n = Math.min(pa.length, pb.length)
-  for (let i = 0; i < n; i++) {
-    const byName = compareCodePoints(pa[i] ?? '', pb[i] ?? '')
-    if (byName !== 0) return byName
-    const fa = i === pa.length - 1 ? 1 : 0
-    const fb = i === pb.length - 1 ? 1 : 0
-    if (fa !== fb) return fa - fb
-  }
-  return pa.length - pb.length
-}
-
 /** Whether a row is a mount point or a namespace-only ancestor of one,
  * which are not unlinkable entries. Ancestors use the raw mount table
  * like isMountRoot: an ungranted mount still pins its ancestors in the
@@ -326,13 +321,137 @@ function testsStat(expr: FindExpr): boolean {
     expr.mtimeMin !== null ||
     expr.mtimeMax !== null ||
     treeHasTime(expr.tree) ||
+    treeHas(expr.tree, ['size', 'perm', 'count', 'owner', 'nouser', 'lname', 'xtype']) ||
     expr.usesEmpty ||
     expr.newer.length > 0
   )
 }
 
 function hasActions(expr: FindExpr): boolean {
-  return expr.actions.length > 1 || expr.actions.some((a) => a.kind !== 'print')
+  return (
+    expr.actions.length > 1 ||
+    expr.actions.some((a) => a.kind !== 'print' || (a.file !== undefined && a.file !== null))
+  )
+}
+
+// The files -fprint names that are find's own streams, not files.
+const STDOUT = '/dev/stdout'
+const STDERR = '/dev/stderr'
+const NULL = '/dev/null'
+const STREAMS: readonly string[] = [STDOUT, STDERR, NULL]
+
+function fileSpec(file: string, cwd: string): PathSpec {
+  return PathSpec.fromStrPath(file, undefined, cwd)
+}
+
+/**
+ * Create every file `-fprint`, `-fprint0` and `-fprintf` name, empty,
+ * before the walk, as the reference opens them while it parses: a file no row
+ * reaches still exists, and one that cannot be created ends find before
+ * it walks. Returns the reference's line for the first file that cannot be created,
+ * null when every one was.
+ */
+export async function openFindFiles(
+  expr: FindExpr,
+  cwd: string,
+  dispatch: DispatchFn | null,
+): Promise<Uint8Array | null> {
+  if (dispatch === null) return null
+  for (const file of expr.files ?? []) {
+    if (STREAMS.includes(resolvePath(file, cwd))) continue
+    try {
+      await dispatch('write', fileSpec(file, cwd), [new Uint8Array()])
+    } catch (err) {
+      return encodeText(`find: '${file}': ${strerrorOf(err)}\n`)
+    }
+  }
+  return null
+}
+
+// The words before find's start points that are not start points.
+const LINK_OPTIONS: readonly string[] = ['-P', '-H', '-L']
+// Start point names find's grammar would read as the expression.
+const GRAMMAR: readonly string[] = ['!', '(', ')']
+
+/**
+ * `find -files0-from LIST`: find over the start points a list of
+ * NUL-terminated names holds, `-` reading the list from stdin. The names
+ * become the line's start points, run as the line again, so each one
+ * routes to its mount as a typed operand does. A start point typed beside
+ * the list is refused, an empty name is refused by its place in the list
+ * while the others run, and an empty list walks nothing. A name the
+ * grammar would read as a test (`-x`, `!`) is handed on as `./-x`, which
+ * is the same file.
+ */
+export async function runListedFind(
+  expr: FindExpr,
+  words: readonly string[],
+  cwd: string,
+  dispatch: DispatchFn | null,
+  executeFn: ExecuteFn | null,
+  sessionId: string,
+  stdin: ByteSource | null,
+): Promise<IOResult> {
+  const source = expr.files0From ?? '-'
+  const typed = words.slice(0, expr.start).filter((w) => !LINK_OPTIONS.includes(w))
+  if (typed.length > 0) {
+    return new IOResult({
+      exitCode: 1,
+      stderr: encodeText(
+        `find: extra operand ${shellQuoteAlways(typed[0] ?? '')}\n` +
+          'find: file operands cannot be combined with -files0-from\n',
+      ),
+    })
+  }
+  async function* stream(): AsyncGenerator<Uint8Array> {
+    let data: ByteSource
+    if (source === '') throw enoent(fileSpec(source, cwd))
+    if (source === '-') data = stdin ?? new Uint8Array()
+    else if (dispatch === null) throw enoent(fileSpec(source, cwd))
+    else {
+      const [read] = await dispatch('read', fileSpec(source, cwd), [], { stream: true })
+      data = read as ByteSource
+    }
+    for await (const chunk of ensureStream(data)) yield chunk
+  }
+  let names: string[]
+  try {
+    names = await listedNames(fileSpec(source, cwd), stream)
+  } catch (err) {
+    return new IOResult({
+      exitCode: 1,
+      stderr: encodeText(
+        `find: cannot open ${shellQuoteAlways(source)} for reading: ${strerrorOf(err)}\n`,
+      ),
+    })
+  }
+  const refused = names
+    .map((name, at) =>
+      name === ''
+        ? `find: ${shellQuoteAlways(source)}:${String(at + 1)}: invalid zero-length file name\n`
+        : '',
+    )
+    .join('')
+  const starts = names
+    .filter((name) => name !== '')
+    .map((name) => (name.startsWith('-') || GRAMMAR.includes(name) ? `./${name}` : name))
+  if (starts.length === 0 || executeFn === null) {
+    const opened = await openFindFiles(expr, cwd, dispatch)
+    return new IOResult({
+      exitCode: refused !== '' || opened !== null ? 1 : 0,
+      stderr: concat([encodeText(refused), opened ?? new Uint8Array()]),
+    })
+  }
+  const dropped = new Set((expr.files0At ?? []).flatMap((at) => [at, at + 1]))
+  const rest = words.slice(expr.start).filter((_, at) => !dropped.has(at))
+  const line = shellJoin(['find', ...words.slice(0, expr.start), ...starts, ...rest])
+  const io = await executeFn(line, { sessionId, stdin: source === '-' ? null : stdin })
+  if (refused !== '') {
+    const existing = await materialize(io.stderr)
+    io.stderr = concat([encodeText(refused), existing])
+    io.exitCode = Math.max(io.exitCode, 1)
+  }
+  return io
 }
 
 /**
@@ -436,10 +555,21 @@ export async function applyFindActions(
   ).map((record): [PathSpec, string] => [record.path, startBase(starts[record.run])])
   // An expression with no action of its own prints, which is the one
   // implicit action -depth reorders.
-  const actions: FindAction[] = expr.actions.length > 0 ? expr.actions : [{ kind: 'print' }]
+  const actions: FindAction[] =
+    expr.actions.length > 0 ? expr.actions.slice(0, expr.reached) : [{ kind: 'print' }]
   const errors: Uint8Array[] = []
   const out: Uint8Array[] = []
-  const batches = new Map<number, string[]>()
+  const batches = new Map<number, [string | null, string[]][]>()
+  const sinks = new Map<string, Uint8Array[]>((expr.files ?? []).map((file) => [file, []]))
+  const sink = (file: string | null | undefined): Uint8Array[] => {
+    if (file === null || file === undefined) return out
+    const where = resolvePath(file, cwd)
+    if (where === STDOUT) return out
+    if (where === STDERR) return errors
+    const chunks = sinks.get(file) ?? []
+    sinks.set(file, chunks)
+    return chunks
+  }
   let exitCode = 0
   const stats = actions.some(readsStat)
   const statted = testsStat(expr)
@@ -463,10 +593,15 @@ export async function applyFindActions(
       for (const [position, action] of actions.entries()) {
         const formatter = formatters.get(position)
         if (action.kind === 'exec') {
+          const [where, arg] = action.inDir === true ? execDir(path) : [null, path]
           if (action.batch) {
-            const bucket = batches.get(position) ?? []
-            bucket.push(path)
-            batches.set(position, bucket)
+            // -execdir batches the rows of one directory that arrive
+            // together, as the reference's runs end where its walk leaves a directory.
+            const groups = batches.get(position) ?? []
+            const last = groups.at(-1)
+            if (last?.[0] === where) last[1].push(arg)
+            else groups.push([where, [arg]])
+            batches.set(position, groups)
             continue
           }
           if (executeFn === undefined) break
@@ -478,10 +613,11 @@ export async function applyFindActions(
               cwd,
               statPath,
               action,
-              [path],
+              [arg],
               out,
               errors,
               once,
+              where,
             ))
           )
             break
@@ -493,7 +629,7 @@ export async function applyFindActions(
             exitCode = 1
             break
           }
-          out.push(
+          sink(action.kind === 'printf' ? action.file : null).push(
             formatter !== undefined
               ? await renderPrintf(
                   formatter,
@@ -506,7 +642,9 @@ export async function applyFindActions(
               : lsRow(match, held, identity),
           )
         } else if (formatter !== undefined) {
-          out.push(await renderPrintf(formatter, path, base, null, identity, signal))
+          sink(action.kind === 'printf' ? action.file : null).push(
+            await renderPrintf(formatter, path, base, null, identity, signal),
+          )
         } else if (action.kind === 'delete') {
           // A structural row is skipped, not refused, the way Unix leaves
           // a mount point in place.
@@ -516,29 +654,55 @@ export async function applyFindActions(
             break
           }
         } else {
-          out.push(encodeText(path + (action.kind === 'print0' ? '\0' : '\n')))
+          sink(action.kind === 'print' || action.kind === 'print0' ? action.file : null).push(
+            encodeText(path + (action.kind === 'print0' ? '\0' : '\n')),
+          )
         }
       }
     }
     for (const [position, action] of actions.entries()) {
-      const paths = batches.get(position)
-      if (action.kind !== 'exec' || paths === undefined || executeFn === undefined) continue
-      signal?.throwIfAborted()
-      if (
-        !(await runExec(
-          executeFn,
-          session,
-          registry,
-          cwd,
-          statPath,
-          action,
-          paths,
-          out,
-          errors,
-          once,
-        ))
-      )
+      if (action.kind !== 'exec' || executeFn === undefined) continue
+      for (const [where, paths] of batches.get(position) ?? []) {
+        signal?.throwIfAborted()
+        if (
+          !(await runExec(
+            executeFn,
+            session,
+            registry,
+            cwd,
+            statPath,
+            action,
+            paths,
+            out,
+            errors,
+            once,
+            where,
+          ))
+        )
+          exitCode = 1
+      }
+    }
+    for (const [file, chunks] of sinks) {
+      if (STREAMS.includes(resolvePath(file, cwd)) || dispatch === null) continue
+      const spec = fileSpec(file, cwd)
+      if (hasExec) {
+        // The reference writes to the file it opened, wherever a child moves
+        // it; a workspace has no open file to follow, so a file a child moved
+        // or removed is not made again.
+        try {
+          await dispatch('stat', spec)
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          console.debug(`find: ${file} is gone, rows dropped: ${String(err)}`)
+          continue
+        }
+      }
+      try {
+        await dispatch('write', spec, [concat(chunks)])
+      } catch (err) {
+        errors.push(encodeText(`find: '${file}': ${strerrorOf(err)}\n`))
         exitCode = 1
+      }
     }
     const body = concat(out)
     return [body.byteLength > 0 ? body : null, concat(errors), exitCode]

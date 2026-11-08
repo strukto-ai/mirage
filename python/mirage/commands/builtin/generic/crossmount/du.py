@@ -26,10 +26,17 @@ from mirage.commands.builtin.generic.crossmount.types import (
     CrossResult,
     RunSingle,
 )
-from mirage.commands.builtin.generic.du import du, leaves_of, parse_flags
+from mirage.commands.builtin.generic.crossmount.utils import file_stream_op
+from mirage.commands.builtin.generic.du import (
+    du,
+    excluded_start,
+    leaves_of,
+    read_flags,
+)
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.builtin.utils.paths import virtual_key
+from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -59,6 +66,7 @@ async def run_du(
     stdin: ByteSource | None = None,
     nested: bool = False,
     follow: FollowOperands | None = None,
+    env: dict[str, str] | None = None,
 ) -> CrossResult:
     """Render du over operands spanning mounts from each mount's own du.
 
@@ -69,7 +77,10 @@ async def run_du(
     du fails adds its diagnostic and status, and the mounts below it
     count only where the walk could still reach them (``reached``); one
     that succeeds without a measurement (a du not built on
-    ``du_generic``) leaves the line to the one dispatcher walk.
+    ``du_generic``) leaves the line to the one dispatcher walk. The
+    ``-X`` files are read here, once, and every mount is handed their
+    patterns as ``--exclude``, so a list read from stdin reaches them all,
+    and a mount below a path they leave out is never measured.
 
     Args:
         paths (list[PathSpec]): Operands in command-line order.
@@ -86,12 +97,20 @@ async def run_du(
             operand's run composes its own.
         follow (FollowOperands | None): The line's operand resolution,
             which the one walk's globs take.
+        env (dict[str, str] | None): The command's environment, which
+            ``TIME_STYLE`` is read from.
     """
-    rendering = parse_flags(Context(flags=flags))
+    rendering = await read_flags(
+        Context(flags=flags, env=env),
+        stdin_stream(file_stream_op(dispatch), stdin),
+    )
     if isinstance(rendering, IOResult):
         return None, rendering
     bounded = FlagView(flags, spec=SPECS["du"]).as_bool("one_file_system")
-    measuring = {k: v for k, v in flags.items() if k not in RENDERING}
+    resolved = {k: v for k, v in flags.items() if k != "exclude_from"}
+    if rendering.excludes:
+        resolved["exclude"] = list(rendering.excludes)
+    measuring = {k: v for k, v in resolved.items() if k not in RENDERING}
     # Each start is then one mount's own part, and keeps only what that
     # mount owns: a part walked through the dispatcher reaches the mounts
     # below it too, which measure themselves.
@@ -100,6 +119,7 @@ async def run_du(
         (index, start)
         for index, path in enumerate(paths)
         for start in (mount_starts(path, vfs) if mounts else [path])
+        if start is path or not excluded_start(rendering.excludes, path, start)
     ]
 
     async def measure(step: tuple[int, PathSpec]) -> IOResult:
@@ -115,12 +135,13 @@ async def run_du(
             DISPATCH_BUILDERS["du"],
             paths,
             texts,
-            flags,
+            resolved,
             dispatch,
             cwd,
             vfs,
             stdin,
             follow=follow,
+            env=env,
         )
     kept = await reached(
         paths, plan, [io.exit_code != 0 for io in ios], dispatch
@@ -171,6 +192,12 @@ async def run_du(
     async def size(path: PathSpec) -> int:
         return (await entries(path))[1]
 
+    stamped = {
+        r.path.virtual: r.modified
+        for _, io in done
+        for r in io.records or []
+        if r.modified is not None
+    }
     out = await du(
         targets,
         compute_size=size,
@@ -182,6 +209,7 @@ async def run_du(
             for r in rows
             if r.size is None
         ],
+        times=lambda: stamped,
     )
     merged.stderr = out.stderr + await materialize(merged.stderr)
     merged.exit_code = max([out.exit_code, *(io.exit_code for _, io in done)])

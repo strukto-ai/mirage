@@ -267,7 +267,7 @@
       ]
     },
     {
-      "id": "find_unknown_predicate",
+      "id": "find_regex_matches_the_whole_path",
       "seq": 686,
       "targets": [
         "ram",
@@ -294,14 +294,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -regex '.*deep.*'",
+      "command": "mkdir -p /data/frx/sub/deep && printf 'x\\n' > /data/frx/sub/deep/d.txt && printf 'y\\n' > /data/frx/a.txt; find /data/frx -regex '.*deep.*' | sort; find /data/frx -regex 'sub.*'; find /data/frx -iregex '.*/A\\.TXT'; find /data/frx -regex '/data/frx/\\(a\\|sub\\)[.a-z]*' | sort; find /data/frx -regex '/data/frx/a+.*'; find /data/frx -regextype posix-extended -regex '/data/frx/(a|nope)\\.txt'; find /data/frx -regex '\\('; find /data/frx -regextype bogus; echo rc=$?; rm -r /data/frx",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: unknown predicate `-regex'\n"
+        "exit": 0,
+        "stdout": "/data/frx/sub/deep\n/data/frx/sub/deep/d.txt\n/data/frx/a.txt\n/data/frx/a.txt\n/data/frx/sub\n/data/frx/a.txt\n/data/frx/a.txt\nrc=1\n",
+        "stderr": "find: failed to compile regular expression '\\(': Unmatched ( or \\(\nfind: Unknown regular expression type 'bogus'; valid types are 'findutils-default', 'ed', 'emacs', 'gnu-awk', 'grep', 'posix-awk', 'awk', 'posix-basic', 'posix-egrep', 'egrep', 'posix-extended', 'posix-minimal-basic', 'sed'.\n"
       },
       "flags": [
-        "regex"
+        "regex",
+        "iregex",
+        "regextype"
       ]
     },
     {

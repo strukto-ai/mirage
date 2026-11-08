@@ -15,15 +15,16 @@
 import type { FindAction, PrintfPart } from '../commands/builtin/types.ts'
 import { UsageError } from '../commands/errors.ts'
 import type { ActionKind, PredNode, RowActionKind } from '../core/generic/types.ts'
-import { textView } from '../shell/bytes.ts'
+import { textView, utf8Locale } from '../shell/bytes.ts'
 import type { JsonValue } from '../types.ts'
 import { systemNow } from '../utils/clock.ts'
 import { parseDateExpr } from '../utils/dates.ts'
-import { UTC_ZONE } from '../utils/timezone.ts'
+import { LOCAL_ZONE, UTC_ZONE, zoneFromEnv, type Zone } from '../utils/timezone.ts'
 import { scanned } from './scan.ts'
 
 export const OPERAND = ''
 export const DAY = 86400
+export const MINUTE = 60
 
 type Bounds = readonly [number | null, number | null]
 type Obj = Readonly<Record<string, JsonValue>>
@@ -40,9 +41,16 @@ type Obj = Readonly<Record<string, JsonValue>>
  * operands as typed, which the executor resolves against the dispatcher
  * before it binds the expression. `actions` are in the order written, since
  * GNU runs actions per position; `depthFirst` is GNU's `-depth`, which
- * `-delete` turns on; `predicates` is every predicate word typed, in order;
- * `warnings` the lines GNU prints while it parses; `start` where the
- * expression begins among the words typed. Mirrors Python's `FindExpr`.
+ * `-delete` turns on; `follow` is `-follow`, which follows links as `-L`
+ * does; `files0From` is `-files0-from`'s file as typed, which names the
+ * start points in place of the operands, and `files0At` where each one stands
+ * among the expression's words; `reached` how many of the actions, in order,
+ * a row can reach, those before a top-level `-quit` (all when absent);
+ * `files` every file `-fprint`,
+ * `-fprint0` and `-fprintf` write, each once, in the order first named;
+ * `predicates` is every predicate word typed, in order; `warnings` the
+ * lines the reference prints while it parses; `start` where the expression begins
+ * among the words typed. Mirrors Python's `FindExpr`.
  */
 export interface FindExpr {
   tree: PredNode
@@ -56,6 +64,11 @@ export interface FindExpr {
   actions: FindAction[]
   newer: string[]
   depthFirst: boolean
+  follow?: boolean
+  files0From?: string | null
+  files0At?: number[]
+  reached?: number
+  files?: string[]
   predicates: string[]
   warnings: string[]
   start: number
@@ -96,6 +109,7 @@ function int(value: JsonValue | undefined): number {
 }
 
 function float(value: JsonValue | undefined): number {
+  if (value === 'Infinity' || value === '-Infinity') return Number(value)
   if (typeof value !== 'number') {
     throw new TypeError(`find: mirage-rs answered ${JSON.stringify(value)}, not a number`)
   }
@@ -111,6 +125,10 @@ function flag(value: JsonValue | undefined): boolean {
 
 function optInt(value: JsonValue | undefined): number | null {
   return value === null || value === undefined ? null : int(value)
+}
+
+function optText(value: JsonValue | undefined): string | null {
+  return value === null || value === undefined ? null : textView(str(value))
 }
 
 function optBound(value: JsonValue | undefined): number | null {
@@ -180,6 +198,53 @@ export function mtimeBounds(cmp: string, days: number, now: number): Bounds {
   return [now - (days + 1) * DAY, now - days * DAY]
 }
 
+// The double just below `timestamp`, `strictlyAfter`'s other side.
+function before(timestamp: number): number {
+  if (!Number.isFinite(timestamp)) {
+    return timestamp > 0 ? Number.MAX_VALUE : timestamp
+  }
+  if (timestamp === 0) return -Number.MIN_VALUE
+  const view = new DataView(new ArrayBuffer(8))
+  view.setFloat64(0, timestamp)
+  const bits = view.getBigUint64(0)
+  view.setBigUint64(0, timestamp > 0 ? bits - 1n : bits + 1n)
+  return view.getFloat64(0)
+}
+
+/**
+ * One age test (`-mtime`, `-amin`...) as inclusive epoch-second bounds. A
+ * day count drops the fraction of the age (`mtimeBounds`); a minute count
+ * rounds it up, measured on findutils 4.10: `-mmin N` holds for an age
+ * above N-1 minutes and at most N, `+N` for one above N and `-N` for one
+ * below.
+ */
+export function ageBounds(cmp: string, amount: number, minutes: boolean, origin: number): Bounds {
+  if (!minutes) return mtimeBounds(cmp, amount, origin)
+  const edge = origin - amount * MINUTE
+  if (cmp === '+') return [null, before(edge)]
+  if (cmp === '-') return [strictlyAfter(edge), null]
+  return [edge, before(edge + MINUTE)]
+}
+
+/**
+ * `-daystart`'s origin: the midnight that ends today in `zone`, the
+ * session's `TZ`, or in the host's local zone when null.
+ */
+export function nextMidnight(now: number, zone: Zone | null): number {
+  const here = zone ?? LOCAL_ZONE
+  const today = here.parts(new Date(now * 1000))
+  const midnight = here.fromWall({
+    year: today.year,
+    month: today.month,
+    day: today.day + 1,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    ms: 0,
+  })
+  return midnight.getTime() / 1000
+}
+
 // Intersect one top-level time test with the expression's window. Every test
 // in the top-level `-a` chain must hold, so the windows intersect: `-newer old
 // -newer new` keeps only what is newer than both, and `-mtime +2 -mtime -1`
@@ -212,8 +277,11 @@ function action(raw: Obj): FindAction {
       kind: 'exec',
       argv: array(raw.argv).map((w) => textView(str(w))),
       batch: flag(raw.batch),
+      ...(flag(raw.dir) ? { inDir: true } : {}),
     }
   }
+  const file = optText(raw.file)
+  const target = file === null ? {} : { file }
   if (kind === 'printf') {
     const parts: PrintfPart[] = array(raw.parts).map((item) => {
       const part = object(item)
@@ -221,15 +289,54 @@ function action(raw: Obj): FindAction {
       if ('dir' in part) return { dir: str(part.dir) }
       return { time: str(part.time) }
     })
-    return { kind: 'printf', format: textView(str(raw.format)), parts, stat: flag(raw.stat) }
+    return {
+      kind: 'printf',
+      format: textView(str(raw.format)),
+      parts,
+      stat: flag(raw.stat),
+      ...target,
+    }
   }
-  return { kind: rowKind(kind) }
+  return { kind: rowKind(kind), ...target }
 }
 
 interface Binding {
   readonly refs: readonly number[]
   readonly now: number
+  readonly zone: Zone | null
+  readonly utf8: boolean
+  readonly profile: string | null
   window: Bounds | null
+}
+
+function permBits(bits: string): 'exact' | 'all' | 'any' {
+  if (bits === 'exact' || bits === 'all' || bits === 'any') return bits
+  throw new TypeError(`find: mirage-rs answered the -perm kind ${JSON.stringify(bits)}`)
+}
+
+function countField(name: string): 'links' | 'uid' | 'gid' {
+  if (name === 'links' || name === 'uid' || name === 'gid') return name
+  throw new TypeError(`find: mirage-rs answered the count ${JSON.stringify(name)}`)
+}
+
+function cmp(sign: string): '+' | '-' | '=' {
+  if (sign === '+' || sign === '-' || sign === '=') return sign
+  throw new TypeError(`find: mirage-rs answered the comparison ${JSON.stringify(sign)}`)
+}
+
+function accessMode(mode: string): 'r' | 'w' | 'x' {
+  if (mode === 'r' || mode === 'w' || mode === 'x') return mode
+  throw new TypeError(`find: mirage-rs answered the access ${JSON.stringify(mode)}`)
+}
+
+function stamp(field: string): 'm' | 'a' | 'c' {
+  if (field === 'm' || field === 'a' || field === 'c') return field
+  throw new TypeError(`find: mirage-rs answered the stamp ${JSON.stringify(field)}`)
+}
+
+function dialect(name: string): 'emacs' | 'posix' {
+  if (name === 'emacs' || name === 'posix') return name
+  throw new TypeError(`find: mirage-rs answered the dialect ${JSON.stringify(name)}`)
 }
 
 function node(raw: Obj, binding: Binding, top = true): PredNode {
@@ -238,15 +345,59 @@ function node(raw: Obj, binding: Binding, top = true): PredNode {
     case 'name':
       return { op: 'name', pattern: textView(str(raw.pattern)), icase: flag(raw.icase) }
     case 'path':
-      return { op: 'path', pattern: textView(str(raw.pattern)) }
+      return flag(raw.icase)
+        ? { op: 'path', pattern: textView(str(raw.pattern)), icase: true }
+        : { op: 'path', pattern: textView(str(raw.pattern)) }
+    case 'regex':
+      return {
+        op: 'regex',
+        pattern: textView(str(raw.pattern)),
+        icase: flag(raw.icase),
+        dialect: dialect(str(raw.dialect)),
+        extended: flag(raw.extended),
+        utf8: binding.utf8,
+        hits: new Map(),
+      }
+    case 'lname':
+      return { op: 'lname', pattern: textView(str(raw.pattern)), icase: flag(raw.icase) }
     case 'type':
       return { op: 'type', kind: str(raw.kind) }
+    case 'xtype':
+      return { op: 'xtype', kind: str(raw.kind) }
+    case 'perm':
+      return {
+        op: 'perm',
+        mode: int(raw.mode),
+        bits: permBits(str(raw.bits)),
+      }
+    case 'count':
+      return {
+        op: 'count',
+        field: countField(str(raw.field)),
+        cmp: cmp(str(raw.cmp)),
+        count: int(raw.count),
+      }
+    case 'owner':
+      return {
+        op: 'owner',
+        name: textView(str(raw.name)),
+        group: flag(raw.group),
+        profile: binding.profile,
+      }
+    case 'nouser':
+      return { op: 'nouser', group: flag(raw.group) }
+    case 'access':
+      return { op: 'access', mode: accessMode(str(raw.mode)) }
+    case 'size':
+      return { op: 'size', min: optBound(raw.min), max: optBound(raw.max) }
     case 'empty':
       return { op: 'empty' }
     case 'true':
       return { op: 'true' }
     case 'prune':
       return { op: 'prune', pruned: [], pending: [] }
+    case 'quit':
+      return { op: 'quit', fired: [] }
     case 'not':
       return { op: 'not', kid: node(object(raw.kid), binding, false) }
     // Only a test every match must pass is in the top-level -a chain.
@@ -265,8 +416,11 @@ function node(raw: Obj, binding: Binding, top = true): PredNode {
 
 function timeNode(op: string, raw: Obj, binding: Binding, top: boolean): PredNode {
   let bounds: Bounds
-  if (op === 'mtime') {
-    bounds = mtimeBounds(str(raw.cmp), float(raw.days), binding.now)
+  let field: 'm' | 'a' | 'c' = 'm'
+  if (op === 'age') {
+    field = stamp(str(raw.field))
+    const origin = flag(raw.daystart) ? nextMidnight(binding.now, binding.zone) : binding.now
+    bounds = ageBounds(str(raw.cmp), float(raw.amount), flag(raw.minutes), origin)
   } else if (op === 'newermt') {
     bounds = [strictlyAfter(parseNewermt(textView(str(raw.date)))), null]
   } else {
@@ -274,8 +428,11 @@ function timeNode(op: string, raw: Obj, binding: Binding, top: boolean): PredNod
     if (ref === undefined) return { op: 'true' }
     bounds = [strictlyAfter(ref), null]
   }
-  if (top) binding.window = merge(binding.window, bounds)
-  return { op: 'mtime', lo: bounds[0], hi: bounds[1] }
+  // The flat window is the modification time's alone.
+  if (top && field === 'm') binding.window = merge(binding.window, bounds)
+  return field === 'm'
+    ? { op: 'mtime', lo: bounds[0], hi: bounds[1] }
+    : { op: 'mtime', lo: bounds[0], hi: bounds[1], field }
 }
 
 /**
@@ -324,12 +481,31 @@ export class FindParse {
    * `-newer` reference's mtime in epoch seconds, in order; empty leaves
    * every `-newer` a test that always holds, as one the executor could not
    * resolve. `now` is the clock `-mtime` counts from, the current time by
-   * default. Throws UsageError for a `-newermt` text that is no date.
+   * default. `env` is the command's environment, whose `TZ` places
+   * `-daystart`'s midnight and whose locale reads a `-regex` subject;
+   * `profile` the session's name, the owner `-user` sees on an entry that
+   * reports none. Throws UsageError for a `-newermt` text that is no date.
    */
-  bind(newerTimes: readonly number[] = [], now: number = systemNow()): FindExpr {
-    const binding: Binding = { refs: newerTimes, now, window: null }
+  bind(
+    newerTimes: readonly number[] = [],
+    now: number = systemNow(),
+    env: Readonly<Record<string, string>> | null = null,
+    profile: string | null = null,
+  ): FindExpr {
+    const binding: Binding = {
+      refs: newerTimes,
+      now,
+      zone: zoneFromEnv(env),
+      utf8: utf8Locale(env ?? undefined),
+      profile,
+      window: null,
+    }
     const tree = node(object(this.values.tree), binding)
     const [mtimeMin, mtimeMax] = binding.window ?? [null, null]
+    const actions = array(this.values.actions).map((a) => action(object(a)))
+    const named = actions.flatMap((a) =>
+      a.kind !== 'exec' && a.file !== undefined && a.file !== null ? [a.file] : [],
+    )
     return {
       tree,
       maxDepth: optInt(this.values.maxdepth),
@@ -339,9 +515,14 @@ export class FindParse {
       mtimeMin,
       mtimeMax,
       usesEmpty: flag(this.values.uses_empty),
-      actions: array(this.values.actions).map((a) => action(object(a))),
+      actions,
       newer: this.newer,
       depthFirst: flag(this.values.depth_first),
+      follow: flag(this.values.follow),
+      files0From: optText(this.values.files0_from),
+      files0At: array(this.values.files0_at).map((at) => int(at)),
+      reached: int(this.values.reached),
+      files: [...new Set(named)],
       predicates: array(this.values.predicates).map((w) => textView(str(w))),
       warnings: array(this.values.warnings).map((w) => textView(str(w))),
       start: this.start,

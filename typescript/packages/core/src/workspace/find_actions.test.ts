@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { compareDepthFirst } from './executor/find_action_dispatch.ts'
+import { compareDepthFirst } from '../core/generic/find.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 function singleMountWs(): Workspace {

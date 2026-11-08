@@ -29,7 +29,7 @@ from mirage.types import JsonValue
 
 Span: TypeAlias = tuple[int, int]
 Groups: TypeAlias = list[Span | None]
-PosixDialect: TypeAlias = Literal["sed", "posix"]
+PosixDialect: TypeAlias = Literal["sed", "posix", "emacs"]
 LineSyntax: TypeAlias = Literal["basic", "extended", "fixed", "perl"]
 
 _UNSET = 0xFFFFFFFF
@@ -200,7 +200,8 @@ class PosixRegex:
         pattern (str): the expression as a byte view.
         extended (bool): an extended expression rather than a basic one.
         dialect (PosixDialect): ``sed`` reads it as GNU sed does,
-            ``posix`` as regcomp does for expr, nl, bash and git.
+            ``posix`` as regcomp does for expr, nl, bash and git, and
+            ``emacs`` in the syntax find's ``-regex`` defaults to.
         ignore_case (bool): letters match in either case.
         utf8 (bool): the views are text under a UTF-8 locale.
         multiline (bool): sed's ``M``: ``^`` and ``$`` match at each

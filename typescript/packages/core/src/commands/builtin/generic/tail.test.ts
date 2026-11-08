@@ -35,6 +35,7 @@ import { Channel } from '../../../shell/console/index.ts'
 import type { JobHandle } from '../../../execution/job/handle.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
+import { stderrStr, stdoutStr } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -724,6 +725,41 @@ describe('tail quotes the word it names', () => {
 // `tail --follow=d` and `--follow=n` both exit 0 (measured, coreutils 9.4):
 // the two candidates share no prefix, so one letter is enough. Mirrors
 // test_tail.py.
+// --pid is a decimal with an optional plus, after blanks, that fits a pid_t;
+// --max-unchanged-stats the same count, unbounded, and only checked (pinned on
+// debian:stable-slim). Mirrors test_tail.py.
+describe('tail --pid and --max-unchanged-stats', () => {
+  it('reads plain decimals', () => {
+    const answer = said({ pid: ' +5' })
+    expect(typeof answer === 'string' ? answer : answer.pid).toBe(5)
+    expect(said({ pid: '-1' })).toBe("tail: invalid PID: '-1'\n")
+    expect(said({ pid: '2147483648' })).toBe(
+      "tail: invalid PID: '2147483648': Value too large for defined data type\n",
+    )
+    expect(said({ max_unchanged_stats: '3k' })).toBe(
+      "tail: invalid maximum number of unchanged stats between opens: '3k'\n",
+    )
+  })
+
+  it('ends a follow once its pid is gone', async () => {
+    const ws = new Workspace({ '/r': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell("printf 'a\\n' > /r/f")
+      const io = await ws.shell(
+        '(sleep 0.2; echo b >> /r/f) & tail -f -s 0.05 --pid=$! /r/f; echo rc=$?',
+      )
+      expect(stdoutStr(io)).toBe('a\nb\nrc=0\n')
+      const ignored = await ws.shell('tail --pid=1 /r/f')
+      expect([stdoutStr(ignored), stderrStr(ignored)]).toEqual([
+        'a\nb\n',
+        'tail: warning: PID ignored; --pid=PID is useful only when following\n',
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 describe('tail --follow accepts an unambiguous prefix', () => {
   it.each([
     ['d', false],

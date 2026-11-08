@@ -70,11 +70,11 @@ import { pathStat } from '../../mount/namespace/probe.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import { makeCheckUnlink, makeStorageKey } from '../../mount/storage.ts'
 import type { SessionState } from '../../session/session.ts'
-import { sessionView } from '../../session/state.ts'
+import { envSnapshot, sessionView } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { operandFollow } from '../builtins/links/links.ts'
 import { fanOutTraversal, runWithFanout, shouldFanOut } from '../fanout.ts'
-import { applyFindActions } from '../find_action_dispatch.ts'
+import { applyFindActions, openFindFiles, runListedFind } from '../find_action_dispatch.ts'
 import { resolveNewerRefs } from '../find_refs.ts'
 import { handleDisown } from '../builtins/disown/disown.ts'
 import { handleFg } from '../builtins/fg/fg.ts'
@@ -659,7 +659,12 @@ export async function handleCommand(
         }
       }
       if (badDate !== null) throw badDate[1]
-      findExpr = parsedFind.bind(newerTimes)
+      findExpr = parsedFind.bind(
+        newerTimes,
+        undefined,
+        envSnapshot(session),
+        identityFrom(sessionView(session, registry.policies, context.frame.diagnostics)).profile,
+      )
     } catch (err) {
       if (err instanceof UsageError) {
         const errBytes = encodeText(`${err.message}\n`)
@@ -670,6 +675,28 @@ export async function handleCommand(
         ]
       }
       throw err
+    }
+    if (findExpr.files0From !== null && findExpr.files0From !== undefined) {
+      const listed = await runListedFind(
+        findExpr,
+        spelledWords(parts.slice(1)),
+        session.cwd,
+        dispatch,
+        executeFn ?? null,
+        session.sessionId,
+        stdin,
+      )
+      return [listed.stdout, listed, await execNode(cmdStr, listed)]
+    }
+    // The reference opens every file -fprint names while it parses, so one it cannot
+    // create ends the line before any walk.
+    const unopened = await openFindFiles(findExpr, session.cwd, dispatch)
+    if (unopened !== null) {
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: unopened }),
+        new ExecutionNode({ command: cmdStr, stderr: unopened, exitCode: 1 }),
+      ]
     }
   }
 
