@@ -196,11 +196,13 @@ export class CallStack {
 
   /**
    * `${BASH_LINENO[@]}`: the line each frame was called from, innermost
-   * first, a sourced file's and a returning one's too.
+   * first, a sourced file's too, but not one whose RETURN action runs: it
+   * has returned.
    */
   callLines(): readonly number[] {
     return this.frames
       .slice(1)
+      .filter((frame) => !frame.closed)
       .reverse()
       .map((frame) => frame.callLine)
   }

@@ -26,7 +26,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Files } from '../../../workspace/files.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import type { Context } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -143,6 +143,23 @@ const codeStat = (p: PathSpec): Promise<FileStat> => {
   )
 }
 
+// What a terminal shows: each stderr line said on `io` before the chunk it
+// precedes. Mirrors test_ls.py's _merged.
+async function merged(result: CommandFnResult): Promise<string> {
+  if (result === null) return ''
+  const [out, io] = result
+  let text = ''
+  let said = 0
+  for await (const chunk of out === null || out instanceof Uint8Array
+    ? [out ?? new Uint8Array()]
+    : out) {
+    const err = await materialize(io.stderr)
+    text += DEC.decode(err.subarray(said)) + DEC.decode(chunk)
+    said = err.byteLength
+  }
+  return text + DEC.decode((await materialize(io.stderr)).subarray(said))
+}
+
 async function status(
   paths: string[],
   flags: Record<string, string | boolean | number | string[]> = {},
@@ -241,6 +258,51 @@ describe('structure-only directories', () => {
     expect(DEC.decode(result?.[1].stderr as Uint8Array)).toBe(
       "ls: cannot open directory '/base/sealed': Permission denied\n",
     )
+  })
+
+  // GNU 9.7 (ls -1 z missing m a, then ls -1R, m mode 000): a missing operand
+  // is reported first, a directory that will not open where its listing would
+  // have printed, with no blank line before it. Mirrors test_ls.py.
+  it('reports a directory it cannot open in its place', async () => {
+    const tree: Record<string, string[]> = {
+      '/t': ['/t/a', '/t/m', '/t/z'],
+      '/t/a': ['/t/a/f1'],
+      '/t/z': ['/t/z/f2'],
+    }
+    const placeReaddir = (p: PathSpec): Promise<string[]> => {
+      if (key(p) === '/t/m') return eacces()
+      const names = tree[key(p)]
+      return names === undefined ? enoent() : Promise.resolve(names)
+    }
+    const placeStat = (p: PathSpec): Promise<FileStat> =>
+      key(p) === '/t/missing'
+        ? enoent()
+        : Promise.resolve(
+            new FileStat({
+              name: key(p).split('/').pop() ?? '',
+              type: key(p) in tree || key(p) === '/t/m' ? FileType.DIRECTORY : FileType.FILE,
+            }),
+          )
+    const plain = await lsGeneric(
+      ['/t/z', '/t/missing', '/t/m', '/t/a'].map(spec),
+      ctx({}),
+      placeReaddir,
+      placeStat,
+    )
+    expect(await merged(plain)).toBe(
+      "ls: cannot access '/t/missing': No such file or directory\n" +
+        '/t/a:\nf1\n' +
+        "ls: cannot open directory '/t/m': Permission denied\n" +
+        '\n/t/z:\nf2\n',
+    )
+    expect(plain?.[1].exitCode).toBe(LS_FAILURE)
+    const walked = await lsGeneric([spec('/t')], ctx({ recursive: true }), placeReaddir, placeStat)
+    expect(await merged(walked)).toBe(
+      '/t:\na\nm\nz\n\n/t/a:\nf1\n' +
+        "ls: cannot open directory '/t/m': Permission denied\n" +
+        '\n/t/z:\nf2\n',
+    )
+    expect(walked?.[1].exitCode).toBe(LS_MINOR_PROBLEM)
   })
 
   // Absence of the dispatcher can only mean "nobody can answer", so the row keeps

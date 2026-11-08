@@ -667,6 +667,22 @@ it.each([
   }
 })
 
+// bash's `builtin kill` is the shell's own, so a runtime that captures kill
+// never sees it, while `command kill` still reaches the runtime. Mirrors
+// test_external.py.
+it('builtin runs the shell kill past a capture', async () => {
+  const probe = new ProcessProbe({ captures: ['kill'] })
+  const ws = workspace(probe)
+  try {
+    expect((await ws.shell('builtin kill -0 "$BASHPID"')).exitCode).toBe(0)
+    expect(probe.requests).toEqual([])
+    expect((await ws.shell('command kill -0 456')).exitCode).toBe(0)
+    expect(probe.requests.map((r) => r.argv)).toEqual([['kill', '-0', '456']])
+  } finally {
+    await ws.close()
+  }
+})
+
 class FailingProcess extends ProcessProbe {
   override runProcess(): Promise<RunResult> {
     return Promise.reject(new Error('provider unavailable'))

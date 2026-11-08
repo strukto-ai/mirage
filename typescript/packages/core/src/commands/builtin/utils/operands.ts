@@ -151,21 +151,26 @@ export async function splitInOrder(
  * The parts' streams one after another, each bytes part a failed operand's
  * stderr line said on `io` when the output reaches it, as GNU reports an
  * operand and goes on (`cat a missing b`). A reader that stops early still
- * finds the lines it never reached on `io`, after what it read. Mirrors
- * Python's in_order.
+ * finds the lines it never reached on `io`, after what it read. Lines that
+ * meet with no output between them are said together, so a run of them costs
+ * one copy of what `io` holds. Mirrors Python's in_order.
  */
 export async function* inOrder(
   parts: readonly (AsyncIterable<Uint8Array> | Uint8Array)[],
   io: IOResult,
 ): AsyncIterable<Uint8Array> {
   const lines = parts.filter((p): p is Uint8Array => p instanceof Uint8Array)
+  let reached = 0
   let said = 0
   try {
     for (const part of parts) {
       if (part instanceof Uint8Array) {
-        said++
-        await say(io, part)
+        reached++
         continue
+      }
+      if (said < reached) {
+        await say(io, concat(lines.slice(said, reached)))
+        said = reached
       }
       yield* part
     }
@@ -192,8 +197,9 @@ export function atOffsets(
   const parts: (AsyncIterable<Uint8Array> | Uint8Array)[] = []
   let start = 0
   for (const [offset, line] of notes) {
-    parts.push(chunks(body.subarray(start, offset)), line)
-    start = offset
+    if (offset > start) parts.push(chunks(body.subarray(start, offset)))
+    parts.push(line)
+    start = Math.max(start, offset)
   }
   parts.push(chunks(body.subarray(start)))
   return inOrder(parts, io)

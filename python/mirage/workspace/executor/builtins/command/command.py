@@ -16,6 +16,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from mirage.io.types import ByteSource
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.shell.call_stack import CallStack
 from mirage.shell.join import shell_join
 from mirage.shell.voice import shell_voice
@@ -40,6 +41,7 @@ from mirage.workspace.lookup.constants import (
     KEYWORDS,
     SHELL_NAMES,
 )
+from mirage.workspace.lookup.lookup import without_capture
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -152,6 +154,7 @@ async def _past_functions(
     session: SessionState,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
+    routing: RouteDecision[RuntimeIdentity] | None = None,
 ) -> Result:
     """Run ``words`` past a shell function or alias of their head's name.
 
@@ -172,6 +175,8 @@ async def _past_functions(
         stdin (ByteSource | None): piped input for the inner run.
         call_stack (CallStack | None): the caller's frames; None runs
             the target as a line of its own.
+        routing (RouteDecision | None): the placement the inner line
+            runs under; None keeps the line's own.
     """
     inner_name = words[0]
     inner = shell_join(words)
@@ -192,12 +197,14 @@ async def _past_functions(
         if inner_name in BASH_BUILTINS and inner_name in SHELL_NAMES
         else session.functions.pop(inner_name, None)
     )
+    placement = {} if routing is None else {"routing_decision": routing}
     try:
         io = await execute_fn(
             inner,
             session_id=session.session_id,
             stdin=stdin,
             call_stack=call_stack,
+            **placement,
         )
     finally:
         if saved_fn is not None:
@@ -215,11 +222,13 @@ async def handle_builtin(
     session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    routing: RouteDecision[RuntimeIdentity] | None = None,
 ) -> Result:
     """Run the ``builtin`` builtin (``builtin [shell-builtin [arg ...]]``).
 
     It runs a shell builtin past a function or alias of its name, in the
-    caller's frames as ``command`` does, and refuses any other word
+    caller's frames as ``command`` does, and past a runtime that captures
+    the name (``builtin kill``), and refuses any other word
     (``builtin: ls: not a shell builtin``, status 1); with no word it
     does nothing. ``--`` ends its options and any other one is refused
     with status 2. Pinned against bash 5.2 on debian:stable-slim.
@@ -231,6 +240,7 @@ async def handle_builtin(
         stdin (ByteSource | None): piped input for the inner run.
         call_stack (CallStack | None): the caller's frames; None runs
             the target as a line of its own.
+        routing (RouteDecision | None): the line's placement.
     """
     if args[:1] == ["--"]:
         args = args[1:]
@@ -250,7 +260,13 @@ async def handle_builtin(
             stderr=f"{shell_voice()}builtin: {args[0]}: not a shell builtin\n",
         )
     return await _past_functions(
-        "builtin", execute_fn, args, session, stdin, call_stack
+        "builtin",
+        execute_fn,
+        args,
+        session,
+        stdin,
+        call_stack,
+        without_capture(routing, args[0]),
     )
 
 
@@ -266,6 +282,7 @@ async def builtin_builtin(call: BuiltinCall) -> Result:
         call.context.session,
         call.stdin,
         call.call_stack,
+        call.context.frame.routing,
     )
 
 

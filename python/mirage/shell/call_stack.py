@@ -190,8 +190,13 @@ class CallStack:
 
     def call_lines(self) -> tuple[int, ...]:
         """``${BASH_LINENO[@]}``: the line each frame was called from,
-        innermost first, a sourced file's and a returning one's too."""
-        return tuple(frame.call_line for frame in reversed(self._frames[1:]))
+        innermost first, a sourced file's too, but not one whose RETURN
+        action runs: it has returned."""
+        return tuple(
+            frame.call_line
+            for frame in reversed(self._frames[1:])
+            if not frame.closed
+        )
 
     def get_all_positional(self) -> list[str]:
         return self.current.positional

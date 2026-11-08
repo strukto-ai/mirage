@@ -15,6 +15,8 @@
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { ByteSource } from '../../../../io/types.ts'
+import type { Runtime } from '../../../../runtime/base.ts'
+import type { RouteDecision } from '../../../../runtime/types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
@@ -31,6 +33,7 @@ import { classify, describe, programFile } from '../lookup/index.ts'
 import { NameKind } from '../lookup/types.ts'
 import { builtinUsage, result, written } from '../shared.ts'
 import { BASH_BUILTINS, KEYWORDS, SHELL_NAMES } from '../../../lookup/constants.ts'
+import { withoutCapture } from '../../../lookup/lookup.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 
 /**
@@ -139,6 +142,7 @@ async function pastFunctions(
   session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
+  routing?: RouteDecision<Runtime>,
 ): Promise<RedirectResult> {
   const innerName = words[0] ?? ''
   const rest = shellJoin(words.slice(1))
@@ -163,6 +167,7 @@ async function pastFunctions(
       sessionId: session.sessionId,
       stdin,
       ...(callStack !== null ? { callStack } : {}),
+      ...(routing !== undefined ? { routingDecision: routing } : {}),
     })
     return [io.stdout, io, new ExecutionNode({ command: cmd, exitCode: io.exitCode })]
   } finally {
@@ -173,7 +178,8 @@ async function pastFunctions(
 /**
  * Run the `builtin` builtin (`builtin [shell-builtin [arg ...]]`): a shell
  * builtin past a function or alias of its name, in the caller's frames as
- * `command` does, and a refusal of any other word (`builtin: ls: not a shell
+ * `command` does, and past a runtime that captures the name (`builtin kill`,
+ * under `routing`, the line's placement), and a refusal of any other word (`builtin: ls: not a shell
  * builtin`, status 1); with no word it does nothing. `--` ends its options
  * and any other one is refused with status 2. Pinned against bash 5.2 on
  * debian:stable-slim. Mirrors Python's handle_builtin.
@@ -184,6 +190,7 @@ export async function handleBuiltin(
   session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
+  routing?: RouteDecision<Runtime>,
 ): Promise<RedirectResult> {
   let words = args
   const first = words[0]
@@ -202,7 +209,15 @@ export async function handleBuiltin(
       stderr: `${shellVoice()}builtin: ${name}: not a shell builtin\n`,
     })
   }
-  return pastFunctions('builtin', executeFn, words, session, stdin, callStack)
+  return pastFunctions(
+    'builtin',
+    executeFn,
+    words,
+    session,
+    stdin,
+    callStack,
+    withoutCapture(routing, name),
+  )
 }
 
 /** The `builtin` arm. */
@@ -213,6 +228,7 @@ export async function builtinBuiltin(call: BuiltinCall): Promise<RedirectResult>
     call.context.session,
     call.stdin,
     call.callStack,
+    call.context.frame.routing,
   )
 }
 

@@ -205,7 +205,9 @@ async def in_order(
     operand's stderr line said on ``io`` when the output reaches it, as
     GNU reports an operand and goes on (``cat a missing b``). A reader
     that stops early still finds the lines it never reached on ``io``,
-    after what it read. Mirrors TypeScript's ``inOrder``.
+    after what it read. Lines that meet with no output between them are
+    said together, so a run of them costs one copy of what ``io``
+    holds. Mirrors TypeScript's ``inOrder``.
 
     Args:
         parts (Sequence[AsyncIterator[bytes] | bytes]): each operand's
@@ -213,13 +215,15 @@ async def in_order(
         io (IOResult): the result the lines are said on.
     """
     lines = [p for p in parts if isinstance(p, bytes)]
-    said = 0
+    reached = said = 0
     try:
         for part in parts:
             if isinstance(part, bytes):
-                said += 1
-                await say(io, part)
+                reached += 1
                 continue
+            if said < reached:
+                await say(io, b"".join(lines[said:reached]))
+                said = reached
             async for chunk in part:
                 yield chunk
     finally:
@@ -249,8 +253,10 @@ def at_offsets(
     parts: list[AsyncIterator[bytes] | bytes] = []
     start = 0
     for offset, line in notes:
-        parts.extend((chunks(body[start:offset]), line))
-        start = offset
+        if offset > start:
+            parts.append(chunks(body[start:offset]))
+        parts.append(line)
+        start = max(start, offset)
     parts.append(chunks(body[start:]))
     return in_order(parts, io)
 
