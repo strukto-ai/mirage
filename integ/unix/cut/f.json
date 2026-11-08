@@ -270,6 +270,44 @@
         "f",
         "d"
       ]
+    },
+    {
+      "id": "cut_f_long_fields_stream",
+      "seq": 20070203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "{ printf '%6000s' | tr ' ' a; printf '\\tmid\\t'; printf '%6000s' | tr ' ' c; echo; } | cut -f2,3 | wc -c; printf '%9000s\\n' | tr ' ' z | cut -f2 | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "6005\n9001\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
     }
   ]
 }

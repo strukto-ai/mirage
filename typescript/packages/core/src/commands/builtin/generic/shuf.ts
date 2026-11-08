@@ -50,25 +50,15 @@ const ENC = new TextEncoder()
 // Error rather than returned like every user-facing refusal.
 export const NO_WRITE_OP = 'shuf: backend provides no write op'
 
-// GNU's own out-of-memory wording, exit 1. It is what real shuf answers with
-// when a range is too large to materialize, so it is borrowed rather than
-// invented. Measured, ground truth SH5.
-export const MEMORY_EXHAUSTED = 'shuf: memory exhausted'
-
 const TRY_HELP = `\n${usageHint('shuf')}`
-
-// Preserve the existing one-million-record output limit. Output now streams;
-// this limit bounds shuffle indexes and sampling state, not rendered bytes.
-// GNU has no fixed ceiling and may enumerate larger populations.
-export const MAX_OUTPUT_LINES = 1000000n
 
 // How many lines shuf will emit, before any of them are built.
 //
 // Computed rather than discovered, because `-i` can name 2**64 values and GNU
 // answers `-i 1-18446744073709551615 -n 3` instantly by never building the
 // population (SH5). Knowing the emitted count up front is what lets the range
-// path sample instead of enumerate, and what lets an output larger than
-// MAX_OUTPUT_LINES be refused without allocating it.
+// path sample instead of enumerate, and what lets mirage-rs refuse a range it
+// cannot hold without allocating it.
 //
 // `-r` draws independently, so it emits exactly the requested count however few
 // values it is drawing from -- except from nothing at all, which emits nothing.
@@ -267,10 +257,9 @@ async function sampleRecords(
       counted += new TextDecoder().decode(chunk)
     const available = Number(counted)
     const need = emitCount(BigInt(available), count, repeat)
-    if (need > MAX_OUTPUT_LINES) throw new Error(MEMORY_EXHAUSTED)
     return await engine(
       ids,
-      { mode: 'records', separator, size: data.size, available, need: Number(need), repeat },
+      { mode: 'records', separator, size: data.size, available, need: String(need), repeat },
       new Map([[0, data]]),
       signal,
     )
@@ -289,7 +278,6 @@ async function sampleItems(
   signal?: AbortSignal,
 ): Promise<ByteSource> {
   const need = emitCount(BigInt(items.length), count, repeat)
-  if (need > MAX_OUTPUT_LINES) throw new Error(MEMORY_EXHAUSTED)
   const data = new ByteSpool()
   const index = new ByteSpool()
   try {
@@ -311,7 +299,7 @@ async function sampleItems(
         separator,
         size: data.size,
         available: items.length,
-        need: Number(need),
+        need: String(need),
         repeat,
       },
       new Map([
@@ -392,48 +380,39 @@ export async function shufGeneric(
     }
     const [low, high] = inputRange
     const need = emitCount(high - low + 1n, nFlag, repeat)
-    if (need > MAX_OUTPUT_LINES) {
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${MEMORY_EXHAUSTED}\n`) })]
+    try {
+      result = await engine(
+        ids,
+        {
+          mode: 'range',
+          separator: sep.charCodeAt(0),
+          low: String(low),
+          high: String(high),
+          need: String(need),
+          repeat,
+        },
+        undefined,
+        ctx.signal,
+      )
+    } catch (error) {
+      if (!(error instanceof StreamRefusal)) throw error
+      return [null, refused(error)]
     }
-    result = await engine(
-      ids,
-      {
-        mode: 'range',
-        separator: sep.charCodeAt(0),
-        low: String(low),
-        high: String(high),
-        need: Number(need),
-        repeat,
-      },
-      undefined,
-      ctx.signal,
-    )
   } else if (echoMode) {
     // An operand -e echoes is named below the mount the command runs on.
     const root = mountRoot(ctx)
     items = paths.length > 0 ? paths.map((p) => `/${mountKey(p.virtual, root)}`) : [...texts]
   } else {
-    try {
-      result = await sampleRecords(
-        ids,
-        paths.length > 0 ? paths.map((p) => stream(p)) : [ctx.stdin ?? new Uint8Array()],
-        sep,
-        nFlag,
-        repeat,
-        ctx.signal,
-      )
-    } catch (error) {
-      if (!(error instanceof Error) || error.message !== MEMORY_EXHAUSTED) throw error
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${MEMORY_EXHAUSTED}\n`) })]
-    }
+    result = await sampleRecords(
+      ids,
+      paths.length > 0 ? paths.map((p) => stream(p)) : [ctx.stdin ?? new Uint8Array()],
+      sep,
+      nFlag,
+      repeat,
+      ctx.signal,
+    )
   }
-  if (result === null) {
-    const need = emitCount(BigInt(items.length), nFlag, repeat)
-    if (need > MAX_OUTPUT_LINES) {
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${MEMORY_EXHAUSTED}\n`) })]
-    }
-    result = await sampleItems(ids, items, nFlag, repeat, sep.charCodeAt(0), ctx.signal)
-  }
+  result ??= await sampleItems(ids, items, nFlag, repeat, sep.charCodeAt(0), ctx.signal)
   const io = new IOResult()
   if (parsed.randomSource !== null) {
     if (output !== null && !(result instanceof Uint8Array)) {

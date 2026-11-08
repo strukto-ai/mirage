@@ -37,6 +37,45 @@
       "flags": [
         "b"
       ]
+    },
+    {
+      "id": "cut_b_long_line_streams",
+      "seq": 20070201,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '%9999s\\n' x | tr ' ' b | cut -b 1,9998- --output-delimiter=:",
+      "expect": {
+        "exit": 0,
+        "stdout": "b:bx\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "output-delimiter"
+      ]
     }
   ]
 }

@@ -221,3 +221,71 @@ fn decoded_limit_accepts_its_exact_boundary() {
     assert_eq!(status, 2);
     assert_eq!(err, "tar: decoded input exceeds size limit\n");
 }
+
+/// A type-S sparse member holding `DATA` at the end of a `hole` of zeros.
+fn sparse(name: &str, hole: u64) -> Vec<u8> {
+    let mut out = header::encode(name.as_bytes(), Kind::File, 4, b"");
+    out[156] = b'S';
+    out[386..398].copy_from_slice(format!("{hole:011o}\0").as_bytes());
+    out[398..410].copy_from_slice(b"00000000004\0");
+    out[483..495].copy_from_slice(format!("{:011o}\0", hole + 4).as_bytes());
+    out[148..156].copy_from_slice(b"        ");
+    let sum: u32 = out.iter().map(|&b| u32::from(b)).sum();
+    out[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
+    out.extend_from_slice(b"DATA");
+    out.resize(2 * BLOCK, 0);
+    out
+}
+
+#[test]
+fn holes_past_the_room_left_fail_their_member_and_the_run_reads_on() {
+    let small = 600 * 1024;
+    let tar = [
+        sparse("s", small),
+        sparse("t", small),
+        archive("a", (0, b"")),
+    ]
+    .concat();
+    let failed = "tar: t: Cannot write: File too large\n\
+                  tar: Exiting with failure status due to previous errors\n";
+    let mut host = Host::default();
+    let (status, _, err) = read(&mut host, &tar, json!({"mode": "extract"}));
+    assert_eq!((status, err.as_str()), (2, failed));
+    assert_eq!(host.files["/out/s"].len() as u64, small + 4);
+    assert!(host.files["/out/s"].ends_with(b"\0DATA"));
+    assert_eq!(host.files["/out/t"], b"");
+    assert_eq!(host.files["/out/a"], b"hello\n");
+    let (status, out, err) = read(
+        &mut host,
+        &tar,
+        json!({"mode": "extract", "to_stdout": true}),
+    );
+    assert_eq!((status, err.as_str()), (2, failed));
+    assert_eq!(out.len() as u64, small + 4 + 6);
+    let (status, out, _) = read(&mut host, &tar, json!({}));
+    assert_eq!((status, out.as_str()), (0, "s\nt\na\n"));
+}
+
+#[test]
+fn a_meta_header_past_what_a_run_holds_is_memory_exhausted() {
+    for flag in *b"LKxg" {
+        let mut tar = header::encode(b"././@LongLink", Kind::File, super::read::MAX_META + 1, b"");
+        tar[156] = flag;
+        tar[148..156].fill(b' ');
+        let sum: u32 = tar.iter().map(|&b| u32::from(b)).sum();
+        tar[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
+        tar.extend_from_slice(&[b'n'; BLOCK]);
+        for mode in ["list", "extract"] {
+            let (status, _, err) = read(&mut Host::default(), &tar, json!({"mode": mode}));
+            assert_eq!(
+                (status, err.as_str()),
+                (
+                    2,
+                    "tar: memory exhausted\ntar: Error is not recoverable: exiting now\n"
+                ),
+                "{}",
+                flag as char
+            );
+        }
+    }
+}

@@ -17,7 +17,10 @@ from datetime import datetime, timezone, tzinfo
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import resolve_source
-from mirage.commands.builtin.utils.strftime import gnu_strftime
+from mirage.commands.builtin.utils.strftime import (
+    gnu_strftime,
+    strftime_stream,
+)
 from mirage.commands.config import Context, command
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
@@ -31,7 +34,7 @@ from mirage.commands.spec.usage import (
 )
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
-from mirage.io.stream import OutputStream, close_quietly
+from mirage.io.stream import OutputStream, async_chain, close_quietly
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import PathSpec
@@ -338,7 +341,7 @@ async def date(
     fmt = formats[0] if formats else DEFAULT_FORMAT
     # --resolution names one nanosecond past the epoch.
     tick = 1 if resolution else None
-    out = encode_text(gnu_strftime(dt, fmt, nanosecond=tick) + "\n")
+    out = async_chain([strftime_stream(dt, fmt, nanosecond=tick), b"\n"])
     if setting is not None:
         return out, IOResult(exit_code=1, stderr=CANNOT_SET)
     return out, IOResult()

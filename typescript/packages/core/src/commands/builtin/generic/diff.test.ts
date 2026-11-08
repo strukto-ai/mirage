@@ -72,6 +72,42 @@ it('compares inputs larger than the default budget in brief mode', async () => {
   expect(readBytes).toBe(68 << 20)
 })
 
+it('answers brief from sizes and stops at the first difference', async () => {
+  const files: Record<string, Uint8Array> = {
+    '/d/a': new Uint8Array(5000).fill(120),
+    '/d/b': new Uint8Array(5001).fill(120),
+    '/d/c': new Uint8Array(5000).fill(121),
+  }
+  let readBytes = 0
+  async function* read(p: PathSpec): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    const data = files[p.virtual] ?? new Uint8Array()
+    for (let at = 0; at < data.byteLength; at += 1000) {
+      readBytes += 1000
+      yield data.subarray(at, at + 1000)
+    }
+  }
+  function sizeOf(p: PathSpec): Promise<number | null> {
+    return Promise.resolve(files[p.virtual]?.byteLength ?? null)
+  }
+  for (const [other, readTotal, sizes] of [
+    ['b', 0, sizeOf],
+    ['c', 2000, null],
+  ] as const) {
+    readBytes = 0
+    const [out, io] = await diffRun(
+      [operand('a', '/d/a'), operand(other, `/d/${other}`)],
+      { flags: { brief: true }, stdin: null, cwd: operand('/', '/') },
+      read,
+      readdir,
+      stat,
+      sizes,
+    )
+    expect(await materialize(out)).toEqual(ENC.encode(`Files a and ${other} differ\n`))
+    expect([io.exitCode, readBytes]).toEqual([1, readTotal])
+  }
+})
+
 function statFiles(modified: string): Files {
   const dispatch: DispatchFn = (op, path) => {
     if (op !== 'stat') return Promise.reject(new Error(`unexpected ${op}`))

@@ -37,7 +37,16 @@ function transport() {
         outcome: 'equal',
         stderr: new Uint8Array(),
       })
-    return Promise.resolve({ kind: 'output', output: new Uint8Array() })
+    // Each input in turn, as a whole diff's engine asks for them.
+    const wants =
+      request.kind === 'open'
+        ? 0
+        : request.kind === 'feed'
+          ? request.index
+          : request.kind === 'end' && request.index === 0
+            ? 1
+            : null
+    return Promise.resolve({ kind: 'output', output: new Uint8Array(), wants })
   })
 }
 function gate(): { wait: Promise<void>; release: () => void } {
@@ -49,6 +58,23 @@ function gate(): { wait: Promise<void>; release: () => void } {
 }
 async function tick(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0))
+}
+function closable(
+  text: string,
+  close: () => Promise<IteratorResult<Uint8Array>>,
+): AsyncIterableIterator<Uint8Array> {
+  const pending = [new TextEncoder().encode(text), new TextEncoder().encode('more')]
+  const iterator: AsyncIterableIterator<Uint8Array> = {
+    next: () => {
+      const value = pending.shift()
+      return Promise.resolve(
+        value === undefined ? { done: true, value: undefined } : { done: false, value },
+      )
+    },
+    return: close,
+    [Symbol.asyncIterator]: () => iterator,
+  }
+  return iterator
 }
 
 afterEach(async () => {
@@ -234,6 +260,23 @@ describe('diff pool with its Rust worker', () => {
     expect(large.output.length).toBeGreaterThan(1)
     expect(large.output.every((chunk) => chunk.byteLength <= 64 * 1024)).toBe(true)
     expect(concat(large.output).byteLength).toBeGreaterThan(huge.byteLength)
+  })
+
+  it('closes both -q inputs when one close fails', async () => {
+    const owner = pool()
+    let closed = false
+    await expect(
+      owner.compare(
+        { ...options, brief: true },
+        () => closable('a\n', () => Promise.reject(new Error('close failed'))),
+        () =>
+          closable('b\n', () => {
+            closed = true
+            return Promise.resolve({ done: true, value: undefined })
+          }),
+      ),
+    ).rejects.toThrow('close failed')
+    expect(closed).toBe(true)
   })
 
   it('cancels synchronous matching while host timers keep running and recovers', async () => {

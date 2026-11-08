@@ -310,6 +310,7 @@ class CheckLine(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
     line: int
     parsed: tuple[str, str, str] | None
+    error: str | None = None
 
 
 async def _check_lines(
@@ -322,6 +323,9 @@ async def _check_lines(
     try:
         async for line in lines:
             yield CheckLine.model_validate_json(line)
+    except StreamRefusal as refusal:
+        # A line too long to hold ends the list as a read error does.
+        yield CheckLine(line=0, parsed=None, error=refusal.message)
     finally:
         await lines.discard()
 
@@ -437,6 +441,11 @@ async def _hash_check(
     try:
         async for record in records:
             lineno, parsed = record.line, record.parsed
+            if record.error is not None:
+                await _check_note(
+                    stderr_lines, f"{prog}: {check_label}: {record.error}"
+                )
+                return await lines.output(), await stderr_lines.output(), 1
             if parsed is None:
                 malformed += 1
                 if warn:

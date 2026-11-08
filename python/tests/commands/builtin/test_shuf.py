@@ -17,8 +17,6 @@ import pytest
 
 from mirage.commands.builtin.constants import UINTMAX
 from mirage.commands.builtin.generic.shuf import (
-    MAX_OUTPUT_LINES,
-    MEMORY_EXHAUSTED,
     NO_WRITE_OP,
     emit_count,
     parse_flags,
@@ -277,62 +275,43 @@ def test_shuf_repeat_draws_from_a_huge_range_without_enumerating_it():
     assert len(rendered.decode().split("\n")[:-1]) == 4
 
 
-# A range GNU would enumerate given enough memory, and the wording is GNU's
-# own `xalloc_die` line for exactly that situation (ground truth SH5). mirage
-# renders one byte object rather than streaming, so the ceiling is stated
-# rather than left to whatever the host survives.
+# A range whose order or drawn values would pass what shuf holds gets the
+# reference's out-of-memory line, exit 1; nothing else has a ceiling, since
+# records spool and `-r` holds nothing (ground truth SH5).
+@pytest.mark.parametrize("high", [UINTMAX, 1000000000000])
+def test_shuf_refuses_a_range_it_cannot_hold(high):
+    rendered, io = asyncio.run(
+        shuf_generic([], [], read=_unused_read_bytes, input_range=(1, high))
+    )
+    assert rendered is None
+    assert (io.exit_code, io.stderr) == (1, b"shuf: memory exhausted\n")
+
+
 @pytest.mark.parametrize(
-    "kwargs",
+    "kwargs, lines",
     [
-        {"input_range": (1, UINTMAX)},
-        {"input_range": (1, 1000000000000)},
-        {"input_range": (1, MAX_OUTPUT_LINES + 1)},
-        {"input_range": (1, UINTMAX), "with_replacement": True},
-        {
-            "input_range": (1, 3),
-            "count": MAX_OUTPUT_LINES + 1,
-            "with_replacement": True,
-        },
+        ({"input_range": (1, 1000001)}, 1000001),
+        ({"input_range": (1, UINTMAX), "count": 3}, 3),
+        (
+            {
+                "input_range": (1, 3),
+                "count": 1000001,
+                "with_replacement": True,
+            },
+            1000001,
+        ),
+        (
+            {"stdin": b"a\n", "count": 1000001, "with_replacement": True},
+            1000001,
+        ),
     ],
 )
-def test_shuf_refuses_an_output_it_cannot_render(kwargs):
-    with pytest.raises(ValueError) as refusal:
-        asyncio.run(shuf_generic([], [], read=_unused_read_bytes, **kwargs))
-    assert str(refusal.value) == MEMORY_EXHAUSTED
-    assert MEMORY_EXHAUSTED == "shuf: memory exhausted"
-
-
-def test_shuf_repeat_with_a_huge_count_on_stdin_is_refused_too():
-    """The same ceiling, reached through `-r -n` rather than through `-i`.
-
-    Without `-r` a `-n` past the input's line count is just a head count
-    and emits every line, which is why the second half exits 0.
-    """
-    with pytest.raises(ValueError) as refusal:
-        asyncio.run(
-            shuf_generic(
-                [],
-                [],
-                read=_unused_read_bytes,
-                stdin=b"a\n",
-                count=MAX_OUTPUT_LINES + 1,
-                with_replacement=True,
-            )
-        )
-    assert str(refusal.value) == MEMORY_EXHAUSTED
+def test_shuf_has_no_line_ceiling(kwargs, lines):
     rendered, io = asyncio.run(
-        shuf_generic(
-            [],
-            [],
-            read=_unused_read_bytes,
-            stdin=b"a\nb\n",
-            count=MAX_OUTPUT_LINES + 1,
-        )
+        shuf_generic([], [], read=_unused_read_bytes, **kwargs)
     )
     assert io.exit_code == 0
-    assert sorted(
-        asyncio.run(materialize(rendered)).decode().split("\n")[:-1]
-    ) == ["a", "b"]
+    assert asyncio.run(materialize(rendered)).count(b"\n") == lines
 
 
 # `emit_count` is what lets the range path sample rather than enumerate, so it

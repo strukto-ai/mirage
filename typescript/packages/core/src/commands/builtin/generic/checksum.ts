@@ -285,7 +285,11 @@ async function hashCheck(
   let malformed = 0
   let parsedAny = false
   try {
-    for await (const { line: lineno, parsed } of checkLines(stream(p), algorithm)) {
+    for await (const { line: lineno, parsed, error } of checkLines(stream(p), algorithm)) {
+      if (error !== undefined) {
+        await checkNote(errors, `${name}: ${checkLabel}: ${error}`)
+        return [await output.output(), await errors.output(), 1]
+      }
       if (parsed === null) {
         malformed += 1
         if (flags.warn) {
@@ -379,10 +383,14 @@ const CheckLine = z
 async function* checkLines(
   source: ByteSource,
   algorithm: string,
-): AsyncGenerator<z.infer<typeof CheckLine>> {
+): AsyncGenerator<z.infer<typeof CheckLine> & { error?: string }> {
   const lines = new AsyncLineIterator(runStream('digest', { algorithm, check_lines: true }, source))
   try {
     for await (const line of lines) yield CheckLine.parse(JSON.parse(DEC.decode(line)))
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    // A line too long to hold ends the list as a read error does.
+    yield { line: 0, parsed: null, error: err.message }
   } finally {
     await lines.discard()
   }

@@ -12,9 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { openStreamSync } from '../../../rs/stream.ts'
+import type { util } from 'zod'
+import { openStream, openStreamSync } from '../../../rs/stream.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
+import { concat } from '../../../utils/bytes.ts'
 import type { Zone } from '../../../utils/timezone.ts'
+import { streamOutput } from './stream.ts'
 
 /** The last padding flag, also used by Git's libc-style formatter. */
 export function winningPad(flags: string): string | null {
@@ -25,11 +28,13 @@ export function winningPad(flags: string): string | null {
   return null
 }
 
-/** date's C-locale directives. The host supplies one timezone reading;
- * Rust owns the calendar, directives and padding. */
-export function gnuStrftime(dt: Date, fmt: string, zone: Zone, nanosecond?: number): string {
+function config(
+  dt: Date,
+  zone: Zone,
+  nanosecond?: number,
+): Readonly<Record<string, util.JSONType>> {
   const parts = zone.parts(dt)
-  const stream = openStreamSync('strftime', {
+  return {
     year: parts.year,
     month: parts.month + 1,
     day: parts.day,
@@ -40,11 +45,32 @@ export function gnuStrftime(dt: Date, fmt: string, zone: Zone, nanosecond?: numb
     epoch: Math.floor(dt.getTime() / 1000),
     offset: parts.offsetSec,
     zone: parts.abbrev,
-  })
+  }
+}
+
+/** date's C-locale directives. The host supplies one timezone reading;
+ * Rust owns the calendar, directives and padding. */
+export function gnuStrftime(dt: Date, fmt: string, zone: Zone, nanosecond?: number): string {
+  const stream = openStreamSync('strftime', config(dt, zone, nanosecond))
   try {
     stream.feed(encodeText(fmt))
-    return decodeText(stream.finish())
+    const parts = [stream.finish()]
+    while (stream.busy()) parts.push(stream.drain())
+    return decodeText(concat(parts))
   } finally {
     stream.close()
   }
+}
+
+/** `gnuStrftime` as output, a window at a time, so a field as wide as date
+ * allows is written as date writes it rather than held. Mirrors Python's
+ * `strftime_stream`. */
+export async function strftimeStream(
+  dt: Date,
+  fmt: string,
+  zone: Zone,
+  nanosecond?: number,
+): Promise<AsyncIterableIterator<Uint8Array>> {
+  const stream = await openStream('strftime', config(dt, zone, nanosecond))
+  return streamOutput(stream, encodeText(fmt))
 }

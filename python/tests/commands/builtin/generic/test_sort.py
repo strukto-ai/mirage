@@ -9,6 +9,8 @@ from mirage.commands.builtin.generic.sort import (
     sort_generic,
 )
 from mirage.io.types import IOResult, materialize
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.stream import OpenStream
 from mirage.shell.descriptors import unreadable_stdin
 from mirage.types import PathSpec
 
@@ -163,6 +165,26 @@ async def test_check_refuses_an_output_by_its_own_letter(flags, mode):
     assert await _stderr(io) == (
         f"sort: options '-{mode}o' are incompatible\n".encode()
     )
+    assert io.exit_code == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flags", [{"c": True}, {"C": True}])
+async def test_check_out_of_memory_is_sorts_own_line(monkeypatch, flags):
+    # The engine refuses a line past its cap as sort does out of memory,
+    # which -C does not silence (pinned, coreutils 9.7).
+    feed = OpenStream.feed
+
+    def refusing(self: OpenStream, chunk: bytes) -> bytes:
+        if chunk.endswith(b"long"):
+            raise StreamRefusal("sort: memory exhausted", b"", 2)
+        return feed(self, chunk)
+
+    monkeypatch.setattr(OpenStream, "feed", refusing)
+    _, io = await sort_generic(
+        [], read=_unused_read_bytes, stdin=b"a\nlong", flags=flags
+    )
+    assert await _stderr(io) == b"sort: memory exhausted\n"
     assert io.exit_code == 2
 
 

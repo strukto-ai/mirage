@@ -19,6 +19,8 @@ import pytest
 from mirage.commands.builtin.generic.checksum import checksum
 from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.types import materialize
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.stream import OpenStream
 from mirage.types import PathSpec
 
 _DIGEST = hashlib.md5(b"abc").hexdigest()
@@ -98,6 +100,31 @@ _MISSING_ONE = {
 )
 async def test_check_reports_a_missing_recorded_file(flags, expected):
     assert await _run_check(_MISSING_ONE, **flags) == expected
+
+
+@pytest.mark.asyncio
+async def test_a_list_line_too_long_to_hold_is_that_lists_read_error(
+    monkeypatch,
+):
+    # The digest engine refuses a list line past its cap. Out of memory,
+    # md5sum says the list's read error, prints none of its summaries and
+    # goes on to the next list (pinned, coreutils 9.7).
+    feed = OpenStream.feed
+
+    def refusing(self: OpenStream, chunk: bytes) -> bytes:
+        if chunk == b"long":
+            raise StreamRefusal("read error", b"")
+        return feed(self, chunk)
+
+    monkeypatch.setattr(OpenStream, "feed", refusing)
+    files = {**_MISSING_ONE, "/sums.txt": f"{_DIGEST}  /ok.txt\n"}
+    files["/long.txt"] = "long"
+    paths = ["/sums.txt", "/long.txt", "/sums.txt"]
+    assert await _run_check(files, paths=paths) == (
+        "/ok.txt: OK\n/ok.txt: OK\n",
+        "md5sum: /long.txt: read error\n",
+        1,
+    )
 
 
 @pytest.mark.asyncio
