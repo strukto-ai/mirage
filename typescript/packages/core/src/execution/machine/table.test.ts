@@ -485,7 +485,7 @@ describe('MachineTable scans', () => {
         typeof target === 'string' ? target : target.pid,
         signum,
       ])
-      expect(sent.sort()).toEqual([
+      expect(sent).toEqual([
         [412, 28],
         [413, 28],
       ])

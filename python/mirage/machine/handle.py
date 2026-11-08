@@ -345,7 +345,14 @@ class MachineHandle:
         """
         try:
             async with asyncio.timeout(MACHINE_STOP_WAIT_SECONDS):
-                done = await self._control_line(stop_line(tag, signum))
+                done = await self._exec_argv(
+                    ("/bin/sh", "-c", stop_line(tag, signum)),
+                    None,
+                    dict(self.config.env),
+                    "/",
+                    None,
+                    None,
+                )
         except Exception:
             logger.debug("%s: run %s not stopped", self.id, tag, exc_info=True)
             return None

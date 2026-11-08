@@ -371,10 +371,10 @@ async def test_a_kept_signal_reaches_a_program_as_sent():
         assert [signum for _, signum in box.sent] == [28]
         box.sent.clear()
         assert (await ws.shell("kill -WINCH -- -$$")).exit_code == 0
-        assert set(box.sent) == {
+        assert box.sent == [
             (MachinePid(412, 100.0), 28),
             (MachinePid(413, 101.0), 28),
-        }
+        ]
         said = await ws.shell("jobs")
         assert said.stdout == b"[1] running train 1\n"
     finally:

@@ -311,7 +311,7 @@ class ProcessTable:
         """
         await self.scan()
         members = self._members(group_id)
-        sending = [self.send(member, signal) for member in members]
+        sending = [self.send(member, signal) for member in reversed(members)]
         await asyncio.gather(*(sent for sent in sending if sent is not None))
 
     async def signal_group(self, group_id: int, signal: int) -> bool:

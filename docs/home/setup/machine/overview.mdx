@@ -60,8 +60,9 @@ connected, run the shared
 - The machine needs only `sshfs`. No Mirage, keys or open port.
 - Each file call is a round trip to the workspace. With `both`, keep bulk
   data on the machine's own mounts.
-- A machine shows one session's view, the first that runs a line there, and
-  one workspace's mounts. Give each agent and each workspace its own machine.
+- A machine shows one session's view, the first that runs a line there. An
+  sshfs already serving a path Mirage serves is left alone and the line exits
+  1. Give each agent and each workspace its own machine.
 - If the machine restarts, Mirage mounts the paths again. A line caught
   mid-restart exits 126 without running.
 - The root mount and `/dev` are not served.
@@ -170,5 +171,11 @@ past its `timeout_seconds` exits 124, and `max_bytes` and `max_lines` cap its
 output.
 
 A timeout sends TERM, then KILL a second later, to every process of that run,
-and gives up after 5 seconds if the machine stops answering. Use the
-provider's own limits for anything that must not outlive a timeout.
+and gives up after 5 seconds if the machine stops answering. That needs
+`/bin/sh`, `tr`, `grep` and `/proc` on the machine.
+
+<Warning>
+  In TypeScript, a Daytona command keeps running after a timeout, and a
+  Daytona sandbox has no timeout of its own, so it keeps billing. Use the
+  provider's own limits for anything that must not outlive a timeout.
+</Warning>

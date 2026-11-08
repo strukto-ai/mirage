@@ -302,7 +302,18 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   protected async stopRunBounded(tag: string, signum: number): Promise<number | null> {
     const signal = AbortSignal.timeout(MACHINE_STOP_WAIT_SECONDS * 1000)
     try {
-      const done = await abortable(this.controlLine(stopLine(tag, signum), signal), signal)
+      const done = await abortable(
+        this.execArgv(
+          ['/bin/sh', '-c', stopLine(tag, signum)],
+          null,
+          { ...this.config.env },
+          '/',
+          null,
+          null,
+          signal,
+        ),
+        signal,
+      )
       if (done.exitCode !== 0 && done.exitCode !== NOT_RUNNING_STATUS) {
         console.debug(
           `${this.id.toString()}: run ${tag} not stopped: exit ${String(done.exitCode)}`,

@@ -255,7 +255,7 @@ export class ProcessTable {
    */
   async sendGroup(groupId: number, signal: number): Promise<void> {
     await this.scan()
-    const sending = this.members(groupId).map((member) => this.send(member, signal))
+    const sending = [...this.members(groupId)].reverse().map((member) => this.send(member, signal))
     await Promise.all(sending.filter((sent) => sent !== null))
   }
 

@@ -409,6 +409,16 @@ describe('E2BMachine', () => {
       stopLine('line', 15),
     ])
   })
+  it('starts no other stop when a stop times out', async () => {
+    const runtime = makeRuntime()
+    await runtime.connect()
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => AbortSignal.abort())
+    const stopper = runtime as unknown as {
+      stopRunBounded(tag: string, signum: number): Promise<number | null>
+    }
+    expect(await stopper.stopRunBounded('t', 15)).toBeNull()
+    expect(FakeMachine.last.commands.calls.length).toBeLessThanOrEqual(1)
+  })
   // A kill reaches only the shell that encodes the output, so a tagged run
   // that fails for a reason other than a cancel is also stopped by its tag.
   it('reaps a tagged run that fails by its tag', async () => {

@@ -393,6 +393,25 @@ async def test_a_cancelled_line_is_killed_and_reaped_by_its_own_tag(
     ]
 
 
+@pytest.mark.asyncio
+async def test_a_stop_that_times_out_starts_no_other_stop(monkeypatch):
+    async def hang(self):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(FakeHandle, "wait", hang)
+    monkeypatch.setattr(
+        "mirage.machine.handle.MACHINE_STOP_WAIT_SECONDS", 0.01
+    )
+    runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    async with asyncio.timeout(2):
+        assert await runtime._stop_run_bounded("t", 15) is None
+    assert [
+        shlex.split(command)[-1]
+        for command, _ in FakeMachine.last.commands.calls
+    ] == [stop_line("t", 15)]
+
+
 # A kill that names a gentler signal leaves a run's tagged command to the
 # reap, which sends it that signal first; an untagged one (mount setup, a
 # direct exec) has no reap behind it and is killed. Either way the runtime
