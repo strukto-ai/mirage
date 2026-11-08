@@ -1520,6 +1520,7 @@ export async function lsGeneric(
       } finally {
         // A reader that stops early still gets what was found for the
         // operands it never finished, after what it read.
+        const seen = new Set(reported)
         for (const operand of operands) {
           if (finished.has(operand)) continue
           const stopped = budgets.get(operand)?.stopped ?? []
@@ -1527,7 +1528,8 @@ export async function lsGeneric(
             ...(operand.notes ?? []).map(([, note]) => note),
             ...stopped.map((line) => ({ message: `ls: ${line}`, serious: false })),
           ]) {
-            if (reported.includes(warning)) continue
+            if (seen.has(warning)) continue
+            seen.add(warning)
             reported.push(warning)
             pending.push(warning.message)
           }

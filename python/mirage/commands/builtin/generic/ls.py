@@ -1839,6 +1839,7 @@ async def ls(
             finally:
                 # A reader that stops early still gets what was found for
                 # the operands it never finished, after what it read.
+                seen = {id(warning) for warning in reported}
                 for operand in operands:
                     if id(operand) in finished:
                         continue
@@ -1848,7 +1849,8 @@ async def ls(
                         *(note for _, note in operand.notes),
                         *(LsWarning(f"ls: {line}", False) for line in stopped),
                     ):
-                        if all(warning is not seen for seen in reported):
+                        if id(warning) not in seen:
+                            seen.add(id(warning))
                             reported.append(warning)
                             pending.append(warning.message)
                 if pending:
