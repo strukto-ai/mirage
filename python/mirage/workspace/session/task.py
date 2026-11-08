@@ -249,9 +249,13 @@ async def drive(
         try:
             match ask:
                 case ("substitute", _, body, node, span, read):
-                    out, err, status = await host.substitute(
-                        ask[1], body, node, span, read
-                    )
+                    try:
+                        out, err, status = await host.substitute(
+                            ask[1], body, node, span, read
+                        )
+                    finally:
+                        # The child shell ends with its substitution.
+                        ask[1].close()
                     answer = partial(task.answer_substituted, out, err, status)
                 case ("process", _, node):
                     path = await host.process(ask[1], node)

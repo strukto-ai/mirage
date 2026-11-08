@@ -43,7 +43,7 @@ import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord, Recorder } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
-import { Terminal } from '../../shell/console/index.ts'
+import { JobOutput, Terminal } from '../../shell/console/index.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import {
   currentCaller,
@@ -326,13 +326,26 @@ async function runLine(
   await abortable(preflight(env), options.signal)
   // Evaluator calls carry their exact session, including ephemeral forks.
   // Ambient re-entry is safe only with task-local storage: the browser
-  // fallback's newest frame may belong to an unrelated shell call.
+  // fallback's newest frame may belong to an unrelated shell call. A
+  // substitution's shell ends with it. A host task still bound to one
+  // (started in it, run after it) runs as a process a substitution leaves
+  // behind does: in a subshell of the session as it is now, beside the
+  // session's lines, and nothing it changes reaches them but what its jobs
+  // write, which goes on to the session's terminal through a job output of
+  // its own, so a statement of its never takes the session's jobs' output.
   const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(env.sessions) : null
   const inPlace =
     ambient !== null && (options.sessionId === undefined || options.sessionId === ambient.sessionId)
-  const targetSession =
+  let targetSession =
     options.session ??
     (inPlace ? ambient : env.sessions.get(options.sessionId ?? env.sessions.defaultId))
+  if (options.session === undefined && inPlace && ambient.vars.shell.closed) {
+    const source = env.sessions.get(ambient.sessionId)
+    targetSession = source.fork()
+    targetSession.processId = null
+    targetSession.jobTable = env.jobTable.child()
+    targetSession.jobOutput = new JobOutput(source.tty.jobs)
+  }
   frame.session = targetSession
   // Whole-invocation policies must approve the result before bytes escape.
   if (await env.registry.policies.wantsFor('postExecute', targetSession.sessionId)) {
@@ -507,6 +520,7 @@ async function runPreparedLine(
     lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits),
     env.registry.ceilings.maxLineSeconds,
   )
+  if (parent === null) env.sessions.beginLine(targetSession.sessionId)
   try {
     // The outermost line, recorded or not, runs under its `@line` deadline,
     // which a nested one shares: past it the tree is stopped like an abort
@@ -1071,10 +1085,13 @@ async function runPreparedLine(
       effectiveSession.expandAliasesMarks.clear()
     }
     // Durable session fields (cwd, env, grants) flush at the end of
-    // every execute, success or failure, mirroring Python's finally. It
-    // joins under the grace like the tree: a stalled store finishes in
-    // the background instead of holding an aborted caller.
-    await runCancellable(env.sessions.flush(targetSession.sessionId), options.signal)
+    // every line, success or failure, mirroring Python's finally. It joins
+    // under the grace like the tree: a stalled store finishes in the
+    // background instead of holding an aborted caller.
+    await runCancellable(
+      env.sessions.endLine(targetSession.sessionId, parent === null),
+      options.signal,
+    )
   }
 }
 

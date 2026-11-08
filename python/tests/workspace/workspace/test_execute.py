@@ -16,6 +16,7 @@ import asyncio
 import logging
 import threading
 from collections.abc import AsyncIterator
+from unittest.mock import patch
 
 import pytest
 
@@ -491,6 +492,113 @@ async def test_abort_on_the_flush_restores_status():
     store.stall = None
     r = await ws.shell("echo next")
     assert r.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_a_line_saves_its_session_once_at_its_end():
+    store = RAMNamespaceStore()
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, session_store=store)
+    await ws.shell("x=0")
+    with patch.object(store, "cas_set", wraps=store.cas_set) as cas_set:
+        await ws.shell("for i in 1 2 3; do x=$(echo $i); eval 'y=$x'; done")
+    assert [c.args[1]["env"]["y"] for c in cas_set.call_args_list] == ["3"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_line_that_outlives_its_caller_saves_its_session():
+    store = RAMNamespaceStore()
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, session_store=store)
+    gate = asyncio.Event()
+    later: list[asyncio.Task[IOResult]] = []
+
+    async def late() -> IOResult:
+        await gate.wait()
+        return await ws.shell("X=late", record=False)
+
+    async def spawn(config, paths, texts, ctx):
+        later.append(asyncio.create_task(late()))
+        return None, IOResult()
+
+    ws.register_cli(
+        "spawn",
+        CLI(
+            spec=CommandSpec(name="spawn"), handlers={"": CLIHandler(fn=spawn)}
+        ),
+    )
+    await ws.shell("spawn")
+    gate.set()
+    await later[0]
+    saved = (await store.load())[ws._session_mgr.default_id]
+    assert saved["env"]["X"] == "late"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_task_a_substitution_left_runs_in_a_subshell():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    gate = asyncio.Event()
+    later: list[asyncio.Task[IOResult]] = []
+
+    async def late() -> IOResult:
+        await gate.wait()
+        line = 'echo "v=$V"; J=joined; echo "j=$J"; echo late & wait'
+        return await ws.shell(line, record=False)
+
+    async def spawn(config, paths, texts, ctx):
+        later.append(asyncio.create_task(late()))
+        return None, IOResult()
+
+    async def await_late(config, paths, texts, ctx):
+        gate.set()
+        return (await later[0]).stdout, IOResult()
+
+    for name, fn in (("spawn", spawn), ("await_late", await_late)):
+        ws.register_cli(
+            name,
+            CLI(spec=CommandSpec(name=name), handlers={"": CLIHandler(fn=fn)}),
+        )
+    ws.create_session("s")
+    await ws.shell("V=outer", session_id="s")
+    line = 'echo $(spawn); await_late; echo "J=$J"'
+    io = await asyncio.wait_for(ws.shell(line, session_id="s"), 5)
+    assert io.stdout == b"\nv=outer\nj=joined\nlate\nJ=\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_subshell_task_leaves_the_session_jobs_output_alone():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    gate, hold = asyncio.Event(), asyncio.Event()
+    later: list[asyncio.Task[IOResult]] = []
+
+    async def late() -> IOResult:
+        await gate.wait()
+        return await ws.shell("release; sleep 0.2; echo cb", record=False)
+
+    async def spawn(config, paths, texts, ctx):
+        later.append(asyncio.create_task(late()))
+        return None, IOResult()
+
+    async def held(config, paths, texts, ctx):
+        await hold.wait()
+        return None, IOResult()
+
+    async def release(config, paths, texts, ctx):
+        hold.set()
+        return None, IOResult()
+
+    for name, fn in (("spawn", spawn), ("held", held), ("release", release)):
+        ws.register_cli(
+            name,
+            CLI(spec=CommandSpec(name=name), handlers={"": CLIHandler(fn=fn)}),
+        )
+    await ws.shell("{ held; echo job; } &")
+    await ws.shell("echo $(spawn)")
+    gate.set()
+    assert (await later[0]).stdout == b"cb\n"
+    assert (await ws.shell("echo next")).stdout == b"job\nnext\n"
+    await ws.close()
 
 
 @pytest.mark.asyncio
