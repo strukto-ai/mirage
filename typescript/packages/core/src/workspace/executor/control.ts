@@ -235,6 +235,7 @@ export async function returning(
   const frame = callStack.current
   frame.closed = frame.sourced
   if (session.functionNames !== null) session.functionNames = callStack.functionNames()
+  session.callLines = callStack.callLines()
   const outputs = [stdout]
   try {
     io = await land(await runReturnTrap(executeFn, session, stdin, callStack), sink, outputs, io)

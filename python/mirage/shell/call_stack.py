@@ -29,6 +29,7 @@ class CallFrame:
     loop_level: int = 0
     sourced: bool = False
     closed: bool = False
+    call_line: int = 0
 
 
 class CallStack:
@@ -85,6 +86,7 @@ class CallStack:
         positional: list[str] | None = None,
         function_name: str = "",
         sourced: bool = False,
+        call_line: int = 0,
     ) -> None:
         """Enter a function, or a sourced file (``function_name`` is
         ``source``). A function starts outside every loop, so ``break``
@@ -95,6 +97,8 @@ class CallStack:
             positional (list[str] | None): the frame's ``$1``... .
             function_name (str): what ``FUNCNAME`` names the frame.
             sourced (bool): the frame is a sourced file's.
+            call_line (int): the line it was called from, which
+                ``BASH_LINENO`` holds.
         """
         self._frames.append(
             CallFrame(
@@ -102,6 +106,7 @@ class CallStack:
                 function_name=function_name,
                 loop_level=self.current.loop_level if sourced else 0,
                 sourced=sourced,
+                call_line=call_line,
             )
         )
 
@@ -182,6 +187,16 @@ class CallStack:
         if all(frame.sourced for frame in frames):
             return ()
         return tuple(frame.function_name for frame in reversed(frames))
+
+    def call_lines(self) -> tuple[int, ...]:
+        """``${BASH_LINENO[@]}``: the line each frame was called from,
+        innermost first, a sourced file's too, but not one whose RETURN
+        action runs: it has returned."""
+        return tuple(
+            frame.call_line
+            for frame in reversed(self._frames[1:])
+            if not frame.closed
+        )
 
     def get_all_positional(self) -> list[str]:
         return self.current.positional

@@ -2,6 +2,7 @@ import pytest
 
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
+from mirage.io.types import materialize
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.executor.builtins.lookup.lookup import (
     handle_type,
@@ -183,9 +184,11 @@ def test_type_t_not_found_is_silent():
     assert not io.stderr
 
 
-def test_type_all_found_exit_rule():
+@pytest.mark.asyncio
+async def test_type_all_found_exit_rule():
     out, io, _ = handle_type(["cd", "nope"], make_session(), make_registry())
-    assert out.decode() == "cd is a shell builtin\n"
+    assert await materialize(out) == b"cd is a shell builtin\n"
+    assert io.stderr == b"bash: type: nope: not found\n"
     assert io.exit_code == 1
 
 

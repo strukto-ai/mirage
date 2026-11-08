@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "command echo hi there",
+      "command": "command echo hi there; ( command 'X=5' 2>&1; echo rc=$? \"[${X-unset}]\"; command time echo hi 2>&1; echo rc=$? )",
       "expect": {
         "exit": 0,
-        "stdout": "hi there\n",
+        "stdout": "hi there\nbash: line 1: X=5: command not found\nrc=127 [unset]\nbash: line 1: time: command not found\nrc=127\n",
         "stderr": ""
       }
     },

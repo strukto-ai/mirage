@@ -133,10 +133,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "alias axd='echo hi'\nalias axd; type -t axd; command -v axd",
+      "command": "alias axd='echo hi'\nalias axd; ( shopt -s expand_aliases; type -t axd; command -v axd ); ( shopt -u expand_aliases; type -t axd; command -v axd; echo rc=$? )",
       "expect": {
         "exit": 0,
-        "stdout": "alias axd='echo hi'\nalias\nalias axd='echo hi'\n",
+        "stdout": "alias axd='echo hi'\nalias\nalias axd='echo hi'\nrc=1\n",
         "stderr": ""
       }
     },

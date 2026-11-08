@@ -31,6 +31,7 @@ from mirage.cli.output import (
     format_table,
     handle_response,
 )
+from mirage.cli.policy import keep_policy_names
 from mirage.cli.settings import header, use_workspace
 from mirage.utils.yaml import parse_yaml
 
@@ -83,7 +84,9 @@ def _load_config_argument(path: Path) -> dict[str, Any]:
         )
     except ValueError as e:
         fail(str(e), exit_code=2)
-    _absolutize_scripts(resolved, path.resolve().parent)
+    keep_policy_names(
+        resolved, lambda: _absolutize_scripts(resolved, path.resolve().parent)
+    )
     return resolved
 
 
@@ -401,13 +404,12 @@ def delete_cmd(workspace_id: str = typer.Argument(...)) -> None:
         r = client.request(
             "DELETE", f"/v1/workspaces/{quote(workspace_id, safe='')}"
         )
-    # The console answers a delete with no body, so the id is the one asked
-    # for.
+    # The hosted API answers 204 with no body, so the id is the one given.
     deleted = cast(dict[str, Any], handle_response(r))
     header(f"deleted {workspace_id}")
     emit(
         {"id": workspace_id, **deleted},
-        human=lambda d: f"Deleted workspace {workspace_id}.",
+        human=lambda _: f"Deleted workspace {workspace_id}.",
     )
 
 

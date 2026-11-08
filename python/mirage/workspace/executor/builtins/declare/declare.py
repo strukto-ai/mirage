@@ -32,7 +32,6 @@ from mirage.shell.variable import (
     ShellVar,
     VarAttr,
     VarKind,
-    attr_letters,
 )
 from mirage.shell.voice import shell_voice
 from mirage.shell.xtrace import trace_assignment
@@ -41,7 +40,6 @@ from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.alias.alias import body_alias_values
 from mirage.workspace.executor.builtins.declare.constants import (
     EXPORT_FLAGS,
-    LISTED_ATTRIBUTES,
     NAME_BRACKET_RE,
     READONLY_FLAGS,
     SUBSCRIPT_RE,
@@ -60,6 +58,7 @@ from mirage.workspace.executor.builtins.shared import (
     refusal,
     require_view,
     result,
+    written,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
@@ -566,20 +565,22 @@ def operand_parts(word: str) -> tuple[str, bool, str | None]:
     """A declaration operand as its name, whether it appends, and its
     value, None for a bare name: ``X+=y`` appends ``y`` to ``X``. An
     element's subscript runs to its matching ``]``, so an ``=`` inside it
-    is the subscript's (``a[x=5]=1``, ``a[b[0]=1]=v``).
+    is the subscript's (``a[x=5]=1``, ``a[b[0]=1]=v``). bash finds that
+    ``]`` in the word as expanded, so one whose subscript never closes,
+    or closes anywhere but before its ``=`` (``c[]]=v`` from ``c[$k]=v``),
+    assigns nothing.
 
     Args:
         word (str): the operand as typed.
     """
-    end = _subscript_end(word)
-    if end is not None:
-        rest = word[end:]
-        if not rest:
-            return word, False, None
-        if rest.startswith("+="):
+    if NAME_BRACKET_RE.match(word):
+        end = _subscript_end(word)
+        rest = "" if end is None else word[end:]
+        if end is not None and rest.startswith("+="):
             return word[:end], True, rest[2:]
-        if rest.startswith("="):
+        if end is not None and rest.startswith("="):
             return word[:end], False, rest[1:]
+        return word, False, None
     name, eq, value = word.partition("=")
     if not eq:
         return word, False, None
@@ -694,30 +695,6 @@ def declaration_result(
     )
 
 
-def declaration_listed(
-    session: SessionState, name: str, flags: set[str]
-) -> bool:
-    """Whether a no-name ``declare`` listing's letters keep ``name``:
-    ``-a`` / ``-A`` narrow it to that array kind (``kind_listed``), and
-    any of ``-i -l -n -r -t -u -x`` keeps a name carrying one of them.
-    A running command's temporary is never listed.
-
-    Args:
-        session (SessionState): shell session state.
-        name (str): the variable listed.
-        flags (set[str]): the listing's option letters.
-    """
-    var = session.vars.get(name)
-    if (
-        var is None
-        or not kind_listed(session, name, flags)
-        or name in prefix_temporaries(session)
-    ):
-        return False
-    wanted = flags & LISTED_ATTRIBUTES
-    return not wanted or bool(wanted & set(attr_letters(var)))
-
-
 async def handle_declare_print(
     names: list[str],
     session: SessionState,
@@ -730,7 +707,8 @@ async def handle_declare_print(
     exist is reported on stderr without stopping the rest, exiting 1 at
     the end -- GNU prints the names it knows and refuses only the ones
     it does not. Bare ``declare -p`` lists every visible name sorted,
-    narrowed by the declaration's letters (``declaration_listed``).
+    the ones the shell computes too, narrowed by the declaration's
+    letters (``Shell.listing``).
 
     Args:
         names (list[str]): the names to render, empty for all.
@@ -738,25 +716,21 @@ async def handle_declare_print(
         flags (set[str] | None): the declaration's option letters.
         cmd (str): ``declare`` or ``typeset``, which a refusal names.
     """
-    targets = names or sorted(
-        name
-        for name in session.vars
-        if declaration_listed(session, name, flags or set())
-    )
-    lines: list[str] = []
-    errors: list[str] = []
-    for name in targets:
+    if not names:
+        listed = session.vars.shell.listing(
+            "".join(sorted(flags or ())), sorted(prefix_temporaries(session))
+        )
+        return written(cmd, [(False, f"{line}\n") for line in listed], 0)
+    pieces: list[tuple[bool, str]] = []
+    failed = False
+    for name in names:
         line = session.vars.shell.declaration(name)
         if line is None:
-            errors.append(f"{shell_voice()}{cmd}: {name}: not found")
+            failed = True
+            pieces.append((True, f"{shell_voice()}{cmd}: {name}: not found\n"))
         else:
-            lines.append(line)
-    return result(
-        cmd,
-        encode_text("".join(f"{line}\n" for line in lines)),
-        1 if errors else 0,
-        "".join(f"{error}\n" for error in errors),
-    )
+            pieces.append((False, f"{line}\n"))
+    return written(cmd, pieces, 1 if failed else 0)
 
 
 def function_flags(session: SessionState, name: str) -> str:
@@ -863,24 +837,24 @@ def handle_declare_functions(
             ),
         )
     if not names:
-        present = [
+        names = [
             name
             for name in sorted(session.functions)
             if not wanted or wanted & set(function_flags(session, name))
         ]
-    lines = function_lines(
-        session, present, "F" not in flags, printing or not names
-    )
-    return result(
-        cmd,
-        encode_text("".join(f"{line}\n" for line in lines)),
-        1 if missing else 0,
-        "".join(
-            f"{shell_voice()}{cmd}: {name}: not found\n" for name in missing
-        )
-        if printing
-        else "",
-    )
+        printing = True
+    pieces: list[tuple[bool, str]] = []
+    for name in names:
+        if name in session.functions:
+            pieces.extend(
+                (False, f"{line}\n")
+                for line in function_lines(
+                    session, [name], "F" not in flags, printing
+                )
+            )
+        elif printing:
+            pieces.append((True, f"{shell_voice()}{cmd}: {name}: not found\n"))
+    return written(cmd, pieces, 1 if missing else 0)
 
 
 async def mark_names(

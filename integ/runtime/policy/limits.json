@@ -1251,7 +1251,7 @@
           "expect": {
             "exit": 2,
             "stdout": "/data/a.txt:alice\n/data/a.txt:alice\n",
-            "stderr": "grep: output truncated at limit (2 lines); narrow the selection or raise command_limits for this command\ngrep: /data/missing: No such file or directory\n"
+            "stderr": "grep: /data/missing: No such file or directory\ngrep: output truncated at limit (2 lines); narrow the selection or raise command_limits for this command\n"
           }
         },
         {

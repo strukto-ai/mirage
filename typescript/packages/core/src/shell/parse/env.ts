@@ -16,6 +16,7 @@ import type { TSNodeLike } from '../types.ts'
 import { CD_ANCHORS, DECL_PRINTER_HEADS, IMPLICIT_HEAD_READS, NAMEREF_HEADS } from './constants.ts'
 import {
   commandArgs,
+  commandHead,
   commandInvocations,
   literalText,
   sameNode,
@@ -199,7 +200,7 @@ export function envReads(node: TSNodeLike): {
   for (const current of walkNamedOutsideDefs(node)) {
     if (current.type === 'command') {
       const nameNode = current.childForFieldName?.('name') ?? null
-      const head = nameNode !== null ? nameNode.text : ''
+      const head = nameNode !== null ? commandHead(nameNode) : ''
       const prefix = prefixAssignmentNames(current)
       let skipped: ReadonlySet<string> | null = null
       if (head === 'env') {

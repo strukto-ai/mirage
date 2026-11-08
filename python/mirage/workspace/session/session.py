@@ -40,7 +40,7 @@ from mirage.shell.constants import (
     SHELL_ARGV0,
 )
 from mirage.shell.descriptors import Descriptor, StreamOwner
-from mirage.shell.helpers import line_row
+from mirage.shell.helpers import line_row, source_row
 from mirage.shell.types import AliasExpansion, TSNodeLike
 from mirage.shell.variable import (
     ManagedRef,
@@ -361,6 +361,10 @@ class SessionState:
     # None once `unset FUNCNAME` has made it an ordinary name, as bash's
     # unset does for the rest of the shell.
     function_names: tuple[str, ...] | None = ()
+    # `${BASH_LINENO[@]}`: the line each frame on the call stack was
+    # called from, innermost first (`CallStack.call_lines`), written
+    # beside `function_names`; `unset` cannot end it.
+    call_lines: tuple[int, ...] = ()
     # Which line stamped the two fields above, so a cancelled line puts
     # back only what it overwrote. Two `execute()` calls can share one
     # session, and a restore of a snapshot older than a concurrent
@@ -549,9 +553,12 @@ class SessionState:
     _parse_from: int | None = field(default=None, repr=False)
     # Whether the next nested parse is a `$( )` or `<( )` body, which
     # bash reads again as it prints it; and that running parse's line per
-    # row (`reread_rows`), None when its rows count as typed.
+    # node, and the line each ends on, by id (`reread_lines`), None when
+    # its rows count as typed.
     _reread: bool = field(default=False, repr=False)
-    _line_rows: tuple[int, ...] | None = field(default=None, repr=False)
+    _line_rows: dict[int, tuple[int, int]] | None = field(
+        default=None, repr=False
+    )
     # The owner of this session's terminal streams, which an `exec` copy
     # of one names (`exec 3>&1`), and whether a line of the session is
     # running, whose outermost program routes what was written to them.
@@ -612,7 +619,7 @@ class SessionState:
 
     def variables_to_dict(self) -> dict[str, Any]:
         """The record's keys the variables fill: ``env``, ``arrays``,
-        ``assocs``, ``var_attrs`` and ``managed``."""
+        ``assocs``, ``var_attrs``, ``unassigned`` and ``managed``."""
         # A managed name serializes as its pointer, never its value: a
         # stored session may leak only where a secret lives. `env` skips
         # the name (the fetched plaintext must not land in the record)
@@ -669,6 +676,18 @@ class SessionState:
         data["var_attrs"] = {
             name: stored_attrs(var) for name, var in records if var.attrs
         }
+        # A name declared and never assigned (`declare x`, `declare -a y`)
+        # holds no value: with no attribute either it would not be saved
+        # at all, and an array would come back assigned and empty.
+        shell = self.vars.shell
+        unassigned = sorted(
+            name
+            for name, var in records
+            if name not in managed
+            and (var.value is None or shell.is_unassigned(name))
+        )
+        if unassigned:
+            data["unassigned"] = unassigned
         if managed:
             refs: dict[str, dict[str, str]] = {}
             for name, ref in managed.items():
@@ -780,6 +799,7 @@ class SessionState:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SessionState":
         recorded: dict[str, ShellVar] | None = None
+        unassigned: list[str] = []
         if "env" in data or "var_attrs" in data or "managed" in data:
             data = dict(data)
             env = data.pop("env", {})
@@ -787,6 +807,7 @@ class SessionState:
             managed = data.pop("managed", None)
             arrays = data.pop("arrays", {})
             assocs = data.pop("assocs", {})
+            unassigned = data.pop("unassigned", [])
             # No `var_attrs` at all means the payload is a bare process
             # environment -- an embedder's dict, or a record another
             # writer hand-built -- so every name in it is exported,
@@ -808,6 +829,8 @@ class SessionState:
                     dict(entries),
                     attrs_from_letters((attrs or {}).get(name, "")),
                 )
+            for name in unassigned:
+                out_vars.setdefault(name, ShellVar(None, frozenset()))
             # A managed name restores declared-but-unfetched. The value
             # is forced back to None: a stored session must never carry
             # the plaintext, so one a tampered payload smuggles into
@@ -940,6 +963,9 @@ class SessionState:
             # startup variable it had unset stays unset rather than being
             # seeded again; a bare environment starts a new shell.
             session.vars = ShellVars.of(recorded, session.ids.random_u32)
+            for name in unassigned:
+                if isinstance(recorded[name].value, (ShellArray, dict)):
+                    session.vars.shell.unassigned(name)
         return session
 
     @property
@@ -960,19 +986,24 @@ class SessionState:
         it (``_line_rows``), numbered on from where that text's parse
         starts (``_line_row``)."""
         node = self._line_node
-        row = 0 if node is None else self.counted_row(line_row(node))
+        row = 0 if node is None else self.counted_line(node)
         return self._line_row + row + 1
 
-    def counted_row(self, row: int) -> int:
-        """A row of the running parse's text as its lines count it.
+    def counted_line(self, node: TSNodeLike, end: bool = False) -> int:
+        """The line of the running parse's text a node is numbered by
+        (``line_row``), or ends on, as its lines count it: as typed, or
+        as bash prints a body it reads again (``_line_rows``).
 
         Args:
-            row (int): the row in the text.
+            node (TSNodeLike): a node of the running parse.
+            end (bool): the line it ends on instead.
         """
-        rows = self._line_rows
-        if not rows:
-            return row
-        return rows[min(row, len(rows) - 1)]
+        found = (
+            None if self._line_rows is None else self._line_rows.get(node.id)
+        )
+        if found is not None:
+            return found[1] if end else found[0]
+        return source_row(node, end=True) if end else line_row(node)
 
     @property
     def bash_pid(self) -> int:
@@ -1199,6 +1230,7 @@ class SessionState:
             pipe_status=(),
             last_bg_job_id=None,
             function_names=(),
+            call_lines=(),
             _getopts_pos=0,
             _getopts_optind=None,
             errexit_ignored=False,

@@ -14,7 +14,6 @@
 
 import { decodeAnsiC } from './escapes.ts'
 import {
-  ALIAS_WORD_TYPES,
   REDIRECT_NODE_TYPES,
   aliasRewrite,
   getCaseItems,
@@ -24,7 +23,7 @@ import {
   parseFunction,
 } from './helpers.ts'
 import type { ParseScope } from './parse/scope.ts'
-import { BASH_KEYWORDS } from './parse/constants.ts'
+import { ALIAS_WORD_TYPES, BASH_KEYWORDS } from './parse/constants.ts'
 import { NodeType as NT, type Heredoc, type TSNodeLike } from './types.ts'
 import { singleQuote } from '../utils/quote.ts'
 

@@ -335,14 +335,28 @@ export async function grepGeneric(
     (f.maxCount !== null && f.maxCount <= 1)
   )
   let failed = false
-  const notices: Uint8Array[] = []
   let matched = false
   let printed = false
+
+  const pending: Uint8Array[] = []
+
+  function note(line: Uint8Array): void {
+    pending.push(line)
+  }
+
+  // Said before the output that follows it, so it lands among the output it
+  // came with, each stretch joined once.
+  function said(): void {
+    if (pending.length === 0) return
+    const held = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
+    io.stderr = concat([held, ...pending])
+    pending.length = 0
+  }
 
   function warn(message: string): void {
     failed = true
     io.exitCode = exitCodeFor(matched, failed, f.quiet)
-    if (!f.noMessages) notices.push(ENC.encode(message + '\n'))
+    if (!f.noMessages) note(ENC.encode(message + '\n'))
   }
 
   function updateStatus(fileIO: IOResult): void {
@@ -365,7 +379,7 @@ export async function grepGeneric(
         const here = follow.resolve(p.virtual)
         if (chain.includes(here)) {
           if (!f.noMessages)
-            notices.push(ENC.encode(`${name}: ${p.rawPath}: warning: recursive directory loop\n`))
+            note(ENC.encode(`${name}: ${p.rawPath}: warning: recursive directory loop\n`))
           return
         }
         chain = [...chain, here]
@@ -442,7 +456,7 @@ export async function grepGeneric(
         // A -P search that gave up ends its file with an error.
         failed ||= fileIO.exitCode === 2
         updateStatus(fileIO)
-        if (fileIO.stderr !== null) notices.push(await materialize(fileIO.stderr))
+        if (fileIO.stderr !== null) note(await materialize(fileIO.stderr))
       }
     } catch (error) {
       if (!isFsError(error)) throw error
@@ -454,7 +468,10 @@ export async function grepGeneric(
     try {
       for (const path of paths) {
         try {
-          yield* scan(path)
+          for await (const chunk of scan(path)) {
+            said()
+            yield chunk
+          }
         } catch (err) {
           if (!(err instanceof WalkLimitError)) throw err
           warn(`grep: ${err.message}`)
@@ -462,7 +479,7 @@ export async function grepGeneric(
         if (f.quiet && matched) break
       }
     } finally {
-      if (notices.length > 0) io.stderr = concat([await materialize(io.stderr), ...notices])
+      said()
     }
   }
 

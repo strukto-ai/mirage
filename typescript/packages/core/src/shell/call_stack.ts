@@ -24,10 +24,15 @@ export class CallFrame {
   sourced: boolean
   // A sourced file whose RETURN action runs: it has returned.
   closed: boolean
+  // The line it was called from, which `BASH_LINENO` holds.
+  callLine: number
 
   constructor(
     init: Partial<
-      Pick<CallFrame, 'positional' | 'functionName' | 'loopLevel' | 'sourced' | 'closed'>
+      Pick<
+        CallFrame,
+        'positional' | 'functionName' | 'loopLevel' | 'sourced' | 'closed' | 'callLine'
+      >
     > = {},
   ) {
     this.positional = init.positional ?? []
@@ -35,6 +40,7 @@ export class CallFrame {
     this.loopLevel = init.loopLevel ?? 0
     this.sourced = init.sourced ?? false
     this.closed = init.closed ?? false
+    this.callLine = init.callLine ?? 0
   }
 }
 
@@ -78,6 +84,7 @@ export class CallStack {
             loopLevel: loops ? frame.loopLevel : 0,
             sourced: frame.sourced,
             closed: frame.closed,
+            callLine: frame.callLine,
           }),
       ),
     )
@@ -95,15 +102,17 @@ export class CallStack {
   /**
    * Enter a function, or a sourced file (`functionName` is `source`). A
    * function starts outside every loop, so `break` in it cannot end its
-   * caller's; a sourced file runs in its caller's loops.
+   * caller's; a sourced file runs in its caller's loops. `callLine` is the
+   * line it was called from, which `BASH_LINENO` holds.
    */
-  push(positional: string[] = [], functionName = '', sourced = false): void {
+  push(positional: string[] = [], functionName = '', sourced = false, callLine = 0): void {
     this.frames.push(
       new CallFrame({
         positional,
         functionName,
         loopLevel: sourced ? this.current.loopLevel : 0,
         sourced,
+        callLine,
       }),
     )
   }
@@ -183,6 +192,19 @@ export class CallStack {
     const frames = this.frames.slice(1).filter((frame) => !frame.closed)
     if (frames.every((frame) => frame.sourced)) return []
     return frames.reverse().map((frame) => frame.functionName)
+  }
+
+  /**
+   * `${BASH_LINENO[@]}`: the line each frame was called from, innermost
+   * first, a sourced file's too, but not one whose RETURN action runs: it
+   * has returned.
+   */
+  callLines(): readonly number[] {
+    return this.frames
+      .slice(1)
+      .filter((frame) => !frame.closed)
+      .reverse()
+      .map((frame) => frame.callLine)
   }
 
   getAllPositional(): string[] {

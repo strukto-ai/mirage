@@ -179,6 +179,7 @@ SHELL_ONLY_BUILTINS = frozenset(
         "alias",
         "bg",
         "break",
+        "builtin",
         "cd",
         "command",
         "compgen",

@@ -692,7 +692,7 @@ async def _replay(seed: int) -> list[str]:
             "shuf -n 3 /data/n.txt",
             "shuf -i 1-9",
             "cat /data/n.txt | shuf -n 2",
-            "shuf -n 4 /data/n.txt /more/m.txt",
+            "shuf -n 4 /more/m.txt",
         ):
             result = await ws.shell(line)
             assert result.exit_code == 0, line

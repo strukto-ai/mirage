@@ -67,9 +67,7 @@ async def relay_stdio(url: str, token: Callable[[], str]) -> None:
                 return
             if response.status_code >= 400:
                 detail = response.json().get("detail", response.text)
-                raise RuntimeError(
-                    f"daemon error {response.status_code}: {detail}"
-                )
+                raise RuntimeError(f"error {response.status_code}: {detail}")
             await write(response.text)
 
         async with anyio.wrap_file(sys.stdin) as stdin:

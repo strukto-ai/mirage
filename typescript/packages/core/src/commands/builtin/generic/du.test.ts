@@ -27,7 +27,7 @@ import {
   rollup,
   toVirtual,
 } from './du.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
@@ -101,7 +101,7 @@ describe('du', () => {
       boom as unknown as ComputeSize,
       boom as unknown as ComputeEntries,
     )
-    expect(DEC.decode(out)).toBe('0\ttotal\n')
+    expect(DEC.decode(await materialize(out))).toBe('0\ttotal\n')
     expect(DEC.decode(await io.materializeStderr())).toBe(
       "du: cannot access '/data/nosuch': No such file or directory\n",
     )

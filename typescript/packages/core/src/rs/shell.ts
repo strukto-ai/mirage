@@ -33,6 +33,8 @@ interface Exports {
   ): number
   mirage_rs_shell_message(): number
   mirage_rs_shell_message_len(): number
+  mirage_rs_shell_reread(handle: number, index: number): number
+  mirage_rs_shell_reread_lines(): number
   mirage_rs_shell_names(): number
   mirage_rs_shell_names_len(): number
   mirage_rs_shell_extras(): number
@@ -163,6 +165,24 @@ export class ShellTree {
 
   inlined(index: number): string | undefined {
     return this.extras.inlined.get(index)
+  }
+
+  /**
+   * Each node under node `index`, a `$( )` body bash reads again as it prints
+   * it, by id: the line `$LINENO` numbers it by and the line it ends on, from 0.
+   */
+  rereadLines(index: number): Map<number, readonly [number, number]> {
+    const wasm = instance()
+    const len = wasm.mirage_rs_shell_reread(this.handle, index)
+    const numbers = new Uint32Array(wasm.memory.buffer, wasm.mirage_rs_shell_reread_lines(), len)
+    const lines = new Map<number, readonly [number, number]>()
+    for (let at = 0; at + 2 < len; at += 3) {
+      lines.set(this.serial * 0x1000000 + (numbers[at] ?? 0), [
+        numbers[at + 1] ?? 0,
+        numbers[at + 2] ?? 0,
+      ])
+    }
+    return lines
   }
 
   /**
@@ -326,6 +346,11 @@ export class ShellTreeNode implements ShellNode {
   /** The node's text with the heredoc bodies the line reads after a substitution in it moved inside it. */
   get inlined(): string | undefined {
     return this.tree.inlined(this.index)
+  }
+
+  /** Each node under this one as bash prints a `$( )` body it reads again (`ShellTree.rereadLines`). */
+  rereadLines(): ReadonlyMap<number, readonly [number, number]> {
+    return this.tree.rereadLines(this.index)
   }
 
   /** Where each UTF-16 unit of the tree's source came from in the line as typed, then its end. */
@@ -640,6 +665,7 @@ export interface ShellFrame {
   readonly outside: number
   readonly pipeStatus: readonly number[]
   readonly functionNames: readonly string[] | null
+  readonly callLines: readonly number[]
   readonly paren: boolean
   readonly memoryRoom: number | null
   readonly line: number
@@ -839,9 +865,17 @@ export class Shell {
     return this.call('is_unassigned', name) as boolean
   }
 
-  /** The line `declare -p` prints for a name; null for one unset or hidden. */
+  /** The line `declare -p` prints for a name, `RANDOM` drawing; null for one unset or hidden. */
   declaration(name: string): string | null {
     return this.call('declaration', name) as string | null
+  }
+
+  /**
+   * The lines a bare `declare -p` prints, sorted by name, narrowed by its option
+   * `letters`, the running command's temporaries in `skip` left out.
+   */
+  listing(letters: string, skip: readonly string[]): string[] {
+    return texts(this.call('listing', letters, skip))
   }
 
   /**
@@ -934,6 +968,7 @@ export class Shell {
       frame.outside,
       frame.pipeStatus,
       frame.functionNames,
+      frame.callLines,
       frame.paren,
       frame.memoryRoom,
       frame.line,

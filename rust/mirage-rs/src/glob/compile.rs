@@ -132,7 +132,9 @@ fn unquote(cp: u32) -> u32 {
         .and_then(|i| QUOTED.get(i as usize))
         .map_or(cp, |&c| u32::from(c))
 }
-pub(super) fn quote(cp: u32) -> u32 {
+/// A character the matcher reads specially as the mark that makes it
+/// literal, any other as it is.
+pub(crate) fn quote(cp: u32) -> u32 {
     QUOTED
         .iter()
         .position(|&c| u32::from(c) == cp)

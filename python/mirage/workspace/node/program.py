@@ -73,20 +73,6 @@ from mirage.workspace.history.line import LineHistory
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
-# The compound commands, whose rows a `$( )` body read again keeps apart.
-_COMPOUND_TYPES = frozenset(
-    {
-        NT.IF_STATEMENT,
-        NT.FOR_STATEMENT,
-        NT.C_STYLE_FOR_STATEMENT,
-        NT.WHILE_STATEMENT,
-        NT.CASE_STATEMENT,
-        NT.COMPOUND_STATEMENT,
-        NT.SUBSHELL,
-        NT.FUNCTION_DEFINITION,
-    }
-)
-
 
 class StatementRecorder(Recorder):
     """Forward ordinary output while retaining chunks needing descriptor routing."""
@@ -165,7 +151,7 @@ async def execute_program(
     session._parse_from = None
     session._parse_row = start
     session._line_row = line_start
-    session._line_rows = reread_rows(node) if session._reread else None
+    session._line_rows = reread_lines(node) if session._reread else None
     session._reread = False
     root = not session._line_open
     session._line_open = True
@@ -683,53 +669,20 @@ def parse_rows(session: SessionState, inline: bool) -> tuple[int, int]:
     ends = source_row(running, end=True)
     if session._reread:
         return session._parse_row + ends, session.line_number - 1
-    return session._parse_row + ends, session._line_row + session.counted_row(
-        ends
+    return session._parse_row + ends, session._line_row + session.counted_line(
+        running, end=True
     )
 
 
-def reread_rows(node: TSNodeLike) -> tuple[int, ...]:
-    """The line a ``$( )`` or ``<( )`` body numbers each of its rows by,
-    on from the command running it. bash reads the body again as it
-    prints it, a statement to a line only where a newline ended the one
-    before, so a blank line, a newline after ``;`` and the rows a simple
-    statement or pipeline spans add none; a compound command keeps its
-    rows apart, one line each.
+def reread_lines(node: TSNodeLike) -> dict[int, tuple[int, int]]:
+    """The line a ``$( )`` or ``<( )`` body numbers each of its nodes by,
+    and the line each ends on, by id, on from the command running it:
+    bash reads the body again as it prints it (``ShellNode.reread_lines``).
 
     Args:
         node (TSNodeLike): the body's program.
     """
-    rows: list[int] = []
-    line = 0
-    newline = False
-    for child in node.children:
-        if not child.is_named:
-            newline = False
-            continue
-        if child.type == NT.COMMENT:
-            continue
-        if rows and newline:
-            line += 1
-        first, last = source_row(child), source_row(child, end=True)
-        rows.extend([line] * (first + 1 - len(rows)))
-        compound = _compound(child)
-        for row in range(len(rows), last + 1):
-            rows.append(line + (row - first if compound else 0))
-        if compound:
-            line += last - first
-        newline = True
-    return tuple(rows)
-
-
-def _compound(node: TSNodeLike) -> bool:
-    """Whether a statement is a compound command, under its redirects.
-
-    Args:
-        node (TSNodeLike): a statement.
-    """
-    if node.type == NT.REDIRECTED_STATEMENT and node.named_children:
-        node = node.named_children[0]
-    return node.type in _COMPOUND_TYPES
+    return {id_: (line, end) for id_, line, end in node.reread_lines()}
 
 
 def refused_row(node: TSNodeLike) -> int | None:

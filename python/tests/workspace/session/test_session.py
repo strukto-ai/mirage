@@ -148,6 +148,27 @@ def test_session_roundtrip():
     assert restored.env == original.env
 
 
+def test_session_roundtrip_keeps_names_declared_and_never_assigned():
+    record = {
+        "session_id": "rt",
+        "env": {},
+        "arrays": {"y": {}, "w": {"0": "1"}},
+        "assocs": {"m": {}},
+        "var_attrs": {"z": "i"},
+        "unassigned": ["m", "x", "y", "z"],
+    }
+    restored = SessionState.from_dict(SessionState.from_dict(record).to_dict())
+    lines = [restored.vars.shell.declaration(n) for n in "mwxyz"]
+    assert lines == [
+        "declare -A m",
+        'declare -a w=([0]="1")',
+        "declare -- x",
+        "declare -a y",
+        "declare -i z",
+    ]
+    assert restored.to_dict()["unassigned"] == ["m", "x", "y", "z"]
+
+
 def test_session_independent_envs():
     s1 = SessionState(session_id="a")
     s2 = SessionState(session_id="b")

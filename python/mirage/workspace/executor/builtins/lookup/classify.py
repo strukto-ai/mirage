@@ -14,7 +14,10 @@
 
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.printer import stored_function_text
-from mirage.workspace.executor.builtins.alias.alias import body_alias_values
+from mirage.workspace.executor.builtins.alias.alias import (
+    aliases_on,
+    body_alias_values,
+)
 from mirage.workspace.executor.builtins.lookup.constants import DESCRIPTIONS
 from mirage.workspace.executor.builtins.lookup.types import NameKind
 from mirage.workspace.lookup import Consumer, lookup, lookup_all, program
@@ -56,7 +59,7 @@ def classify(
         session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry.
     """
-    if name in session.aliases:
+    if name in session.aliases and aliases_on(session):
         return NameKind.ALIAS
     if name in KEYWORDS:
         return NameKind.KEYWORD
@@ -95,10 +98,14 @@ def classify_all(
         session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry.
     """
-    # An alias is reported first and whether or not `expand_aliases`
-    # is on, as bash does: `type` describes the definition, not
-    # whether the parser is currently applying it.
-    kinds: list[NameKind] = [NameKind.ALIAS] if name in session.aliases else []
+    # An alias is reported first, and only while `expand_aliases` is on,
+    # as bash does: with it off (bash -c's default) `type` and `command
+    # -v` look past the definition as the parser does.
+    kinds: list[NameKind] = (
+        [NameKind.ALIAS]
+        if name in session.aliases and aliases_on(session)
+        else []
+    )
     if name in KEYWORDS:
         kinds.append(NameKind.KEYWORD)
     has_file = program(name, session, registry) is not None

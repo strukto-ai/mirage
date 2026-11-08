@@ -403,6 +403,18 @@ export async function shufGeneric(
     const root = mountRoot(ctx)
     items = paths.length > 0 ? paths.map((p) => `/${mountKey(p.virtual, root)}`) : [...texts]
   } else {
+    const extra = paths[1]
+    if (extra !== undefined) {
+      // GNU: shuf reads one input, so a second file is one too many.
+      const word = extra.rawPath !== '' ? extra.rawPath : extra.virtual
+      return [
+        null,
+        new IOResult({
+          exitCode: 1,
+          stderr: ENC.encode(`shuf: extra operand '${quoteText(word)}'${TRY_HELP}\n`),
+        }),
+      ]
+    }
     result = await sampleRecords(
       ids,
       paths.length > 0 ? paths.map((p) => stream(p)) : [ctx.stdin ?? new Uint8Array()],
