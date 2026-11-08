@@ -303,6 +303,36 @@ async def run(
     )
 
 
+async def run_raw(
+    argv: list[str], env: dict[str, str] | None = None, timeout: float = 120
+) -> tuple[int, bytes, str]:
+    """Run a command to its end, keeping its stdout as bytes.
+
+    Args:
+        argv (list[str]): the command.
+        env (dict[str, str] | None): its environment.
+        timeout (float): seconds before it is killed.
+
+    Returns:
+        tuple[int, bytes, str]: exit status, stdout, stderr.
+    """
+    process = await asyncio.create_subprocess_exec(
+        *argv,
+        cwd=ROOT,
+        env=env,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        out, err = await asyncio.wait_for(process.communicate(), timeout)
+    except TimeoutError:
+        process.kill()
+        await process.wait()
+        raise
+    return process.returncode or 0, out, err.decode(errors="replace")
+
+
 class RpcStream:
     """Line-delimited JSON-RPC over ``mirage rpc``'s stdio.
 
@@ -2163,12 +2193,19 @@ class Cli:
         if op == "bytes":
             words, stdin = vfs_words(step)
             argv = self.server.cli(*words, "-w", wid, *self._session(session))
-            code, out, err = await run(argv, env, stdin=stdin)
+            if step["call"] == "read":
+                # A read prints the file's bytes, not JSON.
+                code, raw, err = await run_raw(argv, env)
+                out = base64.b64encode(raw).decode()
+            else:
+                code, out, err = await run(argv, env, stdin=stdin)
             if code != 0:
                 named = re.search(r"\(([A-Z][A-Z_]+)\)", err)
                 return bytes_answer(
                     step, {"errno": named.group(1) if named else err.strip()}
                 )
+            if step["call"] == "read":
+                return bytes_answer(step, out)
             return bytes_answer(step, json.loads(out) if out.strip() else None)
         if op == "explain":
             words, stdin = (

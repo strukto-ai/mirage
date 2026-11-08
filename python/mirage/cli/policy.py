@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -31,6 +32,7 @@ from mirage.cli.output import (
     handle_response,
     show,
 )
+from mirage.resources.constants import POLICY_NAME
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -42,6 +44,37 @@ NAME = typer.Argument(..., help="The policy's name, such as guard.py.")
 SOURCE = typer.Option(
     ..., "--source", help="The program: @FILE reads a file, else the text."
 )
+
+
+def keep_policy_names(
+    config: dict[str, Any], rebase: Callable[[], None]
+) -> None:
+    """Run ``rebase``, which turns a config's relative script paths into
+    absolute ones, keeping each profile program whose ``script`` names a
+    saved policy, such as ``guard.py``, as written: the server reads that
+    policy's source. A path such as ``./guard.py`` is a file next to the
+    config and is rebased.
+
+    Args:
+        config (dict[str, Any]): the config, rebased in place.
+        rebase (Callable[[], None]): rebases ``config``'s script paths.
+    """
+    kept: list[tuple[dict[str, Any], str]] = []
+    profiles = config.get("profiles")
+    for profile in profiles.values() if isinstance(profiles, dict) else ():
+        policy = profile.get("policy") if isinstance(profile, dict) else None
+        for programs in policy.values() if isinstance(policy, dict) else ():
+            for program in programs if isinstance(programs, list) else ():
+                script = (
+                    program.get("script")
+                    if isinstance(program, dict)
+                    else None
+                )
+                if isinstance(script, str) and POLICY_NAME.fullmatch(script):
+                    kept.append((program, script))
+    rebase()
+    for program, script in kept:
+        program["script"] = script
 
 
 def read_source(given: str) -> str:

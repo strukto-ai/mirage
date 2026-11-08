@@ -45,6 +45,27 @@ class _FakeClient:
         self.calls.append((method, path, json))
         return _FakeResponse()
 
+    def stream(self, method, path, json=None, params=None):
+        self.calls.append((method, path, json))
+        return _FakeStream()
+
+
+# Bytes that are not UTF-8, split across chunks.
+_BINARY = [b"\x89PNG\r\n", b"\xff\xfe\x00", b"\xc3"]
+
+
+class _FakeStream:
+    status_code = 200
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def iter_bytes(self):
+        yield from _BINARY
+
 
 @pytest.fixture
 def fake(monkeypatch, tmp_path) -> _FakeClient:
@@ -81,3 +102,29 @@ def test_no_workspace_is_a_usage_failure(fake):
     assert result.exit_code == 2
     assert "no workspace selected" in result.stderr
     assert fake.calls == []
+
+
+def test_read_writes_the_bytes_as_they_are(fake):
+    result = CliRunner().invoke(
+        main_cli.app, ["workspace", "vfs", "read", "/img.png", "-w", "demo"]
+    )
+    assert result.exit_code == 0, result.output
+    assert result.stdout_bytes == b"".join(_BINARY)
+    assert fake.calls == [
+        (
+            "POST",
+            "/v1/workspaces/demo/vfs/read",
+            {"path": "/img.png", "stream": True},
+        )
+    ]
+
+
+def test_read_json_keeps_the_json_answer(fake):
+    result = CliRunner().invoke(
+        main_cli.app,
+        ["workspace", "vfs", "read", "/a.py", "--json", "-w", "demo"],
+    )
+    assert result.exit_code == 0, result.output
+    assert fake.calls == [
+        ("POST", "/v1/workspaces/demo/vfs/read", {"path": "/a.py"})
+    ]

@@ -17,6 +17,7 @@ import type { Command } from 'commander'
 import { DaemonClient, makeClient } from './client.ts'
 import { LoginError } from './credentials.ts'
 import { fail, handleResponse } from './output.ts'
+import { resolveConfig } from './workspace.ts'
 
 export const MCP_ENV_NAMES = ['MIRAGE_MCP_CONFIG', 'MIRAGE_CONFIG']
 
@@ -32,7 +33,7 @@ async function hasSession(
   const r = await client.request('GET', `${workspacePath}/sessions`)
   if (r.status >= 400) {
     const { detail } = (await r.json()) as { detail?: unknown }
-    throw new Error(`daemon error ${String(r.status)}: ${String(detail)}`)
+    throw new Error(`error ${String(r.status)}: ${String(detail)}`)
   }
   const rows: unknown = await r.json()
   return (
@@ -110,7 +111,7 @@ async function deleteWorkspace(client: DaemonClient, workspaceId: string): Promi
   }
   if (!done.ok) {
     process.stderr.write(
-      `could not delete workspace ${workspaceId}: daemon error ${String(done.status)}\n`,
+      `could not delete workspace ${workspaceId}: error ${String(done.status)}\n`,
     )
   }
 }
@@ -139,8 +140,7 @@ export async function relayWorkspace(
   let workspaceId: string
   let minted = false
   if (path !== undefined) {
-    const { checkWorkspaceConfigFile } = await import('@struktoai/mirage-node/config')
-    const loaded = checkWorkspaceConfigFile(path)
+    const loaded = await resolveConfig(path)
     const body = JSON.stringify({ config: loaded })
     const created = await handleResponse(await client.request('POST', '/v1/workspaces', { body }))
     workspaceId = (created as { id: string }).id

@@ -17,6 +17,6 @@ profiles:
   reviewer:
     policy:
       pre_command:
-        - {script: guard.py, runtime: monty}
+        - {script: ./guard.py, runtime: monty}
       pre_session:
-        - {script: credentials.py, runtime: monty}
+        - {script: ./credentials.py, runtime: monty}
