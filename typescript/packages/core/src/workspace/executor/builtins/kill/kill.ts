@@ -223,15 +223,14 @@ async function killGroup(
   sessionId: string,
 ): Promise<boolean> {
   if (KEPT_SIGNALS.has(signal)) {
-    if (signal !== 0 && processes.probeGroup(group)) {
-      await processes.scan()
-      const sending = processes
-        .list()
-        .filter((record) => record.group === group)
-        .map((record) => processes.send(record.id.pid, signal))
-      await Promise.all(sending.filter((sent) => sent !== null))
-    }
-    return processes.probeGroup(group)
+    if (signal === 0 || !processes.probeGroup(group)) return processes.probeGroup(group)
+    await processes.scan()
+    const sending = processes
+      .list()
+      .filter((record) => record.group === group)
+      .map((record) => processes.send(record.id.pid, signal))
+    await Promise.all(sending.filter((sent) => sent !== null))
+    return true
   }
   if (!processes.probeGroup(group)) return false
   const found = await processes.signalGroup(group, signal)

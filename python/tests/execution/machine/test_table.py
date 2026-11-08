@@ -19,6 +19,7 @@ import pytest
 from mirage import Workspace
 from mirage.execution.machine.table import MachineTable
 from mirage.execution.machine.types import MachineProcess, MachineState
+from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachinePid
 from mirage.machine.constants import CHECK_LINE, PROCESS
 from mirage.machine.handle import MachineHandle
@@ -336,6 +337,69 @@ async def test_a_kept_signal_reaches_a_program_as_sent():
         }
         said = await ws.shell("jobs")
         assert said.stdout == b"[1] running train 1\n"
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+class _Unreachable(_Leaver):
+    """A leaver whose machine stops answering signals."""
+
+    async def signal(self, target, signum):
+        raise ConnectionError("connection lost")
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_signal_keeps_what_a_scan_found():
+    box = _Unreachable("a")
+    ws = _sleepers(a=box)
+    try:
+        assert (await ws.shell("train 1")).exit_code == 0
+        assert b"daemon" in (await ws.shell("ps -o args=")).stdout
+        assert (await ws.shell("kill -WINCH 413")).exit_code == 1
+        assert b"daemon" in (await ws.shell("ps -o args=")).stdout
+    finally:
+        await ws.close()
+
+
+class _Quitter(_Sleeper):
+    """A box whose program exits on WINCH, its whole run gone before the
+    signal's delivery answers."""
+
+    table: ProcessTable | None = None
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        self.rows = [MachineProcess(env[PROCESS], self.base, 1, 100.0, "q")]
+        await self.ended.wait()
+        self.rows = []
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+    async def signal(self, target, signum):
+        self.sent.append((target, signum))
+        self.ended.set()
+        assert self.table is not None
+        async with asyncio.timeout(5):
+            while any(p.record.machine_pid for p in self.table.live()):
+                await asyncio.sleep(0.01)
+        return True
+
+
+@pytest.mark.asyncio
+async def test_a_kept_signal_to_a_group_that_then_ends_is_sent():
+    box = _Quitter("a")
+    ws = _sleepers(a=box)
+    box.table = ws.process_table
+    try:
+        await ws.shell("timeout 30 train 1 &")
+        await _started(box)
+        listed = (await ws.shell("ps -o pgid=,mpid=")).stdout.decode()
+        group = next(
+            row.split()[0]
+            for row in listed.splitlines()
+            if row.split()[1:] == ["412"]
+        )
+        said = await ws.shell(f"kill -WINCH -- -{group}")
+        assert (said.exit_code, said.stderr) == (0, None)
     finally:
         box.ended.set()
         await ws.close()

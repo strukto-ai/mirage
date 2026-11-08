@@ -281,7 +281,9 @@ class MachineTable:
         target: str | MachinePid,
         signum: int,
     ) -> bool:
-        """Send ``signum`` as ``send`` does, once.
+        """Send ``signum`` as ``send`` does, once. A process a scan found
+        stays when its machine does not answer, for the next scan to
+        settle; only one the machine no longer shows leaves.
 
         Args:
             handle (ProcessHandle): the process.
@@ -293,6 +295,8 @@ class MachineTable:
             sent = await self._signal(machine, target, signum)
         except Exception as exc:
             logger.debug("%s: signal %d not sent: %s", machine, signum, exc)
+            if handle.record.runtime is None:
+                return False
             sent = False
         if sent:
             handle.program_signaled(signum)

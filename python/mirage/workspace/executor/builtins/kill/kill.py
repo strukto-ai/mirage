@@ -281,15 +281,16 @@ async def _kill_group(
         bool: whether the group had a runner the view sees.
     """
     if signal in KEPT_SIGNALS:
-        if signal != 0 and processes.probe_group(group):
-            await processes.scan()
-            sending = [
-                processes.send(record.pid, signal)
-                for record in processes.list()
-                if record.group == group
-            ]
-            await asyncio.gather(*(s for s in sending if s is not None))
-        return processes.probe_group(group)
+        if signal == 0 or not processes.probe_group(group):
+            return processes.probe_group(group)
+        await processes.scan()
+        sending = [
+            processes.send(record.pid, signal)
+            for record in processes.list()
+            if record.group == group
+        ]
+        await asyncio.gather(*(s for s in sending if s is not None))
+        return True
     if not processes.probe_group(group):
         return False
     found = await processes.signal_group(group, signal)

@@ -21,6 +21,7 @@ import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { MachinePid } from '../types.ts'
+import type { ProcessTable } from '../process/table.ts'
 import { MachineTable } from './table.ts'
 import type { MachineProcess } from './types.ts'
 
@@ -143,6 +144,48 @@ class Leaver extends Sleeper {
     const tag = env[PROCESS] ?? ''
     this.rows = [{ tag, pid: this.base + 1, ppid: 1, started: 101, args: 'daemon' }]
     return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+}
+
+/** A leaver whose machine stops answering signals. */
+class Unreachable extends Leaver {
+  override signal(): Promise<boolean> {
+    return Promise.reject(new Error('connection lost'))
+  }
+}
+
+/** A box whose program exits on WINCH, its whole run gone before the signal's delivery answers. */
+class Quitter extends Sleeper {
+  table: ProcessTable | null = null
+  private quit: () => void = () => undefined
+  private readonly quitted = new Promise<void>((resolve) => {
+    this.quit = resolve
+  })
+
+  override finish(): void {
+    this.quit()
+  }
+
+  protected override async execArgv(
+    _argv: readonly string[],
+    _stdin: unknown,
+    env: Record<string, string>,
+  ): Promise<RunResult> {
+    this.rows = [{ tag: env[PROCESS] ?? '', pid: this.base, ppid: 1, started: 100, args: 'q' }]
+    await this.quitted
+    this.rows = []
+    return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+  }
+
+  override async signal(target: string | MachinePid, signum: number): Promise<boolean> {
+    this.sent.push([target, signum])
+    this.finish()
+    const table = this.table
+    for (let i = 0; table !== null && i < 500; i++) {
+      if (!table.live().some((p) => p.record.machinePid !== null)) break
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    return true
   }
 }
 
@@ -383,6 +426,39 @@ describe('MachineTable scans', () => {
         [413, 28],
       ])
       expect(DEC.decode((await ws.shell('jobs')).stdout)).toBe('[1] running train 1\n')
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  })
+
+  it('keeps what a scan found when a signal goes unanswered', async () => {
+    const box = new Unreachable('a')
+    const ws = sleepers({ a: box })
+    try {
+      expect((await ws.shell('train 1')).exitCode).toBe(0)
+      expect(DEC.decode((await ws.shell('ps -o args=')).stdout)).toContain('daemon')
+      expect((await ws.shell('kill -WINCH 413')).exitCode).toBe(1)
+      expect(DEC.decode((await ws.shell('ps -o args=')).stdout)).toContain('daemon')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reports a kept signal sent to a group that then ends', async () => {
+    const box = new Quitter('a')
+    const ws = sleepers({ a: box })
+    box.table = ws.processTable
+    try {
+      await ws.shell('timeout 30 train 1 &')
+      await started(box)
+      const listed = DEC.decode((await ws.shell('ps -o pgid=,mpid=')).stdout)
+      const group = listed
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/))
+        .find((row) => row[1] === '412')?.[0]
+      const said = await ws.shell(`kill -WINCH -- -${group ?? ''}`)
+      expect([said.exitCode, DEC.decode(said.stderr)]).toEqual([0, ''])
     } finally {
       box.finish()
       await ws.close()

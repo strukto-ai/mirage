@@ -240,7 +240,11 @@ export class MachineTable {
     return this.sent(handle, record.machine, target ?? record.id.toString(), signum)
   }
 
-  /** Send `signum` as `send` does, once. */
+  /**
+   * Send `signum` as `send` does, once. A process a scan found stays when
+   * its machine does not answer, for the next scan to settle; only one the
+   * machine no longer shows leaves.
+   */
   private async sent(
     handle: ProcessHandle,
     machine: MachineId,
@@ -252,6 +256,7 @@ export class MachineTable {
       sent = await this.signal(machine, target, signum)
     } catch (error) {
       console.debug(`${machine.toString()}: signal ${String(signum)} not sent:`, error)
+      if (handle.record.runtime === null) return false
       sent = false
     }
     if (sent) {
