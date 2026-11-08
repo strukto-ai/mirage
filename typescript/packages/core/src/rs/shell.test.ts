@@ -247,7 +247,7 @@ describe('Shell', () => {
       })[0]
     expect(count()).toEqual(['ok', ['2']])
     shell.frame({ ...frame, positional: ['c'] })
-    expect(() => shell.visibleNames('bogus')).toThrow()
+    expect(() => shell.visibleNames('bogus' as 'scalar')).toThrow()
     shell.frame(frame)
     expect(count()).toEqual(['ok', ['2']])
     shell.close()
