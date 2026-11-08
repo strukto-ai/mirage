@@ -175,12 +175,13 @@ function printed(
   const io = new IOResult()
   const node = new ExecutionNode({ command: 'printf' })
   const voice = shellVoice()
+  const said: Uint8Array[] = []
   async function* output(): AsyncGenerator<Uint8Array> {
     try {
-      yield* printfOutput(fmt, args, io, program, posix, utf8, voice, signal)
+      yield* printfOutput(fmt, args, io, program, posix, utf8, voice, signal, said)
     } finally {
       node.exitCode = io.exitCode
-      node.stderr = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
+      node.stderr = concat(said)
     }
   }
   return [output(), io, node]

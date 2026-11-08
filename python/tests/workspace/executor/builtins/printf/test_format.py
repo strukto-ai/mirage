@@ -139,12 +139,27 @@ async def test_a_wide_field_comes_out_in_bounded_steps():
     assert 0 < len(first) <= 16 * 1024
 
 
-async def test_a_long_diagnostic_lands_whole_before_the_output_after_it():
+async def test_a_long_diagnostic_reaches_a_reader_before_the_output_after_it():
     io = IOResult()
+    io.stderr_pieces = []
     async with aclosing(printf_output("%d|", ["x" * 50000], io)) as parts:
         first = await anext(parts)
-        assert (
-            io.stderr
-            == b"bash: printf: " + b"x" * 50000 + b": invalid number\n"
-        )
+        assert io.stderr_pieces == [
+            b"bash: printf: " + b"x" * 50000 + b": invalid number\n"
+        ]
     assert first == b"0|"
+    assert not io.stderr
+
+
+async def test_diagnostics_land_once_with_no_reader_among_the_output():
+    io = IOResult()
+    said: list[bytes] = []
+    async with aclosing(
+        printf_output("%d|", ["x", "y"], io, record=said)
+    ) as parts:
+        assert b"".join([part async for part in parts]) == b"0|0|"
+    text = (
+        b"bash: printf: x: invalid number\nbash: printf: y: invalid number\n"
+    )
+    assert io.stderr == text
+    assert b"".join(said) == text

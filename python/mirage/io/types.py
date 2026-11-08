@@ -317,6 +317,7 @@ class IOResult:
         self.records = records
         self.rows = rows
         self.stderr = stderr
+        self.stderr_pieces: list[bytes] | None = None
         self._exit_code = exit_code
         self.output: OutputState | None = None
         self.output_finalized = False

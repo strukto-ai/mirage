@@ -357,8 +357,10 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     delim: number | null,
     signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
-    let out: Uint8Array<ArrayBuffer> = new Uint8Array(0)
+    const out: Uint8Array[] = []
+    let size = 0
     const room = memoryRoom()
+    const joined = (): Uint8Array<ArrayBuffer> => new Uint8Array(concat(out))
     try {
       let taken = 0
       while (taken < count) {
@@ -372,20 +374,29 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
           else this.buf = concat([this.buf, result.value])
           continue
         }
-        if (this.buf.byteLength === 0) return [new Uint8Array(out), false]
-        if (delim !== null && this.buf[0] === delim) {
-          this.buf = this.buf.subarray(1)
-          return [new Uint8Array(out), true]
+        if (this.buf.byteLength === 0) return [joined(), false]
+        const buf = this.buf
+        const whole = this.exhausted ? buf.byteLength : buf.byteLength - 3
+        let at = 0
+        while (at < whole && taken < count && !(delim !== null && buf[at] === delim)) {
+          const width = charWidth(buf, at)
+          if (room !== null && size + at + width > room) throw new MemoryExhausted()
+          at += width
+          taken++
         }
-        const width = charWidth(this.buf)
-        if (room !== null && out.byteLength + width > room) throw new MemoryExhausted()
-        out = concat([out, this.buf.subarray(0, width)])
-        this.buf = this.buf.subarray(width)
-        taken++
+        if (at > 0) {
+          out.push(buf.subarray(0, at))
+          size += at
+          this.buf = buf.subarray(at)
+        }
+        if (taken < count && delim !== null && this.buf[0] === delim) {
+          this.buf = this.buf.subarray(1)
+          return [joined(), true]
+        }
       }
-      return [new Uint8Array(out), true]
+      return [joined(), true]
     } catch (error) {
-      await this.failed(error, [out])
+      await this.failed(error, out)
       throw error
     }
   }
@@ -474,13 +485,13 @@ export function lineBuffer(stdin: ByteSource): AsyncLineIterator {
  * lead the encoding never uses, and a sequence cut short by a byte that
  * cannot continue it.
  */
-export function charWidth(data: Uint8Array): number {
-  const lead = data[0] ?? 0
+export function charWidth(data: Uint8Array, at = 0): number {
+  const lead = data[at] ?? 0
   if (lead < 0xc2 || lead >= 0xf5) return 1
   const width = lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4
-  const limit = Math.min(width, data.byteLength)
+  const limit = Math.min(width, data.byteLength - at)
   for (let i = 1; i < limit; i++) {
-    const byte = data[i] ?? 0
+    const byte = data[at + i] ?? 0
     if (byte < 0x80 || byte >= 0xc0) return i
   }
   return limit

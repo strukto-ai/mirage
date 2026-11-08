@@ -477,7 +477,7 @@ class _Printer:
         children = [
             c
             for c in (group.children if group is not None else [])
-            if c.type not in ("do", "done")
+            if c.type not in ("do", "done", "{", "}")
         ]
         inner = indent + _INDENT
         return (
@@ -523,7 +523,14 @@ class _Printer:
             if values is None
             else " ".join(self.word(v) for v in values)
         )
-        group = next((c for c in node.children if c.type == NT.DO_GROUP), None)
+        group = next(
+            (
+                c
+                for c in node.children
+                if c.type in (NT.DO_GROUP, NT.COMPOUND_STATEMENT)
+            ),
+            None,
+        )
         return (
             node.children[0].type
             + f" {variable} in {words};\n"
@@ -549,7 +556,14 @@ class _Printer:
                 begin = child.end_byte if child.type != "))" else None
                 if child.type == "))":
                     break
-        group = next((c for c in node.children if c.type == NT.DO_GROUP), None)
+        group = next(
+            (
+                c
+                for c in node.children
+                if c.type in (NT.DO_GROUP, NT.COMPOUND_STATEMENT)
+            ),
+            None,
+        )
         return (
             "for (("
             + "; ".join(slots)

@@ -623,10 +623,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(set -e; f() { false; echo after; }; f; echo unreached); echo rc=$?; (set -e; case x in x) false; echo after;; esac; echo end); echo rc=$?",
+      "command": "(set -e; f() { false; echo after; }; f; echo unreached); echo rc=$?; (set -e; case x in x) false; echo after;; esac; echo end); echo rc=$?; (set -e; i=0; while true; do i=$((i+1)); echo \"t$i\"; false; done; echo after); echo rc=$?; (set -e; i=0; until [ $i = 3 ]; do i=$((i+1)); echo \"v$i\"; false; done; echo after); echo rc=$?; (set -e; for ((i=0;i<3;i++)); do echo \"u$i\"; false; done; echo after); echo rc=$?; (set -e; for ((i=0;i<1;i++)); { false; echo no; }; echo after); echo rc=$?; (set -e; for x in p q; do echo \"$x\"; false; done; echo after); echo rc=$?; (set -e; select x in p; do echo \"w$x\"; false; done <<< 1; echo after) 2>/dev/null; echo rc=$?; (set -e; i=0; while [ $i -lt 2 ]; do i=$((i+1)); false && echo no; echo \"x$i\"; done; echo after); echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\nrc=1\n",
+        "stdout": "rc=1\nrc=1\nt1\nrc=1\nv1\nrc=1\nu0\nrc=1\nrc=1\np\nrc=1\nwp\nrc=1\nx1\nx2\nafter\nrc=0\n",
         "stderr": ""
       }
     }

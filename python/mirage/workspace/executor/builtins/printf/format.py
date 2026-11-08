@@ -30,14 +30,16 @@ async def printf_output(
     posix: bool = False,
     utf8: bool = False,
     voice: str = "bash: ",
+    record: list[bytes] | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Format raw shell arguments through the shared bounded engine.
 
     The output comes out as the engine drains it, one bounded step at a
     time, so a wide field or a long reuse of the format is never held
     whole, and a reader that stops early stops the engine. A diagnostic
-    lands on ``io`` where the engine wrote it among the output, and the
-    status settles as the output ends, or as its reader stops: the
+    reaches a reader keeping errors among the output where the engine
+    wrote it (``stderr_pieces``), and lands on ``io`` once otherwise, and
+    the status settles as the output ends, or as its reader stops: the
     status the format reached, unless an output limit set one first.
 
     Args:
@@ -49,6 +51,8 @@ async def printf_output(
         utf8 (bool): Read quoted numeric constants as UTF-8 characters.
         voice (str): How the builtin leads a diagnostic, read when the
             builtin ran rather than when its output drains.
+        record (list[bytes] | None): Collects every diagnostic, for a
+            caller's own record of what the command said.
     """
     stream = open_stream(
         "printf",
@@ -63,10 +67,15 @@ async def printf_output(
     budget = YieldBudget()
     errors: list[bytes] = []
 
+    def heard() -> None:
+        if err := stream.take_stderr():
+            errors.append(err)
+            if record is not None:
+                record.append(err)
+
     def said() -> None:
-        if errors:
-            held = io.stderr if isinstance(io.stderr, bytes) else b""
-            io.stderr = held + b"".join(errors)
+        if errors and io.stderr_pieces is not None:
+            io.stderr_pieces.append(b"".join(errors))
             errors.clear()
 
     try:
@@ -77,21 +86,22 @@ async def printf_output(
             stream.end_input(index)
             await budget.run()
         output = stream.finish()
-        if err := stream.take_stderr():
-            errors.append(err)
+        heard()
         if output:
             said()
             yield output
         while stream.busy():
             output = stream.drain()
-            if err := stream.take_stderr():
-                errors.append(err)
+            heard()
             if output:
                 said()
                 yield output
             await budget.run()
     finally:
         said()
+        if errors:
+            held = io.stderr if isinstance(io.stderr, bytes) else b""
+            io.stderr = held + b"".join(errors)
         if not io.exit_code:
             io.exit_code = stream.status()
         await close_stream(stream)

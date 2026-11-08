@@ -551,12 +551,13 @@ export async function statementOutput(
 }
 
 /**
- * `stdout`'s chunks, each after the stderr `io` gained while it was read, so
- * a command's errors keep their place among its output (`cat a missing b
- * 2>&1`). What `io` held when the stream started waits for what comes next,
- * or for after the stream: one command that returns both at once keeps no
- * order between them. What went out is cut off `io.stderr` once the stream
- * ends. Mirrors Python's interleaved.
+ * `stdout`'s chunks, each after the stderr `io` gained while it was read, or
+ * handed over as `stderrPieces`, so a command's errors keep their place among
+ * its output (`cat a missing b 2>&1`). What `io` held when the stream started
+ * waits for what comes next, or for after the stream: one command that returns
+ * both at once keeps no order between them. What went out is cut off
+ * `io.stderr` once the stream ends. A piece stays on `stderrPieces` until
+ * then, so a `postCommand` policy hears it. Mirrors Python's interleaved.
  */
 export async function* interleaved(
   stdout: AsyncIterable<Uint8Array>,
@@ -565,8 +566,15 @@ export async function* interleaved(
   const held = io.stderr
   const start = held instanceof Uint8Array ? held.byteLength : 0
   let sent: Uint8Array = new Uint8Array(0)
+  const pieces: Uint8Array[] = []
+  let told = 0
+  io.stderrPieces = pieces
   try {
     for await (const chunk of stdout) {
+      for (const piece of pieces.slice(told)) {
+        told += 1
+        yield [Channel.STDERR, piece]
+      }
       const err = io.stderr
       if (
         err instanceof Uint8Array &&
@@ -578,11 +586,21 @@ export async function* interleaved(
       }
       yield [Channel.STDOUT, chunk]
     }
+    for (const piece of pieces.slice(told)) {
+      told += 1
+      yield [Channel.STDERR, piece]
+    }
   } finally {
+    io.stderrPieces = null
     const err = io.stderr
     if (sent.byteLength > 0 && err instanceof Uint8Array && startsWith(err, sent)) {
       const rest = err.subarray(sent.byteLength)
       io.stderr = rest.byteLength > 0 ? rest : null
+    }
+    if (told < pieces.length) {
+      const rest = pieces.slice(told)
+      const left = io.stderr
+      io.stderr = concat(left instanceof Uint8Array ? [left, ...rest] : rest)
     }
   }
 }
