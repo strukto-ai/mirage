@@ -399,9 +399,12 @@ impl<G: Gate> Writer<'_, G> {
     }
 
     /// Append `words` at the extent of the indexed array `name` holds
-    /// (`a+=(x y)`): each lands in place as `set_element` writes it, a word
-    /// refused taking back the ones before it, or, with a policy listening,
-    /// the whole value through `set` as one write.
+    /// (`a+=(x y)`): each lands in place as `set_element` writes it, as
+    /// bash's do, so an `-i` word's own write to the array stands
+    /// (`b+=(2 'b[1]=9,1')` leaves `b[1]` at 9). A word refused takes back
+    /// what the append stored before it, each slot that still holds it.
+    /// With a policy listening, the whole value lands through `set` as one
+    /// write.
     pub async fn push(&mut self, name: &str, words: Vec<Vec<u8>>) -> Result<(), Fault> {
         let name = self.store.target(name);
         self.writable(&name)?;
@@ -429,17 +432,26 @@ impl<G: Gate> Writer<'_, G> {
                 .set(&name, Value::Indexed(array), false, Some(&assigned), None)
                 .await;
         }
-        let mut landed = Vec::new();
+        let mut stored: Vec<(Slot, Vec<u8>)> = Vec::new();
         for (index, word) in slots {
             let slot = Slot::Index(index);
-            if let Err(fault) = self.set_element(&name, slot, Some(word), None).await {
-                for index in landed {
-                    self.store
-                        .put_element(&name, &Slot::Index(index), None, false);
+            if let Err(fault) = self
+                .set_element(&name, slot.clone(), Some(word), None)
+                .await
+            {
+                for (slot, text) in stored.into_iter().rev() {
+                    if self.store.element(&name, &slot) == Some(&text[..]) {
+                        self.store.put_element(&name, &slot, None, false);
+                    }
                 }
                 return Err(fault);
             }
-            landed.push(index);
+            let text = self
+                .store
+                .element(&name, &slot)
+                .unwrap_or_default()
+                .to_vec();
+            stored.push((slot, text));
         }
         Ok(())
     }
@@ -1212,6 +1224,15 @@ mod tests {
             Err(Fault::Signal(Signal::Exit { status: 2, .. }))
         ));
         assert_eq!(writer.store.indexed("a").unwrap().count(), 2);
+        writer.limit = None;
+        writer
+            .store
+            .seed("n", Value::Indexed(Indexed::dense([b"1".to_vec()])));
+        writer.store.set_attr("n", Some(INTEGER), true);
+        let failed = run(writer.push("n", vec![b"2".to_vec(), b"n[1]=9,1/0".to_vec()]));
+        assert!(matches!(failed, Err(Fault::Arith(_))));
+        let kept: Vec<_> = writer.store.indexed("n").unwrap().iter().collect();
+        assert_eq!(kept, [(0, &b"1"[..]), (1, &b"9"[..])]);
         let counted: usize = writer
             .store
             .records()
