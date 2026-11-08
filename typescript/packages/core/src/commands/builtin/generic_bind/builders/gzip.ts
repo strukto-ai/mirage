@@ -27,6 +27,8 @@ const gzip: CommandFn = async (_accessor, paths, _texts, ctx) => {
     (p, d) => files.write(p, d),
     (p) => files.unlink(p),
     files.stat,
+    (p) => files.readdir(p),
+    (p, fields) => files.setAttrs(p, fields),
   )
 }
 

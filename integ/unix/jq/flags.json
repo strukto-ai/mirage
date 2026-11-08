@@ -692,7 +692,7 @@
       ]
     },
     {
-      "id": "jq_colour_output_is_refused",
+      "id": "jq_colour_output_stays_plain",
       "seq": 700937,
       "targets": [
         "ram",
@@ -702,14 +702,14 @@
       ],
       "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq -C . /data/qjqf/o.json",
       "expect": {
-        "exit": 2,
-        "stdout": "",
-        "stderr": "jq: Unknown option -C\nUse jq --help for help with command-line options,\nor see the jq manpage, or online docs at https://jqlang.org\n"
+        "exit": 0,
+        "stdout": "{\n  \"a\": \"x\",\n  \"b\": 1\n}\n",
+        "stderr": ""
       },
       "flags": []
     },
     {
-      "id": "jq_module_path_is_refused",
+      "id": "jq_library_path_finds_modules",
       "seq": 700938,
       "targets": [
         "ram",
@@ -717,16 +717,16 @@
         "redis",
         "opfs"
       ],
-      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq -L . /data/qjqf/o.json",
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq -L . /data/qjqf/o.json; mkdir -p /data/qjqf/lib/sub && printf 'def f: \"a.f\"; def g: f + \"+g\";\\n' > /data/qjqf/lib/a.jq && printf '[1]\\n{\"k\":2}\\n' > /data/qjqf/lib/d.json && printf 'def s: \"deep\";\\n' > /data/qjqf/lib/sub/sub.jq && printf 'import \"a\" as a; def h: a::f;\\n' > /data/qjqf/lib/b.jq; jq -nc -L /data/qjqf/lib 'import \"a\" as x; include \"sub\"; import \"d\" as $d; [x::f, x::g, s, $d, $d::d]'; jq -nc --library-path /data/qjqf/lib 'import \"b\" as b; b::h, get_search_list'; jq -nc -L/data/qjqf/lib 'import \"a\" as x {search:\"./nope\"}; x::f'; jq -nc -L /data/qjqf/lib 'import \"nope\" as x {optional:true}; 1'; jq -nc -L /data/qjqf/lib 'import \"a\" as x; x::nope'; jq -nc -L; rm -rf /data/qjqf/lib",
       "expect": {
-        "exit": 2,
-        "stdout": "",
-        "stderr": "jq: Unknown option -L\nUse jq --help for help with command-line options,\nor see the jq manpage, or online docs at https://jqlang.org\n"
+        "exit": 0,
+        "stdout": "[\"a.f\",\"a.f+g\",\"deep\",[[1],{\"k\":2}],[[1],{\"k\":2}]]\n\"a.f\"\n[\"/data/qjqf/lib\"]\n1\n",
+        "stderr": "jq: error: syntax error, unexpected '/', expecting end of file at <top-level>, line 1, column 1:\n    /data/qjqf/o.json\n    ^\njq: 1 compile error\njq: error: module not found: a\n\njq: 1 compile error\njq: error: x::nope/0 is not defined at <top-level>, line 1, column 18:\n    import \"a\" as x; x::nope\n                     ^^^^^^^\njq: 1 compile error\n-L takes a parameter: (e.g. -L /search/path or -L/search/path)\nUse jq --help for help with command-line options,\nor see the jq manpage, or online docs at https://jqlang.org\n"
       },
       "flags": []
     },
     {
-      "id": "jq_stream_errors_is_refused",
+      "id": "jq_stream_errors_reads_a_parse_error_as_an_event",
       "seq": 700939,
       "targets": [
         "ram",
@@ -734,11 +734,11 @@
         "redis",
         "opfs"
       ],
-      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq --stream-errors . /data/qjqf/o.json",
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq -c --stream-errors . /data/qjqf/o.json; printf '{\"a\":[1,x]}\\n[2]\\n' | jq -c --stream-errors .; echo \"rc=$?\"; printf '[1,x]\\n[2]\\n' | jq -c -s --stream-errors .; printf '1 2 x 3\\n4\\n' | jq -c --stream-errors .",
       "expect": {
-        "exit": 2,
-        "stdout": "",
-        "stderr": "jq: Unknown option --stream-errors\nUse jq --help for help with command-line options,\nor see the jq manpage, or online docs at https://jqlang.org\n"
+        "exit": 0,
+        "stdout": "[[\"a\"],\"x\"]\n[[\"b\"],1]\n[[\"b\"]]\n[[\"a\",0],1]\n[\"Invalid numeric literal at line 1, column 10\",[\"a\",1]]\n[[0],2]\n[[0]]\nrc=0\n[[[0],1],[\"Invalid numeric literal at line 1, column 5\",[1]],[[0],2],[[0]]]\n[[],1]\n[[],2]\n[\"Invalid numeric literal at line 1, column 6\",[]]\n[[],4]\n",
+        "stderr": ""
       },
       "flags": []
     },

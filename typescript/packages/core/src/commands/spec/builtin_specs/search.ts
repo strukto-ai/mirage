@@ -132,6 +132,18 @@ export const SPECS: Record<string, CommandSpec> = {
       }),
       new Argument('--tab', { action: 'store_true', help: 'Indent with tabs' }),
       new Argument('--indent', { help: 'Indent with n spaces (max 7)' }),
+      new Argument('--stream-errors', {
+        action: 'store_true',
+        help: 'Read as --stream does, a parse error as one more event',
+      }),
+      new Argument(['-L', '--library-path'], {
+        action: 'append',
+        help: 'Add a directory to the module search list',
+      }),
+      new Argument(['-C', '--color-output'], {
+        action: 'store_true',
+        help: 'Accepted; output stays plain',
+      }),
       new Argument(['-M', '--monochrome-output'], {
         action: 'store_true',
         help: 'Disable colored output (already the default)',

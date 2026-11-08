@@ -26,10 +26,10 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/pti/keep /data/pti/skip && printf x>/data/pti/top.txt && tree -I 'skip' /data/pti",
+      "command": "mkdir -p /data/pti/keep /data/pti/skip && printf x>/data/pti/top.txt && tree -I 'skip' /data/pti; tree --prune /data/pti; tree --filelimit 2 /data/pti; tree -J --filelimit=2 /data/pti",
       "expect": {
         "exit": 0,
-        "stdout": "/data/pti\n|-- keep\n`-- top.txt\n\n2 directories, 1 file\n",
+        "stdout": "/data/pti\n|-- keep\n`-- top.txt\n\n2 directories, 1 file\n/data/pti\n`-- top.txt\n\n1 directory, 1 file\n/data/pti  [3 entries exceeds filelimit, not opening dir]\n\n1 directory, 0 files\n[\n  {\"type\":\"directory\",\"name\":\"/data/pti\",\"contents\":[{\"error\": \"3 entries exceeds filelimit, not opening dir\"}\n  ]}\n,\n  {\"type\":\"report\",\"directories\":1,\"files\":0}\n]\n",
         "stderr": ""
       },
       "flags": [

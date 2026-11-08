@@ -14,10 +14,10 @@
 // Mirrors python/tests/commands/builtin/generic/test_gzip.py.
 
 import { expect, it } from 'vitest'
-import { eacces } from '../../../errors/fs.ts'
+import { eacces, enoent } from '../../../errors/fs.ts'
 import { gzipGeneric } from './gzip.ts'
 import { gunzip } from '../../../utils/compress.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { materialize } from '../../../io/types.ts'
 
 it.each([false, true])('compression skips suffixes or reports late errors: %s', async (skipped) => {
@@ -62,4 +62,45 @@ it.each([false, true])('compression skips suffixes or reports late errors: %s', 
     if (output === undefined) throw new Error('gzip did not write the next file')
     expect(await gunzip(output)).toEqual(new TextEncoder().encode('hello\n'))
   }
+})
+
+it('compression stores the input time and keeps its attributes', async () => {
+  const writes = new Map<string, Uint8Array>()
+  const attrs: [string, unknown][] = []
+  async function* read(): AsyncIterable<Uint8Array> {
+    await Promise.resolve()
+    yield new TextEncoder().encode('hello\n')
+  }
+  for (const flags of [{}, { no_name: true }]) {
+    const result = await gzipGeneric(
+      [PathSpec.fromStrPath('/f')],
+      { flags, stdin: null, cwd: PathSpec.fromStrPath('/') },
+      read,
+      async (path, data) => {
+        writes.set(path.virtual, await materialize(data))
+      },
+      () => Promise.resolve(),
+      (path) =>
+        path.virtual === '/f.gz'
+          ? Promise.reject(enoent(path))
+          : Promise.resolve(
+              new FileStat({
+                name: 'f',
+                type: FileType.FILE,
+                mode: 0o100640,
+                modified: '2001-02-03T04:05:06Z',
+              }),
+            ),
+      undefined,
+      (path, fields) => {
+        attrs.push([path.virtual, fields])
+        return Promise.resolve()
+      },
+    )
+    if (result === null) throw new Error('gzip returned no result')
+    expect(result[1].exitCode).toBe(0)
+    const stamp = [...(writes.get('/f.gz') ?? new Uint8Array()).subarray(4, 8)]
+    expect(stamp).toEqual('no_name' in flags ? [0, 0, 0, 0] : [0x72, 0x83, 0x7b, 0x3a])
+  }
+  expect(attrs[0]).toEqual(['/f.gz', { mode: 0o640, mtime: '2001-02-03T04:05:06Z' }])
 })

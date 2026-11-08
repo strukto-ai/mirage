@@ -58,6 +58,10 @@ logger = logging.getLogger(__name__)
 BINDINGS = ("arg", "argjson", "rawfile", "slurpfile")
 FILE_BINDINGS = ("rawfile", "slurpfile")
 
+# What a program that imports a module has to hold, so that any other
+# goes straight to its run.
+MODULE_WORDS = ("import", "include")
+
 # jq's exit status when it refuses the program itself, and when the
 # program file holds a NUL byte.
 ERROR_COMPILE = 3
@@ -172,6 +176,93 @@ class FlagFiles:
                     "directory": isinstance(exc, IsADirectoryError),
                 }
             )
+
+
+class ModuleFiles:
+    """Serves the files jq's linker asks for. Reading is how it finds out
+    whether one is there: a file that is not answers ``missing``.
+
+    Args:
+        read (Callable): byte reader for one path.
+    """
+
+    def __init__(self, read: Callable[[PathSpec], Awaitable[bytes]]) -> None:
+        self._read = read
+        self.errors = ByteSpool()
+
+    async def serve(
+        self, request: Mapping[str, JsonValue], data: bytes
+    ) -> Served:
+        """Read one file, or say why it could not be read.
+
+        Args:
+            request (Mapping[str, JsonValue]): ``{"op": "read", "path": p}``.
+            data (bytes): unused; a read carries no bytes.
+        """
+        path = request.get("path")
+        if request.get("op") != "read" or not isinstance(path, str):
+            raise ValueError(f"jq: unknown linker request {request}")
+        try:
+            return Served(
+                {"kind": "data"},
+                await self._read(PathSpec.from_str_path(path)),
+            )
+        except (FileNotFoundError, NotADirectoryError):
+            return Served({"kind": "missing"})
+        except FS_ERRORS as exc:
+            return Served(
+                {
+                    "kind": "error",
+                    "message": fs_strerror(exc),
+                    "directory": isinstance(exc, IsADirectoryError),
+                }
+            )
+
+
+async def link_modules(
+    expression: str,
+    options: Mapping[str, JsonValue],
+    origin: str | None,
+    cwd: str | None,
+    home: str | None,
+    read: Callable[[PathSpec], Awaitable[bytes]],
+) -> JsonValue:
+    """The modules a program imports, read for the run to compile, or None
+    for a program that cannot import one.
+
+    Args:
+        expression (str): jq program text.
+        options (Mapping[str, JsonValue]): what the option loop decided.
+        origin (str | None): the directory of the program's file, else
+            the working directory.
+        cwd (str | None): the working directory.
+        home (str | None): the session's ``HOME``.
+        read (Callable): byte reader for one path.
+
+    Raises:
+        StreamRefusal: an import jq could not load, in jq's report.
+    """
+    if not any(word in expression for word in MODULE_WORDS):
+        return None
+    stream = open_stream(
+        "jq_link",
+        {
+            "program": expression,
+            "library_paths": options.get("library_paths", []),
+            "origin": origin,
+            "cwd": cwd,
+            "home": home,
+        },
+    )
+    host = ModuleFiles(read)
+    try:
+        async with aclosing(serve_requests(stream, host)) as output:
+            reply = b"".join([chunk async for chunk in output])
+    finally:
+        await host.errors.close()
+        await close_stream(stream)
+    linked: JsonValue = json.loads(reply)
+    return linked
 
 
 @dataclass(frozen=True)
@@ -520,6 +611,19 @@ async def _jq(
         # reading the program as typed, so its lines and columns are jq's.
         # The run compiles it again when it starts, so nothing is held
         # open for a stream no one reads.
+        working = None if cwd is None else cwd.virtual
+        options = {
+            **options,
+            "cwd": working,
+            "linked": await link_modules(
+                expression,
+                options,
+                origin,
+                working,
+                (env or {}).get("HOME"),
+                read_flag_file,
+            ),
+        }
         checked = open_stream(
             "jq",
             run_config(expression, options, env_text, zone, origin, names),

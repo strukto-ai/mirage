@@ -13,36 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource } from '../../../io/types.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { FlagView } from '../../spec/flag_view.ts'
-import type { FlagValue } from '../../spec/types.ts'
-import { LineFacts, type PathSpec, type StatFn } from '../../../types.ts'
+import type { FlagView } from '../../spec/flag_view.ts'
+import { LineFacts, type PathSpec, type ReaddirFn, type StatFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { GZIP_SUFFIX } from '../constants.ts'
-import { linkResolver } from '../utils/links.ts'
-import { decompressInputs } from './decompress.ts'
+import type { SetAttrsFn } from './decompress.ts'
+import { gzipGeneric } from './gzip.ts'
 
-interface GunzipFlags {
-  readonly keep: boolean
-  readonly force: boolean
-  readonly toStdout: boolean
-  readonly testOnly: boolean
-  readonly quiet: boolean
-  readonly suffix: string
-}
-
-function parseFlags(bag: Record<string, FlagValue>): GunzipFlags {
-  const fl = new FlagView(bag, specOf('gunzip'))
-  return {
-    keep: fl.asBool('k'),
-    force: fl.asBool('f'),
-    toStdout: fl.asBool('c'),
-    testOnly: fl.asBool('t'),
-    quiet: fl.asBool('q'),
-    suffix: fl.asStr('S') ?? GZIP_SUFFIX,
-  }
-}
-
+/** Run gunzip, which is `gzip -d`, over resolved operands. Mirrors Python's
+ * gunzip_generic. */
 export async function gunzipGeneric(
   paths: PathSpec[],
   ctx: Context,
@@ -50,18 +28,16 @@ export async function gunzipGeneric(
   write: (p: PathSpec, data: ByteSource) => Promise<void>,
   unlink: (p: PathSpec) => Promise<void>,
   stat?: StatFn,
+  readdir?: ReaddirFn,
+  setAttrs?: SetAttrsFn,
 ): Promise<CommandFnResult> {
-  return decompressInputs(paths, stream, {
-    stdin: ctx.stdin,
-    ...parseFlags(ctx.flags),
-    write,
-    unlink,
-    ...(stat !== undefined ? { stat } : {}),
-    resolver: linkResolver(ctx),
-  })
+  return gzipGeneric(paths, ctx, stream, write, unlink, stat, readdir, setAttrs, 'gunzip')
 }
 
-/** A gunzip line replaces its file operands unless `-c` or `-t`. Mirrors Python's `facts`. */
+/** A gunzip line replaces its file operands unless `-c`, `-t` or `-l`.
+ * Mirrors Python's `facts`. */
 export function facts(fl: FlagView, operands: readonly (string | PathSpec)[]): LineFacts {
-  return new LineFacts({ writes: operands.length > 0 && !(fl.asBool('c') || fl.asBool('t')) })
+  return new LineFacts({
+    writes: operands.length > 0 && !['stdout', 'test', 'list'].some((n) => fl.asBool(n)),
+  })
 }

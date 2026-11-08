@@ -2,8 +2,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from mirage.commands.builtin.generic.tree import tree
+from mirage.commands.builtin.generic.tree import (
+    TreeFlags,
+    parse_flags,
+    tree,
+)
+from mirage.commands.spec import SPECS
+from mirage.io.types import IOResult
 from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.workspace.executor.command.flags import (
+    parse_flags as parse_line_flags,
+)
 
 
 def _spec(path: str) -> PathSpec:
@@ -192,3 +201,100 @@ async def test_tree_crosses_into_a_nested_mount():
         "3 directories, 3 files",
     ]
     assert io.exit_code == 0
+
+
+_SIZED = {
+    "/r": _dir("r"),
+    "/r/a.txt": _file("a.txt", 6),
+    "/r/b": _dir("b"),
+    "/r/b/z10": _file("z10", 6),
+    "/r/b/z9": _file("z9", 1),
+    "/r/empty": _dir("empty"),
+    "/r/.gitignore": _file(".gitignore", 6),
+    "/r/x.log": _file("x.log", 3),
+}
+
+
+async def _read_gitignore(path: PathSpec):
+    assert path.virtual == "/r/.gitignore"
+    yield b"*.log\n"
+
+
+@pytest.mark.parametrize(
+    "flags,expected",
+    [
+        (
+            TreeFlags(du=True, sizes=True),
+            "[      12304]  /r\n|-- [          6]  a.txt\n"
+            "|-- [       4103]  b\n|   |-- [          6]  z10\n"
+            "|   `-- [          1]  z9\n|-- [       4096]  empty\n"
+            "`-- [          3]  x.log\n\n"
+            "       12304 bytes used in 3 directories, 4 files\n",
+        ),
+        (
+            TreeFlags(
+                gitignore=True, prune=True, dirs_first=True, sort="size"
+            ),
+            "/r\n|-- b\n|   |-- z10\n|   `-- z9\n`-- a.txt\n\n"
+            "2 directories, 3 files\n",
+        ),
+        (
+            TreeFlags(json=True, full_path=True, file_limit=1),
+            '[\n  {"type":"directory","name":"/r","contents":[{"error": '
+            '"4 entries exceeds filelimit, not opening dir"}\n  ]}\n,\n'
+            '  {"type":"report","directories":1,"files":0}\n]\n',
+        ),
+        (
+            TreeFlags(json=True, no_indent=True, no_report=True, max_depth=1),
+            '[{"type":"directory","name":"/r","contents":[{"type":"file",'
+            '"name":"a.txt"},{"type":"directory","name":"b"},{"type":'
+            '"directory","name":"empty"},{"type":"file","name":"x.log"}]}]\n',
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_tree_lays_out_sizes_orders_and_json(
+    flags: TreeFlags, expected: str
+):
+    readdir, stat = _make_backend(_SIZED)
+    output, io = await tree(
+        [_spec("/r")],
+        readdir=readdir,
+        stat=stat,
+        flags=flags,
+        read=_read_gitignore,
+    )
+    assert (output.decode(), io.exit_code) == (expected, 0)
+
+
+def _line_flags(argv: list[str]) -> TreeFlags | IOResult:
+    parsed = parse_line_flags(argv, SPECS["tree"], "tree", "/")
+    return parse_flags(parsed.flag_kwargs)
+
+
+@pytest.mark.parametrize(
+    "argv,sort,limit",
+    [
+        ([], "name", None),
+        (["-t", "--sort=size"], "size", None),
+        (["--sort=size", "-U"], "none", None),
+        (["-v", "--filelimit", "3"], "version", 3),
+        (["--filelimit=0"], "name", None),
+    ],
+)
+def test_tree_order_is_the_last_one_typed(
+    argv: list[str], sort: str, limit: int | None
+):
+    parsed = _line_flags(argv)
+    assert isinstance(parsed, TreeFlags)
+    assert (parsed.sort, parsed.file_limit) == (sort, limit)
+
+
+def test_tree_names_the_orders_when_one_is_unknown():
+    parsed = _line_flags(["--sort=n"])
+    assert isinstance(parsed, IOResult)
+    assert (parsed.exit_code, parsed.stdout, parsed.stderr) == (
+        1,
+        b"name,version,size,mtime,ctime,none\n",
+        b"tree: Sort type 'n' not valid, should be one of: ",
+    )

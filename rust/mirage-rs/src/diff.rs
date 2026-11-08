@@ -2,6 +2,8 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::ops::Range;
 
+use crate::regex::{Options as RegexOptions, Regex, Step, Syntax};
+use crate::width::char_width;
 use crate::{Stream, StreamError, number};
 use serde::Deserialize;
 use similar::{
@@ -11,6 +13,13 @@ use similar::{
 
 const BINARY_PROBE_BYTES: usize = 4096;
 const HINT: &[u8] = b"diff: Try 'diff --help' for more information.";
+/// The widest `-W` mirage lays out: the reference takes any width and pads
+/// every side-by-side row to half of it, so a wider one only writes blanks.
+const WIDEST: usize = 1 << 16;
+/// The bytes of a matched line a hunk header carries.
+const FUNCTION_BYTES: usize = 40;
+/// What `-p` looks for: a line that opens with a letter, `$` or `_`.
+const C_FUNCTION: &[u8] = b"^[[:alpha:]$_]";
 
 #[derive(Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -18,6 +27,9 @@ enum Mode {
     Normal,
     Unified,
     Ed,
+    Context,
+    Rcs,
+    Sides,
 }
 #[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -25,14 +37,31 @@ struct Config {
     mode: Mode,
     #[serde(deserialize_with = "crate::saturating_usize")]
     context: usize,
-    /// `-U` and `--unified` as typed, each value one character per byte
-    /// and a bare `--unified` null; when given, they set `context`.
-    unified: Option<Vec<Option<String>>>,
+    /// `-U`, `--unified`, `-C` and `--context` as typed, each value one
+    /// character per byte and a bare long option null; when given, they set
+    /// `context`.
+    lengths: Option<Vec<Option<String>>>,
     ignore_case: bool,
     ignore_all_space: bool,
     ignore_space_change: bool,
+    ignore_tab_expansion: bool,
+    ignore_trailing_space: bool,
+    strip_trailing_cr: bool,
+    ignore_blank_lines: bool,
+    /// `-I` patterns, one character per byte.
+    ignore_lines: Vec<String>,
+    /// `-F` patterns, one character per byte; `-p` is `show_c_function`.
+    function_lines: Vec<String>,
+    show_c_function: bool,
+    expand_tabs: bool,
+    initial_tab: bool,
+    /// `-W` values as typed.
+    widths: Vec<String>,
+    suppress_common: bool,
+    left_column: bool,
     text: bool,
     brief: bool,
+    utf8: bool,
     old_label: String,
     new_label: String,
     old_header: String,
@@ -43,12 +72,25 @@ impl Default for Config {
         Self {
             mode: Mode::Normal,
             context: 3,
-            unified: None,
+            lengths: None,
             ignore_case: false,
             ignore_all_space: false,
             ignore_space_change: false,
+            ignore_tab_expansion: false,
+            ignore_trailing_space: false,
+            strip_trailing_cr: false,
+            ignore_blank_lines: false,
+            ignore_lines: Vec::new(),
+            function_lines: Vec::new(),
+            show_c_function: false,
+            expand_tabs: false,
+            initial_tab: false,
+            widths: Vec::new(),
+            suppress_common: false,
+            left_column: false,
             text: false,
             brief: false,
+            utf8: false,
             old_label: "a".into(),
             new_label: "b".into(),
             old_header: String::new(),
@@ -57,32 +99,38 @@ impl Default for Config {
     }
 }
 
-/// The context `-U` and `--unified` give as diffutils 3.10 reads each one
-/// typed: a bare `--unified` is 3, an empty value 0, and any other a whole
-/// decimal past blanks with one sign, refused below 0, a value past
-/// `intmax_t` the largest; the widest wins, and none is 3.
-fn unified_context(typed: &[Option<String>]) -> Result<usize, StreamError> {
+fn refusal(parts: &[&[u8]]) -> StreamError {
+    StreamError::refusal(&parts.concat(), 2)
+}
+
+fn typed_bytes(text: &str) -> Result<Vec<u8>, StreamError> {
+    crate::latin1_bytes(text)
+        .ok_or_else(|| StreamError::new("a diff value holds a character past U+00FF"))
+}
+
+/// The context the context and unified options give as diffutils 3.10
+/// reads each one typed: a bare long option is 3, an empty value 0, and any
+/// other a whole decimal past blanks with one sign, refused below 0, a value
+/// past `intmax_t` the largest; the widest wins, and none is 3.
+fn context_length(typed: &[Option<String>]) -> Result<usize, StreamError> {
     let mut widest = None;
     for text in typed {
         let context = match text {
             None => 3,
             Some(text) => {
-                let raw = crate::latin1_bytes(text)
-                    .ok_or_else(|| StreamError::new("a -U value holds a character past U+00FF"))?;
+                let raw = typed_bytes(text)?;
                 let value = if raw.is_empty() {
                     Some(0)
                 } else {
                     number::signed_decimal(&raw).filter(|&value| value >= 0)
                 };
                 let Some(value) = value else {
-                    let refused = [
-                        b"diff: invalid context length '".as_slice(),
+                    return Err(refusal(&[
+                        b"diff: invalid context length '",
                         &raw,
                         b"'\n",
                         HINT,
-                    ]
-                    .concat();
-                    return Err(StreamError::refusal(&refused, 2));
+                    ]));
                 };
                 usize::try_from(value.min(i128::from(i64::MAX))).unwrap_or(usize::MAX)
             }
@@ -92,13 +140,71 @@ fn unified_context(typed: &[Option<String>]) -> Result<usize, StreamError> {
     Ok(widest.unwrap_or(3))
 }
 
+/// The `-W` width: each value typed a positive decimal, all of them one
+/// width, 130 when none is typed.
+fn output_width(typed: &[String]) -> Result<usize, StreamError> {
+    let mut width = None;
+    for text in typed {
+        let raw = typed_bytes(text)?;
+        let Some(value) = number::signed_decimal(&raw).filter(|&value| value > 0) else {
+            return Err(refusal(&[b"diff: invalid width '", &raw, b"'\n", HINT]));
+        };
+        if width.is_some_and(|width| width != value) {
+            return Err(refusal(&[b"diff: conflicting width options"]));
+        }
+        width = Some(value);
+    }
+    Ok(width.map_or(130, |width| {
+        usize::try_from(width.min(WIDEST as i128)).unwrap_or(WIDEST)
+    }))
+}
+
+/// Each pattern compiled as a basic expression, refused as the reference
+/// refuses it: `diff: PATTERN: why`.
+fn patterns(typed: &[String], utf8: bool) -> Result<Vec<Regex>, StreamError> {
+    typed
+        .iter()
+        .map(|text| {
+            let raw = typed_bytes(text)?;
+            let options = RegexOptions {
+                syntax: Syntax::Basic,
+                ignore_case: false,
+                utf8,
+                word: false,
+                line: false,
+                terminator: b'\n',
+                extents: false,
+            };
+            Regex::compile(std::slice::from_ref(&raw), &options)
+                .map(|compiled| compiled.regex)
+                .map_err(|why| refusal(&[b"diff: ", &raw, b": ", why.as_bytes()]))
+        })
+        .collect()
+}
+
 pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let mut config: Config = crate::parse_config(config)?;
-    if let Some(typed) = &config.unified {
-        config.context = unified_context(typed)?;
+    if let Some(typed) = &config.lengths {
+        config.context = context_length(typed)?;
     }
-    if config.brief {
-        let ignores = config.ignore_case || config.ignore_all_space || config.ignore_space_change;
+    let width = output_width(&config.widths)?;
+    let ignore = patterns(&config.ignore_lines, config.utf8)?;
+    let mut functions = patterns(&config.function_lines, config.utf8)?;
+    if config.show_c_function {
+        functions.extend(patterns(
+            &[String::from_utf8_lossy(C_FUNCTION).into_owned()],
+            config.utf8,
+        )?);
+    }
+    // -B, -I and --strip-trailing-cr need the whole pair, so -q under one
+    // of them takes the full diff and prints nothing.
+    let whole = config.ignore_blank_lines || !ignore.is_empty() || config.strip_trailing_cr;
+    if config.brief && !whole {
+        let ignores = config.ignore_case
+            || config.ignore_all_space
+            || config.ignore_space_change
+            || config.ignore_tab_expansion
+            || config.ignore_trailing_space;
         return Ok(Box::new(Brief {
             config,
             held: [Vec::new(), Vec::new()],
@@ -110,6 +216,11 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     }
     Ok(Box::new(Diff {
         config,
+        layout: Layout::new(width),
+        ignore,
+        functions,
+        found: None,
+        scanned: 0,
         inputs: [Vec::new(), Vec::new()],
         ended: [false; 2],
         pieces: VecDeque::new(),
@@ -121,17 +232,66 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         equal: true,
     }))
 }
+
+/// The side-by-side columns for a width: where the right column starts,
+/// how wide each one is, and where the gutter's mark goes, the mark centred
+/// between the two and tabs counted at `tab` columns.
+struct Layout {
+    width: usize,
+    half: usize,
+    right: usize,
+    mark: usize,
+}
+impl Layout {
+    fn new(width: usize) -> Self {
+        Self {
+            width,
+            half: 0,
+            right: 0,
+            mark: 0,
+        }
+    }
+
+    fn with_tab(width: usize, tab: usize) -> Self {
+        let offset = (width + tab + 3) / (2 * tab) * tab;
+        let half = offset.saturating_sub(3).min(width.saturating_sub(offset));
+        let right = if half > 0 { offset } else { width };
+        Self {
+            width,
+            half,
+            right,
+            mark: (half + right).saturating_sub(1) / 2,
+        }
+    }
+}
+
 struct Diff {
     config: Config,
+    layout: Layout,
+    ignore: Vec<Regex>,
+    functions: Vec<Regex>,
+    /// The old line a hunk header last named, and how far the search for
+    /// one has read.
+    found: Option<usize>,
+    scanned: usize,
     inputs: [Vec<u8>; 2],
     ended: [bool; 2],
     pieces: VecDeque<Piece>,
     records: [Vec<usize>; 2],
     groups: VecDeque<Vec<DiffOp>>,
-    ops: VecDeque<DiffOp>,
+    ops: VecDeque<(DiffOp, bool)>,
     stderr: Vec<u8>,
     status: i32,
     equal: bool,
+}
+
+/// How a printed line that lacks its newline ends: with the marker after a
+/// newline, with a newline alone, or as it is.
+#[derive(Clone, Copy, PartialEq)]
+enum Ending {
+    Marker,
+    Newline,
+    Bare,
 }
 
 enum Piece {
@@ -144,13 +304,29 @@ enum Piece {
         input: usize,
         lines: Range<usize>,
         prefix: &'static [u8],
-        hint: bool,
+        ending: Ending,
         ed: bool,
+    },
+    /// One side-by-side row per step: an operation's lines paired, the
+    /// ignorable ones as if they were common.
+    Sides {
+        op: DiffOp,
+        at: usize,
+        ignorable: bool,
     },
 }
 
+fn is_white(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\r' | 0x0b | 0x0c)
+}
+
 fn key<'a>(line: &&'a [u8], config: &Config) -> Cow<'a, [u8]> {
-    if !config.ignore_case && !config.ignore_all_space && !config.ignore_space_change {
+    if !config.ignore_case
+        && !config.ignore_all_space
+        && !config.ignore_space_change
+        && !config.ignore_tab_expansion
+        && !config.ignore_trailing_space
+    {
         return Cow::Borrowed(if config.mode == Mode::Ed {
             line.strip_suffix(b"\n").unwrap_or(line)
         } else {
@@ -174,10 +350,25 @@ fn key<'a>(line: &&'a [u8], config: &Config) -> Cow<'a, [u8]> {
         };
         line = &lowercase;
     }
+    let expanded;
+    if config.ignore_tab_expansion && !config.ignore_all_space && !config.ignore_space_change {
+        expanded = {
+            let mut bytes = Vec::with_capacity(line.len());
+            for &byte in line {
+                if byte == b'\t' {
+                    bytes.resize((bytes.len() / 8 + 1) * 8, b' ');
+                } else {
+                    bytes.push(byte);
+                }
+            }
+            bytes
+        };
+        line = &expanded;
+    }
     let mut out = Vec::new();
     let mut spaces = false;
     for &byte in line {
-        if matches!(byte, b' ' | b'\t' | b'\r' | 0x0b | 0x0c) {
+        if is_white(byte) {
             if config.ignore_all_space {
                 continue;
             }
@@ -192,8 +383,13 @@ fn key<'a>(line: &&'a [u8], config: &Config) -> Cow<'a, [u8]> {
         }
         out.push(byte);
     }
-    if newline && !config.ignore_all_space && !config.ignore_space_change && config.mode != Mode::Ed
-    {
+    let trailing =
+        config.ignore_all_space || config.ignore_space_change || config.ignore_trailing_space;
+    if config.ignore_trailing_space {
+        let kept = out.iter().rposition(|b| !is_white(*b)).map_or(0, |i| i + 1);
+        out.truncate(kept);
+    }
+    if newline && !trailing && config.mode != Mode::Ed {
         out.push(b'\n');
     }
     Cow::Owned(out)
@@ -207,8 +403,117 @@ fn address(range: std::ops::Range<usize>) -> String {
         format!("{},{}", range.start + 1, range.end)
     }
 }
+
+/// A line's text as `-t` writes it: each tab spaced out to the next stop
+/// of eight, counted from the text's start.
+fn expanded(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    for &byte in text {
+        if byte == b'\t' {
+            out.resize((out.len() / 8 + 1) * 8, b' ');
+        } else {
+            out.push(byte);
+        }
+    }
+    out
+}
+
+/// Line `index` of `input`, its newline kept.
+fn record<'a>(
+    inputs: &'a [Vec<u8>; 2],
+    records: &[Vec<usize>; 2],
+    input: usize,
+    index: usize,
+) -> &'a [u8] {
+    &inputs[input][records[input][index]..records[input][index + 1]]
+}
+
+fn matches(regex: &mut Regex, text: &[u8]) -> bool {
+    let mut budget = u64::MAX;
+    matches!(
+        regex.matches(text, 0, text.len(), &mut budget),
+        Step::Done(true)
+    )
+}
+
+/// Whether every line an operation takes out or puts in is ignorable.
+fn ignorable(
+    config: &Config,
+    ignore: &mut [Regex],
+    inputs: &[Vec<u8>; 2],
+    records: &[Vec<usize>; 2],
+    op: &DiffOp,
+) -> bool {
+    op.old_range()
+        .all(|i| ignorable_line(config, ignore, record(inputs, records, 0, i)))
+        && op
+            .new_range()
+            .all(|i| ignorable_line(config, ignore, record(inputs, records, 1, i)))
+}
+
+/// Whether `-B` or `-I` set a line aside: blank once compared, or matched
+/// by a pattern.
+fn ignorable_line(config: &Config, ignore: &mut [Regex], line: &[u8]) -> bool {
+    let text = line.strip_suffix(b"\n").unwrap_or(line);
+    (config.ignore_blank_lines && key(&text, config).is_empty())
+        || ignore.iter_mut().any(|regex| matches(regex, text))
+}
+
 impl Diff {
+    fn line(&self, input: usize, index: usize) -> &[u8] {
+        record(&self.inputs, &self.records, input, index)
+    }
+
+    /// The old line a hunk starting at `start` names: the last one before
+    /// it that a pattern matches, read back to where the last search
+    /// stopped, else the one found before.
+    fn function(&mut self, start: usize) -> Option<Vec<u8>> {
+        let Self {
+            functions,
+            inputs,
+            records,
+            scanned,
+            found,
+            ..
+        } = self;
+        if functions.is_empty() {
+            return None;
+        }
+        for index in (*scanned..start).rev() {
+            let line = record(inputs, records, 0, index);
+            let text = line.strip_suffix(b"\n").unwrap_or(line);
+            if functions.iter_mut().any(|regex| matches(regex, text)) {
+                *found = Some(index);
+                break;
+            }
+        }
+        *scanned = (*scanned).max(start);
+        let line = record(inputs, records, 0, (*found)?);
+        let text = line.strip_suffix(b"\n").unwrap_or(line);
+        let text = &text[..text.len().min(FUNCTION_BYTES)];
+        let kept = text
+            .iter()
+            .rposition(|b| !b.is_ascii_whitespace())
+            .map_or(0, |i| i + 1);
+        Some(text[..kept].to_vec())
+    }
+
     fn compute(&mut self) {
+        if self.config.strip_trailing_cr {
+            for input in &mut self.inputs {
+                let mut out = Vec::with_capacity(input.len());
+                let mut at = 0;
+                while at < input.len() {
+                    let byte = input[at];
+                    let ends = input.get(at + 1).is_none_or(|next| *next == b'\n');
+                    if !(byte == b'\r' && ends) {
+                        out.push(byte);
+                    }
+                    at += 1;
+                }
+                *input = out;
+            }
+        }
         if !self.config.text
             && self
                 .inputs
@@ -217,7 +522,7 @@ impl Diff {
         {
             self.equal = self.inputs[0] == self.inputs[1];
             self.status = if self.equal { 0 } else { 1 };
-            if !self.equal {
+            if !self.equal && !self.config.brief {
                 self.text(
                     format!(
                         "Binary files {} and {} differ\n",
@@ -234,7 +539,10 @@ impl Diff {
         let normalize = self.config.ignore_case
             || self.config.ignore_all_space
             || self.config.ignore_space_change
+            || self.config.ignore_tab_expansion
+            || self.config.ignore_trailing_space
             || self.config.mode == Mode::Ed;
+        let filters = self.config.ignore_blank_lines || !self.config.ignore_lines.is_empty();
         let ops = if normalize {
             capture_diff_slices_by_key(Algorithm::Myers, &old, &new, |record| {
                 key(record, &self.config)
@@ -242,9 +550,35 @@ impl Diff {
         } else {
             capture_diff_slices(Algorithm::Myers, &old, &new)
         };
-        self.equal = ops.iter().all(|op| op.tag() == DiffTag::Equal);
+        for (index, lines) in [&old, &new].into_iter().enumerate() {
+            let mut offset = 0;
+            self.records[index].push(0);
+            for line in lines {
+                offset += line.len();
+                self.records[index].push(offset);
+            }
+        }
+        let Diff {
+            ref config,
+            ref mut ignore,
+            ref inputs,
+            ref records,
+            ..
+        } = *self;
+        let marked: Vec<(DiffOp, bool)> = ops
+            .into_iter()
+            .map(|op| {
+                let set_aside = filters
+                    && op.tag() != DiffTag::Equal
+                    && ignorable(config, ignore, inputs, records, &op);
+                (op, set_aside)
+            })
+            .collect();
+        self.equal = marked
+            .iter()
+            .all(|(op, ignorable)| op.tag() == DiffTag::Equal || *ignorable);
         self.status = if self.equal { 0 } else { 1 };
-        if self.config.mode == Mode::Ed {
+        if self.config.mode == Mode::Ed && !self.config.brief {
             for (bytes, label) in [
                 (&self.inputs[0], &self.config.old_label),
                 (&self.inputs[1], &self.config.new_label),
@@ -257,47 +591,80 @@ impl Diff {
                 }
             }
         }
-        if self.equal {
+        if self.config.brief || (self.equal && self.config.mode != Mode::Sides) {
             self.release_inputs();
             return;
         }
-        for (index, lines) in [&old, &new].into_iter().enumerate() {
-            let mut offset = 0;
-            self.records[index].push(0);
-            for line in lines {
-                offset += line.len();
-                self.records[index].push(offset);
-            }
-        }
         match self.config.mode {
-            Mode::Unified => {
+            Mode::Unified | Mode::Context => {
                 let context = self
                     .config
                     .context
                     .min(old.len().max(new.len()))
                     .min(usize::MAX / 2);
-                self.groups = group_diff_ops(ops, context).into();
+                let ignorable: std::collections::HashSet<(usize, usize)> = marked
+                    .iter()
+                    .filter(|(_, ignorable)| *ignorable)
+                    .map(|(op, _)| (op.old_range().start, op.new_range().start))
+                    .collect();
+                let ops: Vec<DiffOp> = marked.into_iter().map(|(op, _)| op).collect();
+                self.groups = group_diff_ops(ops, context)
+                    .into_iter()
+                    .filter(|group| {
+                        group.iter().any(|op| {
+                            op.tag() != DiffTag::Equal
+                                && !ignorable
+                                    .contains(&(op.old_range().start, op.new_range().start))
+                        })
+                    })
+                    .collect();
                 if !self.groups.is_empty() {
-                    self.text(
-                        format!(
-                            "--- {}\n+++ {}\n",
-                            if self.config.old_header.is_empty() {
-                                &self.config.old_label
-                            } else {
-                                &self.config.old_header
-                            },
-                            if self.config.new_header.is_empty() {
-                                &self.config.new_label
-                            } else {
-                                &self.config.new_header
-                            },
-                        )
-                        .into_bytes(),
-                    );
+                    let (old_mark, new_mark): (&[u8], &[u8]) = if self.config.mode == Mode::Unified
+                    {
+                        (b"--- ", b"+++ ")
+                    } else {
+                        (b"*** ", b"--- ")
+                    };
+                    let named = |header: &String, label: &String| {
+                        if header.is_empty() { label } else { header }.clone()
+                    };
+                    let lines = [
+                        [
+                            old_mark,
+                            named(&self.config.old_header, &self.config.old_label).as_bytes(),
+                        ]
+                        .concat(),
+                        [
+                            new_mark,
+                            named(&self.config.new_header, &self.config.new_label).as_bytes(),
+                        ]
+                        .concat(),
+                    ];
+                    for line in lines {
+                        self.text([line, b"\n".to_vec()].concat());
+                    }
                 }
             }
-            Mode::Normal => self.ops = ops.into(),
-            Mode::Ed => self.ops = ops.into_iter().rev().collect(),
+            Mode::Normal | Mode::Rcs => {
+                self.ops = marked
+                    .into_iter()
+                    .filter(|(op, ignorable)| op.tag() != DiffTag::Equal && !ignorable)
+                    .collect()
+            }
+            Mode::Ed => {
+                self.ops = marked
+                    .into_iter()
+                    .rev()
+                    .filter(|(op, ignorable)| op.tag() != DiffTag::Equal && !ignorable)
+                    .collect()
+            }
+            Mode::Sides => {
+                self.layout = Layout::with_tab(
+                    self.layout.width,
+                    if self.config.expand_tabs { 1 } else { 8 },
+                );
+                self.ops = marked.into();
+            }
         }
     }
 
@@ -310,48 +677,83 @@ impl Diff {
         self.pieces.push_back(Piece::Text(bytes.into(), 0));
     }
 
-    fn rows(
-        &mut self,
-        input: usize,
-        lines: Range<usize>,
-        prefix: &'static [u8],
-        hint: bool,
-        ed: bool,
-    ) {
+    fn rows(&mut self, input: usize, lines: Range<usize>, prefix: &'static [u8], ending: Ending) {
         if !lines.is_empty() {
             self.pieces.push_back(Piece::Rows {
                 input,
                 lines,
                 prefix,
-                hint,
-                ed,
+                ending,
+                ed: false,
             });
+        }
+    }
+
+    /// The prefix a line takes, `-T` turning the space that ends it into a
+    /// tab (a unified context line's lone space becoming the tab).
+    fn prefix(&self, plain: &'static [u8]) -> &'static [u8] {
+        if !self.config.initial_tab {
+            return plain;
+        }
+        match plain {
+            b"< " => b"<\t",
+            b"> " => b">\t",
+            b" " => b"\t",
+            b"-" => b"-\t",
+            b"+" => b"+\t",
+            b"  " => b" \t",
+            b"- " => b"-\t",
+            b"+ " => b"+\t",
+            b"! " => b"!\t",
+            other => other,
         }
     }
 
     fn prepare(&mut self) {
         if self.ops.is_empty() {
             if let Some(group) = self.groups.pop_front() {
-                self.text(format!("{}\n", UnifiedHunkHeader::new(&group)).into_bytes());
-                self.ops = group.into();
+                let function = self.function(group[0].old_range().start);
+                let suffix = function.map(|text| [b" ".as_slice(), &text].concat());
+                if self.config.mode == Mode::Context {
+                    self.context_hunk(&group, suffix.unwrap_or_default());
+                    return;
+                }
+                let header = format!("{}", UnifiedHunkHeader::new(&group)).into_bytes();
+                self.text([header, suffix.unwrap_or_default(), b"\n".to_vec()].concat());
+                self.ops = group.into_iter().map(|op| (op, false)).collect();
                 return;
             }
         }
-        let Some(op) = self.ops.pop_front() else {
+        let Some((op, ignorable)) = self.ops.pop_front() else {
             return;
         };
+        if self.config.mode == Mode::Sides {
+            self.pieces.push_back(Piece::Sides {
+                op,
+                at: 0,
+                ignorable,
+            });
+            return;
+        }
         let a = op.old_range();
         let b = op.new_range();
         if self.config.mode == Mode::Unified {
             if op.tag() == DiffTag::Equal {
-                self.rows(0, a, b" ", true, false);
+                self.rows(0, a, self.prefix(b" "), Ending::Marker);
             } else {
-                self.rows(0, a, b"-", true, false);
-                self.rows(1, b, b"+", true, false);
+                self.rows(0, a, self.prefix(b"-"), Ending::Marker);
+                self.rows(1, b, self.prefix(b"+"), Ending::Marker);
             }
             return;
         }
-        if op.tag() == DiffTag::Equal {
+        if self.config.mode == Mode::Rcs {
+            if !a.is_empty() {
+                self.text(format!("d{} {}\n", a.start + 1, a.len()).into_bytes());
+            }
+            if !b.is_empty() {
+                self.text(format!("a{} {}\n", a.end, b.len()).into_bytes());
+                self.rows(1, b, b"", Ending::Bare);
+            }
             return;
         }
         let action = if a.is_empty() {
@@ -366,22 +768,219 @@ impl Diff {
                 format!("{}{}{}\n", address(a.clone()), action, address(b.clone())).into_bytes(),
             );
             let both = !a.is_empty() && !b.is_empty();
-            self.rows(0, a, b"< ", true, false);
+            self.rows(0, a, self.prefix(b"< "), Ending::Marker);
             if both {
                 self.text(b"---\n".as_slice());
             }
-            self.rows(1, b, b"> ", true, false);
+            self.rows(1, b, self.prefix(b"> "), Ending::Marker);
         } else {
             self.text(format!("{}{}\n", address(a), action).into_bytes());
             if !b.is_empty() {
-                let last = &self.inputs[1][self.records[1][b.end - 1]..self.records[1][b.end]];
+                let last = self.line(1, b.end - 1);
                 let dot = last == b".\n" || last == b".";
-                self.rows(1, b, b"", false, true);
+                self.pieces.push_back(Piece::Rows {
+                    input: 1,
+                    lines: b,
+                    prefix: b"",
+                    ending: Ending::Newline,
+                    ed: true,
+                });
                 if !dot {
                     self.text(b".\n".as_slice());
                 }
             }
         }
+    }
+
+    /// One hunk in the context format: the old range and its lines when the
+    /// hunk takes any out, then the new range and its lines when it puts
+    /// any in, a changed line marked `!` on both sides.
+    fn context_hunk(&mut self, group: &[DiffOp], suffix: Vec<u8>) {
+        let start = |op: &DiffOp, old: bool| {
+            if old {
+                op.old_range().start
+            } else {
+                op.new_range().start
+            }
+        };
+        let end = |op: &DiffOp, old: bool| {
+            if old {
+                op.old_range().end
+            } else {
+                op.new_range().end
+            }
+        };
+        self.text([b"***************".as_slice(), &suffix, b"\n"].concat());
+        for (old, mark, tail) in [
+            (true, b"*** ".as_slice(), b" ****".as_slice()),
+            (false, b"--- ".as_slice(), b" ----".as_slice()),
+        ] {
+            let first = group.first().map_or(0, |op| start(op, old));
+            let last = group.last().map_or(0, |op| end(op, old));
+            let range = address(first..last);
+            self.text([mark, range.as_bytes(), tail, b"\n"].concat());
+            let changed = group.iter().any(|op| match op.tag() {
+                DiffTag::Equal => false,
+                DiffTag::Delete => old,
+                DiffTag::Insert => !old,
+                DiffTag::Replace => true,
+            });
+            if !changed {
+                continue;
+            }
+            for op in group {
+                let prefix: &'static [u8] = match op.tag() {
+                    DiffTag::Equal => b"  ",
+                    DiffTag::Delete => b"- ",
+                    DiffTag::Insert => b"+ ",
+                    DiffTag::Replace => b"! ",
+                };
+                let lines = if old { op.old_range() } else { op.new_range() };
+                self.rows(
+                    usize::from(!old),
+                    lines,
+                    self.prefix(prefix),
+                    Ending::Marker,
+                );
+            }
+        }
+    }
+
+    /// The text of one half of a side-by-side row from column `from`, as
+    /// much as fits by `to`; trailing blanks are left to the padding. The
+    /// column it ends at.
+    fn half(&self, text: &[u8], from: usize, to: usize, out: &mut Vec<u8>) -> usize {
+        let mut column = from;
+        let mut written = out.len();
+        let mut end = from;
+        let units: Vec<(u32, &[u8])> = if self.config.utf8 {
+            let mut units = Vec::new();
+            for chunk in text.utf8_chunks() {
+                let valid = chunk.valid();
+                for (at, c) in valid.char_indices() {
+                    units.push((u32::from(c), &valid.as_bytes()[at..at + c.len_utf8()]));
+                }
+                for byte in chunk.invalid().chunks(1) {
+                    units.push((0x80, byte));
+                }
+            }
+            units
+        } else {
+            text.chunks(1)
+                .map(|byte| (u32::from(byte[0]), byte))
+                .collect()
+        };
+        for (cp, bytes) in units {
+            if cp == u32::from(b'\t') {
+                let next = from + ((column - from) / 8 + 1) * 8;
+                if next > to {
+                    break;
+                }
+                if self.config.expand_tabs {
+                    out.resize(out.len() + (next - column), b' ');
+                } else {
+                    out.push(b'\t');
+                }
+                column = next;
+                continue;
+            }
+            let width = if cp >= 0x80 && !self.config.utf8 {
+                0
+            } else {
+                char_width(cp) as usize
+            };
+            if column + width > to {
+                break;
+            }
+            out.extend_from_slice(bytes);
+            column += width;
+            if !(cp == u32::from(b' ') || cp == 0x0b || cp == 0x0c || cp == u32::from(b'\r')) {
+                written = out.len();
+                end = column;
+            }
+        }
+        out.truncate(written);
+        end
+    }
+
+    /// Padding from column `from` to `to`: tabs to each stop on the way,
+    /// then blanks; blanks alone under `-t`.
+    fn pad(&self, from: usize, to: usize, out: &mut Vec<u8>) {
+        let mut column = from;
+        if !self.config.expand_tabs {
+            while (column / 8 + 1) * 8 <= to {
+                out.push(b'\t');
+                column = (column / 8 + 1) * 8;
+            }
+        }
+        out.resize(out.len() + to.saturating_sub(column), b' ');
+    }
+
+    /// One side-by-side row: the old line, the gutter's mark and the new
+    /// line, either one absent; it ends with a newline when either line
+    /// has one.
+    fn side_row(&self, left: Option<&[u8]>, mark: u8, right: Option<&[u8]>) -> Vec<u8> {
+        let layout = &self.layout;
+        let mut out = Vec::new();
+        let strip = |line: &[u8]| line.strip_suffix(b"\n").unwrap_or(line).to_vec();
+        let mut column = 0;
+        if let Some(line) = left {
+            column = self.half(&strip(line), 0, layout.half, &mut out);
+        }
+        if mark == b' ' && self.config.left_column {
+            self.pad(column, layout.mark, &mut out);
+            out.push(b'(');
+            if left.is_some_and(|line| line.ends_with(b"\n")) {
+                out.push(b'\n');
+            }
+            return out;
+        }
+        if mark != b' ' {
+            self.pad(column, layout.mark, &mut out);
+            out.push(mark);
+            column = layout.mark + 1;
+        }
+        let right_text = right.map(strip).filter(|text| !text.is_empty());
+        if let Some(text) = right_text {
+            self.pad(column, layout.right, &mut out);
+            self.half(&text, layout.right, layout.right + layout.half, &mut out);
+        }
+        if [left, right]
+            .into_iter()
+            .flatten()
+            .any(|line| line.ends_with(b"\n"))
+        {
+            out.push(b'\n');
+        }
+        out
+    }
+
+    /// The next row of a side-by-side operation, None once it has none.
+    fn side(&self, op: &DiffOp, at: usize, ignorable: bool) -> Option<Vec<u8>> {
+        let a = op.old_range();
+        let b = op.new_range();
+        let left = (at < a.len()).then(|| self.line(0, a.start + at));
+        let right = (at < b.len()).then(|| self.line(1, b.start + at));
+        if left.is_none() && right.is_none() {
+            return None;
+        }
+        let common = op.tag() == DiffTag::Equal || ignorable;
+        if common && self.config.suppress_common {
+            return Some(Vec::new());
+        }
+        let mark = match (left, right) {
+            (Some(_), Some(_)) if common => b' ',
+            (Some(l), Some(r)) => match (l.ends_with(b"\n"), r.ends_with(b"\n")) {
+                (false, true) => b'\\',
+                (true, false) => b'/',
+                _ => b'|',
+            },
+            (Some(_), None) if common => b'(',
+            (None, Some(_)) if common => b')',
+            (Some(_), None) => b'<',
+            _ => b'>',
+        };
+        Some(self.side_row(left, mark, right))
     }
 
     fn render(&mut self, out: &mut Vec<u8>) {
@@ -409,11 +1008,23 @@ impl Diff {
                         self.pieces.push_front(Piece::Range { input, bytes });
                     }
                 }
+                Piece::Sides { op, at, ignorable } => {
+                    if let Some(row) = self.side(&op, at, ignorable) {
+                        self.pieces.push_front(Piece::Sides {
+                            op,
+                            at: at + 1,
+                            ignorable,
+                        });
+                        if !row.is_empty() {
+                            self.pieces.push_front(Piece::Text(row.into(), 0));
+                        }
+                    }
+                }
                 Piece::Rows {
                     input,
                     mut lines,
                     prefix,
-                    hint,
+                    ending,
                     ed,
                 } => {
                     let bytes =
@@ -426,7 +1037,7 @@ impl Diff {
                             input,
                             lines,
                             prefix,
-                            hint,
+                            ending,
                             ed,
                         });
                     }
@@ -437,19 +1048,25 @@ impl Diff {
                             b"..\n.\ns/.//\n".as_slice()
                         };
                         self.pieces.push_front(Piece::Text(text.into(), 0));
+                        continue;
+                    }
+                    let newline = value.ends_with(b"\n");
+                    let tail: &'static [u8] = match (newline, ending) {
+                        (true, _) => b"\n",
+                        (false, Ending::Marker) => b"\n\\ No newline at end of file\n",
+                        (false, Ending::Newline) => b"\n",
+                        (false, Ending::Bare) => b"",
+                    };
+                    self.pieces.push_front(Piece::Text(tail.into(), 0));
+                    let text = bytes.start..bytes.end - usize::from(newline);
+                    if self.config.expand_tabs {
+                        let wide = expanded(&self.inputs[input][text]);
+                        self.pieces.push_front(Piece::Text(wide.into(), 0));
                     } else {
-                        if !value.ends_with(b"\n") {
-                            let text = if hint {
-                                b"\n\\ No newline at end of file\n".as_slice()
-                            } else {
-                                b"\n".as_slice()
-                            };
-                            self.pieces.push_front(Piece::Text(text.into(), 0));
-                        }
-                        self.pieces.push_front(Piece::Range { input, bytes });
-                        if !prefix.is_empty() {
-                            self.pieces.push_front(Piece::Text(prefix.into(), 0));
-                        }
+                        self.pieces.push_front(Piece::Range { input, bytes: text });
+                    }
+                    if !prefix.is_empty() {
+                        self.pieces.push_front(Piece::Text(prefix.into(), 0));
                     }
                 }
             }
@@ -459,6 +1076,7 @@ impl Diff {
         }
     }
 }
+
 impl Stream for Diff {
     fn feed(&mut self, _: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
         Err(StreamError::new("use indexed inputs"))
@@ -687,7 +1305,7 @@ mod unified_tests {
     use serde_json::json;
 
     fn opened(typed: serde_json::Value) -> Result<String, (String, i32)> {
-        let config = json!({ "unified": typed }).to_string();
+        let config = json!({ "lengths": typed }).to_string();
         match crate::open("diff", config.as_bytes()) {
             Ok(stream) => {
                 let mut out = Vec::new();

@@ -249,6 +249,13 @@ export function fullIsoTime(modified: string | null | undefined, zone: Zone = UT
   return gnuStrftime(whole, `%Y-%m-%d %H:%M:%S.${fraction} %z`, zone)
 }
 
+/** A timestamp as a context diff's header gives it, `%a %b %e %T %Y`, read
+ * in `zone`; an unknown time is the epoch. Mirrors Python's `context_time`. */
+export function contextTime(modified: string | null | undefined, zone: Zone = UTC_ZONE): string {
+  const seconds = isoTimestamp(modified)
+  return gnuStrftime(new Date(Math.floor(seconds ?? 0) * 1000), '%a %b %e %H:%M:%S %Y', zone)
+}
+
 export function styledTime(modified: string | null | undefined, style: string): string {
   if (style === 'locale') return lsTimeString(modified)
   if (style === 'full-iso') return fullIsoTime(modified)

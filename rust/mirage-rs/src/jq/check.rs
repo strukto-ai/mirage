@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use super::builtin::{BUILTINS, Kind};
+use super::link::{Body, Dep, Unit};
 use super::syntax::{Ast, Def, Loc, Pattern, PatternKey, Update, locate};
 use super::value::Value;
 
@@ -42,9 +43,12 @@ fn with(env: &Env, bind: Bind) -> Env {
     }))
 }
 
-fn id(def: &Def) -> usize {
+pub(crate) fn id(def: &Def) -> usize {
     def as *const Def as usize
 }
+
+/// What jq's reports call a program's own text.
+const TOP_LEVEL: &str = "<top-level>";
 
 enum Callee {
     Defined(Option<usize>),
@@ -65,9 +69,46 @@ enum Step<'a> {
 
 struct Checker<'a> {
     source: &'a str,
+    file: &'a str,
     globals: &'a HashMap<String, Value>,
     referenced: HashSet<usize>,
     errors: Vec<String>,
+    /// Each module definition by its id: the module, the definition, and
+    /// the scope its body opens in.
+    modules: HashMap<usize, (usize, &'a Def, Env)>,
+}
+
+/// The names one file's imports bind, a later import over an earlier one,
+/// a module exporting only what it defines itself and, of one name, its
+/// last definition.
+fn imports_env(units: &[Unit], deps: &[Dep]) -> Env {
+    let mut env = None;
+    for dep in deps {
+        match (&units[dep.module].body, &dep.alias) {
+            (Body::Data(_), Some(alias)) => {
+                env = with(&env, Bind::Var(format!("{alias}::{alias}")));
+                env = with(&env, Bind::Var(alias.clone()));
+            }
+            (Body::Data(_), None) => {}
+            (Body::Code(defs), alias) => {
+                for def in defs {
+                    let name = match alias {
+                        Some(alias) => format!("{alias}::{}", def.name),
+                        None => def.name.clone(),
+                    };
+                    env = with(
+                        &env,
+                        Bind::Func {
+                            name,
+                            arity: def.params.len(),
+                            def: Some(id(def)),
+                        },
+                    );
+                }
+            }
+        }
+    }
+    env
 }
 
 /// jq's reports of the names a parsed program uses without binding them,
@@ -77,29 +118,56 @@ struct Checker<'a> {
 /// calls is dropped unchecked, as block_bind_referenced drops it. Every
 /// walk runs from an explicit stack: a program nests as deep as Bison's
 /// stack let it.
-pub(crate) fn check(
-    ast: &Ast,
-    globals: &HashMap<String, Value>,
-    source: &str,
+pub(crate) fn check<'a>(
+    ast: &'a Ast,
+    globals: &'a HashMap<String, Value>,
+    source: &'a str,
+    units: &'a [Unit<'a>],
+    deps: &[Dep],
 ) -> Result<HashSet<usize>, Vec<String>> {
     let mut checker = Checker {
         source,
+        file: TOP_LEVEL,
         globals,
         referenced: HashSet::new(),
         errors: Vec::new(),
+        modules: HashMap::new(),
     };
-    checker.mark(ast);
-    let mut pending: Vec<Vec<Lambda>> = vec![vec![(ast, None)]];
-    while let Some(bodies) = pending.last_mut() {
+    for (unit, module) in units.iter().enumerate() {
+        let Body::Code(defs) = &module.body else {
+            continue;
+        };
+        let mut env = imports_env(units, module.deps);
+        for def in defs {
+            env = define(&env, def);
+            checker.modules.insert(id(def), (unit, def, env.clone()));
+        }
+    }
+    let main = imports_env(units, deps);
+    checker.mark(ast, main.clone());
+    // A module's definitions are the top level's subfunctions, ahead of
+    // the program's own. None of them is reached if the program's own
+    // instructions had an error.
+    let mut pending: Vec<(Option<usize>, Vec<Lambda>)> = vec![(None, vec![(ast, main)])];
+    let mut opened = false;
+    while let Some((unit, bodies)) = pending.last_mut() {
         let Some((body, env)) = bodies.pop() else {
             pending.pop();
             continue;
         };
+        let unit = *unit;
+        let (file, text) =
+            unit.map_or((TOP_LEVEL, source), |at| (units[at].file, units[at].source));
+        checker.file = file;
+        checker.source = text;
         let before = checker.errors.len();
         let mut lambdas = checker.walk(body, &env);
         if checker.errors.len() == before {
             lambdas.reverse();
-            pending.push(lambdas);
+            pending.push((unit, lambdas));
+            if !std::mem::replace(&mut opened, true) {
+                pending.extend(checker.module_bodies(units));
+            }
         }
     }
     if checker.errors.is_empty() {
@@ -113,11 +181,13 @@ pub(crate) fn references(ast: &Ast) -> HashSet<usize> {
     let globals = HashMap::new();
     let mut checker = Checker {
         source: "",
+        file: TOP_LEVEL,
         globals: &globals,
         referenced: HashSet::new(),
         errors: Vec::new(),
+        modules: HashMap::new(),
     };
-    checker.mark(ast);
+    checker.mark(ast, None);
     checker.referenced
 }
 
@@ -243,18 +313,40 @@ impl<'a> Checker<'a> {
     }
 
     fn error(&mut self, loc: Loc, message: String) {
-        let text = locate(self.source, loc, &message);
+        let text = locate(self.source, self.file, loc, &message);
         self.errors.push(text);
+    }
+
+    /// The bodies of every module definition something calls, a group per
+    /// module, the first module's on top.
+    fn module_bodies(&self, units: &'a [Unit<'a>]) -> Vec<(Option<usize>, Vec<Lambda<'a>>)> {
+        let mut groups = Vec::new();
+        for (unit, module) in units.iter().enumerate().rev() {
+            let Body::Code(defs) = &module.body else {
+                continue;
+            };
+            let bodies: Vec<Lambda<'a>> = defs
+                .iter()
+                .rev()
+                .filter(|def| self.referenced.contains(&id(def)))
+                .map(|def| {
+                    let (_, _, env) = &self.modules[&id(def)];
+                    (&def.body, body_env(env, def))
+                })
+                .collect();
+            groups.push((Some(unit), bodies));
+        }
+        groups
     }
 
     /// Mark the definitions a program calls, innermost first: a call from
     /// a definition counts only when that definition is called itself.
-    fn mark(&mut self, ast: &'a Ast) {
+    fn mark(&mut self, ast: &'a Ast, env: Env) {
         enum Mark<'a> {
             Visit(&'a Ast, Env),
             Body(&'a Def, Env),
         }
-        let mut steps = vec![Mark::Visit(ast, None)];
+        let mut steps = vec![Mark::Visit(ast, env)];
         while let Some(step) = steps.pop() {
             match step {
                 Mark::Body(def, inner) => {
@@ -269,7 +361,11 @@ impl<'a> Checker<'a> {
                 }
                 Mark::Visit(Ast::Call(name, args, _), env) => {
                     if let Callee::Defined(Some(def)) = self.callee(&env, name, args.len()) {
-                        self.referenced.insert(def);
+                        if self.referenced.insert(def) {
+                            if let Some((_, def, inner)) = self.modules.get(&def) {
+                                steps.push(Mark::Visit(&def.body, body_env(inner, def)));
+                            }
+                        }
                     }
                     for arg in args.iter().rev() {
                         steps.push(Mark::Visit(arg, env.clone()));
@@ -286,7 +382,11 @@ impl<'a> Checker<'a> {
                     };
                     if let Some((name, arity)) = implicit {
                         if let Callee::Defined(Some(def)) = self.callee(&env, name, arity) {
-                            self.referenced.insert(def);
+                            if self.referenced.insert(def) {
+                                if let Some((_, def, inner)) = self.modules.get(&def) {
+                                    steps.push(Mark::Visit(&def.body, body_env(inner, def)));
+                                }
+                            }
                         }
                     }
                     for child in children(other).into_iter().rev() {

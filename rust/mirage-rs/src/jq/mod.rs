@@ -5,6 +5,7 @@ mod eval;
 mod format;
 mod host;
 mod lalr;
+mod link;
 mod main;
 mod meter;
 mod onig;
@@ -20,6 +21,7 @@ mod value;
 mod vm;
 
 pub(crate) use eval::open as open_eval;
+pub(crate) use link::open as open_link;
 pub(crate) use main::open as open_main;
 pub(crate) use options::open as open_options;
 

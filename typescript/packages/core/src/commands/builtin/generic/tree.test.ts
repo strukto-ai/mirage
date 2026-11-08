@@ -21,7 +21,9 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { Files } from '../../../workspace/files.ts'
-import { parseFlags, treeGeneric as generic } from './tree.ts'
+import { parseFlags, treeGeneric as generic, type TreeFlags } from './tree.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { parseFlags as parseLineFlags } from '../../../workspace/executor/command/flags.ts'
 import { readers } from '../../../test-utils.ts'
 
 const DEC = new TextDecoder()
@@ -271,6 +273,107 @@ describe('tree -L', () => {
     expect([parsed.exitCode, DEC.decode(parsed.stderr as Uint8Array)]).toEqual([
       1,
       'tree: Invalid level, must be greater than 0.\n',
+    ])
+  })
+})
+
+describe('tree sizes, orders and JSON', () => {
+  const sized: Record<string, FileStat> = {
+    '/r': new FileStat({ name: 'r', type: FileType.DIRECTORY }),
+    '/r/a.txt': new FileStat({ name: 'a.txt', size: 6, type: FileType.FILE }),
+    '/r/b': new FileStat({ name: 'b', type: FileType.DIRECTORY }),
+    '/r/b/z10': new FileStat({ name: 'z10', size: 6, type: FileType.FILE }),
+    '/r/b/z9': new FileStat({ name: 'z9', size: 1, type: FileType.FILE }),
+    '/r/empty': new FileStat({ name: 'empty', type: FileType.DIRECTORY }),
+    '/r/.gitignore': new FileStat({ name: '.gitignore', size: 6, type: FileType.FILE }),
+    '/r/x.log': new FileStat({ name: 'x.log', size: 3, type: FileType.FILE }),
+  }
+  const sizedStat = (p: PathSpec): Promise<FileStat> => {
+    const row = sized[key(p)]
+    return row === undefined ? Promise.reject(new Error(key(p))) : Promise.resolve(row)
+  }
+  const sizedReaddir = (p: PathSpec): Promise<string[]> => {
+    const prefix = `${key(p)}/`
+    return Promise.resolve(
+      Object.keys(sized).filter(
+        (path) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'),
+      ),
+    )
+  }
+  async function* readGitignore(p: PathSpec): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    expect(p.virtual).toBe('/r/.gitignore')
+    yield new TextEncoder().encode('*.log\n')
+  }
+  function lineFlags(argv: string[]): TreeFlags | IOResult {
+    return parseFlags(parseLineFlags(argv, specOf('tree'), 'tree', '/').flagKwargs)
+  }
+
+  it.each([
+    [
+      ['--du', '-s'],
+      '[      12304]  /r\n|-- [          6]  a.txt\n|-- [       4103]  b\n|   |-- [          6]  z10\n' +
+        '|   `-- [          1]  z9\n|-- [       4096]  empty\n`-- [          3]  x.log\n\n' +
+        '       12304 bytes used in 3 directories, 4 files\n',
+    ],
+    [
+      ['--gitignore', '--prune', '--dirsfirst', '--sort=size'],
+      '/r\n|-- b\n|   |-- z10\n|   `-- z9\n`-- a.txt\n\n2 directories, 3 files\n',
+    ],
+    [
+      ['-J', '-f', '--filelimit', '1'],
+      '[\n  {"type":"directory","name":"/r","contents":[{"error": ' +
+        '"4 entries exceeds filelimit, not opening dir"}\n  ]}\n,\n' +
+        '  {"type":"report","directories":1,"files":0}\n]\n',
+    ],
+    [
+      ['-J', '-i', '--noreport', '-L', '1'],
+      '[{"type":"directory","name":"/r","contents":[{"type":"file","name":"a.txt"},' +
+        '{"type":"directory","name":"b"},{"type":"directory","name":"empty"},' +
+        '{"type":"file","name":"x.log"}]}]\n',
+    ],
+  ])('draws %j', async (argv, expected) => {
+    const flags = lineFlags(argv) as TreeFlags
+    const root = new PathSpec({
+      virtual: '/r',
+      directory: '/r',
+      resolved: false,
+      vfsPath: 'r',
+      rawPath: '/r',
+    })
+    const [out, io] = (await generic(
+      flags,
+      [root],
+      ctx({}),
+      sizedReaddir,
+      sizedStat,
+      undefined,
+      readGitignore,
+    )) as [Uint8Array, IOResult]
+    expect([DEC.decode(out), io.exitCode]).toEqual([expected, 0])
+  })
+
+  it.each([
+    [[], 'name', null],
+    [['-t', '--sort=size'], 'size', null],
+    [['--sort=size', '-U'], 'none', null],
+    [['-v', '--filelimit', '3'], 'version', 3],
+    [['--filelimit=0'], 'name', null],
+  ])('reads %j as the last order typed', (argv, sort, limit) => {
+    const flags = lineFlags(argv) as TreeFlags
+    expect([flags.sort, flags.fileLimit]).toEqual([sort, limit])
+  })
+
+  it('names the orders when one is unknown', () => {
+    const io = lineFlags(['--sort=n']) as IOResult
+    expect([
+      io.exitCode,
+      DEC.decode(io.stdout as Uint8Array),
+      DEC.decode(io.stderr as Uint8Array),
+    ]).toEqual([
+      1,
+      'name,version,size,mtime,ctime,none\n',
+      "tree: Sort type 'n' not valid, should be one of: ",
     ])
   })
 })

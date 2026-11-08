@@ -66,6 +66,16 @@ GZIP_RETRY_SUFFIXES = (".gz", ".z", "-z", ".Z")
 # The suffixes gzip -d turns into .tar rather than dropping.
 GZIP_TAR_SUFFIXES = (".tgz", ".taz")
 GZIP_MAX_SUFFIX = 30
+# The heads of gzip -l's table, plain and under -v, and the width of the
+# method, CRC and date columns -v puts before the totals row's numbers.
+GZIP_LIST_HEAD = (
+    "         compressed        uncompressed  ratio uncompressed_name"
+)
+GZIP_LIST_VERBOSE_HEAD = (
+    "method  crc     date  time           compressed        uncompressed"
+    "  ratio uncompressed_name"
+)
+GZIP_LIST_VERBOSE_INDENT = 28
 
 AWK_USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
 

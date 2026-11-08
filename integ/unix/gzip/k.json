@@ -28,11 +28,11 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/pgz && printf 'roundtrip\\n' > /data/pgz/k.txt && gzip -k /data/pgz/k.txt && test -f /data/pgz/k.txt && echo kept && zcat /data/pgz/k.txt.gz",
+      "command": "mkdir -p /data/pgz && printf 'roundtrip\\n' > /data/pgz/k.txt && gzip -k /data/pgz/k.txt && test -f /data/pgz/k.txt && echo kept && zcat /data/pgz/k.txt.gz && gzip -l /data/pgz/k.txt.gz && gzip -tv /data/pgz/k.txt.gz",
       "expect": {
         "exit": 0,
-        "stdout": "kept\nroundtrip\n",
-        "stderr": ""
+        "stdout": "kept\nroundtrip\n         compressed        uncompressed  ratio uncompressed_name\n                 36                  10 -20.0% /data/pgz/k.txt\n",
+        "stderr": "/data/pgz/k.txt.gz:\t OK\n"
       },
       "flags": [
         "k"

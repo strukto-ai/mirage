@@ -9,6 +9,7 @@ use crate::{Stream, StreamError};
 
 use super::eval::{self, DEBUG, ERROR, Eval, Formatting, HALT, PRINT, Position, STDERR};
 use super::format;
+use super::link::{Linked, resolve};
 use super::meter::{self, Meter};
 use super::parse::{Scanned, Scanner};
 use super::unicode::{Bytes, DecodeCursor, WORK};
@@ -61,6 +62,11 @@ pub(super) struct Config {
     pub(super) zone: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) prog_origin: Option<String>,
+    /// The working directory, which a relative `-L` is read against.
+    pub(super) cwd: Option<String>,
+    pub(super) library_paths: Vec<String>,
+    /// What the linker found for the program's imports.
+    pub(super) linked: Option<Linked>,
     /// The bytes jq may hold, the workspace's room; None for jq_eval's
     /// own limit, which a run reports as its error instead.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -74,6 +80,7 @@ pub(super) struct Config {
     pub(super) raw_input: bool,
     pub(super) slurp: bool,
     pub(super) stream: bool,
+    pub(super) stream_errors: bool,
     pub(super) seq: bool,
     pub(super) exit_status: bool,
     pub(super) raw_output: bool,
@@ -95,6 +102,9 @@ impl Default for Config {
             env: None,
             zone: None,
             prog_origin: None,
+            cwd: None,
+            library_paths: Vec::new(),
+            linked: None,
             memory: None,
             steps: None,
             inputs: Vec::new(),
@@ -102,6 +112,7 @@ impl Default for Config {
             raw_input: false,
             slurp: false,
             stream: false,
+            stream_errors: false,
             seq: false,
             exit_status: false,
             raw_output: false,
@@ -176,9 +187,13 @@ enum Parsed {
 }
 
 impl Parser {
-    fn new(seq: bool, streaming: bool) -> Self {
+    fn new(seq: bool, streaming: bool, stream_errors: bool) -> Self {
         Self {
-            scanner: Scanner::values(seq, streaming),
+            scanner: if stream_errors {
+                Scanner::stream_errors(seq)
+            } else {
+                Scanner::values(seq, streaming)
+            },
             input: Vec::new(),
             fed: 0,
             last: false,
@@ -194,7 +209,13 @@ impl Parser {
 
     fn next(&mut self) -> Result<Parsed, StreamError> {
         match self.scanner.take() {
-            Some(Scanned::Value(value)) => return Ok(Parsed::Value(value)),
+            Some(Scanned::Value(value)) => {
+                // A --stream-errors event drops the rest of the piece.
+                if self.scanner.dropped() {
+                    self.fed = self.input.len();
+                }
+                return Ok(Parsed::Value(value));
+            }
             Some(Scanned::Error(message)) => return Ok(Parsed::Error(message)),
             None => {}
         }
@@ -280,7 +301,8 @@ struct Reader {
 
 impl Reader {
     fn new(config: &Config) -> Self {
-        let parser = (!config.raw_input).then(|| Parser::new(config.seq, config.stream));
+        let parser = (!config.raw_input)
+            .then(|| Parser::new(config.seq, config.stream, config.stream_errors));
         let slurp = config.slurp.then(|| {
             if config.raw_input {
                 Slurp::Raw(String::new())
@@ -703,6 +725,11 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "sort_keys": config.sort_keys,
         "indent": config.indent,
     });
+    let cwd = config.cwd.as_deref().unwrap_or("/");
+    let search_list = (!config.library_paths.is_empty()).then(|| {
+        let resolved = config.library_paths.iter().map(|path| resolve(cwd, path));
+        resolved.collect::<Vec<String>>()
+    });
     let mut eval_config = serde_json::json!({
         "program": config.program,
         "named": config.named,
@@ -710,6 +737,8 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "env": config.env,
         "zone": config.zone,
         "prog_origin": config.prog_origin,
+        "search_list": search_list,
+        "linked": config.linked,
         "print": print,
     });
     if let Some(memory) = config.memory {
@@ -1219,6 +1248,65 @@ mod tests {
     }
 
     const PLACED: &str = "[., input_filename, input_line_number]";
+
+    fn events(text: &'static [u8], options: serde_json::Value) -> Vec<String> {
+        let mut all = serde_json::json!({ "stream": true, "stream_errors": true });
+        for (key, value) in options.as_object().expect("options") {
+            all[key] = value.clone();
+        }
+        let ran = run(".", &[Source::Bytes(text)], all);
+        assert_eq!((ran.err.as_str(), ran.status), ("", 0));
+        ran.out.lines().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn a_parse_error_under_stream_errors_is_one_more_event() {
+        assert_eq!(
+            events(b"{\"a\":[1,2,x]}\n", none()),
+            [
+                r#"[["a",0],1]"#,
+                r#"[["a",1],2]"#,
+                r#"["Invalid numeric literal at line 1, column 12",["a",2]]"#,
+            ]
+        );
+        assert_eq!(
+            events(b"[1,2", none()),
+            [
+                "[[0],1]",
+                r#"["Unfinished JSON term at EOF at line 1, column 4",[1]]"#,
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_errors_drops_the_rest_of_the_line_and_reads_the_next() {
+        assert_eq!(
+            events(b"{\"a\":1,\"b\":}\n[3]\n", none()),
+            [
+                r#"[["a"],1]"#,
+                r#"["Missing value in key:value pair at line 1, column 12",["b"]]"#,
+                "[[0],3]",
+                "[[0]]",
+            ]
+        );
+        assert_eq!(
+            events(b"1 2 x 3\n4\n", none()),
+            [
+                "[[],1]",
+                "[[],2]",
+                r#"["Invalid numeric literal at line 1, column 6",[]]"#,
+                "[[],4]",
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_errors_slurps_the_error_with_the_events() {
+        assert_eq!(
+            events(b"[1,x]\n[2]\n", serde_json::json!({ "slurp": true })),
+            [r#"[[[0],1],["Invalid numeric literal at line 1, column 5",[1]],[[0],2],[[0]]]"#]
+        );
+    }
 
     fn none() -> serde_json::Value {
         serde_json::json!({})

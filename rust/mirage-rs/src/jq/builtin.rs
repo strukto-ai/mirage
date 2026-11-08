@@ -1017,7 +1017,8 @@ pub(crate) fn call(f: Cfunc, args: &mut [Value], limits: Limits) -> Answer {
         | Cfunc::Debug
         | Cfunc::Stderr
         | Cfunc::Env
-        | Cfunc::GetProgOrigin => unreachable!("the VM answers its host builtins"),
+        | Cfunc::GetProgOrigin
+        | Cfunc::GetSearchList => unreachable!("the VM answers its host builtins"),
         Cfunc::HaveDecnum => Ok(Value::True),
         Cfunc::HaveLiteralNumbers => Ok(Value::True),
         Cfunc::Floor => math1(input, f64::floor),
@@ -1124,12 +1125,6 @@ pub(crate) fn call(f: Cfunc, args: &mut [Value], limits: Limits) -> Answer {
             Value::String(name) => Err(fail(module_error(name))),
             _ => Err(fail("modulemeta input module name must be a string")),
         },
-        Cfunc::GetSearchList => Ok(Value::array(
-            ["~/.jq", "$ORIGIN/../lib/jq", "$ORIGIN/../lib"]
-                .into_iter()
-                .map(Value::string)
-                .collect(),
-        )),
         Cfunc::GetJqOrigin => Ok(Value::string(".")),
         Cfunc::Now
         | Cfunc::Mktime
@@ -1169,25 +1164,34 @@ fn builtins() -> Value {
 }
 
 pub(crate) fn module_error(path: &str) -> String {
+    invalid_module_path(path).unwrap_or_else(|| format!("module not found: {path}"))
+}
+
+/// validate_relpath: what jq says of a module path it will not look for.
+pub(crate) fn invalid_module_path(path: &str) -> Option<String> {
     if path.contains('\0') {
-        return "Module path contains a NUL byte".into();
+        return Some("Module path contains a NUL byte".into());
     }
     if path.contains('\\') {
-        return format!("Modules must be named by relative paths using '/', not '\\' ({path})");
+        return Some(format!(
+            "Modules must be named by relative paths using '/', not '\\' ({path})"
+        ));
     }
     let mut previous = None;
     for component in path.split('/') {
         if component == ".." {
-            return format!(
+            return Some(format!(
                 "Relative paths to modules may not traverse to parent directories ({path})"
-            );
+            ));
         }
         if Some(component) == previous {
-            return format!("module names must not have equal consecutive components: {path}");
+            return Some(format!(
+                "module names must not have equal consecutive components: {path}"
+            ));
         }
         previous = Some(component);
     }
-    format!("module not found: {path}")
+    None
 }
 
 /// nextafter: the double adjacent to `x` on `y`'s side.

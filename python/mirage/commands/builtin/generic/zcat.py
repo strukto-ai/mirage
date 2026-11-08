@@ -1,15 +1,7 @@
-from collections.abc import AsyncIterator
-
-from mirage.commands.builtin.constants import GZIP_SUFFIX
-from mirage.commands.builtin.generic.decompress import decompress_inputs
-from mirage.commands.builtin.utils.links import link_resolver
-from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.commands.builtin.generic.gzip import gzip_generic
 from mirage.commands.config import Context
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.flag_view import FlagView
-from mirage.errors.fs import eisdir
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec, PolymorphicReadFn, StatFn
+from mirage.types import PathSpec, PolymorphicReadFn, ReaddirFn, StatFn
 
 
 async def zcat_generic(
@@ -18,11 +10,10 @@ async def zcat_generic(
     ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
+    readdir: ReaddirFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    """Run zcat over resolved operands; mirrors zcatGeneric.
-
-    zcat is ``gzip -cd``, so -f copies input that is not gzip, -q drops
-    the warnings, and -S names the suffix a missing name is retried with.
+    """Run zcat, which is ``gzip -cd``, over resolved operands; mirrors
+    zcatGeneric.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
@@ -31,26 +22,16 @@ async def zcat_generic(
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
+        readdir (ReaddirFn | None): the mount's readdir, for -r.
     """
-    fl = FlagView(ctx.flags, spec=SPECS["zcat"])
-    suffix = fl.as_str("S")
-    read_stream = normalized_read(stream)
-
-    async def read(path: PathSpec) -> AsyncIterator[bytes]:
-        if (await stat(path)).type is FileType.DIRECTORY:
-            raise eisdir(path.virtual)
-        async for chunk in read_stream(path):
-            yield chunk
-
-    return await decompress_inputs(
+    return await gzip_generic(
         paths,
-        read=read,
-        stdin=ctx.stdin,
-        to_stdout=True,
-        force=fl.as_bool("f"),
-        quiet=fl.as_bool("q"),
-        suffix=GZIP_SUFFIX if suffix is None else suffix,
-        resolver=link_resolver(ctx),
+        texts,
+        ctx,
+        stream,
+        stat=stat,
+        readdir=readdir,
+        command="zcat",
     )
 
 

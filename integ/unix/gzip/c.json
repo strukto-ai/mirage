@@ -28,11 +28,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cat /data/b.txt | gzip -c | zcat",
+      "command": "cat /data/b.txt | gzip -c | zcat; cat /data/b.txt | gzip -v | gzip -l; cat /data/b.txt | gzip --stdout --best | gunzip --to-stdout --decompress",
       "expect": {
         "exit": 0,
-        "stdout": "1\n2\n3\n",
-        "stderr": ""
+        "stdout": "1\n2\n3\n         compressed        uncompressed  ratio uncompressed_name\n                 26                   6 -33.3% stdout\n1\n2\n3\n",
+        "stderr": "-33.3%\n"
       },
       "flags": [
         "c"

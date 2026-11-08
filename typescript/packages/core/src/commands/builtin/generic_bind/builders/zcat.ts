@@ -20,7 +20,7 @@ import { commandFiles, dirAwareStream, resolveOrEmpty } from '../files.ts'
 const zcat: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return zcatGeneric(resolved, ctx, dirAwareStream(files, ctx))
+  return zcatGeneric(resolved, ctx, dirAwareStream(files, ctx), files.stat, (p) => files.readdir(p))
 }
 
 export const BUILDER: GenericCommand = {

@@ -38,6 +38,8 @@ async def gunzip(
         files.write,
         files.unlink,
         files.stat,
+        files.readdir,
+        files.set_attrs,
     )
 
 

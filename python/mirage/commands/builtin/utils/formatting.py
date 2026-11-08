@@ -304,6 +304,29 @@ def full_iso_time(modified: str | None, zone: tzinfo | None = None) -> str:
     return gnu_strftime(whole, f"%Y-%m-%d %H:%M:%S.{fraction} %z")
 
 
+def context_time(modified: str | None, zone: tzinfo | None = None) -> str:
+    """A timestamp as a context diff's header gives it, ``%a %b %e %T
+    %Y``, read in ``zone`` (UTC when None); an unknown time is the epoch.
+
+    Args:
+        modified (str | None): the ISO timestamp, None when unknown.
+        zone (tzinfo | None): the zone the command's ``TZ`` names.
+    """
+    stamp = _EPOCH
+    if modified and iso_timestamp(modified) is not None:
+        stamp = datetime.fromisoformat(modified)
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+    whole = stamp.replace(microsecond=0)
+    try:
+        whole = whole.astimezone(zone or timezone.utc)
+    except OverflowError as exc:
+        logger.debug(
+            "%s does not fit a datetime in %s: %s", modified, zone, exc
+        )
+    return gnu_strftime(whole, "%a %b %e %H:%M:%S %Y")
+
+
 def styled_time(modified: str | None, style: str) -> str:
     """The time column under ``--time-style``.
 

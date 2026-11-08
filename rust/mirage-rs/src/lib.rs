@@ -410,6 +410,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "iconv" => iconv::open(config),
         "join" => join::open(config),
         "jq_options" => jq::open_options(config),
+        "jq_link" => jq::open_link(config),
         "jq_eval" => jq::open_eval(config),
         "jq" => jq::open_main(config),
         "look" => look::open(config),

@@ -640,10 +640,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/gzn1306 && printf 'hi\\n' | gzip > /data/gzn1306/q.x && gunzip -S .x /data/gzn1306/q.x && cat /data/gzn1306/q && ls /data/gzn1306; rc=$?; exit $rc)",
+      "command": "(mkdir -p /data/gzn1306 && printf 'hi\\n' | gzip > /data/gzn1306/q.x && gunzip -S .x /data/gzn1306/q.x && cat /data/gzn1306/q && ls /data/gzn1306 && gzip -c /data/gzn1306/q > /data/gzn1306/o.gz && rm /data/gzn1306/q && gunzip -N /data/gzn1306/o.gz && ls /data/gzn1306; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
-        "stdout": "hi\nq\n",
+        "stdout": "hi\nq\nq\n",
         "stderr": ""
       }
     },

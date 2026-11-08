@@ -52,6 +52,24 @@ const gzipFailure = z
   })
   .strict()
 
+const gzipFacts = z
+  .object({
+    name: z.string().nullable(),
+    mtime: z.number().int(),
+    header: z.number().int(),
+    compressed: z.number().int(),
+    crc: z.number().int(),
+    size: z.number().int(),
+  })
+  .strict()
+
+/** What `gzip -l` and `-v` read off an input besides its data: the first
+ * member's stored name (null for none) and time (0 for none), the bytes
+ * its header and trailer take (none once a second member follows, as the
+ * reference counts them), the bytes read, and the CRC and length the
+ * input's last eight bytes claim. Mirrors Python's `GzipFacts`. */
+export type GzipFacts = z.infer<typeof gzipFacts>
+
 function failure(stream: OpenStream): GzipDataError | null {
   if (stream.status() === 0) return null
   const record = gzipFailure.parse(JSON.parse(new TextDecoder().decode(stream.takeStderr())))
@@ -73,6 +91,7 @@ function* output(stream: OpenStream, data: Uint8Array): Generator<Uint8Array> {
 async function* codecStream(
   source: AsyncIterable<Uint8Array>,
   config: Readonly<Record<string, JsonValue>>,
+  onFacts?: (facts: GzipFacts) => void,
 ): AsyncGenerator<Uint8Array, void> {
   const stream = await openStream('compress', config)
   try {
@@ -81,6 +100,9 @@ async function* codecStream(
     }
     const error = failure(stream)
     if (error !== null) throw error
+    if (onFacts !== undefined) {
+      onFacts(gzipFacts.parse(JSON.parse(new TextDecoder().decode(stream.metadata()))))
+    }
   } catch (error) {
     if (!(error instanceof StreamRefusal)) throw error
     if (error.output.byteLength > 0) yield error.output
@@ -103,20 +125,47 @@ export async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
   return materialize(gunzipStream(yieldBytes(bytes)))
 }
 
-/** Encode bounded chunks and close an abandoned source. */
+/** Encode bounded chunks and close an abandoned source; `mtime` is the
+ * time the header stores, 0 for none. */
 export function gzipCompressStream(
   source: AsyncIterable<Uint8Array>,
   level: number | null = null,
   name = '',
+  mtime = 0,
 ): AsyncGenerator<Uint8Array, void> {
-  return codecStream(source, { operation: 'encode', format: 'gzip', level: level ?? -1, name })
+  return codecStream(source, {
+    operation: 'encode',
+    format: 'gzip',
+    level: level ?? -1,
+    name,
+    mtime,
+  })
 }
 
-/** Decode members and retain bytes produced before a checked failure. */
+/** Decode members and retain bytes produced before a checked failure;
+ * `onFacts` hears the input's facts once it decodes whole. */
 export function gunzipStream(
   source: AsyncIterable<Uint8Array>,
   test = false,
   passthrough = false,
+  onFacts?: (facts: GzipFacts) => void,
 ): AsyncGenerator<Uint8Array, void> {
-  return codecStream(source, { operation: 'decode', format: 'gzip', test, passthrough })
+  return codecStream(source, { operation: 'decode', format: 'gzip', test, passthrough }, onFacts)
+}
+
+/** An input's facts read the way `gzip -l` reads them: checked whole, as
+ * `-t` checks it, with nothing written. Throws `GzipDataError` when the
+ * input does not decode. */
+export async function readGzipFacts(source: AsyncIterable<Uint8Array>): Promise<GzipFacts> {
+  const found: GzipFacts[] = []
+  for await (const _ of codecStream(
+    source,
+    { operation: 'decode', format: 'gzip', list: true },
+    (facts) => found.push(facts),
+  )) {
+    void _
+  }
+  const facts = found[0]
+  if (facts === undefined) throw new Error('gzip listing ended without facts')
+  return facts
 }

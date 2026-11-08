@@ -4,7 +4,7 @@ import { materialize, type ByteSource } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { gzip } from '../../../utils/compress.ts'
 import { eisdir, enoent } from '../../../errors/fs.ts'
-import { decompressInputs, gzipSuffix, suffixRefusal } from './decompress.ts'
+import { decompressInputs, gzipRatio, gzipSuffix, listInputs, suffixRefusal } from './decompress.ts'
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
@@ -190,4 +190,54 @@ it.each([
   ['.' + 'a'.repeat(30), true],
 ])('takes a -S suffix of one to thirty bytes: %j', (suffix, refused) => {
   expect(suffixRefusal(suffix) !== null).toBe(refused)
+})
+
+it.each([
+  [18, 41, 24, '  5.6%'],
+  [400, 351, 0, ' 12.2%'],
+  [400, 349, 0, ' 12.8%'],
+  [0, 22, 20, '  0.0%'],
+  [1, 23, 20, '-200.0%'],
+])('the ratio rounds a tie to even as printf does: %i %i %i', (size, compressed, header, shown) => {
+  expect(gzipRatio(size, compressed, header)).toBe(shown)
+})
+
+it('a listing totals only once a row was printed', async () => {
+  const { read, options } = backend(
+    new Map([
+      ['/d/a.gz', HELLO],
+      ['/d/bad.gz', enc.encode('junk')],
+    ]),
+  )
+  const bad = PathSpec.fromStrPath('/d/bad.gz')
+  let [out, io] = await listInputs([bad, bad], read, { stdin: null, stat: options.stat })
+  expect([text(out), io.exitCode]).toEqual(['', 1])
+  ;[out, io] = await listInputs([PathSpec.fromStrPath('/d/a.gz'), bad], read, {
+    stdin: null,
+    stat: options.stat,
+  })
+  const rows = (text(out) ?? '').split('\n')
+  expect(rows[1]?.split(/ +/).filter(Boolean)).toEqual(['25', '5', '-40.0%', '/d/a'])
+  expect(rows[2]?.split(/ +/).filter(Boolean)).toEqual(['25', '5', '-400.0%', '(totals)'])
+  expect(text(io.stderr)).toBe('\ngzip: /d/bad.gz: not in gzip format\n')
+})
+
+it('-N restores the stored name and time', async () => {
+  const stored = await gzip(enc.encode('hi\n'), 'orig.txt')
+  stored.set([0x44, 0x43, 0x6d, 0x38], 4)
+  const { read, options } = backend(new Map([['/d/x.gz', stored]]))
+  const attrs: [string, unknown][] = []
+  const [, io] = await decompressInputs([PathSpec.fromStrPath('/d/x.gz')], read, {
+    stdin: null,
+    restore: true,
+    verbose: true,
+    setAttrs: (path, fields) => {
+      attrs.push([path.virtual, fields])
+      return Promise.resolve()
+    },
+    ...options,
+  })
+  expect(io.exitCode).toBe(0)
+  expect(attrs).toEqual([['/d/orig.txt', { mtime: '1999-12-31T23:59:00Z' }]])
+  expect(text(io.stderr)).toMatch(/^\/d\/x\.gz:\t.* -- replaced with \/d\/orig\.txt\n$/)
 })

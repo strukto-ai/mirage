@@ -14,143 +14,219 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { flagKwargName } from '../../spec/constants.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { LineFacts, PathSpec, type StatFn } from '../../../types.ts'
+import { LineFacts, PathSpec, type ReaddirFn, type StatFn } from '../../../types.ts'
 import { gnuBasename } from '../../../utils/path.ts'
 import { gzipCompressStream } from '../../../utils/compress.ts'
+import { isoTimestamp } from '../../../utils/dates.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { linkResolver } from '../utils/links.ts'
 import { formatRecords } from '../utils/output.ts'
-import { resolveSource, stdinStream } from '../utils/stream.ts'
+import { STDIN_OPERAND } from '../utils/constants.ts'
+import { stdinStream } from '../utils/stream.ts'
 import { GZIP_SUFFIX } from '../constants.ts'
 import {
   besideLink,
   decompressInputs,
   existsLine,
+  gzipRatio,
   gzipSuffix,
+  inputInfo,
+  keepAttributes,
+  listInputs,
   openGzipInput,
   outputTaken,
   removeInput,
   replaceOutput,
   suffixRefusal,
+  verboseLine,
+  walked,
+  type SetAttrsFn,
 } from './decompress.ts'
 import { ByteSpool } from '../../../io/spool.ts'
 import { OutputStream, closeQuietly, drain } from '../../../io/stream.ts'
 
-interface GzipFlags {
+export interface GzipFlags {
   readonly decompress: boolean
   readonly keep: boolean
   readonly force: boolean
   readonly toStdout: boolean
   readonly quiet: boolean
+  readonly verbose: boolean
+  readonly test: boolean
+  readonly listing: boolean
+  readonly recursive: boolean
+  readonly named: boolean | null
   readonly suffix: string
   readonly level: number | null
 }
 
-// -1..-9, the last one typed, as GNU's option loop keeps it; -1 parses to
-// args_1 (AMBIGUOUS_NAMES). Read off the flag tape: an object lists its
-// integer-like keys first and in numeric order, so typedOrder cannot rank
-// the digits.
+// -1..-9, the last one typed, as the reference's option loop keeps it; -1
+// and -9 are --fast and --best, keyed by those names. Read off the flag
+// tape: an object lists its integer-like keys first and in numeric order, so
+// typedOrder cannot rank the digits.
+const LEVELS = new Map<string, number>([
+  ['fast', 1],
+  ...Array.from({ length: 7 }, (_, i): [string, number] => [String(i + 2), i + 2]),
+  ['best', 9],
+])
+
 function extractLevel(fl: FlagView): number | null {
-  const names = new Map<string, number>()
-  for (let n = 1; n <= 9; n++) names.set(flagKwargName(String(n)), n)
-  const typed = fl.occurrences(...names.keys()).filter(([, value]) => value === true)
+  const typed = fl.occurrences(...LEVELS.keys()).filter(([, value]) => value === true)
   const last = typed.at(-1)
-  return last === undefined ? null : (names.get(last[0]) ?? null)
+  return last === undefined ? null : (LEVELS.get(last[0]) ?? null)
 }
 
-function parseFlags(bag: Record<string, FlagValue>): GzipFlags {
-  const fl = new FlagView(bag, specOf('gzip'))
+// Of a family where the last one typed wins, that one's key.
+function lastOf(fl: FlagView, ...names: string[]): string | null {
+  const typed = fl.occurrences(...names).filter(([, value]) => value === true)
+  return typed.at(-1)?.[0] ?? null
+}
+
+/** gzip's options for `command`: gunzip always decompresses and zcat also
+ * writes to stdout; -q and -v, and -n and -N, are each a pair where the last
+ * one typed wins. Mirrors Python's parse_flags. */
+export function parseFlags(bag: Record<string, FlagValue>, command = 'gzip'): GzipFlags {
+  const fl = new FlagView(bag, specOf(command))
+  const loud = lastOf(fl, 'quiet', 'verbose')
+  const name = lastOf(fl, 'no_name', 'name')
   return {
-    decompress: fl.asBool('d'),
-    keep: fl.asBool('k'),
-    force: fl.asBool('f'),
-    toStdout: fl.asBool('c'),
-    quiet: fl.asBool('q'),
-    suffix: fl.asStr('S') ?? GZIP_SUFFIX,
+    decompress: command !== 'gzip' || fl.asBool('decompress'),
+    keep: fl.asBool('keep'),
+    force: fl.asBool('force'),
+    toStdout: command === 'zcat' || fl.asBool('stdout'),
+    quiet: loud === 'quiet',
+    verbose: loud === 'verbose',
+    test: fl.asBool('test'),
+    listing: fl.asBool('list'),
+    recursive: fl.asBool('recursive'),
+    named: name === null ? null : name === 'name',
+    suffix: fl.asStr('suffix') ?? GZIP_SUFFIX,
     level: extractLevel(fl),
   }
 }
 
+async function* counted(
+  source: AsyncIterable<Uint8Array>,
+  count: number[],
+): AsyncGenerator<Uint8Array> {
+  for await (const chunk of source) {
+    count[0] = (count[0] ?? 0) + chunk.byteLength
+    yield chunk
+  }
+}
+
+/**
+ * gzip, gunzip and zcat over resolved operands, stdin when none.
+ *
+ * -l lists and -t tests, both decompressing; -d decompresses. In compression
+ * each input stores its name and time unless -n, and an in-place output takes
+ * the input's mode and times; under -r a directory gives way to the files
+ * below it, where one already suffixed is passed over, said only under -v;
+ * -v says each input's ratio once done. Mirrors Python's gzip_generic.
+ */
 export async function gzipGeneric(
   paths: PathSpec[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  write: (p: PathSpec, data: ByteSource) => Promise<void>,
-  unlink: (p: PathSpec) => Promise<void>,
+  write?: (p: PathSpec, data: ByteSource) => Promise<void>,
+  unlink?: (p: PathSpec) => Promise<void>,
   stat?: StatFn,
+  readdir?: ReaddirFn,
+  setAttrs?: SetAttrsFn,
+  command = 'gzip',
 ): Promise<CommandFnResult> {
-  const {
-    decompress,
-    keep,
-    force,
-    toStdout: stdoutMode,
-    quiet,
-    suffix,
-    level,
-  } = parseFlags(ctx.flags)
-
+  const flags = parseFlags(ctx.flags, command)
+  const { keep, force, toStdout, quiet, verbose, recursive, named, suffix, level } = flags
   const resolver = linkResolver(ctx)
-
   const refused = suffixRefusal(suffix)
   if (refused !== null) return [null, refused]
-  if (decompress)
+  const files = {
+    ...(stat !== undefined ? { stat } : {}),
+    ...(readdir !== undefined ? { readdir } : {}),
+  }
+  if (flags.listing)
+    return listInputs(paths, stream, {
+      stdin: ctx.stdin,
+      quiet,
+      verbose,
+      restore: named === true,
+      recursive,
+      suffix,
+      ...files,
+      resolver,
+    })
+  if (flags.decompress || flags.test)
     return decompressInputs(paths, stream, {
       stdin: ctx.stdin,
       keep,
       force,
       quiet,
+      verbose,
+      restore: named === true,
+      recursive,
       suffix,
-      toStdout: stdoutMode,
-      write,
-      unlink,
-      ...(stat !== undefined ? { stat } : {}),
+      toStdout,
+      testOnly: flags.test,
+      ...(write !== undefined ? { write } : {}),
+      ...(unlink !== undefined ? { unlink } : {}),
+      ...files,
+      ...(setAttrs !== undefined ? { setAttrs } : {}),
       resolver,
     })
-  if (paths.length === 0) {
-    const result: ByteSource = gzipCompressStream(resolveSource(ctx.stdin), level)
-    return [result, new IOResult()]
-  }
+  const operands = paths.length > 0 ? paths : [STDIN_OPERAND]
   const read = stdinStream(stream, ctx.stdin)
   const io = new IOResult()
   const lines: string[] = []
+  const note = (line: string): void => {
+    lines.push(line.replace(/\n$/, ''))
+    io.stderr = formatRecords(lines)
+  }
   const report = (line: string, code: number, warning: boolean): void => {
-    if (!(warning && quiet)) {
-      lines.push(line.replace(/\n$/, ''))
-      io.stderr = formatRecords(lines)
-    }
+    if (!(warning && quiet)) note(line)
     if (io.exitCode !== 1) io.exitCode = code
   }
   async function* run(): AsyncGenerator<Uint8Array> {
-    for (const p of paths) {
-      const inPlace = !(stdoutMode || p.rawPath === '-')
-      const found =
-        p.rawPath === '-'
-          ? null
-          : await openGzipInput(p, inPlace ? stream : read, report, {
-              suffix,
-              decompress: false,
-              follow: stdoutMode || force,
-              resolver,
-            })
-      if (found === null && p.rawPath !== '-') continue
+    for await (const [p] of walked(operands, report, { recursive, ...files })) {
+      const onStdin = p.rawPath === '-'
+      const inPlace = !(toStdout || onStdin)
+      const found = onStdin
+        ? null
+        : await openGzipInput(p, inPlace ? stream : read, report, {
+            suffix,
+            decompress: false,
+            follow: toStdout || force,
+            resolver,
+          })
+      if (found === null && !onStdin) continue
       const input = found === null ? read(p) : found.stream
       const link = found?.link ?? null
       try {
         const known = inPlace ? gzipSuffix(p.rawPath, suffix) : null
         if (known !== null && !force) {
-          report(`gzip: ${p.rawPath} already has ${known} suffix -- unchanged`, io.exitCode, true)
+          if (verbose || !(recursive || quiet))
+            note(`gzip: ${p.rawPath} already has ${known} suffix -- unchanged`)
           continue
         }
-        const compressed = gzipCompressStream(
-          input,
-          level,
-          p.rawPath === '-' ? '' : gnuBasename(p.rawPath),
+        const info = await inputInfo(stat, p)
+        const stamp = info === null ? null : isoTimestamp(info.modified)
+        const name = onStdin || named === false ? '' : gnuBasename(p.rawPath)
+        const readIn = [0]
+        const written = [0]
+        const compressed = counted(
+          gzipCompressStream(
+            counted(input, readIn),
+            level,
+            name,
+            stamp === null || named === false ? 0 : Math.trunc(stamp),
+          ),
+          written,
         )
+        const header = 18 + (name === '' ? 0 : new TextEncoder().encode(name).byteLength + 1)
+        const ratio = (): string => gzipRatio(readIn[0] ?? 0, written[0] ?? 0, header)
         if (!inPlace) {
           try {
             yield* compressed
@@ -159,9 +235,16 @@ export async function gzipGeneric(
             report(`\ngzip: ${p.rawPath}: ${String(fsStrerror(error))}`, 1, false)
             return
           }
+          if (verbose) note(onStdin ? ratio() : verboseLine(p.rawPath, ratio(), keep, 'stdout'))
           continue
         }
+        if (write === undefined || unlink === undefined)
+          throw new Error('in-place compression requires write and unlink')
         const spool = new ByteSpool()
+        const out =
+          link === null
+            ? PathSpec.fromStrPath(`/${stripSlash(p.virtual)}${suffix}`)
+            : besideLink(link, p.rawPath + suffix)
         try {
           try {
             await spool.fill(compressed)
@@ -170,10 +253,6 @@ export async function gzipGeneric(
             report(`\ngzip: ${p.rawPath}: ${String(fsStrerror(error))}`, 1, false)
             return
           }
-          const out =
-            link === null
-              ? PathSpec.fromStrPath(`/${stripSlash(p.virtual)}${suffix}`)
-              : besideLink(link, p.rawPath + suffix)
           const existed = await outputTaken(out, stat, resolver)
           if (existed && !force) {
             report(existsLine(p.rawPath + suffix), 2, false)
@@ -194,6 +273,8 @@ export async function gzipGeneric(
         } finally {
           await spool.close()
         }
+        await keepAttributes(setAttrs, out, info)
+        if (verbose) note(verboseLine(p.rawPath, ratio(), keep, p.rawPath + suffix))
         if (!keep) await removeInput(p, link, unlink, resolver)
       } finally {
         await closeQuietly(input)
@@ -201,14 +282,17 @@ export async function gzipGeneric(
     }
   }
   const body = new OutputStream(run(), () => closeQuietly(ctx.stdin))
-  if (!stdoutMode && paths.every((p) => p.rawPath !== '-')) {
+  if (!toStdout && operands.every((p) => p.rawPath !== '-')) {
     await drain(body)
     return [null, io]
   }
   return [body, io]
 }
 
-/** A gzip line replaces its file operands unless `-c`. Mirrors Python's `facts`. */
+/** A gzip line replaces its file operands unless `-c`, `-t` or `-l`. Mirrors
+ * Python's `facts`. */
 export function facts(fl: FlagView, operands: readonly (string | PathSpec)[]): LineFacts {
-  return new LineFacts({ writes: operands.length > 0 && !fl.asBool('c') })
+  return new LineFacts({
+    writes: operands.length > 0 && !['stdout', 'test', 'list'].some((n) => fl.asBool(n)),
+  })
 }

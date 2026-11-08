@@ -26,6 +26,9 @@ const SURROGATE: &str = "Invalid \\uXXXX\\uXXXX surrogate pair escape";
 struct Config {
     seq: bool,
     streaming: bool,
+    /// `--stream-errors`: a parse error is one more event, `[message,
+    /// path]`, and reading goes on with the next piece.
+    stream_errors: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -866,13 +869,42 @@ pub(crate) struct Scanner {
     retiring: Vec<Retirement>,
     scanned: Option<Scanned>,
     charge: Charge,
+    /// Whether a `--stream-errors` event dropped the rest of the piece
+    /// being read, which the reader then skips too.
+    dropped: bool,
 }
 
 impl Scanner {
     /// The scanner jq reads its inputs and `fromjson` its text with, each
     /// document or `--stream` event built as a value.
     pub(crate) fn values(seq: bool, streaming: bool) -> Self {
-        Self::new(Config { seq, streaming }, true)
+        Self::new(
+            Config {
+                seq,
+                streaming,
+                stream_errors: false,
+            },
+            true,
+        )
+    }
+
+    /// The scanner `--stream-errors` reads its inputs with: `--stream`'s
+    /// events, a parse error among them as `[message, path]`.
+    pub(crate) fn stream_errors(seq: bool) -> Self {
+        Self::new(
+            Config {
+                seq,
+                streaming: true,
+                stream_errors: true,
+            },
+            true,
+        )
+    }
+
+    /// Whether the last error dropped the rest of the piece being read,
+    /// asked once.
+    pub(crate) fn dropped(&mut self) -> bool {
+        std::mem::take(&mut self.dropped)
     }
 
     fn new(config: Config, values: bool) -> Self {
@@ -910,6 +942,7 @@ impl Scanner {
             retiring: Vec::new(),
             scanned: None,
             charge: Charge::open(0),
+            dropped: false,
         }
     }
 
@@ -1034,6 +1067,24 @@ impl Scanner {
             "{message} {where_} line {}, column {}{suffix}",
             self.line, self.column
         );
+        if self.config.stream_errors && self.values {
+            // As jq 1.8.2 does: the error goes out where the stream stood,
+            // the parser starts over, and the rest of the piece read is
+            // dropped, so the next one is read afresh.
+            let path = self.path_value(self.path.len());
+            self.reset();
+            self.ended = eof;
+            if !eof {
+                self.input.clear();
+                self.input_at = 0;
+                self.dropped = true;
+            }
+            self.emission = Some(Emission::Value(Value::array(vec![
+                Value::string(message),
+                path,
+            ])));
+            return;
+        }
         self.reset();
         if self.config.seq && eof {
             self.lex = Lex::Waiting;
@@ -1701,9 +1752,9 @@ impl Scanner {
 
     /// The `--stream` event as a value: its path, and its leaf unless it
     /// closes a container.
-    fn event(&self, event: &mut Event, budget: &mut usize) -> Value {
-        *budget = budget.saturating_sub(event.path_len);
-        let path = (0..event.path_len)
+    /// The first `len` steps of the path the stream stands at.
+    fn path_value(&self, len: usize) -> Value {
+        let path = (0..len)
             .map(
                 |at| match self.path.get(at).expect("a path as long as its event") {
                     Path::Index(index) => Value::Number(Number::literal(&index.to_string())),
@@ -1713,7 +1764,12 @@ impl Scanner {
                 },
             )
             .collect();
-        let path = Value::array(path);
+        Value::array(path)
+    }
+
+    fn event(&self, event: &mut Event, budget: &mut usize) -> Value {
+        *budget = budget.saturating_sub(event.path_len);
+        let path = self.path_value(event.path_len);
         Value::array(match event.leaf.take() {
             Some(leaf) => vec![path, leaf.into_value()],
             None => vec![path],
@@ -2800,6 +2856,7 @@ mod tests {
                 Config {
                     streaming,
                     seq: false,
+                    stream_errors: false,
                 },
                 false,
             );
@@ -2830,6 +2887,7 @@ mod tests {
                 Config {
                     streaming,
                     seq: false,
+                    stream_errors: false,
                 },
                 false,
             );
