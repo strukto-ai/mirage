@@ -12,7 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.machine.e2b.config import E2BConfig
-from mirage.machine.e2b.handle import E2BMachine
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.machine.e2b.config import E2BConfig
+    from mirage.machine.e2b.handle import E2BMachine
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.machine.e2b.config": ("E2BConfig",),
+    "mirage.machine.e2b.handle": ("E2BMachine",),
+}
 
 __all__ = ["E2BConfig", "E2BMachine"]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

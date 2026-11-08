@@ -12,12 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import weakref
 from collections.abc import Sequence
 from typing import Any
 
 from mirage.execution.machine.table import MachineTable
 from mirage.machine.handle import MachineHandle
 from mirage.runtime.machine import MachineRuntime
+
+# One table per handle, as one workspace holds a handle however many
+# runtimes a test binds to it.
+_TABLES: "weakref.WeakKeyDictionary[MachineHandle, MachineTable]" = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def machine_runtime(handle: MachineHandle) -> MachineRuntime:
@@ -28,7 +35,10 @@ def machine_runtime(handle: MachineHandle) -> MachineRuntime:
         handle (MachineHandle): the machine.
     """
     runtime = MachineRuntime(captures_of(handle), machine=handle.name)
-    runtime.bind_machines(MachineTable({handle.name: handle}))
+    table = _TABLES.get(handle)
+    if table is None:
+        table = _TABLES[handle] = MachineTable({handle.name: handle})
+    runtime.bind_machines(table)
     return runtime
 
 

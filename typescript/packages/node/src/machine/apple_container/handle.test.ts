@@ -335,10 +335,10 @@ it('preserves argv through execute and shares the shell connection', async () =>
     { kind: 'line' },
   )
   expect(runtime.inspected()).toEqual(['box'])
-  expect([isProcessExecutor(machineRuntime(runtime)), isLineExecutor(machineRuntime(runtime))]).toEqual([
-    true,
-    true,
-  ])
+  expect([
+    isProcessExecutor(machineRuntime(runtime)),
+    isLineExecutor(machineRuntime(runtime)),
+  ]).toEqual([true, true])
   expect(machineRuntime(runtime).filesystem).toEqual([])
 })
 
@@ -347,9 +347,13 @@ it('refuses empty argv and a stopped container before executing', async () => {
   runtime.states.box = 'stopped'
   const ctx = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') }
   const opts = { kind: 'process' } as const
-  await expect(machineRuntime(runtime).execute([], [], ctx, opts)).rejects.toThrow('argv must not be empty')
+  await expect(machineRuntime(runtime).execute([], [], ctx, opts)).rejects.toThrow(
+    'argv must not be empty',
+  )
   expect(runtime.calls).toHaveLength(0)
-  await expect(machineRuntime(runtime).execute([], ['node'], ctx, opts)).rejects.toThrow('not running')
+  await expect(machineRuntime(runtime).execute([], ['node'], ctx, opts)).rejects.toThrow(
+    'not running',
+  )
   expect(runtime.calls).toHaveLength(1)
 })
 

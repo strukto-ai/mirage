@@ -12,7 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.machine.ssh.config import SSHMachineConfig
-from mirage.machine.ssh.handle import SSHMachine
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.machine.ssh.config import SSHMachineConfig
+    from mirage.machine.ssh.handle import SSHMachine
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.machine.ssh.config": ("SSHMachineConfig",),
+    "mirage.machine.ssh.handle": ("SSHMachine",),
+}
 
 __all__ = ["SSHMachine", "SSHMachineConfig"]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

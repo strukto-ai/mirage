@@ -22,8 +22,8 @@ from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.machine.registry import build_machine
 from mirage.runtime.base import Runtime
-from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.machine import MachineRuntime
+from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import Program, RunResult
 

@@ -131,7 +131,9 @@ class ProcessTable:
             limit (int | None): the most runners the session may hold,
                 this one included, held under ``ceiling``; None for no
                 cap. Stopping runners count until they finish cleanup and
-                leave the live registry.
+                leave the live registry. A process a scan found on a
+                machine (no runtime, a machine pid) counts against its
+                machine's own limits, not this one.
             line (LineId | None): the line the runner runs for; None
                 takes its parent's.
             started (Callable[[ProcessHandle], None] | None): what the
@@ -171,6 +173,10 @@ class ProcessTable:
                     1
                     for _, handle in self._live.values()
                     if handle.record.session_id == session_id
+                    and (
+                        handle.record.runtime is not None
+                        or handle.record.machine_pid is None
+                    )
                 )
                 >= limit
             ):
@@ -296,7 +302,9 @@ class ProcessTable:
         program it runs right now (``ProcessHandle.interrupt``), and any
         other stops with it and leaves the rest of the group to their own
         delivery. The deepest runners hear it first, so a native program
-        knows the signal before the shell that waits for it stops.
+        knows the signal before the shell that waits for it stops. The
+        machines are scanned first, so what a program started there is
+        in the group.
 
         Args:
             group_id (int): the group.
@@ -305,6 +313,7 @@ class ProcessTable:
         Returns:
             bool: whether the group had a live runner.
         """
+        await self.scan()
         members = self._members(group_id)
         await _signal_members(self, members, signal)
         return bool(members)
@@ -432,6 +441,7 @@ class ProcessTable:
             return self.send(handle, signal)
 
         async def signal_group(group_id: int, signal: int) -> bool:
+            await self.scan()
             members = group(group_id)
             await _signal_members(self, members or [], signal)
             return members is not None
@@ -568,8 +578,11 @@ class ProcessTable:
 async def _signal_members(
     table: ProcessTable, members: list[ProcessHandle], signal: int
 ) -> None:
-    """Deliver a signal to each runner of a group, in order: Mirage's
-    own at once (``deliver``), then the programs on machines as sent.
+    """Deliver a signal to each runner of a group, in order: the
+    programs on machines as sent, Mirage's own at once (``deliver``). A
+    runner that ignores it, a shell, hands it to the program it runs
+    right now, unless a process of that program, a child a scan found,
+    already got it as sent.
 
     Args:
         table (ProcessTable): the table the runners run in.
@@ -577,10 +590,16 @@ async def _signal_members(
         signal (int): the signal.
     """
     sending: list[Awaitable[bool]] = []
+    reached: set[int] = set()
     for member in members:
         sent = table.send(member, signal)
-        if sent is None:
-            deliver(member, signal)
-        else:
+        if sent is not None:
             sending.append(sent)
+            reached.add(member.record.pid)
+        elif signal not in member.ignores or not any(
+            other.record.parent == member.record.pid
+            and other.record.pid in reached
+            for other in members
+        ):
+            deliver(member, signal)
     await asyncio.gather(*sending)

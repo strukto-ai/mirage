@@ -163,7 +163,9 @@ async def test_process_preserves_argv_and_shares_the_shell_connection(
     argv = ("node", "a b", "$(echo literal)", "", "--flag")
     work = PathSpec.from_str_path("/work")
     ctx = Context(cwd=work, env={"E": "request"}, stdin=b"input")
-    result = await machine_runtime(runtime).execute([], list(argv), ctx, kind="process")
+    result = await machine_runtime(runtime).execute(
+        [], list(argv), ctx, kind="process"
+    )
     assert result.stdout == b"out:--flag"
     assert result.stderr == b"warn"
     assert runtime.calls[-1] == (
@@ -201,10 +203,14 @@ async def test_process_preserves_argv_and_shares_the_shell_connection(
 async def test_process_refuses_a_stopped_vm_and_empty_argv():
     runtime = FakeSmolvmMachine(state="stopped", config={"machine": "vm"})
     with pytest.raises(ValueError, match="argv must not be empty"):
-        await machine_runtime(runtime).execute([], [], Context(), kind="process")
+        await machine_runtime(runtime).execute(
+            [], [], Context(), kind="process"
+        )
     assert not runtime.calls
     with pytest.raises(RuntimeError, match="not running"):
-        await machine_runtime(runtime).execute([], ["node"], Context(), kind="process")
+        await machine_runtime(runtime).execute(
+            [], ["node"], Context(), kind="process"
+        )
     assert len(runtime.calls) == 1
 
 

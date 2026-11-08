@@ -147,6 +147,7 @@ async def job_with_machine_pid(
     held.sort(key=lambda pair: pair[1].exited is not None)
     return (held[0][0] if held else None), False
 
+
 def job_with_pid(jobs: list[JobHandle], pid: int) -> JobHandle | None:
     """The job a bare PID names.
 

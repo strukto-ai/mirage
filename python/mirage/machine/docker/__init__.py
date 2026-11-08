@@ -12,7 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.machine.docker.config import DockerConfig
-from mirage.machine.docker.handle import DockerMachine
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.machine.docker.config import DockerConfig
+    from mirage.machine.docker.handle import DockerMachine
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.machine.docker.config": ("DockerConfig",),
+    "mirage.machine.docker.handle": ("DockerMachine",),
+}
 
 __all__ = ["DockerConfig", "DockerMachine"]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

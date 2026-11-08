@@ -2078,6 +2078,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MachineDetailResponse'
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':

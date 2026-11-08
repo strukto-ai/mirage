@@ -17,6 +17,10 @@ import type { MachineHandle } from '../../src/machine/handle.ts'
 import type { RuntimeEntry } from '../../src/runtime/base.ts'
 import { MachineRuntime } from '../../src/runtime/machine/runtime.ts'
 
+// One table per handle, as one workspace holds a handle however many
+// runtimes a test binds to it.
+const TABLES = new WeakMap<MachineHandle, MachineTable>()
+
 /** A handle whose machine runtime captures `captures`, for a test. */
 export function captured<T extends MachineHandle>(handle: T, captures: readonly string[]): T {
   ;(handle as { captures?: readonly string[] }).captures = captures
@@ -39,7 +43,12 @@ export function machineRuntime(handle: MachineHandle): MachineRuntime {
     machine: handle.name,
     ...(captures !== undefined ? { captures } : {}),
   })
-  runtime.bindMachines(new MachineTable({ [handle.name]: handle }))
+  let table = TABLES.get(handle)
+  if (table === undefined) {
+    table = new MachineTable({ [handle.name]: handle })
+    TABLES.set(handle, table)
+  }
+  runtime.bindMachines(table)
   return runtime
 }
 

@@ -100,7 +100,7 @@ A program on the machine opens workspace files at the same paths as in
 Mirage, so the machine must see the mounts there. With `mount_type: ssh`,
 Mirage serves every mount over the runtime's own connection and the machine
 mounts each with `sshfs`, as for
-[Docker](/home/setup/runtime/sandbox/docker#connecting-the-workspace). The
+[Docker](/home/setup/machine/docker#connecting-the-workspace). The
 machine needs `sshfs`, and passwordless `sudo` for a mountpoint its user
 cannot create (`/data`).
 

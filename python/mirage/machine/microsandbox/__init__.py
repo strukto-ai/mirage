@@ -12,7 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.machine.microsandbox.config import MicrosandboxConfig
-from mirage.machine.microsandbox.handle import MicrosandboxMachine
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.machine.microsandbox.config import MicrosandboxConfig
+    from mirage.machine.microsandbox.handle import MicrosandboxMachine
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.machine.microsandbox.config": ("MicrosandboxConfig",),
+    "mirage.machine.microsandbox.handle": ("MicrosandboxMachine",),
+}
 
 __all__ = ["MicrosandboxConfig", "MicrosandboxMachine"]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

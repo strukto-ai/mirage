@@ -211,3 +211,109 @@ async def test_a_machine_pid_answers_wait_once_its_program_ended():
     finally:
         box.ended.set()
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_what_a_scan_found_leaves_the_session_room_to_fork():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    ws.create_session("capped", profile={"processes": {"max": 3}})
+    try:
+        await ws.shell("train 1 &", session_id="capped")
+        await _started(box)
+        await ws.shell("ps", session_id="capped")
+        held = [
+            p.record
+            for p in ws.process_table.live()
+            if p.record.session_id == "capped"
+        ]
+        found = [p.machine_pid for p in held if p.runtime is None]
+        assert [m.pid for m in found if m is not None] == [413]
+        said = await ws.shell("(echo room)", session_id="capped")
+        assert (said.stdout, said.exit_code) == (b"room\n", 0)
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+class _Leaver(_Sleeper):
+    """A box whose runs start a child and exit before any scan."""
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        self.rows = [
+            MachineProcess(env[PROCESS], self.base + 1, 1, 101.0, "daemon")
+        ]
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+@pytest.mark.asyncio
+async def test_a_scan_finds_what_an_ended_program_left_running():
+    box = _Leaver("a")
+    ws = _sleepers(a=box)
+    try:
+        assert (await ws.shell("train 1")).exit_code == 0
+        said = await ws.shell("ps -o mpid=,args=")
+        rows = [line.split() for line in said.stdout.decode().splitlines()]
+        assert ["413", "daemon"] in rows
+        box.rows = []
+        await ws.shell("ps")
+        left = [p.record.machine_pid for p in ws.process_table.live()]
+        assert all(m is None or m.pid != 413 for m in left)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_host_scan_finds_what_an_ended_program_left_running():
+    ws = Workspace(
+        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=["local", "workspace"]
+    )
+    spawn = (
+        "import subprocess as s; "
+        "s.Popen(['sleep', '30'], stdin=s.DEVNULL, stdout=s.DEVNULL, "
+        "stderr=s.DEVNULL)"
+    )
+    try:
+        assert (await ws.shell(f'python3 -c "{spawn}"')).exit_code == 0
+        said = await ws.shell("ps -o machine=,mpid=,args=")
+        rows = [line.split() for line in said.stdout.decode().splitlines()]
+        held = [row for row in rows if row[2:] == ["sleep", "30"]]
+        assert len(held) == 1 and held[0][0].startswith("host:")
+        assert (await ws.shell(f"kill -9 {held[0][1]}")).exit_code == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_group_signal_reaches_a_shells_program_as_sent():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        await ws.shell("( train 1; true ) &")
+        await _started(box)
+        assert (await ws.shell("kill -QUIT -- -$$")).exit_code == 0
+        assert set(box.sent) == {
+            (MachinePid(412, 100.0), 3),
+            (MachinePid(413, 101.0), 3),
+        }
+        said = await ws.shell("jobs")
+        assert said.stdout == b"[1] running ( train 1; true )\n"
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_handle_belongs_to_one_workspace_at_a_time():
+    box = _Box("a", 0)
+
+    def workspace() -> Workspace:
+        return Workspace(
+            {"/": RAMVFS()}, mode=MountMode.EXEC, machines={"a": box}
+        )
+
+    first = workspace()
+    with pytest.raises(ValueError, match="already in another workspace"):
+        workspace()
+    await first.close()
+    await workspace().close()

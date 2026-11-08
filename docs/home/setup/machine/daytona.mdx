@@ -86,7 +86,7 @@ Python in the sandbox too.
 
 A program in the sandbox opens workspace files at the same paths as in
 Mirage, so the sandbox must see the mounts there. Mirage does not serve them
-into a Daytona sandbox: use [the sandbox image](/home/setup/runtime/sandbox#the-sandbox-image),
+into a Daytona sandbox: use [the machine image](/home/setup/machine/overview#the-machine-image),
 which carries Mirage and `fuse3`. Write the same mounts at the same paths
 into `sandbox.yaml`, and start Mirage with it in the sandbox:
 
@@ -132,5 +132,5 @@ mirage workspace create /tmp/sandbox.yaml
   [Daytona example](https://github.com/strukto-ai/mirage/tree/main/examples/python/runtime/sandbox/daytona)
   covers baking a snapshot and a full read and write round trip.
 - A Daytona sandbox has no timeout of its own: after a Mirage
-  [timeout](/home/setup/runtime/sandbox#timeouts), the program keeps running and billing until you
+  [timeout](/home/setup/machine/overview#timeouts), the program keeps running and billing until you
   stop it.

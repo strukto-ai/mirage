@@ -133,6 +133,19 @@ class Sleeper extends MachineHandle {
   }
 }
 
+/** A box whose runs start a child and exit before any scan. */
+class Leaver extends Sleeper {
+  protected override execArgv(
+    _argv: readonly string[],
+    _stdin: unknown,
+    env: Record<string, string>,
+  ): Promise<RunResult> {
+    const tag = env[PROCESS] ?? ''
+    this.rows = [{ tag, pid: this.base + 1, ppid: 1, started: 101, args: 'daemon' }]
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+}
+
 async function started(box: Sleeper): Promise<void> {
   const deadline = Date.now() + 5000
   while (box.rows.length === 0 && Date.now() < deadline)
@@ -246,5 +259,75 @@ describe('MachineTable scans', () => {
       box.finish()
       await ws.close()
     }
+  })
+
+  it('leaves the session room to fork past what a scan found', async () => {
+    const box = new Sleeper('a')
+    const ws = sleepers({ a: box })
+    ws.createSession('capped', { profile: { processes: { max: 3 } } })
+    try {
+      await ws.shell('train 1 &', { sessionId: 'capped' })
+      await started(box)
+      await ws.shell('ps', { sessionId: 'capped' })
+      const found = ws.processTable
+        .live()
+        .map((p) => p.record)
+        .filter((r) => r.sessionId === 'capped' && r.runtime === null)
+      expect(found.map((r) => r.machinePid?.pid)).toEqual([413])
+      const said = await ws.shell('(echo room)', { sessionId: 'capped' })
+      expect([DEC.decode(said.stdout), said.exitCode]).toEqual(['room\n', 0])
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  })
+
+  it('finds what an ended program left running', async () => {
+    const box = new Leaver('a')
+    const ws = sleepers({ a: box })
+    try {
+      expect((await ws.shell('train 1')).exitCode).toBe(0)
+      const said = await ws.shell('ps -o mpid=,args=')
+      const rows = DEC.decode(said.stdout)
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/))
+      expect(rows).toContainEqual(['413', 'daemon'])
+      box.rows = []
+      await ws.shell('ps')
+      expect(ws.processTable.live().map((p) => p.record.machinePid?.pid)).not.toContain(413)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("reaches a shell's program with a group signal as sent", async () => {
+    const box = new Sleeper('a')
+    const ws = sleepers({ a: box })
+    try {
+      await ws.shell('( train 1; true ) &')
+      await started(box)
+      expect((await ws.shell('kill -QUIT -- -$$')).exitCode).toBe(0)
+      expect(box.sent.map(([target, signum]) => [JSON.stringify(target), signum]).sort()).toEqual(
+        [
+          [JSON.stringify({ pid: 412, started: 100, exited: null }), 3],
+          [JSON.stringify({ pid: 413, started: 101, exited: null }), 3],
+        ].sort(),
+      )
+      const said = await ws.shell('jobs')
+      expect(DEC.decode(said.stdout)).toBe('[1] running ( train 1; true )\n')
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  })
+
+  it('keeps a handle in one workspace at a time', async () => {
+    const box = new Sleeper('a')
+    const workspace = () =>
+      new Workspace({ '/': new RAMVFS() }, { mode: MountMode.EXEC, machines: { a: box } })
+    const first = workspace()
+    expect(workspace).toThrow('already in another workspace')
+    await first.close()
+    await workspace().close()
   })
 })

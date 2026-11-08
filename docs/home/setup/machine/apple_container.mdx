@@ -13,7 +13,7 @@ in them. Needs Apple silicon and macOS 26 or later. Python SDK and Node.
 ## Installation
 
 Install and start Apple's `container`. From the Mirage repository root,
-build [the sandbox image](/home/setup/runtime/sandbox#the-sandbox-image), which
+build [the machine image](/home/setup/machine/overview#the-machine-image), which
 carries Mirage and `fuse3`, and start a container from it:
 
 ```bash
@@ -86,7 +86,7 @@ map from session ID to container, for one container per agent.
 
 A program in the container opens workspace files at the same paths as in
 Mirage, so the container must see the mounts there. `mount_type` picks how, as
-for [Docker](/home/setup/runtime/sandbox/docker#connecting-the-workspace):
+for [Docker](/home/setup/machine/docker#connecting-the-workspace):
 `ssh` serves every mount over `container exec` (the image needs `sshfs`),
 `fuse` leaves them to a Mirage inside, and `both` mixes the two. `mount_type`
 serves one session, so it cannot be combined with `containers`.
@@ -139,6 +139,6 @@ container exec my-sandbox mirage workspace create /tmp/sandbox.yaml
   listed runs in `container`, and fails if there is none. Each container is
   its own VM, so agents share no files, processes, CPU or memory. Give each
   one that agent's rules: the `default` profile in its `sandbox.yaml`.
-- A [timeout](/home/setup/runtime/sandbox#timeouts) does not kill the program: `container` 1.4.1 does
+- A [timeout](/home/setup/machine/overview#timeouts) does not kill the program: `container` 1.4.1 does
   not deliver signals into the guest
   ([apple/container#1941](https://github.com/apple/container/issues/1941)).

@@ -34,8 +34,8 @@ from mirage.machine.constants import (
 )
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.machine import MachineRuntime
+from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunResult
 from mirage.types import FileStat, FileType, Limit, PathSpec
 from tests.fixtures.machine import machine_runtime, on
@@ -228,7 +228,9 @@ async def test_a_cancelled_run_stops_what_it_left_in_the_box():
 
     box = StuckBox(captures=("yes",))
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
-    task = asyncio.create_task(machine_runtime(box).run_line(None, [], [], ctx))
+    task = asyncio.create_task(
+        machine_runtime(box).run_line(None, [], [], ctx)
+    )
     while not box.execs:
         await asyncio.sleep(0)
     task.cancel()
@@ -255,7 +257,9 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
 
     async def run() -> int:
-        return (await machine_runtime(box).run_line(None, [], [], ctx)).exit_code
+        return (
+            await machine_runtime(box).run_line(None, [], [], ctx)
+        ).exit_code
 
     runner = ProcessTable(bind=run_as_process).start(
         session_id="s", command="yes", cwd=ctx.cwd, run=run
@@ -279,7 +283,9 @@ async def test_a_run_in_the_box_is_tagged_with_its_process():
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
 
     async def run() -> int:
-        return (await machine_runtime(box).run_line(None, [], [], ctx)).exit_code
+        return (
+            await machine_runtime(box).run_line(None, [], [], ctx)
+        ).exit_code
 
     runner = ProcessTable("w1", bind=run_as_process).start(
         session_id="s", command="yes", cwd=ctx.cwd, run=run
@@ -331,7 +337,9 @@ async def test_a_box_that_stops_answering_holds_a_cancel_only_so_long(
     monkeypatch.setattr("mirage.machine.handle.REAP_WAIT_SECONDS", 0.01)
     box = DeadBox(captures=("yes",))
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
-    task = asyncio.create_task(machine_runtime(box).run_line(None, [], [], ctx))
+    task = asyncio.create_task(
+        machine_runtime(box).run_line(None, [], [], ctx)
+    )
     while not box.execs:
         await asyncio.sleep(0)
     task.cancel()

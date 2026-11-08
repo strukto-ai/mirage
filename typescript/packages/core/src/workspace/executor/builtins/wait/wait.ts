@@ -28,13 +28,7 @@ import { ExecutionNode } from '../../../types.ts'
 import { builtinUsage, identifierLine } from '../shared.ts'
 import { reportJobs } from '../../background.ts'
 import { IDENTIFIER_RE } from '../constants.ts'
-import {
-  jobResult,
-  jobWithMachinePid,
-  processView,
-  resolveSpec,
-  sessionOf,
-} from '../jobspec.ts'
+import { jobResult, jobWithMachinePid, processView, resolveSpec, sessionOf } from '../jobspec.ts'
 import { FIRST_PID } from '../../../../execution/process/constants.ts'
 
 /**

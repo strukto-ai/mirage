@@ -243,7 +243,9 @@ async def test_process_preserves_argv_and_probes_the_container_once(
     argv = ("node", "a b", "$(echo literal)", "", "--flag")
     work = PathSpec.from_str_path("/work")
     ctx = Context(cwd=work, env={"E": "request"}, stdin=b"input")
-    result = await machine_runtime(runtime).execute([], list(argv), ctx, kind="process")
+    result = await machine_runtime(runtime).execute(
+        [], list(argv), ctx, kind="process"
+    )
     assert result.stdout == b"out:--flag"
     assert result.stderr == b"warn"
     assert runtime.calls[-1] == (
@@ -280,10 +282,14 @@ async def test_process_refuses_empty_argv_and_a_stopped_container():
         states={"box": "stopped"}, config={"container": "box"}
     )
     with pytest.raises(ValueError, match="argv must not be empty"):
-        await machine_runtime(runtime).execute([], [], Context(), kind="process")
+        await machine_runtime(runtime).execute(
+            [], [], Context(), kind="process"
+        )
     assert not runtime.calls
     with pytest.raises(RuntimeError, match="not running"):
-        await machine_runtime(runtime).execute([], ["node"], Context(), kind="process")
+        await machine_runtime(runtime).execute(
+            [], ["node"], Context(), kind="process"
+        )
     assert len(runtime.calls) == 1
 
 

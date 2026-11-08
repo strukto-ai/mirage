@@ -12,7 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.machine.daytona.config import DaytonaConfig
-from mirage.machine.daytona.handle import DaytonaMachine
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.machine.daytona.config import DaytonaConfig
+    from mirage.machine.daytona.handle import DaytonaMachine
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.machine.daytona.config": ("DaytonaConfig",),
+    "mirage.machine.daytona.handle": ("DaytonaMachine",),
+}
 
 __all__ = ["DaytonaConfig", "DaytonaMachine"]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

@@ -12,9 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.machine.apple_container.config import AppleContainerConfig
-from mirage.machine.apple_container.handle import (
-    AppleContainerMachine,
-)
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.machine.apple_container.config import AppleContainerConfig
+    from mirage.machine.apple_container.handle import AppleContainerMachine
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.machine.apple_container.config": ("AppleContainerConfig",),
+    "mirage.machine.apple_container.handle": ("AppleContainerMachine",),
+}
 
 __all__ = ["AppleContainerConfig", "AppleContainerMachine"]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

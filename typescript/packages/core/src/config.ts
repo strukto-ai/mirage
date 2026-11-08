@@ -191,7 +191,7 @@ async function buildMachines(
   machines: Record<string, Record<string, unknown>>,
   sources: Readonly<Record<string, ResolvedSource>> | undefined,
 ): Promise<Record<string, MachineHandle>> {
-  const out: Record<string, MachineHandle> = {}
+  const out = Object.create(null) as Record<string, MachineHandle>
   for (const [name, entry] of Object.entries(machines)) {
     const read = await resolveConfigSecrets(entry, sources, `machines.${name}`)
     try {

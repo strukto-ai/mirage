@@ -303,22 +303,21 @@
                 ]
               },
               "home/setup/runtime/local",
-              {
-                "group": "Sandbox",
-                "icon": "server",
-                "pages": [
-                  "home/setup/runtime/sandbox",
-                  "home/setup/runtime/sandbox/sandlock",
-                  "home/setup/runtime/sandbox/docker",
-                  "home/setup/runtime/sandbox/apple_container",
-                  "home/setup/runtime/sandbox/smolvm",
-                  "home/setup/runtime/sandbox/microsandbox",
-                  "home/setup/runtime/sandbox/daytona",
-                  "home/setup/runtime/sandbox/e2b",
-                  "home/setup/runtime/sandbox/ssh"
-                ]
-              },
+              "home/setup/runtime/sandlock",
               "home/setup/runtime/custom"
+            ]
+          },
+          {
+            "group": "Machines",
+            "pages": [
+              "home/setup/machine/overview",
+              "home/setup/machine/docker",
+              "home/setup/machine/apple_container",
+              "home/setup/machine/smolvm",
+              "home/setup/machine/microsandbox",
+              "home/setup/machine/daytona",
+              "home/setup/machine/e2b",
+              "home/setup/machine/ssh"
             ]
           },
           {
@@ -972,6 +971,42 @@
   },
   "redirects": [
     {
+      "source": "/home/setup/runtime/sandbox",
+      "destination": "/home/setup/machine/overview"
+    },
+    {
+      "source": "/home/setup/runtime/sandbox/sandlock",
+      "destination": "/home/setup/runtime/sandlock"
+    },
+    {
+      "source": "/home/setup/runtime/sandbox/apple_container",
+      "destination": "/home/setup/machine/apple_container"
+    },
+    {
+      "source": "/home/setup/runtime/sandbox/daytona",
+      "destination": "/home/setup/machine/daytona"
+    },
+    {
+      "source": "/home/setup/runtime/sandbox/docker",
+      "destination": "/home/setup/machine/docker"
+    },
+    {
+      "source": "/home/setup/runtime/sandbox/e2b",
+      "destination": "/home/setup/machine/e2b"
+    },
+    {
+      "source": "/home/setup/runtime/sandbox/microsandbox",
+      "destination": "/home/setup/machine/microsandbox"
+    },
+    {
+      "source": "/home/setup/runtime/sandbox/smolvm",
+      "destination": "/home/setup/machine/smolvm"
+    },
+    {
+      "source": "/home/setup/runtime/sandbox/ssh",
+      "destination": "/home/setup/machine/ssh"
+    },
+    {
       "source": "/python/agents/openhands",
       "destination": "/python/agents/index"
     },
@@ -1041,35 +1076,35 @@
     },
     {
       "source": "/python/runtime/sandbox",
-      "destination": "/home/setup/runtime/sandbox"
+      "destination": "/home/setup/machine/overview"
     },
     {
       "source": "/python/runtime/sandbox/apple_container",
-      "destination": "/home/setup/runtime/sandbox/apple_container"
+      "destination": "/home/setup/machine/apple_container"
     },
     {
       "source": "/python/runtime/sandbox/daytona",
-      "destination": "/home/setup/runtime/sandbox/daytona"
+      "destination": "/home/setup/machine/daytona"
     },
     {
       "source": "/python/runtime/sandbox/docker",
-      "destination": "/home/setup/runtime/sandbox/docker"
+      "destination": "/home/setup/machine/docker"
     },
     {
       "source": "/python/runtime/sandbox/e2b",
-      "destination": "/home/setup/runtime/sandbox/e2b"
+      "destination": "/home/setup/machine/e2b"
     },
     {
       "source": "/python/runtime/sandbox/sandlock",
-      "destination": "/home/setup/runtime/sandbox/sandlock"
+      "destination": "/home/setup/runtime/sandlock"
     },
     {
       "source": "/python/runtime/sandbox/smolvm",
-      "destination": "/home/setup/runtime/sandbox/smolvm"
+      "destination": "/home/setup/machine/smolvm"
     },
     {
       "source": "/python/runtime/sandbox/ssh",
-      "destination": "/home/setup/runtime/sandbox/ssh"
+      "destination": "/home/setup/machine/ssh"
     },
     {
       "source": "/typescript/runtime/javascript",
@@ -1081,35 +1116,35 @@
     },
     {
       "source": "/typescript/runtime/sandbox",
-      "destination": "/home/setup/runtime/sandbox"
+      "destination": "/home/setup/machine/overview"
     },
     {
       "source": "/typescript/runtime/sandbox/apple_container",
-      "destination": "/home/setup/runtime/sandbox/apple_container"
+      "destination": "/home/setup/machine/apple_container"
     },
     {
       "source": "/typescript/runtime/sandbox/daytona",
-      "destination": "/home/setup/runtime/sandbox/daytona"
+      "destination": "/home/setup/machine/daytona"
     },
     {
       "source": "/typescript/runtime/sandbox/docker",
-      "destination": "/home/setup/runtime/sandbox/docker"
+      "destination": "/home/setup/machine/docker"
     },
     {
       "source": "/typescript/runtime/sandbox/e2b",
-      "destination": "/home/setup/runtime/sandbox/e2b"
+      "destination": "/home/setup/machine/e2b"
     },
     {
       "source": "/typescript/runtime/sandbox/sandlock",
-      "destination": "/home/setup/runtime/sandbox/sandlock"
+      "destination": "/home/setup/runtime/sandlock"
     },
     {
       "source": "/typescript/runtime/sandbox/smolvm",
-      "destination": "/home/setup/runtime/sandbox/smolvm"
+      "destination": "/home/setup/machine/smolvm"
     },
     {
       "source": "/typescript/runtime/sandbox/ssh",
-      "destination": "/home/setup/runtime/sandbox/ssh"
+      "destination": "/home/setup/machine/ssh"
     },
     {
       "source": "/home/setup/local-fuse",

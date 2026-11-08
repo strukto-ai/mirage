@@ -8,8 +8,8 @@ icon: microchip
 A runtime runs the programs in a line. Mirage's own commands (`grep`, `cat`, pipes, redirects) run in the workspace itself; `python3`, `node` and any other program go to the runtime that captures them. Each runtime reaches the workspace's files its own way.
 
 <div className="my-6">
-  <img noZoom src="/images/runtime-light.svg" alt="Monty, WASI, Pyodide and QuickJS access workspace files directly. Host programs use a FUSE folder. Sandboxes connect through SSH or FUSE." className="block dark:hidden w-full" />
-  <img noZoom src="/images/runtime-dark.svg" alt="Monty, WASI, Pyodide and QuickJS access workspace files directly. Host programs use a FUSE folder. Sandboxes connect through SSH or FUSE." className="hidden dark:block w-full" />
+  <img noZoom src="/images/runtime-light.svg" alt="Monty, WASI, Pyodide and QuickJS access workspace files directly. Host programs use a FUSE folder. Machines connect through SSH or FUSE." className="block dark:hidden w-full" />
+  <img noZoom src="/images/runtime-dark.svg" alt="Monty, WASI, Pyodide and QuickJS access workspace files directly. Host programs use a FUSE folder. Machines connect through SSH or FUSE." className="hidden dark:block w-full" />
 </div>
 
 | Runtime | Runs | Where | SDK |
@@ -20,8 +20,8 @@ A runtime runs the programs in a line. Mirage's own commands (`grep`, `cat`, pip
 | [`pyodide`](/home/setup/runtime/pyodide) | `python3`, CPython in WebAssembly | Mirage workspace | TypeScript |
 | [`quickjs`](/home/setup/runtime/quickjs) | `node` and `js`, with Node.js's common APIs | Mirage workspace | both (default) |
 | [`local`](/home/setup/runtime/local) | host programs such as `python3`, `node` or `tsx` | host | Python, Node |
-| [`machine`](/home/setup/runtime/sandbox) | native programs | a [machine](/home/setup/runtime/sandbox): a container, VM, cloud sandbox or SSH host | Python, Node; E2B also in the browser |
-| [`sandlock`](/home/setup/runtime/sandbox/sandlock) | native programs | this Linux host, confined | Python, Node |
+| [`machine`](/home/setup/machine/overview) | native programs | a [machine](/home/setup/machine/overview): a container, VM, cloud sandbox or SSH host | Python, Node; E2B also in the browser |
+| [`sandlock`](/home/setup/runtime/sandlock) | native programs | this Linux host, confined | Python, Node |
 
 ## Routing
 
@@ -64,7 +64,7 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
 | --- | --- |
 | `monty`, `wasi`, `pyodide`, `local` | `@python` |
 | `quickjs` | `@js` |
-| Sandboxes | `@external` |
+| `sandlock`, `machine` | `@external` |
 
 - Mirage's own commands (`cat`, `grep`, `sha1sum`), pipes and redirects stay
   in Mirage. Name `cat`, `grep`, `ps` or `kill` to run it on a runtime
@@ -77,11 +77,11 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
   packages must land there, as in `captures: ["@python", "pip", "pip3"]`.
 - `monty`, `wasi`, `pyodide` and `quickjs` take only their own interpreter's
   names; naming another program on one is refused when the workspace is
-  built. `local` and sandboxes take any name.
+  built. `local`, `sandlock` and `machine` take any name.
 - `nice`, `nohup`, `stdbuf`, `ionice` and `setsid` run their program where
   it runs alone: `nice gcc x.c` where `gcc` is taken, `nice grep` in Mirage.
-- Under `local` and the sandboxes, a program a captured program starts runs
-  there: `make` running `gcc`, or a script calling `subprocess`. Capture the
+- Under `local`, `sandlock` and `machine`, a program a captured program
+  starts runs there: `make` running `gcc`, or a script calling `subprocess`. Capture the
   launcher on the same runtime as the tool. A Pyodide script's `subprocess`
   calls go back through Mirage's routing like any other command.
 - An alias is captured as the word it expands to, once `shopt -s
@@ -119,12 +119,12 @@ Here `python3 job.py | grep error` runs `python3` in the container and
 | Monty, WASI, QuickJS | directly | no host files or network |
 | Pyodide | directly | Browser programs retain JavaScript and network access; `init_module` enables host access. See [containment](/typescript/runtime/python#containment). |
 | `local`, Sandlock | a [FUSE folder](/home/setup/fuse) you mount | the host's disk and network; under Sandlock, only the paths you grant |
-| Other sandboxes | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`, `ssh`, `smolvm`, `apple_container`, `microsandbox`), or a Mirage inside the sandbox | that sandbox's disk and network |
+| `machine` | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`, `ssh`, `smolvm`, `apple_container`, `microsandbox`), or a Mirage inside the machine | that machine's disk and network |
 
 Mount modes, profiles and policies apply to every file call that reaches the
-workspace. A host or sandbox runtime also has its own files and network, which
-they do not cover. Pyodide has its own containment limits; use a sandbox with
-a process and kernel boundary for hostile code.
+workspace. A host runtime or a machine also has its own files and network,
+which they do not cover. Pyodide has its own containment limits; use a machine
+with a process and kernel boundary for hostile code.
 
 ### Verify workspace file access
 
@@ -146,8 +146,8 @@ read a workspace file and write one back:
 
 Monty, WASI, Pyodide and QuickJS access workspace files automatically.
 For `local` and Sandlock, first mount a [FUSE folder](/home/setup/fuse).
-For other sandboxes, finish the provider page's **Connecting the workspace**
-steps first.
+For a machine, finish its provider page's **Connecting the workspace** steps
+first.
 
 ## Resource limits
 
@@ -161,12 +161,12 @@ command_limits:
     timeout_seconds: 30
 ```
 
-The deadline also stops the run in Monty, WASI, Pyodide, QuickJS, `local` and
-Sandlock. The other sandboxes only stop waiting, so give untrusted code a
-finite workload; see [sandbox timeouts](/home/setup/runtime/sandbox#timeouts).
+The deadline also stops the run in Monty, WASI, Pyodide, QuickJS, `local`,
+Sandlock and on a machine; see [machine timeouts](/home/setup/machine/overview#timeouts)
+for what a machine needs.
 
 If a host or remote runtime cannot enforce the session's file restrictions,
 Mirage refuses to launch the program as a policy refuses a command:
 `<runtime>: Permission denied`, exit 126. See
-[sandbox file permissions](/home/setup/runtime/sandbox#serving-session-files)
+[machine file permissions](/home/setup/machine/overview#serving-session-files)
 for restrictions that affect runtime selection.

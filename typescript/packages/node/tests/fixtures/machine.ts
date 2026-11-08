@@ -17,6 +17,10 @@ import type { MachineHandle } from '@struktoai/mirage-core/machine/handle'
 import type { RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import { MachineRuntime } from '@struktoai/mirage-core/runtime/machine/runtime'
 
+// One table per handle, as one workspace holds a handle however many
+// runtimes a test binds to it.
+const TABLES = new WeakMap<MachineHandle, MachineTable>()
+
 /** A handle whose machine runtime captures `captures`, for a test. */
 export function captured<T extends MachineHandle>(handle: T, captures: readonly string[]): T {
   ;(handle as { captures?: readonly string[] }).captures = captures
@@ -39,7 +43,12 @@ export function machineRuntime(handle: MachineHandle): MachineRuntime {
     machine: handle.name,
     ...(captures !== undefined ? { captures } : {}),
   })
-  runtime.bindMachines(new MachineTable({ [handle.name]: handle }))
+  let table = TABLES.get(handle)
+  if (table === undefined) {
+    table = new MachineTable({ [handle.name]: handle })
+    TABLES.set(handle, table)
+  }
+  runtime.bindMachines(table)
   return runtime
 }
 

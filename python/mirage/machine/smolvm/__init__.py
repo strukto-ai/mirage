@@ -12,7 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.machine.smolvm.config import SmolvmConfig
-from mirage.machine.smolvm.handle import SmolvmMachine
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.machine.smolvm.config import SmolvmConfig
+    from mirage.machine.smolvm.handle import SmolvmMachine
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.machine.smolvm.config": ("SmolvmConfig",),
+    "mirage.machine.smolvm.handle": ("SmolvmMachine",),
+}
 
 __all__ = ["SmolvmConfig", "SmolvmMachine"]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

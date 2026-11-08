@@ -14,8 +14,10 @@
 
 import type { MachineHandle } from '../../machine/handle.ts'
 import { buildMachine } from '../../machine/registry.ts'
+import { MAX_PROCESSES } from '../process/constants.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import type { ProcessTable } from '../process/table.ts'
+import type { Process } from '../process/types.ts'
 import type { MachineId, MachinePid } from '../types.ts'
 import type { Machine, MachineProcess, MachineState } from './types.ts'
 
@@ -24,6 +26,10 @@ export type HostStatus = (groups: ReadonlyMap<number, string>) => Promise<Machin
 
 /** Sends a signal to a host process. */
 export type HostSignal = (target: MachinePid, signum: number) => Promise<boolean>
+
+// The table that holds each machine handle, so a second workspace cannot
+// take, and close, a handle another one runs on; a table's close lets go.
+const HOLDERS = new WeakMap<MachineHandle, MachineTable>()
 
 /**
  * The machines one workspace runs programs on, each one's handle under the
@@ -39,11 +45,19 @@ export type HostSignal = (target: MachinePid, signum: number) => Promise<boolean
 export class MachineTable {
   private readonly byName = new Map<string, MachineHandle>()
   // The processes scans found, by machine, pid and start, each with what
-  // ends it once a scan no longer sees it.
+  // ends it once a scan no longer sees it and the tag of the run that
+  // started it.
   private readonly found = new Map<
     string,
-    { machine: string; handle: ProcessHandle; end: (code: number) => void }
+    { machine: string; handle: ProcessHandle; end: (code: number) => void; tag: string }
   >()
+  // The runs whose program has ended that a scan has looked at since, by
+  // tag; one not yet looked at is scanned once more for what it left
+  // running.
+  private swept = new Set<string>()
+  // One scan at a time, so an older answer never lands after a newer one
+  // and ends what the newer one found.
+  private scanning: Promise<void> = Promise.resolve()
 
   /**
    * @param machines each machine's handle or its config entry, by name.
@@ -56,8 +70,14 @@ export class MachineTable {
     private readonly hostStatus: HostStatus | null = null,
     private readonly hostSignal: HostSignal | null = null,
   ) {
-    for (const [name, spec] of Object.entries(machines))
-      this.byName.set(name, buildMachine(name, spec))
+    for (const [name, spec] of Object.entries(machines)) {
+      const handle = buildMachine(name, spec)
+      const holder = HOLDERS.get(handle)
+      if (holder !== undefined && holder !== this)
+        throw new Error(`machine '${name}' is already in another workspace`)
+      HOLDERS.set(handle, this)
+      this.byName.set(name, handle)
+    }
   }
 
   /** Every machine's name, in the order `machines:` lists them. */
@@ -112,36 +132,58 @@ export class MachineTable {
   /**
    * Bring `processes` in step with what each machine runs now. A machine is
    * scanned while a run executes there or a process an earlier scan found
-   * there still shows, the host while a program runs on it. A run's first
-   * process is the Mirage process the run is, when that process is the
-   * program (it has a runtime), and its machine pid is recorded. Every other
-   * process the run started joins the table as a process of its own, with no
-   * runtime, under the process whose machine pid is its parent's, else under
-   * the run's, and leaves it once a scan no longer sees it. A machine that
-   * does not answer keeps what it showed. Mirrors Python's
-   * `MachineTable.scan`.
+   * there still shows, and once more after a run there ends, the host
+   * likewise. A run's first process is the Mirage process the run is, when
+   * that process is the program (it has a runtime) and still runs, and its
+   * machine pid is recorded. Every other process the run started joins the
+   * table as a process of its own, with no runtime, under the process whose
+   * machine pid is its parent's, else under the run's while it runs, else at
+   * the top, and leaves it once a scan no longer sees it. A machine that does
+   * not answer keeps what it showed. Mirrors Python's `MachineTable.scan`.
    *
    * @param processes the workspace's processes.
    * @param workspace the workspace's id, which each run's tag starts with.
    */
-  async scan(processes: ProcessTable, workspace: string): Promise<void> {
+  scan(processes: ProcessTable, workspace: string): Promise<void> {
+    const run = this.scanning.then(() => this.scanNow(processes, workspace))
+    this.scanning = run.catch((error: unknown) => {
+      console.debug('scan failed:', error)
+    })
+    return run
+  }
+
+  private async scanNow(processes: ProcessTable, workspace: string): Promise<void> {
     const live = new Map(processes.live().map((handle) => [handle.record.id.toString(), handle]))
+    const host = processes.machine.toString()
+    const runs = new Map(
+      processes
+        .records()
+        .filter((record) => record.runtime !== null)
+        .map((record) => [record.id.toString(), record]),
+    )
+    const ended = new Set([...runs.keys()].filter((tag) => !live.has(tag)))
+    const fresh = new Set([...ended].filter((tag) => !this.swept.has(tag)))
+    this.swept = ended
+    const held = new Set([...this.found.values()].map((entry) => entry.tag))
     const shown = new Set([...this.found.values()].map((entry) => entry.machine))
+    for (const tag of fresh) {
+      const machine = runs.get(tag)?.machine.toString()
+      if (machine !== undefined && machine !== host) shown.add(machine)
+    }
     const scans: [MachineId, Promise<MachineProcess[]>][] = this.handles()
       .filter((handle) => handle.executing || shown.has(handle.id.toString()))
       .map((handle) => [handle.id, handle.status(workspace)])
     if (this.hostStatus !== null) {
       const groups = new Map<number, string>()
-      for (const [tag, handle] of live) {
-        const record = handle.record
+      for (const [tag, record] of runs) {
         if (
-          record.machine.toString() === processes.machine.toString() &&
-          record.runtime !== null &&
-          record.machinePid !== null
+          record.machine.toString() === host &&
+          record.machinePid !== null &&
+          (live.has(tag) || fresh.has(tag) || held.has(tag))
         )
           groups.set(record.machinePid.pid, tag)
       }
-      if (groups.size > 0 || shown.has(processes.machine.toString()))
+      if (groups.size > 0 || shown.has(host))
         scans.push([processes.machine, this.hostStatus(groups)])
     }
     const found = await Promise.allSettled(scans.map(([, scan]) => scan))
@@ -152,7 +194,7 @@ export class MachineTable {
         console.debug(`${machine.toString()}: scan failed:`, rows.reason)
         return
       }
-      this.settle(processes, machine, rows.value, live)
+      this.settle(processes, machine, rows.value, live, runs)
     })
   }
 
@@ -226,25 +268,27 @@ export class MachineTable {
     machine: MachineId,
     rows: readonly MachineProcess[],
     live: ReadonlyMap<string, ProcessHandle>,
+    runs: ReadonlyMap<string, Process>,
   ): void {
     const seen = new Set<string>()
-    const runs = new Map<string, MachineProcess[]>()
-    for (const row of rows) runs.set(row.tag, [...(runs.get(row.tag) ?? []), row])
-    for (const [tag, run] of runs) {
-      const owner = live.get(tag) ?? null
+    const tagged = new Map<string, MachineProcess[]>()
+    for (const row of rows) tagged.set(row.tag, [...(tagged.get(row.tag) ?? []), row])
+    for (const [tag, run] of tagged) {
+      const handle = live.get(tag) ?? null
+      const owner = handle?.record ?? runs.get(tag) ?? null
       const pids = new Set(run.map((row) => row.pid))
       const placed = new Map<number, number>()
       if (
-        owner !== null &&
-        owner.record.runtime !== null &&
-        owner.record.machine.toString() === machine.toString()
+        handle !== null &&
+        handle.record.runtime !== null &&
+        handle.record.machine.toString() === machine.toString()
       ) {
-        const known = owner.record.machinePid
+        const known = handle.record.machinePid
         const root = rootOf(run, pids, known)
         if (root !== null) {
-          placed.set(root.pid, owner.record.id.pid)
+          placed.set(root.pid, handle.record.id.pid)
           if (known?.pid !== root.pid)
-            owner.setMachinePid({ pid: root.pid, started: root.started, exited: null })
+            handle.setMachinePid({ pid: root.pid, started: root.started, exited: null })
         }
       }
       let waiting = run.filter((row) => !placed.has(row.pid))
@@ -253,7 +297,7 @@ export class MachineTable {
         const ready = waiting.filter((row) => !left.has(row.ppid))
         const batch = ready.length > 0 ? ready : waiting
         for (const row of batch) {
-          const parent = placed.get(row.ppid) ?? owner?.record.id.pid ?? null
+          const parent = placed.get(row.ppid) ?? handle?.record.id.pid ?? null
           const found = this.foundProcess(processes, machine, row, parent, owner)
           if (found !== null) {
             placed.set(row.pid, found.record.id.pid)
@@ -272,20 +316,36 @@ export class MachineTable {
 
   /**
    * The process a scan found `row` to be: the one an earlier scan placed,
-   * else a new one under `parent`, in its run's session, while that run's
-   * process still runs.
+   * else a new one under `parent` (at the top for null), in its run's
+   * session. `owner` is the process its run is, ended or not; null for a
+   * run the table no longer keeps.
    */
   private foundProcess(
     processes: ProcessTable,
     machine: MachineId,
     row: MachineProcess,
     parent: number | null,
-    owner: ProcessHandle | null,
+    owner: Process | null,
   ): ProcessHandle | null {
     const key = foundKey(machine, row)
     const known = this.found.get(key)
     if (known?.handle.record.state === 'running') return known.handle
-    if (owner === null || parent === null || owner.record.state !== 'running') return null
+    if (owner === null) return null
+    const session = owner.sessionId
+    const placed = processes
+      .live()
+      .filter(
+        (p) =>
+          p.record.sessionId === session &&
+          p.record.runtime === null &&
+          p.record.machinePid !== null,
+      ).length
+    if (placed >= MAX_PROCESSES) {
+      console.debug(
+        `${machine.toString()}: process ${String(row.pid)} not placed: session ${session} holds ${String(placed)} found`,
+      )
+      return null
+    }
     const target: MachinePid = { pid: row.pid, started: row.started, exited: null }
     let end: (code: number) => void = () => undefined
     const ended = new Promise<number>((resolve) => {
@@ -294,9 +354,9 @@ export class MachineTable {
     let handle: ProcessHandle | null = null
     try {
       handle = processes.start({
-        sessionId: owner.record.sessionId,
+        sessionId: owner.sessionId,
         command: row.args,
-        cwd: owner.record.cwd,
+        cwd: owner.cwd,
         run: () => ended,
         cancel: () => {
           const signum = handle?.signal ?? 15
@@ -305,6 +365,7 @@ export class MachineTable {
           })
         },
         parent,
+        line: owner.line,
         machine,
       })
     } catch (error) {
@@ -312,7 +373,7 @@ export class MachineTable {
       return null
     }
     handle.setMachinePid(target)
-    this.found.set(key, { machine: machine.toString(), handle, end })
+    this.found.set(key, { machine: machine.toString(), handle, end, tag: row.tag })
     return handle
   }
 
@@ -334,8 +395,9 @@ export class MachineTable {
     }
   }
 
-  /** Close every handle: unmount what each was served. */
+  /** Close every handle: unmount what each was served, and let go of it for another workspace. */
   async close(): Promise<void> {
+    for (const handle of this.handles()) if (HOLDERS.get(handle) === this) HOLDERS.delete(handle)
     const results = await Promise.allSettled(this.handles().map((h) => h.close()))
     const failures = results.flatMap((r) => (r.status === 'rejected' ? [r.reason as unknown] : []))
     if (failures.length === 1) throw failures[0] as Error

@@ -162,7 +162,10 @@ async def exercise_cancellation(machine):
         mode=MountMode.EXEC,
         command_limits={"@line": Limit(timeout_seconds=5)},
         machines={machine.name: machine},
-        runtimes=[MachineRuntime(["@line"], machine=machine.name), "workspace"],
+        runtimes=[
+            MachineRuntime(["@line"], machine=machine.name),
+            "workspace",
+        ],
     )
     try:
         for mode in ("caller", "timeout"):

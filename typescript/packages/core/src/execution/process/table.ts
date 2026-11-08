@@ -126,8 +126,11 @@ export class ProcessTable {
     const limit = underCeiling(init.limit ?? null, this.ceiling)
     if (
       limit !== null &&
-      [...this.runners.values()].filter(({ handle }) => handle.record.sessionId === init.sessionId)
-        .length >= limit
+      [...this.runners.values()].filter(
+        ({ handle }) =>
+          handle.record.sessionId === init.sessionId &&
+          (handle.record.runtime !== null || handle.record.machinePid === null),
+      ).length >= limit
     )
       throw Object.assign(new Error('Resource temporarily unavailable'), { code: 'EAGAIN' })
     const above = init.parent == null ? undefined : this.runners.get(init.parent)
@@ -246,10 +249,12 @@ export class ProcessTable {
    * (`ProcessHandle.interrupt`), and any other stops with it and leaves the
    * rest of the group to their own delivery. The deepest runners hear it
    * first, so a native program knows the signal before the shell that waits
-   * for it stops. Returns whether the group had a live runner. Mirrors
-   * Python's signal_group.
+   * for it stops. The machines are scanned first, so what a program started
+   * there is in the group. Returns whether the group had a live runner.
+   * Mirrors Python's signal_group.
    */
   async signalGroup(groupId: number, signal: number): Promise<boolean> {
+    await this.scan()
     const members = this.members(groupId)
     await signalMembers(this, members, signal)
     return members.length > 0
@@ -325,6 +330,7 @@ export class ProcessTable {
       permissions: () => (valid() ? permissions() : null),
       probeGroup: (groupId: number) => group(groupId) !== null,
       signalGroup: async (groupId: number, signal: number) => {
+        await this.scan()
         const members = group(groupId)
         await signalMembers(this, members ?? [], signal)
         return members !== null
@@ -419,8 +425,10 @@ export class ProcessTable {
 }
 
 /**
- * Deliver a signal to each runner of a group, in order: Mirage's own at once
- * (`deliver`), then the programs on machines as sent.
+ * Deliver a signal to each runner of a group, in order: the programs on
+ * machines as sent, Mirage's own at once (`deliver`). A runner that ignores
+ * it, a shell, hands it to the program it runs right now, unless a process
+ * of that program, a child a scan found, already got it as sent.
  *
  * @param table the table the runners run in.
  * @param members the runners, deepest first.
@@ -432,10 +440,19 @@ async function signalMembers(
   signal: number,
 ): Promise<void> {
   const sending: Promise<boolean>[] = []
+  const reached = new Set<number>()
   for (const member of members) {
     const sent = table.send(member, signal)
-    if (sent === null) deliver(member, signal)
-    else sending.push(sent)
+    if (sent !== null) {
+      sending.push(sent)
+      reached.add(member.record.id.pid)
+    } else if (
+      !member.ignores.has(signal) ||
+      !members.some(
+        (other) => other.record.parent === member.record.id.pid && reached.has(other.record.id.pid),
+      )
+    )
+      deliver(member, signal)
   }
   await Promise.all(sending)
 }

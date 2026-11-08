@@ -24,7 +24,7 @@ export const INSPECT_TIMEOUT_SECONDS = 10
 // `PROCESS` tag, so a signal by tag reaches the program, and it exits with
 // the program's status, 128 plus the signal for one a signal ended, which
 // msb reports as given. `$1` is the working directory (126 when the box
-// lacks it), `$2` the tag's assignment, then the command. Mirrors Python's
-// `TAGGED_PRELUDE`.
-export const TAGGED_PRELUDE =
-  'CDPATH= cd -- "$1" || exit 126; t=$2; shift 2; env "$t" "$@"; exit $?'
+// lacks it), `$2` the tag's assignment, which the prelude exports for the
+// command alone (a builtin, so a PATH without the system tools still runs
+// it), then the command. Mirrors Python's `TAGGED_PRELUDE`.
+export const TAGGED_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; export "$2"; shift 2; "$@"; exit $?'

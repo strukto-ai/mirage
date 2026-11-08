@@ -33,15 +33,15 @@ Daytona uses a Mirage inside.
 
 | Provider | Runs programs in | Workspace files through |
 | --- | --- | --- |
-| [Docker](/home/setup/runtime/sandbox/docker) | A Docker container | `mount_type`: `ssh`, `fuse` or `both` |
-| [E2B](/home/setup/runtime/sandbox/e2b) | An E2B cloud sandbox | `mount_type`: `ssh`, `fuse` or `both` |
-| [Daytona](/home/setup/runtime/sandbox/daytona) | A Daytona cloud sandbox | FUSE, from a Mirage inside |
-| [smolvm](/home/setup/runtime/sandbox/smolvm) | A microVM with its own kernel | `mount_type`: `ssh`, `fuse` or `both` |
-| [Microsandbox](/home/setup/runtime/sandbox/microsandbox) | A microVM with its own kernel | `mount_type`: `ssh`, `fuse` or `both` |
-| [Apple Container](/home/setup/runtime/sandbox/apple_container) | A container on macOS, one per agent if you map them | `mount_type`: `ssh`, `fuse` or `both` |
-| [SSH](/home/setup/runtime/sandbox/ssh) | Any machine running `sshd` | `mount_type`: `ssh`, `fuse` or `both` |
+| [Docker](/home/setup/machine/docker) | A Docker container | `mount_type`: `ssh`, `fuse` or `both` |
+| [E2B](/home/setup/machine/e2b) | An E2B cloud sandbox | `mount_type`: `ssh`, `fuse` or `both` |
+| [Daytona](/home/setup/machine/daytona) | A Daytona cloud sandbox | FUSE, from a Mirage inside |
+| [smolvm](/home/setup/machine/smolvm) | A microVM with its own kernel | `mount_type`: `ssh`, `fuse` or `both` |
+| [Microsandbox](/home/setup/machine/microsandbox) | A microVM with its own kernel | `mount_type`: `ssh`, `fuse` or `both` |
+| [Apple Container](/home/setup/machine/apple_container) | A container on macOS, one per agent if you map them | `mount_type`: `ssh`, `fuse` or `both` |
+| [SSH](/home/setup/machine/ssh) | Any machine running `sshd` | `mount_type`: `ssh`, `fuse` or `both` |
 
-[Sandlock](/home/setup/runtime/sandbox/sandlock) is a runtime, not a machine:
+[Sandlock](/home/setup/runtime/sandlock) is a runtime, not a machine:
 it runs programs on this Linux host, confined, with a
 [FUSE folder](/home/setup/fuse) you grant.
 
@@ -52,16 +52,15 @@ to confirm reads and writes cross the runtime boundary.
 ## Language compatibility
 
 Python modules, file modes and other language APIs come from the interpreter
-installed in the sandbox image or on the remote machine. For Sandlock, they
-come from this host's interpreter. Mirage forwards the captured program's
+installed on the machine. Mirage forwards the captured program's
 arguments, input, environment and working directory; a working directory
-the sandbox lacks fails the program with exit 126. Each run also gets
+the machine lacks fails the program with exit 126. Each run also gets
 `MIRAGE_PROCESS`, the id of its Mirage process (`w1:9`), which every process
 it starts inherits. Each provider's **Runtime behavior** table describes
 that boundary.
 
 File operations reach workspace mounts through the connection configured
-for that provider. They also remain subject to the sandbox or host's own
+for that provider. They also remain subject to the machine's own
 permissions and confinement.
 
 ## Processes and signals
@@ -111,15 +110,15 @@ Each check finds a machine in one of three states:
 first; `GET /v1/workspaces/{id}/machines/{machine}` checks one and lists its
 processes. `mirage workspace list-machines` prints the same table.
 
-## The sandbox image
+## The machine image
 
-Every sandbox needs a POSIX shell at `/bin/sh`, which starts each command,
+Every machine needs a POSIX shell at `/bin/sh`, which starts each command,
 and `grep`, which finds what a run cut short left running. With
 [libfaketime](https://github.com/wolfcw/libfaketime) in the image, programs
 see the workspace's [`system_time`](/home/configuration#system-time);
-without it they see the sandbox's clock.
-With `mount_type: ssh` the sandbox also needs `sshfs`.
-A sandbox that serves the mounts with its own Mirage needs `fuse3` and
+without it they see the machine's clock.
+With `mount_type: ssh` the machine also needs `sshfs`.
+A machine that serves the mounts with its own Mirage needs `fuse3` and
 Mirage. The repository's Dockerfile builds that image from the current
 checkout, with every mountable backend:
 
@@ -141,13 +140,12 @@ inside is the Python build, whichever SDK the host uses.
 
 ## Timeouts
 
-`command_limits` apply to a sandboxed program as to any command: a line past
+`command_limits` apply to a program on a machine as to any command: a line past
 its `@line` entry's `timeout_seconds` exits 124, and `max_bytes` and
 `max_lines` cap the program's output.
 
 <Warning>
-  A timeout stops the program. Sandlock kills it. On a machine, Mirage sends
-  TERM, then KILL a second later, to every process there that carries the
+  A timeout stops the program: Mirage sends TERM, then KILL a second later, to every process there that carries the
   run's `MIRAGE_PROCESS`; that needs `/bin/sh`, `tr`, `grep` and `/proc` on
   the machine, and Mirage gives up after 5 seconds if it stops answering. In TypeScript, a Daytona command keeps
   running after a timeout. A Daytona sandbox has no timeout of its own, so
@@ -159,12 +157,12 @@ its `@line` entry's `timeout_seconds` exits 124, and `max_bytes` and
 
 With `mount_type: ssh`, workspace file access follows the session's permissions
 and policies. You do not need to expose a public file server or copy service
-credentials into the sandbox. Each sandbox is assigned to one session.
+credentials into the machine. Each machine is assigned to one session.
 
 Mirage refuses to run a program when it cannot enforce the session's file
 restrictions. Unsupported cases include:
 
 - Restrictions on `/` or `/dev`.
-- Hiding a mount when doing so would expose the sandbox's own files underneath.
-- Restrictions on mounts served by a separate Mirage inside the sandbox.
+- Hiding a mount when doing so would expose the machine's own files underneath.
+- Restrictions on mounts served by a separate Mirage inside the machine.
 - File rules that depend on which program opens a file.

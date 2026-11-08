@@ -154,7 +154,7 @@ instead.
 
 ### fuse
 
-Base the template on [the sandbox image](/home/setup/runtime/sandbox#the-sandbox-image),
+Base the template on [the machine image](/home/setup/machine/overview#the-machine-image),
 which carries Mirage and `fuse3`. Write the same mounts at the same paths
 into `sandbox.yaml`, and start Mirage with it in the sandbox:
 
@@ -202,5 +202,5 @@ mirage workspace create /tmp/sandbox.yaml
 - Commands run concurrently, each with its own input and output. Without
   piped input, stdin starts closed.
 - Templates, sizing, networking and lifecycle stay E2B settings.
-- A Mirage [timeout](/home/setup/runtime/sandbox#timeouts) tries to kill the command; its child
+- A Mirage [timeout](/home/setup/machine/overview#timeouts) tries to kill the command; its child
   processes may survive.
