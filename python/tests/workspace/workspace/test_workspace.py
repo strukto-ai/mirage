@@ -33,7 +33,7 @@ from mirage.execution.line.types import Line, LineState
 from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import LineId, MachineId, ProcessId
-from mirage.runtime.sandbox import RemoteSandbox
+from mirage.machine import MachineHandle
 from mirage.types import MountBackend, MountMode, PathSpec
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.clock import ManualClock
@@ -814,21 +814,17 @@ async def test_close_cancels_streamed_lines_in_the_order_they_started(
     assert cancelled[: len(started)] == started
 
 
-class _ReapedBox(RemoteSandbox):
-    """A sandbox runtime on machine ``reapbox:b1`` that records the
-    processes it was asked to reap, holds those of the pids in
-    ``holds``, and does not answer for pid 6."""
+class _ReapedBox(MachineHandle):
+    """A machine ``reapbox:b1`` that records the processes it was asked
+    to reap, holds those of the pids in ``holds``, and does not answer
+    for pid 6."""
 
-    name = "reapbox"
+    provider = "reapbox"
 
     def __init__(self, holds: tuple[int, ...]) -> None:
-        super().__init__(captures=("never-run",))
+        super().__init__("b1")
         self.holds = holds
         self.reaped: list[tuple[str, int]] = []
-
-    @property
-    def machine(self) -> MachineId:
-        return MachineId(self.name, "b1")
 
     async def connect(self) -> None:
         return None
@@ -846,14 +842,14 @@ def _box_process(pid: int, machine: str = "reapbox:b1") -> dict:
 
 
 # A lapsed workspace's programs are stopped by whatever reaches them
-# here: a sandbox's by each runtime on the machine its record names,
-# reached once that box held it, by its process's tag. One the box does
-# not hold, one whose box did not answer, one on a machine no runtime
-# here reaches and a host program of another host are out of reach.
+# here: a machine's by the machine its record names, reached once it
+# held it, by its process's tag. One the machine does not hold, one
+# whose machine did not answer, one on a machine this workspace does not
+# declare and a host program of another host are out of reach.
 @pytest.mark.asyncio
-async def test_a_workspace_reaps_the_programs_its_runtimes_reach():
+async def test_a_workspace_reaps_the_programs_its_machines_reach():
     box = _ReapedBox((2,))
-    ws = Workspace({}, runtimes=[box])
+    ws = Workspace({}, machines={"b1": box})
     try:
         wid = ws.process_table.workspace_id
         assert await ws._reap_process(_box_process(2), 15)
@@ -879,7 +875,7 @@ async def test_a_workspace_reaps_the_programs_its_runtimes_reach():
 @pytest.mark.asyncio
 async def test_a_workspace_reaps_a_lapsed_instance_as_it_starts():
     box = _ReapedBox((2,))
-    ws = Workspace({}, runtimes=[box])
+    ws = Workspace({}, machines={"b1": box})
     try:
         store = RAMExecutionStore(lease_seconds=30.0)
         ws.job_table.store = store

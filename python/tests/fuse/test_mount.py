@@ -35,7 +35,7 @@ from mirage.fuse.mount import (
     resolve_fusermount_binary,
     unmount_with_fusermount,
 )
-from mirage.runtime.sandbox.program import SERVED
+from mirage.machine.program import SERVED
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace

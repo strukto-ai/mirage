@@ -165,7 +165,7 @@ gets its own worker.
 These measures close known host access paths. They do not make arbitrary
 JavaScript safe: Pyodide exposes mutable interpreter internals, and a worker
 thread shares the host process. For hostile code, use a
-[sandbox](/home/setup/runtime/sandbox) with a process and kernel boundary.
+[sandbox](/home/setup/machine/overview) with a process and kernel boundary.
 
 ### Child processes
 
@@ -211,11 +211,11 @@ access. Only an in-process shutdown calls its cleanup.
 
 ## E2B in browsers
 
-Import the runtime from core (`pnpm add @struktoai/mirage-core`), which also registers `e2b` for
-YAML, and pass `apiKey`:
+Import the E2B machine from core (`pnpm add @struktoai/mirage-core`), which
+also registers the `e2b` provider for `machines:`, and pass `apiKey`:
 
 ```ts
-import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
+import { E2BMachine } from '@struktoai/mirage-core/machine/e2b/handle'
 ```
 
 Keep account keys out of shared frontend bundles; have your backend
@@ -226,7 +226,7 @@ uses `fuse` or none.
 
 `new Workspace(mounts, { runtimes: [...] })` takes names and runtime objects,
 and adds `workspace` when the list leaves it out. On a live workspace,
-`addRuntime` appends an entry (a remote sandbox goes after the last sandbox
+`addRuntime` appends an entry (a `machine` runtime goes after the last one
 listed, else ahead of Monty and QuickJS), `removeRuntime` takes one out, and
 `runtimes()` lists them:
 
@@ -241,13 +241,13 @@ its removed runtime closes, a removed instance cannot be added again, and
 runtime class available by name in YAML. The `@external` capture is also
 exported as `EXTERNAL_COMMANDS`.
 
-A sandbox subclass that overrides `loadSdk()` imports the SDK type from the
+A machine subclass that overrides `loadSdk()` imports the SDK type from the
 provider's `sdk` module. The E2B one needs `pnpm add @struktoai/mirage-core`:
 
 ```ts
-import type { E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/sdk'
-import type { DaytonaSdk } from '@struktoai/mirage-node/runtime/sandbox/daytona/sdk'
-import type { Ssh2Sdk } from '@struktoai/mirage-node/runtime/sandbox/ssh/sdk'
+import type { E2bSdk } from '@struktoai/mirage-core/machine/e2b/sdk'
+import type { DaytonaSdk } from '@struktoai/mirage-node/machine/daytona/sdk'
+import type { Ssh2Sdk } from '@struktoai/mirage-node/machine/ssh/sdk'
 ```
 
 ## Child processes

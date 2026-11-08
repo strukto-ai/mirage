@@ -219,7 +219,8 @@ async def recurse(
     Never a typed line, so it must not record a history entry or open
     its own recording context (GNU: history is appended by the line
     reader, the evaluator can't touch it). It inherits the typed
-    line's routing decision: nested lines never re-route. It runs on
+    line's routing decision, or the one a ``pre_command`` route gave
+    the command running it: nested lines never re-route. It runs on
     a hand-off of its own under the one the node that runs it runs on,
     standing at that node: the outer pass reads into the words a
     command runs and claims for them at that place, so the grants are
@@ -535,6 +536,7 @@ async def execute_line(
     line_handle: LineHandle | None = None,
     job_table: JobTable | None = None,
     tty: Terminal | None = None,
+    machine: str | None = None,
 ) -> IOResult:
     """The body of ``Workspace.shell``; see its docstring for the
     argument contract.
@@ -606,6 +608,7 @@ async def execute_line(
         cancel=cancel,
         record=record,
         runtime=runtime,
+        machine=machine,
         routing_decision=routing_decision,
         handed=handed,
         frame=frame,
@@ -778,6 +781,7 @@ async def run_prepared_line(
     cancel: asyncio.Event | None,
     record: bool,
     runtime: str | None,
+    machine: str | None,
     routing_decision: RouteDecision[RuntimeIdentity] | None,
     handed: HandOff | None,
     frame: LineFrame | None,
@@ -1026,6 +1030,7 @@ async def run_prepared_line(
             placed = await ws.router.decide(
                 command,
                 runtime,
+                machine,
                 effective_session,
                 routing_decision,
                 judged,
@@ -1071,6 +1076,7 @@ async def run_prepared_line(
                     ws.namespace,
                     cancel,
                     handed,
+                    partial(ws.router.off_line, decision=decision),
                 )
                 if refused is not None:
                     held = is_pending(refused.refusal)
@@ -1124,6 +1130,7 @@ async def run_prepared_line(
                             ws.registry.memory,
                             run_whole_line(
                                 line_runtime,
+                                decision.machine,
                                 command,
                                 stdin,
                                 effective_session,

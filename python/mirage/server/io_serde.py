@@ -147,6 +147,7 @@ def explanation_to_dict(expl: Explanation) -> dict[str, JsonValue]:
             "exit_code": expl.exit_code,
             "stderr": expl.stderr,
             "runtime": expl.runtime,
+            "machine": expl.machine,
             "children": [_node_to_dict(c) for c in expl.children],
         }
     return verdict
@@ -179,6 +180,7 @@ def answer_to_dict(action: Deny | Ask | Route) -> dict[str, JsonValue]:
         return {
             "kind": "route",
             "runtime": action.runtime,
+            "machine": action.machine,
             "reason": action.reason,
             "policy": action.policy,
         }

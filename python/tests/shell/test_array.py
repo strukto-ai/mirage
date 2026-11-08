@@ -5,7 +5,6 @@ from mirage.shell.array import (
     array_extent,
     array_get,
     array_set,
-    array_unset,
     build_assoc_literal,
     build_indexed_literal,
     keyed_word,
@@ -33,40 +32,8 @@ def test_set_holds_only_the_element_it_assigns():
     assert 3 in arr.elements
 
 
-def test_unset_interior_element_keeps_later_indices():
-    arr = make_array(["zero", "one", "two"])
-    array_unset(arr, 1)
-    assert arr == ShellArray({0: "zero", 2: "two"})
-    assert array_get(arr, 2) == "two"
-    assert len(arr.elements) == 2
-    assert list(arr.elements) == [0, 2]
-
-
-def test_unset_trailing_element_shrinks_the_extent():
-    arr = make_array(["x", "y", "z"])
-    array_unset(arr, 2)
-    assert arr == ShellArray({0: "x", 1: "y"})
-    assert array_extent(arr) == 2
-
-
-def test_unset_trailing_element_drops_earlier_holes_too():
-    arr = make_array(["x", "y", "z"])
-    array_unset(arr, 1)
-    array_unset(arr, 2)
-    assert arr == ShellArray({0: "x"})
-    assert array_extent(arr) == 1
-
-
-def test_unset_out_of_range_is_a_no_op():
-    arr = make_array(["x"])
-    array_unset(arr, 5)
-    array_unset(arr, -1)
-    assert arr == ShellArray({0: "x"})
-
-
 def test_set_reassigns_a_hole():
-    arr = make_array(["x", "y", "z"])
-    array_unset(arr, 1)
+    arr = ShellArray({0: "x", 2: "z"})
     array_set(arr, 1, "new")
     assert arr == ShellArray({0: "x", 1: "new", 2: "z"})
     assert list(arr.elements) == [0, 1, 2]
@@ -127,5 +94,3 @@ def test_a_far_index_holds_one_element():
     assert len(arr.elements) == 2
     assert array_extent(arr) == 1_000_000_001
     assert list(arr.elements) == [0, 1_000_000_000]
-    array_unset(arr, 1_000_000_000)
-    assert array_extent(arr) == 1

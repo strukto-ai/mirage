@@ -32,6 +32,11 @@ export class ProcessHandle {
    * runtime of its own, runs as this process (`take`).
    */
   oneCommand = false
+  /**
+   * What the program that takes it (`take`) ignores as well: a job's INT and
+   * QUIT, never what only a shell ignores.
+   */
+  programIgnores: ReadonlySet<number> = new Set()
   /** Told the record each time it changes, as its table keeps it. */
   noted: ((record: Process) => void) | null = null
   private current: Process
@@ -51,7 +56,7 @@ export class ProcessHandle {
     private readonly finished: (pid: number) => void,
     private readonly cancelChildren: (signal: number) => void = () => undefined,
     private readonly bind: ExecutionBind = (run) => run(),
-    readonly ignores: ReadonlySet<number> = new Set(),
+    public ignores: ReadonlySet<number> = new Set(),
     private readonly now: () => number = () => Date.now() / 1000,
   ) {
     this.current = Object.freeze(record)
@@ -120,8 +125,8 @@ export class ProcessHandle {
   /**
    * Take the runner as the program it was started for (`oneCommand`),
    * which runs on `machine` with `runtime`, as bash execs a stage's or a
-   * job's one program in place. Its record names both from then on.
-   * Answers whether the runner was the program's to take: false for one
+   * job's one program in place. Its record names both from then on, and it
+   * ignores only what the program does (`programIgnores`). Answers whether the runner was the program's to take: false for one
    * started for more than one command, or taken already.
    *
    * @param machine where the program runs; null for the workspace's own.
@@ -130,6 +135,7 @@ export class ProcessHandle {
   take(machine: MachineId | null, runtime: string): boolean {
     if (!this.oneCommand) return false
     this.oneCommand = false
+    this.ignores = this.programIgnores
     this.current = Object.freeze({
       ...this.current,
       machine: machine ?? this.current.machine,

@@ -8,15 +8,19 @@
     {
       "id": "unserved_cwd_fails_loud",
       "world": {
+        "machines": {
+          "box": {
+            "provider": "apple_container",
+            "container": "${MIRAGE_INTEG_APPLE_CONTAINER}"
+          }
+        },
         "runtimes": [
           {
-            "name": "apple_container",
+            "name": "machine",
             "captures": [
               "uname"
             ],
-            "config": {
-              "container": "${MIRAGE_INTEG_APPLE_CONTAINER}"
-            }
+            "machine": "box"
           },
           "workspace"
         ],

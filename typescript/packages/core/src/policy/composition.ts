@@ -118,6 +118,18 @@ export interface CompositionResult {
   limit: Limit | null
 }
 
+/** Whether an answer is a route, told by its fields: an agreement leaves its kind unread. */
+function isRoute(answer: Answer): answer is Route {
+  return 'runtime' in answer || 'machine' in answer
+}
+
+/** Where a route places a line, as a conflict names it: its runtime, its machine, or the runtime on the machine. */
+function placed(route: Route): string {
+  if (route.machine === undefined) return route.runtime ?? ''
+  if (route.runtime === undefined) return `machine ${route.machine}`
+  return `${route.runtime} on machine ${route.machine}`
+}
+
 export class Composition {
   readonly stream: OpenStream = openStreamSync('policy_compose', {})
   readonly evaluation = `evaluation-${String(++sequence)}`
@@ -240,8 +252,12 @@ export class Composition {
       case 'read_final_values': {
         const routes = effect.routes.map((index) => {
           const action = this.settlement?.[index] ?? this.answer(index)
-          if (!('runtime' in action)) throw new Error('invalid policy route reference')
-          return { action: index, runtime: units(action.runtime) }
+          if (!isRoute(action)) throw new Error('invalid policy route reference')
+          return {
+            action: index,
+            runtime: units(action.runtime ?? ''),
+            machine: units(action.machine ?? ''),
+          }
         })
         const sources = effect.limits.map((index) => {
           const limit = this.actions[index]
@@ -285,13 +301,13 @@ export class Composition {
     if (result.conflict.length > 0) {
       const routes = result.conflict.map((index) => {
         const route = this.settlement?.[index]
-        if (route === undefined || !('runtime' in route))
+        if (route === undefined || !isRoute(route))
           throw new Error('invalid policy route reference')
         return route
       })
       return {
         kind: 'deny',
-        reason: `policies place the line on different runtimes: ${routes.map((r) => `${r.policy ?? ''} on ${r.runtime}`).join(', ')}`,
+        reason: `policies place the line on different runtimes: ${routes.map((r) => `${r.policy ?? ''} on ${placed(r)}`).join(', ')}`,
         policy: [...new Set(routes.map((r) => r.policy ?? ''))].join(', '),
       }
     }
@@ -329,7 +345,7 @@ export class Composition {
       })
       action = {
         kind: 'deny',
-        reason: `policies place the line on different runtimes: ${routes.map((r) => `${r.policy ?? ''} on ${r.runtime}`).join(', ')}`,
+        reason: `policies place the line on different runtimes: ${routes.map((r) => `${r.policy ?? ''} on ${placed(r)}`).join(', ')}`,
         policy: [...new Set(routes.map((r) => r.policy ?? ''))].join(', '),
       }
     }

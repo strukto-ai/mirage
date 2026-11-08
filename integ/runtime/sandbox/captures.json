@@ -31,6 +31,27 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_signal_reaches_the_program_as_sent",
+      "runtimes": [
+        "docker",
+        "microsandbox"
+      ],
+      "entry": {
+        "captures": [
+          "dash"
+        ]
+      },
+      "steps": [
+        {
+          "command": "dash -c 'trap \"echo usr1\" USR1; while :; do sleep 0.2; done' & p=$!; sleep 1; kill -USR1 $p; sleep 1; kill -0 $p && echo alive; m=$(ps -o mpid= -p $p | tr -d ' '); [ \"$m\" -lt 4194305 ] && echo mpid; kill \"$m\"; wait $p 2>/dev/null; echo rc=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "usr1\nalive\nmpid\nrc=143\n"
+          }
+        }
+      ]
     }
   ]
 }

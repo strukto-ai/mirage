@@ -59,6 +59,7 @@ CLI_GROUPS = (
     "vfs",
     "cli",
     "runtime",
+    "machine",
 )
 # A group inside a group: its commands are three words.
 NESTED_GROUPS = (
@@ -1163,12 +1164,14 @@ def _prefix(path: str) -> str:
 
 
 def record_row(kind: str, record: dict[str, Any]) -> str:
-    """One line, job or process as a ``records`` step prints it.
+    """One line, job, process or machine as a ``records`` step prints it.
 
     Args:
-        kind (str): ``lines``, ``jobs`` or ``processes``.
+        kind (str): ``lines``, ``jobs``, ``processes`` or ``machines``.
         record (dict[str, Any]): the record's fields.
     """
+    if kind == "machines":
+        return record["state"]
     if kind == "jobs":
         return f"%{record['number']} {record['command']} {record['state']}"
     if kind == "processes":
@@ -1303,6 +1306,11 @@ class InAppSteps:
         self, wid: str, kind: str, state: str | None
     ) -> list[dict[str, Any]]:
         ws = self.workspaces[wid]
+        if kind == "machines":
+            return [
+                {"id": str(m.id), "state": m.state.value}
+                for m in await ws.machines()
+            ]
         listed = {
             "lines": ws.lines,
             "jobs": ws.jobs,

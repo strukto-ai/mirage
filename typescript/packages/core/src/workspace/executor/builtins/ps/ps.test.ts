@@ -22,6 +22,13 @@ import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { handlePs } from './ps.ts'
 import { pendingRun } from '../../../../../tests/workspace/fixtures/job_runners.ts'
+import { FIRST_PID } from '../../../../execution/process/constants.ts'
+
+const HEADER = `${'PID'.padStart(7)} ${'MACHINE'.padEnd(31)} ${'MPID'.padStart(7)} CMD`
+
+function row(pid: number, command: string, machine = '-', mpid = '-'): string {
+  return `${String(pid).padStart(7)} ${machine.padEnd(31)} ${mpid.padStart(7)} ${command}`
+}
 
 function decode(b: Uint8Array): string {
   return new TextDecoder().decode(b)
@@ -36,15 +43,15 @@ describe('handlePs', () => {
     const jt = new JobTable()
     const abort = new AbortController()
     const task = pendingRun(abort)
-    await jt.submit({ command: 'sleep', run: task, abort, cwd: '/' })
+    const job = await jt.submit({ command: 'sleep', run: task, abort, cwd: '/' })
     const [out] = await handlePs(jt, ['ps'])
-    expect(decode(out as Uint8Array)).toMatch(/1\tsleep/)
+    expect(decode(out as Uint8Array)).toBe(`${HEADER}\n${row(job.pid, 'sleep')}\n`)
   })
 
-  it('returns empty output when no running jobs', async () => {
+  it('prints its header alone when no job is running', async () => {
     const jt = new JobTable()
-    const [out] = await handlePs(jt, ['ps'])
-    expect((out as Uint8Array).byteLength).toBe(0)
+    const [out, io] = await handlePs(jt, ['ps'])
+    expect([decode(out as Uint8Array), io.exitCode]).toEqual([`${HEADER}\n`, 1])
   })
 
   it.each(['true && ps < /m/f | cat', 'ps | cat 2>/dev/null', 'true && ps | cat 2>/dev/null'])(
@@ -56,7 +63,7 @@ describe('handlePs', () => {
         const rows = stdoutStr(await ws.shell(line))
           .trim()
           .split('\n')
-        const commands = rows.map((row) => row.split('\t')[1])
+        const commands = rows.slice(1).map((line) => line.slice(48))
         expect(commands).toEqual(expect.arrayContaining(['ps', 'cat']))
       } finally {
         await ws.close()
@@ -73,7 +80,7 @@ describe('job builtins honor the process profile', () => {
     ws.createSession('audit', { profile: { processes: { list: 'workspace' } } })
     ws.createSession('ops', { profile: { processes: 'workspace' } })
     const count = "ps | grep -c 'sleep 30$'"
-    const stop = "kill $(ps | grep 'sleep 30$' | cut -f1); echo rc=$?"
+    const stop = "kill $(ps | grep 'sleep 30$' | awk '{print $1}'); echo rc=$?"
     try {
       const pid = stdoutStr(await ws.shell('sleep 30 & echo $!', { sessionId: 'a' })).trim()
       expect(stdoutStr(await ws.shell(count, { sessionId: 'b' }))).toBe('0\n')
@@ -127,9 +134,13 @@ it('ps lays columns out as procps does', async () => {
   const ws = buildWs()
   try {
     const pid = stdoutStr(await ws.shell('sleep 30 & echo $!')).trim()
+    const shell = stdoutStr(await ws.shell('echo $$')).trim()
     const at = pid.padStart(7)
     const cases: [string, string | null][] = [
-      [`ps -o pid,ppid,cmd -p ${pid}`, `    PID    PPID CMD\n${at}       1 sleep 30\n`],
+      [
+        `ps -o pid,ppid,cmd -p ${pid}`,
+        `    PID    PPID CMD\n${at} ${shell.padStart(7)} sleep 30\n`,
+      ],
       [`ps -o cmd,pid -p ${pid}`, `CMD${' '.repeat(25)}    PID\nsleep 30${' '.repeat(20)}${at}\n`],
       [`ps -o comm,args -p ${pid}`, 'COMMAND         COMMAND\nsleep           sleep 30\n'],
       [`ps -o pid,cmd= -p ${pid}`, `    PID \n${at} sleep 30\n`],
@@ -164,7 +175,7 @@ it('ps lists the session leader with its owner', async () => {
     const line = 'ps -o pid,ppid,pgid,sid,stat,user,uid,group,gid,cmd -p $$'
     expect(stdoutStr(await ws.shell(line))).toBe(
       '    PID    PPID    PGID     SID STAT USER       UID GROUP      GID CMD\n' +
-        `      1       0       1       1 Rs   admin    admin admin    admin ${line}\n`,
+        `${String(FIRST_PID)}       0 ${String(FIRST_PID)} ${String(FIRST_PID)} Rs   admin    admin admin    admin ${line}\n`,
     )
   } finally {
     await ws.close()
@@ -227,8 +238,8 @@ it.each([
   ])
 })
 
-// ps lists this daemon's runners, one that is a program a runtime runs
-// followed by where it runs: a sandbox's machine, a host program's pid.
+// ps names the machine a program a runtime runs is on, and its pid there once
+// known: a host program's from its start, a machine's from a scan.
 it.each([false, true])('ps shows where a program runs (host %s)', async (host) => {
   const ws = new Workspace({}, { sessionId: 's' })
   try {
@@ -242,9 +253,10 @@ it.each([false, true])('ps shows where a program runs (host %s)', async (host) =
     } else {
       expect(process.take(new MachineId('docker', 'tools'), 'docker')).toBe(true)
     }
-    const where = host ? 'host 4242' : 'docker:tools'
+    const machine = host ? ws.processTable.machine.toString() : 'docker:tools'
     const own = stdoutStr(await ws.shell('ps', { sessionId: 's' })).split('\n')
-    expect(own.slice(0, 2)).toEqual([`${String(process.record.id.pid)}\tsleep 30`, `-\t└ ${where}`])
+    expect(own[0]).toBe(HEADER)
+    expect(own).toContain(row(process.record.id.pid, 'sleep 30', machine, host ? '4242' : '-'))
     await ws.shell('kill %1', { sessionId: 's' })
   } finally {
     await ws.close()

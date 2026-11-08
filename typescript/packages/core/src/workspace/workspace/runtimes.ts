@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { MachineTable } from '../../execution/machine/table.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import type { WorkspaceBinding } from '../../runtime/binding.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
+import { MachineRuntime } from '../../runtime/machine/runtime.ts'
 import {
   bindCommands,
   buildRuntime,
@@ -45,6 +47,8 @@ export class Runtimes {
   entries: readonly Runtime[] = []
   private readonly registry: MountRegistry
   private readonly binding: WorkspaceBinding
+  /** The machines a machine entry runs its programs on. */
+  readonly machines: MachineTable
   private readonly retiring = new Map<Runtime, Promise<void>>()
 
   constructor(init: {
@@ -52,9 +56,12 @@ export class Runtimes {
     /** The `runtimes` option: instances and name shorthands, or undefined for the default world. */
     entries: RuntimeEntry[] | undefined
     binding: WorkspaceBinding
+    /** The machines a machine entry runs on. */
+    machines: MachineTable
   }) {
     this.registry = init.registry
     this.binding = init.binding
+    this.machines = init.machines
     const entries: Runtime[] = (init.entries ?? DEFAULT_ENTRIES).map((entry) =>
       typeof entry === 'string' ? buildRuntime(entry) : entry,
     )
@@ -62,7 +69,7 @@ export class Runtimes {
       entries.push(new WorkspaceRuntime())
     }
     const bindings = bindCommands(entries)
-    for (const entry of entries) entry.bind(this.binding)
+    for (const entry of entries) this.bindEntry(entry)
     this.install(entries, bindings)
   }
 
@@ -85,9 +92,24 @@ export class Runtimes {
     }
     const candidate = [...this.entries.slice(0, at), entry, ...this.entries.slice(at)]
     const bindings = bindCommands(candidate)
-    entry.bind(this.binding)
+    this.bindEntry(entry)
     this.install(candidate, bindings)
     return entry
+  }
+
+  /**
+   * Bind an entry to the workspace, and a machine one to its machines once
+   * the workspace has it, so an entry another workspace holds keeps its own.
+   *
+   * Throws:
+   *   Error: a machine entry's machine is not the workspace's, or another
+   *   workspace holds the entry.
+   */
+  private bindEntry(entry: Runtime): void {
+    const onMachine = entry instanceof MachineRuntime
+    if (onMachine && entry.defaultMachine !== null) this.machines.get(entry.defaultMachine)
+    entry.bind(this.binding)
+    if (onMachine) entry.bindMachines(this.machines)
   }
 
   /** Unbind an entry's commands now and close it once it is idle. */

@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import importlib
 from collections.abc import Mapping
 from typing import Any, TypeGuard
 
+from mirage.machine.registry import MACHINE_MODULES
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import (
     EXTERNAL_COMMANDS,
@@ -26,12 +26,13 @@ from mirage.runtime.constants import (
 )
 from mirage.runtime.js.quickjs import QuickJsRuntime
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.wasi import WasiRuntime
-from mirage.runtime.sandbox.sandlock import SandlockRuntime
-from mirage.runtime.types import RuntimeIdentity
+from mirage.runtime.sandlock import SandlockRuntime
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
 
 # The builtin runtimes by name. The command -> runtime mapping is
@@ -45,27 +46,14 @@ NAMED: dict[str, type[Runtime[Any]]] = {
         QuickJsRuntime,
         WorkspaceRuntime,
         SandlockRuntime,
+        MachineRuntime,
     )
-}
-
-# Sandbox runtimes resolve on first use. Some provider SDKs are heavy
-# (the daytona client alone pulls in opentelemetry), and importing them
-# eagerly would put that cost on every `import mirage`, so the table
-# holds module paths and imports the class only when the name is built.
-SANDBOX_MODULES: dict[str, str] = {
-    "apple_container": "mirage.runtime.sandbox.apple_container:AppleContainerRuntime",
-    "daytona": "mirage.runtime.sandbox.daytona:DaytonaRuntime",
-    "docker": "mirage.runtime.sandbox.docker:DockerRuntime",
-    "e2b": "mirage.runtime.sandbox.e2b:E2BRuntime",
-    "microsandbox": "mirage.runtime.sandbox.microsandbox:MicrosandboxRuntime",
-    "smolvm": "mirage.runtime.sandbox.smolvm:SmolvmRuntime",
-    "ssh": "mirage.runtime.sandbox.ssh:SSHRuntime",
 }
 
 # The names mirage ships, frozen before any host registers its own, so
 # `register_runtime` can refuse to shadow one the way `register_vfs`
 # and `register_cli_spec` refuse a builtin VFS or CLI name.
-BUILTIN_RUNTIMES: frozenset[str] = frozenset({*NAMED, *SANDBOX_MODULES})
+BUILTIN_RUNTIMES: frozenset[str] = frozenset(NAMED)
 
 
 def register_runtime(name: str, cls: type[Runtime[Any]]) -> None:
@@ -96,7 +84,7 @@ def register_runtime(name: str, cls: type[Runtime[Any]]) -> None:
 
 def known_runtimes() -> list[str]:
     """Every name ``build_runtime`` can resolve, builtin and registered."""
-    return sorted({*NAMED, *SANDBOX_MODULES})
+    return sorted(NAMED)
 
 
 # The default world when no runtimes list is given: one python engine,
@@ -141,23 +129,25 @@ def build_runtime(name: str, **options: Any) -> Runtime[Any]:
 
 
 def runtime_class(name: str) -> type[Runtime[Any]]:
-    """The runtime class a name resolves to, importing a sandbox's module
-    on first use.
+    """The runtime class a name resolves to.
 
     Args:
-        name (str): a runtime name from NAMED or SANDBOX_MODULES.
+        name (str): a runtime name from NAMED.
 
     Raises:
-        ValueError: unknown name, with a cross-language hint for
-            TypeScript-only names.
+        ValueError: unknown name, with a hint for TypeScript-only names
+            and for machine providers.
     """
     cls = NAMED.get(name)
-    if cls is None and name in SANDBOX_MODULES:
-        module_path, attr = SANDBOX_MODULES[name].split(":")
-        cls = getattr(importlib.import_module(module_path), attr)
     if cls is None:
         if name in RUNTIME_HINTS:
             raise ValueError(RUNTIME_HINTS[name])
+        if name in MACHINE_MODULES:
+            raise ValueError(
+                f"{name!r} is a machine provider, not a runtime: declare the"
+                f" machine under machines: with provider: {name}, and run"
+                " its programs with the machine runtime"
+            )
         known = ", ".join(repr(n) for n in known_runtimes())
         raise ValueError(
             f"unknown runtime: {name!r} (expected one of {known})"
@@ -302,6 +292,44 @@ def is_sandbox(entry: RuntimeIdentity | None) -> TypeGuard[Runtime[Any]]:
         isinstance(entry, Runtime)
         and isinstance(entry, LineExecutorMixin)
         and entry.reach == "remote"
+    )
+
+
+def routed(
+    entries: list[Runtime[Any]],
+    bindings: Mapping[str, RuntimeIdentity | None],
+    runtime: str | None,
+    machine: str | None,
+) -> RouteDecision[RuntimeIdentity]:
+    """The decision a policy's route places a line or a command on.
+
+    ``workspace`` keeps it in Mirage: no line executor (an ``@line``
+    capture) takes it, and each command stays on its first other
+    capturer. Any other runtime serves every command it captures over
+    ``bindings``; none leaves each command where ``bindings`` put it.
+
+    Args:
+        entries (list[Runtime]): the workspace's ordered runtimes.
+        bindings (Mapping[str, RuntimeIdentity | None]): the bindings
+            the route overlays: the static ones for a line, the line's
+            own for a command.
+        runtime (str | None): the runtime the route names.
+        machine (str | None): the machine it names.
+
+    Raises:
+        ValueError: no entry has the runtime's name.
+    """
+    placed: dict[str, RuntimeIdentity | None] = dict(bindings)
+    if runtime == WorkspaceRuntime.name:
+        kept = [e for e in entries if WHOLE_LINE not in e.captures]
+        placed = {
+            command: None for entry in entries for command in entry.captures
+        }
+        placed.update(bind_commands(kept))
+    elif runtime is not None:
+        placed.update(runtime_bindings_for(entries, runtime))
+    return RouteDecision(
+        bindings=placed, fallback=catch_all(entries), machine=machine
     )
 
 

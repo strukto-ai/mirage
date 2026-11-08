@@ -226,7 +226,7 @@ INTERPRETER_NAMES = frozenset(
     if group is BuiltinGroup.INTERPRETERS
 )
 
-# Shell words a native runtime's captures can take from the session: the
+# Shell words a machine runtime's captures can take from the session: the
 # interpreters, and the process tools whose host programs see that
 # runtime's own processes rather than mirage's managed runners.
 CAPTURABLE_BUILTINS = INTERPRETER_NAMES | frozenset({"ps", "kill"})

@@ -791,7 +791,7 @@ async def server_checks(server: Server, report: Report) -> None:
         report.check(
             f"{server.key} server.policies", codes, want["policies"][d.name]
         )
-        for route in ("/v1/vfs", "/v1/clis", "/v1/runtimes"):
+        for route in ("/v1/vfs", "/v1/clis", "/v1/runtimes", "/v1/machines"):
             entry = f"{route}/{name}"
             unknown = {"name": name, "type": "nope", "fields": {}}
             codes = [
@@ -1192,7 +1192,7 @@ async def lifecycle(
         f"{len(json.loads(out)['items'])}"
     )
     refused = []
-    for kind in ("cli", "runtime"):
+    for kind in ("cli", "runtime", "machine"):
         codes = [
             (await cli(kind, "types"))[0],
             (await cli(kind, "list"))[0],

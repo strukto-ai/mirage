@@ -139,7 +139,7 @@ export async function handlePrintf(
   let subscript = parsed[2] ?? null
   if (subscript !== null && subscripts !== null) subscript = await subscripts(subscript)
   const text = decodeText(output).split('\0', 1)[0] ?? ''
-  let status: 'ok' | 'denied' | 'readonly' | 'subscript'
+  let status: string
   try {
     status = await assignElement(session, policies, base, subscript, text, false, diagnostics)
   } catch (err) {

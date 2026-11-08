@@ -16,10 +16,12 @@ import asyncio
 import logging
 from typing import Any
 
+from mirage.execution.machine.table import MachineTable
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.constants import expand_captures
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.table import (
     DEFAULT_ENTRIES,
     NAMED,
@@ -47,15 +49,25 @@ class Runtimes:
             unavailable-runtime hints the dispatcher reports.
         binding (WorkspaceBinding): the live workspace connection shared
             by every runtime entry.
+        machines (MachineTable): the machines a machine entry runs on.
     """
 
     def __init__(
-        self, registry: MountRegistry, binding: WorkspaceBinding
+        self,
+        registry: MountRegistry,
+        binding: WorkspaceBinding,
+        machines: MachineTable,
     ) -> None:
         self._registry = registry
         self._binding = binding
+        self._machines = machines
         self._entries: list[Runtime[Any]] = []
         self._retiring: dict[int, asyncio.Task[None]] = {}
+
+    @property
+    def machines(self) -> MachineTable:
+        """The machines a machine entry runs its programs on."""
+        return self._machines
 
     @property
     def entries(self) -> list[Runtime[Any]]:
@@ -102,7 +114,7 @@ class Runtimes:
             entries.append(WorkspaceRuntime())
         bindings = bind_commands(entries)
         for entry in entries:
-            entry.bind(self._binding)
+            self._bind(entry)
         self._install(entries, bindings)
         return entries
 
@@ -138,7 +150,7 @@ class Runtimes:
                 at = languages[0]
         candidate = [*self._entries[:at], entry, *self._entries[at:]]
         bindings = bind_commands(candidate)
-        entry.bind(self._binding)
+        self._bind(entry)
         self._install(candidate, bindings)
         return entry
 
@@ -184,6 +196,27 @@ class Runtimes:
                 if len(failures) == 1
                 else BaseExceptionGroup("runtime close failed", failures)
             )
+
+    def _bind(self, entry: Runtime[Any]) -> None:
+        """Bind an entry to the workspace, and a machine one to its
+        machines once the workspace has it, so an entry another
+        workspace holds keeps its own.
+
+        Args:
+            entry (Runtime): the entry.
+
+        Raises:
+            ValueError: a machine entry's machine is not the workspace's,
+                or another workspace holds the entry.
+        """
+        if (
+            isinstance(entry, MachineRuntime)
+            and entry.default_machine is not None
+        ):
+            self._machines.get(entry.default_machine)
+        entry.bind(self._binding)
+        if isinstance(entry, MachineRuntime):
+            entry.bind_machines(self._machines)
 
     def _install(
         self, entries: list[Runtime[Any]], bindings: dict[str, Runtime[Any]]

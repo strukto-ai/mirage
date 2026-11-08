@@ -99,7 +99,8 @@ function answerToDict(action: Deny | Ask | Route): Record<string, JsonValue> {
   if (action.kind === 'route') {
     return {
       kind: 'route',
-      runtime: action.runtime,
+      runtime: action.runtime ?? null,
+      machine: action.machine ?? null,
       reason: action.reason ?? '',
       policy: action.policy ?? '',
     }
@@ -144,6 +145,7 @@ export function explanationToDict(
     exit_code: expl.exitCode,
     stderr: expl.stderr,
     runtime: expl.runtime,
+    machine: expl.machine,
     children: expl.children.map(nodeToDict),
   }
 }

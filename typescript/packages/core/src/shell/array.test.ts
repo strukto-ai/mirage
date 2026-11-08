@@ -18,7 +18,6 @@ import {
   arrayExtent,
   arrayGet,
   arraySet,
-  arrayUnset,
   buildAssocLiteral,
   buildIndexedLiteral,
   keyedWord,
@@ -49,43 +48,13 @@ describe('shell array', () => {
     expect(arr.elements.has(3n)).toBe(true)
   })
 
-  it('unsetting an interior element keeps the later indices', () => {
-    const arr = makeArray(['zero', 'one', 'two'])
-    arrayUnset(arr, 1)
-    expect([...arr.elements]).toEqual([
-      [0n, 'zero'],
-      [2n, 'two'],
-    ])
-    expect(arrayGet(arr, 2)).toBe('two')
-    expect(arr.elements.size).toBe(2)
-    expect([...arr.elements.keys()]).toEqual([0n, 2n])
-  })
-
-  it('unsetting a trailing element shrinks the extent', () => {
-    const arr = makeArray(['x', 'y', 'z'])
-    arrayUnset(arr, 2)
-    expect([...arr.elements.values()]).toEqual(['x', 'y'])
-    expect(arrayExtent(arr)).toBe(2n)
-  })
-
-  it('unsetting a trailing element drops earlier holes too', () => {
-    const arr = makeArray(['x', 'y', 'z'])
-    arrayUnset(arr, 1)
-    arrayUnset(arr, 2)
-    expect([...arr.elements]).toEqual([[0n, 'x']])
-    expect(arrayExtent(arr)).toBe(1n)
-  })
-
-  it('unsetting an out-of-range index is a no-op', () => {
-    const arr = makeArray(['x'])
-    arrayUnset(arr, 5)
-    arrayUnset(arr, -1)
-    expect([...arr.elements]).toEqual([[0n, 'x']])
-  })
-
   it('a hole can be reassigned', () => {
-    const arr = makeArray(['x', 'y', 'z'])
-    arrayUnset(arr, 1)
+    const arr = new ShellArray(
+      new Map([
+        [0n, 'x'],
+        [2n, 'z'],
+      ]),
+    )
     arraySet(arr, 1, 'new')
     expect([...arr.elements.values()]).toEqual(['x', 'new', 'z'])
     expect([...arr.elements.keys()]).toEqual([0n, 1n, 2n])
@@ -105,8 +74,6 @@ describe('shell array', () => {
     expect(arr.elements.size).toBe(2)
     expect(arrayExtent(arr)).toBe(1_000_000_001n)
     expect([...arr.elements.keys()]).toEqual([0n, 1_000_000_000n])
-    arrayUnset(arr, 1_000_000_000)
-    expect(arrayExtent(arr)).toBe(1n)
   })
 })
 

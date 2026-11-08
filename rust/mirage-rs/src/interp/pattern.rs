@@ -5,9 +5,12 @@
 //! locale, its bytes in the C locale, a byte that is no character standing
 //! as its surrogate escape, which no class matches.
 
+use std::cell::RefCell;
+
 use serde_json::{Value as Json, json};
 
 use super::write::Fault;
+use crate::Stream;
 use crate::glob;
 
 const ESCAPE: u32 = 0xDC00;
@@ -65,6 +68,52 @@ impl Pattern {
 
 /// The characters a recase handles between two pauses.
 const RECASE_SLICE: usize = 2048;
+/// The compiled patterns a shell keeps for the next expansion that asks.
+const COMPILED_KEPT: usize = 16;
+/// The units fed to the matcher at a time, so a long subject is never
+/// copied into bytes whole; a matcher whose pattern or subject ran longer
+/// is not kept, so what the shell keeps stays small.
+const FEED_UNITS: usize = 4096;
+
+/// A compiled pattern kept: its units, whether extglob read them, and the
+/// matcher.
+type Kept = (Vec<u32>, bool, Box<dyn Stream>);
+
+thread_local! {
+    /// The patterns value operations compiled last, most recent first: a
+    /// loop over `${v#p}` compiles `p` once. Each is lent to one operation
+    /// at a time, so one paused midway never shares it.
+    static COMPILED: RefCell<Vec<Kept>> = RefCell::default();
+}
+
+/// A matcher for `pattern` ready to run `operation`: a kept one started
+/// afresh, or one compiled now.
+fn lend(pattern: &Pattern, extglob: bool, operation: &Json) -> Option<Box<dyn Stream>> {
+    let kept = COMPILED.with_borrow_mut(|kept| {
+        let at = kept
+            .iter()
+            .position(|(units, ext, _)| *ext == extglob && *units == pattern.0)?;
+        Some(kept.remove(at).2)
+    });
+    match kept {
+        Some(mut glob) => glob
+            .begin(operation.to_string().as_bytes())
+            .ok()
+            .map(|()| glob),
+        None => crate::glob::open(&glob_config(pattern, extglob, operation.clone())).ok(),
+    }
+}
+
+/// Keep a matcher an operation finished with for the next that asks.
+fn keep(pattern: &Pattern, extglob: bool, glob: Box<dyn Stream>) {
+    if pattern.0.len() > FEED_UNITS {
+        return;
+    }
+    COMPILED.with_borrow_mut(|kept| {
+        kept.insert(0, (pattern.0.clone(), extglob, glob));
+        kept.truncate(COMPILED_KEPT);
+    });
+}
 
 fn glob_config(pattern: &Pattern, extglob: bool, operation: Json) -> Vec<u8> {
     json!({
@@ -91,11 +140,12 @@ async fn ask(
     pause: &mut impl AsyncFnMut() -> Result<(), Fault>,
 ) -> Result<Json, Fault> {
     let mut out = Vec::new();
-    let Ok(mut glob) = crate::glob::open(&glob_config(pattern, extglob, operation)) else {
+    let Some(mut glob) = lend(pattern, extglob, &operation) else {
         return Ok(Json::Null);
     };
-    let fed = glob
-        .feed(&unit_bytes(subject), &mut out)
+    let fed = subject
+        .chunks(FEED_UNITS)
+        .try_for_each(|chunk| glob.feed(&unit_bytes(chunk), &mut out))
         .and_then(|()| glob.finish(&mut out));
     if fed.is_err() {
         return Ok(Json::Null);
@@ -106,16 +156,25 @@ async fn ask(
         }
         pause().await?;
     }
+    if subject.len() <= FEED_UNITS {
+        keep(pattern, extglob, glob);
+    }
     Ok(serde_json::from_slice(&out).unwrap_or(Json::Null))
 }
 
 /// One pattern compiled once and tested against whole subjects.
-struct Matcher(Option<Box<dyn crate::Stream>>);
+struct Matcher(Option<Box<dyn Stream>>);
 
 impl Matcher {
     fn new(pattern: &Pattern, extglob: bool) -> Self {
-        let config = glob_config(pattern, extglob, json!({"kind": "matches"}));
-        Self(crate::glob::open(&config).ok())
+        Self(lend(pattern, extglob, &json!({"kind": "matches"})))
+    }
+
+    /// Keep the compiled pattern for the next operation that asks.
+    fn keep(self, pattern: &Pattern, extglob: bool) {
+        if let Some(glob) = self.0 {
+            keep(pattern, extglob, glob);
+        }
     }
 
     fn matches(&mut self, subject: &[u32]) -> bool {
@@ -309,6 +368,7 @@ pub async fn recase(
             break;
         }
     }
+    matcher.keep(pattern, extglob);
     Ok(out)
 }
 

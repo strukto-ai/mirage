@@ -205,8 +205,8 @@ terminal:
     from pydantic import BaseModel
 
     from mirage import MountMode, Workspace
+    from mirage.runtime.machine import MachineRuntime
     from mirage.runtime.python.monty import MontyRuntime
-    from mirage.runtime.sandbox.docker import DockerRuntime
     from mirage.vfs.redis import RedisVFS
     from mirage.workspace.store import RedisWorkspaceStateStore
 
@@ -222,14 +222,18 @@ terminal:
                 workspace_id=terminal_id,
                 store=RedisWorkspaceStateStore(url=REDIS_URL),
                 owns_store=True,
+                machines={
+                    "box": {
+                        "provider": "docker",
+                        "container": f"box-{terminal_id}",
+                        "mount_type": "ssh",
+                    }
+                },
                 runtimes=[
                     MontyRuntime(captures=["python", "python3"]),
-                    DockerRuntime(
-                        captures=["@python", "@external"],
-                        config={"container": f"box-{terminal_id}", "mount_type": "ssh"},
-                    ),
+                    MachineRuntime(["@python", "@external"], machine="box"),
                 ],
-                route_policy=lambda ctx: "docker" if re.search(r"\b(numpy|pandas)\b", ctx.line) else None,
+                route_policy=lambda ctx: "machine" if re.search(r"\b(numpy|pandas)\b", ctx.line) else None,
             )
         return terminals[terminal_id]
 
@@ -275,9 +279,9 @@ terminal:
     import { promisify } from 'node:util'
     import express from 'express'
     import {
-      DockerRuntime,
       MontyRuntime,
       MountMode,
+      MachineRuntime,
       RedisVFS,
       RedisWorkspaceStateStore,
       Workspace,
@@ -297,14 +301,14 @@ terminal:
               workspaceId: id,
               store: new RedisWorkspaceStateStore({ url: redisUrl }),
               ownsStore: true,
+              machines: {
+                box: { provider: 'docker', container: `box-${id}`, mountType: 'ssh' },
+              },
               runtimes: [
                 new MontyRuntime({ captures: ['python', 'python3'] }),
-                new DockerRuntime({
-                  captures: ['@python', '@external'],
-                  config: { container: `box-${id}`, mountType: 'ssh' },
-                }),
+                new MachineRuntime({ captures: ['@python', '@external'], machine: 'box' }),
               ],
-              routePolicy: (ctx) => (/\b(numpy|pandas)\b/.test(ctx.line) ? 'docker' : null),
+              routePolicy: (ctx) => (/\b(numpy|pandas)\b/.test(ctx.line) ? 'machine' : null),
             },
           ),
         )

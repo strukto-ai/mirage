@@ -399,6 +399,7 @@ def test_close_cancel_and_kill_are_not_workspace_commands(fake, gone):
             "/v1/workspaces/w/processes",
             {"job_id": "j1", "machine": "docker:t"},
         ),
+        (("list-machines", "w"), "/v1/workspaces/w/machines", {}),
     ],
 )
 def test_a_record_list_asks_for_what_its_options_name(

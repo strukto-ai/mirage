@@ -116,7 +116,26 @@ export const COLUMNS: Readonly<Record<string, readonly [string, number, boolean,
   wchan: ['WCHAN', 6, false, 'dash'],
   nwchan: ['WCHAN', 6, true, 'dash'],
   label: ['LABEL', 31, false, 'dash'],
+  machine: ['MACHINE', 31, false, 'machine'],
+  mpid: ['MPID', 7, true, 'mpid'],
 }
+
+// What ps prints without -o: each process's pid, the machine its program
+// runs on with that program's pid there (`-` for Mirage's own), and its
+// command. Mirrors Python's `PLAIN`.
+export const PLAIN: readonly (readonly [string, string])[] = [
+  ['pid', 'PID'],
+  ['machine', 'MACHINE'],
+  ['mpid', 'MPID'],
+  ['cmd', 'CMD'],
+]
+
+// What a forest (BSD `f`, `--forest`) puts before each command, as
+// procps-ng 4.0.4 draws it: a child's branch, then for each ancestor between
+// it and the root a bar while that ancestor has a later sibling.
+export const BRANCH = ' \\_ '
+export const BAR = ' |  '
+export const GAP = '    '
 
 // The fixed answers for a runner: what procps prints for a process on no
 // terminal, never scheduled away from the default policy and priority.

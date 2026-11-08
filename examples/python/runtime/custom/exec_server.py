@@ -21,7 +21,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from mirage.runtime.sandbox.program import kill_tree
+from mirage.machine.program import kill_tree
 
 # A stand-in for the execution service, so the example runs on one machine.
 # POST /run takes {argv, stdin, files} with base64 bytes, runs argv in a

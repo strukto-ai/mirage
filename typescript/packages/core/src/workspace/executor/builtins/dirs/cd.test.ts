@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { resolveSymlinks } from '../../../../utils/path.ts'
-import { varsFromEnv } from '../../../../workspace/session/session.ts'
+import { varsFromEnv } from '../../../session/session.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { PathSpec } from '../../../../types.ts'
 import { ContentType, FileType } from '../../../../types.ts'

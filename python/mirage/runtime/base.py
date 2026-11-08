@@ -133,6 +133,23 @@ class Runtime(ABC, Generic[E]):
         process records name; None for the workspace's own."""
         return None
 
+    def voice(self, ctx: Context) -> str:
+        """The name a refusal of one run speaks in: the runtime's.
+
+        Args:
+            ctx (Context): the run's context.
+        """
+        return self.name
+
+    def machine_for(self, ctx: Context) -> MachineId | None:
+        """The machine one run of this runtime goes to: its own
+        (``machine``), whatever the run's route names.
+
+        Args:
+            ctx (Context): the run's context.
+        """
+        return self.machine
+
     @property
     def file_effects_dispatched(self) -> bool:
         """Whether workspace file mutations already invalidate through dispatch."""
@@ -196,10 +213,10 @@ class Runtime(ABC, Generic[E]):
                 capture is not None
                 and self.reach != "workspace"
                 and capture.restricted_mounts
-                and not self._serves_session(capture.restricted_mounts)
+                and not self._serves_session(capture.restricted_mounts, ctx)
             ):
                 return refused_run(
-                    self.name,
+                    self.voice(ctx),
                     "runtime cannot enforce this session's file restrictions",
                 )
             # A process on this machine opens its connections around the
@@ -210,7 +227,7 @@ class Runtime(ABC, Generic[E]):
                 for egress in live_egress()
             ):
                 return refused_run(
-                    self.name,
+                    self.voice(ctx),
                     "runtime cannot enforce this workspace's network",
                 )
             engine = await self.engine()
@@ -288,7 +305,8 @@ class Runtime(ABC, Generic[E]):
             or session is None
         ):
             return await run()
-        if shell.take(self.machine, self.name):
+        machine = self.machine_for(ctx)
+        if shell.take(machine, self.name):
             return await run()
         line = ctx.flags.get("c")
         if kind == "line" and isinstance(line, str):
@@ -312,7 +330,7 @@ class Runtime(ABC, Generic[E]):
                 run=program,
                 parent=shell.record.pid,
                 limit=session.processes.max,
-                machine=self.machine,
+                machine=machine,
                 runtime=self.name,
             )
         except BlockingIOError:
@@ -466,12 +484,15 @@ class Runtime(ABC, Generic[E]):
                 self._engine_task = None
             raise
 
-    def _serves_session(self, restricted_mounts: tuple[str, ...]) -> bool:
+    def _serves_session(
+        self, restricted_mounts: tuple[str, ...], ctx: Context
+    ) -> bool:
         """Whether every restricted mount is served through this caller's gate.
 
         Args:
             restricted_mounts (tuple[str, ...]): the mounts the session
                 restricts.
+            ctx (Context): the run's context.
         """
         return False
 

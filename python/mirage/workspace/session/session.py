@@ -472,6 +472,14 @@ class SessionState:
     _prefix_saves: list[dict[str, ShellVar | None]] = field(
         default_factory=list, repr=False
     )
+    # Runtime memo of `positional_bytes`.
+    _positional_held: tuple[list[str], int] | None = field(
+        default=None, repr=False, compare=False
+    )
+    # Runtime memo of `env_snapshot`.
+    _env_held: tuple[int, dict[str, str]] | None = field(
+        default=None, repr=False, compare=False
+    )
     # Hidden `getopts` state: the 1-based char offset within the current
     # word being scanned, plus the OPTIND value that offset belongs to.
     # A caller resetting OPTIND (e.g. to 1) makes the seen value stale,

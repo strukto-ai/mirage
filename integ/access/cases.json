@@ -385,6 +385,7 @@
     {"id": "lists_each_line_with_how_it_ended", "input": {"step": "records", "id": "w", "kind": "lines"}, "expect": {"text": "echo hi > /f exited 0\ncat /f exited 0\ncat /nope exited 1\nsleep 30 & exited 0"}},
     {"id": "lists_the_running_job", "input": {"step": "records", "id": "w", "kind": "jobs", "state": "running"}, "expect": {"text": "%1 sleep 30 running"}},
     {"id": "lists_its_running_process", "input": {"step": "records", "id": "w", "kind": "processes", "state": "running"}, "expect": {"text": "sleep 30 running"}},
+    {"id": "lists_its_host_machine", "input": {"step": "records", "id": "w", "kind": "machines"}, "expect": {"text": "managed"}},
     {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
    ]
   },
@@ -660,7 +661,7 @@
   "template_round_trip": "t1:ram t2:ram same config",
   "policy_round_trip": "pass 0",
   "vfs_round_trip": "r2 token 0",
-  "entries_refuse_unknown": "cli:002222 runtime:002222",
+  "entries_refuse_unknown": "cli:002222 runtime:002222 machine:002222",
   "api_sends_fields": "api\n",
   "api_keeps_the_route_query": "1",
   "api_takes_only_a_route": "2",

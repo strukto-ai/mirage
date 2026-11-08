@@ -26,7 +26,8 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { builtinUsage } from '../shared.ts'
 import { MAX_PID_OPERAND } from '../constants.ts'
-import { jobNumbered, jobResult, processView, sessionOf } from '../jobspec.ts'
+import { jobNumbered, jobResult, machineProcess, processView, sessionOf } from '../jobspec.ts'
+import { FIRST_PID } from '../../../../execution/process/constants.ts'
 import { KEPT_SIGNALS } from './constants.ts'
 
 /**
@@ -81,8 +82,11 @@ function killPid(jobs: readonly JobHandle[], operand: string): [number | null, s
 
 /**
  * Signal managed runners with bash's kill surface. The signal comes from
- * `-s`/`-n`, or from the first `-sigspec`; `0` probes and every other
- * signal cancels the runner with it. Every operand is tried and each failure is
+ * `-s`/`-n`, or from the first `-sigspec`; `0` probes, a program on a
+ * machine gets any other as sent (it ends when it exits), a signal a
+ * process takes and goes on (`KEPT_SIGNALS`) leaves every other runner as
+ * it is, and every other runner is cancelled with the rest. A number under `FIRST_PID` is a machine pid
+ * (`machineProcess`). Every operand is tried and each failure is
  * named in bash's words; the status is 0 when any operand was signalled,
  * as bash's is. A job spec is `%N`; a negative number is a process group,
  * the session's `-$$` among them, whose every runner gets the signal
@@ -141,7 +145,16 @@ export async function handleKill(
   await jobTable.sync(sid)
   for (const operand of words) {
     const jobs = jobTable.listJobs(sid)
-    const [pid, refusal] = killPid(jobs, operand)
+    let [pid, refusal] = killPid(jobs, operand)
+    if (pid !== null && pid > 0 && pid < FIRST_PID && /^[0-9]+$/.test(operand)) {
+      const [found, ambiguous] = await machineProcess(processes, pid)
+      if (ambiguous) {
+        errors.push(`${voice}kill: ${operand}: ambiguous job spec`)
+        continue
+      }
+      pid = found?.id.pid ?? null
+      refusal = `(${operand}) - No such process`
+    }
     if (pid === null) {
       errors.push(`${voice}kill: ${refusal}`)
       continue
@@ -164,7 +177,10 @@ export async function handleKill(
     }
     let found: boolean
     try {
-      if (KEPT_SIGNALS.has(signal)) found = processes.probe(pid)
+      const kept = KEPT_SIGNALS.has(signal)
+      const sending = kept && signal === 0 ? null : processes.send(pid, signal)
+      if (sending !== null) found = await sending
+      else if (kept) found = processes.probe(pid)
       else {
         found = processes.terminate(pid, signal)
         const job = jobs.find((j) => j.process !== null && j.pid === pid)
@@ -191,9 +207,12 @@ export async function handleKill(
 }
 
 /**
- * Signal a process group as killpg(2) does, its jobs recorded as killed by a
- * signal they take. Returns whether the group had a runner the view sees.
- * Mirrors Python's _kill_group.
+ * Signal a process group as killpg(2) does, its jobs Mirage stops recorded
+ * as killed by the signal; a program on a machine gets it as sent, a kept
+ * signal (`KEPT_SIGNALS`) too, which leaves Mirage's own runners as they
+ * are. Returns whether the group had a runner the view sees; for a kept
+ * signal, one of Mirage's own or a program that took it. Mirrors Python's
+ * _kill_group.
  */
 async function killGroup(
   jobTable: JobTable,
@@ -203,15 +222,25 @@ async function killGroup(
   signal: number,
   sessionId: string,
 ): Promise<boolean> {
-  if (KEPT_SIGNALS.has(signal)) return processes.probeGroup(group)
+  if (KEPT_SIGNALS.has(signal)) {
+    if (signal === 0 || !processes.probeGroup(group)) return processes.probeGroup(group)
+    await processes.scan()
+    const sending = processes
+      .list()
+      .filter((record) => record.group === group)
+      .map((record) => processes.send(record.id.pid, signal))
+    const sent = await Promise.all(sending.filter((one) => one !== null))
+    return sending.includes(null) || sent.includes(true)
+  }
   if (!processes.probeGroup(group)) return false
+  const found = await processes.signalGroup(group, signal)
   for (const job of jobs) {
     if (
       job.process !== null &&
       job.process.record.group === group &&
-      !job.process.ignores.has(signal)
+      job.process.record.state === 'stopping'
     )
       await jobTable.kill(job.id, sessionId, signal)
   }
-  return processes.signalGroup(group, signal)
+  return found
 }

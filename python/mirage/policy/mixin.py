@@ -34,6 +34,13 @@ class SessionScopedMixin(ABC):
     async def wants_for(self, method: str, session_id: str) -> bool:
         """Whether this policy's ``method`` will speak for one session.
 
+        The answer follows what the host sets on the session (its
+        profile, the policies added), never what a line writes: a
+        running task asks it again each time it waits on its host, not
+        between two of its own writes. A policy that turns on a session's
+        variables (``ARMED=1``) decides in ``pre_session`` itself, which
+        every write reaches while the policy speaks for the session.
+
         Args:
             method (str): the method name (``pre_command``, ``pre_vfs``,
                 ``pre_session``, ...).

@@ -84,6 +84,22 @@ def args_bytes(args: Iterable[str]) -> int:
     return sum(byte_length(arg) + 1 for arg in args)
 
 
+def positional_bytes(session: SessionState) -> int:
+    """The bytes a session's positional parameters hold, measured once
+    per list: ``set_positional_params`` replaces the list rather than
+    change it, so a frame or a write reads the count again without
+    walking every parameter.
+
+    Args:
+        session (SessionState): the session.
+    """
+    held = session._positional_held
+    if held is None or held[0] is not session.positional_args:
+        held = (session.positional_args, args_bytes(session.positional_args))
+        session._positional_held = held
+    return held[1]
+
+
 def frames_bytes(call_stack: CallStack) -> int:
     """The bytes the frames on a call stack hold in positional
     parameters, which :func:`env_bytes` does not count.
@@ -119,7 +135,7 @@ def outside_bytes(session: SessionState) -> int:
     return (
         sum(entry_bytes(n, body) for n, body in session.functions.items())
         + sum(entry_bytes(n, text) for n, text in session.aliases.items())
-        + args_bytes(session.positional_args)
+        + positional_bytes(session)
         + saves_bytes(session)
     )
 

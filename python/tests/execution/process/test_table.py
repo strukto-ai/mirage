@@ -11,6 +11,7 @@ from mirage.context.session_context import (
 )
 from mirage.execution.constants import HISTORY_SECONDS
 from mirage.execution.process.config import ProcessPermissions
+from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import ProcessState
@@ -571,14 +572,14 @@ async def test_a_group_signal_ends_an_ignoring_shells_program_and_stops_the_rest
     )
     async with asyncio.timeout(5):
         await started.wait()
-        assert processes.signal_group(parent.record.group, 2)
+        assert await processes.signal_group(parent.record.group, 2)
         assert (await child.join()).exit == 0
         assert (await other.join()).exit == 130
         assert (await forked.join()).exit == 130
         assert (await parent.join()).exit == 130
     assert outcome == [(None, 2)]
     assert outside.signal is None
-    assert not processes.signal_group(outside.record.pid + 1, 2)
+    assert not await processes.signal_group(outside.record.pid + 1, 2)
     outside.terminate()
     await outside.join()
 
@@ -593,27 +594,30 @@ async def test_a_given_pid_is_taken_while_free():
         command="line",
         cwd=PathSpec.from_str_path("/"),
         run=_exits_0,
-        pid=7,
+        pid=FIRST_PID + 6,
     )
     held = processes.start(
         session_id="a",
         command="line",
         cwd=PathSpec.from_str_path("/"),
         run=_hangs,
-        pid=7,
+        pid=FIRST_PID + 6,
     )
-    assert (first.record.pid, held.record.pid) == (7, 8)
+    assert (first.record.pid, held.record.pid) == (
+        FIRST_PID + 6,
+        FIRST_PID + 7,
+    )
     await first.join()
     again = processes.start(
         session_id="a",
         command="line",
         cwd=PathSpec.from_str_path("/"),
         run=_exits_0,
-        pid=7,
+        pid=FIRST_PID + 6,
     )
-    assert again.record.pid == 7
+    assert again.record.pid == FIRST_PID + 6
     await again.join()
-    assert [p.record.pid for p in processes.live()] == [8]
+    assert [p.record.pid for p in processes.live()] == [FIRST_PID + 7]
     held.terminate()
     await held.join()
 
@@ -667,7 +671,7 @@ async def test_started_runs_before_the_runner_with_the_process_live():
         started=lambda process: order.append(f"started {process.record.pid}"),
     )
     await handle.join()
-    assert order == ["started 1", "run [1]"]
+    assert order == [f"started {FIRST_PID}", f"run [{FIRST_PID}]"]
 
 
 async def _exits_0() -> int:

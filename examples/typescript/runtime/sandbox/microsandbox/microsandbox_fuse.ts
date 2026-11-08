@@ -17,7 +17,7 @@
 // natively, with no S3 credentials and no network of its own.
 // Requires the `msb` CLI on PATH, host FUSE (Linux fuse3), and AWS creds in
 // .env.development. The microVM is booted with `msb run`, the same CLI
-// Mirage's MicrosandboxRuntime drives, as a child process: this process's
+// Mirage's MicrosandboxMachine drives, as a child process: this process's
 // event loop serves the FUSE mount, so it must stay free while the guest reads.
 // The guest script is the Python example's remote/guest.py.
 

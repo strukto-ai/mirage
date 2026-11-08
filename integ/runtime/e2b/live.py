@@ -30,8 +30,9 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosedError
 
 from mirage import Context, Limit, MountMode, PathSpec, Workspace
-from mirage.runtime.sandbox.e2b import E2BRuntime
-from mirage.runtime.sandbox.ssh import SSHRuntime
+from mirage.machine.e2b import E2BMachine
+from mirage.machine.ssh import SSHMachine
+from mirage.runtime.machine import MachineRuntime
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 
@@ -84,18 +85,14 @@ async def relay(reader, writer, url):
         await writer.wait_closed()
 
 
-def run_line(runtime, line, stdin, env, cwd):
-    """Run one raw line on a sandbox runtime, as an ``@line`` capture hands it."""
-    ctx = Context(
-        flags={"c": line},
-        stdin=stdin,
-        env=env,
-        cwd=PathSpec.from_str_path(cwd),
-    )
-    return runtime.run_line(None, [], [], ctx)
+def run_line(machine, line, stdin, env, cwd):
+    """Run one raw line on a machine, as the machine runtime runs an
+    ``@line`` capture there."""
+    ctx = Context(stdin=stdin, env=env, cwd=PathSpec.from_str_path(cwd))
+    return machine.run(("/bin/sh", "-c", line), ctx, None, None, None)
 
 
-async def exercise(runtime, label):
+async def exercise(machine, label):
     code = (
         "import sys,hashlib; "
         "print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())"
@@ -103,7 +100,7 @@ async def exercise(runtime, label):
     line = f"python3 -c {shlex.quote(code)}"
     for data in (None, b"", bytes(range(256)) * 1024):
         result = await asyncio.wait_for(
-            run_line(runtime, line, data, {}, "/home/user"), 30
+            run_line(machine, line, data, {}, "/home/user"), 30
         )
         assert result.exit_code == 0, result
         assert (
@@ -112,7 +109,7 @@ async def exercise(runtime, label):
         ), result
     for _ in range(6):
         result = await run_line(
-            runtime,
+            machine,
             "printf out; printf err >&2; exit 7",
             b"input",
             {},
@@ -132,7 +129,7 @@ async def exercise(runtime, label):
     start = time.monotonic()
     results = await asyncio.gather(
         *(
-            run_line(runtime, line, bytes([i]), {}, "/home/user")
+            run_line(machine, line, bytes([i]), {}, "/home/user")
             for i in range(6)
         )
     )
@@ -145,10 +142,10 @@ async def exercise(runtime, label):
     )
 
 
-async def wait_for_remote(runtime, command):
+async def wait_for_remote(machine, command):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        result = await run_line(runtime, command, None, {}, "/home/user")
+        result = await run_line(machine, command, None, {}, "/home/user")
         if result.exit_code == 0:
             return
         await asyncio.sleep(0.1)
@@ -157,14 +154,18 @@ async def wait_for_remote(runtime, command):
     )
 
 
-async def exercise_cancellation(runtime):
+async def exercise_cancellation(machine):
     workspace = Workspace(
         {
             "/home/user": (RAMVFS(), MountMode.EXEC),
         },
         mode=MountMode.EXEC,
         command_limits={"@line": Limit(timeout_seconds=5)},
-        runtimes=[runtime, "workspace"],
+        machines={machine.name: machine},
+        runtimes=[
+            MachineRuntime(["@line"], machine=machine.name),
+            "workspace",
+        ],
     )
     try:
         for mode in ("caller", "timeout"):
@@ -180,10 +181,10 @@ async def exercise_cancellation(runtime):
                 )
             )
             try:
-                await wait_for_remote(runtime, f"test -s {path}")
+                await wait_for_remote(machine, f"test -s {path}")
                 survivor = asyncio.create_task(
                     run_line(
-                        runtime,
+                        machine,
                         "sleep 1; printf survivor",
                         None,
                         {},
@@ -203,14 +204,14 @@ async def exercise_cancellation(runtime):
                 else:
                     assert (await task).exit_code == 124
                 await wait_for_remote(
-                    runtime, f"! kill -0 $(cat {path}) 2>/dev/null"
+                    machine, f"! kill -0 $(cat {path}) 2>/dev/null"
                 )
                 assert (await survivor).stdout == b"survivor"
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
                 await run_line(
-                    runtime,
+                    machine,
                     f"if test -s {path}; then kill -9 $(cat {path}) "
                     f"2>/dev/null || true; fi; rm -f {path}",
                     None,
@@ -227,13 +228,13 @@ async def main():
     key = os.environ["E2B_API_KEY"]
     sandbox = None
     bridge = None
-    runtime = None
+    machine = None
     workspace = None
     try:
         sandbox = await AsyncSandbox.create(api_key=key, timeout=1200)
         passed("sandbox_created", sandbox_id=sandbox.sandbox_id)
-        e2b = E2BRuntime(
-            config={"sandbox_id": sandbox.sandbox_id, "api_key": key}
+        e2b = E2BMachine(
+            "e2b", {"sandbox_id": sandbox.sandbox_id, "api_key": key}
         )
         await exercise(e2b, "python_e2b")
         await exercise_cancellation(e2b)
@@ -290,17 +291,21 @@ async def main():
                 username="user",
                 identity_file=str(identity),
             )
-            runtime = SSHRuntime(captures=["python3"], config=cfg)
-            await exercise(runtime, "python_ssh")
-            conn = runtime._conn
-            await run_line(runtime, "true", None, {}, "/home/user")
-            assert runtime._conn is conn
+            machine = SSHMachine("ssh", cfg)
+            await exercise(machine, "python_ssh")
+            conn = machine._conn
+            await run_line(machine, "true", None, {}, "/home/user")
+            assert machine._conn is conn
             passed("python_ssh_connection_reused")
             vfs = SSHVFS(SSHConfig(root="/home/user/work", **cfg))
             workspace = Workspace(
                 {"/home/user/work": vfs},
                 mode=MountMode.EXEC,
-                runtimes=[runtime, "workspace"],
+                machines={"ssh": machine},
+                runtimes=[
+                    MachineRuntime(["python3"], machine="ssh"),
+                    "workspace",
+                ],
             )
             result = await workspace.shell(
                 "cat > /home/user/work/output.txt", stdin=b"old"
@@ -392,7 +397,7 @@ async def main():
                     assert result["content"][0]["text"] == value, result
                 process.stdin.write_eof()
                 await asyncio.wait_for(process.wait(), 15)
-            assert runtime._conn is conn
+            assert machine._conn is conn
             passed("mcp_stdio_multiple_requests_on_reused_ssh_connection")
 
             # Keep the bridge available while the TypeScript twin exercises it.
@@ -414,8 +419,8 @@ async def main():
             passed("typescript_transport_checks")
             await workspace.close()
             workspace = None
-            await runtime.close()
-            runtime = None
+            await machine.close()
+            machine = None
             bridge.close()
             await bridge.wait_closed()
             bridge = None
@@ -433,8 +438,8 @@ async def main():
         try:
             if workspace is not None:
                 await workspace.close()
-            if runtime is not None:
-                await runtime.close()
+            if machine is not None:
+                await machine.close()
             if bridge is not None:
                 bridge.close()
                 await bridge.wait_closed()

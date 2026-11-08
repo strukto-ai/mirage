@@ -78,17 +78,23 @@ export interface Deny {
 }
 
 /**
- * Place a line on a runtime, the answer `preExecute` gives beside a Deny.
+ * Place a line or one command on a runtime, a machine or both: the answer
+ * `preExecute` gives for a line and `preCommand` for a command, beside a
+ * Deny.
  *
- * The runtime serves every command it captures on the line, as a
- * `routePolicy` verdict naming it does. A Deny at the stage outranks it,
- * and two policies placing one line on different runtimes refuse the
- * line, since neither choice is the line's. Mirrors the Python `Route`.
+ * The runtime serves every command it captures there, as a `routePolicy`
+ * verdict naming it does; the machine is where the machine runtime runs
+ * what it serves, over its entry's own machine. A Deny at the stage
+ * outranks it, and two policies placing one line on different runtimes or
+ * machines refuse it, since neither choice is the line's. Mirrors the
+ * Python `Route`.
  */
 export interface Route {
   kind: 'route'
-  /** The runtime entry's name. */
-  runtime: string
+  /** The runtime entry's name; absent leaves each command on its first capturer. */
+  runtime?: string
+  /** The machine's name under `machines:`; absent leaves each machine runtime on its own. */
+  machine?: string
   /** Why the line goes there, for `explain` to show; absent when the policy gives none. */
   reason?: string
   /** The policy that placed the line; the chain fills it in. */
@@ -480,21 +486,23 @@ export interface SessionScriptsQuery {
  * policy program prints, and what the server's entry points send
  * (`answerToDict`, which adds the policy that spoke). A deny or an ask
  * may leave the reason out for the default one; a route names its
- * runtime and may say why. Mirrors the Python `Answer`.
+ * runtime, its machine or both, and may say why. Mirrors the Python
+ * `Answer`.
  */
 export const Answer = z
   .strictObject({
     kind: z.enum(['deny', 'ask', 'route']),
     reason: z.string().nullable().optional(),
     runtime: z.string().nullable().optional(),
+    machine: z.string().nullable().optional(),
   })
   .superRefine((answer, check) => {
     if (answer.kind === 'route') {
-      if (!answer.runtime) {
-        check.addIssue({ code: 'custom', message: 'a route names its runtime' })
+      if (!answer.runtime && !answer.machine) {
+        check.addIssue({ code: 'custom', message: 'a route names its runtime or its machine' })
       }
-    } else if ((answer.runtime ?? null) !== null) {
-      check.addIssue({ code: 'custom', message: `a ${answer.kind} carries no runtime` })
+    } else if ((answer.runtime ?? null) !== null || (answer.machine ?? null) !== null) {
+      check.addIssue({ code: 'custom', message: `a ${answer.kind} carries no runtime or machine` })
     }
   })
 
@@ -883,7 +891,7 @@ export const VALIDITY: Readonly<
     ReadonlySet<string>
   >
 > = {
-  preCommand: new Set(['deny', 'ask']),
+  preCommand: new Set(['deny', 'ask', 'route']),
   postCommand: new Set(['deny', 'ask']),
   preExecute: new Set(['deny', 'ask', 'route']),
   preVfs: new Set(['deny', 'ask']),
@@ -962,7 +970,7 @@ export interface ShellNode {
 export interface CommandExplanation extends Explanation {
   readonly type: 'command'
   /** Every policy's answer to the command (`preCommand`). */
-  readonly answers: readonly (Deny | Ask)[]
+  readonly answers: readonly (Deny | Ask | Route)[]
   /** The program, as the gate read it. */
   readonly command: string
   /**
@@ -978,6 +986,8 @@ export interface CommandExplanation extends Explanation {
   readonly stderr: string
   /** The runtime entry that would run it, empty when the workspace runs it itself. */
   readonly runtime: string
+  /** The machine it would run on, `docker:tools`, empty when the workspace's own does. */
+  readonly machine: string
   /** The command's source text. */
   readonly text: string
   /** The lines it runs in turn (`$( )` in its words, a `bash -c` string), in source order. */

@@ -1,0 +1,216 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
+import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
+import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
+import type { Context } from '@struktoai/mirage-core/commands/config'
+import { isLineExecutor, isProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
+import { LanguageRuntime } from '@struktoai/mirage-core/runtime/language'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { DiskVFS } from '../../vfs/disk/disk.ts'
+import { Workspace } from '../../workspace.ts'
+import { FAKETIME_LIBRARIES } from '@struktoai/mirage-core/machine/constants'
+import { SandlockRuntime } from './runtime.ts'
+
+const DEC = new TextDecoder()
+
+const RESTRICTIONS: SessionProfile[] = [
+  { paths: { hide: ['/data/secret'] } },
+  { commands: { deny: [{ paths: ['/data/secret'], reason: 'x' }] } },
+  { mounts: new Map([['/data', { mode: MountMode.READ }]]) },
+]
+interface Capture {
+  argv: string[]
+  env: Record<string, string>
+  cwd: string
+  stdin: string
+}
+
+function execute(
+  runtime: SandlockRuntime,
+  argv: readonly string[],
+  cwd = '/',
+  ctx: Partial<Context> = {},
+) {
+  const run = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath(cwd), ...ctx }
+  return runtime.execute([], argv, run, { kind: 'process' })
+}
+
+describe.skipIf(process.platform === 'win32')('SandlockRuntime', () => {
+  let dir: string
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'mirage-sandlock-'))
+    await writeFile(
+      join(dir, 'sandlock'),
+      `#!${process.execPath}
+const args = process.argv.slice(2)
+if (args.at(-1) === 'wait') setInterval(() => {}, 1000)
+else {
+  let stdin = ''
+  process.stdin.setEncoding('utf8')
+  process.stdin.on('data', data => stdin += data)
+  process.stdin.on('end', () => console.log(JSON.stringify({argv: args, env: process.env, cwd: process.cwd(), stdin})))
+}
+`,
+      { mode: 0o755 },
+    )
+    vi.stubEnv('PATH', dir)
+  })
+  afterEach(async () => {
+    vi.unstubAllEnvs()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('preserves argv, cwd, stdin and confines requested environment to child flags', async () => {
+    vi.stubEnv('MIRAGE_HOST_ONLY', 'must-not-inherit')
+    const runtime = new SandlockRuntime({
+      config: {
+        env: { E: 'config', BASE: 'yes' },
+        fsReadable: ['/data'],
+        fsWritable: ['/work'],
+        maxMemory: '512M',
+      },
+    })
+    const argv = ['node', 'a b', '$(echo literal)', '', '--flag'] as const
+    const result = await execute(runtime, argv, dir, {
+      env: { E: 'request', LD_PRELOAD: '/guest-only.so' },
+      stdin: new TextEncoder().encode('input\n'),
+    })
+    expect(result.exitCode).toBe(0)
+    const data = JSON.parse(DEC.decode(result.stdout)) as Capture
+    expect(data.argv.slice(data.argv.indexOf('--') + 1)).toEqual(argv)
+    expect(data.argv.slice(1, 1 + runtime.policyArgv().length)).toEqual(runtime.policyArgv())
+    expect(data.argv).toContain('--clean-env')
+    expect(data.argv).toContain('E=request')
+    expect(data.argv).not.toContain('E=config')
+    expect(data.argv).toContain('BASE=yes')
+    expect(data.argv).toContain('LD_PRELOAD=/guest-only.so')
+    expect(data.env).not.toHaveProperty('MIRAGE_HOST_ONLY')
+    expect(data.env).not.toHaveProperty('LD_PRELOAD')
+    expect(data.env).not.toHaveProperty('E')
+    expect(data.cwd).toBe(await realpath(dir))
+    expect(data.stdin).toBe('input\n')
+  })
+
+  it('hands the system time to the child, or the host clock without libfaketime', async () => {
+    const library = join(dir, 'libfaketime.so.1')
+    await writeFile(library, '')
+    const saved = FAKETIME_LIBRARIES.splice(0, FAKETIME_LIBRARIES.length, library)
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        runtimes: [new SandlockRuntime({ captures: ['node'] })],
+        systemTime: '2026-03-02T09:00:00Z',
+      },
+    )
+    try {
+      const data = JSON.parse(DEC.decode((await ws.shell('node')).stdout)) as Capture
+      expect(data.argv).toContain(`LD_PRELOAD=${library}`)
+      expect(data.argv).toContain('FAKETIME_DONT_FAKE_MONOTONIC=1')
+      await rm(library)
+      const host = await ws.shell('node')
+      expect(host.exitCode).toBe(0)
+      expect((JSON.parse(DEC.decode(host.stdout)) as Capture).argv.join(' ')).not.toContain(
+        'FAKETIME',
+      )
+    } finally {
+      await ws.close()
+      FAKETIME_LIBRARIES.splice(0, FAKETIME_LIBRARIES.length, ...saved)
+      if (platform !== undefined) Object.defineProperty(process, 'platform', platform)
+    }
+  })
+
+  it('keeps shell interpretation explicit', async () => {
+    const runtime = new SandlockRuntime()
+    const result = await runtime.execute(
+      [],
+      [],
+      { stdin: null, flags: { c: 'node --version | cat' }, cwd: PathSpec.fromStrPath(dir) },
+      { kind: 'line' },
+    )
+    const data = JSON.parse(DEC.decode(result.stdout)) as Capture
+    expect(data.argv.slice(-4)).toEqual(['--', '/bin/sh', '-c', 'node --version | cat'])
+  })
+
+  it('registers process and shell support without claiming language or workspace filesystem APIs', () => {
+    const runtime = buildRuntime('sandlock')
+    expect(runtime).toBeInstanceOf(SandlockRuntime)
+    expect(runtime.captures).toEqual(['@external'])
+    expect([isProcessExecutor(runtime), isLineExecutor(runtime)]).toEqual([true, true])
+    expect(runtime).not.toBeInstanceOf(LanguageRuntime)
+    expect([runtime.filesystem, runtime.reach]).toEqual([[], 'process'])
+    expect(() => buildRuntime('sandlock', { config: { home: 'python3' } })).toThrow('home')
+  })
+
+  // A relative PATH entry is the host's directory, never the session's: a
+  // `sandlock` there must not stand in for the wrapper and run unconfined.
+  it('never runs a sandlock in the session directory', async () => {
+    const session = join(dir, 'session')
+    await mkdir(session)
+    await writeFile(join(session, 'sandlock'), '#!/bin/sh\necho planted\n', { mode: 0o755 })
+    vi.stubEnv('PATH', `.${delimiter}${dir}`)
+    const result = await execute(new SandlockRuntime(), ['node'], session)
+    const data = JSON.parse(DEC.decode(result.stdout)) as Capture
+    expect(data.argv.slice(-2)).toEqual(['--', 'node'])
+  })
+
+  it('reports an absent sandlock', async () => {
+    await rm(join(dir, 'sandlock'))
+    await expect(execute(new SandlockRuntime(), ['node'])).rejects.toThrow(
+      'needs `sandlock` on PATH',
+    )
+  })
+
+  it('rejects empty argv', async () => {
+    await expect(execute(new SandlockRuntime(), [])).rejects.toThrow('argv must not be empty')
+  })
+
+  it('cancels sandlock', async () => {
+    const controller = new AbortController()
+    const runtime = new SandlockRuntime()
+    const running = execute(runtime, ['wait'], '/', { signal: controller.signal })
+    const checked = expect(running).rejects.toMatchObject({ name: 'AbortError' })
+    controller.abort()
+    await checked
+    await runtime.close()
+  })
+
+  it.each(RESTRICTIONS)('refuses every line under a session restriction', async (profile) => {
+    const runtime = new SandlockRuntime({ captures: ['tool'] })
+    const ws = new Workspace(
+      { '/data': new DiskVFS({ root: dir }) },
+      { mode: MountMode.EXEC, profiles: { agent: profile }, runtimes: [runtime, 'workspace'] },
+    )
+    try {
+      const agent = await ws.session('agent', { profile: 'agent' })
+      const result = await agent.shell('tool run')
+      expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
+        126,
+        '',
+        'sandlock: Permission denied\n',
+      ])
+      const other = await ws.session('other')
+      expect((await other.shell('tool run')).exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+})

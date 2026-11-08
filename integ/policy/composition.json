@@ -755,7 +755,8 @@
           "slot": 0,
           "legal": [
             "ask",
-            "deny"
+            "deny",
+            "route"
           ]
         }
       }
@@ -1432,7 +1433,8 @@
           "slot": 0,
           "legal": [
             "ask",
-            "deny"
+            "deny",
+            "route"
           ]
         }
       }
@@ -1986,7 +1988,8 @@
           "slot": 0,
           "legal": [
             "ask",
-            "deny"
+            "deny",
+            "route"
           ]
         }
       }

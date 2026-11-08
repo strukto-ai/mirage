@@ -30,7 +30,6 @@ export const SAFE_SLASH = '∕'
 // reversible encoding with it.
 export const ESCAPE_LEAD = '⁄'
 
-const ENCODER = new TextEncoder()
 const DECODER = new TextDecoder()
 
 /** Answer one of mirage-rs's filename rules, its text as code points. */
@@ -48,9 +47,23 @@ export function isBlank(text: string): boolean {
   return sanitize({ op: 'blank', text: units(text) }) === true
 }
 
-/** Measure a string the way the filesystem does: in UTF-8 bytes. */
+/**
+ * Measure a string the way the filesystem does: in UTF-8 bytes, a lone
+ * surrogate as the three its replacement takes. Counted without encoding,
+ * since a session's frame measures every function body it holds.
+ */
 export function byteLength(text: string): number {
-  return ENCODER.encode(text).length
+  let bytes = text.length
+  for (let i = 0; i < text.length; i++) {
+    const unit = text.charCodeAt(i)
+    if (unit < 0x80) continue
+    if (unit < 0x800) bytes += 1
+    else if (unit >= 0xd800 && unit < 0xdc00 && (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+      bytes += 2
+      i++
+    } else bytes += 2
+  }
+  return bytes
 }
 
 /** Trim a string to fit a byte budget without splitting a character. */

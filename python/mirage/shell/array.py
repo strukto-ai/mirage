@@ -178,34 +178,3 @@ def array_set(arr: ShellArray, idx: int, value: str) -> None:
     elements[idx] = value
     if not ordered:
         arr.elements = dict(sorted(elements.items()))
-
-
-def array_with(arr: ShellArray, idx: int, value: str) -> ShellArray:
-    """A copy of ``arr`` with ``value`` assigned at ``idx``.
-
-    What a writer hands the session view: the session view speaks in
-    whole variables, so an element write states itself as the array the
-    write produces. Building it on a copy is what keeps a refusal from
-    leaving the element applied.
-
-    Args:
-        arr (ShellArray): the array to copy.
-        idx (int): a non-negative index.
-        value (str): the element value.
-    """
-    updated = arr.copy()
-    array_set(updated, idx, value)
-    return updated
-
-
-def array_unset(arr: ShellArray, idx: int) -> None:
-    """Clear one element, keeping the indices of the elements after it.
-
-    The extent stays at one past the highest assigned index, matching
-    how bash resolves ``arr[-1]``.
-
-    Args:
-        arr (ShellArray): the array, mutated in place.
-        idx (int): a non-negative index.
-    """
-    arr.elements.pop(idx, None)

@@ -275,7 +275,8 @@ class Composition:
                     routes.append(
                         {
                             "action": index,
-                            "runtime": units(route.runtime),
+                            "runtime": units(route.runtime or ""),
+                            "machine": units(route.machine or ""),
                         }
                     )
                 limits = []
@@ -328,7 +329,7 @@ class Composition:
             selected = None
         if result["conflict"]:
             routes = [self.actions[index] for index in result["conflict"]]
-            said = ", ".join(f"{r.policy} on {r.runtime}" for r in routes)
+            said = ", ".join(f"{r.policy} on {_placed(r)}" for r in routes)
             selected = Deny(
                 f"policies place the line on different runtimes: {said}",
                 policy=", ".join(dict.fromkeys(r.policy for r in routes)),
@@ -342,6 +343,20 @@ class Composition:
 
     def close(self) -> None:
         self.stream.cancel()
+
+
+def _placed(route: Route) -> str:
+    """Where a route places a line, as a conflict names it: its runtime,
+    its machine, or the runtime on the machine.
+
+    Args:
+        route (Route): the route.
+    """
+    if route.machine is None:
+        return route.runtime or ""
+    if route.runtime is None:
+        return f"machine {route.machine}"
+    return f"{route.runtime} on machine {route.machine}"
 
 
 def compose_settled(

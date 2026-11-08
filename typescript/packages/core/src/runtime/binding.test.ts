@@ -333,7 +333,7 @@ it('does not share process views by profile or follow reused session IDs', async
   }
 })
 
-it('refuses a native runtime before running with hidden files', async () => {
+it('refuses a machine runtime before running with hidden files', async () => {
   const runtime = new ShellProbe({ captures: ['@line'] })
   const ws = world([runtime])
   try {
@@ -354,7 +354,7 @@ it.each<[string, NetworkSetting, boolean, boolean]>([
   ['a domain list', { allowed_domains: ['example.com'] }, false, true],
   ['a listening policy', true, true, true],
 ])(
-  'refuses a native runtime under %s where the network is judged',
+  'refuses a machine runtime under %s where the network is judged',
   async (_name, network, listening, refused) => {
     const runtime = new ShellProbe({ captures: ['@line'] })
     const ws = new Workspace(

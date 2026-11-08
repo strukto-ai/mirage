@@ -15,9 +15,9 @@
 import { homedir } from 'node:os'
 import {
   MountMode,
+  MachineRuntime,
   S3VFS,
   SSHVFS,
-  SSHRuntime,
   Workspace,
   type S3Config,
   type SSHConfig,
@@ -81,13 +81,21 @@ async function show(ws: Workspace, command: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const runtime = new SSHRuntime({
-    captures: ['python3'],
-    config: { host: 'dev', hostname: HOSTNAME, username: 'ubuntu', identityFile: IDENTITY },
-  })
   const ws = new Workspace(
     { '/data': new S3VFS(dataConfig), [REMOTE_DIR]: new SSHVFS(projConfig) },
-    { mode: MountMode.EXEC, runtimes: [runtime, 'workspace'] },
+    {
+      mode: MountMode.EXEC,
+      machines: {
+        box: {
+          provider: 'ssh',
+          host: 'dev',
+          hostname: HOSTNAME,
+          username: 'ubuntu',
+          identityFile: IDENTITY,
+        },
+      },
+      runtimes: [new MachineRuntime({ captures: ['python3'], machine: 'box' }), 'workspace'],
+    },
   )
 
   try {
@@ -114,7 +122,6 @@ async function main(): Promise<void> {
 
     await show(ws, 'rm load.py points.csv result.json /data/points.csv')
   } finally {
-    await runtime.close()
     await ws.close()
   }
 }

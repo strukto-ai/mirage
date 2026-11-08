@@ -18,11 +18,11 @@ from typing import Literal, Protocol, TypeAlias
 
 from mirage.types import JsonValue
 
-EntryKind: TypeAlias = Literal["vfs", "cli", "runtime", "store"]
+EntryKind: TypeAlias = Literal["vfs", "cli", "runtime", "machine", "store"]
 """A kind whose entries hold a type's fields, some of them sealed."""
 
 ResourceKind: TypeAlias = Literal[
-    "vfs", "cli", "runtime", "store", "policy", "template"
+    "vfs", "cli", "runtime", "machine", "store", "policy", "template"
 ]
 """Every kind of saved config a store keeps."""
 
@@ -31,8 +31,8 @@ Fields: TypeAlias = dict[str, JsonValue]
 
 @dataclass(frozen=True)
 class Entry:
-    """A vfs, cli, runtime or store entry as the API answers it: sealed
-    fields by name only, sorted."""
+    """A vfs, cli, runtime, machine or store entry as the API answers it:
+    sealed fields by name only, sorted."""
 
     name: str
     type: str
