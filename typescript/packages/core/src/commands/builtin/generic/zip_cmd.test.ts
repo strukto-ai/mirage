@@ -37,3 +37,36 @@ const ROWS: [string, string, [number, string, string]][] = [
 it.each(ROWS)('zip option %s', async (_name, line, expected) => {
   expect(await shell(line)).toEqual(expected)
 })
+
+async function mounted(line: string): Promise<[number, string, string]> {
+  const ws = new Workspace(
+    { '/data/': new RAMVFS(), '/m/': new RAMVFS() },
+    { mode: MountMode.WRITE },
+  )
+  try {
+    const io = await ws.shell(line)
+    return [io.exitCode, DEC.decode(io.stdout), DEC.decode(io.stderr)]
+  } finally {
+    await ws.close()
+  }
+}
+
+it('refuses a mount root named on stdin like an operand', async () => {
+  const line = 'cd /data; echo /m | zip -q -@ o.zip; echo rc=$?'
+  expect(await mounted(line)).toEqual([
+    0,
+    'rc=1\n',
+    "zip: cannot read '/m': Device or resource busy\n",
+  ])
+})
+
+it('deletes a member named like a mount root', async () => {
+  const line = 'cd /data; echo x > m; zip -q a.zip m; cd /; zip -q -d /data/a.zip m; echo rc=$?'
+  expect((await mounted(line))[1]).toBe('rc=0\n')
+})
+
+it('carries names on stdin into a zip across mounts', async () => {
+  const line =
+    'echo a > /m/f; echo b > /m/g; echo /m/f | zip -q -@ /data/o.zip /m/g; unzip -Z1 /data/o.zip | sort'
+  expect((await mounted(line))[1]).toBe('m/f\nm/g\n')
+})

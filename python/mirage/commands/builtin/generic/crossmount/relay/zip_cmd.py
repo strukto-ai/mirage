@@ -30,6 +30,7 @@ from mirage.commands.builtin.utils.links import (
 )
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.spec.types import FlagValue
+from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
@@ -40,6 +41,7 @@ async def run_zip(
     flag_kwargs: dict[str, FlagValue],
     dispatch: DispatchFn,
     vfs: Files | None,
+    stdin: ByteSource | None = None,
 ) -> CrossResult:
     """Run a zip whose archive and operands span mounts.
 
@@ -55,6 +57,7 @@ async def run_zip(
         dispatch (DispatchFn): Workspace operation dispatcher.
         vfs (Files | None): The symlinks and mount boundaries the
             scan merges into each walk.
+        stdin (ByteSource | None): What ``-@``, ``-c`` and ``-z`` read.
     """
     prim = transfer_primitives(dispatch)
     links = link_view(vfs)
@@ -83,4 +86,5 @@ async def run_zip(
         flags=parse_flags(flag_kwargs),
         links=links,
         mounts=mount_view(vfs),
+        stdin=stdin,
     )

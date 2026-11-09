@@ -315,8 +315,11 @@ export class MountRootPolicy implements Policy {
 
     if (cmd === 'zip') {
       // The first operand is the archive being written, not a source;
-      // only what follows it is read.
-      const root = firstRoot(this.registry, operands.slice(1))
+      // only what follows it is read. Under -d they name members of the
+      // archive, not paths.
+      const root = lnFlagPresent(ctx.argv, 'd', '--delete')
+        ? null
+        : firstRoot(this.registry, operands.slice(1))
       if (root !== null) {
         return deny(`cannot read '${root.rawPath}': Device or resource busy`, ebusy(root))
       }

@@ -20,6 +20,7 @@ import { dispatchedReadTree } from '../../../generic_bind/files.ts'
 import { zipGeneric } from '../../zip_cmd.ts'
 import { crossOpts, flatScopes, statOp, streamOp } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
+import type { ByteSource } from '../../../../../io/types.ts'
 import { Files } from '../../../../../workspace/files.ts'
 import { linkLocation, linkView, mountView, owedNames } from '../../../utils/links.ts'
 
@@ -37,6 +38,8 @@ export async function runZip(
   dispatch: DispatchFn,
   // The symlinks and mount boundaries the scan merges into each walk.
   vfs?: Files,
+  // What -@, -c and -z read.
+  stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
   const links = linkView(vfs)
   const tree =
@@ -52,6 +55,7 @@ export async function runZip(
     flatScopes(scopes),
     {
       ...crossOpts(flagKwargs),
+      stdin,
       vfs: vfs ?? new Files(dispatch, null, null, { ledger: false }).servedBy(null),
     },
     {

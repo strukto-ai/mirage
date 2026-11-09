@@ -663,3 +663,38 @@ fn a_named_reject_file_takes_the_failed_hunks() {
     let refused = "patch: **** Can't create file /missing/r : No such file or directory\n";
     assert_eq!(err, refused);
 }
+
+const APPLIED: &str = "--- f\n+++ f\n@@ -1,3 +1,3 @@\n a\n-b\n+X\n c\n";
+
+#[test]
+fn batch_mode_does_not_undo_what_forward_skips() {
+    let mut host = Host::with(&[("f", "a\nX\nc\n")], APPLIED);
+    let (status, out, _) = patch(&mut host, r#"{"batch": true, "forward": true}"#);
+    assert_eq!(status, 1);
+    assert!(
+        out.contains("Reversed (or previously applied) patch detected!  Skipping patch.\n"),
+        "{out}"
+    );
+    assert_eq!(file(&host, "f").as_deref(), Some("a\nX\nc\n"));
+}
+
+#[test]
+fn a_huge_fuzz_costs_no_more_than_the_context_it_can_drop() {
+    let mut host = Host::with(&[("f", "a\nb\nc\n")], APPLIED);
+    assert_eq!(patch(&mut host, r#"{"fuzz": "9223372036854775807"}"#).0, 0);
+    assert_eq!(file(&host, "f").as_deref(), Some("a\nX\nc\n"));
+}
+
+#[test]
+fn numbered_backups_keep_counting_past_the_first_run_of_names() {
+    let names: Vec<(String, &str)> = (1..=70).map(|n| (format!("f.~{n}~"), "old\n")).collect();
+    let mut files: Vec<(&str, &str)> = names.iter().map(|(n, c)| (n.as_str(), *c)).collect();
+    files.push(("f", "a\nb\nc\n"));
+    let mut host = Host::with(&files, APPLIED);
+    assert_eq!(
+        patch(&mut host, r#"{"backup": true, "version": "numbered"}"#).0,
+        0
+    );
+    assert_eq!(file(&host, "f.~71~").as_deref(), Some("a\nb\nc\n"));
+    assert_eq!(file(&host, "f.~70~").as_deref(), Some("old\n"));
+}

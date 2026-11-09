@@ -64,6 +64,7 @@ class TarFlags:
     directories: tuple[PathSpec, ...] = ()
     typed: tuple[tuple[str, str], ...] = ()
     exclude: tuple["Exclusion | _ExcludeFile", ...] = ()
+    lists_after: tuple[int, ...] = ()
     one_file_system: bool = False
     append: bool = False
     update: bool = False
@@ -177,6 +178,13 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags | IOResult:
         else:
             anchored = name == "anchored"
             unanchored = name == "no_anchored"
+    lists_after: list[int] = []
+    changes = 0
+    for name, _ in fl.texts("directory", "files_from"):
+        if name == "directory":
+            changes += 1
+        else:
+            lists_after.append(changes)
     return TarFlags(
         create=fl.as_bool("create"),
         extract=fl.as_bool("extract"),
@@ -189,6 +197,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags | IOResult:
         directories=tuple(fl.as_paths("directory")),
         typed=typed,
         exclude=tuple(rules),
+        lists_after=tuple(lists_after),
         one_file_system=fl.as_bool("one_file_system"),
         append=fl.as_bool("append"),
         update=fl.as_bool("update"),
@@ -253,22 +262,26 @@ class _Names:
     """What the ``-T`` lists named.
 
     Args:
-        names (list[tuple[str, str | None]]): each name and the directory
-            a ``-C`` line above it set, if any.
+        names (list[tuple[str, PathSpec]]): each name and the directory
+            it is read in.
         notices (list[str]): what reading them said.
         status (int): the status those lines came to.
         failure (str | None): the line a list that cannot be read ends the
             run with.
     """
 
-    names: list[tuple[str, str | None]]
+    names: list[tuple[str, PathSpec]]
     notices: list[str]
     status: int
     failure: str | None = None
 
 
 async def _listed_names(
-    flags: TarFlags, stream: ReadStreamFn, stdin: ByteSource | None
+    flags: TarFlags,
+    stream: ReadStreamFn,
+    stdin: ByteSource | None,
+    directories: list[PathSpec],
+    cwd: PathSpec,
 ) -> _Names:
     """The names in every ``-T`` list: a line each, blank lines passed
     over, or one per NUL under ``--null``. A line that starts with a dash
@@ -278,11 +291,15 @@ async def _listed_names(
         flags (TarFlags): the parsed flags.
         stream (ReadStreamFn): reads a list.
         stdin (ByteSource | None): standard input.
+        directories (list[PathSpec]): each ``-C`` of the line, in order.
+        cwd (PathSpec): the working directory.
     """
-    names: list[tuple[str, str | None]] = []
+    names: list[tuple[str, PathSpec]] = []
     notices: list[str] = []
     status = 0
-    for source in flags.files_from:
+    for source, changes in zip(
+        flags.files_from, flags.lists_after, strict=True
+    ):
         try:
             data = await _whole(source, stream, stdin)
         except IsADirectoryError as exc:
@@ -291,7 +308,7 @@ async def _listed_names(
         except FS_ERRORS as exc:
             failure = cannot(source.raw_path, "stat", fs_strerror(exc))
             return _Names([], [], 0, failure)
-        base: str | None = None
+        base = directories[changes - 1] if changes else cwd
         separator = b"\0" if flags.null else b"\n"
         for number, raw in enumerate(data.split(separator), start=1):
             if not raw:
@@ -300,9 +317,11 @@ async def _listed_names(
             if flags.null or not line.startswith("-"):
                 names.append((line, base))
             elif line.startswith("--directory="):
-                base = line[len("--directory=") :]
+                base = PathSpec.from_str_path(
+                    line[len("--directory=") :], cwd=base
+                )
             elif line.startswith("-C") and len(line) > 2:
-                base = line[2:]
+                base = PathSpec.from_str_path(line[2:].lstrip(), cwd=base)
             else:
                 notices.append(
                     f"tar: {source.raw_path}:{number}: unrecognized option"
@@ -436,7 +455,7 @@ async def tar(
     if relay:
         archive = virtual_key(archive)
     directories = list(flags.directories)
-    listed = await _listed_names(flags, stream, stdin)
+    listed = await _listed_names(flags, stream, stdin, directories, cwd)
     if listed.failure is not None and not flags.sources:
         return None, IOResult(
             exit_code=constants.CREATE_ERROR_EXIT,
@@ -455,8 +474,13 @@ async def tar(
         "absolute": flags.absolute,
         "numeric": flags.numeric,
     }
+    rules = await _exclusions(flags, stream, stdin)
+    if isinstance(rules, str) and not flags.sources:
+        return None, IOResult(
+            exit_code=constants.CREATE_ERROR_EXIT,
+            stderr=format_records([rules, constants.FATAL_TRAILER]),
+        )
     if flags.sources:
-        rules = await _exclusions(flags, stream, stdin)
         unread = None if isinstance(rules, list) else rules
         leading = list(listed.notices)
         stored_time: int | None = None
@@ -467,14 +491,24 @@ async def tar(
             stored_time, warning = found
             if warning is not None:
                 leading.append(warning)
-        base = directories[-1] if directories else cwd
-        operands = [
-            *(
-                _listed_operand(name, within, base)
-                for name, within in listed.names
-            ),
-            *paths,
-        ]
+        named = [_listed_operand(name, base) for name, base in listed.names]
+        for operand in named:
+            if (
+                mounts is not None
+                and operand.walk_error is None
+                and mounts.is_root(operand.virtual)
+            ):
+                return None, IOResult(
+                    exit_code=constants.CREATE_ERROR_EXIT,
+                    stderr=format_records(
+                        [
+                            f"tar: {operand.raw_path}: Cannot open: "
+                            "Device or resource busy",
+                            constants.FATAL_TRAILER,
+                        ]
+                    ),
+                )
+        operands = [*named, *paths]
         plan = await plan_create(
             operands,
             archive=archive,
@@ -556,9 +590,18 @@ async def tar(
     else:
         refusal = await check_directories(directories, is_dir, stat)
         dest = directories[-1] if directories else None
+        exclusions: list[JsonValue] = [
+            {
+                "pattern": byte_view(rule.pattern),
+                "anchored": rule.anchored,
+                "wildcards": rule.wildcards,
+            }
+            for rule in (rules if isinstance(rules, list) else ())
+        ]
         config |= {
             "mode": "list" if flags.list_only else "extract",
             "probe": archive.walk_error is None,
+            "exclusions": exclusions,
             "selectors": _selector_views(listed, selectors),
             "wildcards": flags.wildcards,
             "unanchored": flags.unanchored,
@@ -574,16 +617,14 @@ async def tar(
     return hosted_stream("tar", config, host, io), io
 
 
-def _listed_operand(name: str, within: str | None, base: PathSpec) -> PathSpec:
+def _listed_operand(name: str, base: PathSpec) -> PathSpec:
     """A ``-T`` name as an operand, spelled as it was listed.
 
     Args:
         name (str): the name.
-        within (str | None): the directory a ``-C`` line set, if any.
-        base (PathSpec): what the rest resolve against.
+        base (PathSpec): the directory it is read in.
     """
-    root = base if within is None else PathSpec.from_str_path(within, cwd=base)
-    return replace(PathSpec.from_str_path(name, cwd=root), raw_path=name)
+    return replace(PathSpec.from_str_path(name, cwd=base), raw_path=name)
 
 
 async def tar_generic(

@@ -16,6 +16,10 @@ use crate::task::Host;
 const MAX_META: u64 = 1 << 30;
 
 pub(super) async fn run(host: &Host, config: &Config) -> i32 {
+    if config.abandon {
+        host.warn(&lines(&config.notices));
+        return config.status;
+    }
     let delete = config.mode == Mode::Delete;
     let to_stdout = config.archive == b"-";
     let opening = if to_stdout {
@@ -151,6 +155,10 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
             cut = true;
             break;
         }
+    }
+    if let Some(reply) = input.raw.error.take() {
+        host.warn(&open_failure(config, &reply, true));
+        return FAILED;
     }
     if cut {
         notices.push(b"tar: Unexpected EOF in archive".to_vec());

@@ -215,7 +215,7 @@ fn seek(lines: &[&[u8]], needle: &Needle<'_>, fuzz: i64, expected: i64, used: i6
 /// The fuzz levels worth trying, each one comparing less than the last.
 fn fuzz_steps(needle: &Needle<'_>, most: i64) -> Vec<i64> {
     let mut steps: Vec<i64> = Vec::new();
-    for fuzz in 0..=most {
+    for fuzz in 0..=most.min(needle.lead.max(needle.trail) as i64) {
         let seen = steps.last().map(|&last| compared_at(needle, last));
         if seen != Some(compared_at(needle, fuzz)) {
             steps.push(fuzz);
@@ -357,7 +357,7 @@ pub(super) fn section<'a>(
             }
             if let Some(other) = &other {
                 if seek(lines, other, fuzz, other.claimed - 1, 0).is_some() {
-                    if placing.batch {
+                    if placing.batch && !forward {
                         let again = Placing {
                             force: true,
                             batch: false,

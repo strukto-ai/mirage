@@ -36,6 +36,16 @@ const READ: u64 = 256 * 1024;
 /// How much output gathers before it goes to the host.
 const WINDOW: usize = 256 * 1024;
 
+/// One `--exclude` or `-X` pattern and how it matches.
+#[derive(Deserialize, Clone, Default)]
+#[serde(default, deny_unknown_fields)]
+struct Exclusion {
+    #[serde(deserialize_with = "crate::latin1")]
+    pattern: Vec<u8>,
+    anchored: bool,
+    wildcards: bool,
+}
+
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 enum Mode {
@@ -177,6 +187,8 @@ struct Config {
     numeric: bool,
     /// --mtime: the time every new member records.
     mtime: Option<i64>,
+    /// What a listing or an extraction leaves out.
+    exclusions: Vec<Exclusion>,
     /// --wildcards or --no-wildcards, when typed.
     wildcards: Option<bool>,
     /// --no-anchored: a selector may start after any slash.

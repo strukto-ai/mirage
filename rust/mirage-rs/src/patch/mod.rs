@@ -227,11 +227,14 @@ impl Files {
     /// The next numbered backup of a name, past the highest within reach.
     async fn numbered(&self, name: &[u8]) -> (bool, Vec<u8>) {
         let mut highest = 0;
-        for number in 1..=64 {
+        let mut number = 1;
+        // The search ends only after this many free numbers in a row.
+        while number <= highest + 64 {
             let candidate = [name, format!(".~{number}~").as_bytes()].concat();
             if self.stands(&candidate).await {
                 highest = number;
             }
+            number += 1;
         }
         let next = [name, format!(".~{}~", highest + 1).as_bytes()].concat();
         (highest > 0, next)

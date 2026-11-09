@@ -381,8 +381,13 @@ class MountRootPolicy(Policy):
                 )
         elif cmd == "zip":
             # The first operand is the archive being written, not a
-            # source; only what follows it is read.
-            root = first_root(self._registry, operands[1:])
+            # source; only what follows it is read. Under -d they name
+            # members of the archive, not paths.
+            root = (
+                None
+                if ln_flag_present(ctx.argv, "d", "--delete")
+                else first_root(self._registry, operands[1:])
+            )
             if root is not None:
                 return Deny(
                     f"cannot read '{root.raw_path}': Device or resource busy",

@@ -512,6 +512,18 @@ async fn open(host: &Host, typed: &[u8]) -> Result<(Vec<u8>, u64), Option<Vec<u8
     Err(None)
 }
 
+impl Config {
+    /// A run that tests `archive` and says nothing unless it finds damage.
+    pub(super) fn testing(archive: &[u8]) -> Config {
+        Config {
+            archive: archive.to_vec(),
+            t: true,
+            q: 2,
+            ..Config::default()
+        }
+    }
+}
+
 pub(super) async fn run(host: Host, mut config: Config) -> i32 {
     let (archive_line, stdout) = config.report();
     let typed = config.archive.clone();
@@ -1129,6 +1141,19 @@ async fn extract(
         } else {
             parent(&out_path).to_vec()
         };
+        if is_dir && freshen {
+            continue;
+        }
+        if !is_dir && (update || freshen) {
+            let stored = entry
+                .utc
+                .map_or_else(|| dos_epoch(entry.date, entry.time), i128::from);
+            match host.stat_time(&out_path).await {
+                None if freshen => continue,
+                Some((_, Some(held))) if stored <= i128::from(held) => continue,
+                _ => {}
+            }
+        }
         // A directory entry is the only record an empty directory leaves.
         let existed = is_dir && host.stat(&out_path).await.is_some();
         if !chain.is_empty() {
@@ -1146,15 +1171,6 @@ async fn extract(
         if let Some(text) = run.skips(entry, quiet) {
             host.warn(&text);
             continue;
-        }
-        if update || freshen {
-            match host.stat_time(&out_path).await {
-                None if freshen => continue,
-                Some((_, Some(held))) if dos_epoch(entry.date, entry.time) <= i128::from(held) => {
-                    continue;
-                }
-                _ => {}
-            }
         }
         let Some(target) = state.destination(run, out_path.clone()).await else {
             continue;

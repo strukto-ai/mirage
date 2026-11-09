@@ -478,3 +478,112 @@ fn an_update_extraction_keeps_a_newer_file_and_freshen_makes_none() {
     );
     assert!(!host.files.contains_key("/out/b.txt"));
 }
+
+#[test]
+fn a_delete_spares_what_exclude_and_include_keep_out() {
+    let mut host = sample();
+    let config = json!({
+        "archive": "z.zip",
+        "output": "z.zip",
+        "delete": true,
+        "patterns": ["*"],
+        "exclude": ["a.txt"],
+    });
+    assert_eq!(run(&mut host, "zip", config).0, 0);
+    assert_eq!(names_of(&mut host, "z.zip"), "a.txt\n");
+    let mut host = sample();
+    let config = json!({
+        "archive": "z.zip",
+        "output": "z.zip",
+        "delete": true,
+        "patterns": ["*"],
+        "include": ["a.txt"],
+    });
+    assert_eq!(run(&mut host, "zip", config).0, 0);
+    assert_eq!(names_of(&mut host, "z.zip"), "d/\nd/b.txt\n");
+}
+
+#[test]
+fn a_refresh_with_no_file_named_looks_at_what_the_archive_holds() {
+    let mut host = Host::with(&[("a.txt", "one\n"), ("b.txt", "two\n")], "");
+    let found = json!([at("a.txt", YEAR_2001), at("b.txt", YEAR_2001)]);
+    assert_eq!(zip(&mut host, "z.zip", found).0, 0);
+    let refresh =
+        json!({"archive": "z.zip", "output": "z.zip", "update": true, "refresh_all": true});
+    assert_eq!(run(&mut host, "zip", refresh.clone()).0, 12);
+    host.files.insert("a.txt".into(), b"NEW\n".to_vec());
+    host.mtimes.insert("a.txt".into(), YEAR_2001 + 100);
+    host.mtimes.insert("b.txt".into(), YEAR_2001);
+    assert_eq!(run(&mut host, "zip", refresh).0, 0);
+    let piped = unzip(&mut host, "z.zip", json!({"p": true, "members": ["a.txt"]}));
+    assert_eq!(piped.1, "NEW\n");
+}
+
+#[test]
+fn a_test_finds_damage_before_anything_changes() {
+    let mut host = sample();
+    let good = json!({"archive": "z.zip", "output": "z.zip", "test": true});
+    let (status, out, _) = run(&mut host, "zip", good.clone());
+    assert_eq!((status, out.as_str()), (0, "test of z.zip OK\n"));
+    let damaged = host.files["z.zip"].len() / 3;
+    host.files.get_mut("z.zip").expect("archive")[damaged] ^= 0xFF;
+    let before = host.files["z.zip"].clone();
+    let (status, out, err) = run(&mut host, "zip", good);
+    assert_eq!(status, 8);
+    assert!(out.ends_with("test of z.zip FAILED\n"), "{out}");
+    assert!(err.contains("original files unmodified"), "{err}");
+    assert_eq!(host.files["z.zip"], before);
+}
+
+#[test]
+fn a_move_removes_the_name_found_and_says_what_it_could_not() {
+    let mut host = Host::with(&[("link", "t\n"), ("target", "t\n")], "");
+    let mut entry = file("link", 2);
+    entry["path"] = json!("target");
+    entry["source"] = json!("link");
+    let config =
+        json!({"archive": "z.zip", "output": "z.zip", "move_files": true, "found": [entry]});
+    assert_eq!(run(&mut host, "zip", config).0, 0);
+    assert!(!host.files.contains_key("link"));
+    assert!(host.files.contains_key("target"));
+    let mut entry = file("target", 2);
+    entry["source"] = json!("gone");
+    let config =
+        json!({"archive": "y.zip", "output": "y.zip", "move_files": true, "found": [entry]});
+    let (status, _, err) = run(&mut host, "zip", config);
+    assert_eq!(
+        (status, err.as_str()),
+        (0, "\tzip warning: error deleting target\n")
+    );
+}
+
+#[test]
+fn a_comment_past_its_length_field_is_cut_to_fit() {
+    let mut host = sample();
+    let config = json!({
+        "archive": "z.zip",
+        "output": "z.zip",
+        "comment_archive": true,
+        "stdin_lines": ["x".repeat(70_000)],
+    });
+    assert_eq!(run(&mut host, "zip", config).0, 0);
+    let shown = unzip(&mut host, "z.zip", json!({"z": true})).1;
+    assert_eq!(
+        shown.len()
+            - "Archive:  z.zip
+"
+            .len(),
+        0xFFFF + 1
+    );
+}
+
+#[test]
+fn a_freshen_makes_no_directories() {
+    let mut host = sample();
+    assert_eq!(
+        unzip(&mut host, "z.zip", json!({"f": true, "base": "/out"})).0,
+        0
+    );
+    assert!(!host.directories.iter().any(|dir| dir.starts_with("/out/d")));
+    assert!(!host.files.contains_key("/out/d/b.txt"));
+}

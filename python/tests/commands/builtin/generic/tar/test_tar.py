@@ -159,3 +159,30 @@ async def test_tar_options_behave_as_pinned(
     line: str, expected: tuple[int, bytes, bytes]
 ) -> None:
     assert await _shell(SEEDED + line, {}) == expected
+
+
+async def _mounted(line: str) -> tuple[int, bytes, bytes]:
+    ws = Workspace(
+        {"/data": RAMVFS(), "/m": RAMVFS()},
+        mode=MountMode.WRITE,
+    )
+    try:
+        r = await ws.shell(line)
+        return (
+            r.exit_code,
+            await r.materialize_stdout(),
+            await r.materialize_stderr(),
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mount_root_on_a_names_list_is_refused_like_an_operand():
+    line = "cd /data; printf '/m\\n' > l; tar -cf o.tar -T l; echo rc=$?"
+    assert await _mounted(line) == (
+        0,
+        b"rc=2\n",
+        b"tar: /m: Cannot open: Device or resource busy\n"
+        b"tar: Error is not recoverable: exiting now\n",
+    )

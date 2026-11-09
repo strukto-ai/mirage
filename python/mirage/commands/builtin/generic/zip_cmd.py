@@ -10,6 +10,7 @@ from mirage.commands.builtin.generic.archive.walk import (
     recorded_stamp,
     scan_operand,
 )
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream_host import (
     StreamHost,
     hosted_stream,
@@ -146,11 +147,25 @@ async def zip_generic(
     operands = list(paths[1:])
     stdin_lines: list[str] = []
     if flags.names_from_stdin:
-        operands += [
+        named = [
             replace(PathSpec.from_str_path(line, cwd=cwd), raw_path=line)
             for line in await _stdin_lines(stdin)
             if line
         ]
+        for operand in named:
+            if (
+                mounts is not None
+                and operand.walk_error is None
+                and mounts.is_root(operand.virtual)
+            ):
+                line = (
+                    f"zip: cannot read '{operand.raw_path}': "
+                    "Device or resource busy"
+                )
+                return None, IOResult(
+                    exit_code=1, stderr=format_records([line])
+                )
+        operands += named
     elif flags.comment_members or flags.comment_archive:
         stdin_lines = await _stdin_lines(stdin)
     for path in () if flags.delete else operands:
@@ -200,6 +215,7 @@ async def zip_generic(
                 "kind": entry.kind,
                 "target": byte_view(entry.target),
                 "mtime": (await recorded_stamp(stat, read))[0],
+                "source": byte_view(entry.name_path),
             }
             if read is not None:
                 reads.append(read)
@@ -217,6 +233,7 @@ async def zip_generic(
         "quiet": flags.quiet,
         "update": flags.update,
         "freshen": flags.freshen,
+        "refresh_all": (flags.update or flags.freshen) and not operands,
         "delete": flags.delete,
         "patterns": [byte_view(path.raw_path) for path in operands]
         if flags.delete

@@ -93,7 +93,7 @@ export async function runRelay(
   if (cmdName === 'tar') return runTar(scopes, textArgs, flagKwargs, dispatch, cwd, vfs, stdin)
   if (cmdName === 'tee') return runTee(scopes, flagKwargs, dispatch, stdin, storageKey)
   if (cmdName === 'unzip') return runUnzip(scopes, textArgs, flagKwargs, dispatch, cwd)
-  if (cmdName === 'zip') return runZip(scopes, flagKwargs, dispatch, vfs)
+  if (cmdName === 'zip') return runZip(scopes, flagKwargs, dispatch, vfs, stdin)
   const builder = DISPATCH_BUILDERS.get(cmdName)
   if (builder !== undefined) {
     return runDispatch(

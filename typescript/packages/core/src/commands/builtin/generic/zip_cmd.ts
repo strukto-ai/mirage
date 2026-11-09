@@ -26,6 +26,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { linksOf, mountView } from '../utils/links.ts'
+import { formatRecords } from '../utils/output.ts'
 import { hostedStream, StreamHost } from '../utils/stream_host.ts'
 import { OTHER_FILESYSTEM, recordedStamp, scanOperand, type WalkFn } from './archive/walk.ts'
 
@@ -128,6 +129,11 @@ export async function zipGeneric(
     for (const line of await stdinLines(stdin)) {
       if (line === '') continue
       const spec = PathSpec.fromStrPath(line, undefined, ctx.cwd)
+      const mounts = mountView(ctx.vfs) ?? null
+      if (mounts !== null && spec.walkError === null && mounts.isRoot(spec.virtual)) {
+        const stderr = formatRecords([`zip: cannot read '${line}': Device or resource busy`])
+        return [null, new IOResult({ exitCode: 1, stderr })]
+      }
       operands.push(
         new PathSpec({
           virtual: spec.virtual,
@@ -184,6 +190,7 @@ export async function zipGeneric(
         kind: entry.kind,
         target: byteView(entry.target ?? ''),
         mtime: (await recordedStamp(deps.stat, read))[0],
+        source: byteView(entry.namePath),
       }
       if (read !== null) {
         reads.push(read)
@@ -204,6 +211,7 @@ export async function zipGeneric(
     quiet: flags.quiet,
     update: flags.update,
     freshen: flags.freshen,
+    refresh_all: (flags.update || flags.freshen) && operands.length === 0,
     delete: flags.delete,
     patterns: flags.delete ? operands.map((path) => byteView(path.rawPath)) : [],
     move_files: flags.moveFiles,

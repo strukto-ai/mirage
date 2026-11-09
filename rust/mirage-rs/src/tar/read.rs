@@ -13,7 +13,8 @@ use super::header::{self, BLOCK, Block, Kind, Member, Pax, Rows, padding};
 use super::options::Overwrites;
 use super::transform::Scope;
 use super::{
-    Codec, Config, FAILED, FATAL, Mode, TRAILER, WINDOW, escaped, lines, open_failure, read,
+    Codec, Config, Exclusion, FAILED, FATAL, Mode, TRAILER, WINDOW, escaped, lines, open_failure,
+    read,
 };
 use crate::Stream;
 use crate::glob::CompiledGlob;
@@ -120,7 +121,7 @@ impl<'h> Raw<'h> {
 
 /// The archive's bytes as tar reads them, decoded when compressed.
 pub(super) struct Input<'h> {
-    raw: Raw<'h>,
+    pub(super) raw: Raw<'h>,
     codec: Option<Box<dyn Stream>>,
     finished: bool,
     buf: Vec<u8>,
@@ -495,6 +496,7 @@ pub(super) struct Selection {
     wildcards: Option<bool>,
     unanchored: bool,
     found: Vec<bool>,
+    left_out: Vec<(Exclusion, Option<CompiledGlob>)>,
 }
 
 fn units(text: &[u8]) -> Vec<u32> {
@@ -518,7 +520,44 @@ impl Selection {
             globs,
             wildcards: config.wildcards,
             unanchored: config.unanchored,
+            left_out: config
+                .exclusions
+                .iter()
+                .map(|rule| {
+                    let glob = rule
+                        .wildcards
+                        .then(|| CompiledGlob::new(units(&rule.pattern)));
+                    (rule.clone(), glob)
+                })
+                .collect(),
         }
+    }
+
+    /// Whether a rule takes `name`: the rule read against each run of its
+    /// components, or only those from its start when anchored.
+    pub(super) fn excluded(&self, name: &[u8]) -> bool {
+        let name = trimmed(name);
+        self.left_out.iter().any(|(rule, glob)| {
+            let starts = std::iter::once(0).chain(
+                name.iter()
+                    .enumerate()
+                    .filter(|&(_, &byte)| byte == b'/' && !rule.anchored)
+                    .map(|(at, _)| at + 1),
+            );
+            starts.into_iter().any(|start| {
+                let tail = &name[start..];
+                let ends = tail
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, &byte)| byte == b'/')
+                    .map(|(at, _)| at)
+                    .chain([tail.len()]);
+                ends.into_iter().any(|end| match glob {
+                    Some(glob) => glob.matches(&units(&tail[..end])),
+                    None => tail[..end] == rule.pattern[..],
+                })
+            })
+        })
     }
 
     fn same(&self, index: usize, part: &[u8]) -> bool {
@@ -679,7 +718,7 @@ impl Run<'_, '_> {
             return input.skip(member.size).await;
         }
         let target = config.transformed(&member.name, Scope::Regular);
-        let (base, parts) = if config.absolute {
+        let (base, parts) = if config.absolute && config.strip == 0 {
             let joined = if target.starts_with(b"/") {
                 target.clone()
             } else {
@@ -965,7 +1004,7 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
             member.kind = Kind::Dir;
         }
         run.announce(&member.name);
-        if !run.selection.hit(&member.name) {
+        if !run.selection.hit(&member.name) || run.selection.excluded(&member.name) {
             if input.skip(member.size).await {
                 continue;
             }

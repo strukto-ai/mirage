@@ -6,7 +6,7 @@ use serde_json::{Value as Json, json};
 
 use super::escaped;
 use super::header::{self, BLOCK, Kind, RECORD};
-use crate::host::Host;
+use crate::host::{Fault, Host};
 
 fn run(host: &mut Host, config: Json) -> (i32, String, String) {
     let mut stream = crate::open("tar", config.to_string().as_bytes()).expect("opens");
@@ -420,4 +420,92 @@ fn a_transform_renames_what_it_matches_as_a_run_reads() {
         (0, String::new(), String::new())
     );
     assert_eq!(host.files["/out/z.txt"], b"one\n");
+}
+
+#[test]
+fn a_value_octal_cannot_hold_goes_in_base_256() {
+    let mut host = two();
+    let config = json!({
+        "archive": "a.tar",
+        "output": "a.tar",
+        "mtime": -1,
+        "members": [file("a.txt", 2, None)],
+        "typed": [["create", ""], ["owner", ":3000000"]],
+    });
+    assert_eq!(run(&mut host, config).0, 0);
+    let block = &host.files["a.tar"][..BLOCK];
+    assert_eq!(block[108..116], [0x80, 0, 0, 0, 0, 0x2d, 0xc6, 0xc0]);
+    assert_eq!(block[136..148], [0xFF; 12]);
+}
+
+#[test]
+fn an_exclusion_takes_a_name_any_of_its_directories_or_any_tail() {
+    let mut host = two();
+    let members = json!([file("a.txt", 2, None), file("b.txt", 3, None)]);
+    packed(&mut host, members);
+    let tar = host.files["a.tar"].clone();
+    let rule = |pattern: &str, anchored: bool| json!({"exclusions": [{"pattern": pattern, "anchored": anchored, "wildcards": true}]});
+    assert_eq!(read(&mut host, &tar, rule("a.*", false)).1, "b.txt\n");
+    assert_eq!(read(&mut host, &tar, rule("*", true)).1, "");
+    let selected = {
+        let mut options = rule("a.txt", false);
+        options["selectors"] = json!(["a.txt"]);
+        options
+    };
+    assert_eq!(
+        read(&mut host, &tar, selected),
+        (0, String::new(), String::new())
+    );
+}
+
+#[test]
+fn an_abandoned_update_leaves_the_archive_alone() {
+    let mut host = two();
+    packed(&mut host, json!([file("a.txt", 2, None)]));
+    let before = host.files["a.tar"].clone();
+    let config = json!({
+        "mode": "append",
+        "archive": "a.tar",
+        "output": "a.tar",
+        "abandon": true,
+        "status": 2,
+        "notices": ["tar: nope: No such file or directory"],
+        "members": [file("b.txt", 2, None)],
+    });
+    let (status, _, err) = run(&mut host, config);
+    assert_eq!(
+        (status, err.as_str()),
+        (2, "tar: nope: No such file or directory\n")
+    );
+    assert_eq!(host.files["a.tar"], before);
+}
+
+#[test]
+fn a_failed_read_leaves_the_archive_alone() {
+    let mut host = two();
+    let members = json!([file("a.txt", 2, None), file("b.txt", 3, None)]);
+    packed(&mut host, members);
+    let before = host.files["a.tar"].clone();
+    let fault = Fault {
+        after: BLOCK * 2,
+        errno: "EIO",
+        text: "Input/output error",
+    };
+    host.faults.insert("a.tar".into(), fault);
+    let (status, ..) = changed(&mut host, "delete", json!([]), json!(["a.txt"]));
+    assert_eq!(status, 2);
+    assert_eq!(host.files["a.tar"], before);
+}
+
+#[test]
+fn absolute_names_still_lose_stripped_components() {
+    let mut host = two();
+    packed(&mut host, json!([file("a.txt", 2, None)]));
+    let member = header::encode(b"/x/y/a.txt", Kind::File, 0, b"", &header::Stamp::default());
+    let mut tar = member;
+    tar.resize(RECORD, 0);
+    let typed = json!([["extract", ""], ["strip_components", "2"]]);
+    let options = json!({"mode": "extract", "absolute": true, "typed": typed});
+    assert_eq!(read(&mut host, &tar, options).0, 0);
+    assert!(host.files.contains_key("/out/a.txt"));
 }

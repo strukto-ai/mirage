@@ -108,3 +108,47 @@ async def test_zip_options_behave_as_pinned(
     line: str, expected: tuple[int, bytes, bytes]
 ) -> None:
     assert await _shell(line) == expected
+
+
+async def _mounted(line: str) -> tuple[int, bytes, bytes]:
+    ws = Workspace(
+        {"/data": RAMVFS(), "/m": RAMVFS()},
+        mode=MountMode.WRITE,
+    )
+    try:
+        r = await ws.shell(line)
+        return (
+            r.exit_code,
+            await r.materialize_stdout(),
+            await r.materialize_stderr(),
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mount_root_named_on_stdin_is_refused_like_an_operand():
+    line = "cd /data; echo /m | zip -q -@ o.zip; echo rc=$?"
+    assert await _mounted(line) == (
+        0,
+        b"rc=1\n",
+        b"zip: cannot read '/m': Device or resource busy\n",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_member_named_like_a_mount_root_can_be_deleted():
+    line = (
+        "cd /data; echo x > m; zip -q a.zip m; cd /; "
+        "zip -q -d /data/a.zip m; echo rc=$?"
+    )
+    assert (await _mounted(line))[1] == b"rc=0\n"
+
+
+@pytest.mark.asyncio
+async def test_names_on_stdin_reach_a_zip_across_mounts():
+    line = (
+        "echo a > /m/f; echo b > /m/g; "
+        "echo /m/f | zip -q -@ /data/o.zip /m/g; unzip -Z1 /data/o.zip | sort"
+    )
+    assert (await _mounted(line))[1] == b"m/f\nm/g\n"

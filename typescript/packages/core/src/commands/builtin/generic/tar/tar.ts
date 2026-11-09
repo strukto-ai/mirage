@@ -69,6 +69,7 @@ export interface TarFlags {
   directories: PathSpec[]
   typed: [string, string][]
   exclude: (Exclusion | ExcludeFile)[]
+  listsAfter: number[]
   oneFileSystem: boolean
   append: boolean
   update: boolean
@@ -164,6 +165,12 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags | IOResult 
       unanchored = name === 'no_anchored'
     }
   }
+  const listsAfter: number[] = []
+  let changes = 0
+  for (const [name] of fl.texts('directory', 'files_from')) {
+    if (name === 'directory') changes += 1
+    else listsAfter.push(changes)
+  }
   return {
     create: fl.asBool('create'),
     extract: fl.asBool('extract'),
@@ -176,6 +183,7 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags | IOResult 
     directories: fl.asPaths('directory'),
     typed,
     exclude: rules,
+    listsAfter,
     oneFileSystem: fl.asBool('one_file_system'),
     append: fl.asBool('append'),
     update: fl.asBool('update'),
@@ -194,7 +202,7 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags | IOResult 
 
 // What the -T lists named. Mirrors Python's `_Names`.
 interface Names {
-  readonly names: readonly (readonly [string, string | null])[]
+  readonly names: readonly (readonly [string, PathSpec])[]
   readonly notices: readonly string[]
   readonly status: number
   readonly failure: string | null
@@ -243,11 +251,13 @@ async function listedNames(
   flags: TarFlags,
   stream: ReadStreamFn,
   stdin: ByteSource | null,
+  directories: readonly PathSpec[],
+  cwd: PathSpec,
 ): Promise<Names> {
-  const names: [string, string | null][] = []
+  const names: [string, PathSpec][] = []
   const notices: string[] = []
   let status = 0
-  for (const source of flags.filesFrom) {
+  for (const [position, source] of flags.filesFrom.entries()) {
     let data: Uint8Array
     try {
       data = await whole(source, stream, stdin)
@@ -260,15 +270,18 @@ async function listedNames(
       const failure = cannot(source.rawPath, 'stat', String(fsStrerror(err)))
       return { names: [], notices: [], status: 0, failure }
     }
-    let base: string | null = null
+    const changes = flags.listsAfter[position] ?? 0
+    let base = changes > 0 ? (directories[changes - 1] ?? cwd) : cwd
     decodeText(data)
       .split(flags.null ? '\0' : '\n')
       .forEach((line, index) => {
         if (line === '') return
         if (flags.null || !line.startsWith('-')) names.push([line, base])
-        else if (line.startsWith('--directory=')) base = line.slice('--directory='.length)
-        else if (line.startsWith('-C') && line.length > 2) base = line.slice(2)
-        else {
+        else if (line.startsWith('--directory=')) {
+          base = PathSpec.fromStrPath(line.slice('--directory='.length), undefined, base)
+        } else if (line.startsWith('-C') && line.length > 2) {
+          base = PathSpec.fromStrPath(line.slice(2).trimStart(), undefined, base)
+        } else {
           notices.push(`tar: ${source.rawPath}:${String(index + 1)}: unrecognized option`)
           status = CREATE_ERROR_EXIT
         }
@@ -278,14 +291,8 @@ async function listedNames(
 }
 
 // A -T name as an operand, spelled as it was listed.
-function listedOperand(
-  name: string,
-  within: string | null,
-  base: PathSpec,
-  prefix: string,
-): PathSpec {
-  const root = within === null ? base : PathSpec.fromStrPath(within, undefined, base)
-  const virtual = PathSpec.fromStrPath(name, undefined, root).virtual
+function listedOperand(name: string, base: PathSpec, prefix: string): PathSpec {
+  const virtual = PathSpec.fromStrPath(name, undefined, base).virtual
   return new PathSpec({
     virtual,
     directory: virtual,
@@ -379,7 +386,7 @@ export async function tarGeneric(
         })
   const directories = flags.directories.map((dir) => makePathSpec(dir.virtual, prefix, dir))
   const stdin = ctx.stdin ?? null
-  const listed = await listedNames(flags, deps.stream, stdin)
+  const listed = await listedNames(flags, deps.stream, stdin, directories, ctx.cwd)
   const sources = flags.create || flags.append || flags.update
   if (listed.failure !== null && !sources) {
     return [
@@ -405,9 +412,18 @@ export async function tarGeneric(
     absolute: flags.absolute,
     numeric: flags.numeric,
   }
+  const rules = await exclusions(flags, deps.stream, stdin)
+  if (typeof rules === 'string' && !sources) {
+    return [
+      null,
+      new IOResult({
+        exitCode: CREATE_ERROR_EXIT,
+        stderr: formatRecords([rules, FATAL_TRAILER]),
+      }),
+    ]
+  }
   let host: StreamHost
   if (sources) {
-    const rules = await exclusions(flags, deps.stream, stdin)
     const leading = [...listed.notices]
     let stored: number | null = null
     if (flags.mtime !== null) {
@@ -416,11 +432,24 @@ export async function tarGeneric(
       stored = found[0]
       if (found[1] !== null) leading.push(found[1])
     }
-    const base = directories.at(-1) ?? ctx.cwd
-    const operands = [
-      ...listed.names.map(([name, within]) => listedOperand(name, within, base, prefix)),
-      ...paths,
-    ]
+    const named = listed.names.map(([name, base]) => listedOperand(name, base, prefix))
+    const mounts = mountView(ctx.vfs) ?? null
+    const root = named.find(
+      (operand) => mounts !== null && operand.walkError === null && mounts.isRoot(operand.virtual),
+    )
+    if (root !== undefined) {
+      return [
+        null,
+        new IOResult({
+          exitCode: CREATE_ERROR_EXIT,
+          stderr: formatRecords([
+            `tar: ${root.rawPath}: Cannot open: Device or resource busy`,
+            FATAL_TRAILER,
+          ]),
+        }),
+      ]
+    }
+    const operands = [...named, ...paths]
     const plan = await planCreate(operands, {
       archive,
       exclude: typeof rules === 'string' ? [] : rules,
@@ -496,6 +525,11 @@ export async function tarGeneric(
     const refusal = await checkDirectories(directories, deps.isDir, deps.stat)
     Object.assign(config, {
       mode: flags.list ? 'list' : 'extract',
+      exclusions: (typeof rules === 'string' ? [] : rules).map((rule) => ({
+        pattern: byteView(rule.pattern),
+        anchored: rule.anchored,
+        wildcards: rule.wildcards,
+      })),
       probe: archive.walkError === null,
       selectors: selectorViews(listed, texts),
       wildcards: flags.wildcards,

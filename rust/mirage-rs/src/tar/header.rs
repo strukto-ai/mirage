@@ -346,11 +346,19 @@ fn seconds(value: &[u8]) -> Option<i64> {
     Some(seconds - i64::from(below))
 }
 
-/// `value` as an octal field of `width` digits and its NUL, the low bits
-/// where it does not fit.
-fn octal(value: u64, width: usize) -> Vec<u8> {
-    let digits = format!("{:0width$o}", value & ((1u64 << (3 * width)) - 1));
-    [digits.as_bytes(), b"\0"].concat()
+/// `value` as a field of `width` octal digits and its NUL or, where those
+/// cannot hold it, in base 256: two's complement with the top bit set.
+fn numeric(value: i64, width: usize) -> Vec<u8> {
+    if (0..1i64 << (3 * width)).contains(&value) {
+        return [format!("{value:0width$o}").as_bytes(), b"\0"].concat();
+    }
+    let mut field = vec![if value < 0 { 0xFF } else { 0 }; width + 1];
+    let bytes = value.to_be_bytes();
+    let kept = bytes.len().min(field.len());
+    let from = field.len() - kept;
+    field[from..].copy_from_slice(&bytes[bytes.len() - kept..]);
+    field[0] |= 0x80;
+    field
 }
 
 /// The block tar writes for one member.
@@ -362,15 +370,15 @@ fn head(name: &[u8], flag: u8, mode: u32, size: u64, target: &[u8], stamp: &Stam
         100,
         format!("{:07o}\0", stamp.mode.unwrap_or(mode)).as_bytes(),
     );
-    put(108, &octal(stamp.uid, 7));
-    put(116, &octal(stamp.gid, 7));
+    put(108, &numeric(stamp.uid as i64, 7));
+    put(116, &numeric(stamp.gid as i64, 7));
     if size < OCTAL_SIZE {
         put(124, format!("{size:011o}\0").as_bytes());
     } else {
         put(124, &[0x80, 0, 0, 0]);
         put(128, &size.to_be_bytes());
     }
-    put(136, &octal(stamp.mtime.max(0) as u64, 11));
+    put(136, &numeric(stamp.mtime, 11));
     put(148, b"        ");
     put(156, &[flag]);
     put(157, &target[..target.len().min(FIELD)]);

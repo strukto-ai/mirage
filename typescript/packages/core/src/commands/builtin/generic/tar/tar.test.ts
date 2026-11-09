@@ -126,3 +126,25 @@ const ROWS: [string, string, [number, string, string]][] = [
 it.each(ROWS)('tar option %s', async (_name, line, expected) => {
   expect(await shell(SEEDED + line, {})).toEqual(expected)
 })
+
+async function mounted(line: string): Promise<[number, string, string]> {
+  const ws = new Workspace(
+    { '/data/': new RAMVFS(), '/m/': new RAMVFS() },
+    { mode: MountMode.WRITE },
+  )
+  try {
+    const io = await ws.shell(line)
+    return [io.exitCode, DEC.decode(io.stdout), DEC.decode(io.stderr)]
+  } finally {
+    await ws.close()
+  }
+}
+
+it('refuses a mount root on a names list like an operand', async () => {
+  const line = "cd /data; printf '/m\\n' > l; tar -cf o.tar -T l; echo rc=$?"
+  expect(await mounted(line)).toEqual([
+    0,
+    'rc=2\n',
+    'tar: /m: Cannot open: Device or resource busy\ntar: Error is not recoverable: exiting now\n',
+  ])
+})
