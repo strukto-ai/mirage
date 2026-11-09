@@ -436,6 +436,27 @@ fn a_rename_that_reaches_a_parent_stays_below_the_root() {
 }
 
 #[test]
+fn a_renamed_member_loses_its_parents_before_its_strip() {
+    let mut host = Host::with(&[], "");
+    let tar = [
+        member("bundle-../x", (0, b"")),
+        member("bundle-../d/e/y", (0, b"")),
+        vec![0; 2 * BLOCK],
+    ]
+    .concat();
+    let typed = json!([
+        ["extract", ""],
+        ["transform", "s/^bundle-//"],
+        ["strip_components", "1"]
+    ]);
+    let (status, _, err) = read(&mut host, &tar, json!({"mode": "extract", "typed": typed}));
+    assert_eq!(status, 0);
+    assert_eq!(err, "tar: Removing leading `../' from member names\n");
+    assert_eq!(host.files["/out/e/y"], b"hello\n");
+    assert!(!host.files.contains_key("/out/x"));
+}
+
+#[test]
 fn a_link_to_nothing_counts_as_an_old_file() {
     let mut host = Host::with(&[], "");
     host.links.insert("/out/x".into(), "/out/gone".into());

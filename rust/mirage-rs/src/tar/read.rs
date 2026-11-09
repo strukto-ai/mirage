@@ -707,9 +707,14 @@ impl Run<'_, '_> {
             .collect()
     }
 
-    /// One member, its data read past or taken; false when the input ended
-    /// inside it.
-    async fn member(&mut self, input: &mut Input<'_>, member: &Member) -> bool {
+    /// One member under the name `--transform` gave it, its data read past
+    /// or taken; false when the input ended inside it.
+    async fn member(
+        &mut self,
+        input: &mut Input<'_>,
+        member: &Member,
+        mut target: Vec<u8>,
+    ) -> bool {
         let (config, host) = (self.config, self.host);
         if config.mode == Mode::List {
             let mut row = if config.verbose {
@@ -727,7 +732,6 @@ impl Run<'_, '_> {
             self.failed = true;
             return input.skip(member.size).await;
         }
-        let mut target = config.transformed(&member.name, Scope::Regular);
         if !config.absolute {
             let lost = prefix(&target).len();
             target.drain(..lost);
@@ -1017,7 +1021,8 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
         if member.kind == Kind::File && member.name.ends_with(b"/") {
             member.kind = Kind::Dir;
         }
-        run.announce(&config.transformed(&member.name, Scope::Regular));
+        let target = config.transformed(&member.name, Scope::Regular);
+        run.announce(&target);
         if !run.selection.hit(&member.name) || run.selection.excluded(&member.name) {
             if input.skip(member.size).await {
                 continue;
@@ -1029,7 +1034,7 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
             host.warn(&lines(&config.refusal));
             return FAILED;
         }
-        if !run.member(&mut input, &member).await {
+        if !run.member(&mut input, &member, target).await {
             cut = true;
             break;
         }
