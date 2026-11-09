@@ -775,7 +775,8 @@ export async function handleSelect(
       mergedIo = await mergedIo.merge(io)
       if (session.errexitExiting) break
     } catch (sig) {
-      if (!(sig instanceof LoopSignal)) throw sig
+      if (!isUnwinding(sig)) throw sig
+      if (!(sig instanceof LoopSignal)) throw await carried(sig, chainStreams(allStdout), mergedIo)
       mergedIo = await absorbed(sig, allStdout, mergedIo)
       if (sig instanceof BreakSignal) break
     }

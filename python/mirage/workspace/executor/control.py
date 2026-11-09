@@ -981,6 +981,8 @@ async def handle_select(
             merged_io = await _absorbed(sig, all_stdout, merged_io)
             if isinstance(sig, BreakSignal):
                 break
+        except UNWINDING as sig:
+            raise await carried(sig, _chain_streams(all_stdout), merged_io)
         else:
             merged_io = await merged_io.merge(io)
             _keep(all_stdout, stdout)
