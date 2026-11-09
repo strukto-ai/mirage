@@ -192,6 +192,7 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
       username,
       password,
       use_ssl: false,
+      trash_folder: 'Trash',
     })
     const installs: Record<string, string> = {
       himalaya: 'integ@example.com',
