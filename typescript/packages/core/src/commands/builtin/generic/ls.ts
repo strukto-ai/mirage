@@ -79,9 +79,6 @@ import { engineConfig } from './sort.ts'
 export const LS_OK = 0
 export const LS_MINOR_PROBLEM = 1
 export const LS_FAILURE = 2
-// The width and tab stops a listing in columns takes when nothing names them.
-export const LINE_WIDTH = 80
-export const TAB_SIZE = 8
 
 // How a name prints under the line's quoting style.
 type Quote = (name: string) => string
@@ -1071,16 +1068,6 @@ function scanValues(
     tabsize,
     warnings: warnings.map((w) => textView(w)),
   }
-}
-
-/**
- * The indicator style a line asks for: the last of -F/--classify[=WHEN], -p,
- * --file-type and --indicator-style wins, and every one is checked on the
- * way, as GNU checks each value while it reads the options (coreutils 9.7).
- * Mirrors Python's indicator_flag.
- */
-export function indicatorFlag(fl: FlagView): LsIndicator {
-  return scanValues(fl, INDICATOR_DESTS).indicator
 }
 
 /**

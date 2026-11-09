@@ -600,28 +600,16 @@ export async function handleRedirect(
   }
 }
 
-async function runRedirects(
-  owned: SharedInput[],
-  executeNode: ExecuteNodeFn,
-  dispatch: DispatchFn,
-  command: TSNodeLike | null,
-  redirects: readonly Redirect[],
+/**
+ * The descriptors a command starts from, before its redirections: what each
+ * reads, where each writes, and the closed ones. Mirrors Python's
+ * `_open_descriptors`.
+ */
+function openDescriptors(
   context: EvaluationContext,
-  stdin: ByteSource | null = null,
-  callStack: CallStack | null = null,
-  captureInput = false,
-  sink?: JobConsole,
-  expand?: (redirect: Redirect) => Promise<Redirect>,
-  guard?: RedirectGuard,
-  name = '',
-  args: readonly string[] = [],
-  // Whether bash forks to run the command, so a closed pipe ends it alone.
-  forked = false,
-  follow: ((path: string) => string) | null = null,
-): Promise<RedirectResult> {
+  stdin: ByteSource | null,
+): [Map<number, Input>, Map<number, FdDest>, Set<number>] {
   const session = context.session
-  const badFd = unsupportedDescriptor(redirects)
-  if (badFd !== null) return shellFailure(badDescriptorLine(badFd))
   const inputs = new Map<number, Input>([
     [0, share(stdin)],
     [1, UNREADABLE],
@@ -656,6 +644,185 @@ async function runRedirects(
     outputs.set(fd, descriptorOutput(descriptor))
     if (descriptor.identity === EXEC_CLOSED) closed.add(fd)
   }
+  return [inputs, outputs, closed]
+}
+
+/**
+ * The recorder a command's output goes through, bound to its files. Mirrors
+ * Python's `_output_recorder`.
+ */
+function outputRecorder(
+  dispatch: DispatchFn,
+  outputs: Map<number, FdDest>,
+  files: readonly FileDescription[],
+  piped: ReadonlySet<number>,
+  sink: JobConsole | undefined,
+  command: TSNodeLike | null,
+  follow: ((path: string) => string) | null,
+): PipeRecorder {
+  const streams = new Map<Channel, PathSpec>()
+  const forward = new Map<Channel, Channel>()
+  for (const [fd, channel] of [
+    [1, Channel.STDOUT],
+    [2, Channel.STDERR],
+  ] as const) {
+    const target = outputs.get(fd)
+    if (target === TO_STDOUT) forward.set(channel, Channel.STDOUT)
+    else if (target === TO_STDERR) forward.set(channel, Channel.STDERR)
+    else if (target instanceof FileDescription && target.pipe) streams.set(channel, target.scope)
+  }
+  const live = streams.size > 0 || piped.size > 0
+  const recorder = new PipeRecorder(
+    dispatch,
+    streams,
+    live ? forward : new Map<Channel, Channel>(),
+    sink ?? null,
+    live,
+  )
+  for (const file of files) {
+    if (file.source !== null) continue
+    for (const [fd, channel] of [
+      [1, Channel.STDOUT],
+      [2, Channel.STDERR],
+    ] as const) {
+      if (outputs.get(fd) === file) {
+        file.emit = (data) => recorder.emitLevel(channel, data)
+        break
+      }
+    }
+  }
+  // What the command writes as it runs (a group's, a loop's, a function's
+  // statements) goes into its file as it is written, its stderr too when it
+  // shares the description (`> f 2>&1`); an op that reaches the file first
+  // commits what went in (`hold`). A stderr that opened the same file again
+  // (`> f 2> f`) keeps both waiting, so each write lands at its own
+  // description's offset.
+  const opened = outputs.get(1)
+  const errs = outputs.get(2)
+  if (
+    opened instanceof FileDescription &&
+    files.includes(opened) &&
+    opened.source === null &&
+    !opened.pipe
+  ) {
+    const landed = followed(opened.scope, follow)
+    recorder.outputFile = landed
+    if (
+      command !== null &&
+      opened.opened &&
+      (errs === opened ||
+        !(errs instanceof FileDescription) ||
+        !oneFile(errs.scope, opened.scope, follow))
+    ) {
+      opened.landed = PathSpec.fromStrPath(landed)
+      recorder.outputFile = opened
+      recorder.streamTo(opened)
+      if (errs === opened) recorder.streamTo(opened, Channel.STDERR)
+    }
+  }
+  return recorder
+}
+
+/**
+ * Settle how the command's output reaches its files as it drains. Mirrors
+ * Python's `_before_drain`.
+ */
+async function beforeDrain(
+  recorder: PipeRecorder,
+  result: RedirectResult,
+  outputs: Map<number, FdDest>,
+  files: readonly FileDescription[],
+  name: string,
+): Promise<void> {
+  const refused = result[2].refused
+  const errs = outputs.get(2)
+  const target = outputs.get(1)
+  const [stdout, , ran] = result
+  // A command reading the file it writes (`cat f >> f`, `grep -r x
+  // d > d/f`) would read its own output back.
+  if (refused) await recorder.finishWriter()
+  else if (
+    target instanceof FileDescription &&
+    stdout !== null &&
+    !(stdout instanceof Uint8Array && stdout.byteLength === 0) &&
+    !(
+      (STREAM_OUTPUT_BUILTINS.has(name) || result[1].producer?.native === true) &&
+      ownerPrefix(
+        ran.paths.map((p) => p.virtual),
+        target.scope.virtual,
+      ) === null
+    )
+  )
+    await recorder.finishWriter()
+  // A program's stderr goes into its own file as it is written too.
+  if (
+    !refused &&
+    result[1].producer?.native === true &&
+    recorder.chunks.length === 0 &&
+    errs instanceof FileDescription &&
+    errs !== target &&
+    files.includes(errs) &&
+    errs.source === null &&
+    !errs.pipe
+  )
+    recorder.streamTo(errs, Channel.STDERR)
+}
+
+/**
+ * Hand a command's routed output to its console, or keep it. Resolves to the
+ * stdout the caller still has to take. Mirrors Python's `_deliver_routed`.
+ */
+async function deliverRouted(
+  routed: readonly [Channel | Inherited, ByteSource][],
+  sink: JobConsole | undefined,
+  io: IOResult,
+): Promise<ByteSource | null> {
+  let stdout: ByteSource | null = null
+  io.stderr = null
+  const kept: [Channel, ByteSource][] = []
+  for (const [key, data] of routed) {
+    if (key instanceof Inherited) {
+      if (!(await deliver(sink ?? null, key, data, currentCaller().enclosing)))
+        kept.push([key.channel, data])
+    } else if (sink !== undefined) {
+      for await (const part of byteChunks(data)) await sink.emit(key, part)
+    } else kept.push([key, data])
+  }
+  if (sink !== undefined) {
+    for (const [channel, data] of kept)
+      for await (const part of byteChunks(data)) await sink.emit(channel, part)
+  } else {
+    ;[stdout, io.stderr] = await spooledPair(
+      asyncChain(kept.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d)),
+      asyncChain(kept.filter(([c]) => c !== Channel.STDOUT).map(([, d]) => d)),
+    )
+  }
+  return stdout
+}
+
+async function runRedirects(
+  owned: SharedInput[],
+  executeNode: ExecuteNodeFn,
+  dispatch: DispatchFn,
+  command: TSNodeLike | null,
+  redirects: readonly Redirect[],
+  context: EvaluationContext,
+  stdin: ByteSource | null = null,
+  callStack: CallStack | null = null,
+  captureInput = false,
+  sink?: JobConsole,
+  expand?: (redirect: Redirect) => Promise<Redirect>,
+  guard?: RedirectGuard,
+  name = '',
+  args: readonly string[] = [],
+  // Whether bash forks to run the command, so a closed pipe ends it alone.
+  forked = false,
+  follow: ((path: string) => string) | null = null,
+): Promise<RedirectResult> {
+  const session = context.session
+  const badFd = unsupportedDescriptor(redirects)
+  if (badFd !== null) return shellFailure(badDescriptorLine(badFd))
+  const [inputs, outputs, closed] = openDescriptors(context, stdin)
   let deferred: FileDescription | null = null
   let openingStderr: FdDest | undefined = TO_STDERR
   const failed = async (
@@ -852,66 +1019,7 @@ async function runRedirects(
     }
   }
   redirects = expanded
-  const streams = new Map<Channel, PathSpec>()
-  const forward = new Map<Channel, Channel>()
-  for (const [fd, channel] of [
-    [1, Channel.STDOUT],
-    [2, Channel.STDERR],
-  ] as const) {
-    const target = outputs.get(fd)
-    if (target === TO_STDOUT) forward.set(channel, Channel.STDOUT)
-    else if (target === TO_STDERR) forward.set(channel, Channel.STDERR)
-    else if (target instanceof FileDescription && target.pipe) streams.set(channel, target.scope)
-  }
-  const live = streams.size > 0 || piped.size > 0
-  const recorder = new PipeRecorder(
-    dispatch,
-    streams,
-    live ? forward : new Map<Channel, Channel>(),
-    sink ?? null,
-    live,
-  )
-  for (const file of files) {
-    if (file.source !== null) continue
-    for (const [fd, channel] of [
-      [1, Channel.STDOUT],
-      [2, Channel.STDERR],
-    ] as const) {
-      if (outputs.get(fd) === file) {
-        file.emit = (data) => recorder.emitLevel(channel, data)
-        break
-      }
-    }
-  }
-  // What the command writes as it runs (a group's, a loop's, a function's
-  // statements) goes into its file as it is written, its stderr too when it
-  // shares the description (`> f 2>&1`); an op that reaches the file first
-  // commits what went in (`hold`). A stderr that opened the same file again
-  // (`> f 2> f`) keeps both waiting, so each write lands at its own
-  // description's offset.
-  const opened = outputs.get(1)
-  const errs = outputs.get(2)
-  if (
-    opened instanceof FileDescription &&
-    files.includes(opened) &&
-    opened.source === null &&
-    !opened.pipe
-  ) {
-    const landed = followed(opened.scope, follow)
-    recorder.outputFile = landed
-    if (
-      command !== null &&
-      opened.opened &&
-      (errs === opened ||
-        !(errs instanceof FileDescription) ||
-        !oneFile(errs.scope, opened.scope, follow))
-    ) {
-      opened.landed = PathSpec.fromStrPath(landed)
-      recorder.outputFile = opened
-      recorder.streamTo(opened)
-      if (errs === opened) recorder.streamTo(opened, Channel.STDERR)
-    }
-  }
+  const recorder = outputRecorder(dispatch, outputs, files, piped, sink, command, follow)
   const streamed: Caller['streamed'] = [
     ...currentCaller().streamed,
     ...[...new Set(recorder.bound.values())].map(
@@ -974,36 +1082,7 @@ async function runRedirects(
         refused = result[2].refused
         await runWithCaller({ ...currentCaller(), streamed }, () =>
           runWithRedirectPaths(command, targets, async () => {
-            const target = outputs.get(1)
-            const [stdout, , ran] = result
-            // A command reading the file it writes (`cat f >> f`, `grep -r x
-            // d > d/f`) would read its own output back.
-            if (refused) await recorder.finishWriter()
-            else if (
-              target instanceof FileDescription &&
-              stdout !== null &&
-              !(stdout instanceof Uint8Array && stdout.byteLength === 0) &&
-              !(
-                (STREAM_OUTPUT_BUILTINS.has(name) || result[1].producer?.native === true) &&
-                ownerPrefix(
-                  ran.paths.map((p) => p.virtual),
-                  target.scope.virtual,
-                ) === null
-              )
-            )
-              await recorder.finishWriter()
-            // A program's stderr goes into its own file as it is written too.
-            if (
-              !refused &&
-              result[1].producer?.native === true &&
-              recorder.chunks.length === 0 &&
-              errs instanceof FileDescription &&
-              errs !== target &&
-              files.includes(errs) &&
-              errs.source === null &&
-              !errs.pipe
-            )
-              recorder.streamTo(errs, Channel.STDERR)
+            await beforeDrain(recorder, result, outputs, files, name)
             const [, execIo] = await drained(recorder, ...result)
             io = execIo
             await recorder.finishWriter()
@@ -1154,25 +1233,7 @@ async function runRedirects(
     }
     if (command === null) await writeFiles()
     else await runWithRedirectPaths(command, targets, writeFiles)
-    io.stderr = null
-    const kept: [Channel, ByteSource][] = []
-    for (const [key, data] of routed) {
-      if (key instanceof Inherited) {
-        if (!(await deliver(sink ?? null, key, data, currentCaller().enclosing)))
-          kept.push([key.channel, data])
-      } else if (sink !== undefined) {
-        for await (const part of byteChunks(data)) await sink.emit(key, part)
-      } else kept.push([key, data])
-    }
-    if (sink !== undefined) {
-      for (const [channel, data] of kept)
-        for await (const part of byteChunks(data)) await sink.emit(channel, part)
-    } else {
-      ;[stdout, io.stderr] = await spooledPair(
-        asyncChain(kept.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d)),
-        asyncChain(kept.filter(([c]) => c !== Channel.STDOUT).map(([, d]) => d)),
-      )
-    }
+    stdout = await deliverRouted(routed, sink, io)
   } finally {
     await route.release()
   }

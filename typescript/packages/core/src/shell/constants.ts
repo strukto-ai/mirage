@@ -15,8 +15,6 @@
 import { compareCodePoints } from '../utils/sort.ts'
 import { BuiltinGroup, BuiltinTier, NodeType, ShellBuiltin } from './types.ts'
 
-export const PARAMETER_NAME = /^(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-])/
-
 // How deep the shell may re-enter itself: function calls, sourced files,
 // `eval` lines and nested shells (`bash -c`, a script) together. bash limits
 // none of them unless FUNCNEST names a limit on functions; mirage serves every

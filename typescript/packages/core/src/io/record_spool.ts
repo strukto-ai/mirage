@@ -1,5 +1,4 @@
 import { ByteSpool, MEMORY_LIMIT } from './spool.ts'
-import type { ByteSource } from './types.ts'
 
 /** Replay variable-length records without retaining their byte offsets in RAM. */
 export class RecordSpool {
@@ -72,20 +71,4 @@ export class RecordSpool {
       await this.index.close()
     }
   }
-}
-
-/**
- * The records `separator` ends across `sources` read back to back, byte for
- * byte; the last one may lack it. Mirrors Python's delimited.
- */
-export async function delimited(sources: ByteSource[], separator: number): Promise<RecordSpool> {
-  const records = new RecordSpool()
-  try {
-    for (const source of sources) await records.data.fill(source)
-    await records.indexDelimited(separator)
-  } catch (error) {
-    await records.close()
-    throw error
-  }
-  return records
 }

@@ -159,6 +159,7 @@ from mirage.workspace.node.timing import timed_by, timing_report
 from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session.budget import check_env, entry_bytes
 from mirage.workspace.session.functions import FunctionSite, site_lines
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import (
     bind_last_word,
     positional_params,
@@ -1050,6 +1051,395 @@ def _names_process_sub(word: TSNodeLike) -> bool:
     return any(_names_process_sub(child) for child in word.children)
 
 
+async def _run_timed(
+    stream: Callable[..., Awaitable[RedirectResult]],
+    node: TSNodeLike,
+    context: EvaluationContext,
+    stdin: ByteSource | None,
+    cs: CallStack,
+) -> RedirectResult:
+    """Run a ``time`` pipeline and report how long it took.
+
+    Args:
+        stream (Callable[..., Awaitable[RedirectResult]]): runs the timed pipeline.
+        node (TSNodeLike): the timed node.
+        context (EvaluationContext): the evaluation's session and frame.
+        stdin (ByteSource | None): input stream.
+        cs (CallStack): shell call stack.
+    """
+    session = context.session
+    started = time.monotonic()
+    portable = timed_by(node)
+
+    def report(portable: bool) -> bytes:
+        return timing_report(
+            time.monotonic() - started,
+            portable,
+            session.env.get("TIMEFORMAT"),
+        )
+
+    body = node.named_children
+    try:
+        if body:
+            stdout, io, exec_node = await stream(body[0], context, stdin, cs)
+            stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+        else:
+            stdout, io = None, IOResult()
+            exec_node = ExecutionNode(command="", exit_code=0)
+    except (ExitSignal, LoopSignal) as sig:
+        # bash reports the time of a pipeline that `exit`, `break`,
+        # `continue` or an error discarding the line leaves, though
+        # not of one `return` leaves.
+        if portable is not None:
+            if isinstance(sig, ExitSignal):
+                sig.stderr += report(portable)
+            else:
+                sig.io.stderr = (await sig.io.materialize_stderr()) + report(
+                    portable
+                )
+        raise
+    if portable is not None:
+        io.stderr = (await io.materialize_stderr()) + report(portable)
+    return stdout, io, exec_node
+
+
+async def _assign_then_open(
+    recurse: Callable[..., Awaitable[RedirectResult]],
+    redirected: Callable[..., Awaitable[RedirectResult]],
+    node: TSNodeLike,
+    context: EvaluationContext,
+    stdin: ByteSource | None,
+    cs: CallStack,
+) -> RedirectResult:
+    """Run a command of assignments and redirects with no command name.
+
+    Args:
+        recurse (Callable[..., Awaitable[RedirectResult]]): runs an assignment.
+        redirected (Callable): opens the redirects with no command.
+        node (TSNodeLike): the command node.
+        context (EvaluationContext): the evaluation's session and frame.
+        stdin (ByteSource | None): input stream.
+        cs (CallStack): shell call stack.
+    """
+    session = context.session
+    # Assignments with redirects among them and no command name
+    # (`a=1 > f b=$a`): bash assigns in order, as an assignment
+    # statement does, then opens the redirects with no command; one
+    # that fails fails the line, the assignments standing, and else the
+    # status is the last substitution's, a redirect's included.
+    sub_seq = context.frame.cmdsub_seq
+    merged_io = IOResult()
+    for assignment in node.named_children:
+        if assignment.type == NT.VARIABLE_ASSIGNMENT:
+            _, io, _ = await recurse(
+                assignment, context, stdin, cs, own_diagnostics=False
+            )
+            merged_io = await merged_io.merge(io)
+    runner = redirect_runner_for(node.id)
+    if runner is None:
+        _, opened, _ = await redirected(None, command_redirects(node), None)
+    else:
+        _, opened, _ = await runner(_no_command, None, "", ())
+    merged_io = await merged_io.merge(opened)
+    merged_io.exit_code = opened.exit_code or assignment_status(
+        context.frame, sub_seq
+    )
+    bind_last_word(session, ())
+    return (
+        None,
+        merged_io,
+        ExecutionNode(command=get_text(node), exit_code=merged_io.exit_code),
+    )
+
+
+async def _fork_subshell(
+    dispatch: DispatchFn,
+    registry: MountRegistry,
+    namespace: Namespace,
+    job_table: JobTable,
+    execute_fn: ExecuteFn,
+    cancel: asyncio.Event | None,
+    handed: HandOff | None,
+    node: TSNodeLike,
+    context: EvaluationContext,
+    stdin: ByteSource | None,
+    cs: CallStack,
+    sink: JobConsole | None,
+) -> RedirectResult:
+    """Run a subshell, its own shell, as bash forks one.
+
+    Args:
+        dispatch (DispatchFn): VFS op dispatcher (op, path, **kw).
+        registry (MountRegistry): mount registry for path resolution.
+        namespace (Namespace): addressing authority for symlink ops.
+        job_table (JobTable): background job management.
+        execute_fn (ExecuteFn): recursive execute (for source/eval).
+        cancel (asyncio.Event | None): event used to abort mid-flight.
+        handed (HandOff | None): the hand-off this subtree runs on.
+        node (TSNodeLike): the subshell node.
+        context (EvaluationContext): the evaluation's session and frame.
+        stdin (ByteSource | None): input stream.
+        cs (CallStack): shell call stack.
+        sink (JobConsole | None): where the body writes as it runs.
+    """
+    session = context.session
+    # A subshell is its own shell: background jobs started inside
+    # live in a private job table (`$!`/`wait`/`kill` in the body
+    # see them; the parent's table never does), mirroring bash's
+    # forked process.
+    sub_table = job_table.child() if job_table is not None else JobTable()
+    sub_recurse = partial(
+        execute_node,
+        dispatch,
+        registry,
+        namespace,
+        sub_table,
+        execute_fn,
+        cancel=cancel,
+        handed=handed,
+    )
+    child = child_context(context)
+    as_program = program_invocation(session)
+    results: list[tuple[ByteSource | None, IOResult, ExecutionNode]] = []
+
+    async def run_subshell() -> int:
+        token = set_current_evaluation(child)
+        program_token = (
+            set_program_invocation(child.session) if as_program else None
+        )
+        try:
+            result = await handle_subshell(
+                sub_recurse,
+                list(node.children),
+                child,
+                stdin,
+                cs,
+                sub_table,
+                dispatch,
+                handed,
+                registry.decisions,
+                sink=sink,
+                execute_fn=execute_fn,
+            )
+            results.append(result)
+            return result[1].exit_code
+        finally:
+            reset_current_session(token)
+            if program_token is not None:
+                reset_program_invocation(program_token)
+            await child.session.close_inputs()
+
+    # A body that is one nested shell (`( sh -c ... )`) is the
+    # subshell itself, as bash execs it there.
+    statements = [c for c in node.named_children if c.type != NT.COMMENT]
+    execs = len(statements) == 1 and nested_shell(statements[0], session)
+
+    def forked(process: ProcessHandle) -> None:
+        child.session.process_id = process.record.pid
+        child.frame.shell = None if execs else process
+
+    owner = current_caller().process
+    if context.frame.shell is None and owner is not None:
+        # The whole of what its runner runs (`( sleep 3; echo x ) &`)
+        # is the runner itself, as bash forks a job's subshell once:
+        # it keeps the INT its job ignores.
+        forked(owner)
+        await run_subshell()
+        return results[0]
+    process = start_shell(
+        sub_table.processes,
+        session,
+        get_text(node),
+        run_subshell,
+        session.process_id,
+        forked,
+    )
+    code = await process.reap()
+    report_reaped(context.frame, [(process, code, node)])
+    if results:
+        return results[0]
+    return result(get_text(node), exit_code=code)
+
+
+async def _run_arith(
+    node: TSNodeLike,
+    context: EvaluationContext,
+    execute_fn: ExecuteFn,
+    cs: CallStack,
+) -> RedirectResult:
+    """Run a ``((...))`` command.
+
+    Args:
+        node (TSNodeLike): the arithmetic node.
+        context (EvaluationContext): the evaluation's session and frame.
+        execute_fn (ExecuteFn): recursive execute (for substitutions).
+        cs (CallStack): shell call stack.
+    """
+    session = context.session
+    text = get_text(node)
+    expr = await expand_arith(node, context, execute_fn, cs)
+    try:
+        value = await session_arith(session, expr, cs)
+    except PolicyDenied as exc:
+        return fail(text, f"{shell_voice()}{exc.strerror}\n")
+    except (ArithError, ReadonlyVariableError) as exc:
+        if exc.in_subscript:
+            raise exc.signal() from exc
+        voice = "((: " if isinstance(exc, ArithError) else ""
+        return fail(text, f"{shell_voice()}{voice}{exc}\n")
+    return result(text, exit_code=0 if value != 0 else 1)
+
+
+async def _run_for(
+    kind: NodeKind,
+    node: TSNodeLike,
+    run_body: Callable[..., Awaitable[RedirectResult]],
+    context: EvaluationContext,
+    stdin: ByteSource | None,
+    cs: CallStack,
+    execute_fn: ExecuteFn,
+    registry: MountRegistry,
+    namespace: Namespace,
+    sink: JobConsole | None,
+) -> RedirectResult:
+    """Run a ``for`` or ``select`` over its expanded words.
+
+    Args:
+        kind (NodeKind): which of the two the node is.
+        node (TSNodeLike): the loop node.
+        run_body (Callable): runs the loop's statements.
+        context (EvaluationContext): the evaluation's session and frame.
+        stdin (ByteSource | None): input stream.
+        cs (CallStack): shell call stack.
+        execute_fn (ExecuteFn): recursive execute (for substitutions).
+        registry (MountRegistry): mount registry for path resolution.
+        namespace (Namespace): addressing authority for symlink ops.
+        sink (JobConsole | None): where ``select`` writes its menu.
+    """
+    session = context.session
+    var, values, body = get_for_parts(node)
+    if not is_valid_name(var):
+        return fail(
+            kind.value, f"{shell_voice()}`{var}': not a valid identifier\n"
+        )
+    if values is None:
+        classified: list[str | PathSpec] = list(positional_params(session, cs))
+    else:
+        async with command_scope():
+            classified = await expand_and_classify(
+                values,
+                context,
+                execute_fn,
+                registry,
+                session.cwd,
+                cs,
+            )
+            # The loop word list is consumed by the shell
+            # (WordPolicy.SHELL): globs resolve to matches before
+            # iteration starts.
+            classified = await resolve_globs(
+                classified,
+                registry,
+                noglob=bool(session.shell_options.get("noglob")),
+                links=namespace.session_links(session),
+                options=glob_options(session),
+            )
+    with cs.loop():
+        if kind == NodeKind.SELECT:
+            return await handle_select(
+                run_body,
+                var,
+                classified,
+                body,
+                context,
+                stdin,
+                sink=sink,
+            )
+        return await handle_for(run_body, var, classified, body, context)
+
+
+def _define_function(
+    node: TSNodeLike, session: SessionState, handed: HandOff | None
+) -> RedirectResult:
+    """Store a function definition on the session.
+
+    Args:
+        node (TSNodeLike): the definition node.
+        session (SessionState): the session it is defined in.
+        handed (HandOff | None): the hand-off the definition runs on.
+    """
+    name = get_function_name(node)
+    if name in session.readonly_functions:
+        # `readonly -f f` froze the body: either definition syntax
+        # refuses with `f: readonly function`, exit 1, and the old
+        # body stays, pinned on 5.2.37.
+        return fail(
+            f"function {name}",
+            f"{shell_voice()}{name}: readonly function\n",
+        )
+    source = get_function_source(node)
+    held = session.functions.get(name)
+    check_env(
+        session,
+        0 if held is None else entry_bytes(name, held),
+        entry_bytes(name, source),
+    )
+    session.functions[name] = source
+    row = session.line_number - 1
+    session._function_sites[name] = FunctionSite(
+        source,
+        alias_mark(session, node.start_point[0]),
+        defined_at(node, handed),
+        alias_view(session, node, alias_mark(session, read_row(node))),
+        session._parse_name or "environment",
+        row,
+        None
+        if session._line_rows is None
+        else site_lines(
+            session._line_rows,
+            row - session._line_row,
+            get_function_body(node),
+        ),
+    )
+    return result(f"function {name}")
+
+
+async def _assign_all(
+    recurse: Callable[..., Awaitable[RedirectResult]],
+    node: TSNodeLike,
+    context: EvaluationContext,
+    stdin: ByteSource | None,
+    cs: CallStack,
+) -> RedirectResult:
+    """Run an assignment statement's assignments in order.
+
+    Args:
+        recurse (Callable[..., Awaitable[RedirectResult]]): runs an assignment.
+        node (TSNodeLike): the statement.
+        context (EvaluationContext): the evaluation's session and frame.
+        stdin (ByteSource | None): input stream.
+        cs (CallStack): shell call stack.
+    """
+    sub_seq = context.frame.cmdsub_seq
+    merged_io = IOResult()
+    for assignment in node.named_children:
+        if assignment.type != NT.VARIABLE_ASSIGNMENT:
+            continue
+        _, io, _ = await recurse(
+            assignment, context, stdin, cs, own_diagnostics=False
+        )
+        merged_io = await merged_io.merge(io)
+    # The statement's status follows the last command substitution
+    # performed across ALL its assignments, not the last child's.
+    code = assignment_status(context.frame, sub_seq)
+    merged_io.exit_code = code
+    return (
+        None,
+        merged_io,
+        ExecutionNode(command=get_text(node), exit_code=code),
+    )
+
+
 async def _execute_node(
     dispatch: DispatchFn,
     registry: MountRegistry,
@@ -1168,42 +1558,28 @@ async def _execute_node(
 
     stream = partial(recurse, sink=sink) if sink is not None else recurse
 
+    def redirected(
+        command: TSNodeLike | None,
+        redirects: list[Redirect],
+        to: JobConsole | None,
+    ) -> Awaitable[RedirectResult]:
+        return _run_redirected(
+            recurse,
+            dispatch,
+            execute_fn,
+            registry,
+            namespace,
+            command,
+            redirects,
+            job_table.processes if job_table is not None else None,
+            context,
+            stdin,
+            cs,
+            sink=to,
+        )
+
     if kind == NodeKind.TIMED:
-        started = time.monotonic()
-        portable = timed_by(node)
-
-        def report(portable: bool) -> bytes:
-            return timing_report(
-                time.monotonic() - started,
-                portable,
-                session.env.get("TIMEFORMAT"),
-            )
-
-        body = node.named_children
-        try:
-            if body:
-                stdout, io, exec_node = await stream(
-                    body[0], context, stdin, cs
-                )
-                stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-            else:
-                stdout, io = None, IOResult()
-                exec_node = ExecutionNode(command="", exit_code=0)
-        except (ExitSignal, LoopSignal) as sig:
-            # bash reports the time of a pipeline that `exit`, `break`,
-            # `continue` or an error discarding the line leaves, though
-            # not of one `return` leaves.
-            if portable is not None:
-                if isinstance(sig, ExitSignal):
-                    sig.stderr += report(portable)
-                else:
-                    sig.io.stderr = (
-                        await sig.io.materialize_stderr()
-                    ) + report(portable)
-            raise
-        if portable is not None:
-            io.stderr = (await io.materialize_stderr()) + report(portable)
-        return stdout, io, exec_node
+        return await _run_timed(stream, node, context, stdin, cs)
 
     if kind == NodeKind.COMMENT:
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
@@ -1218,20 +1594,7 @@ async def _execute_node(
                 if child.type != NT.COMMENT
             ]
             if not statements:
-                return await _run_redirected(
-                    recurse,
-                    dispatch,
-                    execute_fn,
-                    registry,
-                    namespace,
-                    None,
-                    list(pending),
-                    job_table.processes if job_table is not None else None,
-                    context,
-                    stdin,
-                    cs,
-                    sink=sink,
-                )
+                return await redirected(None, list(pending), sink)
             program_recurse = partial(
                 _recurse_reassociated,
                 recurse,
@@ -1263,47 +1626,8 @@ async def _execute_node(
     if kind == NodeKind.COMMAND and not any(
         child.type == NT.COMMAND_NAME for child in node.children
     ):
-        # Assignments with redirects among them and no command name
-        # (`a=1 > f b=$a`): bash assigns in order, as an assignment
-        # statement does, then opens the redirects with no command; one
-        # that fails fails the line, the assignments standing, and else the
-        # status is the last substitution's, a redirect's included.
-        sub_seq = context.frame.cmdsub_seq
-        merged_io = IOResult()
-        for assignment in node.named_children:
-            if assignment.type == NT.VARIABLE_ASSIGNMENT:
-                _, io, _ = await recurse(
-                    assignment, context, stdin, cs, own_diagnostics=False
-                )
-                merged_io = await merged_io.merge(io)
-        runner = redirect_runner_for(node.id)
-        if runner is None:
-            _, opened, _ = await _run_redirected(
-                recurse,
-                dispatch,
-                execute_fn,
-                registry,
-                namespace,
-                None,
-                command_redirects(node),
-                job_table.processes if job_table is not None else None,
-                context,
-                stdin,
-                cs,
-            )
-        else:
-            _, opened, _ = await runner(_no_command, None, "", ())
-        merged_io = await merged_io.merge(opened)
-        merged_io.exit_code = opened.exit_code or assignment_status(
-            context.frame, sub_seq
-        )
-        bind_last_word(session, ())
-        ran: RedirectResult = (
-            None,
-            merged_io,
-            ExecutionNode(
-                command=get_text(node), exit_code=merged_io.exit_code
-            ),
+        ran = await _assign_then_open(
+            recurse, redirected, node, context, stdin, cs
         )
         return ran if sink is None else await drained(sink, *ran)
 
@@ -1313,20 +1637,7 @@ async def _execute_node(
         else []
     )
     if own:
-        ran = await _run_redirected(
-            recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
-            node,
-            own,
-            job_table.processes if job_table is not None else None,
-            context,
-            stdin,
-            cs,
-            sink=sink,
-        )
+        ran = await redirected(node, own, sink)
         return ran if sink is None else await drained(sink, *ran)
 
     if kind == NodeKind.COMMAND:
@@ -1396,20 +1707,7 @@ async def _execute_node(
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
         try:
-            ran = await _run_redirected(
-                recurse,
-                dispatch,
-                execute_fn,
-                registry,
-                namespace,
-                command,
-                redirects,
-                job_table.processes if job_table is not None else None,
-                context,
-                stdin,
-                cs,
-                sink=sink,
-            )
+            ran = await redirected(command, redirects, sink)
         finally:
             # A line of redirects alone clears `$_` once they are
             # opened, so a target may still name it (`>"$_"`).
@@ -1418,96 +1716,23 @@ async def _execute_node(
         return ran if sink is None else await drained(sink, *ran)
 
     if kind == NodeKind.SUBSHELL:
-        # A subshell is its own shell: background jobs started inside
-        # live in a private job table (`$!`/`wait`/`kill` in the body
-        # see them; the parent's table never does), mirroring bash's
-        # forked process.
-        sub_table = job_table.child() if job_table is not None else JobTable()
-        sub_recurse = partial(
-            execute_node,
+        return await _fork_subshell(
             dispatch,
             registry,
             namespace,
-            sub_table,
+            job_table,
             execute_fn,
-            cancel=cancel,
-            handed=handed,
+            cancel,
+            handed,
+            node,
+            context,
+            stdin,
+            cs,
+            sink,
         )
-        child = child_context(context)
-        as_program = program_invocation(session)
-        results: list[tuple[ByteSource | None, IOResult, ExecutionNode]] = []
-
-        async def run_subshell() -> int:
-            token = set_current_evaluation(child)
-            program_token = (
-                set_program_invocation(child.session) if as_program else None
-            )
-            try:
-                result = await handle_subshell(
-                    sub_recurse,
-                    list(node.children),
-                    child,
-                    stdin,
-                    cs,
-                    sub_table,
-                    dispatch,
-                    handed,
-                    registry.decisions,
-                    sink=sink,
-                    execute_fn=execute_fn,
-                )
-                results.append(result)
-                return result[1].exit_code
-            finally:
-                reset_current_session(token)
-                if program_token is not None:
-                    reset_program_invocation(program_token)
-                await child.session.close_inputs()
-
-        # A body that is one nested shell (`( sh -c ... )`) is the
-        # subshell itself, as bash execs it there.
-        statements = [c for c in node.named_children if c.type != NT.COMMENT]
-        execs = len(statements) == 1 and nested_shell(statements[0], session)
-
-        def forked(process: ProcessHandle) -> None:
-            child.session.process_id = process.record.pid
-            child.frame.shell = None if execs else process
-
-        owner = current_caller().process
-        if context.frame.shell is None and owner is not None:
-            # The whole of what its runner runs (`( sleep 3; echo x ) &`)
-            # is the runner itself, as bash forks a job's subshell once:
-            # it keeps the INT its job ignores.
-            forked(owner)
-            await run_subshell()
-            return results[0]
-        process = start_shell(
-            sub_table.processes,
-            session,
-            get_text(node),
-            run_subshell,
-            session.process_id,
-            forked,
-        )
-        code = await process.reap()
-        report_reaped(context.frame, [(process, code, node)])
-        if results:
-            return results[0]
-        return result(get_text(node), exit_code=code)
 
     if kind == NodeKind.ARITH:
-        text = get_text(node)
-        expr = await expand_arith(node, context, execute_fn, cs)
-        try:
-            value = await session_arith(session, expr, cs)
-        except PolicyDenied as exc:
-            return fail(text, f"{shell_voice()}{exc.strerror}\n")
-        except (ArithError, ReadonlyVariableError) as exc:
-            if exc.in_subscript:
-                raise exc.signal() from exc
-            voice = "((: " if isinstance(exc, ArithError) else ""
-            return fail(text, f"{shell_voice()}{voice}{exc}\n")
-        return result(text, exit_code=0 if value != 0 else 1)
+        return await _run_arith(node, context, execute_fn, cs)
 
     run_body = partial(
         execute_body,
@@ -1541,47 +1766,18 @@ async def _execute_node(
             return await handle_cfor(run_body, exprs, body, eval_expr, session)
 
     if kind in (NodeKind.FOR, NodeKind.SELECT):
-        var, values, body = get_for_parts(node)
-        if not is_valid_name(var):
-            return fail(
-                kind.value, f"{shell_voice()}`{var}': not a valid identifier\n"
-            )
-        if values is None:
-            classified: list[str | PathSpec] = list(
-                positional_params(session, cs)
-            )
-        else:
-            async with command_scope():
-                classified = await expand_and_classify(
-                    values,
-                    context,
-                    execute_fn,
-                    registry,
-                    session.cwd,
-                    cs,
-                )
-                # The loop word list is consumed by the shell
-                # (WordPolicy.SHELL): globs resolve to matches before
-                # iteration starts.
-                classified = await resolve_globs(
-                    classified,
-                    registry,
-                    noglob=bool(session.shell_options.get("noglob")),
-                    links=namespace.session_links(session),
-                    options=glob_options(session),
-                )
-        with cs.loop():
-            if kind == NodeKind.SELECT:
-                return await handle_select(
-                    run_body,
-                    var,
-                    classified,
-                    body,
-                    context,
-                    stdin,
-                    sink=sink,
-                )
-            return await handle_for(run_body, var, classified, body, context)
+        return await _run_for(
+            kind,
+            node,
+            run_body,
+            context,
+            stdin,
+            cs,
+            execute_fn,
+            registry,
+            namespace,
+            sink,
+        )
 
     if kind in (NodeKind.WHILE, NodeKind.UNTIL):
         test, body = get_while_parts(node)
@@ -1607,40 +1803,7 @@ async def _execute_node(
         )
 
     if kind == NodeKind.FUNCTION_DEF:
-        name = get_function_name(node)
-        if name in session.readonly_functions:
-            # `readonly -f f` froze the body: either definition syntax
-            # refuses with `f: readonly function`, exit 1, and the old
-            # body stays, pinned on 5.2.37.
-            return fail(
-                f"function {name}",
-                f"{shell_voice()}{name}: readonly function\n",
-            )
-        source = get_function_source(node)
-        held = session.functions.get(name)
-        check_env(
-            session,
-            0 if held is None else entry_bytes(name, held),
-            entry_bytes(name, source),
-        )
-        session.functions[name] = source
-        row = session.line_number - 1
-        session._function_sites[name] = FunctionSite(
-            source,
-            alias_mark(session, node.start_point[0]),
-            defined_at(node, handed),
-            alias_view(session, node, alias_mark(session, read_row(node))),
-            session._parse_name or "environment",
-            row,
-            None
-            if session._line_rows is None
-            else site_lines(
-                session._line_rows,
-                row - session._line_row,
-                get_function_body(node),
-            ),
-        )
-        return result(f"function {name}")
+        return _define_function(node, session, handed)
 
     if kind == NodeKind.DECLARATION:
         declared = ExpandedWords()
@@ -1725,24 +1888,7 @@ async def _execute_node(
         return assigned
 
     if kind == NodeKind.VAR_ASSIGNS:
-        sub_seq = context.frame.cmdsub_seq
-        merged_io = IOResult()
-        for assignment in node.named_children:
-            if assignment.type != NT.VARIABLE_ASSIGNMENT:
-                continue
-            _, io, _ = await recurse(
-                assignment, context, stdin, cs, own_diagnostics=False
-            )
-            merged_io = await merged_io.merge(io)
-        # The statement's status follows the last command substitution
-        # performed across ALL its assignments, not the last child's.
-        code = assignment_status(context.frame, sub_seq)
-        merged_io.exit_code = code
-        return (
-            None,
-            merged_io,
-            ExecutionNode(command=get_text(node), exit_code=code),
-        )
+        return await _assign_all(recurse, node, context, stdin, cs)
 
     # Constructs the parser accepts but the executor cannot honor
     # (future grammar additions).
