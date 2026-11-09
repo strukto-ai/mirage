@@ -210,11 +210,12 @@ export class MirageRpcServer {
     return Object.keys(this.table)
   }
 
-  /** Run one shell line in the session; `signal` aborts it. */
+  /** Run one shell line in the session; `signal` aborts it, `_pipe` is the one behind an open stdin. */
   async runLine(
     command: string,
     options: { cwd?: string; env?: Record<string, string>; stdin?: ByteSource },
     signal?: AbortSignal,
+    _pipe?: BytePipe,
   ): Promise<JsonValue> {
     return ioResultToDict(
       await this.session.shell(command, {
@@ -350,7 +351,7 @@ export class MirageRpcServer {
     const pipe = new BytePipe(this.ws.io.bufferBytes, currentRequest() !== null)
     this.stdins.set(key, pipe)
     try {
-      return await this.runLine(command, { ...options, stdin: pipe.stream() }, signal)
+      return await this.runLine(command, { ...options, stdin: pipe.stream() }, signal, pipe)
     } finally {
       this.stdins.delete(key)
       pipe.closeReader()

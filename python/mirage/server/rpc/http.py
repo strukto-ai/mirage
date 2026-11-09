@@ -90,6 +90,7 @@ class DaemonRpcServer(MirageRpcServer):
         cwd: str | None,
         env: dict[str, str] | None,
         stdin: ByteSource | None,
+        pipe: BytePipe | None = None,
     ) -> JsonValue:
         """Run one shell line as a daemon job.
 
@@ -98,6 +99,7 @@ class DaemonRpcServer(MirageRpcServer):
             cwd (str | None): a working directory for this line only.
             env (dict[str, str] | None): variables for this line only.
             stdin (ByteSource | None): the line's stdin.
+            pipe (BytePipe | None): the pipe behind an open ``stdin``.
 
         Returns:
             JsonValue: ``{exit_code, stdout, stderr, refusal}``.
@@ -133,6 +135,7 @@ class DaemonRpcServer(MirageRpcServer):
             factory=run,
             session_id=session_id,
         )
+        job.stdin = pipe
         job = await self._jobs.join(job.id)
         if job.line.record.signal is not None:
             raise RpcError(RPC_REQUEST_CANCELLED, "job canceled")

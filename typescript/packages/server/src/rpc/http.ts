@@ -56,6 +56,7 @@ class DaemonRpcServer extends MirageRpcServer {
     command: string,
     options: { cwd?: string; env?: Record<string, string>; stdin?: ByteSource },
     signal?: AbortSignal,
+    pipe?: BytePipe,
   ): Promise<JsonValue> {
     const ws = this.entry.runner.ws
     const sessionId = this.sessionId
@@ -73,6 +74,7 @@ class DaemonRpcServer extends MirageRpcServer {
         ),
       sessionId,
     )
+    submitted.stdin = pipe
     const job = await this.jobs.join(submitted.id, signal)
     if (job.line.record.signal !== null) throw new RpcError(RPC_REQUEST_CANCELLED, 'job canceled')
     if (job.error !== null) throw new RpcError(RPC_INTERNAL_ERROR, job.error)

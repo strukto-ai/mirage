@@ -194,6 +194,7 @@ class MirageRpcServer:
         cwd: str | None,
         env: dict[str, str] | None,
         stdin: ByteSource | None,
+        pipe: BytePipe | None = None,
     ) -> JsonValue:
         """Run one shell line in the session.
 
@@ -202,6 +203,7 @@ class MirageRpcServer:
             cwd (str | None): a working directory for this line only.
             env (dict[str, str] | None): variables for this line only.
             stdin (ByteSource | None): the line's stdin.
+            pipe (BytePipe | None): the pipe behind an open ``stdin``.
 
         Returns:
             JsonValue: ``{exit_code, stdout, stderr, refusal}``.
@@ -428,10 +430,15 @@ class MirageRpcServer:
         pipe = BytePipe(self._ws.io.buffer_bytes)
         self._stdins[key] = pipe
         try:
-            return await self.run_line(command, cwd, variables, pipe.stream())
+            return await self.run_line(
+                command, cwd, variables, pipe.stream(), pipe
+            )
         finally:
             del self._stdins[key]
-            await self._call_there(pipe.close_reader)
+            try:
+                await self._call_there(pipe.close_reader)
+            except RuntimeError as exc:
+                logger.debug("the workspace stopped with its line: %s", exc)
 
     async def _glob(self, params: Params) -> JsonValue:
         try:

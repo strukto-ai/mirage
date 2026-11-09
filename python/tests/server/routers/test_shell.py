@@ -766,6 +766,26 @@ async def test_a_write_past_the_buffer_waits_until_the_line_ends():
 
 
 @pytest.mark.asyncio
+async def test_deleting_a_workspace_answers_a_held_write():
+    app = build_app(idle_grace_seconds=10.0)
+    async with _served(app) as client:
+        wid = await _create_workspace(client)
+        capacity = app.state.registry.get(wid).runner.ws.io.buffer_bytes
+        async with _open_stdin(client, wid, "sleep 30") as reply:
+            lines = reply.aiter_lines()
+            line_id = (await _record(lines))["line_id"]
+            route = f"/v1/workspaces/{wid}/lines/{line_id}/stdin"
+            filled = await client.post(route, content=b"x" * capacity)
+            assert filled.status_code == 204, filled.text
+            held = asyncio.create_task(client.post(route, content=b"y"))
+            await asyncio.sleep(0.2)
+            assert not held.done()
+            assert (await client.delete(f"/v1/workspaces/{wid}")).is_success
+            answer = await asyncio.wait_for(held, 5)
+            assert answer.status_code == 409, answer.text
+
+
+@pytest.mark.asyncio
 async def test_open_stdin_needs_a_stream_and_no_stdin_part():
     async with _served() as client:
         wid = await _create_workspace(client)

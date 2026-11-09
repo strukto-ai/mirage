@@ -894,7 +894,7 @@ class WorkspaceRegistry:
             entry (WorkspaceEntry): the entry being deleted.
         """
         try:
-            await _stop(entry, delete=True)
+            await _stop(entry, self.jobs, delete=True)
             if self._owners is not None:
                 await self._owners.delete([entry.id])
             if self._configs is not None:
@@ -941,7 +941,7 @@ class WorkspaceRegistry:
             entry (WorkspaceEntry): the entry being stopped.
         """
         try:
-            await _stop(entry)
+            await _stop(entry, self.jobs)
         finally:
             del self._removals[entry.id]
             if not self._entries:
@@ -956,7 +956,7 @@ class WorkspaceRegistry:
             entry = self._entries.pop(wid)
             entry.accepting_jobs = False
             try:
-                await _stop(entry)
+                await _stop(entry, self.jobs)
             except Exception:
                 logger.exception("error stopping runner for %s", wid)
         await self._admission_programs.close()
@@ -1028,14 +1028,28 @@ async def _settle(entry: WorkspaceEntry, seconds: float) -> None:
         logger.debug("drain: %s already stopped", entry.id)
 
 
-async def _stop(entry: WorkspaceEntry, delete: bool = False) -> None:
-    """Stop an entry's runner, closing the runtimes its server policy
-    programs ran on, on the workspace's loop, before the loop goes.
+async def _stop(
+    entry: WorkspaceEntry, jobs: RequestTable, delete: bool = False
+) -> None:
+    """Stop an entry's runner, closing on the workspace's loop, before
+    the loop goes, the runtimes its server policy programs ran on and the
+    stdins its lines hold open, which answers a write waiting on one.
 
     Args:
         entry (WorkspaceEntry): the entry.
+        jobs (RequestTable): the requests that run lines.
         delete (bool): delete the workspace's state as it closes.
     """
+
+    async def close_stdins() -> None:
+        for request in jobs.requests():
+            if request.workspace_id == entry.id and request.stdin is not None:
+                request.stdin.close_reader()
+
+    try:
+        await entry.runner.call(close_stdins())
+    except RuntimeError as exc:
+        logger.debug("%s already stopped: %s", entry.id, exc)
     if entry.programs is not None:
         try:
             await entry.runner.call(entry.programs.close())

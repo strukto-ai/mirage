@@ -87,7 +87,14 @@ class ShellResponse(Response):
             finished = await self._jobs.wait(self._job.id)
         finally:
             if self._job.stdin is not None:
-                self._loop.call_soon_threadsafe(self._job.stdin.close_reader)
+                try:
+                    self._loop.call_soon_threadsafe(
+                        self._job.stdin.close_reader
+                    )
+                except RuntimeError as exc:
+                    logger.debug(
+                        "the workspace stopped with its line: %s", exc
+                    )
         # A job cancelled before its work started never opened the line.
         if not self._execution.done():
             self._execution.set_result(None)

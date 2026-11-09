@@ -180,6 +180,52 @@ async def test_a_body_over_the_limit_is_refused(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_deleting_a_workspace_answers_a_held_stdin_write(tmp_path):
+    async with daemon(tmp_path) as (http, app):
+        wid = await workspace(http)
+        url = f"/v1/workspaces/{wid}/rpc"
+        capacity = app.state.registry.get(wid).runner.ws.io.buffer_bytes
+        running = asyncio.create_task(
+            http.post(
+                url,
+                json=request(
+                    7, "shell", {"command": "sleep 30", "open_stdin": True}
+                ),
+            )
+        )
+        data = base64.b64encode(b"x" * capacity).decode()
+        written: dict = {}
+        try:
+            for _ in range(500):
+                reply = await http.post(
+                    url,
+                    json=request(8, "stdin/write", {"id": 7, "data": data}),
+                )
+                written = reply.json()
+                if written.get("error", {}).get("code") != -32004:
+                    break
+                await asyncio.sleep(0.01)
+            assert written["result"] is None
+            held = asyncio.create_task(
+                http.post(
+                    url,
+                    json=request(
+                        9,
+                        "stdin/write",
+                        {"id": 7, "data": base64.b64encode(b"y").decode()},
+                    ),
+                )
+            )
+            await asyncio.sleep(0.2)
+            assert not held.done()
+            assert (await http.delete(f"/v1/workspaces/{wid}")).is_success
+            answer = (await asyncio.wait_for(held, 5)).json()
+            assert answer["error"]["message"] == "stdin is closed"
+        finally:
+            running.cancel()
+
+
+@pytest.mark.asyncio
 async def test_open_stdin_takes_writes_on_other_requests(tmp_path):
     async with daemon(tmp_path) as (http, app):
         wid = await workspace(http)
