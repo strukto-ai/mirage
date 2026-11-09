@@ -196,11 +196,10 @@ claim to check, not as a credential:
 
 The host sets `session_id` (`caller.session.session_id` too), `profile`,
 `mounts`, `prefix` and `mode`, and what `vfs` shows: the agent cannot
-change them from inside the session. Decide who may do what from those.
-`session.is_readonly()` is no proof either: the agent can run `readonly NAME`
-on a value it set. Trust a variable only when the workspace's or the profile's
-`env` sets it with `readonly: true`, which the agent can neither change nor
-unset.
+change them from inside the session. Decide who may do what from those, and
+from a variable only when the workspace's or the profile's `env` sets it with
+`readonly: true`. `session.is_readonly()` is also true for a name the agent
+marked with `readonly NAME` itself.
 
 A policy written as a program, on monty or Python on wasm, gets the same
 `ctx` as JSON: see [Scripts](/home/policy/scripts).

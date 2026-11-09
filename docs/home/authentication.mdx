@@ -98,37 +98,13 @@ Use this config with the same workspace creation and read commands above.
 Relative dotenv paths use the Mirage process's working directory. A pointer's
 non-empty `ref` overrides the source's configured `path`.
 
-## Use a saved connection
-
-On the daemon or the hosted API, save a credential once with
-[`mirage vfs`, `mirage cli`, `mirage runtime` or
-`mirage machine`](/home/access/cli#saved-connections), then point at it with
-`from: strukto`, the entry's name as `ref` and its field as `key`:
-
-```bash
-mirage vfs create slack --type slack --secret token
-```
-
-```yaml workspace.yaml
-mounts:
-  /slack:
-    vfs: slack
-    config:
-      token:
-        from: strukto
-        ref: slack
-        key: token
-```
-
-The server reads the entry each time it creates or starts the workspace. A
-workspace built in your own code has no `strukto` source.
-
 ## Other credential sources
 
 | `from` | `ref` example | `key` example | Prerequisite |
 | --- | --- | --- | --- |
 | `aws-sm` | `mirage/slack` or a secret ARN | `SLACK_BOT_TOKEN` | AWS credentials and region in the SDK's normal environment. Python needs `mirage-ai[aws-sm]`; Node includes the source dependency. |
 | `1password` | `op://Engineering/Slack/credential` | `credential` | `OP_SERVICE_ACCOUNT_TOKEN` in the Mirage process environment. Python needs `mirage-ai[1password]`; Node needs `@1password/sdk`. |
+| `strukto` | `slack`, a saved entry's name | `token` | A Mirage server, the daemon or the hosted API, and an entry saved with [`mirage vfs`, `cli`, `runtime` or `machine`](/home/access/cli#saved-connections). |
 
 Use these values in place of `from`, `ref` and `key` in the mount pointer above.
 Install source dependencies in the same environment that runs Mirage, using

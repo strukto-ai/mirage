@@ -211,7 +211,7 @@ a `workspace_id`.
 | `mirage workspace use ID` | Make it the current workspace of the [context](#log-in). |
 | `mirage workspace get ID [--verbose]` | Show its status, mounts and sessions. A stopped workspace shows the mounts its config names and no sessions. |
 | `mirage workspace delete ID` | Delete a workspace, running or stopped, with its state and config. |
-| `mirage workspace stop ID` | Stop a workspace and keep its state and config. Stopping a stopped workspace does nothing. |
+| `mirage workspace stop ID` | Stop a workspace and keep its state and config. A `ram` mount, and the sessions on a `ram` store, come back empty. Stopping a stopped workspace does nothing. |
 | `mirage workspace start ID` | Start a stopped workspace again from the config it was created with. Starting a running workspace does nothing. |
 | `mirage workspace set-profile ID NAME FILE` | Add a [profile](/home/policy/overview) from a YAML or JSON file, or replace what `NAME` means. Sessions keep their rules until `session update` moves them, and the workspace's config is not rewritten. |
 | `mirage workspace logs ID [--session S] [--limit N] [--after CURSOR] [--jsonl]` | Show completed commands newest first, with cursor pagination. `--jsonl` exports all retained matching commands oldest first. |
@@ -375,25 +375,9 @@ mounts:
       token: {from: strukto, ref: github, key: token}
 ```
 
-A machine is saved the same way and named the same way:
-
-```bash
-mirage machine create box --type docker --set container=mirage-box --set mount_type=ssh
-```
-
-```yaml
-machines:
-  box:
-    provider: docker
-    container: {from: strukto, ref: box, key: container}
-    mount_type: {from: strukto, ref: box, key: mount_type}
-```
-
-An `env` entry takes the same pointer, and `key` defaults to the variable's
-name. The server fills each pointer in when it creates or starts the
-workspace, so a later `update` reaches the next start. Only a Mirage server,
-such as the daemon or the hosted API, reads `from: strukto`; a workspace built
-in your own code does not.
+The server fills each pointer in when it creates or starts the workspace, so
+a later `update` reaches the next start. A workspace built in your own code
+cannot read `from: strukto`.
 
 ## Sessions
 
@@ -415,8 +399,8 @@ The server the CLI starts. It exits 30 seconds after its last running workspace 
 | Command | Does |
 | --- | --- |
 | `mirage daemon status` | Show PID, uptime and workspace count. |
-| `mirage daemon stop` | Stop its workspaces and exit. They stay, stopped. |
-| `mirage daemon restart [--eager]` | Stop it; the next command, or `--eager`, starts a new one. Its workspaces stay, stopped, until `mirage workspace start`. |
+| `mirage daemon stop` | Stop its workspaces and exit. They stay stopped until `mirage workspace start`. |
+| `mirage daemon restart [--eager]` | Stop it; the next command, or `--eager`, starts a new one. Its workspaces stay stopped until `mirage workspace start`. |
 | `mirage daemon kill` | Kill it. A last resort. |
 
 ## Log in
@@ -545,5 +529,6 @@ environment variable wins over the file. Changes apply on the next start.
 | `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Log in](#log-in) |
 
 `jwt_clock_skew` is `MIRAGE_JWT_CLOCK_SKEW_SECONDS`, and `MIRAGE_JWT_PUBKEY`
-has no key: use `jwt_pubkey_file`. `MIRAGE_HOME` moves everything under
-`~/.mirage`.
+has no key: use `jwt_pubkey_file`.
+
+`MIRAGE_HOME` moves everything under `~/.mirage`.

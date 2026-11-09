@@ -25,12 +25,13 @@ Node.
 </Tabs>
 
 These serve the workspace into the container with `mount_type: ssh`. Start
-the container with FUSE allowed, from an image that has what
-[connecting the workspace](#connecting-the-workspace) needs:
+the container with FUSE allowed and `sshfs` in it, or from an image that has
+what [connecting the workspace](#connecting-the-workspace) needs:
 
 ```bash
 docker run -d --cap-add SYS_ADMIN --device /dev/fuse \
-  --name my-sandbox my-image sleep infinity
+  --name my-sandbox python:3.12-slim sleep infinity
+docker exec my-sandbox sh -c 'apt-get update && apt-get install -y sshfs'
 ```
 
 ## Usage
@@ -94,6 +95,17 @@ Python in the container too.
   </Tab>
 </Tabs>
 
+Save the YAML as `workspace.yaml` and run a line from the CLI:
+
+```bash
+mirage workspace create workspace.yaml -w box-demo
+mirage shell -w box-demo -c 'echo hello > /data/hi.txt; python3 -c "print(open(\"/data/hi.txt\").read().upper())"'
+```
+
+`python3` runs in the container and reads the file Mirage wrote, so this
+prints `HELLO`. Remove both with `mirage workspace delete box-demo` and
+`docker rm -f my-sandbox`.
+
 ## Connecting the workspace
 
 Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). With `ssh`, the image needs only `sshfs`. With
@@ -113,7 +125,7 @@ docker exec my-sandbox mirage workspace create /tmp/sandbox.yaml
   copying it, and point it at `host.docker.internal` for a host service.
 
 <Warning>
-  Environment values, the session's and the config `env`'s, go on the
-  `docker exec` command line, so other users of the host can see them in
-  `ps`. Avoid secrets on a host shared with untrusted users.
+  Environment values go on the `docker exec` command line, so other users of
+  the host can see them in `ps`. Avoid secrets on a host shared with
+  untrusted users.
 </Warning>

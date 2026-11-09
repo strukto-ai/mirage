@@ -30,7 +30,7 @@ Node requirement.
 
 A workspace session persists across `shell()` calls, so a call that returns does not fire `EXIT`. Register the cleanup inside `bash -c` when it has to finish before the call returns. Registrations are live shell state: session stores do not keep them.
 
-`trap` cannot catch a signal. Cancellation, `kill`, timeouts, and stopping or closing a workspace or a session stop the work without running cleanup, and they interrupt cleanup that is already running (bash runs `EXIT` on a `SIGTERM`). `trap` refuses every other event (`INT`, `TERM`, `DEBUG`, ...) as `bash: line 1: trap: TERM: not supported`, and `trap -l` the same way.
+`trap` cannot catch a signal. Cancellation, `kill`, timeouts, and stopping or closing a workspace or a session end the work without running cleanup, and they interrupt cleanup that is already running (bash runs `EXIT` on a `SIGTERM`). `trap` refuses every other event (`INT`, `TERM`, `DEBUG`, ...) as `bash: line 1: trap: TERM: not supported`, and `trap -l` the same way.
 
 ## Background job output (Python, Node and Browser)
 

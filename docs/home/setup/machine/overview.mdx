@@ -39,47 +39,7 @@ A line or a command can also name its machine: `execute(machine=)`, a
 [Sandlock](/home/setup/runtime/sandlock) is a runtime, not a machine: it runs
 programs on this Linux host, confined.
 
-## Try it on Docker
-
-Start a container with FUSE allowed and `sshfs` in it:
-
-```bash
-docker run -d --cap-add SYS_ADMIN --device /dev/fuse \
-  --name mirage-box python:3.12-slim sleep infinity
-docker exec mirage-box sh -c 'apt-get update && apt-get install -y sshfs'
-```
-
-Serve a RAM mount into it, and run Python and every program Mirage lacks
-there:
-
-```yaml workspace.yaml
-mode: exec
-machines:
-  box:
-    provider: docker
-    container: mirage-box
-    mount_type: ssh
-runtimes:
-  - name: machine
-    captures: ["@python", "@external"]
-    machine: box
-mounts:
-  /data:
-    vfs: ram
-```
-
-With the `pip` CLI, `mount_type: ssh` needs the `ssh` extra:
-
-```bash
-pip install 'mirage-ai[ssh]'
-mirage workspace create workspace.yaml -w box-demo
-mirage shell -w box-demo -c 'echo hello > /data/hi.txt; python3 -c "print(open(\"/data/hi.txt\").read().upper())"'
-```
-
-`python3` runs in the container and reads the file Mirage wrote, so this
-prints `HELLO`. `mirage workspace list-machines box-demo` shows `docker:box`
-as `managed`. Remove both with `mirage workspace delete box-demo` and
-`docker rm -f mirage-box`.
+To try one, start with [Docker](/home/setup/machine/docker).
 
 ## Connecting the workspace
 
@@ -107,10 +67,10 @@ or put the files there yourself. Once connected, run the shared
   1. Give each agent and each workspace its own machine.
 - If the machine restarts, Mirage mounts the paths again. A line caught
   mid-restart exits 126 without running.
-- A write that cannot land, such as one past a mount's `capacity`, fails
-  the line once the program ends: stderr names the file, as
-  `docker: /data/big.bin: Disk quota exceeded`, and a program that exited
-  0 exits 1. The program itself saw the write succeed.
+- A write the workspace refuses, such as one past a mount's `capacity`,
+  looks done to the program but fails the line when it ends. Stderr names
+  the file, as `docker: /data/big.bin: Disk quota exceeded`, and a line
+  that would exit 0 exits 1.
 - The root mount and `/dev` are not served.
 
 Mirage refuses to run a program when it cannot enforce the session's file
@@ -184,15 +144,19 @@ session's `processes` grants.
 
 | State | Means |
 | --- | --- |
-| `managed` | Mirage sees and stops every process its programs start there, except one that drops `MIRAGE_PROCESS` from its environment, or whose environment Mirage cannot read in `/proc`, such as a process of another user. The workspace's own host is always `managed`. |
+| `managed` | Mirage sees and stops every process its programs start there. The workspace's own host is always `managed`. |
 | `reachable` | Mirage reached it, but sees and stops only what it started itself. The machine lacks `/proc`, `sh`, `tr` or `grep`. |
 | `unreachable` | The last check failed. |
+
+Mirage finds a run's processes by `MIRAGE_PROCESS` in `/proc`, so it misses
+one that drops the variable or whose `/proc` entry it cannot read, such as a
+process of another user.
 
 `GET /v1/workspaces/{id}/machines` checks every machine, and
 `GET /v1/workspaces/{id}/machines/{machine}` checks one and lists its
 processes. `{machine}` is the id `ps` shows, `provider:name` such as
 `docker:box`; a bare name answers 400. `mirage workspace list-machines ID`
-prints each machine and its state, as JSON when piped.
+prints each machine and its state.
 
 ## The machine image
 
