@@ -517,8 +517,9 @@ class StreamHost:
             where = self._where(path)
             link = None if self.links is None else self.links.stat_at(where)
             target = None if link is None else link.extra.get(LINK_TARGET_KEY)
-            if isinstance(target, str):
-                return Served({"target": byte_view(target)})
+            if link is not None and isinstance(target, str):
+                mtime = stat_epoch(link.modified)
+                return Served({"target": byte_view(target), "mtime": mtime})
             found, _ = await self.dispatch("stat", path)
             if found is None:
                 raise enoent(path)

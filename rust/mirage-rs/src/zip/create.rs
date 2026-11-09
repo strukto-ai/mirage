@@ -12,7 +12,7 @@ use super::{
     ARCHIVE, CENTRAL, END, END64, GATHER, LOCAL, LOCATOR64, Spool, WINDOW, ZIP32, central,
     end_record, say, u16_at, u32_at, unzip, wildcard,
 };
-use crate::request::{Opening, Reply, Request, WriteMode, failed, failure_text};
+use crate::request::{Opening, Reply, Request, WriteMode, bytes, failed, failure_text};
 use crate::task::Host;
 
 const INVALID: &str = "\nzip error: Zip file structure invalid ({})\n";
@@ -984,15 +984,27 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
 
 /// What `-u` or `-f` with no file named looks at: each file the archive
 /// holds that still stands under its stored name, the archive itself left
-/// out. Under `-y` a stored link
-/// stays as it is, the time of what it points at being no reason to change it.
+/// out. Under `-y` a link standing there is weighed by its own time and goes
+/// in as a link, the time of what it points at being no reason to change it.
 async fn stored_files(host: &Host, old: Option<&Original>, config: &Config) -> Vec<Found> {
     let mut stored = Vec::new();
     for record in old.map_or(&[][..], |old| &old.records[..]) {
-        let link = u32_at(&record.central, 38) >> 16 & 0o170000 == 0o120000;
-        let own = record.name == relative(&config.archive);
-        if record.name.ends_with(b"/") || (config.store_links && link) || own {
+        if record.name.ends_with(b"/") || record.name == relative(&config.archive) {
             continue;
+        }
+        if config.store_links {
+            let path = record.name.clone();
+            let (reply, _) = host.ask(Request::Readlink { path }).await;
+            if let Some(target) = reply.target {
+                stored.push(Found {
+                    spelled: record.name.clone(),
+                    kind: Kind::Link,
+                    target: bytes(&target),
+                    mtime: reply.mtime,
+                    ..Found::default()
+                });
+                continue;
+            }
         }
         if let Some((kind, mtime)) = host.stat_time(&record.name).await {
             if kind == "file" {

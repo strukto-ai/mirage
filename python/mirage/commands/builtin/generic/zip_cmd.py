@@ -10,6 +10,7 @@ from mirage.commands.builtin.generic.archive.walk import (
     recorded_stamp,
     scan_operand,
 )
+from mirage.commands.builtin.utils.links import link_location
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream_host import (
     StreamHost,
@@ -29,6 +30,7 @@ from mirage.types import (
     ReadStreamFn,
     StatFn,
 )
+from mirage.utils.dates import stat_epoch
 from mirage.utils.path import respell_one
 from mirage.view.types import LinkView, MountView
 
@@ -90,6 +92,17 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ZipFlags:
         comment_archive=fl.as_bool("z"),
         names_from_stdin=fl.as_bool("@"),
     )
+
+
+def _link_time(links: LinkView | None, name: str) -> int | None:
+    """When a link itself last changed; None where no time is kept.
+
+    Args:
+        links (LinkView | None): the namespace's symlink facts.
+        name (str): the link's absolute virtual path.
+    """
+    link = None if links is None else links.stat_at(link_location(links, name))
+    return None if link is None else stat_epoch(link.modified)
 
 
 async def _stdin_lines(stdin: ByteSource | None) -> list[str]:
@@ -214,7 +227,9 @@ async def zip_generic(
                 ),
                 "kind": entry.kind,
                 "target": byte_view(entry.target),
-                "mtime": (await recorded_stamp(stat, read))[0],
+                "mtime": _link_time(links, entry.name_path)
+                if entry.kind == "link"
+                else (await recorded_stamp(stat, read))[0],
                 "source": byte_view(entry.name_path),
             }
             if read is not None:
@@ -250,7 +265,9 @@ async def zip_generic(
         "comment_archive": flags.comment_archive,
         "stdin_lines": [byte_view(line) for line in stdin_lines],
     }
-    host = StreamHost(reads, stream, None, dispatch, cwd, dash=False)
+    host = StreamHost(
+        reads, stream, None, dispatch, cwd, dash=False, links=links
+    )
     io = IOResult()
     return hosted_stream("zip", config, host, io), io
 

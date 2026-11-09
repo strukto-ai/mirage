@@ -560,8 +560,11 @@ export class StreamHost {
     if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
     const path = PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd)
     try {
-      const target = linksOf(this.ctx)?.statAt(this.where(path))?.extra[LINK_TARGET_KEY]
-      if (typeof target === 'string') return { reply: { target: byteView(target) } }
+      const link = linksOf(this.ctx)?.statAt(this.where(path))
+      const target = link?.extra[LINK_TARGET_KEY]
+      if (link !== null && link !== undefined && typeof target === 'string') {
+        return { reply: { target: byteView(target), mtime: statEpoch(link.modified) } }
+      }
       const [found] = await dispatch('stat', path)
       if (found === null || found === undefined) throw enoent(path)
     } catch (error) {

@@ -598,11 +598,11 @@ fn a_nul_anywhere_marks_a_member_binary() {
 }
 
 #[test]
-fn a_refresh_under_y_leaves_a_stored_link_alone() {
-    let mut host = Host::with(&[("target", "t\n"), ("link", "t\n")], "");
+fn a_refresh_under_y_weighs_what_stands_at_the_name() {
+    let mut host = Host::with(&[("target", "t\n"), ("other", "o\n")], "");
+    host.links.insert("link".into(), "target".into());
     let link = json!({"spelled": "link", "kind": "link", "target": "target", "mtime": YEAR_2001});
     assert_eq!(zip(&mut host, "z.zip", json!([link])).0, 0);
-    host.mtimes.insert("link".into(), YEAR_2001 + 100);
     let refresh = json!({
         "archive": "z.zip",
         "output": "z.zip",
@@ -610,5 +610,20 @@ fn a_refresh_under_y_leaves_a_stored_link_alone() {
         "refresh_all": true,
         "store_links": true,
     });
-    assert_eq!(run(&mut host, "zip", refresh).0, 12);
+    host.mtimes.insert("link".into(), YEAR_2001);
+    host.mtimes.insert("target".into(), YEAR_2001 + 100);
+    assert_eq!(run(&mut host, "zip", refresh.clone()).0, 12);
+
+    host.links.insert("link".into(), "other".into());
+    host.mtimes.insert("link".into(), YEAR_2001 + 100);
+    assert_eq!(run(&mut host, "zip", refresh.clone()).0, 0);
+    let piped = unzip(&mut host, "z.zip", json!({"p": true, "members": ["link"]}));
+    assert_eq!(piped.1, "other");
+
+    host.links.remove("link");
+    host.files.insert("link".into(), b"real\n".to_vec());
+    host.mtimes.insert("link".into(), YEAR_2001 + 200);
+    assert_eq!(run(&mut host, "zip", refresh).0, 0);
+    let piped = unzip(&mut host, "z.zip", json!({"p": true, "members": ["link"]}));
+    assert_eq!(piped.1, "real\n");
 }

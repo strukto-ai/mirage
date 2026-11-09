@@ -19,13 +19,15 @@ import type { util } from 'zod'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { byteView, decodeText } from '../../../shell/bytes.ts'
 import { Follow, LineFacts, PathSpec, type StatFn } from '../../../types.ts'
+import { statEpoch } from '../../../utils/dates.ts'
 import { respellOne } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import type { LinkView } from '../../../view/types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { linksOf, mountView } from '../utils/links.ts'
+import { linkLocation, linksOf, mountView } from '../utils/links.ts'
 import { formatRecords } from '../utils/output.ts'
 import { hostedStream, StreamHost } from '../utils/stream_host.ts'
 import { OTHER_FILESYSTEM, recordedStamp, scanOperand, type WalkFn } from './archive/walk.ts'
@@ -147,6 +149,7 @@ export async function zipGeneric(
   } else if (flags.commentMembers || flags.commentArchive) {
     lines = await stdinLines(stdin)
   }
+  const links = linksOf(ctx) ?? null
   for (const path of flags.delete ? [] : operands) {
     const raw = path.rawPath
     if (path.walkError !== null) {
@@ -159,7 +162,7 @@ export async function zipGeneric(
     const scan = await scanOperand(path, {
       stat: deps.stat,
       walk: deps.walk,
-      links: linksOf(ctx) ?? null,
+      links,
       // Every mount nested under an operand bounds the scan, a relayed run's too.
       mounts: mountView(ctx.vfs) ?? null,
       dereference: !flags.storeLinks,
@@ -189,7 +192,10 @@ export async function zipGeneric(
         spelled: byteView(respellOne(entry.namePath, base, spelling)),
         kind: entry.kind,
         target: byteView(entry.target ?? ''),
-        mtime: (await recordedStamp(deps.stat, read))[0],
+        mtime:
+          entry.kind === 'link'
+            ? linkTime(links, entry.namePath)
+            : (await recordedStamp(deps.stat, read))[0],
         source: byteView(entry.namePath),
       }
       if (read !== null) {
@@ -238,4 +244,8 @@ export async function zipGeneric(
  */
 export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
   return new LineFacts({ follows: Follow.NONE, readsSubtree: fl.asBool('r') })
+} /** When a link itself last changed; null where no time is kept. */
+function linkTime(links: LinkView | null, name: string): number | null {
+  const link = links === null ? null : links.statAt(linkLocation(links, name))
+  return link === null ? null : statEpoch(link.modified)
 }

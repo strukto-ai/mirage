@@ -335,7 +335,8 @@ impl Host {
             "readlink" => {
                 let path = normal(&text(&request["path"]));
                 if let Some(target) = self.links.get(&path) {
-                    return (json!({"target": target}), Vec::new());
+                    let mtime = self.mtimes.get(&path);
+                    return (json!({"target": target, "mtime": mtime}), Vec::new());
                 }
                 if self.files.contains_key(&path) || self.directories.contains(&path) {
                     return (json!({}), Vec::new());
