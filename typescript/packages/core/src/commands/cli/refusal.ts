@@ -326,7 +326,7 @@ export function clapLeafRefusal(
     if (compiled.rest !== null) {
       const slot = operandSlot(compiled.rest, true)
       const typed = parsed.texts.length > 0 || parsed.paths.length > 0
-      operands.push(typed ? slot.replace('[', '<').replace(']', '>') : slot)
+      operands.push(typed ? slot.replaceAll('[', '<').replaceAll(']', '>') : slot)
     }
     const bits = [prog, ...wanted, ...operands].join(' ')
     return ENC.encode(
