@@ -17,9 +17,19 @@ import { pagerGeneric } from '../../generic/pager.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, dirAwareStream, resolveOrEmpty } from '../files.ts'
 
+// The start positions more takes; any other word is a file to it.
+const MORE_POSITION = /^\+(?:[0-9]+$|\/)/
+
+/** Whether an operand names a file, not where to start reading. */
+function isFile(word: string, command: string): boolean {
+  if (command === 'zmore') return true
+  if (command === 'more') return !MORE_POSITION.test(word)
+  return !word.startsWith('+')
+}
+
 function pager(command: string): CommandFn {
   return async (_accessor, paths, _texts, ctx) => {
-    const operands = paths.filter((p) => !p.rawPath.startsWith('+'))
+    const operands = paths.filter((p) => isFile(p.rawPath, command))
     const files = commandFiles(ctx, operands)
     const resolved = await resolveOrEmpty(files, operands)
     return pagerGeneric(resolved, ctx, dirAwareStream(files, ctx), command)

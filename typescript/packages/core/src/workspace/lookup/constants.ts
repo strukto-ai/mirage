@@ -154,8 +154,8 @@ export const SLASH_KEEPS_LAST: ReadonlySet<string> = new Set([
 // Commands that decide the last component for themselves, so the router
 // resolves only the prefix for them. chmod/chown/chgrp read -h off their
 // own line (GNU `chgrp -h ops link` writes the link, not its target),
-// touch reads -h the same way, ln is creating the name in its second
-// operand, readlink's whole subject is the link it was handed, and
+// touch reads -h the same way, ln and link are creating the name in their
+// second operand, readlink's whole subject is the link it was handed, and
 // mkdir is naming something that must not exist yet -- resolving its
 // last component would make `mkdir -p dangle` create the link's missing
 // target where GNU answers "File exists". getfattr and setfattr read -h
@@ -170,6 +170,7 @@ const SELF_RESOLVING: ReadonlySet<string> = new Set([
   'chgrp',
   'touch',
   'ln',
+  'link',
   'readlink',
   'mkdir',
   'getfattr',
@@ -348,6 +349,7 @@ const SIZE = /^\s*\+?(\d*)(?:([kKMGTPEZYRQ])(B|iB)?)?$/
 // alone prints the niceness, the rest refuse the line.
 export const RUNNERS: ReadonlySet<string> = new Set(['nice', 'nohup', 'setsid', 'stdbuf'])
 export const LOWEST_PRIORITY = 19
+export const DEFAULT_NICENESS = 10
 
 /** The niceness change a `nice` line asks for, null when it asks for none:
  * the last one typed, in any of its spellings. Mirrors Python's

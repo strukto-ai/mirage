@@ -9,11 +9,11 @@
         "s3",
         "ssh"
       ],
-      "command": "mkdir -p /data/ez_ln/d && echo hi > /data/ez_ln/a; link /data/ez_ln/a /data/ez_ln/b; echo rc=$?; cat /data/ez_ln/b; link /data/ez_ln/a /data/ez_ln/b; echo rc=$?; link /data/ez_ln/nosuch /data/ez_ln/z; echo rc=$?; link /data/ez_ln/a; echo rc=$?; link; echo rc=$?; link /data/ez_ln/a /data/ez_ln/b /data/ez_ln/c; echo rc=$?; link /data/ez_ln/d /data/ez_ln/e; echo rc=$?; link /data/ez_ln/a /data/ez_ln/d; echo rc=$?; rm -r /data/ez_ln",
+      "command": "mkdir -p /data/ez_ln/d && echo hi > /data/ez_ln/a; link /data/ez_ln/a /data/ez_ln/b; echo rc=$?; cat /data/ez_ln/b; link /data/ez_ln/a /data/ez_ln/b; echo rc=$?; link /data/ez_ln/nosuch /data/ez_ln/z; echo rc=$?; link /data/ez_ln/a; echo rc=$?; link; echo rc=$?; link /data/ez_ln/a /data/ez_ln/b /data/ez_ln/c; echo rc=$?; link /data/ez_ln/d /data/ez_ln/e; echo rc=$?; link /data/ez_ln/a /data/ez_ln/d; echo rc=$?; ln -s /data/ez_ln/missing /data/ez_ln/dang; link /data/ez_ln/a /data/ez_ln/dang; echo rc=$?; cat /data/ez_ln/missing; echo rc=$?; ln -s /data/ez_ln/a /data/ez_ln/live; link /data/ez_ln/b /data/ez_ln/live; echo rc=$?; rm -r /data/ez_ln",
       "expect": {
         "exit": 0,
-        "stdout": "rc=0\nhi\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
-        "stderr": "link: cannot create link '/data/ez_ln/b' to '/data/ez_ln/a': File exists\nlink: cannot create link '/data/ez_ln/z' to '/data/ez_ln/nosuch': No such file or directory\nlink: missing operand after '/data/ez_ln/a'\nTry 'link --help' for more information.\nlink: missing operand\nTry 'link --help' for more information.\nlink: extra operand '/data/ez_ln/c'\nTry 'link --help' for more information.\nlink: cannot create link '/data/ez_ln/e' to '/data/ez_ln/d': Operation not permitted\nlink: cannot create link '/data/ez_ln/d' to '/data/ez_ln/a': File exists\n"
+        "stdout": "rc=0\nhi\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "link: cannot create link '/data/ez_ln/b' to '/data/ez_ln/a': File exists\nlink: cannot create link '/data/ez_ln/z' to '/data/ez_ln/nosuch': No such file or directory\nlink: missing operand after '/data/ez_ln/a'\nTry 'link --help' for more information.\nlink: missing operand\nTry 'link --help' for more information.\nlink: extra operand '/data/ez_ln/c'\nTry 'link --help' for more information.\nlink: cannot create link '/data/ez_ln/e' to '/data/ez_ln/d': Operation not permitted\nlink: cannot create link '/data/ez_ln/d' to '/data/ez_ln/a': File exists\nlink: cannot create link '/data/ez_ln/dang' to '/data/ez_ln/a': File exists\ncat: /data/ez_ln/missing: No such file or directory\nlink: cannot create link '/data/ez_ln/live' to '/data/ez_ln/b': File exists\n"
       }
     }
   ]

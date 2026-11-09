@@ -18,7 +18,7 @@ import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { PathSpec as PathSpecClass } from '../../../types.ts'
-import { fsStrerror, isEnotdir, isFsError } from '../../../errors/fs.ts'
+import { fsStrerror, isFsError, isMissingPath } from '../../../errors/fs.ts'
 import { byteView, encodeText, textView } from '../../../shell/bytes.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
 import { quoteText } from '../../quote.ts'
@@ -81,10 +81,13 @@ async function onSystem(ctx: Context, name: string): Promise<string | null> {
     return componentRefusal(long[1], NAME_MAX)
   }
   try {
-    await ctx.vfs.stat(PathSpecClass.fromStrPath(name, undefined, cwd))
+    await ctx.vfs.stat(PathSpecClass.fromStrPath(name, undefined, cwd), undefined, {
+      nofollow: true,
+    })
   } catch (error) {
+    if (isMissingPath(error)) return null
     if (!isFsError(error)) throw error
-    if (isEnotdir(error)) return `${name}: ${String(fsStrerror(error))}`
+    return `${name}: ${String(fsStrerror(error))}`
   }
   return null
 }

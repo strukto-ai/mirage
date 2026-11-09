@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_zdiff_reads_both_mounts",
+      "seq": 16200107,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "printf 'a\\n' | gzip > /data/xm_ez_zdiff.gz; printf 'a\\n' | gzip > /data2/xm_ez_zdiff.gz; zdiff /data/xm_ez_zdiff.gz /data2/xm_ez_zdiff.gz; rm /data/xm_ez_zdiff.gz /data2/xm_ez_zdiff.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

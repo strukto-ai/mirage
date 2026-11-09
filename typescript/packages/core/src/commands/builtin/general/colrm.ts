@@ -17,7 +17,7 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { charWidth } from '../../../io/async_line_iterator.ts'
+import { charWidth, leadWidth } from '../../../io/async_line_iterator.ts'
 import { utf8Locale } from '../../../shell/bytes.ts'
 import { quoteText } from '../../quote.ts'
 import { resolveSource } from '../utils/stream.ts'
@@ -95,7 +95,7 @@ function isValidUtf8(bytes: Uint8Array): boolean {
   }
 }
 
-async function* removed(
+export async function* removed(
   source: AsyncIterable<Uint8Array>,
   start: number,
   stop: number | null,
@@ -117,7 +117,7 @@ async function* removed(
         if (!utf8) size = 0
         else {
           size = charWidth(data, at)
-          if (at + size > data.byteLength) break
+          if (at + size === data.byteLength && size < leadWidth(first)) break
           if (!isValidUtf8(data.subarray(at, at + size))) size = 0
         }
       }

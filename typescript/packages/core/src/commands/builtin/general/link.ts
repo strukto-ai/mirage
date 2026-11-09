@@ -18,7 +18,7 @@ import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FileType } from '../../../types.ts'
-import { fsStrerror, isFsError } from '../../../errors/fs.ts'
+import { fsStrerror, isEnotdir, isFsError, isMissingPath } from '../../../errors/fs.ts'
 import { quoteText } from '../../quote.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 
@@ -49,11 +49,18 @@ async function link(
     if (!isFsError(error)) throw error
     return [null, refused(source, target, String(fsStrerror(error)))]
   }
-  if (await ctx.vfs.exists(target)) return [null, refused(source, target, 'File exists')]
+  let taken = true
+  try {
+    await ctx.vfs.stat(target, undefined, { nofollow: true })
+  } catch (error) {
+    if (!isMissingPath(error) && !isEnotdir(error)) throw error
+    taken = false
+  }
+  if (taken) return [null, refused(source, target, 'File exists')]
   if (row.type === FileType.DIRECTORY)
     return [null, refused(source, target, 'Operation not permitted')]
   try {
-    await ctx.vfs.write(target, await ctx.vfs.read(source))
+    await ctx.vfs.write(target, await ctx.vfs.read(source, { stream: true }))
   } catch (error) {
     if (!isFsError(error)) throw error
     return [null, refused(source, target, String(fsStrerror(error)))]
@@ -61,4 +68,10 @@ async function link(
   return [null, new IOResult()]
 }
 
-export const GENERAL_LINK = command({ name: 'link', vfs: null, spec: specOf('link'), fn: link })
+export const GENERAL_LINK = command({
+  name: 'link',
+  vfs: null,
+  spec: specOf('link'),
+  fn: link,
+  write: true,
+})

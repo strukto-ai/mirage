@@ -74,21 +74,23 @@ export interface Tool {
 }
 
 export interface CompressorFlags {
-  decompress: boolean
-  test: boolean
-  keep: boolean
-  force: boolean
-  toStdout: boolean
-  quiet: number
-  verbose: number
-  level: number
-  suffix: string | null
+  readonly decompress: boolean
+  readonly test: boolean
+  readonly keep: boolean
+  readonly force: boolean
+  readonly toStdout: boolean
+  readonly quiet: number
+  readonly verbose: number
+  readonly level: number
+  readonly suffix: string | null
 }
 
-/** A compressor line replaces its operands unless `-c` or `-t`. */
+/** A compressor line replaces its operands unless `-c`, or unless `-t` is the
+ * mode typed last. */
 export function compressorFacts(fl: FlagView, operands: readonly (string | PathSpec)[]): LineFacts {
+  const mode = lastTyped(fl, 'compress', 'decompress', 'test')
   return new LineFacts({
-    writes: operands.length > 0 && !['stdout', 'test'].some((name) => fl.asBool(name)),
+    writes: operands.length > 0 && !fl.asBool('stdout') && mode !== 'test',
   })
 }
 

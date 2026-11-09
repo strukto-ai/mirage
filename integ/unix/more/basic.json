@@ -9,10 +9,10 @@
         "s3",
         "ssh"
       ],
-      "command": "mkdir -p /data/ez_m/d; printf 'one\\n' > /data/ez_m/a; printf 'two\\n' > /data/ez_m/b; more /data/ez_m/a; more /data/ez_m/a /data/ez_m/b; echo rc=$?; more -d -l -f -p -c -s -u /data/ez_m/a; more -n 2 /data/ez_m/a; more -5 /data/ez_m/a; more +3 /data/ez_m/a; more +/x /data/ez_m/a; more /data/ez_m/nosuch; echo rc=$?; more /data/ez_m/d; echo rc=$?; printf 'piped\\n' | more; more --bogus /data/ez_m/a; echo rc=$?; more -Z /data/ez_m/a; echo rc=$?; rm -r /data/ez_m",
+      "command": "mkdir -p /data/ez_m/d; printf 'one\\n' > /data/ez_m/a; printf 'two\\n' > /data/ez_m/b; more /data/ez_m/a; more /data/ez_m/a /data/ez_m/b; echo rc=$?; more -d -l -f -p -c -s -u /data/ez_m/a; more -n 2 /data/ez_m/a; more -5 /data/ez_m/a; more +3 /data/ez_m/a; more +/x /data/ez_m/a; more /data/ez_m/nosuch; echo rc=$?; more /data/ez_m/d; echo rc=$?; printf 'piped\\n' | more; more --bogus /data/ez_m/a; echo rc=$?; more -Z /data/ez_m/a; echo rc=$?; printf 'p\\n' > /data/ez_m/+plain; (cd /data/ez_m && more +plain); rm -r /data/ez_m",
       "expect": {
         "exit": 0,
-        "stdout": "::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\n::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\n::::::::::::::\n/data/ez_m/b\n::::::::::::::\ntwo\nrc=0\n::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\n::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\n::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\n::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\n::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\nrc=0\n\n*** /data/ez_m/d: directory ***\n\nrc=0\npiped\nrc=1\nrc=1\n",
+        "stdout": "::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\n::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\n::::::::::::::\n/data/ez_m/b\n::::::::::::::\ntwo\nrc=0\n::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\n::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\n::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\n::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\n::::::::::::::\n/data/ez_m/a\n::::::::::::::\none\nrc=0\n\n*** /data/ez_m/d: directory ***\n\nrc=0\npiped\nrc=1\nrc=1\n::::::::::::::\n+plain\n::::::::::::::\np\n",
         "stderr": "more: cannot open /data/ez_m/nosuch: No such file or directory\nmore: unrecognized option '--bogus'\nTry 'more --help' for more information.\nmore: invalid option -- 'Z'\nTry 'more --help' for more information.\n"
       }
     }

@@ -1512,6 +1512,7 @@ def _finish(
         results (list[str]): the listing's lines.
         warnings (list[LsWarning]): reported before the listing.
         notices (Sequence[str]): stderr lines that come first of all.
+        program (str): the name the listing was run under.
     """
     out = format_records(results)
     io = IOResult(exit_code=exit_status_for(warnings))

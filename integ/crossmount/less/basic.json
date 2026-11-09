@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_less_reads_both_mounts",
+      "seq": 16200100,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "printf 'a\\n' > /data/xm_ez_less; printf 'b\\n' > /data2/xm_ez_less; less /data/xm_ez_less /data2/xm_ez_less; rm /data/xm_ez_less /data2/xm_ez_less",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

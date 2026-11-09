@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_more_reads_both_mounts",
+      "seq": 16200101,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "printf 'a\\n' > /data/xm_ez_more; printf 'b\\n' > /data2/xm_ez_more; more /data/xm_ez_more /data2/xm_ez_more; rm /data/xm_ez_more /data2/xm_ez_more",
+      "expect": {
+        "exit": 0,
+        "stdout": "::::::::::::::\n/data/xm_ez_more\n::::::::::::::\na\n::::::::::::::\n/data2/xm_ez_more\n::::::::::::::\nb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

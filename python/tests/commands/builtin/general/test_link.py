@@ -14,6 +14,7 @@
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.workspace.lookup.constants import line_facts
 
 
 # A hard link is a byte copy. Pinned on coreutils 9.7.
@@ -22,6 +23,19 @@ from mirage import RAMVFS, MountMode, Workspace
     "line,stdout,stderr,code",
     [
         ("echo hi > /d/a; link /d/a /d/b; cat /d/b", "hi\n", "", 0),
+        (
+            "echo hi > /d/a; ln -s /d/none /d/b; link /d/a /d/b; "
+            "ls /d/none 2>/dev/null",
+            "",
+            "link: cannot create link '/d/b' to '/d/a': File exists\n",
+            2,
+        ),
+        (
+            "echo hi > /d/a; ln -s /d/a /d/s; link /d/s /d/b; cat /d/b",
+            "hi\n",
+            "",
+            0,
+        ),
         (
             "echo hi > /d/a; link /d/a /d/a",
             "",
@@ -55,3 +69,7 @@ async def test_link(line, stdout, stderr, code):
     assert await io.stdout_str() == stdout
     assert await io.stderr_str() == stderr
     assert io.exit_code == code
+
+
+def test_link_counts_as_a_write():
+    assert line_facts("link", ["link", "/d/a", "/d/b"], "/").writes

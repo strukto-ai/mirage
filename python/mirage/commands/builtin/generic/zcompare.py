@@ -27,13 +27,17 @@ from mirage.commands.builtin.generic.diff import (
     diff_generic,
 )
 from mirage.commands.builtin.generic.diff import parse_flags as diff_flags
-from mirage.commands.builtin.utils.stream import is_stdin
+from mirage.commands.builtin.utils.stream import (
+    is_stdin,
+    resolve_source,
+    stdin_stat,
+)
 from mirage.commands.config import Context
 from mirage.commands.quote import quote_text
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import utf8_locale
-from mirage.types import PathSpec, ReaddirFn, ReadStreamFn, StatFn
+from mirage.types import FileStat, PathSpec, ReaddirFn, ReadStreamFn, StatFn
 from mirage.utils.compress import gunzip_stream
 
 # The names zdiff's script reads as compressed, by their ending.
@@ -64,36 +68,28 @@ class _Plan:
     decoded: set[str]
 
 
-def _respelled(
-    path: PathSpec,
-    raw_path: str,
-    virtual: str | None = None,
-    vfs_path: str | None = None,
-) -> PathSpec:
-    return dataclasses.replace(
-        path,
-        raw_path=raw_path,
-        virtual=path.virtual if virtual is None else virtual,
-        vfs_path=path.vfs_path if vfs_path is None else vfs_path,
-    )
+async def _unsized(path: PathSpec) -> int | None:
+    return None
 
 
-def _partner(path: PathSpec) -> PathSpec | None:
-    """The file a lone operand is compared with: its name unzipped.
+def _respelled(path: PathSpec, raw_path: str) -> PathSpec:
+    return dataclasses.replace(path, raw_path=raw_path)
+
+
+def _partner(path: PathSpec, cwd: str) -> PathSpec | None:
+    """The file a lone operand is compared with: its name as typed,
+    unzipped, as the operand itself may be a link to anything.
 
     Args:
         path (PathSpec): the operand.
+        cwd (str): the directory a relative name is under.
     """
     ending = STRIPPED_ENDING.search(path.raw_path)
     if ending is None:
         return None
     swap = ".tar" if ending.group().startswith(".t") else ""
-    return _respelled(
-        path,
-        STRIPPED_ENDING.sub(swap, path.raw_path),
-        STRIPPED_ENDING.sub(swap, path.virtual),
-        STRIPPED_ENDING.sub(swap, path.vfs_path),
-    )
+    unzipped = STRIPPED_ENDING.sub(swap, path.raw_path)
+    return PathSpec.from_str_path(unzipped, cwd=cwd)
 
 
 def _plan(first: PathSpec, second: PathSpec, lone: bool) -> _Plan:
@@ -106,9 +102,11 @@ def _plan(first: PathSpec, second: PathSpec, lone: bool) -> _Plan:
         second (PathSpec): the second file.
         lone (bool): the second is the first's own name unzipped.
     """
-    zipped_first = COMPRESSED_NAME.fullmatch(first.raw_path) is not None
     zipped_second = (
         not lone and COMPRESSED_NAME.fullmatch(second.raw_path) is not None
+    )
+    zipped_first = COMPRESSED_NAME.fullmatch(first.raw_path) is not None or (
+        first.raw_path == "-" and zipped_second
     )
     decoded = {
         p.virtual
@@ -165,7 +163,7 @@ async def zcompare_generic(
     if len(paths) == 2:
         first, second, lone = paths[0], paths[1], False
     else:
-        partner = _partner(paths[0])
+        partner = _partner(paths[0], ctx.cwd.virtual)
         if partner is None:
             name = paths[0].raw_path
             return _refusal(f"{name}: unknown compressed file extension")
@@ -182,21 +180,32 @@ async def zcompare_generic(
     plan = _plan(first, second, lone)
     piped = next((p for p in plan.paths if p.raw_path == "-"), None)
 
+    def is_dash_side(path: PathSpec) -> bool:
+        return (
+            first.raw_path == "-"
+            and path.virtual == first.virtual
+            and path.virtual in plan.decoded
+        )
+
     def reading(path: PathSpec) -> AsyncIterator[bytes]:
-        if path.virtual in plan.decoded:
-            return gunzip_stream(read(path), passthrough=True)
-        return read(path)
+        if path.virtual not in plan.decoded:
+            return read(path)
+        if is_dash_side(path):
+            return gunzip_stream(resolve_source(ctx.stdin), passthrough=True)
+        return gunzip_stream(read(path), passthrough=True)
+
+    stat_stdin = stdin_stat(stat)
+
+    async def stat_side(path: PathSpec) -> FileStat:
+        return await stat_stdin(first if is_dash_side(path) else path)
 
     side = ctx
     if piped is not None and piped.virtual in plan.decoded:
         side = dataclasses.replace(ctx, stdin=reading(piped))
 
-    async def unsized(path: PathSpec) -> int | None:
-        return None
-
     if isinstance(cmp_parsed, CmpFlags):
         return await cmp_generic(
-            cmp_parsed, plan.paths, texts, side, reading, unsized, unsized
+            cmp_parsed, plan.paths, texts, side, reading, _unsized, _unsized
         )
     if isinstance(diff_parsed, DiffFlags):
         return await diff_generic(
@@ -206,8 +215,8 @@ async def zcompare_generic(
             side,
             reading,
             readdir,
-            stat,
-            unsized,
+            stat_side,
+            _unsized,
         )
     raise ValueError(f"no comparison for {command}")
 

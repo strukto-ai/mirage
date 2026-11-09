@@ -13,9 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { IOResult } from '../../../io/types.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
+import { removed } from './colrm.ts'
 
 // Pinned on util-linux 2.41.5.
 describe('colrm', () => {
@@ -37,5 +39,37 @@ describe('colrm', () => {
     const io = await ws.shell(line)
     await ws.close()
     expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([stdout, stderr, code])
+  })
+})
+
+async function* arriving(parts: Uint8Array[]): AsyncGenerator<Uint8Array> {
+  for (const part of parts) {
+    await Promise.resolve()
+    yield part
+  }
+}
+
+describe('colrm across chunks', () => {
+  it.each([
+    [
+      [
+        [0x78, 0xc3],
+        [0xa9, 0x79, 0x0a],
+      ],
+      2,
+      2,
+      [0x78, 0x79, 0x0a],
+      0,
+    ],
+    [[[0x78, 0xe2], [0x82], [0xac, 0x79, 0x0a]], 2, 2, [0x78, 0x79, 0x0a], 0],
+    [[[0x61, 0xc3]], 2, null, [0x61], 0],
+    [[[0x61, 0xc3], [0x62]], 2, null, [0x61], 1],
+  ])('%j', async (parts, start, stop, stdout, code) => {
+    const io = new IOResult()
+    const out: number[] = []
+    const source = arriving(parts.map((part) => Uint8Array.from(part)))
+    for await (const chunk of removed(source, start, stop, true, io)) out.push(...chunk)
+    expect(out).toEqual(stdout)
+    expect(io.exitCode).toBe(code)
   })
 })

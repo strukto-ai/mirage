@@ -153,15 +153,18 @@ class CompressorFlags:
 def compressor_facts(
     fl: FlagView, operands: Sequence[str | PathSpec]
 ) -> LineFacts:
-    """A compressor line replaces its operands unless ``-c`` or ``-t``.
+    """A compressor line replaces its operands unless ``-c``, or unless
+    ``-t`` is the mode typed last.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
         operands (Sequence[str | PathSpec]): the line's operands.
     """
+    mode = last_typed(fl, "compress", "decompress", "test")
     return LineFacts(
         writes=len(operands) > 0
-        and not any(fl.as_bool(n) for n in ("stdout", "test"))
+        and not fl.as_bool("stdout")
+        and mode != "test"
     )
 
 

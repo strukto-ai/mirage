@@ -389,6 +389,7 @@ PROGRAM_WRAPPERS: dict[str, WrapperOptions] = {
 # `nice` alone prints the niceness, the rest refuse the line.
 RUNNERS = frozenset({"nice", "nohup", "setsid", "stdbuf"})
 LOWEST_PRIORITY = 19
+DEFAULT_NICENESS = 10
 
 _SIZE = re.compile(r"\s*\+?(\d*)(?:([kKMGTPEZYRQ])(B|iB)?)?")
 
@@ -578,8 +579,8 @@ SLASH_KEEPS_LAST = {"tar", "rm", "rmdir", "mv", "unlink", "mkdir"}
 # Commands that decide the last component for themselves, so the router
 # resolves only the prefix for them. chmod/chown/chgrp read -h off their
 # own line (GNU `chgrp -h ops link` writes the link, not its target),
-# touch reads -h the same way, ln is creating the name in its second
-# operand, readlink's whole subject is the link it was handed, and
+# touch reads -h the same way, ln and link are creating the name in their
+# second operand, readlink's whole subject is the link it was handed, and
 # mkdir is naming something that must not exist yet -- resolving its
 # last component would make `mkdir -p dangle` create the link's missing
 # target where GNU answers "File exists". getfattr and setfattr read -h
@@ -594,6 +595,7 @@ SELF_RESOLVING = {
     "chgrp",
     "touch",
     "ln",
+    "link",
     "readlink",
     "mkdir",
     "getfattr",

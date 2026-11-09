@@ -11,6 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import logging
 import re
 
 from mirage.accessor.base import Accessor
@@ -21,10 +22,13 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
+from mirage.errors.types import NoMountError
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.utils.quote import shell_quote_always
+
+logger = logging.getLogger(__name__)
 
 NAME_MAX = 255
 PATH_MAX = 4096
@@ -103,11 +107,13 @@ async def _on_system(ctx: Context, name: str) -> str | None:
         if await ctx.vfs.is_dir(spec):
             return f"{name}: File name too long"
         return _component_refusal(long[1], NAME_MAX)
+    spec = PathSpec.from_str_path(name, cwd=ctx.cwd.virtual)
     try:
-        await ctx.vfs.stat(PathSpec.from_str_path(name, cwd=ctx.cwd.virtual))
+        await ctx.vfs.stat(spec, nofollow=True)
+    except (FileNotFoundError, NoMountError) as exc:
+        logger.debug("pathchk: %s does not exist: %s", name, exc)
     except FS_ERRORS as exc:
-        if isinstance(exc, NotADirectoryError):
-            return f"{name}: {fs_strerror(exc)}"
+        return f"{name}: {fs_strerror(exc)}"
     return None
 
 

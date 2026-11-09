@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.pager import pager_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
@@ -24,6 +26,23 @@ from mirage.commands.config import CommandFn, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
+# The start positions more takes; any other word is a file to it.
+MORE_POSITION = re.compile(r"\+(?:[0-9]+\Z|/)")
+
+
+def _is_file(word: str, command: str) -> bool:
+    """Whether an operand names a file, not where to start reading.
+
+    Args:
+        word (str): the operand.
+        command (str): the pager.
+    """
+    if command == "zmore":
+        return True
+    if command == "more":
+        return MORE_POSITION.match(word) is None
+    return not word.startswith("+")
+
 
 def _pager(command: str) -> CommandFn:
     async def page(
@@ -32,7 +51,7 @@ def _pager(command: str) -> CommandFn:
         texts: list[str],
         ctx: Context,
     ) -> tuple[ByteSource | None, IOResult]:
-        operands = [p for p in paths if not p.raw_path.startswith("+")]
+        operands = [p for p in paths if _is_file(p.raw_path, command)]
         files = command_files(ctx, operands)
         resolved = await resolve_or_empty(files, operands)
         return await pager_generic(

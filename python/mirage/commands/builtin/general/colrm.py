@@ -18,7 +18,7 @@ from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.config import Context, command
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
-from mirage.io.async_line_iterator import char_width
+from mirage.io.async_line_iterator import char_width, lead_width
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import utf8_locale
 from mirage.types import PathSpec
@@ -132,7 +132,7 @@ async def _removed(
                 size = 0
             else:
                 size = char_width(held, at)
-                if at + size > len(held):
+                if at + size == len(held) and size < lead_width(first):
                     break
                 if not _is_valid_utf8(bytes(held[at : at + size])):
                     size = 0

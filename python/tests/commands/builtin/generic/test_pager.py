@@ -14,6 +14,9 @@
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.commands.builtin.generic.pager import _pages
+from mirage.io.types import IOResult
+from mirage.types import PathSpec
 
 
 # With no terminal to page on. Pinned on less 668, util-linux 2.41.5 and gzip 1.13.
@@ -73,3 +76,26 @@ async def test_pagers(line, stdout, stderr, code):
     assert await io.stdout_str() == stdout
     assert await io.stderr_str() == stderr
     assert io.exit_code == code
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["less", "zless"])
+async def test_stopped_reader_closes_the_file(command):
+    closed = []
+
+    async def stream():
+        try:
+            yield b"one\n"
+            yield b"two\n"
+        finally:
+            closed.append(True)
+
+    def read(path):
+        return stream()
+
+    pages = _pages(
+        [PathSpec.from_str_path("/d/a")], read, None, command, IOResult()
+    )
+    assert await anext(pages)
+    await pages.aclose()
+    assert closed == [True]

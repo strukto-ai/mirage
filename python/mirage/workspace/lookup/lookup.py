@@ -28,6 +28,7 @@ from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.utils.quote import shell_quote
 from mirage.workspace.lookup.constants import (
     CAPTURABLE_BUILTINS,
+    DEFAULT_NICENESS,
     EXEC_WRAPPERS,
     INTERPRETER_NAMES,
     KEYWORDS,
@@ -265,10 +266,28 @@ def _niceness(args: Sequence[str]) -> WrapperAnswer:
             warned.append("nice: cannot set niceness: Permission denied\n")
         elif adjustment is not None:
             level = min(level + adjustment, LOWEST_PRIORITY)
+        elif at is not None:
+            level = min(level + DEFAULT_NICENESS, LOWEST_PRIORITY)
         if at is None:
             break
         words = words[at + 1 :]
     return WrapperAnswer(stdout=f"{level}\n", stderr="".join(warned))
+
+
+def _ends_bare(args: Sequence[str]) -> bool:
+    """Whether a chain of ``nice`` ends with nothing left to run.
+
+    Args:
+        args (Sequence[str]): the words after the outermost ``nice``.
+    """
+    words = list(args)
+    while True:
+        at = read_wrapper("nice", words)[0]
+        if at is None:
+            return True
+        if words[at] != "nice":
+            return False
+        words = words[at + 1 :]
 
 
 def wrapper_answer(
@@ -293,7 +312,7 @@ def wrapper_answer(
         return WrapperAnswer(exit_code=code, stderr=said)
     at = read_wrapper(name, args)[0]
     if at is not None:
-        if name == "nice" and args[at] == "nice":
+        if name == "nice" and args[at] == "nice" and _ends_bare(args):
             return _niceness(args)
         return WrapperAnswer(runs_from=at)
     word = _help_word(args)

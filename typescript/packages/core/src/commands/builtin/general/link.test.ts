@@ -15,12 +15,20 @@
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { lineFacts } from '../../../workspace/lookup/constants.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 // A hard link is a byte copy. Pinned on coreutils 9.7.
 describe('link', () => {
   it.each([
     ['echo hi > /d/a; link /d/a /d/b; cat /d/b', 'hi\n', '', 0],
+    [
+      'echo hi > /d/a; ln -s /d/none /d/b; link /d/a /d/b; ls /d/none 2>/dev/null',
+      '',
+      "link: cannot create link '/d/b' to '/d/a': File exists\n",
+      2,
+    ],
+    ['echo hi > /d/a; ln -s /d/a /d/s; link /d/s /d/b; cat /d/b', 'hi\n', '', 0],
     [
       'echo hi > /d/a; link /d/a /d/a',
       '',
@@ -46,4 +54,8 @@ describe('link', () => {
     await ws.close()
     expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([stdout, stderr, code])
   })
+})
+
+it('link counts as a write', () => {
+  expect(lineFacts('link', ['link', '/d/a', '/d/b'], '/').writes).toBe(true)
 })

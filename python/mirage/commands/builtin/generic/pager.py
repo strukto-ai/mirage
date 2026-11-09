@@ -136,6 +136,9 @@ async def _pages(
                 yield chunk
         except GzipDataError as exc:
             complain(exc.render(name).rstrip("\n"))
+        finally:
+            await close_quietly(body)
+            await close_quietly(opened)
 
 
 async def pager_generic(

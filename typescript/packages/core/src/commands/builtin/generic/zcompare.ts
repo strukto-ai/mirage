@@ -19,7 +19,7 @@ import { PathSpec, type ReadStreamFn, type ReaddirFn, type StatFn } from '../../
 import { gunzipStream } from '../../../utils/compress.ts'
 import type { Context } from '../../config.ts'
 import { quoteText } from '../../quote.ts'
-import { isStdin } from '../utils/stream.ts'
+import { isStdin, resolveSource, stdinStat } from '../utils/stream.ts'
 import { cmpGeneric, parseFlags as cmpFlags } from './cmp.ts'
 import { diffGeneric, parseFlags as diffFlags } from './diff.ts'
 
@@ -37,29 +37,26 @@ function refusal(line: string): [null, IOResult] {
   ]
 }
 
-function respelled(
-  path: PathSpec,
-  fields: { rawPath?: string; virtual?: string; vfsPath?: string },
-): PathSpec {
+function unsized(): Promise<number | null> {
+  return Promise.resolve(null)
+}
+
+function respelled(path: PathSpec, rawPath: string): PathSpec {
   return new PathSpec({
-    virtual: fields.virtual ?? path.virtual,
+    virtual: path.virtual,
     directory: path.directory,
     resolved: path.resolved,
-    vfsPath: fields.vfsPath ?? path.vfsPath,
-    rawPath: fields.rawPath ?? path.rawPath,
+    vfsPath: path.vfsPath,
+    rawPath,
   })
 }
 
 /** The file a lone operand is compared with: its name unzipped. */
-function partner(path: PathSpec): PathSpec | null {
+function partner(path: PathSpec, cwd: string): PathSpec | null {
   const ending = STRIPPED_ENDING.exec(path.rawPath)
   if (ending === null) return null
   const swap = ending[0].startsWith('.t') ? '.tar' : ''
-  return respelled(path, {
-    rawPath: path.rawPath.replace(STRIPPED_ENDING, swap),
-    virtual: path.virtual.replace(STRIPPED_ENDING, swap),
-    vfsPath: path.vfsPath.replace(STRIPPED_ENDING, swap),
-  })
+  return PathSpec.fromStrPath(path.rawPath.replace(STRIPPED_ENDING, swap), undefined, cwd)
 }
 
 /** Name the sides as the comparison sees them: the second compressed side is
@@ -70,19 +67,19 @@ function plan(
   second: PathSpec,
   lone: boolean,
 ): { sides: PathSpec[]; decoded: Set<string> } {
-  const zippedFirst = COMPRESSED_NAME.test(first.rawPath)
   const zippedSecond = !lone && COMPRESSED_NAME.test(second.rawPath)
+  const zippedFirst = COMPRESSED_NAME.test(first.rawPath) || (first.rawPath === '-' && zippedSecond)
   const decoded = new Set<string>()
   if (zippedFirst) decoded.add(first.virtual)
   if (zippedSecond) decoded.add(second.virtual)
   if (zippedFirst && zippedSecond) {
     return {
-      sides: [respelled(first, { rawPath: '/dev/fd/5' }), respelled(second, { rawPath: '-' })],
+      sides: [respelled(first, '/dev/fd/5'), respelled(second, '-')],
       decoded,
     }
   }
-  if (zippedFirst) return { sides: [respelled(first, { rawPath: '-' }), second], decoded }
-  if (zippedSecond) return { sides: [first, respelled(second, { rawPath: '-' })], decoded }
+  if (zippedFirst) return { sides: [respelled(first, '-'), second], decoded }
+  if (zippedSecond) return { sides: [first, respelled(second, '-')], decoded }
   return { sides: [first, second], decoded }
 }
 
@@ -107,7 +104,7 @@ export async function zcompareGeneric(
   let second = other
   const lone = other === undefined
   if (second === undefined) {
-    const found = partner(only)
+    const found = partner(only, ctx.cwd.virtual)
     if (found === null) return refusal(`${only.rawPath}: unknown compressed file extension`)
     second = found
     first = only
@@ -128,15 +125,21 @@ export async function zcompareGeneric(
     }
   }
   const { sides, decoded } = plan(first, second, lone)
-  const reading: ReadStreamFn = (path) =>
-    decoded.has(path.virtual) ? gunzipStream(read(path), false, true) : read(path)
+  const isDashSide = (path: PathSpec): boolean =>
+    first.rawPath === '-' && path.virtual === first.virtual && decoded.has(path.virtual)
+  const reading: ReadStreamFn = (path) => {
+    if (!decoded.has(path.virtual)) return read(path)
+    if (isDashSide(path)) return gunzipStream(resolveSource(ctx.stdin), false, true)
+    return gunzipStream(read(path), false, true)
+  }
+  const statStdin = stdinStat(stat)
+  const statSide: StatFn = (path) => statStdin(isDashSide(path) ? first : path)
   const piped = sides.find((path) => path.rawPath === '-')
   const side: Context =
     piped !== undefined && decoded.has(piped.virtual) ? { ...ctx, stdin: reading(piped) } : ctx
-  const unsized = (): Promise<number | null> => Promise.resolve(null)
   if (cmpParsed !== null)
     return cmpGeneric(cmpParsed, sides, texts, side, reading, unsized, unsized)
   if (diffParsed !== null)
-    return diffGeneric(diffParsed, sides, side, reading, readdir, stat, unsized)
+    return diffGeneric(diffParsed, sides, side, reading, readdir, statSide, unsized)
   throw new Error(`no comparison for ${command}`)
 }

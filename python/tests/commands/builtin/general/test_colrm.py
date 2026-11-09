@@ -14,6 +14,8 @@
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.commands.builtin.general.colrm import _removed
+from mirage.io.types import IOResult
 
 
 # Pinned on util-linux 2.41.5.
@@ -46,4 +48,28 @@ async def test_colrm(line, stdout, stderr, code):
     io = await ws.shell(line)
     assert await io.stdout_str() == stdout
     assert await io.stderr_str() == stderr
+    assert io.exit_code == code
+
+
+async def _arriving(*parts):
+    for part in parts:
+        yield part
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "parts,start,stop,stdout,code",
+    [
+        ((b"x\xc3", b"\xa9y\n"), 2, 2, b"xy\n", 0),
+        ((b"x\xe2", b"\x82", b"\xacy\n"), 2, 2, b"xy\n", 0),
+        ((b"a\xc3",), 2, None, b"a", 0),
+        ((b"a\xc3", b"b"), 2, None, b"a", 1),
+    ],
+)
+async def test_colrm_character_split_between_chunks(
+    parts, start, stop, stdout, code
+):
+    io = IOResult()
+    out = _removed(_arriving(*parts), start, stop, True, io)
+    assert b"".join([chunk async for chunk in out]) == stdout
     assert io.exit_code == code

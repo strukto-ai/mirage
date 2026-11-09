@@ -14,6 +14,7 @@
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.workspace.lookup.constants import line_facts
 
 
 # Pinned on xz 5.8.1.
@@ -89,3 +90,17 @@ async def test_xz_unxz(line, stdout, stderr, code):
     assert await io.stdout_str() == stdout
     assert await io.stderr_str() == stderr
     assert io.exit_code == code
+
+
+@pytest.mark.parametrize(
+    "words,writes",
+    [
+        (["xz", "-t", "/d/a"], False),
+        (["xz", "-t", "-z", "/d/a"], True),
+        (["xz", "-z", "-t", "/d/a"], False),
+        (["xz", "-t", "-d", "/d/a"], True),
+        (["xz", "-c", "-t", "-z", "/d/a"], False),
+    ],
+)
+def test_the_last_mode_decides_whether_a_line_writes(words, writes):
+    assert line_facts("xz", words, "/").writes is writes

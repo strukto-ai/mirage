@@ -823,11 +823,11 @@ def parse_flags(
             exit_code=2,
             stderr=f"diff: conflicting output style options\n{_HINT}".encode(),
         )
-    for value in fl.as_list("horizon_lines"):
-        if not (value.isascii() and value.isdigit()):
+    for horizon in fl.as_list("horizon_lines"):
+        if not (horizon.isascii() and horizon.isdigit()):
             return IOResult(
                 exit_code=2,
-                stderr=f"diff: invalid horizon length '{value}'\n"
+                stderr=f"diff: invalid horizon length '{horizon}'\n"
                 f"{_HINT}".encode(),
             )
     labels = tuple(fl.as_list("label"))

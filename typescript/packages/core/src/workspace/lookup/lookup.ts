@@ -30,6 +30,7 @@ import {
   INTERPRETER_NAMES,
   KEYWORDS,
   NAMESPACE_COMMANDS,
+  DEFAULT_NICENESS,
   LOWEST_PRIORITY,
   PROGRAM_WRAPPERS,
   ROUTED_COMMANDS,
@@ -216,10 +217,22 @@ function niceness(args: readonly string[]): WrapperAnswer {
     if (adjustment !== null && adjustment < 0)
       warned.push('nice: cannot set niceness: Permission denied\n')
     else if (adjustment !== null) level = Math.min(level + adjustment, LOWEST_PRIORITY)
+    else if (at !== null) level = Math.min(level + DEFAULT_NICENESS, LOWEST_PRIORITY)
     if (at === null) break
     words = words.slice(at + 1)
   }
   return new WrapperAnswer({ stdout: `${String(level)}\n`, stderr: warned.join('') })
+}
+
+/** Whether a chain of `nice` ends with nothing left to run. */
+function endsBare(args: readonly string[]): boolean {
+  let words = [...args]
+  for (;;) {
+    const [at] = readWrapper('nice', words)
+    if (at === null) return true
+    if (words[at] !== 'nice') return false
+    words = words.slice(at + 1)
+  }
 }
 
 /**
@@ -240,7 +253,7 @@ export function wrapperAnswer(
   }
   const [at] = readWrapper(name, args)
   if (at !== null) {
-    if (name === 'nice' && args[at] === 'nice') return niceness(args)
+    if (name === 'nice' && args[at] === 'nice' && endsBare(args)) return niceness(args)
     return new WrapperAnswer({ runsFrom: at })
   }
   const word = helpWord(args)

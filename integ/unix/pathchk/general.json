@@ -7,11 +7,11 @@
         "ram",
         "disk"
       ],
-      "command": "pathchk a/b; echo rc=$?; pathchk -p 'a b'; echo rc=$?; pathchk -P -- -a; echo rc=$?; pathchk ''; echo rc=$?; pathchk -p ''; echo rc=$?; pathchk -P ''; echo rc=$?; pathchk; echo rc=$?; pathchk --portability aaaaaaaaaaaaaaaaaaaaaaaa; echo rc=$?; pathchk -p aaaaaaaaaaaaaaa; echo rc=$?; pathchk -P aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; echo rc=$?",
+      "command": "pathchk a/b; echo rc=$?; pathchk -p 'a b'; echo rc=$?; pathchk -P -- -a; echo rc=$?; pathchk ''; echo rc=$?; pathchk -p ''; echo rc=$?; pathchk -P ''; echo rc=$?; pathchk; echo rc=$?; pathchk --portability aaaaaaaaaaaaaaaaaaaaaaaa; echo rc=$?; pathchk -p aaaaaaaaaaaaaaa; echo rc=$?; pathchk -P aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; echo rc=$?; ln -s /data/ez_pl /data/ez_pl; pathchk /data/ez_pl/x; echo rc=$?; pathchk /data/ez_pl; echo rc=$?; rm /data/ez_pl; pathchk /data/ez_pl/x; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "rc=0\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=0\n",
-        "stderr": "pathchk: non-portable character ' ' in file name 'a b'\npathchk: leading '-' in a component of file name '-a'\npathchk: '': No such file or directory\npathchk: empty file name\npathchk: empty file name\npathchk: missing operand\nTry 'pathchk --help' for more information.\npathchk: limit 14 exceeded by length 24 of file name component 'aaaaaaaaaaaaaaaaaaaaaaaa'\npathchk: limit 14 exceeded by length 15 of file name component 'aaaaaaaaaaaaaaa'\n"
+        "stdout": "rc=0\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=0\nrc=1\nrc=0\nrc=0\n",
+        "stderr": "pathchk: non-portable character ' ' in file name 'a b'\npathchk: leading '-' in a component of file name '-a'\npathchk: '': No such file or directory\npathchk: empty file name\npathchk: empty file name\npathchk: missing operand\nTry 'pathchk --help' for more information.\npathchk: limit 14 exceeded by length 24 of file name component 'aaaaaaaaaaaaaaaaaaaaaaaa'\npathchk: limit 14 exceeded by length 15 of file name component 'aaaaaaaaaaaaaaa'\npathchk: /data/ez_pl/x: Too many levels of symbolic links\n"
       }
     }
   ]

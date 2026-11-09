@@ -11,6 +11,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import logging
+
 from mirage.accessor.base import Accessor
 from mirage.commands.config import Context, command
 from mirage.commands.quote import quote_text
@@ -21,8 +23,11 @@ from mirage.commands.spec.usage import (
 )
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
+from mirage.errors.types import NoMountError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
+
+logger = logging.getLogger(__name__)
 
 
 def _refused(source: PathSpec, target: PathSpec, why: str) -> IOResult:
@@ -33,7 +38,7 @@ def _refused(source: PathSpec, target: PathSpec, why: str) -> IOResult:
     return IOResult(exit_code=1, stderr=line.encode())
 
 
-@command("link", vfs=None, spec=SPECS["link"])
+@command("link", vfs=None, spec=SPECS["link"], write=True)
 async def link(
     accessor: Accessor,
     paths: list[PathSpec],
@@ -56,12 +61,16 @@ async def link(
         row = await ctx.vfs.stat(source)
     except FS_ERRORS as exc:
         return None, _refused(source, target, fs_strerror(exc) or str(exc))
-    if await ctx.vfs.exists(target):
+    try:
+        await ctx.vfs.stat(target, nofollow=True)
+    except (FileNotFoundError, NotADirectoryError, NoMountError) as exc:
+        logger.debug("link: %s is free: %s", target.virtual, exc)
+    else:
         return None, _refused(source, target, "File exists")
     if row.type == FileType.DIRECTORY:
         return None, _refused(source, target, "Operation not permitted")
     try:
-        await ctx.vfs.write(target, await ctx.vfs.read(source))
+        await ctx.vfs.write(target, await ctx.vfs.read(source, stream=True))
     except FS_ERRORS as exc:
         return None, _refused(source, target, fs_strerror(exc) or str(exc))
     return None, IOResult()
