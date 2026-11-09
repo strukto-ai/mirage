@@ -39,8 +39,9 @@ from mirage.io.yield_budget import YieldBudget
 from mirage.rs.stream import open_stream
 from mirage.shell.bytes import byte_view, encode_text
 from mirage.types import PathSpec
-from mirage.utils.clock import system_date, system_now
+from mirage.utils.clock import system_date
 from mirage.utils.dates import (
+    clock_reply,
     date_reply,
     iso_timestamp,
     parse_date_expr_async,
@@ -158,11 +159,7 @@ async def _dated(
         fmt (str): the output format.
         io (IOResult): the result the refusals settle into.
     """
-    current, nanos = divmod(round(system_now() * 1_000_000_000), 1_000_000_000)
-    engine = open_stream(
-        "date_lines",
-        {"format": byte_view(fmt), "now": current, "nanos": nanos},
-    )
+    engine = open_stream("date_lines", {"format": byte_view(fmt)})
     zones: dict[str, tzinfo] = {}
     budget = YieldBudget()
     pending: bytes | None = first
@@ -181,6 +178,8 @@ async def _dated(
             if chunk is None:
                 chunk = await anext(rest, None)
             out = engine.respond({"end": chunk is None}, chunk or b"")
+        elif header["op"] == "clock":
+            out = engine.respond({}, clock_reply())
         else:
             out = engine.respond(*date_reply(header, zone, zones))
         if out:

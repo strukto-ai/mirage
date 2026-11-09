@@ -24,6 +24,8 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { Files } from '../../../workspace/files.ts'
 import { UsageError } from '../../errors.ts'
 import { PipeClosed } from '../../../io/errors.ts'
+import { OutputStream } from '../../../io/stream.ts'
+import { enoent } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
@@ -458,4 +460,47 @@ it('heads every pair a recursive side by side shows', async () => {
     )
     expect([new TextDecoder().decode(await materialize(out)), io.exitCode]).toEqual([expected, 1])
   }
+})
+
+// Mirrors test_a_walk_that_fails_closes_the_output_it_kept.
+it('closes the output a failed walk kept', async () => {
+  let closed = 0
+  let calls = 0
+  async function* oneChunk(): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    yield new Uint8Array()
+  }
+  const computer: DiffComputer = {
+    compare: () => {
+      calls += 1
+      if (calls > 1) return Promise.reject(enoent(operand('b', '/d/b')))
+      const kept = new OutputStream(oneChunk(), () => {
+        closed += 1
+        return Promise.resolve()
+      })
+      return Promise.resolve({ outcome: 'different', status: 1, output: [kept], stderr: [] })
+    },
+  }
+  const directories = new Set(['/d/a', '/d/b'])
+  const [out, io] = await diffRun(
+    [operand('a', '/d/a'), operand('b', '/d/b')],
+    {
+      flags: { recursive: true },
+      argv: ['-r', 'a', 'b'],
+      stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
+      diff: computer,
+    },
+    () => oneChunk(),
+    (p: PathSpec) => Promise.resolve([`${p.virtual}/1`, `${p.virtual}/2`]),
+    (p: PathSpec) =>
+      Promise.resolve(
+        new FileStat({
+          name: p.virtual,
+          type: directories.has(p.virtual) ? FileType.DIRECTORY : FileType.FILE,
+        }),
+      ),
+  )
+  expect([out, io.exitCode]).toEqual([null, 2])
+  expect(closed).toBe(1)
 })

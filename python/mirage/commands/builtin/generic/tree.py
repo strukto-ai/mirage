@@ -58,6 +58,8 @@ _VERTICAL = "|   "
 _INDENT = "    "
 
 UNOPENABLE_MARK = "  [error opening dir]"
+# The lines a drawing holds before it writes them, whatever comes next.
+_HELD_LINES = 1024
 
 
 TreeSort = Literal["name", "version", "size", "mtime", "ctime", "none"]
@@ -783,6 +785,8 @@ async def _draw(
             drawing.dirs += 1
         else:
             drawing.files += 1
+        if len(drawing.lines) >= _HELD_LINES:
+            yield _flushed(drawing)
         if below is None:
             continue
         async for piece in _draw(

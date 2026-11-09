@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from mirage.commands.builtin.generic.tree import (
+    _HELD_LINES,
     TreeFlags,
     _segments_match,
     parse_flags,
@@ -457,3 +458,13 @@ async def test_tree_reads_no_further_than_its_reader_when_it_can(
     await anext(output)
     await close_quietly(output)
     assert seen == opened
+
+
+@pytest.mark.asyncio
+async def test_tree_writes_a_flat_directory_a_bounded_run_at_a_time():
+    names = {f"/r/{n:04}": _file(f"{n:04}") for n in range(3000)}
+    readdir, stat = _make_backend({"/r": _dir("r"), **names})
+    output, _ = await tree([_spec("/r")], readdir=readdir, stat=stat)
+    first = await anext(output)
+    await close_quietly(output)
+    assert first.count(b"\n") == _HELD_LINES

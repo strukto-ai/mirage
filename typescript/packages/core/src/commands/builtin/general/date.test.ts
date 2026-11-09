@@ -15,6 +15,7 @@
 import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
+import { runWithSystemClock, type Clock } from '../../../utils/clock.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
@@ -291,4 +292,35 @@ describe('date -f', () => {
       ),
     ).toEqual(['2001-02-02 14:05:06 EST -0500\n', '', 0])
   })
+})
+
+// Mirrors test_date_f_reads_the_clock_as_each_read_returns.
+it('reads the clock as each -f read returns', async () => {
+  let seconds = 1000
+  const clock = {
+    now: (): number => {
+      seconds += 1000
+      return seconds
+    },
+  } as unknown as Clock
+  const enc = new TextEncoder()
+  const lines = async function* (): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    yield enc.encode('now\n')
+    yield enc.encode('now\n')
+  }
+  const cmd = GENERAL_DATE[0]
+  if (cmd === undefined) throw new Error('date not registered')
+  const vfs = { read: () => Promise.resolve(lines()) }
+  const out = await runWithSystemClock(clock, async () => {
+    const result = await cmd.fn(undefined as never, [], ['+%s'], {
+      stdin: null,
+      flags: { u: true, file: PathSpec.fromStrPath('/l') },
+      cwd: PathSpec.fromStrPath('/'),
+      vfs,
+    } as never)
+    return materialize(result?.[0] ?? null)
+  })
+  const [first, second] = DEC.decode(out).trim().split('\n').map(Number)
+  expect((second ?? 0) - (first ?? 0)).toBe(1000)
 })

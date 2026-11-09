@@ -18,6 +18,7 @@ import { IOResult } from '../../../io/types.ts'
 import { OutputStream, asyncChain, closeQuietly } from '../../../io/stream.ts'
 import { resolveSource } from '../utils/stream.ts'
 import {
+  clockReply,
   dateReply,
   isoTimestamp,
   parseDateExprAsync,
@@ -132,13 +133,7 @@ async function* dated(
   io: IOResult,
   signal?: AbortSignal,
 ): AsyncGenerator<Uint8Array> {
-  const ms = systemDate().getTime()
-  const current = Math.floor(ms / 1000)
-  const engine = openStreamSync('date_lines', {
-    format: byteView(fmt),
-    now: current,
-    nanos: (ms - current * 1000) * 1000000,
-  })
+  const engine = openStreamSync('date_lines', { format: byteView(fmt) })
   const zones = new Map<string, Zone>()
   const budget = new YieldBudget(signal)
   let pending: Uint8Array | undefined = first
@@ -161,6 +156,8 @@ async function* dated(
           chunk = next.done === true ? undefined : next.value
         }
         out = engine.respond({ end: chunk === undefined }, chunk ?? new Uint8Array())
+      } else if (taken[0].op === 'clock') {
+        out = engine.respond({}, clockReply())
       } else {
         const [reply, data] = dateReply(taken[0], zone, zones)
         out = engine.respond(reply, data)

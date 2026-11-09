@@ -21,6 +21,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.builtin.general.date import _each_line
 from mirage.commands.config import Context
 from mirage.io.stream import close_quietly
+from mirage.io.types import materialize
 from mirage.types import PathSpec
 
 
@@ -238,3 +239,22 @@ async def test_date_f_answers_a_line_naming_its_own_zone():
         )
     finally:
         await ws.close()
+
+
+async def _two_nows():
+    yield b"now\n"
+    yield b"now\n"
+
+
+class _TwoNows:
+    async def read(self, path, *, stream):
+        return _two_nows()
+
+
+@pytest.mark.asyncio
+async def test_date_f_reads_the_clock_as_each_read_returns(monkeypatch):
+    moments = iter([1000.0, 2000.0])
+    monkeypatch.setattr("mirage.utils.dates.system_now", lambda: next(moments))
+    ctx = Context(flags={"u": True}, vfs=_TwoNows())
+    out, _ = await _each_line(ctx, PathSpec.from_str_path("/l"), None, "%s")
+    assert await materialize(out) == b"1000\n2000\n"

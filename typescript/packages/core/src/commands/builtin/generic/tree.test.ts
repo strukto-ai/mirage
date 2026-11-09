@@ -513,6 +513,17 @@ describe('tree sizes, orders and JSON', () => {
 
 // Mirrors test_tree_reads_no_further_than_its_reader_when_it_can.
 describe('treeGeneric while it is read', () => {
+  // Mirrors test_tree_writes_a_flat_directory_a_bounded_run_at_a_time.
+  it('writes a flat directory a bounded run at a time', async () => {
+    const flat = Array.from({ length: 3000 }, (_, n) => `/f${String(n).padStart(4, '0')}`)
+    const noting = (): Promise<string[]> => Promise.resolve(flat)
+    const result = await generic(parseFlags({}) as TreeFlags, [spec('/')], ctx({}), noting, stat)
+    const out = (result?.[0] as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+    const step = await out.next()
+    await out.return?.()
+    expect(step.done === true ? 0 : DEC.decode(step.value).split('\n').length - 1).toBe(1024)
+  })
+
   it.each([
     ['plain text', false, ['/']],
     ['-J', true, ['/', '/.secret', '/docs']],

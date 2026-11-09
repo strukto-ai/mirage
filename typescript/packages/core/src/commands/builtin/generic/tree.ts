@@ -46,6 +46,8 @@ import { isoTimestamp } from '../../../utils/dates.ts'
 import { contentSize, posixMode } from '../../../utils/stat_view.ts'
 
 const UNOPENABLE_MARK = '  [error opening dir]'
+// The lines a drawing holds before it writes them, whatever comes next.
+const HELD_LINES = 1024
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
@@ -707,6 +709,7 @@ async function* draw(
     drawing.lines.push(textLine(treeOpts.flags, node, prefix, last))
     if (node.isDir) drawing.dirs += 1
     else drawing.files += 1
+    if (drawing.lines.length >= HELD_LINES) yield flushed(drawing)
     if (below === null) continue
     yield* draw(
       below,

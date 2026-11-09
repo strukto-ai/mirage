@@ -71,6 +71,8 @@ pub(crate) enum Request {
         year: Option<i64>,
         wall: Option<[i64; 6]>,
     },
+    /// The time now, as whole seconds and nanoseconds.
+    Clock,
     /// The next chunk of input `fd`; the first read of a named input says
     /// which file, and which operand when it is one still as typed. A file
     /// read whole asks for `least` bytes a reply, the host gathering chunks
@@ -230,6 +232,7 @@ impl Request {
                     put("wall", serde_json::to_value(wall).unwrap());
                 }
             }
+            Request::Clock => put("op", "clock".into()),
             Request::Read { fd, open, least } => {
                 put("op", "read".into());
                 put("fd", (*fd).into());

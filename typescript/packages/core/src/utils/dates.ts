@@ -125,6 +125,13 @@ function dateRequest(
   return { offset: shown.offsetSec, name: shown.abbrev }
 }
 
+/** The answer to a date stream asking the time, in seconds and nanoseconds. Mirrors Python's clock_reply. */
+export function clockReply(): Uint8Array {
+  const ms = systemDate().getTime()
+  const seconds = Math.floor(ms / 1000)
+  return encodeText(JSON.stringify([seconds, (ms - seconds * 1000) * 1000000]))
+}
+
 /** The answer to one of a date stream's zone questions. Mirrors Python's date_reply. */
 export function dateReply(
   header: Record<string, util.JSONType>,

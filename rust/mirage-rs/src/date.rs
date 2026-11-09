@@ -1103,8 +1103,6 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 struct LinesConfig {
     #[serde(deserialize_with = "crate::latin1")]
     format: Vec<u8>,
-    now: i64,
-    nanos: u32,
 }
 
 /// What one `-f` run keeps between lines, so a line asks its host only what
@@ -1143,6 +1141,18 @@ fn quoted_word(text: &[u8]) -> Vec<u8> {
 }
 
 impl Lines {
+    /// Each read's lines are read against the time it came back, so lines
+    /// that arrive apart name the moments they arrived at.
+    async fn read_clock(&mut self) {
+        let (_, data) = self.host.ask(Request::Clock).await;
+        if let Ok((now, nanos)) = serde_json::from_slice::<(i64, u32)>(&data) {
+            if i128::from(nanos) < NANOS {
+                self.now = i128::from(now);
+                self.nanos = i128::from(nanos);
+            }
+        }
+    }
+
     async fn place(&mut self, line: &[u8]) -> Answer<(i128, i128)> {
         let today;
         let text = if line.iter().all(|byte| BLANKS.contains(byte)) {
@@ -1220,6 +1230,9 @@ async fn each_line(mut lines: Lines) -> i32 {
                 least: 0,
             })
             .await;
+        if !data.is_empty() {
+            lines.read_clock().await;
+        }
         held.extend_from_slice(&data);
         let mut start = 0;
         while let Some(found) = held[scanned..].iter().position(|byte| *byte == b'\n') {
@@ -1244,14 +1257,11 @@ async fn each_line(mut lines: Lines) -> i32 {
 /// is read; what names no date is reported, and the run exits 1.
 pub(crate) fn open_lines(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: LinesConfig = parse_config(config)?;
-    if config.nanos >= NANOS as u32 {
-        return Err(StreamError::new("date: invalid nanoseconds"));
-    }
     Ok(task::spawn(move |host| {
         each_line(Lines {
             format: config.format,
-            now: i128::from(config.now),
-            nanos: i128::from(config.nanos),
+            now: 0,
+            nanos: 0,
             outer: Clock::new(host.clone(), None),
             zoned: HashMap::new(),
             host,
@@ -1510,7 +1520,15 @@ mod tests {
 
     fn lines(input: &[&[u8]], format: &str) -> (Vec<u8>, Vec<u8>, i32, usize) {
         let now = days(2026, 8, 16) * DAY + 13 * 3600 + 45 * 60 + 30;
-        let config = json!({"format":format,"now":now as i64,"nanos":5});
+        lines_at(input, format, || now as i64)
+    }
+
+    fn lines_at(
+        input: &[&[u8]],
+        format: &str,
+        mut clock: impl FnMut() -> i64,
+    ) -> (Vec<u8>, Vec<u8>, i32, usize) {
+        let config = json!({"format":format});
         let mut stream = open_lines(&serde_json::to_vec(&config).unwrap()).unwrap();
         let (mut out, mut chunks, mut asked) = (Vec::new(), input.iter(), 0);
         loop {
@@ -1527,6 +1545,11 @@ mod tests {
                     None => (br#"{"end":true}"#, b""),
                 };
                 stream.respond(reply, data, &mut out).unwrap();
+                continue;
+            }
+            if request["op"] == "clock" {
+                let data = serde_json::to_vec(&json!([clock(), 5])).unwrap();
+                stream.respond(b"{}", &data, &mut out).unwrap();
                 continue;
             }
             asked += 1;
@@ -1565,6 +1588,16 @@ mod tests {
              date: invalid date '\\377'\n"
         );
         assert_eq!(status, 1);
+    }
+
+    #[test]
+    fn date_lines_read_the_clock_again_for_each_read() {
+        let mut moments = [1000, 2000].into_iter();
+        let (out, _, status, _) = lines_at(&[b"now\n", b"now\n"], "%s", || {
+            moments.next().expect("one reading a read")
+        });
+        assert_eq!(String::from_utf8(out).unwrap(), "1000\n2000\n");
+        assert_eq!(status, 0);
     }
 
     #[test]

@@ -508,11 +508,12 @@ async function entryKind(walk: Walk, path: PathSpec): Promise<FileType | null> {
  */
 async function diffDirs(
   walk: Walk,
+  parts: ByteSource[],
   dirA: PathSpec,
   dirB: PathSpec,
   absent: Absent = PRESENT,
   above: readonly [readonly string[], readonly string[]] = [[], []],
-): Promise<[readonly ByteSource[], boolean]> {
+): Promise<boolean> {
   const flags = walk.flags
   const real = walk.real
   const opened: readonly [readonly string[], readonly string[]] =
@@ -527,7 +528,6 @@ async function diffDirs(
   const names = [...new Set([...namesA, ...namesB])].sort(compareCodePoints)
   const left = rstripSlash(dirA.rawPath)
   const right = rstripSlash(dirB.rawPath)
-  const parts: ByteSource[] = []
   let differ = false
   for (const name of names) {
     const inA = namesA.has(name)
@@ -561,9 +561,7 @@ async function diffDirs(
         walk.trouble.push(ENC.encode(`diff: ${named.rawPath}: recursive directory loop\n`))
         continue
       }
-      const [body, changed] = await diffDirs(walk, childA, childB, gone, opened)
-      for (const chunk of body) parts.push(chunk)
-      differ ||= changed
+      differ = (await diffDirs(walk, parts, childA, childB, gone, opened)) || differ
     } else if (!aDir && !bDir) {
       const pair = await diffPair(walk, childA, childB, gone)
       for (const chunk of pair.stderr) walk.trouble.push(chunk)
@@ -598,7 +596,7 @@ async function diffDirs(
       )
     }
   }
-  return [parts, differ]
+  return differ
 }
 
 async function missing(stat: StatFn, path: PathSpec, allowed: boolean): Promise<boolean> {
@@ -707,7 +705,14 @@ export async function diffGeneric(
         (await stat(p0)).type === FileType.DIRECTORY && (await stat(p1)).type === FileType.DIRECTORY
       if (bothDirs) {
         for (const path of [p0, p1]) await beforeFullWalk(dispatchOf(ctx), path, 'diff')
-        ;[output, differ] = await diffDirs(walk, p0, p1)
+        const parts: ByteSource[] = []
+        output = parts
+        try {
+          differ = await diffDirs(walk, parts, p0, p1)
+        } catch (err) {
+          await closeParts(parts)
+          throw err
+        }
       }
     }
     if (output === undefined) {

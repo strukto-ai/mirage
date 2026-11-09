@@ -75,6 +75,14 @@ def _date_request(
     return json.dumps({"offset": offset, "name": abbreviation}).encode()
 
 
+def clock_reply() -> bytes:
+    """The answer to a date stream asking the time, in seconds and
+    nanoseconds."""
+    return json.dumps(
+        divmod(round(system_now() * 1_000_000_000), 1_000_000_000)
+    ).encode()
+
+
 def date_reply(
     header: Mapping[str, JsonValue],
     tz: tzinfo | None,
