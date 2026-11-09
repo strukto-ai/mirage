@@ -19,6 +19,7 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as aioredis
 
+from mirage.shell.console import Channel
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -186,3 +187,43 @@ async def test_drop_deletes_every_key_of_the_workspace(prefix, store):
     assert [key for key in keys if key.startswith(f"{prefix}ws1:")] == []
     assert meta is None
     assert await store.load_meta("ws2") is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("doomed", "kept"),
+    [
+        ("w?", "w1"),
+        ("a", "a:execution:x"),
+        ("a", "a:execution:processes:x"),
+        ("a", "a:execution:console:x"),
+        ("a", "a:execution:processes"),
+        ("a", "a:execution:stops"),
+    ],
+)
+async def test_drop_leaves_a_workspace_whose_keys_its_id_would_match(
+    prefix, store, doomed, kept
+):
+    async def seed(ws: str) -> None:
+        """Give a workspace a session, jobs, the lease, a process and a
+        console.
+
+        Args:
+            ws (str): the workspace id.
+        """
+        execution = store.execution(ws)
+        await execution.cas_set("s", {"generation": 1}, 0)
+        await execution.lease("d")
+        await execution.publish("d", {"7": {"pid": 7}}, 7)
+        await execution.console("c").append(Channel.STDOUT, b"x")
+        await store.sessions(ws).set("s1", {"session_id": "s1"})
+
+    client = aioredis.from_url(REDIS_URL)
+    await seed(kept)
+    kept_keys = {key async for key in client.scan_iter(f"{prefix}*")}
+    await seed(doomed)
+    assert list(await store.execution(doomed).processes()) == ["d"]
+    await store.drop(doomed)
+    left = {key async for key in client.scan_iter(f"{prefix}*")}
+    await client.aclose()
+    assert left == kept_keys

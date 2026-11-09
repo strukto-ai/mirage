@@ -52,6 +52,17 @@ function pending(abort: AbortController): JobRunner {
     })
 }
 
+async function keysUnder(prefix: string): Promise<string[]> {
+  const c = createClient({ url: REDIS_URL })
+  await c.connect()
+  const keys: string[] = []
+  for await (const k of c.scanIterator({ MATCH: `${prefix}*` })) {
+    keys.push(...(Array.isArray(k) ? k : [k]))
+  }
+  await c.quit()
+  return keys.sort()
+}
+
 describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
   let prefix = ''
   const opened: RedisExecutionStore[] = []
@@ -138,12 +149,45 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     expect(records).toBeGreaterThan(5)
   })
 
-  it('clear drops lists, consoles and the lease', async () => {
+  it.each(['', 'a:b', 'sessions'])(
+    'refuses the name %j, which the key filter would not count',
+    async (name) => {
+      const store = open()
+      expect(() => store.console(name)).toThrow()
+      await expect(store.publish(name, { '1': { pid: 1 } }, 1)).rejects.toThrow()
+      await expect(store.requestStop(name, 1, 15)).rejects.toThrow()
+    },
+  )
+
+  it('matches a glob character in the prefix only as itself', async () => {
+    const base = `test:jobs:${randomUUID()}:`
+    const doomed = new RedisExecutionStore({ url: REDIS_URL, keyPrefix: `${base}w?:` })
+    const kept = new RedisExecutionStore({ url: REDIS_URL, keyPrefix: `${base}w1:` })
+    try {
+      await kept.casSet('s', { generation: 1 }, 0)
+      await kept.lease('k')
+      await kept.publish('k', { '7': { pid: 7 } }, 7)
+      const keptKeys = await keysUnder(base)
+      await doomed.publish('d', { '8': { pid: 8 } }, 8)
+      expect(Object.keys(await doomed.processes())).toEqual(['d'])
+      await doomed.clear()
+      expect(await keysUnder(base)).toEqual(keptKeys)
+    } finally {
+      await doomed.clear()
+      await kept.clear()
+      await doomed.close()
+      await kept.close()
+    }
+  })
+
+  it('clear drops every key the store writes', async () => {
     const store = open()
     await store.casSet('s', { generation: 1 }, 0)
     await store.console('c').append(Channel.STDOUT, new TextEncoder().encode('x'))
     await store.lease('o')
-    await store.publish('o', {}, 4)
+    await store.publish('o', { '4': { pid: 4 } }, 4)
+    await store.requestStop('o', 4, 15)
+    store.note(lineOf(1, 2))
     await store.clear()
     expect(await store.load('s')).toBeNull()
     const client = createClient({ url: REDIS_URL })

@@ -17,6 +17,7 @@ import { createClient } from 'redis'
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
+import { Channel } from '@struktoai/mirage-core/shell/console/index'
 import { Workspace } from '../../workspace.ts'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { RedisWorkspaceStateStore } from './redis.ts'
@@ -45,6 +46,17 @@ async function cleanup(prefix: string): Promise<void> {
   }
   if (keys.length > 0) await c.del(keys)
   await c.quit()
+}
+
+async function keysUnder(prefix: string): Promise<string[]> {
+  const c = createClient({ url: REDIS_URL ?? 'redis://localhost:6379/0' })
+  await c.connect()
+  const keys: string[] = []
+  for await (const key of c.scanIterator({ MATCH: `${prefix}*` })) {
+    keys.push(...(Array.isArray(key) ? key : [key]))
+  }
+  await c.quit()
+  return keys.sort()
 }
 
 describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
@@ -174,6 +186,37 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
       expect(keys).toEqual([])
       expect(meta).toBeNull()
       expect(await store.loadMeta('ws2')).not.toBeNull()
+    } finally {
+      await cleanup(prefix)
+      await store.close()
+    }
+  })
+
+  it.each([
+    ['w?', 'w1'],
+    ['a', 'a:execution:x'],
+    ['a', 'a:execution:processes:x'],
+    ['a', 'a:execution:console:x'],
+    ['a', 'a:execution:processes'],
+    ['a', 'a:execution:stops'],
+  ])('drop(%s) leaves %s, whose keys its id would match', async (doomed, kept) => {
+    const prefix = testPrefix()
+    const store = makeStore(prefix)
+    try {
+      const seed = async (ws: string): Promise<void> => {
+        const execution = store.execution(ws)
+        await execution.casSet('s', { generation: 1 }, 0)
+        await execution.lease('d')
+        await execution.publish('d', { '7': { pid: 7 } }, 7)
+        await execution.console('c').append(Channel.STDOUT, new TextEncoder().encode('x'))
+        await store.sessions(ws).set('s1', { session_id: 's1' })
+      }
+      await seed(kept)
+      const keptKeys = await keysUnder(prefix)
+      await seed(doomed)
+      expect(Object.keys(await store.execution(doomed).processes())).toEqual(['d'])
+      await store.drop(doomed)
+      expect(await keysUnder(prefix)).toEqual(keptKeys)
     } finally {
       await cleanup(prefix)
       await store.close()

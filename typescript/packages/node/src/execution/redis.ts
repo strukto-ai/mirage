@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readFileSync } from 'node:fs'
+import { globEscape } from '@struktoai/mirage-core/cache/file/utils'
 import { ExecutionStore } from '@struktoai/mirage-core/execution/base'
 import { HISTORY_MAX_RECORDS, HISTORY_SECONDS } from '@struktoai/mirage-core/execution/constants'
 import { CONSOLE_TTL_SECONDS, LEASE_SECONDS } from '@struktoai/mirage-core/execution/job/constants'
@@ -34,6 +35,18 @@ import { CAS_SCRIPT } from '../workspace/mount/namespace/redis.ts'
 export const LEASE_SCRIPT = readFileSync(new URL('./lease.lua', import.meta.url), 'utf8')
 export const PID_SCRIPT = readFileSync(new URL('./pid.lua', import.meta.url), 'utf8')
 export const HISTORY_SCRIPT = readFileSync(new URL('./history.lua', import.meta.url), 'utf8')
+// A longer workspace id ending in `:execution:processes` puts its session
+// table at `processes:sessions`, so no daemon is named `sessions`.
+export const OWN_KEY =
+  /^(?:lists|lease|pid|(?:records|ended):(?:lines|processes)|console:[^:]+:(?:stream|seq|ended)|(?:processes|stops):(?!sessions$)[^:]+)$/
+
+/** Refuse a daemon id or console name `OWN_KEY` would not count as this store's: empty, holding `:`, or `sessions`. */
+function keyPart(name: string): string {
+  if (name === '' || name.includes(':') || name === 'sessions') {
+    throw new Error(`a redis execution store refuses an empty name, ':' or 'sessions': ${name}`)
+  }
+  return name
+}
 
 /** The hash a record is kept in, `lines` or `processes`, and its field there. */
 function fieldOf(record: Line | Process): [string, string] {
@@ -232,7 +245,7 @@ export class RedisExecutionStore extends ExecutionStore {
   console(name: string): RedisConsoleStore {
     return new RedisConsoleStore({
       url: this.url,
-      keyPrefix: `${this.prefix}console:${name}:`,
+      keyPrefix: `${this.prefix}console:${keyPart(name)}:`,
       ttlSeconds: CONSOLE_TTL_SECONDS,
       connection: this.redis,
     })
@@ -282,7 +295,7 @@ export class RedisExecutionStore extends ExecutionStore {
     lastPid = 0,
   ): Promise<void> {
     const c = await this.redis.client()
-    const key = `${this.prefix}processes:${daemon}`
+    const key = `${this.prefix}processes:${keyPart(daemon)}`
     if (lastPid > this.raised) {
       await c.eval(PID_SCRIPT, { keys: [this.pidKey], arguments: [String(lastPid)] })
       this.raised = lastPid
@@ -297,10 +310,7 @@ export class RedisExecutionStore extends ExecutionStore {
   async processes(): Promise<Record<string, Record<string, RecordFields>>> {
     const c = await this.redis.client()
     const head = `${this.prefix}processes:`
-    const keys: string[] = []
-    for await (const k of c.scanIterator({ MATCH: `${head}*` })) {
-      keys.push(...(Array.isArray(k) ? k : [k]))
-    }
+    const keys = await this.ownKeys('processes:')
     if (keys.length === 0) return {}
     const values = await c.mGet(keys)
     const found: Record<string, Record<string, RecordFields>> = {}
@@ -312,6 +322,20 @@ export class RedisExecutionStore extends ExecutionStore {
     return found
   }
 
+  /**
+   * This store's keys under `{prefix}{family}`. Another store's prefix can
+   * start with this one, as workspace `a:execution:x`'s does with `a`'s, so a
+   * key counts only in a shape this store writes.
+   */
+  private async ownKeys(family: string): Promise<string[]> {
+    const c = await this.redis.client()
+    const keys: string[] = []
+    for await (const k of c.scanIterator({ MATCH: `${globEscape(this.prefix + family)}*` })) {
+      keys.push(...(Array.isArray(k) ? k : [k]))
+    }
+    return keys.filter((key) => OWN_KEY.test(key.slice(this.prefix.length)))
+  }
+
   async highestPid(): Promise<number> {
     const c = await this.redis.client()
     return Number((await c.get(this.pidKey)) ?? 0)
@@ -319,7 +343,7 @@ export class RedisExecutionStore extends ExecutionStore {
 
   async requestStop(daemon: string, pid: number, signal: number): Promise<void> {
     const c = await this.redis.client()
-    const key = `${this.prefix}stops:${daemon}`
+    const key = `${this.prefix}stops:${keyPart(daemon)}`
     await c
       .multi()
       .rPush(key, JSON.stringify([pid, signal]))
@@ -337,10 +361,7 @@ export class RedisExecutionStore extends ExecutionStore {
   async clear(): Promise<void> {
     await this.writing
     const c = await this.redis.client()
-    const keys: string[] = []
-    for await (const k of c.scanIterator({ MATCH: `${this.prefix}*` })) {
-      keys.push(...(Array.isArray(k) ? k : [k]))
-    }
+    const keys = await this.ownKeys('')
     if (keys.length > 0) await c.del(keys)
     this.raised = 0
   }
