@@ -16,6 +16,7 @@ import { LINE_STOP_SIGNAL } from '@struktoai/mirage-core/execution/constants'
 import { newLineId } from '@struktoai/mirage-core/execution/context'
 import { LineHandle } from '@struktoai/mirage-core/execution/line/handle'
 import type { LineId } from '@struktoai/mirage-core/execution/types'
+import type { BytePipe } from '@struktoai/mirage-core/io/pipe'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 
 /**
@@ -34,6 +35,7 @@ export class LineRequest {
   settled = false
   readonly controller = new AbortController()
   completion: Promise<void> = Promise.resolve()
+  stdin: BytePipe | undefined
 
   constructor(
     readonly line: LineHandle,
@@ -68,6 +70,11 @@ export class RequestTable {
   /** The requests held, as of now. */
   requests(): LineRequest[] {
     return [...this.held.values()]
+  }
+
+  /** A request still held, or undefined. */
+  get(id: LineId): LineRequest | undefined {
+    return this.held.get(id.value)
   }
 
   /** Forget requests after their workspace's runner has stopped. */

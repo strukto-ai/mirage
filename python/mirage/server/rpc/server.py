@@ -24,6 +24,10 @@ import jsonschema
 
 from mirage import __version__
 from mirage.errors.types import FsCondition
+from mirage.io.errors import PipeClosed
+from mirage.io.pipe import BytePipe
+from mirage.io.types import ByteSource
+from mirage.server.inflight import InFlight
 from mirage.server.io_serde import (
     CallArgsError,
     answered,
@@ -125,7 +129,9 @@ class MirageRpcServer:
     serve with MCP's schemas. ``shell`` and ``vfs/<call>`` take
     ``explain: true`` to answer what the call would do instead of doing
     it (``session.explain``). Bytes travel as base64.
-    ``$/cancelRequest`` cancels a running request.
+    ``$/cancelRequest`` cancels a running request. A ``shell`` with
+    ``open_stdin: true`` reads what ``stdin/write`` sends it until
+    ``stdin/close``, each naming that request's id as ``id``.
 
     Args:
         workspace (Workspace): the workspace to serve.
@@ -148,6 +154,7 @@ class MirageRpcServer:
         self._ws = workspace
         self._session_id = session_id or workspace.default_session_id
         self._session = Session(workspace, self._session_id)
+        self._stdins: dict[str, BytePipe] = {}
         self._ops = (
             operations if operations is not None else self._session.tools
         )
@@ -156,6 +163,8 @@ class MirageRpcServer:
         self._methods: dict[str, Callable[[Params], Awaitable[JsonValue]]] = {
             "initialize": self._initialize,
             "shell": self._shell,
+            "stdin/write": self._stdin_write,
+            "stdin/close": self._stdin_close,
             "glob": self._glob,
             **{
                 f"vfs/{call.name}": partial(self._vfs, call)
@@ -184,7 +193,8 @@ class MirageRpcServer:
         command: str,
         cwd: str | None,
         env: dict[str, str] | None,
-        stdin: bytes | None,
+        stdin: ByteSource | None,
+        pipe: BytePipe | None = None,
     ) -> JsonValue:
         """Run one shell line in the session.
 
@@ -192,10 +202,11 @@ class MirageRpcServer:
             command (str): the line.
             cwd (str | None): a working directory for this line only.
             env (dict[str, str] | None): variables for this line only.
-            stdin (bytes | None): the line's stdin.
+            stdin (ByteSource | None): the line's stdin.
+            pipe (BytePipe | None): the pipe behind an open ``stdin``.
 
         Returns:
-            JsonValue: ``{kind, exit_code, stdout, stderr, refusal}``.
+            JsonValue: ``{exit_code, stdout, stderr, refusal}``.
         """
         io = await self._session.shell(command, stdin=stdin, cwd=cwd, env=env)
         return await io_result_to_dict(io)
@@ -249,7 +260,11 @@ class MirageRpcServer:
                 request_id, RPC_INVALID_PARAMS, "params must be an object"
             )
         try:
-            result = await handler(params)
+            result = await (
+                self._shell(params, request_id)
+                if method == "shell"
+                else handler(params)
+            )
         except RpcError as exc:
             return error_response(request_id, exc.code, exc.message)
         except asyncio.CancelledError:
@@ -343,7 +358,44 @@ class MirageRpcServer:
             "methods": methods,
         }
 
-    async def _shell(self, params: Params) -> JsonValue:
+    def _stdin_key(self, request_id: JsonValue) -> str:
+        return InFlight.key(
+            self._ws.workspace_id, self._session_id, request_id
+        )
+
+    def _stdin_of(self, params: Params) -> BytePipe:
+        pipe = self._stdins.get(self._stdin_key(params.get("id")))
+        if pipe is None:
+            raise RpcError(RPC_NOT_FOUND, "no running shell opened that stdin")
+        return pipe
+
+    async def _call_there(self, action: Callable[[], None]) -> None:
+        """Make a call on the loop a line reads its stdin on.
+
+        Args:
+            action (Callable[[], None]): the call.
+        """
+
+        async def call() -> None:
+            action()
+
+        await self.hop(call())
+
+    async def _stdin_write(self, params: Params) -> JsonValue:
+        pipe = self._stdin_of(params)
+        try:
+            await self.hop(pipe.write(_bytes(params, "data")))
+        except PipeClosed as exc:
+            raise RpcError(RPC_INVALID_PARAMS, "stdin is closed") from exc
+        return None
+
+    async def _stdin_close(self, params: Params) -> JsonValue:
+        await self._call_there(self._stdin_of(params).end)
+        return None
+
+    async def _shell(
+        self, params: Params, request_id: JsonValue = None
+    ) -> JsonValue:
         if _flag(params, "explain"):
             if set(params) - {"command", "explain"}:
                 raise RpcError(
@@ -363,13 +415,30 @@ class MirageRpcServer:
             and all(isinstance(v, str) for v in env.values())
         ):
             raise RpcError(RPC_INVALID_PARAMS, "env must map names to strings")
-        stdin = _bytes(params, "stdin") if "stdin" in params else None
-        return await self.run_line(
-            _text(params, "command"),
-            cwd,
-            {str(k): str(v) for k, v in env.items()} if env else None,
-            stdin,
-        )
+        command = _text(params, "command")
+        variables = {str(k): str(v) for k, v in env.items()} if env else None
+        if not _flag(params, "open_stdin"):
+            stdin = _bytes(params, "stdin") if "stdin" in params else None
+            return await self.run_line(command, cwd, variables, stdin)
+        if "stdin" in params:
+            raise RpcError(RPC_INVALID_PARAMS, "open_stdin takes no stdin")
+        key = self._stdin_key(request_id)
+        if key in self._stdins:
+            raise RpcError(
+                RPC_INVALID_PARAMS, "that id already holds an open stdin"
+            )
+        pipe = BytePipe(self._ws.io.buffer_bytes)
+        self._stdins[key] = pipe
+        try:
+            return await self.run_line(
+                command, cwd, variables, pipe.stream(), pipe
+            )
+        finally:
+            del self._stdins[key]
+            try:
+                await self._call_there(pipe.close_reader)
+            except RuntimeError as exc:
+                logger.debug("the workspace stopped with its line: %s", exc)
 
     async def _glob(self, params: Params) -> JsonValue:
         try:

@@ -116,6 +116,11 @@ def main() -> None:
             }
     overlay = json.loads(render_overlay(source))
     removed = {a["target"] for a in overlay["actions"] if a.get("remove")}
+    for action in overlay["actions"]:
+        for sample in action.get("update", {}).get("x-codeSamples", []):
+            subprocess.run(
+                ["bash", "-n"], input=sample["source"], text=True, check=True
+            )
     for path, method, op in visible:
         assert not op.get("x-codeSamples")
         for server in op.get("servers", source["servers"]):

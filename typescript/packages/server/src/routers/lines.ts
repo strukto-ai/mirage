@@ -14,8 +14,14 @@
 
 import type { Line, LineState } from '@struktoai/mirage-core/execution/line/types'
 import { LineId } from '@struktoai/mirage-core/execution/types'
+import { PipeClosed } from '@struktoai/mirage-core/io/errors'
+import type { BytePipe } from '@struktoai/mirage-core/io/pipe'
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
+import type { RequestTable } from '../requests.ts'
+import { failure, HttpError, requireEntry } from './vfs.ts'
+
+const NOT_OPEN = "the line's stdin is not open"
 
 interface WsIdParams {
   wsId: string
@@ -65,10 +71,26 @@ function toResponse(record: Line): LineResponse {
   }
 }
 
+/** A running line's open stdin: 404 when no such line runs there, 409 when it opened none. */
+function openStdin(
+  registry: WorkspaceRegistry,
+  jobs: RequestTable,
+  wsId: string,
+  lineId: string,
+  account: string | null,
+): BytePipe {
+  requireEntry(registry, wsId, account)
+  const job = jobs.get(new LineId(lineId))
+  if (job?.workspaceId !== wsId) throw new HttpError(404, 'line not found')
+  if (job.stdin === undefined) throw new HttpError(409, NOT_OPEN)
+  return job.stdin
+}
+
 export function registerLinesRoutes(
   app: RouteApp,
   deps: {
     registry: WorkspaceRegistry
+    jobs: RequestTable
   },
 ): void {
   app.get<{ Params: WsIdParams; Querystring: ListLinesQuery }>(
@@ -112,5 +134,37 @@ export function registerLinesRoutes(
       machines: [...new Set(processes.map((process) => process.machine.toString()))],
     }
     return detail
+  })
+
+  app.post<{ Params: WsLineParams }>(
+    '/v1/workspaces/:wsId/lines/:lineId/stdin',
+    async (req, reply) => {
+      // Send the body to a running line's open stdin. It answers once the
+      // bytes are buffered, so a line that stops reading holds its writer
+      // back.
+      const { wsId, lineId } = req.params
+      try {
+        const stdin = openStdin(deps.registry, deps.jobs, wsId, lineId, req.account)
+        for await (const chunk of req.raw) await stdin.write(chunk, req.closed)
+      } catch (err) {
+        // The rest of a refused body is left unread, so the connection closes
+        // after the answer.
+        reply.header('connection', 'close')
+        return failure(reply, err instanceof PipeClosed ? new HttpError(409, NOT_OPEN) : err)
+      }
+      return reply.status(204).send()
+    },
+  )
+
+  app.delete<{ Params: WsLineParams }>('/v1/workspaces/:wsId/lines/:lineId/stdin', (req, reply) => {
+    // End a running line's open stdin: the line reads what was sent, then
+    // end of file.
+    const { wsId, lineId } = req.params
+    try {
+      openStdin(deps.registry, deps.jobs, wsId, lineId, req.account).end()
+    } catch (err) {
+      return failure(reply, err)
+    }
+    return reply.status(204).send()
   })
 }

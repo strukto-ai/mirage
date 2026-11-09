@@ -135,6 +135,6 @@ CLIs: `airtable`, `discord`, `gh`, `git`, `gws`, `hf`, `himalaya`, `linear`, `mc
 ## Limits
 
 - A Worker's isolate has 128 MB of memory and no disk, shared by every workspace it runs, whether the server API holds them or each has its own Durable Object. Set `max_memory` on each workspace so a large write fails with `Disk quota exceeded`, and a command's output held for its redirect with `line: memory exhausted`, before the isolate runs out.
-- The server API's workspaces live in the isolate's memory. A request routed to another isolate does not see them, and they are gone when the isolate is evicted. `store.type` must be `ram`. A workspace built in code keeps its files and sessions in SQL, as [above](#keep-a-workspaces-files).
+- The server API's workspaces live in the isolate's memory. A request routed to another isolate does not see them, a write to a running line's stdin included, and they are gone when the isolate is evicted. `store.type` must be `ram`. A workspace built in code keeps its files and sessions in SQL, as [above](#keep-a-workspaces-files).
 - Network rules judge each request by host name: the isolate never sees the address a name reaches, so a `denied_domains` entry naming an address or a range is refused, and jwt mode's block on cloud metadata addresses covers only a request made to the address itself.
 - SSH, FUSE, policy and script files read by path, and runtimes or CLIs loaded by a `source:Class` reference are the Node server's alone. Codex's exec-server runs here over its WebSocket.

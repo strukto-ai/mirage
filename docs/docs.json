@@ -820,7 +820,9 @@
                 "group": "Commands",
                 "pages": [
                   "GET /v1/workspaces/{workspace_id}/lines",
-                  "GET /v1/workspaces/{workspace_id}/lines/{line_id}"
+                  "GET /v1/workspaces/{workspace_id}/lines/{line_id}",
+                  "POST /v1/workspaces/{workspace_id}/lines/{line_id}/stdin",
+                  "DELETE /v1/workspaces/{workspace_id}/lines/{line_id}/stdin"
                 ]
               },
               {
@@ -1553,6 +1555,14 @@
     {
       "source": "/api/operations/lines/get-command-execution",
       "destination": "/api/operations/lines/get-command"
+    },
+    {
+      "source": "/api/operations/lines/write-to-a-running-line",
+      "destination": "/api/operations/lines/write-stdin"
+    },
+    {
+      "source": "/api/operations/lines/close-stdin-of-a-running-line",
+      "destination": "/api/operations/lines/close-stdin"
     }
   ],
   "navbar": {

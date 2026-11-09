@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
+import { once } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -136,8 +138,7 @@ describe('execute router', () => {
       payload: { command: 'echo hi' },
     })
     expect(res.statusCode).toBe(200)
-    const body = res.json<{ kind: string; stdout: string; exit_code: number }>()
-    expect(body.kind).toBe('io')
+    const body = res.json<{ stdout: string; exit_code: number }>()
     expect(body.stdout.trim()).toBe('hi')
     expect(body.exit_code).toBe(0)
     await app.close()
@@ -377,6 +378,161 @@ describe('a foreground shell request', () => {
       })
       expect(((await read.json()) as { stdout: string }).stdout).toBe('first\nsecond\n')
     } finally {
+      await app.close()
+    }
+  })
+
+  it('takes writes to an open stdin while the line runs', async () => {
+    const app = buildApp()
+    try {
+      const base = await served(app, 'open')
+      const res = await openStdin(base, 'open', 'cat', new AbortController().signal)
+      const records = ndjson(res.body as ReadableStream<Uint8Array>)
+      const lineId = ((await records.next()).value as { line_id: string }).line_id
+      const route = `${base}/v1/workspaces/open/lines/${lineId}/stdin`
+      for (const word of ['one\n', 'two\n']) {
+        expect((await writeStdin(route, word)).status).toBe(204)
+        const echoed = (await records.next()).value as { data: string }
+        expect(Buffer.from(echoed.data, 'base64').toString()).toBe(word)
+      }
+      expect((await fetch(route, { method: 'DELETE' })).status).toBe(204)
+      const last = (await records.next()).value as {
+        status: string
+        result: { exit_code: number; line_id: string }
+      }
+      expect([last.status, last.result.exit_code, last.result.line_id]).toEqual(['done', 0, lineId])
+      await records.next()
+      expect((await writeStdin(route, 'x')).status).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('refuses a write to a closed stdin', async () => {
+    const app = buildApp()
+    const abort = new AbortController()
+    try {
+      const base = await served(app, 'closed')
+      const res = await openStdin(base, 'closed', 'cat; sleep 5', abort.signal)
+      const records = ndjson(res.body as ReadableStream<Uint8Array>)
+      const lineId = ((await records.next()).value as { line_id: string }).line_id
+      const route = `${base}/v1/workspaces/closed/lines/${lineId}/stdin`
+      expect((await fetch(route, { method: 'DELETE' })).status).toBe(204)
+      expect((await fetch(route, { method: 'DELETE' })).status).toBe(204)
+      const refused = await writeStdin(route, 'late')
+      expect([refused.status, await refused.json()]).toEqual([
+        409,
+        { detail: "the line's stdin is not open" },
+      ])
+    } finally {
+      abort.abort()
+      await app.close()
+    }
+  })
+
+  it('holds a write past the buffer until the line ends', async () => {
+    const app = buildApp()
+    try {
+      const base = await served(app, 'held')
+      const res = await openStdin(base, 'held', 'sleep 1', new AbortController().signal)
+      const records = ndjson(res.body as ReadableStream<Uint8Array>)
+      const lineId = ((await records.next()).value as { line_id: string }).line_id
+      const written = await writeStdin(
+        `${base}/v1/workspaces/held/lines/${lineId}/stdin`,
+        'x'.repeat(1024 * 1024),
+      )
+      expect(written.status).toBe(409)
+      expect(((await records.next()).value as { status: string }).status).toBe('done')
+      await records.next()
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('drops a held write whose caller hung up', async () => {
+    const app = buildApp()
+    try {
+      const base = await served(app, 'gone')
+      const capacity = app.registry.get('gone').runner.ws.io.bufferBytes
+      const res = await openStdin(base, 'gone', 'sleep 2; cat', new AbortController().signal)
+      const records = ndjson(res.body as ReadableStream<Uint8Array>)
+      const lineId = ((await records.next()).value as { line_id: string }).line_id
+      const path = `/v1/workspaces/gone/lines/${lineId}/stdin`
+      expect((await writeStdin(base + path, 'x'.repeat(capacity))).status).toBe(204)
+      const socket = connect(Number(new URL(base).port), '127.0.0.1')
+      await once(socket, 'connect')
+      socket.write(
+        `POST ${path} HTTP/1.1\r\nHost: 127.0.0.1\r\n` +
+          'Content-Type: application/octet-stream\r\nContent-Length: 4\r\n\r\nlate',
+      )
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      socket.destroy()
+      let seen = ''
+      while (seen.length < capacity) {
+        const record = (await records.next()).value as { data: string }
+        seen += Buffer.from(record.data, 'base64').toString()
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect((await fetch(base + path, { method: 'DELETE' })).status).toBe(204)
+      for (;;) {
+        const record = (await records.next()).value as { status?: string; data: string }
+        if (record.status !== undefined) break
+        seen += Buffer.from(record.data, 'base64').toString()
+      }
+      await records.next()
+      expect(seen).toBe('x'.repeat(capacity))
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('open_stdin needs a stream and no stdin part', async () => {
+    const app = buildApp()
+    try {
+      const base = await served(app, 'needs')
+      const route = `${base}/v1/workspaces/needs/shell`
+      const body = JSON.stringify({ command: 'cat', open_stdin: true })
+      const headers = { 'content-type': 'application/json' }
+      expect((await fetch(route, { method: 'POST', headers, body })).status).toBe(400)
+      expect((await fetch(`${route}?explain=true`, { method: 'POST', headers, body })).status).toBe(
+        400,
+      )
+      const form = new FormData()
+      form.append('request', new Blob([body], { type: 'application/json' }))
+      form.append('stdin', new Blob(['x']))
+      expect((await fetch(`${route}?stream=true`, { method: 'POST', body: form })).status).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('stdin routes name a running line with open stdin', async () => {
+    const app = buildApp()
+    const abort = new AbortController()
+    try {
+      const base = await served(app, 'named')
+      await createWs(app, 'elsewhere')
+      const unknown = `${base}/v1/workspaces/named/lines/nope/stdin`
+      expect((await writeStdin(unknown, 'x')).status).toBe(404)
+      expect((await fetch(unknown, { method: 'DELETE' })).status).toBe(404)
+      void fetch(`${base}/v1/workspaces/named/shell?stream=true`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ command: 'sleep 5' }),
+        signal: abort.signal,
+      }).catch(() => undefined)
+      let lineId: string | undefined
+      while (lineId === undefined) {
+        const listed = await fetch(`${base}/v1/workspaces/named/lines?state=running`)
+        lineId = ((await listed.json()) as { id: string }[])[0]?.id
+      }
+      expect(
+        (await writeStdin(`${base}/v1/workspaces/named/lines/${lineId}/stdin`, 'x')).status,
+      ).toBe(409)
+      const elsewhere = `${base}/v1/workspaces/elsewhere/lines/${lineId}/stdin`
+      expect((await fetch(elsewhere, { method: 'DELETE' })).status).toBe(404)
+    } finally {
+      abort.abort()
       await app.close()
     }
   })
@@ -675,3 +831,37 @@ describe('shutdown', () => {
     await app.close()
   })
 })
+
+function openStdin(
+  base: string,
+  id: string,
+  command: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  return fetch(`${base}/v1/workspaces/${id}/shell?stream=true`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ command, open_stdin: true }),
+    signal,
+  })
+}
+
+async function* ndjson(body: ReadableStream<Uint8Array>): AsyncGenerator {
+  const decoder = new TextDecoder()
+  let pending = ''
+  for await (const chunk of body as unknown as AsyncIterable<Uint8Array>) {
+    pending += decoder.decode(chunk, { stream: true })
+    for (let at = pending.indexOf('\n'); at !== -1; at = pending.indexOf('\n')) {
+      yield JSON.parse(pending.slice(0, at))
+      pending = pending.slice(at + 1)
+    }
+  }
+}
+
+function writeStdin(route: string, text: string): Promise<Response> {
+  return fetch(route, {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream' },
+    body: text,
+  })
+}

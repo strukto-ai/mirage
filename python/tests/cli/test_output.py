@@ -7,59 +7,50 @@ from mirage.cli.output import emit, exit_code_from_response
     "response,expected",
     [
         pytest.param(
-            {"kind": "io", "exit_code": 0, "stdout": "", "stderr": ""},
+            {"exit_code": 0, "stdout": "", "stderr": ""},
             0,
             id="test_io_zero",
         ),
         pytest.param(
-            {"kind": "io", "exit_code": 1, "stdout": "", "stderr": ""},
+            {"exit_code": 1, "stdout": "", "stderr": ""},
             1,
             id="test_io_nonzero_1",
         ),
         pytest.param(
-            {"kind": "io", "exit_code": 42, "stdout": "", "stderr": ""},
+            {"exit_code": 42, "stdout": "", "stderr": ""},
             42,
             id="test_io_nonzero_2",
         ),
         pytest.param(
-            {"kind": "io", "exit_code": 127, "stdout": "", "stderr": ""},
+            {"exit_code": 127, "stdout": "", "stderr": ""},
             127,
             id="test_io_nonzero_3",
         ),
+        pytest.param({"exit_code": 300}, 255, id="test_clamp_high"),
+        pytest.param({"exit_code": -1}, 0, id="test_clamp_negative"),
+        pytest.param({"exit_code": 1.9}, 1, id="test_truncate_float"),
         pytest.param(
-            {"kind": "io", "exit_code": 300}, 255, id="test_clamp_high"
-        ),
-        pytest.param(
-            {"kind": "io", "exit_code": -1}, 0, id="test_clamp_negative"
-        ),
-        pytest.param(
-            {"kind": "io", "exit_code": 1.9}, 1, id="test_truncate_float"
-        ),
-        pytest.param(
-            {"kind": "io", "exit_code": float("nan")},
+            {"exit_code": float("nan")},
             0,
             id="test_nan_returns_zero",
         ),
         pytest.param(
-            {"kind": "io", "exit_code": float("inf")},
+            {"exit_code": float("inf")},
             0,
             id="test_inf_returns_zero",
         ),
-        pytest.param(
-            {"kind": "io", "exit_code": True}, 0, id="test_bool_returns_zero"
-        ),
+        pytest.param({"exit_code": True}, 0, id="test_bool_returns_zero"),
         pytest.param(
             {"job_id": "job_abc", "workspace_id": "ws", "submitted_at": 0},
             0,
             id="test_bg_submission",
         ),
-        pytest.param({"kind": "raw", "value": "hi"}, 0, id="test_raw_kind"),
+        pytest.param({"value": "hi"}, 0, id="test_no_exit_code_field"),
         pytest.param(
             {
                 "job_id": "job_x",
                 "status": "done",
                 "result": {
-                    "kind": "io",
                     "exit_code": 7,
                     "stdout": "",
                     "stderr": "",
@@ -114,7 +105,6 @@ from mirage.cli.output import emit, exit_code_from_response
                 "job_id": "job_x",
                 "status": "failed",
                 "result": {
-                    "kind": "io",
                     "exit_code": 9,
                     "stdout": "",
                     "stderr": "",
@@ -129,12 +119,12 @@ from mirage.cli.output import emit, exit_code_from_response
         pytest.param(42, 0, id="test_non_dict_inputs_3"),
         pytest.param([1, 2, 3], 0, id="test_non_dict_inputs_4"),
         pytest.param(
-            {"kind": "io", "stdout": "", "stderr": ""},
+            {"stdout": "", "stderr": ""},
             0,
             id="test_io_missing_exit_code",
         ),
         pytest.param(
-            {"kind": "io", "exit_code": "one"},
+            {"exit_code": "one"},
             0,
             id="test_io_non_numeric_exit_code",
         ),

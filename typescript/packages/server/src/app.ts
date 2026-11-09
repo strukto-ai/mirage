@@ -260,7 +260,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   registerRateLimits(app, rateLimits)
   registerAuth(app, authConfig)
   registerRateLimits(app, rateLimits, true)
-  app.addContentTypeParser(/^multipart\//, (_req, _payload, done) => {
+  app.addContentTypeParser(/^(multipart\/|application\/octet-stream)/, (_req, _payload, done) => {
     done(null)
   })
   const resources = options.resourceStore ?? buildResourceStore(resolveResourceStore())

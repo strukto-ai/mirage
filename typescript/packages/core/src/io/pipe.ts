@@ -13,9 +13,20 @@ export const CAPACITY = 4 * CHUNK_SIZE
  */
 export const SEALED = new WeakSet<ArrayBufferLike>()
 
+const POLL_MS = 10
+
 /** One reader and bounded asynchronous writes. Closing either endpoint wakes writers. */
 export class BytePipe {
-  constructor(private readonly capacity = CAPACITY) {
+  /**
+   * @param capacity The most bytes held before a write waits.
+   * @param polled The two ends sit in different requests on an edge runtime,
+   * where a wake from one request would run the waiter inside it, so a waiter
+   * looks for a change on its own timer instead.
+   */
+  constructor(
+    private readonly capacity = CAPACITY,
+    private readonly polled = false,
+  ) {
     if (!Number.isSafeInteger(capacity) || capacity < CHUNK_SIZE)
       throw new Error('pipe capacity must be an integer from 16384 to 9007199254740991')
   }
@@ -44,16 +55,19 @@ export class BytePipe {
   private changed(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
     return new Promise((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
       const changed = (): void => {
         signal?.removeEventListener('abort', aborted)
         resolve()
       }
       const aborted = (): void => {
+        clearTimeout(timer)
         this.wake = this.wake.filter((wake) => wake !== changed)
         signal?.removeEventListener('abort', aborted)
         reject(makeAbortError(signal))
       }
-      this.wake.push(changed)
+      if (this.polled) timer = setTimeout(changed, POLL_MS)
+      else this.wake.push(changed)
       signal?.addEventListener('abort', aborted, { once: true })
     })
   }

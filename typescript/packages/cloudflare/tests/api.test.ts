@@ -51,6 +51,55 @@ async function shell(id: string, command: string): Promise<{ stdout: string; exi
   return answer.json as { stdout: string; exit_code: number }
 }
 
+interface LineRecord {
+  line_id?: string
+  data?: string
+  status?: string
+}
+
+async function openLine(
+  id: string,
+  command: string,
+): Promise<{ route: string; next: () => Promise<LineRecord> }> {
+  const response = await worker.fetch(`http://edge.test/v1/workspaces/${id}/shell?stream=true`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ command, open_stdin: true }),
+  })
+  const reader = (response.body as ReadableStream<Uint8Array>).getReader()
+  const decoder = new TextDecoder()
+  let held = ''
+  const next = async (): Promise<LineRecord> => {
+    for (;;) {
+      const end = held.indexOf('\n')
+      if (end >= 0) {
+        const line = held.slice(0, end)
+        held = held.slice(end + 1)
+        return JSON.parse(line) as LineRecord
+      }
+      const read = await reader.read()
+      if (read.done) throw new Error('the stream ended before its last record')
+      held += decoder.decode(read.value, { stream: true })
+    }
+  }
+  const first = await next()
+  return { route: `/v1/workspaces/${id}/lines/${first.line_id ?? ''}/stdin`, next }
+}
+
+async function writeLine(route: string, body: string | Uint8Array): Promise<number> {
+  const written = await worker.fetch(`http://edge.test${route}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/octet-stream' },
+    body,
+  })
+  await written.text()
+  return written.status
+}
+
+function decoded(record: LineRecord): string {
+  return Buffer.from(record.data ?? '', 'base64').toString()
+}
+
 beforeAll(async () => {
   worker = await unstable_dev(fileURLToPath(new URL('./worker.ts', import.meta.url)), {
     config: fileURLToPath(new URL('./wrangler.toml', import.meta.url)),
@@ -141,6 +190,55 @@ describe('the server API in workerd', () => {
     expect(streamed.status).toBe(200)
     expect(streamed.type).toBe('application/x-ndjson')
     expect(streamed.text.trim().split('\n').length).toBeGreaterThan(1)
+  })
+
+  it('takes writes to a running line from other requests', async () => {
+    await call('POST', '/v1/workspaces', {
+      id: 'live',
+      config: { mounts: { '/': { vfs: 'ram' } } },
+    })
+    const echoing = await openLine('live', 'cat')
+    for (const word of ['one\n', 'two\n']) {
+      expect(await writeLine(echoing.route, word)).toBe(204)
+      expect(decoded(await echoing.next())).toBe(word)
+    }
+    expect((await call('DELETE', echoing.route)).status).toBe(204)
+    expect((await echoing.next()).status).toBe('done')
+
+    const counting = await openLine('live', 'wc -c')
+    expect(await writeLine(counting.route, new Uint8Array(300_000))).toBe(204)
+    expect((await call('DELETE', counting.route)).status).toBe(204)
+    expect(decoded(await counting.next()).trim()).toBe('300000')
+    expect((await counting.next()).status).toBe('done')
+  })
+
+  it('takes stdin/write to a running RPC line from other requests', async () => {
+    await call('POST', '/v1/workspaces', {
+      id: 'live-rpc',
+      config: { mounts: { '/': { vfs: 'ram' } } },
+    })
+    const path = '/v1/workspaces/live-rpc/rpc'
+    const request = (id: number, method: string, params: object): object => ({
+      jsonrpc: '2.0',
+      id,
+      method,
+      params,
+    })
+    const running = call('POST', path, request(7, 'shell', { command: 'cat', open_stdin: true }))
+    const data = Buffer.from('one\n').toString('base64')
+    let written: { error?: { code: number }; result?: unknown } = {}
+    for (let attempt = 0; attempt < 500; attempt++) {
+      written = (await call('POST', path, request(8, 'stdin/write', { id: 7, data })))
+        .json as typeof written
+      if (written.error?.code !== -32004) break
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(written.result).toBeNull()
+    expect(
+      ((await call('POST', path, request(9, 'stdin/close', { id: 7 }))).json as { result: unknown })
+        .result,
+    ).toBeNull()
+    expect(((await running).json as { result: { stdout: string } }).result.stdout).toBe('one\n')
   })
 
   it("keeps a session's cwd and env across lines", async () => {

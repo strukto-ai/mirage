@@ -17,6 +17,10 @@ import { stderr } from 'node:process'
 import { format } from 'node:util'
 import { fromJsonSchema } from '@modelcontextprotocol/server'
 import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import { PipeClosed } from '@struktoai/mirage-core/io/errors'
+import { BytePipe } from '@struktoai/mirage-core/io/pipe'
+import { currentRequest } from '@struktoai/mirage-core/io/web/request'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { TooManyMatches } from '@struktoai/mirage-core/shell/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
@@ -30,6 +34,7 @@ import {
   failureToDict,
   ioResultToDict,
 } from '../io_serde.ts'
+import { InFlight } from '../inflight.ts'
 import { TOOLS } from '../mcp/server.ts'
 import {
   RPC_INTERNAL_ERROR,
@@ -117,7 +122,9 @@ export interface MirageRpcServerOptions {
  * tools, which `tools/list` and `tools/call` also serve with MCP's
  * schemas. `shell` and `vfs/<call>` take `explain: true` to answer what the
  * call would do instead of doing it (`session.explain`). Bytes travel as
- * base64. `$/cancelRequest` cancels a running request.
+ * base64. `$/cancelRequest` cancels a running request. A `shell` with
+ * `open_stdin: true` reads what `stdin/write` sends it until `stdin/close`,
+ * each naming that request's id as `id`.
  */
 export class MirageRpcServer {
   readonly sessionId: string
@@ -126,9 +133,10 @@ export class MirageRpcServer {
   private readonly operations: MirageToolOperations
   private readonly name: string
   private readonly version: string
+  protected stdins = new Map<string, BytePipe>()
   private readonly table: Record<
     string,
-    (params: Params, signal?: AbortSignal) => Promise<JsonValue>
+    (params: Params, signal?: AbortSignal, id?: JsonValue) => Promise<JsonValue>
   >
 
   constructor(workspace: Workspace, options: MirageRpcServerOptions = {}) {
@@ -147,7 +155,21 @@ export class MirageRpcServer {
           session_id: this.sessionId,
           methods: this.methods,
         }),
-      shell: (params, signal) => this.shell(params, signal),
+      shell: (params, signal, id) => this.shell(params, signal, id),
+      'stdin/write': async (params, signal) => {
+        const pipe = this.stdinOf(params)
+        try {
+          await pipe.write(bytes(params, 'data'), signal)
+        } catch (err) {
+          if (err instanceof PipeClosed) throw new RpcError(RPC_INVALID_PARAMS, 'stdin is closed')
+          throw err
+        }
+        return null
+      },
+      'stdin/close': (params) => {
+        this.stdinOf(params).end()
+        return Promise.resolve(null)
+      },
       glob: async (params) => {
         try {
           return await this.session.glob(text(params, 'pattern'))
@@ -188,11 +210,12 @@ export class MirageRpcServer {
     return Object.keys(this.table)
   }
 
-  /** Run one shell line in the session; `signal` aborts it. */
+  /** Run one shell line in the session; `signal` aborts it, `_pipe` is the one behind an open stdin. */
   async runLine(
     command: string,
-    options: { cwd?: string; env?: Record<string, string>; stdin?: Uint8Array },
+    options: { cwd?: string; env?: Record<string, string>; stdin?: ByteSource },
     signal?: AbortSignal,
+    _pipe?: BytePipe,
   ): Promise<JsonValue> {
     return ioResultToDict(
       await this.session.shell(command, {
@@ -225,7 +248,7 @@ export class MirageRpcServer {
     }
     try {
       signal?.throwIfAborted()
-      const result = await handler(params as Params, signal)
+      const result = await handler(params as Params, signal, requestId)
       return { jsonrpc: '2.0', id: requestId, result }
     } catch (err) {
       if (err instanceof RpcError) return errorResponse(requestId, err.code, err.message)
@@ -279,7 +302,17 @@ export class MirageRpcServer {
     await Promise.all([...running.values()].map((call) => call.done))
   }
 
-  private async shell(params: Params, signal?: AbortSignal): Promise<JsonValue> {
+  private stdinKey(id: JsonValue | undefined): string {
+    return InFlight.key(this.ws.workspaceId, this.sessionId, id ?? null)
+  }
+
+  private stdinOf(params: Params): BytePipe {
+    const pipe = this.stdins.get(this.stdinKey(params.id as JsonValue))
+    if (pipe === undefined) throw new RpcError(RPC_NOT_FOUND, 'no running shell opened that stdin')
+    return pipe
+  }
+
+  private async shell(params: Params, signal?: AbortSignal, id?: JsonValue): Promise<JsonValue> {
     if (flag(params, 'explain')) {
       if (Object.keys(params).some((key) => key !== 'command' && key !== 'explain')) {
         throw new RpcError(RPC_INVALID_PARAMS, 'explain takes the line alone: no cwd, env or stdin')
@@ -298,15 +331,31 @@ export class MirageRpcServer {
     ) {
       throw new RpcError(RPC_INVALID_PARAMS, 'env must map names to strings')
     }
-    return this.runLine(
-      text(params, 'command'),
-      {
-        ...(cwd === undefined ? {} : { cwd }),
-        ...(env === undefined ? {} : { env: env as Record<string, string> }),
-        ...('stdin' in params ? { stdin: bytes(params, 'stdin') } : {}),
-      },
-      signal,
-    )
+    const command = text(params, 'command')
+    const options = {
+      ...(cwd === undefined ? {} : { cwd }),
+      ...(env === undefined ? {} : { env: env as Record<string, string> }),
+    }
+    if (!flag(params, 'open_stdin')) {
+      return this.runLine(
+        command,
+        { ...options, ...('stdin' in params ? { stdin: bytes(params, 'stdin') } : {}) },
+        signal,
+      )
+    }
+    if ('stdin' in params) throw new RpcError(RPC_INVALID_PARAMS, 'open_stdin takes no stdin')
+    const key = this.stdinKey(id)
+    if (this.stdins.has(key)) {
+      throw new RpcError(RPC_INVALID_PARAMS, 'that id already holds an open stdin')
+    }
+    const pipe = new BytePipe(this.ws.io.bufferBytes, currentRequest() !== null)
+    this.stdins.set(key, pipe)
+    try {
+      return await this.runLine(command, { ...options, stdin: pipe.stream() }, signal, pipe)
+    } finally {
+      this.stdins.delete(key)
+      pipe.closeReader()
+    }
   }
 
   /** One VFS call, or its explanation with `explain: true`. Mirrors Python's `_vfs`. */

@@ -26,7 +26,7 @@ Output records identify `stdout` or `stderr` and carry base64-encoded `data`:
 
 ```json
 {"stream":"stdout","data":"aGVsbG8K"}
-{"status":"done","result":{"kind":"io","exit_code":0,"stdout":"","stderr":"","refusal":null,"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"},"error":null}
+{"status":"done","result":{"exit_code":0,"stdout":"","stderr":"","refusal":null,"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"},"error":null}
 ```
 
 Decode each output record's `data` to display the bytes. The output example decodes
@@ -93,6 +93,54 @@ process.stdout.write(result.stdout)
 </CodeGroup>
 
 The command sorts the input and returns `a\nb\n` in `stdout`.
+
+## Write to a running command
+
+A `stdin` part is one upload. To keep sending input after the line starts, from
+any request, set `open_stdin` and `stream=true`. The first record names the line:
+
+```bash
+curl --no-buffer --request POST \
+  --url 'http://127.0.0.1:8765/v1/workspaces/demo/shell?stream=true' \
+  --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"command":"cat","open_stdin":true}'
+```
+
+```json
+{"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"}
+```
+
+Output keeps arriving on this response. From another request,
+[write stdin](/api/operations/lines/write-stdin):
+
+```bash
+curl --request POST \
+  --url 'http://127.0.0.1:8765/v1/workspaces/demo/lines/line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37/stdin' \
+  --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+  --header 'Content-Type: application/octet-stream' \
+  --data-binary $'hello\n'
+```
+
+Then [close its stdin](/api/operations/lines/close-stdin) to
+send end of file:
+
+```bash
+curl --request DELETE \
+  --url 'http://127.0.0.1:8765/v1/workspaces/demo/lines/line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37/stdin' \
+  --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
+```
+
+| Status | Meaning |
+| --- | --- |
+| `204` | The bytes are buffered, or stdin is closed. |
+| `404` | That line is not running in this workspace. |
+| `409` | Its stdin is not open: the line did not set `open_stdin`, stdin was closed, or the command stopped reading. |
+
+A write waits while the buffer is full, so a command that reads slowly holds its
+writer back. Send one write at a time and wait for its answer, to keep the bytes
+in order. Total input has no limit. `open_stdin` needs `stream=true` and takes no
+`stdin` part. Closing the streaming request cancels the line.
 
 See [Run shell command](/api/operations/shell/run-shell-command) for the complete
 request fields and response schemas.

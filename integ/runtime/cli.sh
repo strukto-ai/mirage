@@ -243,7 +243,7 @@ exec_step() {
   # Explicit --json captures a JSON envelope on both hosts; unwrap the
   # command's own streams from it (raw output stays the fallback
   # for CLI-level errors).
-  if jq -e '.kind == "io"' "$dir/got.out" >/dev/null 2>&1; then
+  if jq -e 'has("exit_code")' "$dir/got.out" >/dev/null 2>&1; then
     jq -j '.stdout // ""' "$dir/got.out" > "$dir/got.stdout"
     jq -j '.stderr // ""' "$dir/got.out" > "$dir/got.stderr"
   else

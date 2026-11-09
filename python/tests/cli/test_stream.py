@@ -27,9 +27,7 @@ async def test_split_records_preserve_binary_channels_and_exit_status():
     body = (
         record(stream="stdout", data=base64.b64encode(b"\x00\xffa").decode())
         + record(stream="stderr", data=base64.b64encode(b"oops\n").decode())
-        + record(
-            status="done", result={"kind": "io", "exit_code": 7}, error=None
-        )
+        + record(status="done", result={"exit_code": 7}, error=None)
     )
 
     async def source():
@@ -153,7 +151,7 @@ async def test_http_output_arrives_before_stdin_eof(
         await response.write(
             record(
                 status="done",
-                result={"kind": "io", "exit_code": 7},
+                result={"exit_code": 7},
                 error=None,
             )
         )
@@ -233,7 +231,7 @@ async def test_the_line_ending_ends_the_client_while_stdin_stays_open(
         await response.write(
             record(
                 status="done",
-                result={"kind": "io", "exit_code": 3},
+                result={"exit_code": 3},
                 error=None,
             )
         )
@@ -303,7 +301,6 @@ async def test_json_collects_channels_and_preserves_metadata(
                 + record(
                     status="done",
                     result={
-                        "kind": "io",
                         "exit_code": 7,
                         "refusal": {"reason": "test"},
                     },
@@ -344,7 +341,6 @@ async def test_json_collects_channels_and_preserves_metadata(
             stdout.seek(0)
             stderr.seek(0)
             assert json.load(stdout) == {
-                "kind": "io",
                 "exit_code": 7,
                 "refusal": {"reason": "test"},
                 "stdout": "€�\0",
@@ -365,7 +361,6 @@ async def _refused_shell(request):
             + record(
                 status="done",
                 result={
-                    "kind": "io",
                     "exit_code": 126,
                     "refusal": {
                         "kind": "deny",

@@ -17,7 +17,7 @@ describe('stream response', () => {
     const body = Buffer.concat([
       record({ stream: 'stdout', data: Buffer.from([0, 255, 97]).toString('base64') }),
       record({ stream: 'stderr', data: Buffer.from('oops\n').toString('base64') }),
-      record({ status: 'done', result: { kind: 'io', exit_code: 7 }, error: null }),
+      record({ status: 'done', result: { exit_code: 7 }, error: null }),
     ])
     async function* source() {
       for (const byte of body) yield await Promise.resolve(Buffer.from([byte]))
@@ -111,7 +111,7 @@ describe('stream HTTP lifecycle', () => {
     const server = createServer((req, res) => {
       res.writeHead(200, { 'content-type': 'application/x-ndjson' })
       res.write(record({ stream: 'stdout', data: 'aGkK' }))
-      res.write(record({ status: 'done', result: { kind: 'io', exit_code: 3 }, error: null }))
+      res.write(record({ status: 'done', result: { exit_code: 3 }, error: null }))
       req.resume()
       req.on('close', hungUp)
     })
@@ -171,7 +171,7 @@ describe('stream HTTP lifecycle', () => {
         })
         req.on('end', () => {
           res.write(record({ stream: 'stderr', data: 'AP8=' }))
-          res.end(record({ status: 'done', result: { kind: 'io', exit_code: 7 }, error: null }))
+          res.end(record({ status: 'done', result: { exit_code: 7 }, error: null }))
         })
       })
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))

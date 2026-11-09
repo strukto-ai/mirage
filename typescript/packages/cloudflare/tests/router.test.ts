@@ -75,6 +75,18 @@ describe('WebRoutes', () => {
     expect(await response.json()).toEqual({ size: 0 })
   })
 
+  it('hands an octet-stream body to its route unread', async () => {
+    const response = await routes().fetch(
+      new Request('http://edge.test/upload', {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: 'abc',
+      }),
+      null,
+    )
+    expect(await response.json()).toEqual({ size: 3 })
+  })
+
   it('answers a malformed path escape with 400', async () => {
     const response = await routes().fetch(new Request('http://edge.test/items/%ZZ'), null)
     expect([response.status, ((await response.json()) as { code: string }).code]).toEqual([

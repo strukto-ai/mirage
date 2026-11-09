@@ -137,7 +137,9 @@ async function readBody(request: Request, limit: number): Promise<string> {
 async function parseBody(request: Request, config: RouteConfig): Promise<unknown> {
   if (!BODY_METHODS.has(request.method) || request.body === null) return undefined
   const contentType = (request.headers.get('content-type') ?? '').toLowerCase()
-  if (contentType.startsWith('multipart/')) return undefined
+  if (contentType.startsWith('multipart/') || contentType.startsWith('application/octet-stream')) {
+    return undefined
+  }
   const limit = config.bodyLimit ?? BODY_LIMIT
   if (contentType === '') {
     const text = await readBody(request, limit)
