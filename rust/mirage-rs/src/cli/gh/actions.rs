@@ -213,9 +213,12 @@ fn log_lines(data: &[u8]) -> Vec<&[u8]> {
         .collect()
 }
 
+const LOG_WINDOW: usize = 1 << 20;
+
 struct ZipEntry {
     name: String,
     method: u16,
+    crc: u32,
     compressed: usize,
     offset: usize,
 }
@@ -256,6 +259,7 @@ impl Zip<'_> {
             entries.push(ZipEntry {
                 name: String::from_utf8_lossy(data.get(at + 46..at + 46 + name_len)?).into_owned(),
                 method: u16_at(data, at + 10)?,
+                crc: u32_at(data, at + 16)?,
                 compressed: u32_at(data, at + 20)? as usize,
                 offset: u32_at(data, at + 42)? as usize,
             });
@@ -264,7 +268,7 @@ impl Zip<'_> {
         Some(Zip { data, entries })
     }
 
-    fn read(&self, name: &str) -> Result<Vec<u8>> {
+    async fn read(&self, account: &Account, name: &str) -> Result<Vec<u8>> {
         let broken = || Failure::Value("zip: not a valid zip file".to_owned());
         let entry = self
             .entries
@@ -278,17 +282,46 @@ impl Zip<'_> {
             .data
             .get(start..start + entry.compressed)
             .ok_or_else(broken)?;
-        match entry.method {
-            0 => Ok(body.to_vec()),
-            8 => {
-                let mut out = Vec::new();
-                flate2::read::DeflateDecoder::new(body)
-                    .read_to_end(&mut out)
-                    .map_err(|_| broken())?;
-                Ok(out)
-            }
-            _ => Err(broken()),
+        let out = match entry.method {
+            0 => body.to_vec(),
+            8 => inflated(account, body).await?,
+            _ => return Err(broken()),
+        };
+        checked(out, entry.crc)
+    }
+}
+
+/// A deflated entry a window at a time, each window held to the workspace's
+/// memory and giving the host its turn.
+async fn inflated(account: &Account, body: &[u8]) -> Result<Vec<u8>> {
+    let mut decoder = flate2::read::DeflateDecoder::new(body);
+    let mut window = vec![0; LOG_WINDOW];
+    let mut out = Vec::new();
+    loop {
+        let read = decoder
+            .read(&mut window)
+            .map_err(|_| Failure::Value("zip: checksum error".to_owned()))?;
+        if read == 0 {
+            return Ok(out);
         }
+        out.extend_from_slice(&window[..read]);
+        account
+            .host
+            .ask(Request::Memory {
+                size: out.len() as u64,
+            })
+            .await;
+    }
+}
+
+/// An entry's bytes, refused unless they are what the directory promised.
+fn checked(data: Vec<u8>, crc: u32) -> Result<Vec<u8>> {
+    let mut sum = flate2::Crc::new();
+    sum.update(&data);
+    if sum.sum() == crc {
+        Ok(data)
+    } else {
+        value("zip: checksum error")
     }
 }
 
@@ -446,7 +479,7 @@ async fn run_log(
     let mut printed = Vec::new();
     for segment in segments {
         let log = match &segment.source {
-            Source::Archive(entry) => archive.read(entry),
+            Source::Archive(entry) => archive.read(account, entry).await,
             Source::Job(job) => api_job_log(account, repo, *job).await,
         };
         let log = match log {
@@ -465,6 +498,12 @@ async fn run_log(
             printed.extend_from_slice(line);
             printed.push(b'\n');
         }
+        account
+            .host
+            .ask(Request::Memory {
+                size: printed.len() as u64,
+            })
+            .await;
     }
     Ok(printed)
 }
@@ -921,6 +960,14 @@ mod tests {
         let segments = log_segments(jobs.items(), &names, true).unwrap();
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].step, "bad");
+    }
+
+    #[test]
+    fn a_log_entry_must_match_its_checksum() {
+        let mut sum = flate2::Crc::new();
+        sum.update(b"log");
+        assert_eq!(checked(b"log".to_vec(), sum.sum()).unwrap(), b"log");
+        assert!(checked(b"lag".to_vec(), sum.sum()).is_err());
     }
 
     #[test]

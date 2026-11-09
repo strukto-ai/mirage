@@ -18,6 +18,7 @@ import { API_BASE } from '../../../../core/github/constants.ts'
 import { GitHubApiError, GitHubConnectionError } from '../../../../core/github/client.ts'
 import { Engine, JqCompileError, localZone, type Ending } from '../../../../core/jq/index.ts'
 import { fsStrerror, isEnoent, isEnotdir } from '../../../../errors/fs.ts'
+import { checkMemory } from '../../../../io/memory.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
 import { StreamModule, serveRequests, type OpenStream, type Served } from '../../../../rs/stream.ts'
@@ -214,6 +215,9 @@ class GhHost {
         return this.jq(request, data)
       case 'now':
         return Promise.resolve({ reply: { now: systemNow() } })
+      case 'memory':
+        checkMemory(Number(request.size))
+        return Promise.resolve({ reply: {} })
       case 'fail':
         this.failure = request
         return Promise.resolve({ reply: {} })
@@ -261,7 +265,7 @@ export async function runLeaf(
   const output: Uint8Array[] = []
   let status = 0
   try {
-    for await (const chunk of serveRequests(stream, host)) output.push(chunk)
+    for await (const chunk of serveRequests(stream, host, ctx.signal)) output.push(chunk)
     status = stream.status()
   } finally {
     stream.close()

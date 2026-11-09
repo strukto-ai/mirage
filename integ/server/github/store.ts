@@ -1328,29 +1328,52 @@ export function searchTree(files: Tree, terms: string[], pathFilter: string | nu
 
 // What the vendor keeps that no client of the mounts reads: labels, caches,
 // variables, secrets, deploy keys, autolinks, gists and the pin and lock
-// bits. They live per run in memory, like the run they belong to.
-const KEPT = new Map<string, Map<string, unknown>>()
+// bits. They live in memory with the run's client, like the run they belong
+// to, and a reset forgets its tenants' (`forgetKept`).
+const KEPT = new WeakMap<object, Map<string, Map<string, unknown>>>()
 
-export function kept<T>(ctx: { tenant: string; runPrefix?: string }, kind: string): Map<string, T> {
-  const key = `${ctx.runPrefix ?? ''}\0${ctx.tenant}\0${kind}`
-  let found = KEPT.get(key)
+export function kept<T>(ctx: { tenant: string; db: object }, kind: string): Map<string, T> {
+  let run = KEPT.get(ctx.db)
+  if (run === undefined) {
+    run = new Map()
+    KEPT.set(ctx.db, run)
+  }
+  const key = `${ctx.tenant}\0${kind}`
+  let found = run.get(key)
   if (found === undefined) {
     found = new Map()
-    KEPT.set(key, found)
+    run.set(key, found)
   }
   return found as Map<string, T>
 }
 
-function flagged(ctx: { tenant: string }, kind: string, repo: string, number: number): boolean {
+export function forgetKept(db: object, tenants: readonly string[]): void {
+  const run = KEPT.get(db)
+  if (run === undefined) return
+  for (const key of run.keys()) {
+    if (tenants.includes(key.slice(0, key.indexOf('\0')))) run.delete(key)
+  }
+}
+
+function flagged(
+  ctx: { tenant: string; db: object },
+  kind: string,
+  repo: string,
+  number: number,
+): boolean {
   return kept<boolean>(ctx, kind).get(`${repo}#${String(number)}`) === true
 }
 
-export function isPinned(ctx: { tenant: string }, repo: string, number: number): boolean {
+export function isPinned(
+  ctx: { tenant: string; db: object },
+  repo: string,
+  number: number,
+): boolean {
   return flagged(ctx, 'pinned', repo, number)
 }
 
 export function lockReason(
-  ctx: { tenant: string },
+  ctx: { tenant: string; db: object },
   repo: string,
   number: number,
 ): { locked: boolean; reason: string | null } {
@@ -1358,12 +1381,16 @@ export function lockReason(
   return { locked: row !== undefined, reason: row?.reason ?? null }
 }
 
-export function autoMerge(ctx: { tenant: string }, repo: string, number: number): string | null {
+export function autoMerge(
+  ctx: { tenant: string; db: object },
+  repo: string,
+  number: number,
+): string | null {
   return kept<string>(ctx, 'auto').get(`${repo}#${String(number)}`) ?? null
 }
 
 export function pullExtras(
-  ctx: { tenant: string },
+  ctx: { tenant: string; db: object },
   repo: string,
   number: number,
   key: string,

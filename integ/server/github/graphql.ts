@@ -427,5 +427,7 @@ async function answer(ctx: Ctx<C>): Promise<Reply> {
 }
 
 export function graphqlRoutes(): KitRoute<C>[] {
-  return everywhere<C>(['', '/api'], (p) => [route<C>('POST', `${p}/graphql`, authedRoute(answer))])
+  return everywhere<C>(['', '/api'], (p) => [
+    route<C>('POST', `${p}/graphql`, authedRoute(answer), { write: true }),
+  ])
 }

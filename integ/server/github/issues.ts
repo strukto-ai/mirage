@@ -313,7 +313,9 @@ async function listComments(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
       body: row.body,
       created_at: row.createdAt,
       updated_at: row.createdAt,
-      node_id: Buffer.from(`012:IssueComment${row.id}`).toString('base64'),
+      node_id: Buffer.from(`012:IssueComment${String(repo.seq)}:${String(row.id)}`).toString(
+        'base64',
+      ),
       author_association: 'NONE',
       user: { login: row.user },
       html_url: `https://github.com/${repo.fullName}/issues/${String(number)}#issuecomment-${String(row.id)}`,
@@ -351,7 +353,7 @@ export function commentConnection(
     const page = rows.slice(from, from + size)
     return {
       nodes: page.map((row) => ({
-        id: Buffer.from(`012:IssueComment${row.id}`).toString('base64'),
+        id: Buffer.from(`012:IssueComment${String(repo.seq)}:${String(row.id)}`).toString('base64'),
         author: userNode(row.user),
         authorAssociation: 'NONE',
         body: row.body,

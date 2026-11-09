@@ -190,6 +190,12 @@ pub(crate) enum Request {
     /// The time, for a command that reads the clock.
     #[cfg(feature = "gh")]
     Now,
+    /// Whether an object grown to `size` bytes still fits the workspace's
+    /// memory, the host refusing it if not.
+    #[cfg(feature = "gh")]
+    Memory {
+        size: u64,
+    },
     /// Run a jq program over one value; the reply's bytes are its outputs,
     /// a compact dump to a line, and the reply says what stopped it.
     #[cfg(feature = "gh")]
@@ -458,6 +464,11 @@ impl Request {
             }
             #[cfg(feature = "gh")]
             Request::Now => put("op", "now".into()),
+            #[cfg(feature = "gh")]
+            Request::Memory { size } => {
+                put("op", "memory".into());
+                put("size", (*size).into());
+            }
             #[cfg(feature = "gh")]
             Request::Jq { program, doc } => {
                 put("op", "jq".into());

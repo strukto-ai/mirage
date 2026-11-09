@@ -18,9 +18,12 @@ import pytest
 
 from mirage import Workspace
 from mirage.commands.cli.builtin.gh import GH
+from mirage.commands.cli.builtin.gh.host import GhHost
 from mirage.core.api.client import ApiResponse
 from mirage.core.github.client import GitHubApiError, GitHubConnectionError
 from mirage.core.github.config import GhConfig
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.policy import Deny, Policy
 from mirage.types import JsonValue, MountMode
 from mirage.vfs.ram import RAMVFS
@@ -190,3 +193,16 @@ async def test_a_warning_lands_on_stderr_and_succeeds(monkeypatch):
     code, _, err = await _line(ws, "gh issue reopen 1")
     await ws.close()
     assert (code, err) == (0, "! Issue o/r#1 (t) is already open\n")
+
+
+@pytest.mark.asyncio
+async def test_a_memory_request_is_held_to_the_workspace_budget():
+    host = GhHost(None, None)
+    budget = MemoryBudget(10, lambda: 0)
+    await run_with_memory(
+        budget, host.serve({"op": "memory", "size": 10}, b"")
+    )
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(
+            budget, host.serve({"op": "memory", "size": 11}, b"")
+        )

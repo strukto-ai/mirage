@@ -42,6 +42,7 @@ from mirage.core.jq import (
     local_zone,
 )
 from mirage.errors.fs import fs_strerror
+from mirage.io.memory import check_memory
 from mirage.io.spool import ByteSpool
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
@@ -261,6 +262,9 @@ class GhHost:
             return await self._jq(request, data)
         if op == "now":
             return Served({"now": system_now()})
+        if op == "memory":
+            check_memory(cast(int, request["size"]))
+            return Served({})
         if op == "fail":
             self.failure = request
             return Served({})
