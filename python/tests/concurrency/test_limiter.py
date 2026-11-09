@@ -203,6 +203,19 @@ async def test_shallow_moves_deep_work_to_a_task_in_the_same_context():
 
 
 @pytest.mark.asyncio
+async def test_shallow_starts_from_the_loop_under_an_eager_task_factory():
+    loop = asyncio.get_running_loop()
+    loop.set_task_factory(asyncio.eager_task_factory)
+    try:
+        _SEEN.set("")
+        deep = await _at_depth(sys.getrecursionlimit() // 2)
+    finally:
+        loop.set_task_factory(None)
+    assert deep is not asyncio.current_task()
+    assert _SEEN.get() == "set by the work"
+
+
+@pytest.mark.asyncio
 async def test_bounded_map_keeps_order_and_owns_its_workers():
     entered = asyncio.Event()
     cleaned = asyncio.Event()

@@ -153,8 +153,10 @@ async def shallow(work: Coroutine[Any, Any, _R]) -> _R:
     shell that re-enters itself (a function calling itself through
     ``$( )``) piles each level's frames onto one task's stack, and would
     reach Python's limit before the shell's own nesting cap. A task of
-    its own starts from the loop. It runs in the caller's context, which
-    waits on it, so the caller reads what it sets, as it would in place.
+    its own starts from the loop, never eagerly, whatever task factory
+    the host set, since the caller's context stays entered until it
+    waits. It runs in the caller's context, which waits on it, so the
+    caller reads what it sets, as it would in place.
 
     Args:
         work (Coroutine): the work, not yet started.
@@ -164,8 +166,11 @@ async def shallow(work: Coroutine[Any, Any, _R]) -> _R:
     except ValueError:
         return await work
     task = asyncio.current_task()
-    return await asyncio.create_task(
-        work, context=task.get_context() if task is not None else None
+    return await asyncio.Task(
+        work,
+        loop=asyncio.get_running_loop(),
+        context=task.get_context() if task is not None else None,
+        eager_start=False,
     )
 
 
