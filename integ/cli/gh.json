@@ -3048,10 +3048,10 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh api repos/integ/repo-cli/git/refs -f ref=refs/heads/meta -f sha=$(gh api repos/integ/repo-cli/git/ref/heads/main --jq .object.sha) --silent; gh api -X PUT repos/integ/repo-cli/contents/meta.md -f message=m -f branch=meta -f content=eA== --silent; n=$(gh pr create -t meta -b b -H meta -B main -a @me -l bug | sed 's#.*/##'); gh pr view $n --json assignees,labels --jq '[[.assignees[].login],[.labels[].name]]'; gh pr edit $n --add-label docs --remove-label bug | sed 's#.*/##'; gh pr view $n --json labels --jq '[.labels[].name]'; gh pr edit $n; gh pr merge $n --squash -d; gh pr view $n --json state --jq .state",
+      "command": "gh api repos/integ/repo-cli/git/refs -f ref=refs/heads/meta -f sha=$(gh api repos/integ/repo-cli/git/ref/heads/main --jq .object.sha) --silent; gh api -X PUT repos/integ/repo-cli/contents/meta.md -f message=m -f branch=meta -f content=eA== --silent; n=$(gh pr create -t meta -b b -H meta -B main -a @me -l bug -l docs | sed 's#.*/##'); gh pr view $n --json assignees,labels --jq '[[.assignees[].login],[.labels[].name]]'; gh pr edit $n --remove-label bug --remove-label docs | sed 's#.*/##'; gh pr view $n --json labels --jq '[.labels[].name]'; gh pr edit $n --add-label bug --add-label docs | sed 's#.*/##'; gh pr view $n --json labels --jq '[.labels[].name]'; gh pr edit $n; gh pr merge $n --squash -d; gh pr view $n --json state --jq .state",
       "expect": {
         "exit": 0,
-        "stdout": "[[\"integ-user\"],[\"bug\"]]\n18\n[\"docs\"]\nMERGED\n",
+        "stdout": "[[\"integ-user\"],[\"bug\",\"docs\"]]\n18\n[]\n18\n[\"bug\",\"docs\"]\nMERGED\n",
         "stderr": "--title, --body, --reviewer, --assignee, --label, --project, or --milestone required when not running interactively\n\nUsage:  gh pr edit [<number> | <url> | <branch>] [flags]\n\nFlags:\n      --add-assignee login      Add assigned users by their login. Use \"@me\" to assign yourself, or \"@copilot\" to assign Copilot.\n      --add-label name          Add labels by name\n      --add-reviewer login      Add reviewers by their login.\n  -B, --base branch             Change the base branch for this pull request\n  -b, --body string             Set the new body.\n  -F, --body-file file          Read body text from file (use \"-\" to read from standard input)\n  -m, --milestone name          Edit the milestone the pull request belongs to by name\n      --remove-assignee login   Remove assigned users by their login. Use \"@me\" to unassign yourself, or \"@copilot\" to unassign Copilot.\n      --remove-label name       Remove labels by name\n      --remove-milestone        Remove the milestone association from the pull request\n      --remove-reviewer login   Remove reviewers by their login.\n  -t, --title string            Set the new title.\n  \n"
       }
     },
@@ -3184,6 +3184,32 @@
       "targets": [
         "cli-gh"
       ]
+    },
+    {
+      "id": "gh_a_repository_on_another_host_is_refused",
+      "seq": 9950045,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue transfer 4 other.example/o/t; echo rc=$?; gh label clone other.example/o/s; echo rc=$?; gh repo sync integ/repo-cli --source other.example/o/s; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\n",
+        "stderr": "error connecting to other.example\ncheck your internet connection or https://githubstatus.com\nerror connecting to other.example\ncheck your internet connection or https://githubstatus.com\ncan't sync repositories from different hosts\n"
+      }
+    },
+    {
+      "id": "gh_json_fields_are_checked_before_anything_else",
+      "seq": 9950055,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr view -R integ/repo-cli --json nosuch 2>&1 | head -1; gh pr checks -R integ/repo-cli --json nosuch 2>&1 | head -1; gh run view --json nosuch 2>&1 | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "Unknown JSON field: \"nosuch\"\nUnknown JSON field: \"nosuch\"\nUnknown JSON field: \"nosuch\"\n",
+        "stderr": ""
+      }
     }
   ]
 }

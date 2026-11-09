@@ -173,8 +173,14 @@ pub(crate) fn gh_repo(account: &Account, spec: Option<&str>) -> Result<RepoRef> 
     if named.is_empty() {
         return value("no repository given; pass one or set `repo` on the install");
     }
-    let target = parse_repo(named)?;
-    check_host(account, repo_host(named)?.as_deref())?;
+    named_repo(account, named)
+}
+
+/// A repository a line names, refused when this install cannot reach its
+/// host.
+pub(crate) fn named_repo(account: &Account, spec: &str) -> Result<RepoRef> {
+    let target = parse_repo(spec)?;
+    check_host(account, repo_host(spec)?.as_deref())?;
     Ok(target)
 }
 

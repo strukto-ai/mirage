@@ -12,11 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isPinned, lockReason } from './admin.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN } from './config.ts'
 import type { C } from './config.ts'
-import { nextNumber, scope } from './store.ts'
+import { isPinned, lockReason, nextNumber, scope } from './store.ts'
 import type { RepoRow } from './store.ts'
 import {
   authedRoute,

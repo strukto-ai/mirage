@@ -1,8 +1,8 @@
 // Follows gh 2.85.0's pkg/cmd/issue (MIT; see licenses/third_party/gh.txt).
 
 use super::accessor::{
-    Flags, Out, body_value, csv_values, export_out, json_fields, limit_or_refuse, one_line,
-    repo_for, repo_number, subject_number, time_field, tsv, typed_out,
+    Flags, Out, body_value, csv_values, export_out, json_fields, limit_or_refuse, named_repo,
+    one_line, repo_for, repo_number, subject_number, time_field, tsv, typed_out,
 };
 use super::constants::SEARCH_CAPPED;
 use super::editable::Editable;
@@ -20,9 +20,7 @@ use crate::core::github::issue::{
 };
 use crate::core::github::json::{Json, Obj, quoted};
 use crate::core::github::metadata::{Wanted, repo_metadata};
-use crate::core::github::repo::{
-    RepoRef, current_login, github_repo, graphql_data, mutate, parse_repo,
-};
+use crate::core::github::repo::{RepoRef, current_login, github_repo, graphql_data, mutate};
 
 /// Every field `gh issue view --json` and `gh issue list --json` accept
 /// in gh 2.85.
@@ -740,7 +738,7 @@ pub(crate) async fn transfer_cmd(
             node.get("number").show()
         ));
     }
-    let destination = parse_repo(destination)?;
+    let destination = named_repo(account, destination)?;
     let mut variables = Obj::new();
     variables.set("owner", destination.owner.as_str());
     variables.set("name", destination.repo.as_str());

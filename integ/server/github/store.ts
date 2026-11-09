@@ -1325,3 +1325,48 @@ export function searchTree(files: Tree, terms: string[], pathFilter: string | nu
   }
   return found
 }
+
+// What the vendor keeps that no client of the mounts reads: labels, caches,
+// variables, secrets, deploy keys, autolinks, gists and the pin and lock
+// bits. They live per run in memory, like the run they belong to.
+const KEPT = new Map<string, Map<string, unknown>>()
+
+export function kept<T>(ctx: { tenant: string; runPrefix?: string }, kind: string): Map<string, T> {
+  const key = `${ctx.runPrefix ?? ''}\0${ctx.tenant}\0${kind}`
+  let found = KEPT.get(key)
+  if (found === undefined) {
+    found = new Map()
+    KEPT.set(key, found)
+  }
+  return found as Map<string, T>
+}
+
+function flagged(ctx: { tenant: string }, kind: string, repo: string, number: number): boolean {
+  return kept<boolean>(ctx, kind).get(`${repo}#${String(number)}`) === true
+}
+
+export function isPinned(ctx: { tenant: string }, repo: string, number: number): boolean {
+  return flagged(ctx, 'pinned', repo, number)
+}
+
+export function lockReason(
+  ctx: { tenant: string },
+  repo: string,
+  number: number,
+): { locked: boolean; reason: string | null } {
+  const row = kept<{ reason: string | null }>(ctx, 'locked').get(`${repo}#${String(number)}`)
+  return { locked: row !== undefined, reason: row?.reason ?? null }
+}
+
+export function autoMerge(ctx: { tenant: string }, repo: string, number: number): string | null {
+  return kept<string>(ctx, 'auto').get(`${repo}#${String(number)}`) ?? null
+}
+
+export function pullExtras(
+  ctx: { tenant: string },
+  repo: string,
+  number: number,
+  key: string,
+): string[] {
+  return kept<string[]>(ctx, `pull-${key}\0${repo}`).get(String(number)) ?? []
+}

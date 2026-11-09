@@ -1,13 +1,17 @@
 // Follows gh 2.85.0's pkg/cmd/repo (MIT; see licenses/third_party/gh.txt).
 
 use super::accessor::{
-    Flags, Out, camel, export_out, gh_repo, json_fields, repo_for, time_field, tsv,
+    Flags, Out, camel, export_out, gh_repo, json_fields, repo_for, time_field, tsv, web_host,
 };
 use super::args::wrong_count;
-use crate::core::github::client::{Account, Failure, Result, github_request, quote, usage, value};
+use crate::core::github::client::{
+    Account, Failure, Result, github_request, quote, quote_ref, usage, value,
+};
 use crate::core::github::json::{Json, Obj};
 use crate::core::github::paginate::github_pages;
-use crate::core::github::repo::{RepoRef, mutate, parse_repo, repository_fields, view_repo};
+use crate::core::github::repo::{
+    RepoRef, mutate, parse_repo, repo_host, repository_fields, view_repo,
+};
 
 fn full(repo: &RepoRef) -> String {
     format!("{}/{}", repo.owner, repo.repo)
@@ -75,13 +79,33 @@ pub(crate) async fn unarchive_cmd(
     set_archived(account, flags, texts, false).await
 }
 
+/// The host a named repository lives on: its own, else the install's.
+fn host_of(account: &Account, spec: &str) -> Result<String> {
+    match repo_host(spec)? {
+        Some(host) => Ok(host),
+        None => web_host(account),
+    }
+}
+
 /// `gh repo sync`, of a repository on GitHub: there is no local checkout to
 /// sync here.
 pub(crate) async fn sync_cmd(account: &Account, flags: &Flags, texts: &[String]) -> Result<Out> {
     let dest = gh_repo(account, texts.first().map(String::as_str))?;
     let force = flags.gh_bool("force");
     let mut source = match flags.as_nonempty("source") {
-        Some(spec) => Some(parse_repo(spec)?),
+        Some(spec) => {
+            let source = parse_repo(spec)?;
+            let named = texts
+                .first()
+                .map(String::as_str)
+                .filter(|named| !named.is_empty())
+                .or(account.repo.as_deref())
+                .unwrap_or_default();
+            if host_of(account, named)? != host_of(account, spec)? {
+                return value("can't sync repositories from different hosts");
+            }
+            Some(source)
+        }
         None => None,
     };
     let branch = match flags.as_nonempty("branch") {
@@ -123,7 +147,7 @@ pub(crate) async fn sync_cmd(account: &Account, flags: &Flags, texts: &[String])
         });
     }
     let source = source.unwrap_or_else(|| dest.clone());
-    let reference = quote(&branch).replace("%2F", "/");
+    let reference = quote_ref(&branch);
     let latest = github_request(
         account,
         "GET",

@@ -138,7 +138,11 @@ def test_a_refusal_keeps_one_blank_line_before_the_block():
     assert cobra_refusal("no\n", "gh version", node) == f"no\n\n{block}"
 
 
-def _refused(**reports: object) -> SimpleNamespace:
+def _refused(
+    **reports: list[str]
+    | list[tuple[str, str]]
+    | list[tuple[str, str, tuple[str, ...]]],
+) -> SimpleNamespace:
     return SimpleNamespace(**reports)
 
 

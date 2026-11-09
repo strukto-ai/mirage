@@ -1,9 +1,9 @@
 // Follows gh 2.85.0's pkg/cmd/label (MIT; see licenses/third_party/gh.txt).
 
-use super::accessor::{Flags, Out, exact_one, export_out, json_fields, repo_for, tsv};
+use super::accessor::{Flags, Out, exact_one, export_out, json_fields, named_repo, repo_for, tsv};
 use crate::core::github::client::{Account, Failure, Result, github_request, quote, usage, value};
 use crate::core::github::json::{Json, Obj, quoted};
-use crate::core::github::repo::{RepoRef, graphql_data, parse_repo};
+use crate::core::github::repo::{RepoRef, graphql_data};
 use crate::request::Request;
 
 const LABEL_FIELDS: [&str; 8] = [
@@ -299,7 +299,7 @@ pub(crate) async fn clone_cmd(account: &Account, flags: &Flags, texts: &[String]
         texts,
         "cannot clone labels: source-repository argument required",
     )?;
-    let source = parse_repo(source)?;
+    let source = named_repo(account, source)?;
     let repo = repo_for(account, flags)?;
     let options = ListOptions {
         limit: -1,

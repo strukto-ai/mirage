@@ -20,7 +20,7 @@ import type { IssueRow } from './issues.ts'
 import { findWorkflowRow, runRow } from './actions.ts'
 import { createPull, pullRow, recordPullReview } from './pulls.ts'
 import type { PullRow } from './pulls.ts'
-import { allRepos, metaOf, nextNumber, scope } from './store.ts'
+import { allRepos, kept, metaOf, nextNumber, scope } from './store.ts'
 import type { RepoRow } from './store.ts'
 import {
   authedRoute,
@@ -36,44 +36,9 @@ import {
 import { issueNodeId, nodeId, page } from './wire.ts'
 import type { PageArgs } from './wire.ts'
 
-// What the vendor keeps that no client of the mounts reads: labels, caches,
-// variables, secrets, deploy keys, autolinks, gists and the pin and lock
-// bits. They live per run in memory, like the run they belong to.
-const KEPT = new Map<string, Map<string, unknown>>()
 const STAMP = '2026-01-01T00:00:00Z'
 const LABELED_REPO = 'integ/repo-cli'
 const SEEDED_LABELS = ['bug', 'docs']
-
-function kept<T>(ctx: { tenant: string; runPrefix?: string }, kind: string): Map<string, T> {
-  const key = `${ctx.runPrefix ?? ''}\0${ctx.tenant}\0${kind}`
-  let found = KEPT.get(key)
-  if (found === undefined) {
-    found = new Map()
-    KEPT.set(key, found)
-  }
-  return found as Map<string, T>
-}
-
-function flagged(ctx: { tenant: string }, kind: string, repo: string, number: number): boolean {
-  return kept<boolean>(ctx, kind).get(`${repo}#${String(number)}`) === true
-}
-
-export function isPinned(ctx: { tenant: string }, repo: string, number: number): boolean {
-  return flagged(ctx, 'pinned', repo, number)
-}
-
-export function lockReason(
-  ctx: { tenant: string },
-  repo: string,
-  number: number,
-): { locked: boolean; reason: string | null } {
-  const row = kept<{ reason: string | null }>(ctx, 'locked').get(`${repo}#${String(number)}`)
-  return { locked: row !== undefined, reason: row?.reason ?? null }
-}
-
-export function autoMerge(ctx: { tenant: string }, repo: string, number: number): string | null {
-  return kept<string>(ctx, 'auto').get(`${repo}#${String(number)}`) ?? null
-}
 
 interface LabelRow {
   id: string
@@ -994,15 +959,6 @@ async function bump(
     sign > 0 ? [...new Set([...now, ...given])] : now.filter((name) => !given.includes(name))
   await ctx.db.githubIssue.updateMany({ where, data: { [column]: JSON.stringify(next) } })
   return { status: 200, body: {} }
-}
-
-export function pullExtras(
-  ctx: { tenant: string },
-  repo: string,
-  number: number,
-  key: string,
-): string[] {
-  return kept<string[]>(ctx, `pull-${key}\0${repo}`).get(String(number)) ?? []
 }
 
 async function pullPeople(ctx: Ctx<C>, repo: RepoRow, sign: 1 | -1): Promise<Reply> {

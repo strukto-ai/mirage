@@ -4,8 +4,8 @@
 use std::io::Read;
 
 use super::accessor::{
-    Flags, Out, camel, go_duration, instant, limit_or_refuse, read_cli_file, repo_for, time_field,
-    tsv, typed_out,
+    Flags, Out, camel, go_duration, instant, json_fields, limit_or_refuse, read_cli_file, repo_for,
+    time_field, tsv, typed_out,
 };
 use crate::core::github::actions::{
     dispatch_workflow, get_job, get_run, job_log, list_jobs, list_runs, list_workflows, rerun,
@@ -77,6 +77,7 @@ fn workflow(raw: &Json) -> Obj {
 }
 
 pub(crate) async fn run_list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
+    json_fields(flags, &RUN_FIELDS)?;
     let mut params = Vec::new();
     for (flag, key) in [
         ("branch", "branch"),
@@ -146,6 +147,7 @@ pub(crate) async fn run_view_cmd(
     flags: &Flags,
     texts: &[String],
 ) -> Result<Out> {
+    json_fields(flags, &RUN_FIELDS)?;
     let Some(id) = texts.first() else {
         return usage("run or job ID required when not running interactively");
     };
@@ -514,6 +516,7 @@ pub(crate) async fn run_rerun_cmd(
 }
 
 pub(crate) async fn workflow_list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
+    json_fields(flags, &WORKFLOW_FIELDS)?;
     let all = flags.gh_bool("all");
     let repo = repo_for(account, flags)?;
     let limit = limit_or_refuse(flags, 50)?;

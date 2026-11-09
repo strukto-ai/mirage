@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { autoMerge, lockReason, pullExtras } from './admin.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN } from './config.ts'
 import type { C } from './config.ts'
@@ -37,11 +36,14 @@ import {
 import type { CommitRow, PageArgs } from './wire.ts'
 import {
   allRepos,
+  autoMerge,
   branchFor,
   commitsBySha,
   commitsJson,
   forkOwnedBy,
+  lockReason,
   nextNumber,
+  pullExtras,
   reachableFrom,
   repoJson,
   resolveRef,

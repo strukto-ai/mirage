@@ -157,9 +157,8 @@ gh workflow view ci.yml --yaml --ref release
 
 Use `-R/--repo [HOST/]OWNER/REPO` where supported to override the configured
 repository. Typed `--jq` requires `--json`. List commands paginate up to
-`-L/--limit`; issue, pull-request and repository JSON fields follow the
-supported upstream field sets. Other typed groups expose smaller REST-backed
-field sets; use `gh api` for additional data.
+`-L/--limit`. Typed `--json` fields follow upstream's for each command, except
+`jobs` on `run view`; use `gh api` for additional data.
 
 ```bash
 gh issue create --title 'Broken build' --body-file /work/issue.md --label bug
@@ -224,10 +223,10 @@ gh api graphql -f query='{viewer{login}}'
 | `-F` / `--field` | Typed booleans, null and integers; `@FILE` reads a workspace file and `@-` reads stdin |
 | `-X` / `--method` | Explicit method; GET fields become query parameters, other methods use JSON |
 | `key[nested]`, `key[]` | Nested objects and arrays |
-| `--input FILE` | JSON body from a file or `-`; additional fields move to the query string |
+| `--input FILE` | Request body from a file or `-`, sent as raw bytes; additional fields move to the query string |
 | `-H` / `--header` | Add or replace a header |
 | `--paginate` | Follow REST Link headers; array pages are joined |
-| `--slurp` | Wrap pages in an array; Mirage also permits `--jq` on that array |
+| `--slurp` | Wrap pages in an array; cannot be combined with `--jq` |
 | `-i` / `--include` | Print status and headers for each response, including failures |
 | `--silent` | Suppress the response body; `--include` still prints headers |
 | `-q` / `--jq` | Filter API output in process; unlike typed commands, needs no `--json` |
@@ -255,9 +254,9 @@ invalidate mounted caches; read API methods leave them intact.
 | Interactive tools | No editor, browser, extension manager, codespace or host-checkout workflow. |
 | Pull-request creation | Requires a title and a body or body file. `--head` defaults to `branch` and `--base` to the repository's default branch. |
 | Forks | `--clone` is refused; `--remote` without a repository is refused. |
-| Repository operations | No archive, unarchive, sync, deploy-key, autolink, gitignore, license or set-default verbs. |
-| Release assets and live runs | Asset upload and `run watch` are absent. |
-| Raw API | JSON `--input` only; REST pagination only; no verbose or cache flags. |
+| Repository operations | No `repo set-default`. `repo sync` acts on a repository on GitHub, never a local checkout. |
+| Release assets and live runs | `release upload`, `release download`, `run watch` and `run download` are absent. |
+| Raw API | REST pagination only; no verbose, cache, hostname, preview or template flags. |
 | Help topics | `environment` and `exit-codes` are supported, alongside command help. |
 | HTTP display | `--include` prints HTTP/1.1 rather than upstream's HTTP/2.0 display. |
 | jq compatibility | Uses jq rather than gojq: builtin error wording and floating-point edge cases can differ. Numbers above 2^53 can lose precision; NaN, infinities and negative zero follow jq's values. |

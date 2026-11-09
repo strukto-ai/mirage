@@ -338,7 +338,11 @@ function pr(): CommandSpec {
             metavar: 'login',
             help: 'Assign people by their login. Use "@me" to self-assign.',
           }),
-          new Argument(['-l', '--label'], { metavar: 'name', help: 'Add labels by name' }),
+          new Argument(['-l', '--label'], {
+            action: 'append',
+            metavar: 'name',
+            help: 'Add labels by name',
+          }),
           new Argument(['-m', '--milestone'], {
             metavar: 'name',
             help: 'Add the pull request to a milestone by name',
@@ -368,7 +372,11 @@ function pr(): CommandSpec {
             metavar: 'login',
             help: 'Add assigned users by their login. Use "@me" to assign yourself, or "@copilot" to assign Copilot.',
           }),
-          new Argument('--add-label', { metavar: 'name', help: 'Add labels by name' }),
+          new Argument('--add-label', {
+            action: 'append',
+            metavar: 'name',
+            help: 'Add labels by name',
+          }),
           new Argument('--add-reviewer', {
             action: 'append',
             metavar: 'login',
@@ -383,7 +391,11 @@ function pr(): CommandSpec {
             metavar: 'login',
             help: 'Remove assigned users by their login. Use "@me" to unassign yourself, or "@copilot" to unassign Copilot.',
           }),
-          new Argument('--remove-label', { metavar: 'name', help: 'Remove labels by name' }),
+          new Argument('--remove-label', {
+            action: 'append',
+            metavar: 'name',
+            help: 'Remove labels by name',
+          }),
           flag({
             long: '--remove-milestone',
             description: 'Remove the milestone association from the pull request',

@@ -5,7 +5,7 @@ use super::accessor::{
     typed_out,
 };
 use super::args::wrong_count;
-use crate::core::github::client::{Account, Result, github_request, usage, value};
+use crate::core::github::client::{Account, Result, github_request, quote_ref, usage, value};
 use crate::core::github::json::{Json, Obj};
 use crate::core::github::release::{create_release, get_latest_release, get_release};
 use crate::core::github::repo::graphql_data;
@@ -198,6 +198,7 @@ pub(crate) async fn list_cmd(account: &Account, flags: &Flags) -> Result<Out> {
 }
 
 pub(crate) async fn view_cmd(account: &Account, flags: &Flags, texts: &[String]) -> Result<Out> {
+    json_fields(flags, &RELEASE_FIELDS)?;
     let tag = texts.first().map_or("", String::as_str);
     let target = repo_for(account, flags)?;
     let found = if tag.is_empty() {
@@ -372,7 +373,7 @@ pub(crate) async fn delete_cmd(account: &Account, flags: &Flags, texts: &[String
                 "/repos/{}/{}/git/refs/tags/{}",
                 target.owner,
                 target.repo,
-                found.get("tag_name").text()
+                quote_ref(found.get("tag_name").text())
             ),
             None,
         )

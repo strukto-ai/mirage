@@ -22,7 +22,7 @@ from mirage.core.api.client import ApiResponse
 from mirage.core.github.client import GitHubApiError, GitHubConnectionError
 from mirage.core.github.config import GhConfig
 from mirage.policy import Deny, Policy
-from mirage.types import MountMode
+from mirage.types import JsonValue, MountMode
 from mirage.vfs.ram import RAMVFS
 
 HOST = "mirage.commands.cli.builtin.gh.host.github_raw_response"
@@ -38,7 +38,7 @@ PULL = {
 
 
 class _Github:
-    def __init__(self, reply: object = PULL) -> None:
+    def __init__(self, reply: "JsonValue | Exception" = PULL) -> None:
         self.reply = reply
         self.calls: list[tuple] = []
 

@@ -412,6 +412,11 @@ pub(crate) fn quote(text: &str) -> String {
     out
 }
 
+/// A ref's name in a URL path, its slashes still separating segments.
+pub(crate) fn quote_ref(text: &str) -> String {
+    quote(text).replace("%2F", "/")
+}
+
 /// Bytes from base64 text, whatever is not in its alphabet skipped.
 pub(crate) fn decode_base64(text: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len() / 4 * 3);
@@ -443,6 +448,12 @@ pub(crate) fn decode_base64(text: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_ref_keeps_its_slashes_and_encodes_the_rest() {
+        assert_eq!(quote_ref("release/1.0"), "release/1.0");
+        assert_eq!(quote_ref("v1#hot"), "v1%23hot");
+    }
 
     fn failure(status: u16, kind: &str, body: &str) -> ApiError {
         let headers = BTreeMap::from([("content-type".to_owned(), kind.to_owned())]);

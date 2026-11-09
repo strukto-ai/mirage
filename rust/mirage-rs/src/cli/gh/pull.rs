@@ -20,7 +20,9 @@ use super::issue::{
 };
 use super::search::{ListQuery, has_state_clause, list_query};
 use super::shape::{Shape, exported, or_null, pointer, strukt};
-use crate::core::github::client::{Account, Failure, Result, github_request, quote, usage, value};
+use crate::core::github::client::{
+    Account, Failure, Result, github_request, quote_ref, usage, value,
+};
 use crate::core::github::issue::issue_comments;
 use crate::core::github::json::{Json, Obj, quoted};
 use crate::core::github::metadata::{Wanted, repo_metadata};
@@ -626,10 +628,11 @@ fn view_text(row: &Json, author: &str) -> String {
 }
 
 pub(crate) async fn view_cmd(account: &Account, flags: &Flags, texts: &[String]) -> Result<Out> {
-    let (repo, number) = target(account, texts, flags).await?;
     let table = pull_field_table();
     let allowed = names(&table);
-    if let Some(fields) = json_fields(flags, &allowed)? {
+    let exported_fields = json_fields(flags, &allowed)?;
+    let (repo, number) = target(account, texts, flags).await?;
+    if let Some(fields) = exported_fields {
         let node = viewed_pull(account, &table, &repo, number, &fields).await?;
         let row = exported_node(&table, &node, &fields);
         return typed_out(account, &row, flags, String::new(), &allowed).await;
@@ -1011,6 +1014,7 @@ fn check_before(a: &Obj, b: &Obj) -> bool {
 }
 
 pub(crate) async fn checks_cmd(account: &Account, flags: &Flags, texts: &[String]) -> Result<Out> {
+    json_fields(flags, &CHECK_FIELDS)?;
     let (_, _, node) = find(account, flags, texts, "number,headRefName,id").await?;
     let contexts = status_contexts(
         account,
@@ -1109,7 +1113,7 @@ async fn delete_remote_branch(account: &Account, repo: &RepoRef, branch: &str) -
             "/repos/{}/{}/git/refs/heads/{}",
             repo.owner,
             repo.repo,
-            quote(branch).replace("%2F", "/")
+            quote_ref(branch)
         ),
         None,
     )

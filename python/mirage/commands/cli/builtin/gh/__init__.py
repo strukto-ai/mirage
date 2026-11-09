@@ -507,6 +507,7 @@ def _pr() -> CommandSpec:
                     Argument(
                         "-l",
                         "--label",
+                        action="append",
                         metavar="name",
                         help="Add labels by name",
                     ),
@@ -552,6 +553,7 @@ def _pr() -> CommandSpec:
                     ),
                     Argument(
                         "--add-label",
+                        action="append",
                         metavar="name",
                         help="Add labels by name",
                     ),
@@ -579,6 +581,7 @@ def _pr() -> CommandSpec:
                     ),
                     Argument(
                         "--remove-label",
+                        action="append",
                         metavar="name",
                         help="Remove labels by name",
                     ),
