@@ -1,4 +1,5 @@
 import asyncio
+import base64
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -176,3 +177,30 @@ async def test_a_body_over_the_limit_is_refused(tmp_path):
             f"/v1/workspaces/{wid}/rpc", content=b" " * (4 * 1024 * 1024 + 1)
         )
         assert r.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_open_stdin_takes_writes_on_other_requests(tmp_path):
+    async with daemon(tmp_path) as (http, app):
+        wid = await workspace(http)
+        url = f"/v1/workspaces/{wid}/rpc"
+        running = asyncio.create_task(
+            http.post(
+                url,
+                json=request(
+                    7, "shell", {"command": "cat", "open_stdin": True}
+                ),
+            )
+        )
+        data = base64.b64encode(b"one\n").decode()
+        written = {"error": {}}
+        while "error" in written:
+            reply = await http.post(
+                url, json=request(8, "stdin/write", {"id": 7, "data": data})
+            )
+            written = reply.json()
+        closed = await http.post(
+            url, json=request(9, "stdin/close", {"id": 7})
+        )
+        assert closed.json()["result"] is None
+        assert (await running).json()["result"]["stdout"] == "one\n"

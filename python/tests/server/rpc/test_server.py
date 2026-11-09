@@ -217,3 +217,41 @@ async def test_a_glob_past_the_walk_limit_is_invalid_params():
         "message": "/*.txt: matches more than 2 files (walk_limit); "
         "narrow the path",
     }
+
+
+@pytest.mark.asyncio
+async def test_open_stdin_reads_what_stdin_write_sends():
+    rpc = server()
+    running = asyncio.create_task(
+        rpc.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "shell",
+                "params": {"command": "cat", "open_stdin": True},
+            }
+        )
+    )
+    await asyncio.sleep(0)
+    for word in ("one\n", "two\n"):
+        written = await call(rpc, "stdin/write", {"id": 7, "data": b64(word)})
+        assert written["result"] is None
+    assert (await call(rpc, "stdin/close", {"id": 7}))["result"] is None
+    response = await asyncio.wait_for(running, 5)
+    assert response is not None
+    assert response["result"]["stdout"] == "one\ntwo\n"
+    gone = await call(rpc, "stdin/write", {"id": 7, "data": b64("x")})
+    assert gone["error"]["code"] == -32004
+
+
+@pytest.mark.asyncio
+async def test_open_stdin_refuses_stdin_and_explain():
+    rpc = server()
+    both = await call(
+        rpc, "shell", {"command": "cat", "open_stdin": True, "stdin": b64("x")}
+    )
+    assert both["error"]["code"] == -32602
+    explained = await call(
+        rpc, "shell", {"command": "cat", "open_stdin": True, "explain": True}
+    )
+    assert explained["error"]["code"] == -32602

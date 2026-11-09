@@ -60,7 +60,9 @@ the header itself.
 | Method | Params | Result |
 | --- | --- | --- |
 | `initialize` | | `{server_info, protocol_version, workspace_id, session_id, methods}` |
-| `shell` | `command`, `cwd?`, `env?`, `stdin?`, `explain?` | `{kind, exit_code, stdout, stderr, refusal}` |
+| `shell` | `command`, `cwd?`, `env?`, `stdin?`, `open_stdin?`, `explain?` | `{kind, exit_code, stdout, stderr, refusal}` |
+| `stdin/write` | `id`, `data` | `null` |
+| `stdin/close` | `id` | `null` |
 | `glob` | `pattern` | `string[]`, the matching paths |
 | `vfs/<call>` | the call's arguments, `explain?` | what the call returns |
 | `tools/<tool>` | the tool's input | `{text, is_error}` |
@@ -98,6 +100,21 @@ cancels its calls too.
 {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 7}}
 ```
 
+## Write to a running line
+
+A `shell` with `open_stdin: true` reads what `stdin/write` sends until
+`stdin/close`. Both name the `id` of that `shell` request, as `$/cancelRequest`
+does, and its answer comes when the line ends.
+
+```json
+{"jsonrpc": "2.0", "id": 7, "method": "shell", "params": {"command": "cat", "open_stdin": true}}
+{"jsonrpc": "2.0", "id": 8, "method": "stdin/write", "params": {"id": 7, "data": "aGVsbG8K"}}
+{"jsonrpc": "2.0", "id": 9, "method": "stdin/close", "params": {"id": 7}}
+```
+
+`stdin/write` answers once the bytes are buffered, so a command that reads
+slowly holds it back. Send one at a time to keep the bytes in order.
+
 ## Errors
 
 | Code | Means |
@@ -106,7 +123,7 @@ cancels its calls too.
 | `-32600` | Not a JSON-RPC 2.0 request: no `"jsonrpc": "2.0"`, or no method. |
 | `-32601` | No such method. |
 | `-32602` | Bad params. |
-| `-32004` | No such path (`ENOENT`). |
+| `-32004` | No such path (`ENOENT`), or no running `shell` opened that stdin. |
 | `-32603` | Anything else, such as a refused path. |
 | `-32800` | Canceled. |
 

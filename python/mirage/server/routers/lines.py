@@ -12,14 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from mirage.execution.line.types import Line, LineState
 from mirage.execution.types import LineId
+from mirage.io.errors import PipeClosed
+from mirage.io.pipe import BytePipe
+from mirage.server.requests import RequestTable
 from mirage.server.routers.vfs import require_entry
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/lines")
+
+NOT_OPEN = "the line's stdin is not open"
 
 
 class LineResponse(BaseModel):
@@ -99,3 +104,53 @@ async def get_line(
     if detail is None:
         raise HTTPException(status_code=404, detail="line not found")
     return detail
+
+
+def _open_stdin(request: Request, workspace_id: str, line_id: str) -> BytePipe:
+    """A running line's open stdin.
+
+    Args:
+        request (Request): the request, for the app's job table.
+        workspace_id (str): the workspace.
+        line_id (str): the line.
+
+    Raises:
+        HTTPException: 404 when no such line is running there, 409 when
+            it did not open its stdin.
+    """
+    jobs: RequestTable = request.app.state.jobs
+    job = jobs.get(LineId(line_id))
+    if job is None or job.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="line not found")
+    if job.stdin is None:
+        raise HTTPException(status_code=409, detail=NOT_OPEN)
+    return job.stdin
+
+
+@router.post("/{line_id}/stdin", status_code=204, response_model=None)
+async def write_stdin(
+    workspace_id: str, line_id: str, request: Request
+) -> Response:
+    """Send the body to a running line's open stdin. It answers once the
+    bytes are buffered, so a line that stops reading holds its writer
+    back. Runs on the workspace's own loop, where the line reads."""
+    runner = require_entry(request, workspace_id).runner
+    stdin = _open_stdin(request, workspace_id, line_id)
+    try:
+        async for chunk in request.stream():
+            await runner.call(stdin.write(chunk))
+    except PipeClosed as exc:
+        raise HTTPException(status_code=409, detail=NOT_OPEN) from exc
+    return Response(status_code=204)
+
+
+@router.delete("/{line_id}/stdin", status_code=204, response_model=None)
+async def close_stdin(
+    workspace_id: str, line_id: str, request: Request
+) -> Response:
+    """End a running line's open stdin: the line reads what was sent,
+    then end of file."""
+    runner = require_entry(request, workspace_id).runner
+    stdin = _open_stdin(request, workspace_id, line_id)
+    runner.loop.call_soon_threadsafe(stdin.end)
+    return Response(status_code=204)

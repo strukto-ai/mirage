@@ -1637,6 +1637,82 @@ paths:
         - Lines
       x-hosts:
         - daemon
+  /v1/workspaces/{workspace_id}/lines/{line_id}/stdin:
+    post:
+      summary: Write to a running line
+      operationId: write_stdin_v1_workspaces__workspace_id__lines__line_id__stdin_post
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+        - name: line_id
+          in: path
+          required: true
+          description: The line's id, from the first record of its stream.
+          schema:
+            type: string
+            title: Line Id
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '204':
+          description: The bytes are buffered for the line.
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+      description: Send the body to a running line's open stdin. It answers once the bytes are buffered, so a line that stops reading holds its writer back.
+      tags:
+        - Lines
+      x-hosts:
+        - daemon
+    delete:
+      summary: Close stdin of a running line
+      operationId: close_stdin_v1_workspaces__workspace_id__lines__line_id__stdin_delete
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+        - name: line_id
+          in: path
+          required: true
+          description: The line's id, from the first record of its stream.
+          schema:
+            type: string
+            title: Line Id
+      responses:
+        '204':
+          description: The line reads what was sent, then end of file.
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+      description: 'End a running line''s open stdin: the line reads what was sent, then end of file.'
+      tags:
+        - Lines
+      x-hosts:
+        - daemon
   /v1/workspaces/{workspace_id}/jobs:
     get:
       summary: List jobs
@@ -7896,6 +7972,10 @@ components:
           type: boolean
           default: true
           description: Add the line to the session's history.
+        open_stdin:
+          type: boolean
+          default: false
+          description: Keep the line's stdin open for writes while it runs. Needs `stream=true`; the first record names the line.
       required:
         - command
     LoadRequest:

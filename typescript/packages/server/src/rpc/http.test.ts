@@ -57,6 +57,25 @@ afterEach(async () => {
 })
 
 describe('the RPC endpoint', () => {
+  it('takes open stdin writes on other requests', async () => {
+    const base = await daemon()
+    const url = `${base}/v1/workspaces/${await workspace(base)}/rpc`
+    const running = post(url, request(7, 'shell', { command: 'cat', open_stdin: true }))
+    const data = Buffer.from('one\n').toString('base64')
+    let written: { error?: unknown; result?: unknown } = { error: {} }
+    while (written.error !== undefined) {
+      written = (await (await post(url, request(8, 'stdin/write', { id: 7, data }))).json()) as {
+        error?: unknown
+      }
+    }
+    const closed = (await (await post(url, request(9, 'stdin/close', { id: 7 }))).json()) as {
+      result: unknown
+    }
+    expect(closed.result).toBeNull()
+    const answer = (await (await running).json()) as { result: { stdout: string } }
+    expect(answer.result.stdout).toBe('one\n')
+  })
+
   it('answers a request and a batch', async () => {
     const base = await daemon()
     const id = await workspace(base)

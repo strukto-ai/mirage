@@ -26,6 +26,7 @@ from mirage.concurrency.limiter import run_blocking
 from mirage.execution.errors import WorkspaceHeldError
 from mirage.execution.line.handle import LineHandle
 from mirage.execution.types import LineId
+from mirage.io.pipe import BytePipe
 from mirage.io.types import ByteSource
 from mirage.server.io_serde import explanation_to_dict, io_result_to_dict
 from mirage.server.metrics import refused
@@ -52,6 +53,7 @@ class ShellRequest(BaseModel):
     runtime: str | None = None
     machine: str | None = None
     record: bool = True
+    open_stdin: bool = False
 
 
 def _build_shell_kwargs(
@@ -132,6 +134,17 @@ async def shell(
             stdin = LoopStdin(part, asyncio.get_running_loop())
     else:
         req_obj = await _parse_json_body(request)
+    pipe: BytePipe | None = None
+    if req_obj.open_stdin:
+        if part is not None or not stream:
+            if upload is not None:
+                await _finish_upload(upload, part)
+            raise HTTPException(
+                status_code=400,
+                detail="open_stdin takes stream=true and no stdin part",
+            )
+        pipe = BytePipe(entry.runner.ws.io.buffer_bytes)
+        stdin = pipe.stream()
     kwargs = _build_shell_kwargs(req_obj, stdin)
     session_id = session_id or entry.runner.ws.default_session_id
     kwargs["session_id"] = session_id
@@ -184,6 +197,7 @@ async def shell(
         factory=run,
         session_id=session_id,
     )
+    job.stdin = pipe
     if stream:
         return ShellResponse(
             opened, entry.runner.loop, jobs, job, request, upload, part
@@ -224,7 +238,13 @@ async def _explained(
         if content_type.startswith("multipart/")
         else await _parse_json_body(request)
     )
-    if req_obj is None or req_obj.cwd or req_obj.runtime or req_obj.machine:
+    if (
+        req_obj is None
+        or req_obj.cwd
+        or req_obj.runtime
+        or req_obj.machine
+        or req_obj.open_stdin
+    ):
         raise HTTPException(
             status_code=400,
             detail=(

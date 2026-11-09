@@ -2414,6 +2414,62 @@
       "remove": true
     },
     {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}/stdin\"].post",
+      "update": {
+        "x-mint": {
+          "content": "<div className=\"hidden\">\n<ResponseExample>\n\n```http 204 No Content\nHTTP/1.1 204 No Content\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `404` | The workspace, session, job or file does not exist |\n| `409` | The id or name is taken, the workspace is busy, or a file changed since it was read |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+        }
+      }
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}/stdin\"].post.responses[\"401\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}/stdin\"].post.responses[\"404\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}/stdin\"].post.responses[\"409\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}/stdin\"].post.responses[\"422\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}/stdin\"].post.responses[\"429\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}/stdin\"].delete",
+      "update": {
+        "x-mint": {
+          "content": "<div className=\"hidden\">\n<ResponseExample>\n\n```http 204 No Content\nHTTP/1.1 204 No Content\n```\n\n</ResponseExample>\n</div>\n\n<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `404` | The workspace, session, job or file does not exist |\n| `409` | The id or name is taken, the workspace is busy, or a file changed since it was read |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
+        }
+      }
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}/stdin\"].delete.responses[\"401\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}/stdin\"].delete.responses[\"404\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}/stdin\"].delete.responses[\"409\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}/stdin\"].delete.responses[\"422\"]",
+      "remove": true
+    },
+    {
+      "target": "$.paths[\"/v1/workspaces/{workspace_id}/lines/{line_id}/stdin\"].delete.responses[\"429\"]",
+      "remove": true
+    },
+    {
       "target": "$.paths[\"/v1/workspaces/{workspace_id}/jobs\"].get",
       "update": {
         "x-mint": {

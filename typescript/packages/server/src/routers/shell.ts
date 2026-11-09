@@ -14,6 +14,7 @@
 
 import { WorkspaceHeldError } from '@struktoai/mirage-core/execution/errors'
 import type { LineId } from '@struktoai/mirage-core/execution/types'
+import { BytePipe } from '@struktoai/mirage-core/io/pipe'
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
@@ -44,6 +45,7 @@ const ShellRequest = z
     runtime: z.string().optional(),
     machine: z.string().optional(),
     record: z.boolean().optional(),
+    open_stdin: z.boolean().optional(),
   })
   .strict()
 
@@ -225,7 +227,8 @@ async function explained(
       (parsed.success &&
         (parsed.data.cwd !== undefined ||
           parsed.data.runtime !== undefined ||
-          parsed.data.machine !== undefined))
+          parsed.data.machine !== undefined ||
+          parsed.data.open_stdin === true))
     ) {
       throw new HttpError(400, 'explain takes the line alone: no stdin, cwd, runtime or machine')
     }
@@ -272,6 +275,17 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
         return refuse(req, reply, error)
       }
       const { body, stdin } = upload
+      if (body.open_stdin === true && (stdin !== undefined || !streaming)) {
+        try {
+          await upload.finish()
+        } catch (error) {
+          return refuse(req, reply, error)
+        }
+        return reply.status(400).send({ detail: 'open_stdin takes stream=true and no stdin part' })
+      }
+      const pipe =
+        body.open_stdin === true ? new BytePipe(entry.runner.ws.io.bufferBytes) : undefined
+      const source = pipe?.stream() ?? stdin
       await entry.runner.ws.ensureSessionsLoaded()
       const sessionId = req.query.session_id ?? entry.runner.ws.defaultSessionId
       if (deps.jobs.draining || !entry.acceptingJobs) {
@@ -318,7 +332,7 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
             ...(body.runtime !== undefined ? { runtime: body.runtime } : {}),
             ...(body.machine !== undefined ? { machine: body.machine } : {}),
             ...(body.record !== undefined ? { record: body.record } : {}),
-            ...(stdin !== undefined ? { stdin } : {}),
+            ...(source !== undefined ? { stdin: source } : {}),
             signal,
           }
           const lineId = lineHandle.id.value
@@ -341,6 +355,7 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
         },
         sessionId,
       )
+      job.stdin = pipe
       if (streaming) {
         return shellResponse(execution, deps.jobs, job, reply, req.closed, upload.failed, stdin)
       }

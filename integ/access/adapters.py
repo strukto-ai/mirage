@@ -111,7 +111,9 @@ async def rpc_answer(reply: Awaitable[dict[str, Any]]) -> Answer:
 
 
 async def streamed_answer(
-    reply: httpx.Response, gate: "Gate | None" = None
+    reply: httpx.Response,
+    gate: "Gate | None" = None,
+    on_line: Callable[[str], Awaitable[None]] | None = None,
 ) -> Answer:
     streams: dict[str, list[bytes]] = {"stdout": [], "stderr": []}
     completed: dict[str, Any] | None = None
@@ -120,7 +122,10 @@ async def streamed_answer(
     async for line in reply.aiter_lines():
         record = json.loads(line)
         assert completed is None, "output arrived after the completion record"
-        if "stream" in record:
+        if "line_id" in record:
+            assert on_line is not None
+            await on_line(record["line_id"])
+        elif "stream" in record:
             data = base64.b64decode(record["data"], validate=True)
             assert len(data) <= 16 * 1024
             streams[record["stream"]].append(data)
@@ -1974,6 +1979,28 @@ class Http:
                     step, wire_failure(reply.status_code, reply.json())
                 )
             return bytes_answer(step, reply.json())
+        if op == "stdin" and "open_stdin" in step:
+
+            async def feed(line_id: str) -> None:
+                stdin = f"{base}/lines/{line_id}/stdin"
+                for chunk in step["open_stdin"]:
+                    written = await http.post(
+                        stdin,
+                        content=chunk.encode(),
+                        headers={"content-type": "application/octet-stream"},
+                    )
+                    written.raise_for_status()
+                (await http.delete(stdin)).raise_for_status()
+
+            async with http.stream(
+                "POST",
+                f"{base}/shell",
+                json={"command": step["command"], "open_stdin": True},
+                params={**params, "stream": "true"},
+            ) as reply:
+                answer = await streamed_answer(reply, on_line=feed)
+            await self.server.cleared(wid)
+            return answer
         if op == "stdin" and "stream" not in step:
             request = json.dumps({"command": step["command"]})
             reply = await http.post(
@@ -2519,11 +2546,30 @@ class Rpc:
                     rpc_answer(call("shell", shell_params(command, cwd)))
                 )
 
+            async def fed(command: str, chunks: list[str]) -> Answer:
+                running = asyncio.ensure_future(
+                    http.post(
+                        url,
+                        json=rpc_request(
+                            8,
+                            "shell",
+                            {"command": command, "open_stdin": True},
+                        ),
+                        params=params,
+                    )
+                )
+                await feed_rpc_stdin(call, self.server, wid, 8, chunks)
+                reply = await running
+                reply.raise_for_status()
+                await self.server.cleared(wid)
+                return io_answer(rpc_result(reply.json()))
+
             return [
                 await rpc_case(
                     call,
                     cancel,
                     held,
+                    fed,
                     self.server,
                     wid,
                     suite["op"],
@@ -2573,11 +2619,27 @@ class RpcStdio(Rpc):
                 )
                 return rpc_answer(stream.receive(sent))
 
+            async def fed(command: str, chunks: list[str]) -> Answer:
+                await stream.send(
+                    rpc_request(
+                        901,
+                        "shell",
+                        {"command": command, "open_stdin": True},
+                    )
+                )
+                await feed_rpc_stdin(
+                    stream.call, self.server, wid, 901, chunks
+                )
+                answer = io_answer(rpc_result(await stream.receive(901)))
+                await self.server.cleared(wid)
+                return answer
+
             return [
                 await rpc_case(
                     stream.call,
                     cancel,
                     held,
+                    fed,
                     self.server,
                     wid,
                     suite["op"],
@@ -2587,10 +2649,34 @@ class RpcStdio(Rpc):
             ]
 
 
+async def feed_rpc_stdin(
+    call: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
+    server: Server,
+    wid: str,
+    request_id: int,
+    chunks: list[str],
+) -> None:
+    """Write a case's chunks to its running ``shell``, then end its stdin.
+
+    Args:
+        call (Callable): makes one RPC call.
+        server (Server): the deployment, to see the line begin.
+        wid (str): the workspace.
+        request_id (int): the ``shell`` request's id.
+        chunks (list[str]): what to write.
+    """
+    assert await server.begun(wid, 15), "the line never started"
+    for chunk in chunks:
+        data = base64.b64encode(chunk.encode()).decode()
+        rpc_result(await call("stdin/write", {"id": request_id, "data": data}))
+    rpc_result(await call("stdin/close", {"id": request_id}))
+
+
 async def rpc_case(
     call: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
     cancel: Callable[[str], Awaitable[str]],
     held: Callable[[str, str], Awaitable[Awaitable[Answer]]],
+    fed: Callable[[str, list[str]], Awaitable[Answer]],
     server: Server,
     wid: str,
     op: str,
@@ -2610,6 +2696,8 @@ async def rpc_case(
         return io_answer(
             rpc_result(await call("shell", {"command": step["command"]}))
         )
+    if op == "stdin" and "open_stdin" in step:
+        return await fed(step["command"], step["open_stdin"])
     if op == "stdin":
         data = base64.b64encode(stdin_bytes(step["stdin"])).decode()
         return io_answer(

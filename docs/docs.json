@@ -820,7 +820,9 @@
                 "group": "Lines",
                 "pages": [
                   "GET /v1/workspaces/{workspace_id}/lines",
-                  "GET /v1/workspaces/{workspace_id}/lines/{line_id}"
+                  "GET /v1/workspaces/{workspace_id}/lines/{line_id}",
+                  "POST /v1/workspaces/{workspace_id}/lines/{line_id}/stdin",
+                  "DELETE /v1/workspaces/{workspace_id}/lines/{line_id}/stdin"
                 ]
               },
               {
