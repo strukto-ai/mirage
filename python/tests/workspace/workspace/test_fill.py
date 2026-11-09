@@ -1742,8 +1742,8 @@ class NiceBox(Runtime, LineExecutorMixin):
 
 @pytest.mark.asyncio
 async def test_a_runtime_line_keeps_its_fetch_past_an_inner_refusal():
-    # A runtime that runs `nice env` whole never hands `env` to the gate,
-    # so only `nice`, which the list allows, decides whether it runs.
+    # The pass leaves `env` to the gate where `nice` runs it, which refuses
+    # it there, so the line's own command keeps its fetch.
     calls, fetch = counting_source({"TOKEN": "t0"})
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws(
@@ -1755,7 +1755,7 @@ async def test_a_runtime_line_keeps_its_fetch_past_an_inner_refusal():
     )
     try:
         io = await ws.shell("nice env")
-        assert (io.exit_code, await io.stdout_str()) == (0, "t0\n")
+        assert (io.exit_code, io.stderr) == (126, b"env: Permission denied\n")
         assert calls == ["r"]
     finally:
         await ws.close()
