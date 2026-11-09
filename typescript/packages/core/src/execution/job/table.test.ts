@@ -2431,6 +2431,34 @@ describe('detached jobs a daemon left', () => {
     }
   })
 
+  // An adopted job's program keeps the machine pid `$!` named, as the
+  // daemon that left it published it.
+  it("keep their program's machine pid", async () => {
+    const store = new RAMExecutionStore(30)
+    const [old, job] = await leftDetached(store)
+    job.process?.setMachinePid({ pid: 4242, started: 123, exited: null })
+    await until(
+      async () => (await store.processes())[old.daemon]?.[String(job.pid)]?.machine_pid != null,
+    )
+    Reflect.set(old, 'closed', true)
+    await (Reflect.get(old, 'publishing') as Promise<void> | null)
+    const fresh = new JobTable(store, new ProcessTable(), null, undefined, old.daemon)
+    resuming(fresh, 3, [])
+    try {
+      await fresh.claim()
+      expect(fresh.get(job.id, job.sessionId)?.process?.record.machinePid).toEqual({
+        pid: 4242,
+        started: 123,
+        exited: null,
+      })
+    } finally {
+      await fresh.killAll()
+      await fresh.close()
+      Reflect.set(old, 'closed', false)
+      await old.killAll()
+    }
+  })
+
   // A restart adopts a detached job its session disowned, unlisted as it
   // was, rather than leave its program to the sweep.
   it('are adopted disowned when disowned', async () => {

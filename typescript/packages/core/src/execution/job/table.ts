@@ -36,7 +36,7 @@ import {
 import type { ExecutionStore } from '../base.ts'
 import { WorkspaceHeldError } from '../errors.ts'
 import { RAMExecutionStore } from '../ram.ts'
-import { JobId, LineId, MachineId } from '../types.ts'
+import { JobId, LineId, MachineId, type MachinePid } from '../types.ts'
 import { JobHandle, type JobRunner, markKilled } from './handle.ts'
 import type { Job, JobState } from './types.ts'
 import { SystemClock, type Clock } from '../../utils/clock.ts'
@@ -680,6 +680,7 @@ export class JobTable {
         .map((j) => j.consoleName),
     )
     const owners = new Set<string>()
+    const published = await this.store.processes()
     for (const sessionId of await this.store.sessions()) {
       const fields = await this.store.load(sessionId)
       const found: [number | null, ListEntry][] = [
@@ -693,9 +694,16 @@ export class JobTable {
       for (const [number, entry] of found) {
         if (!this.held) return [adopted, complete]
         if (entry.state !== 'running' || !entry.detached || own.has(entry.console)) continue
+        const record = published[entry.owner]?.[String(entry.pid)]
         let taken: boolean
         try {
-          taken = await this.adopt(sessionId, number, entry, resume)
+          taken = await this.adopt(
+            sessionId,
+            number,
+            entry,
+            resume,
+            (record?.machine_pid as MachinePid | null | undefined) ?? null,
+          )
         } catch (err) {
           console.debug(`job ${entry.console} not adopted:`, err)
           complete = false
@@ -726,14 +734,16 @@ export class JobTable {
    * leaves the job to it, and a lease lost while it lands leaves the job to
    * the daemon that takes the lease next. What can fail is read before the
    * swap, so a job this daemon takes is one it views. A null number names a
-   * disowned job, which the list holds by its console. Mirrors Python's
-   * `JobTable._adopt`.
+   * disowned job, which the list holds by its console. Its program's pid on
+   * its machine, as the daemon that left it published it, is the one `$!`
+   * named; null when it published none. Mirrors Python's `JobTable._adopt`.
    */
   async adopt(
     sessionId: string,
     number: number | null,
     entry: ListEntry,
     resume: (job: JobHandle, sent: [number, number]) => Promise<number>,
+    machinePid: MachinePid | null = null,
   ): Promise<boolean> {
     const detached = entry.detached ?? {}
     const machine = MachineId.parse(String(detached.machine))
@@ -797,6 +807,7 @@ export class JobTable {
       programIgnores: IGNORED_SIGNALS,
     })
     process.detached = true
+    if (machinePid !== null) process.setMachinePid(machinePid)
     process.tag = (detached.tag as string | null | undefined) ?? null
     process.afterEnding = []
     process.mayWrite = () => this.holding()

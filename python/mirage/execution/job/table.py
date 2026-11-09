@@ -42,7 +42,7 @@ from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.ram import RAMExecutionStore
-from mirage.execution.types import JobId, LineId, MachineId
+from mirage.execution.types import JobId, LineId, MachineId, MachinePid
 from mirage.io.types import IOResult
 from mirage.shell.console import Channel, JobConsole
 from mirage.types import PathSpec
@@ -684,6 +684,7 @@ class JobTable:
             if j.process is not None
         }
         owners: set[str] = set()
+        published = await self.store.processes()
         for session_id in await self.store.sessions():
             fields = await self.store.load(session_id) or {}
             found: list[tuple[int | None, RecordFields]] = [
@@ -700,9 +701,16 @@ class JobTable:
                     or entry["console"] in own
                 ):
                     continue
+                record = published.get(entry["owner"], {}).get(
+                    str(entry["pid"]), {}
+                )
                 try:
                     taken = await self._adopt(
-                        session_id, number, entry, resume
+                        session_id,
+                        number,
+                        entry,
+                        resume,
+                        record.get("machine_pid"),
                     )
                 except Exception:
                     logger.debug(
@@ -730,6 +738,7 @@ class JobTable:
         number: int | None,
         entry: RecordFields,
         resume: Callable[[JobHandle, tuple[int, int]], Awaitable[int]],
+        machine_pid: RecordFields | None = None,
     ) -> bool:
         """Take one detached job from the daemon that left it: its entry
         names this daemon once the swap lands, and a process under its
@@ -746,6 +755,9 @@ class JobTable:
             entry (RecordFields): its entry as read.
             resume (Callable[[JobHandle, tuple[int, int]], Awaitable[int]]):
                 views its program to its end (``resumer``).
+            machine_pid (RecordFields | None): its program's pid on its
+                machine, as the daemon that left it published it, which
+                ``$!`` named; None when it published none.
         """
         machine = MachineId.parse(entry["detached"]["machine"])
         console = JobConsole(self.store.console(entry["console"]))
@@ -811,6 +823,14 @@ class JobTable:
             program_ignores=IGNORED_SIGNALS,
         )
         process.detached = True
+        if machine_pid:
+            process.set_machine_pid(
+                MachinePid(
+                    machine_pid["pid"],
+                    machine_pid["started"],
+                    machine_pid["exited"],
+                )
+            )
         process.tag = entry["detached"].get("tag")
         process.after_ending = []
         process.may_write = self._holding

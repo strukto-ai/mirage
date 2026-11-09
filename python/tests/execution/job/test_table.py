@@ -29,7 +29,7 @@ from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import Process
 from mirage.execution.ram import RAMExecutionStore
-from mirage.execution.types import LineId, MachineId
+from mirage.execution.types import LineId, MachineId, MachinePid
 from mirage.io import IOResult
 from mirage.shell.console import (
     Channel,
@@ -2159,6 +2159,35 @@ async def test_a_sweep_before_adoption_keeps_a_detached_record(monkeypatch):
         assert stopped == []
         assert await recorded()
     finally:
+        await new.close()
+        await old.kill_all()
+
+
+# An adopted job's program keeps the machine pid ``$!`` named, as the
+# daemon that left it published it.
+@pytest.mark.asyncio
+async def test_an_adopted_job_keeps_its_programs_machine_pid(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMExecutionStore(lease_seconds=30.0)
+    old, job = await _left_detached(store)
+    assert job.process is not None
+    job.process.set_machine_pid(MachinePid(4242, 123.0))
+
+    async def recorded() -> bool:
+        record = (await store.processes())[old.daemon][str(job.pid)]
+        return record["machine_pid"] is not None
+
+    await _until(recorded)
+    old._publishing.cancel()
+    new = JobTable(store, ProcessTable(), daemon=old.daemon)
+    _resuming(new, 3, [])
+    try:
+        await new.claim()
+        adopted = new.get(job.id, job.session_id)
+        assert adopted is not None and adopted.process is not None
+        assert adopted.process.record.machine_pid == MachinePid(4242, 123.0)
+    finally:
+        await new.kill_all()
         await new.close()
         await old.kill_all()
 
