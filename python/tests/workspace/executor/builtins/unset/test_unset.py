@@ -1,6 +1,7 @@
 import pytest
 
 from mirage.shell.array import ShellArray, make_array
+from mirage.shell.errors import ExitSignal
 from mirage.shell.variable import VarAttr
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.unset import handle_unset
@@ -19,6 +20,16 @@ async def no_lines(*args, **kwargs):
 
 async def unset(args: list[str], session: SessionState):
     return await handle_unset(args, EvaluationContext(session), no_lines)
+
+
+@pytest.mark.asyncio
+async def test_a_later_operand_stopping_keeps_what_earlier_ones_did():
+    session = make_session()
+    session.functions["f"] = "f() { :; }"
+    seed_var(session, "a", make_array(["x"]))
+    with pytest.raises(ExitSignal):
+        await unset(["f", "a[1/0]"], session)
+    assert "f" not in session.functions
 
 
 @pytest.mark.asyncio

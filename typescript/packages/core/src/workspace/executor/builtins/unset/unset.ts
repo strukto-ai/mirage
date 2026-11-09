@@ -26,9 +26,37 @@ import { builtinUsage, fail, written } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 
 /**
- * Read `unset`'s options, unset its operands on the shell, then drop the
- * functions and the host's own state the operands named.
+ * Unset one operand on the shell, then what it named on the host, before the
+ * next operand runs.
  */
+async function unsetWord(
+  letters: string,
+  word: string,
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null,
+): Promise<readonly [readonly (readonly [boolean, Uint8Array])[], number]> {
+  const session = context.session
+  const [pieces, status, fn, tracked] = (await runOnShell(
+    (shell) =>
+      shell.unsetWord(
+        letters,
+        word,
+        word in session.functions,
+        session.readonlyFunctions.has(word),
+        deciding(),
+      ),
+    context,
+    executeFn,
+    callStack,
+  )) as readonly [readonly (readonly [boolean, Uint8Array])[], number, boolean, string | null]
+  if (fn) session.removeFunction(word)
+  if (tracked === 'OPTIND') session.getoptsOptind = null
+  if (tracked === FUNCNAME) session.functionNames = null
+  return [pieces, status]
+}
+
+/** Read `unset`'s options and unset its operands in order. */
 export async function handleUnset(
   args: readonly string[],
   context: EvaluationContext,
@@ -64,30 +92,15 @@ export async function handleUnset(
       `${shellVoice()}unset: cannot simultaneously unset a function and a variable\n`,
     )
   }
-  const session = context.session
-  const operands = args.slice(i)
-  const [pieces, status, functions, tracked] = (await runOnShell(
-    (shell) =>
-      shell.unsetNames(
-        [...letters].sort(compareCodePoints).join(''),
-        operands,
-        operands.filter((name) => name in session.functions),
-        operands.filter((name) => session.readonlyFunctions.has(name)),
-        deciding(),
-      ),
-    context,
-    executeFn,
-    callStack,
-  )) as readonly [
-    readonly (readonly [boolean, Uint8Array])[],
-    number,
-    readonly string[],
-    readonly string[],
-  ]
-  for (const name of functions) session.removeFunction(name)
-  if (tracked.includes('OPTIND')) session.getoptsOptind = null
-  if (tracked.includes(FUNCNAME)) session.functionNames = null
-  return written('unset', pieces, status)
+  const said: (readonly [boolean, Uint8Array])[] = []
+  let failed = 0
+  const sorted = [...letters].sort(compareCodePoints).join('')
+  for (const word of args.slice(i)) {
+    const [pieces, status] = await unsetWord(sorted, word, context, executeFn, callStack)
+    said.push(...pieces)
+    failed |= status
+  }
+  return written('unset', said, failed)
 }
 
 /** The `unset` arm. */

@@ -373,15 +373,15 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let deciding = args.flag()?;
             return engine.start(handle, |inner| task::let_words(inner, words, deciding));
         }
-        "unset_names" => {
+        "unset_word" => {
             let unsetting = Unsetting {
                 letters: args.bytes()?,
-                operands: words(args.list()?)?,
-                functions: words(args.list()?)?,
-                frozen: words(args.list()?)?,
+                word: args.bytes()?,
+                function: args.flag()?,
+                frozen: args.flag()?,
                 deciding: args.flag()?,
             };
-            return engine.start(handle, |inner| task::unset_names(inner, unsetting));
+            return engine.start(handle, |inner| task::unset_word(inner, unsetting));
         }
         "mark_names" => {
             let cmd = args.string()?;

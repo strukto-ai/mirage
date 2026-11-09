@@ -182,6 +182,7 @@ interface CliSpecJson {
 
 interface World {
   read_control?: string
+  decide_lines?: { path: string; lines: string[] }
   track_reads?: boolean
   builtin_clis?: string[]
   session_id?: string
@@ -378,6 +379,21 @@ class RedactReads implements TestPolicy<VfsResultContext> {
     const data = ctx.result instanceof Uint8Array ? DEC.decode(ctx.result) : null
     if (ctx.call.name === 'read' && data !== null && data.includes(this.marker)) {
       return { kind: 'deny', reason: 'redacted' }
+    }
+    return null
+  }
+}
+
+class DecideLines implements Policy {
+  constructor(
+    private readonly ws: Workspace,
+    private readonly path: string,
+    private readonly lines: readonly string[],
+  ) {}
+
+  async preVfs(ctx: VfsContext): Promise<Action | null> {
+    if (ctx.call.name === 'read' && ctx.path.virtual === this.path) {
+      for (const line of this.lines) await this.ws.shell(line)
     }
     return null
   }
@@ -954,6 +970,9 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   if (world.profile !== undefined) options.profile = world.profile
   const ws = new Workspace(mounts, options)
   if (world.read_control !== undefined) ws.policies.add(new ReadControl(ws, world.read_control))
+  if (world.decide_lines !== undefined) {
+    ws.policies.add(new DecideLines(ws, world.decide_lines.path, world.decide_lines.lines))
+  }
   for (const name of world.builtin_clis ?? []) ws.registerCli(name, cliSpecFor(name))
   // The world's script CLIs, the yaml `clis:` shape inline: each entry
   // embeds its program instead of naming a file, the same way a runtime

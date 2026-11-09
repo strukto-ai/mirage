@@ -168,11 +168,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "readonly zbr3=1; unset zbr3; echo $?",
+      "command": "readonly zbr3=1; unset zbr3; echo $?; (zbf4() { echo 0; }; zba4=(x y); unset zbf4 'zba4[$(zbf4)]'; echo \"$? ${zba4[*]}\")",
       "expect": {
         "exit": 0,
-        "stdout": "1\n",
-        "stderr": "bash: line 1: unset: zbr3: cannot unset: readonly variable\n"
+        "stdout": "1\n0 y\n",
+        "stderr": "bash: line 1: unset: zbr3: cannot unset: readonly variable\nbash: line 1: zbf4: command not found\n"
       }
     },
     {

@@ -108,6 +108,14 @@ const runLocal = (cmd: string, s: SessionState): Promise<RedirectResult> =>
   )
 
 describe('handleExport / handleUnset / handlePrintenv', () => {
+  it('keeps what earlier unset operands did when a later one stops', async () => {
+    const s = new SessionState({ sessionId: 'test' })
+    s.functions.f = 'f() { :; }'
+    seedVar(s, 'a', makeArray(['x']))
+    await expect(runUnset(['f', 'a[1/0]'], s)).rejects.toBeInstanceOf(ExitSignal)
+    expect(s.functions.f).toBeUndefined()
+  })
+
   it('gives the shell back when a subscript fails', async () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ KEPT: 'outer' }) })
     const outer = s.vars.shell.enter()

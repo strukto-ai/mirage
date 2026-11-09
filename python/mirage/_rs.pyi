@@ -220,12 +220,12 @@ class Shell:
         deciding: bool,
     ) -> ShellTask: ...
     def let_words(self, words: Sequence[str], deciding: bool) -> ShellTask: ...
-    def unset_names(
+    def unset_word(
         self,
         letters: str,
-        operands: Sequence[str],
-        functions: Sequence[str],
-        frozen: Sequence[str],
+        word: str,
+        function: bool,
+        frozen: bool,
         deciding: bool,
     ) -> ShellTask: ...
     @staticmethod

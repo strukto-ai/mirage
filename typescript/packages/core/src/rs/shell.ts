@@ -1095,20 +1095,20 @@ export class Shell {
     return new ShellTask(handle, step, null)
   }
 
-  /** Run `unset`: `functions` and `frozen` are the operands naming a function and a readonly one. */
-  unsetNames(
+  /** Run `unset` on one operand: `fn` when it names a function, `frozen` when that one is readonly. */
+  unsetWord(
     letters: string,
-    operands: readonly string[],
-    functions: readonly string[],
-    frozen: readonly string[],
+    word: string,
+    fn: boolean,
+    frozen: boolean,
     deciding: boolean,
   ): ShellTask {
     const [handle, step] = this.call(
-      'unset_names',
+      'unset_word',
       letters,
-      [...operands],
-      [...functions],
-      [...frozen],
+      word,
+      fn,
+      frozen,
       deciding,
     ) as readonly [number, Item]
     return new ShellTask(handle, step, null)

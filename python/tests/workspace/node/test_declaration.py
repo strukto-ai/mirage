@@ -80,12 +80,15 @@ async def test_a_deciding_policy_cannot_assign(line: str, said: str):
 @pytest.mark.asyncio
 async def test_a_deciding_policy_cannot_unset():
     ws = _ws()
-    await _run(ws, "HELD=1; A=(x y)")
-    _, err, code = await _run_deciding(ws, "unset HELD 'A[0]'")
-    assert err == "HELD: permission denied\nA: permission denied\n"
+    await _run(ws, "HELD=1; A=(x y); kept() { :; }")
+    _, err, code = await _run_deciding(ws, "unset HELD 'A[0]'; unset -f kept")
+    assert err == (
+        "HELD: permission denied\nA: permission denied\n"
+        "kept: permission denied\n"
+    )
     assert code == 1
-    out, _, _ = await _run(ws, 'echo "$HELD ${A[0]}"')
-    assert out == "1 x\n"
+    out, _, _ = await _run(ws, 'echo "$HELD ${A[0]}"; declare -F kept')
+    assert out == "1 x\nkept\n"
 
 
 @pytest.mark.asyncio

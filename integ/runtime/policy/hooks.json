@@ -383,6 +383,58 @@
           }
         }
       ]
+    },
+    {
+      "id": "hook_a_deciding_policy_changes_no_variable",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        },
+        "decide_lines": {
+          "path": "/ram/a.txt",
+          "lines": [
+            "export DA=1",
+            "readonly DB=1",
+            "declare DC=1",
+            "DD=1",
+            "let DE=1",
+            "((DF=1))",
+            "unset HELD",
+            "unset -f held"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "command": "HELD=1; held() { :; }",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /ram/a.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo \"${DA-a}${DB-b}${DC-c}${DD-d}${DE-e}${DF-f}$HELD\"; declare -F held",
+          "expect": {
+            "exit": 0,
+            "stdout": "abcdef1\nheld\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

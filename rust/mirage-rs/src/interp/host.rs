@@ -188,8 +188,8 @@ pub fn expanded_out(expanded: &Expanded) -> Item {
             Item::tuple([
                 pieces,
                 status,
-                Item::list(unset.functions.iter().map(Item::text)),
-                Item::list(unset.tracked.iter().map(|name| Item::text(name.as_bytes()))),
+                Item::Bool(unset.remove_function),
+                Item::opt(unset.tracked.as_deref(), Item::text),
             ])
         }
         Expanded::Runs(runs) => Item::list(

@@ -378,8 +378,8 @@ pub fn let_words(shell: Shell, words: Vec<Vec<u8>>, deciding: bool) -> Task<Ende
     })
 }
 
-/// Run `unset` on its operands.
-pub fn unset_names(shell: Shell, unsetting: Unsetting) -> Task<Ended<Expanded>> {
+/// Run `unset` on one operand.
+pub fn unset_word(shell: Shell, unsetting: Unsetting) -> Task<Ended<Expanded>> {
     Task::new(move |mut line| async move {
         let mut shell = shell;
         let mut diagnostics = Vec::new();

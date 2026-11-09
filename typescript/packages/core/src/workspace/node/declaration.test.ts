@@ -58,11 +58,15 @@ describe('executeDeclaration', () => {
 
   it('refuses a deciding policy unsetting', async () => {
     const ws = makeWs()
-    await ws.shell('HELD=1; A=(x y)')
-    const io = await runExplaining(DryRun.DECIDING, () => ws.shell("unset HELD 'A[0]'"))
-    expect(stderrStr(io)).toBe('HELD: permission denied\nA: permission denied\n')
+    await ws.shell('HELD=1; A=(x y); kept() { :; }')
+    const io = await runExplaining(DryRun.DECIDING, () =>
+      ws.shell("unset HELD 'A[0]'; unset -f kept"),
+    )
+    expect(stderrStr(io)).toBe(
+      'HELD: permission denied\nA: permission denied\nkept: permission denied\n',
+    )
     expect(io.exitCode).toBe(1)
-    expect(stdoutStr(await ws.shell('echo "$HELD ${A[0]}"'))).toBe('1 x\n')
+    expect(stdoutStr(await ws.shell('echo "$HELD ${A[0]}"; declare -F kept'))).toBe('1 x\nkept\n')
   })
 
   it('refuses a deciding policy a local and lets it list', async () => {

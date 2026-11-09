@@ -6,27 +6,27 @@ use super::{Diagnostic, Signal, arith_line, voiced};
 use crate::arith;
 use crate::vars::BASH_LINENO;
 
-/// The words of an `unset`, and what only the host knows about them.
+/// One operand of an `unset`, and what only the host knows about it.
 pub struct Unsetting {
     /// Its option letters, of `-f`, `-n` and `-v`.
     pub letters: Vec<u8>,
-    pub operands: Vec<Vec<u8>>,
-    /// The operands that name a function.
-    pub functions: Vec<Vec<u8>>,
-    /// The operands that name a readonly function.
-    pub frozen: Vec<Vec<u8>>,
+    pub word: Vec<u8>,
+    /// The word names a function.
+    pub function: bool,
+    /// The word names a readonly function.
+    pub frozen: bool,
     /// A policy is deciding: a write refuses.
     pub deciding: bool,
 }
 
-/// What an `unset` came to, and what is left for the host to do.
+/// What an `unset` of one operand came to, and what is left for the host.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Unset {
     pub said: Declared,
-    /// The functions to remove.
-    pub functions: Vec<Vec<u8>>,
-    /// The names it dropped that the host keeps state about too.
-    pub tracked: Vec<String>,
+    /// The word's function is to go.
+    pub remove_function: bool,
+    /// The name it dropped, when the host keeps state about that name too.
+    pub tracked: Option<String>,
 }
 
 fn writer<'a>(
@@ -55,118 +55,137 @@ fn holds_value(shell: &Shell, name: &str) -> bool {
             .is_some_and(|var| var.value.is_some())
 }
 
-/// Run `unset` over its operands: `-v` a variable only, refusing a word
-/// that names none; `-f` a function only; `-n` the reference itself; and
-/// a bare word a variable if one exists, else a function. `NAME[SUB]`
-/// clears one element, keeping the indexes after it. An operand it cannot
-/// unset is reported and the rest still go, for status 1.
+/// Take the word's function away, unless it is readonly or a policy is
+/// deciding, either of which answers with the line that refuses it.
+fn drop_function(voice: &[u8], unsetting: &Unsetting, out: &mut Unset) -> Option<Vec<u8>> {
+    if unsetting.frozen {
+        return Some(refusal(
+            voice,
+            &unsetting.word,
+            "cannot unset: readonly function",
+        ));
+    }
+    if unsetting.deciding {
+        return Some(denied(&text(&unsetting.word)));
+    }
+    out.remove_function = true;
+    None
+}
+
+/// Unset one word, answering the line that refuses it: `-v` a variable
+/// only, refusing a word that names none; `-f` a function only; `-n` the
+/// reference itself; and a bare word a variable if one exists, else a
+/// function. `NAME[SUB]` clears one element, keeping the indexes after it.
+async fn unset_word<H: Host>(
+    shell: &mut Shell,
+    host: &mut H,
+    diagnostics: &mut Vec<Diagnostic>,
+    unsetting: &Unsetting,
+    out: &mut Unset,
+) -> Result<Option<Vec<u8>>, Fault> {
+    let voice = shell.vars.voice().to_vec();
+    let deciding = unsetting.deciding;
+    let letters = &unsetting.letters;
+    let word = &unsetting.word;
+    let mode = b"fnv".iter().copied().find(|m| letters.contains(m));
+    let target = element_reference(word)
+        .filter(|(_, subscript)| !subscript.is_some_and(|sub| sub.contains(&b'\n')));
+    if letters.contains(&b'v') && target.is_none() {
+        let quoted = [b"unset: `", word.as_slice(), b"': not a valid identifier\n"].concat();
+        return Ok(Some([voice.as_slice(), &quoted].concat()));
+    }
+    let name = text(word);
+    if mode == Some(b'n') {
+        if shell.vars.is_readonly(&name, false) {
+            return Ok(Some(refusal(
+                &voice,
+                word,
+                "cannot unset: readonly variable",
+            )));
+        }
+        if name == BASH_LINENO {
+            return Ok(Some(refusal(&voice, word, "cannot unset")));
+        }
+        return match writer(shell, diagnostics, deciding).unset(&name, false) {
+            Err(Fault::Hidden(hidden)) => Ok(Some(denied(&hidden))),
+            other => other.map(|()| None),
+        };
+    }
+    if mode == Some(b'f') {
+        return Ok(drop_function(&voice, unsetting, out));
+    }
+    let (base, subscript) = target.map_or((name.clone(), None), |(base, subscript)| {
+        (base.to_owned(), subscript)
+    });
+    if shell.vars.is_readonly(&base, true) {
+        let held = shell.vars.deref(&base);
+        return Ok(Some(refusal(
+            &voice,
+            held.as_bytes(),
+            "cannot unset: readonly variable",
+        )));
+    }
+    if subscript.is_none() && shell.vars.deref(&base) == BASH_LINENO {
+        return Ok(Some(refusal(&voice, word, "cannot unset")));
+    }
+    let existed = subscript.is_some() || holds_value(shell, &name);
+    let status = match subscript {
+        Some(subscript) => {
+            let every = subscript == b"@" || subscript == b"*";
+            subscript_of(shell, host, subscript)
+                .await
+                .and_then(|expanded| {
+                    writer(shell, diagnostics, deciding).unset_element(&base, &expanded, every)
+                })
+        }
+        None => writer(shell, diagnostics, deciding)
+            .unset(&name, true)
+            .map(|()| Element::Landed),
+    };
+    match status {
+        Ok(Element::Landed) => {}
+        Ok(Element::NotArray) => {
+            return Ok(Some(refusal(
+                &voice,
+                base.as_bytes(),
+                "not an array variable",
+            )));
+        }
+        Ok(_) => {
+            return Ok(Some(refusal(
+                &voice,
+                &word[base.len()..],
+                "bad array subscript",
+            )));
+        }
+        Err(Fault::Hidden(hidden)) => return Ok(Some(denied(&hidden))),
+        Err(Fault::Arith(error)) => return Err(Signal::arith(&voice, &error, "", true).into()),
+        Err(fault) => return Err(fault),
+    }
+    if subscript.is_none() {
+        let landed = shell.vars.deref(&name);
+        if matches!(landed.as_str(), "OPTIND" | "FUNCNAME") {
+            out.tracked = Some(landed);
+        }
+    }
+    if mode.is_none() && !existed && unsetting.function {
+        return Ok(drop_function(&voice, unsetting, out));
+    }
+    Ok(None)
+}
+
+/// Run `unset` on one operand. The host runs one at a time, so what each
+/// leaves it to do lands before the next starts, whatever becomes of that.
 pub async fn run_unset<H: Host>(
     shell: &mut Shell,
     host: &mut H,
     diagnostics: &mut Vec<Diagnostic>,
     unsetting: &Unsetting,
 ) -> Result<Unset, Fault> {
-    let voice = shell.vars.voice().to_vec();
-    let deciding = unsetting.deciding;
-    let letters = &unsetting.letters;
-    let mode = b"fnv".iter().copied().find(|m| letters.contains(m));
     let mut out = Unset::default();
-    let mut errors: Vec<Vec<u8>> = Vec::new();
-    for word in &unsetting.operands {
-        let target = element_reference(word)
-            .filter(|(_, subscript)| !subscript.is_some_and(|sub| sub.contains(&b'\n')));
-        if letters.contains(&b'v') && target.is_none() {
-            let quoted = [b"unset: `", word.as_slice(), b"': not a valid identifier\n"].concat();
-            errors.push([voice.as_slice(), &quoted].concat());
-            continue;
-        }
-        let name = text(word);
-        if mode == Some(b'n') {
-            if shell.vars.is_readonly(&name, false) {
-                errors.push(refusal(&voice, word, "cannot unset: readonly variable"));
-            } else if name == BASH_LINENO {
-                errors.push(refusal(&voice, word, "cannot unset"));
-            } else {
-                match writer(shell, diagnostics, deciding).unset(&name, false) {
-                    Err(Fault::Hidden(hidden)) => errors.push(denied(&hidden)),
-                    other => other?,
-                }
-            }
-            continue;
-        }
-        if mode == Some(b'f') {
-            if unsetting.frozen.contains(word) {
-                errors.push(refusal(&voice, word, "cannot unset: readonly function"));
-            } else {
-                out.functions.push(word.clone());
-            }
-            continue;
-        }
-        let (base, subscript) = target.map_or((name.clone(), None), |(base, subscript)| {
-            (base.to_owned(), subscript)
-        });
-        if shell.vars.is_readonly(&base, true) {
-            let held = shell.vars.deref(&base);
-            errors.push(refusal(
-                &voice,
-                held.as_bytes(),
-                "cannot unset: readonly variable",
-            ));
-            continue;
-        }
-        if subscript.is_none() && shell.vars.deref(&base) == BASH_LINENO {
-            errors.push(refusal(&voice, word, "cannot unset"));
-            continue;
-        }
-        let existed = subscript.is_some() || holds_value(shell, &name);
-        let status = match subscript {
-            Some(subscript) => {
-                let every = subscript == b"@" || subscript == b"*";
-                subscript_of(shell, host, subscript)
-                    .await
-                    .and_then(|expanded| {
-                        writer(shell, diagnostics, deciding).unset_element(&base, &expanded, every)
-                    })
-            }
-            None => writer(shell, diagnostics, deciding)
-                .unset(&name, true)
-                .map(|()| Element::Landed),
-        };
-        match status {
-            Ok(Element::Landed) => {}
-            Ok(Element::NotArray) => {
-                errors.push(refusal(&voice, base.as_bytes(), "not an array variable"));
-                continue;
-            }
-            Ok(_) => {
-                errors.push(refusal(&voice, &word[base.len()..], "bad array subscript"));
-                continue;
-            }
-            Err(Fault::Hidden(hidden)) => {
-                errors.push(denied(&hidden));
-                continue;
-            }
-            Err(Fault::Arith(error)) => return Err(Signal::arith(&voice, &error, "", true).into()),
-            Err(fault) => return Err(fault),
-        }
-        if subscript.is_none() {
-            let landed = shell.vars.deref(&name);
-            if matches!(landed.as_str(), "OPTIND" | "FUNCNAME") {
-                out.tracked.push(landed);
-            }
-        }
-        if mode.is_none() && !existed && unsetting.functions.contains(word) {
-            if unsetting.frozen.contains(word) {
-                errors.push(refusal(&voice, word, "cannot unset: readonly function"));
-            } else {
-                out.functions.push(word.clone());
-            }
-        }
+    if let Some(line) = unset_word(shell, host, diagnostics, unsetting, &mut out).await? {
+        out.said = Declared::failed(line, 1);
     }
-    out.said = Declared {
-        status: i32::from(!errors.is_empty()),
-        pieces: errors.into_iter().map(|line| (true, line)).collect(),
-    };
     Ok(out)
 }
 
@@ -360,18 +379,18 @@ mod tests {
 
     use super::super::declare::tests::NoHost;
     use super::*;
-    use crate::vars::{READONLY, Store};
+    use crate::vars::{READONLY, Store, Value};
 
     fn shell() -> Shell {
         Shell::new(Store::new(Arc::new(|| 1)))
     }
 
-    fn unsetting(letters: &[u8], operands: &[&[u8]]) -> Unsetting {
+    fn unsetting(letters: &[u8], word: &[u8]) -> Unsetting {
         Unsetting {
             letters: letters.to_vec(),
-            operands: operands.iter().map(|word| word.to_vec()).collect(),
-            functions: Vec::new(),
-            frozen: Vec::new(),
+            word: word.to_vec(),
+            function: false,
+            frozen: false,
             deciding: false,
         }
     }
@@ -407,42 +426,39 @@ mod tests {
     #[test]
     fn a_bare_word_falls_back_to_the_function_only_without_a_variable() {
         let mut shell = shell();
-        shell
-            .vars
-            .seed("a", crate::vars::Value::Scalar(b"v".to_vec()));
-        let words = Unsetting {
-            functions: vec![b"a".to_vec(), b"b".to_vec()],
-            ..unsetting(b"", &[b"a", b"b"])
+        shell.vars.seed("a", Value::Scalar(b"v".to_vec()));
+        let held = Unsetting {
+            function: true,
+            ..unsetting(b"", b"a")
         };
-        let done = unset(&mut shell, &words).unwrap();
-        assert_eq!(done.functions, vec![b"b".to_vec()]);
-        assert_eq!(done.said.status, 0);
+        assert!(!unset(&mut shell, &held).unwrap().remove_function);
         assert_eq!(shell.vars.scalar("a"), None);
+        let bare = Unsetting {
+            function: true,
+            ..unsetting(b"", b"b")
+        };
+        let done = unset(&mut shell, &bare).unwrap();
+        assert!(done.remove_function);
+        assert_eq!(done.said.status, 0);
     }
 
     #[test]
-    fn a_refused_operand_is_reported_and_the_rest_still_go() {
+    fn a_readonly_name_refuses() {
         let mut shell = shell();
-        shell
-            .vars
-            .seed("R", crate::vars::Value::Scalar(b"1".to_vec()));
+        shell.vars.seed("R", Value::Scalar(b"1".to_vec()));
         shell.vars.set_attr("R", Some(READONLY), true);
-        shell
-            .vars
-            .seed("X", crate::vars::Value::Scalar(b"1".to_vec()));
-        let done = unset(&mut shell, &unsetting(b"", &[b"R", b"X"])).unwrap();
+        let done = unset(&mut shell, &unsetting(b"", b"R")).unwrap();
         assert_eq!(done.said.status, 1);
         assert_eq!(
             lines(&done.said),
             vec!["bash: unset: R: cannot unset: readonly variable\n"]
         );
-        assert_eq!(shell.vars.scalar("X"), None);
     }
 
     #[test]
     fn dash_v_refuses_a_word_that_names_no_variable() {
         let mut shell = shell();
-        let done = unset(&mut shell, &unsetting(b"v", &[b"1x"])).unwrap();
+        let done = unset(&mut shell, &unsetting(b"v", b"1x")).unwrap();
         assert_eq!(
             lines(&done.said),
             vec!["bash: unset: `1x': not a valid identifier\n"]
@@ -452,19 +468,24 @@ mod tests {
     #[test]
     fn a_deciding_policy_cannot_unset() {
         let mut shell = shell();
-        shell
-            .vars
-            .seed("X", crate::vars::Value::Scalar(b"1".to_vec()));
-        let words = Unsetting {
-            deciding: true,
-            ..unsetting(b"", &[b"X", b"X[0]"])
-        };
-        let done = unset(&mut shell, &words).unwrap();
-        assert_eq!(
-            lines(&done.said),
-            vec!["X: permission denied\n", "X: permission denied\n"]
-        );
+        shell.vars.seed("X", Value::Scalar(b"1".to_vec()));
+        for word in [&b"X"[..], b"X[0]"] {
+            let words = Unsetting {
+                deciding: true,
+                ..unsetting(b"", word)
+            };
+            let done = unset(&mut shell, &words).unwrap();
+            assert_eq!(lines(&done.said), vec!["X: permission denied\n"]);
+        }
         assert_eq!(shell.vars.scalar("X"), Some(&b"1"[..]));
+        let function = Unsetting {
+            deciding: true,
+            function: true,
+            ..unsetting(b"f", b"g")
+        };
+        let done = unset(&mut shell, &function).unwrap();
+        assert!(!done.remove_function);
+        assert_eq!(lines(&done.said), vec!["g: permission denied\n"]);
     }
 
     #[test]

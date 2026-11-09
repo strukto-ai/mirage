@@ -28,14 +28,55 @@ from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.session.state import deciding
 
 
+async def _unset_word(
+    letters: str,
+    word: str,
+    context: EvaluationContext,
+    execute_fn: ExecuteFn,
+    call_stack: CallStack | None,
+) -> tuple[list[tuple[bool, bytes]], int]:
+    """Unset one operand on the shell, then what it named on the host,
+    before the next operand runs.
+
+    Args:
+        letters (str): the option letters.
+        word (str): the operand.
+        context (EvaluationContext): the evaluation's session and frame.
+        execute_fn (ExecuteFn): evaluator for a subscript's substitutions.
+        call_stack (CallStack | None): shell call stack.
+
+    Returns:
+        tuple[list[tuple[bool, bytes]], int]: what it said, and its status.
+    """
+    session = context.session
+    pieces, status, function, tracked = await run_on_shell(
+        lambda shell: shell.unset_word(
+            letters,
+            word,
+            word in session.functions,
+            word in session.readonly_functions,
+            deciding(),
+        ),
+        context,
+        execute_fn,
+        call_stack,
+    )
+    if function:
+        session.remove_function(word)
+    if tracked == "OPTIND":
+        session._getopts_optind = None
+    if tracked == FUNCNAME:
+        session.function_names = None
+    return pieces, status
+
+
 async def handle_unset(
     args: list[str],
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     call_stack: CallStack | None = None,
 ) -> Result:
-    """Read ``unset``'s options, unset its operands on the shell, then
-    drop the functions and the host's own state the operands named.
+    """Read ``unset``'s options and unset its operands in order.
 
     Args:
         args (list[str]): option words followed by names to unset.
@@ -70,27 +111,15 @@ async def handle_unset(
             f"{shell_voice()}unset: cannot simultaneously unset a function"
             " and a variable\n",
         )
-    session = context.session
-    operands = args[i:]
-    pieces, status, functions, tracked = await run_on_shell(
-        lambda shell: shell.unset_names(
-            "".join(sorted(letters)),
-            operands,
-            [name for name in operands if name in session.functions],
-            [name for name in operands if name in session.readonly_functions],
-            deciding(),
-        ),
-        context,
-        execute_fn,
-        call_stack,
-    )
-    for name in functions:
-        session.remove_function(name)
-    if "OPTIND" in tracked:
-        session._getopts_optind = None
-    if FUNCNAME in tracked:
-        session.function_names = None
-    return written("unset", pieces, status)
+    said: list[tuple[bool, bytes]] = []
+    failed = 0
+    for word in args[i:]:
+        pieces, status = await _unset_word(
+            "".join(sorted(letters)), word, context, execute_fn, call_stack
+        )
+        said.extend(pieces)
+        failed |= status
+    return written("unset", said, failed)
 
 
 async def unset_builtin(call: BuiltinCall) -> Result:

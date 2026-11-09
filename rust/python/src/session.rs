@@ -124,10 +124,6 @@ fn no_tree() -> (Arc<Tree>, u64) {
     (Arc::new(streams::shell::parse(b"")), 0)
 }
 
-fn byte_words(words: &[Bound<'_, PyAny>]) -> PyResult<Vec<Vec<u8>>> {
-    words.iter().map(bytes_of).collect()
-}
-
 /// Declaration operands: a word, or `(name, append, items)`.
 fn operands_in(operands: &[Bound<'_, PyAny>]) -> PyResult<Vec<Operand>> {
     operands
@@ -880,30 +876,30 @@ impl Shell {
         words: Vec<Bound<'_, PyAny>>,
         deciding: bool,
     ) -> PyResult<ShellTask> {
-        let words = byte_words(&words)?;
+        let words = words.iter().map(bytes_of).collect::<PyResult<Vec<_>>>()?;
         ShellTask::start(slf, no_tree(), |inner| {
             task::let_words(inner, words, deciding)
         })
     }
 
-    /// Run `unset`: `functions` and `frozen` are the operands that name a
-    /// function and a readonly one.
-    fn unset_names(
+    /// Run `unset` on one operand: `function` when it names a function
+    /// and `frozen` when that function is readonly.
+    fn unset_word(
         slf: &Bound<'_, Self>,
         letters: &str,
-        operands: Vec<Bound<'_, PyAny>>,
-        functions: Vec<Bound<'_, PyAny>>,
-        frozen: Vec<Bound<'_, PyAny>>,
+        word: Bound<'_, PyAny>,
+        function: bool,
+        frozen: bool,
         deciding: bool,
     ) -> PyResult<ShellTask> {
         let unsetting = Unsetting {
             letters: letters.as_bytes().to_vec(),
-            operands: byte_words(&operands)?,
-            functions: byte_words(&functions)?,
-            frozen: byte_words(&frozen)?,
+            word: bytes_of(&word)?,
+            function,
+            frozen,
             deciding,
         };
-        ShellTask::start(slf, no_tree(), |inner| task::unset_names(inner, unsetting))
+        ShellTask::start(slf, no_tree(), |inner| task::unset_word(inner, unsetting))
     }
 
     /// Split one `read` line into at most `slots` fields on `ifs`, 0 for
