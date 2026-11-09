@@ -34,11 +34,11 @@
         "disk",
         "redis"
       ],
-      "command": "( printf 'x\\n' > /data/dh_f; touch -d '2026-01-02 03:04:05.5' /data/dh_f; diff -uN /data/dh_f /data/dh_fx | head -2; TZ=Asia/Hong_Kong diff -uN /data/dh_f /data/dh_fx | head -2; rm /data/dh_f )",
+      "command": "( printf 'x\\n' > /data/dh_f; touch -d '2026-01-02 03:04:05.5' /data/dh_f; diff -uN /data/dh_f /data/dh_fx | head -2; TZ=Asia/Hong_Kong diff -uN /data/dh_f /data/dh_fx | head -2; rm /data/dh_f ); mkdir -p /data/ez_fd; printf 'a\\n' > /data/ez_fd/x; printf 'b\\n' > /data/ez_fd/y; diff --speed-large-files --horizon-lines=3 /data/ez_fd/x /data/ez_fd/y; echo rc=$?; diff --horizon-lines=x /data/ez_fd/x /data/ez_fd/y; echo rc=$?; rm -r /data/ez_fd",
       "expect": {
         "exit": 0,
-        "stdout": "--- /data/dh_f\t2026-01-02 03:04:05.500000000 +0000\n+++ /data/dh_fx\t1970-01-01 00:00:00.000000000 +0000\n--- /data/dh_f\t2026-01-02 11:04:05.500000000 +0800\n+++ /data/dh_fx\t1970-01-01 08:00:00.000000000 +0800\n",
-        "stderr": ""
+        "stdout": "--- /data/dh_f\t2026-01-02 03:04:05.500000000 +0000\n+++ /data/dh_fx\t1970-01-01 00:00:00.000000000 +0000\n--- /data/dh_f\t2026-01-02 11:04:05.500000000 +0800\n+++ /data/dh_fx\t1970-01-01 08:00:00.000000000 +0800\n1c1\n< a\n---\n> b\nrc=1\nrc=2\n",
+        "stderr": "diff: invalid horizon length 'x'\ndiff: Try 'diff --help' for more information.\n"
       }
     }
   ]

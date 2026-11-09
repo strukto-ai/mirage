@@ -13,6 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compileSpec } from '../../commands/spec/compile.ts'
+import { renderHelp } from '../../commands/spec/help.ts'
+import { SHELL_SPECS } from '../../commands/spec/shell.ts'
+import { versionLine } from '../../commands/spec/standard.ts'
+import { SYNOPSES } from '../../commands/spec/synopsis.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
@@ -26,13 +30,16 @@ import {
   INTERPRETER_NAMES,
   KEYWORDS,
   NAMESPACE_COMMANDS,
+  LOWEST_PRIORITY,
   PROGRAM_WRAPPERS,
   ROUTED_COMMANDS,
+  RUNNERS,
+  niceAdjustment,
   SHELL_NAMES,
   SHELL_ONLY_BUILTINS,
   readWrapper,
 } from './constants.ts'
-import { Consumer } from './types.ts'
+import { Consumer, WrapperAnswer } from './types.ts'
 import { shellQuote } from '../../utils/quote.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -176,6 +183,76 @@ export function wrapperRefusal(
     return [127, grammar.missing.replace('{}', inner)]
   }
   return null
+}
+
+function usage(name: string, line: string, status: number): WrapperAnswer {
+  return new WrapperAnswer({
+    exitCode: status,
+    stderr: `${line}\nTry '${name} --help' for more information.\n`,
+  })
+}
+
+/** The `--help` or `--version` a wrapper's options stopped at. */
+function helpWord(args: readonly string[]): string | null {
+  for (const word of args) {
+    if (word === '--' || !word.startsWith('-')) return null
+    if (word.length > 2 && '--help'.startsWith(word)) return '--help'
+    if (word.length > 2 && '--version'.startsWith(word)) return '--version'
+  }
+  return null
+}
+
+/** `nice` followed down a chain of itself to the end: the niceness it comes
+ * to, an adjustment with nothing to run refused. */
+function niceness(args: readonly string[]): WrapperAnswer {
+  let level = 0
+  const warned: string[] = []
+  let words = [...args]
+  for (;;) {
+    const [at] = readWrapper('nice', words)
+    const adjustment = niceAdjustment(at === null ? words : words.slice(0, at))
+    if (at === null && adjustment !== null)
+      return usage('nice', 'nice: a command must be given with an adjustment', 125)
+    if (adjustment !== null && adjustment < 0)
+      warned.push('nice: cannot set niceness: Permission denied\n')
+    else if (adjustment !== null) level = Math.min(level + adjustment, LOWEST_PRIORITY)
+    if (at === null) break
+    words = words.slice(at + 1)
+  }
+  return new WrapperAnswer({ stdout: `${String(level)}\n`, stderr: warned.join('') })
+}
+
+/**
+ * What a wrapper does with no program it can hand to a Mirage layer: refuse
+ * the line, say what it is, print the niceness, or run a path or another
+ * wrapper through the shell.
+ */
+export function wrapperAnswer(
+  name: string,
+  args: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+): WrapperAnswer {
+  const refused = wrapperRefusal(name, args, session, registry)
+  if (refused !== null) {
+    const [code, said] = refused
+    return new WrapperAnswer({ exitCode: code, stderr: said })
+  }
+  const [at] = readWrapper(name, args)
+  if (at !== null) {
+    if (name === 'nice' && args[at] === 'nice') return niceness(args)
+    return new WrapperAnswer({ runsFrom: at })
+  }
+  const word = helpWord(args)
+  if (word === '--version') return new WrapperAnswer({ stdout: versionLine(name) })
+  if (word === '--help') {
+    const spec = SHELL_SPECS[name]
+    if (spec === undefined) throw new Error(`${name}: no spec`)
+    return new WrapperAnswer({ stdout: renderHelp(name, spec, [], undefined, SYNOPSES[name]) })
+  }
+  if (name === 'nice') return niceness(args)
+  if (name === 'setsid') return usage(name, 'setsid: no command specified', 1)
+  return usage(name, `${name}: missing operand`, 125)
 }
 
 /** Whether no Mirage layer runs the command. */
@@ -353,7 +430,7 @@ export function program(
     if (consumer === Consumer.EXTERNAL && registry.runtimeBindings[name] === undefined) return null
     return consumer
   }
-  return null
+  return RUNNERS.has(name) ? Consumer.UNKNOWN : null
 }
 
 /**
@@ -430,6 +507,7 @@ export function programs(session: SessionState, registry: MountRegistry): string
     ...NAMESPACE_COMMANDS,
     ...ROUTED_COMMANDS,
     ...EXEC_WRAPPERS.keys(),
+    ...RUNNERS,
     ...registry.clis.names(),
   ])
   for (const capture of Object.keys(registry.runtimeBindings)) {

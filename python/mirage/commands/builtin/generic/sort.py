@@ -75,6 +75,7 @@ _WORDS = ("output", "random_source")
 # output and the one input -c reads (`open failed`), stats every input
 # it is about to sort (`stat failed`), and only then reads (`read
 # failed`).
+MIN_BATCH_SIZE = 2
 CANNOT_READ = "cannot read"
 OPEN_FAILED = "open failed"
 STAT_FAILED = "stat failed"
@@ -237,6 +238,16 @@ def parse_flags(
         ValueError: the scan read no configuration or check mode.
     """
     fl = FlagView(flags, spec=SPECS["sort"])
+    for batch in fl.as_list("batch_size"):
+        if not batch.isascii() or not batch.isdigit():
+            return _refusal(f"sort: invalid --batch-size argument '{batch}'")
+        if int(batch) < MIN_BATCH_SIZE:
+            return _refusal(
+                f"sort: invalid --batch-size argument '{batch}'\n"
+                f"sort: minimum --batch-size argument is '{MIN_BATCH_SIZE}'"
+            )
+    if len(set(fl.as_list("compress_program"))) > 1:
+        return _refusal("sort: multiple compress programs specified")
     try:
         values = scan("sort", _typed_options(fl, paths))
     except StreamRefusal as refusal:

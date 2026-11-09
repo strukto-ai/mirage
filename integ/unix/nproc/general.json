@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "nproc_counts_and_ignores",
+      "seq": 16200008,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "nproc; nproc --all; nproc --ignore=9; OMP_NUM_THREADS=4 nproc; OMP_NUM_THREADS=4 OMP_THREAD_LIMIT=2 nproc; OMP_NUM_THREADS=abc nproc; OMP_NUM_THREADS=4 nproc --all; nproc --ignore=x; echo rc=$?; nproc a; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n1\n4\n2\n1\n1\nrc=1\nrc=1\n",
+        "stderr": "nproc: invalid number: 'x'\nnproc: extra operand 'a'\nTry 'nproc --help' for more information.\n"
+      }
+    }
+  ]
+}

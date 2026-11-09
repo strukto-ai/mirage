@@ -406,4 +406,84 @@ export const SPECS: Record<string, CommandSpec> = {
     description: 'Delay for a specified amount of time.',
     arguments: [TEXTS_OPERAND],
   }),
+  arch: new CommandSpec({
+    description: 'Print the machine architecture.',
+    arguments: [TEXTS_OPERAND],
+  }),
+  tty: new CommandSpec({
+    description: 'Print the name of the terminal on standard input.',
+    arguments: [
+      new Argument(['-s', '--silent', '--quiet'], { action: 'store_true' }),
+      TEXTS_OPERAND,
+    ],
+  }),
+  sync: new CommandSpec({
+    description: 'Finish writes that are still in flight.',
+    arguments: [
+      new Argument(['-d', '--data'], { action: 'store_true' }),
+      new Argument(['-f', '--file-system'], { action: 'store_true' }),
+      PATHS_OPERAND,
+    ],
+  }),
+  logname: new CommandSpec({
+    description: 'Print the name the session logged in with.',
+    arguments: [TEXTS_OPERAND],
+  }),
+  hostid: new CommandSpec({
+    description: "Print the host's numeric identifier.",
+    arguments: [TEXTS_OPERAND],
+  }),
+  users: new CommandSpec({
+    description: 'Print who is logged in, on one line.',
+    arguments: [TEXTS_OPERAND],
+  }),
+  groups: new CommandSpec({
+    description: 'Print the groups a user belongs to.',
+    arguments: [TEXTS_OPERAND],
+  }),
+  who: new CommandSpec({
+    description: 'Print who is logged in.',
+    arguments: [
+      new Argument(['-a', '--all'], { action: 'store_true' }),
+      new Argument(['-b', '--boot'], { action: 'store_true' }),
+      new Argument(['-d', '--dead'], { action: 'store_true' }),
+      new Argument(['-H', '--heading'], { action: 'store_true' }),
+      new Argument(['-l', '--login'], { action: 'store_true' }),
+      new Argument('--lookup', { action: 'store_true' }),
+      new Argument('-m', { action: 'store_true' }),
+      new Argument(['-p', '--process'], { action: 'store_true' }),
+      new Argument(['-q', '--count'], { action: 'store_true' }),
+      new Argument(['-r', '--runlevel'], { action: 'store_true' }),
+      new Argument(['-s', '--short'], { action: 'store_true' }),
+      new Argument(['-t', '--time'], { action: 'store_true' }),
+      new Argument(['-T', '-w', '--mesg', '--message', '--writable'], { action: 'store_true' }),
+      new Argument(['-u', '--users'], { action: 'store_true' }),
+      TEXTS_OPERAND,
+    ],
+  }),
+  nproc: new CommandSpec({
+    description: 'Print the number of processors available.',
+    arguments: [
+      new Argument('--all', { action: 'store_true' }),
+      new Argument('--ignore'),
+      TEXTS_OPERAND,
+    ],
+  }),
+  yes: new CommandSpec({
+    description: 'Print a line over and over.',
+    arguments: [TEXTS_OPERAND],
+  }),
+  envsubst: new CommandSpec({
+    description: 'Fill environment variables into text on standard input.',
+    arguments: [new Argument(['-v', '--variables'], { action: 'store_true' }), TEXTS_OPERAND],
+  }),
+  pathchk: new CommandSpec({
+    description: 'Check that file names are valid or portable.',
+    arguments: [
+      new Argument('-p', { action: 'store_true' }),
+      new Argument('-P', { action: 'store_true' }),
+      new Argument('--portability', { action: 'store_true' }),
+      TEXTS_OPERAND,
+    ],
+  }),
 }

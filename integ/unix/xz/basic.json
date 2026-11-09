@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xz_compresses_and_refuses",
+      "seq": 16200021,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_x/d; printf 'hello xz\\n' > /data/ez_x/a; xz /data/ez_x/a; ls /data/ez_x; xz -d /data/ez_x/a.xz; cat /data/ez_x/a; xz -k /data/ez_x/a; ls /data/ez_x; xz -c /data/ez_x/a | xz -d; xz -t /data/ez_x/a.xz; echo rc=$?; xz -9 -e -T 2 --check=crc32 -F xz -k -f /data/ez_x/a; xz -k /data/ez_x/a; echo rc=$?; xz -d /data/ez_x/a.xz; echo rc=$?; xz /data/ez_x/a.xz; echo rc=$?; xz /data/ez_x/nosuch; echo rc=$?; xz /data/ez_x/d; echo rc=$?; xz -q /data/ez_x/d; echo rc=$?; xz -qq /data/ez_x/nosuch; echo rc=$?; cp /data/ez_x/a /data/ez_x/plain; xz -d /data/ez_x/plain; echo rc=$?; printf 'junk' > /data/ez_x/j.xz; xz -d /data/ez_x/j.xz; echo rc=$?; xz -t /data/ez_x/j.xz; echo rc=$?; xz -S .foo -k /data/ez_x/a; ls /data/ez_x; unxz -S .foo -f /data/ez_x/a.foo; rm /data/ez_x/a.xz; printf 'x\\n' | xz | unxz; printf 'junk' | xz -d; echo rc=$?; rm -r /data/ez_x",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.xz\nd\nhello xz\na\na.xz\nd\nhello xz\nrc=0\nrc=1\nrc=1\nrc=2\nrc=1\nrc=2\nrc=2\nrc=1\nrc=1\nrc=1\nrc=1\na\na.foo\na.xz\nd\nj.xz\nplain\nx\nrc=1\n",
+        "stderr": "xz: /data/ez_x/a.xz: File exists\nxz: /data/ez_x/a: File exists\nxz: /data/ez_x/a.xz: File already has '.xz' suffix, skipping\nxz: /data/ez_x/nosuch: No such file or directory\nxz: /data/ez_x/d: Is a directory, skipping\nxz: /data/ez_x/plain: File format not recognized\nxz: /data/ez_x/j.xz: File format not recognized\nxz: /data/ez_x/j.xz: File format not recognized\nxz: (stdin): File format not recognized\n"
+      }
+    }
+  ]
+}

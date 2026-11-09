@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic_bind.builders import cat
 from mirage.commands.builtin.generic_bind.builders import cmp
 from mirage.commands.builtin.generic_bind.builders import column
 from mirage.commands.builtin.generic_bind.builders import comm
+from mirage.commands.builtin.generic_bind.builders import compressors
 from mirage.commands.builtin.generic_bind.builders import cp
 from mirage.commands.builtin.generic_bind.builders import csplit
 from mirage.commands.builtin.generic_bind.builders import cut
@@ -50,6 +51,7 @@ from mirage.commands.builtin.generic_bind.builders import nl
 from mirage.commands.builtin.generic_bind.builders import numfmt
 from mirage.commands.builtin.generic_bind.builders import od
 from mirage.commands.builtin.generic_bind.builders import paste
+from mirage.commands.builtin.generic_bind.builders import pager
 from mirage.commands.builtin.generic_bind.builders import patch
 from mirage.commands.builtin.generic_bind.builders import readlink
 from mirage.commands.builtin.generic_bind.builders import realpath
@@ -84,6 +86,7 @@ from mirage.commands.builtin.generic_bind.builders import unzip
 from mirage.commands.builtin.generic_bind.builders import wc
 from mirage.commands.builtin.generic_bind.builders import xxd
 from mirage.commands.builtin.generic_bind.builders import zcat
+from mirage.commands.builtin.generic_bind.builders import zcompare
 from mirage.commands.builtin.generic_bind.builders import zgrep
 from mirage.commands.builtin.generic_bind.builders import zip_cmd
 
@@ -116,6 +119,8 @@ BUILDERS = (
     jq.BUILDER,
     look.BUILDER,
     ls.BUILDER,
+    ls.DIR_BUILDER,
+    ls.VDIR_BUILDER,
     md5.BUILDER,
     md5sum.BUILDER,
     mkdir.BUILDER,
@@ -159,6 +164,9 @@ BUILDERS = (
     wc.BUILDER,
     xxd.BUILDER,
     zcat.BUILDER,
+    *compressors.BUILDERS,
+    *pager.BUILDERS,
+    *zcompare.BUILDERS,
     zgrep.BUILDER,
     zip_cmd.BUILDER,
 )

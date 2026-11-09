@@ -25,6 +25,20 @@ import { pythonCmd, python3 } from './python.ts'
 import { GENERAL_SEQ } from './seq.ts'
 import { GENERAL_UNAME } from './uname.ts'
 import { GENERAL_WGET } from './wget.ts'
+import { GENERAL_ARCH } from './arch.ts'
+import { GENERAL_COLRM } from './colrm.ts'
+import { GENERAL_ENVSUBST } from './envsubst.ts'
+import { GENERAL_GROUPS } from './groups.ts'
+import { GENERAL_HOSTID } from './hostid.ts'
+import { GENERAL_LINK } from './link.ts'
+import { GENERAL_LOGNAME } from './logname.ts'
+import { GENERAL_NPROC } from './nproc.ts'
+import { GENERAL_PATHCHK } from './pathchk.ts'
+import { GENERAL_SYNC } from './sync.ts'
+import { GENERAL_TTY } from './tty.ts'
+import { GENERAL_USERS } from './users.ts'
+import { GENERAL_WHO } from './who.ts'
+import { GENERAL_YES } from './yes.ts'
 
 export const GENERAL_COMMANDS: readonly Command[] = [
   ...GENERAL_BC,
@@ -41,4 +55,18 @@ export const GENERAL_COMMANDS: readonly Command[] = [
   ...GENERAL_SEQ,
   ...GENERAL_UNAME,
   ...GENERAL_WGET,
+  ...GENERAL_ARCH,
+  ...GENERAL_COLRM,
+  ...GENERAL_ENVSUBST,
+  ...GENERAL_GROUPS,
+  ...GENERAL_HOSTID,
+  ...GENERAL_LINK,
+  ...GENERAL_LOGNAME,
+  ...GENERAL_NPROC,
+  ...GENERAL_PATHCHK,
+  ...GENERAL_SYNC,
+  ...GENERAL_TTY,
+  ...GENERAL_USERS,
+  ...GENERAL_WHO,
+  ...GENERAL_YES,
 ]

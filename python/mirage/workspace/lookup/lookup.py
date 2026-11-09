@@ -17,6 +17,10 @@ from collections.abc import Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from mirage.commands.spec.compile import compile_spec
+from mirage.commands.spec.help import render_help
+from mirage.commands.spec.shell import SHELL_SPECS
+from mirage.commands.spec.standard import version_line
+from mirage.commands.spec.synopsis import SYNOPSES
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
@@ -27,14 +31,17 @@ from mirage.workspace.lookup.constants import (
     EXEC_WRAPPERS,
     INTERPRETER_NAMES,
     KEYWORDS,
+    LOWEST_PRIORITY,
     NAMESPACE_COMMANDS,
     PROGRAM_WRAPPERS,
     ROUTED_COMMANDS,
+    RUNNERS,
     SHELL_NAMES,
     SHELL_ONLY_BUILTINS,
+    nice_adjustment,
     read_wrapper,
 )
-from mirage.workspace.lookup.types import Consumer
+from mirage.workspace.lookup.types import Consumer, WrapperAnswer
 from mirage.workspace.session import SessionState
 
 if TYPE_CHECKING:
@@ -212,6 +219,94 @@ def wrapper_refusal(
     if inner not in PROGRAM_WRAPPERS and not execs(inner, session, registry):
         return 127, grammar.missing.format(inner)
     return None
+
+
+def _usage(name: str, line: str, status: int) -> WrapperAnswer:
+    return WrapperAnswer(
+        exit_code=status,
+        stderr=f"{line}\nTry '{name} --help' for more information.\n",
+    )
+
+
+def _help_word(args: Sequence[str]) -> str | None:
+    """The ``--help`` or ``--version`` a wrapper's options stopped at.
+
+    Args:
+        args (Sequence[str]): its words.
+    """
+    for word in args:
+        if word == "--" or not word.startswith("-"):
+            return None
+        if len(word) > 2 and "--help".startswith(word):
+            return "--help"
+        if len(word) > 2 and "--version".startswith(word):
+            return "--version"
+    return None
+
+
+def _niceness(args: Sequence[str]) -> WrapperAnswer:
+    """``nice`` followed down a chain of itself to the end: the niceness
+    it comes to, an adjustment with nothing to run refused.
+
+    Args:
+        args (Sequence[str]): the words after the outermost ``nice``.
+    """
+    level = 0
+    warned: list[str] = []
+    words = list(args)
+    while True:
+        at = read_wrapper("nice", words)[0]
+        adjustment = nice_adjustment(words[:at] if at is not None else words)
+        if at is None and adjustment is not None:
+            return _usage(
+                "nice", "nice: a command must be given with an adjustment", 125
+            )
+        if adjustment is not None and adjustment < 0:
+            warned.append("nice: cannot set niceness: Permission denied\n")
+        elif adjustment is not None:
+            level = min(level + adjustment, LOWEST_PRIORITY)
+        if at is None:
+            break
+        words = words[at + 1 :]
+    return WrapperAnswer(stdout=f"{level}\n", stderr="".join(warned))
+
+
+def wrapper_answer(
+    name: str,
+    args: Sequence[str],
+    session: SessionState,
+    registry: "MountRegistry",
+) -> WrapperAnswer:
+    """What a wrapper does with no program it can hand to a Mirage layer:
+    refuse the line, say what it is, print the niceness, or run a path or
+    another wrapper through the shell.
+
+    Args:
+        name (str): a ``RUNNERS`` name.
+        args (Sequence[str]): its words, argv[0] excluded.
+        session (SessionState): shell session (function table).
+        registry (MountRegistry): mount registry (command registration).
+    """
+    refused = wrapper_refusal(name, args, session, registry)
+    if refused is not None:
+        code, said = refused
+        return WrapperAnswer(exit_code=code, stderr=said)
+    at = read_wrapper(name, args)[0]
+    if at is not None:
+        if name == "nice" and args[at] == "nice":
+            return _niceness(args)
+        return WrapperAnswer(runs_from=at)
+    word = _help_word(args)
+    if word == "--version":
+        return WrapperAnswer(stdout=version_line(name).decode())
+    if word == "--help":
+        page = render_help(name, SHELL_SPECS[name], synopsis=SYNOPSES[name])
+        return WrapperAnswer(stdout=page)
+    if name == "nice":
+        return _niceness(args)
+    if name == "setsid":
+        return _usage(name, "setsid: no command specified", 1)
+    return _usage(name, f"{name}: missing operand", 125)
 
 
 def _outside_mirage(consumer: Consumer) -> bool:
@@ -429,7 +524,7 @@ def program(
         ):
             return None
         return consumer
-    return None
+    return Consumer.UNKNOWN if name in RUNNERS else None
 
 
 def execs(name: str, session: SessionState, registry: "MountRegistry") -> bool:
@@ -526,7 +621,7 @@ def programs(session: SessionState, registry: "MountRegistry") -> list[str]:
         registry (MountRegistry): mount registry (command registration).
     """
     names = set(SHELL_NAMES) | NAMESPACE_COMMANDS | set(registry.clis.names())
-    names |= ROUTED_COMMANDS | set(EXEC_WRAPPERS)
+    names |= ROUTED_COMMANDS | set(EXEC_WRAPPERS) | RUNNERS
     names |= {n for n in registry.runtime_bindings if n != EXTERNAL_COMMANDS}
     for mount in registry.mounts():
         names |= {cmd.name.split()[0] for cmd in mount.all_commands()}

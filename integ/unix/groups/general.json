@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "groups_refuses_an_unknown_user",
+      "seq": 16200006,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "groups nosuch; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "groups: 'nosuch': no such user\n"
+      }
+    }
+  ]
+}

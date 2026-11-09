@@ -823,6 +823,13 @@ def parse_flags(
             exit_code=2,
             stderr=f"diff: conflicting output style options\n{_HINT}".encode(),
         )
+    for value in fl.as_list("horizon_lines"):
+        if not (value.isascii() and value.isdigit()):
+            return IOResult(
+                exit_code=2,
+                stderr=f"diff: invalid horizon length '{value}'\n"
+                f"{_HINT}".encode(),
+            )
     labels = tuple(fl.as_list("label"))
     if len(labels) > 2:
         return IOResult(

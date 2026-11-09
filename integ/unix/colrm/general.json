@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "colrm_removes_columns",
+      "seq": 16200012,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf 'abcdefgh\\n' | colrm 3 5; printf 'abcdefgh\\n' | colrm 3; printf 'abcdefgh\\n' | colrm; printf 'abc\\n' | colrm 0 2; printf 'a\\tb\\n' | colrm 2 3; printf 'ab\\bcd\\n' | colrm 2 3; printf 'abc\\n' | colrm 2 3 9; printf 'abc\\n' | colrm x; echo rc=$?; printf 'abc\\n' | colrm 1 x; echo rc=$?; printf 'abc\\n' | colrm 99999999999999999999; echo rc=$?; printf 'a\\377b\\n' | colrm 1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "abfgh\nab\nabcdefgh\nabc\na     b\na\na\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "colrm: first argument: 'x'\ncolrm: second argument: 'x'\ncolrm: first argument: '99999999999999999999': Numerical result out of range\ncolrm: fgetwc() failed: Invalid or incomplete multibyte or wide character\n"
+      }
+    }
+  ]
+}

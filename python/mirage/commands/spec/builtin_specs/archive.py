@@ -35,9 +35,50 @@ _GZIP_ARGUMENTS = (
     Argument("-S", "--suffix"),
     Argument("-t", "--test", action="store_true"),
     Argument("-v", "--verbose", action="store_true"),
+    Argument("--rsyncable", action="store_true"),
+    Argument("--synchronous", action="store_true"),
     Argument("-1", "--fast", action="store_true"),
     *(Argument(f"-{n}", action="store_true") for n in range(2, 9)),
     Argument("-9", "--best", action="store_true"),
+    PATHS_OPERAND,
+)
+
+_XZ_ARGUMENTS = (
+    Argument("-z", "--compress", action="store_true"),
+    Argument("-d", "--decompress", "--uncompress", action="store_true"),
+    Argument("-t", "--test", action="store_true"),
+    Argument("-k", "--keep", action="store_true"),
+    Argument("-f", "--force", action="store_true"),
+    Argument("-c", "--stdout", "--to-stdout", action="store_true"),
+    Argument("-q", "--quiet", action="count"),
+    Argument("-v", "--verbose", action="count"),
+    Argument("-e", "--extreme", action="store_true"),
+    Argument("-0", "--fast", action="store_true"),
+    *(Argument(f"-{n}", action="store_true") for n in range(1, 9)),
+    Argument("-9", "--best", action="store_true"),
+    Argument("-T", "--threads"),
+    Argument("-C", "--check"),
+    Argument("-F", "--format"),
+    Argument("-S", "--suffix"),
+    PATHS_OPERAND,
+)
+
+_BZIP2_ARGUMENTS = (
+    Argument("-z", "--compress", action="store_true"),
+    Argument("-d", "--decompress", action="store_true"),
+    Argument("-t", "--test", action="store_true"),
+    Argument("-k", "--keep", action="store_true"),
+    Argument("-f", "--force", action="store_true"),
+    Argument("-c", "--stdout", action="store_true"),
+    Argument("-q", "--quiet", action="store_true"),
+    Argument("-v", "--verbose", action="count"),
+    Argument("-s", "--small", action="store_true"),
+    Argument("-1", "--fast", action="store_true"),
+    *(Argument(f"-{n}", action="store_true") for n in range(2, 9)),
+    Argument("-9", "--best", action="store_true"),
+    Argument("--repetitive-fast", action="store_true"),
+    Argument("--repetitive-best", action="store_true"),
+    Argument("--exponential", action="store_true"),
     PATHS_OPERAND,
 )
 
@@ -196,4 +237,21 @@ SPECS: dict[str, CommandSpec] = {
         )
     ),
     "zcat": CommandSpec(arguments=_GZIP_ARGUMENTS),
+    "xz": CommandSpec(
+        description="Compress or decompress .xz files.",
+        arguments=_XZ_ARGUMENTS,
+    ),
+    "unxz": CommandSpec(
+        description="Decompress .xz files.", arguments=_XZ_ARGUMENTS
+    ),
+    "bzip2": CommandSpec(
+        description="Compress or decompress .bz2 files.",
+        arguments=_BZIP2_ARGUMENTS,
+        allow_abbrev=False,
+    ),
+    "bunzip2": CommandSpec(
+        description="Decompress .bz2 files.",
+        arguments=_BZIP2_ARGUMENTS,
+        allow_abbrev=False,
+    ),
 }

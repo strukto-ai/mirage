@@ -28,11 +28,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "stat -c \"%s\" /data/a.txt; stat --printf '%n %s\\n' /data/a.txt; stat --printf '%n\\t\\x41\\101\\c' /data/a.txt; echo; stat -c '%n' --printf '%s\\n' /data/a.txt",
+      "command": "stat -c \"%s\" /data/a.txt; stat --printf '%n %s\\n' /data/a.txt; stat --printf '%n\\t\\x41\\101\\c' /data/a.txt; echo; stat -c '%n' --printf '%s\\n' /data/a.txt; stat --cached=always -c %F /data; stat --cached=al -c %F /data; stat --cached=bad /data; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "24\n/data/a.txt 24\n/data/a.txt\tAAc\n24\n",
-        "stderr": "stat: warning: unrecognized escape '\\c'\n"
+        "stdout": "24\n/data/a.txt 24\n/data/a.txt\tAAc\n24\ndirectory\ndirectory\nrc=1\n",
+        "stderr": "stat: warning: unrecognized escape '\\c'\nstat: invalid argument 'bad' for '--cached'\nValid arguments are:\n  - 'default'\n  - 'never'\n  - 'always'\nTry 'stat --help' for more information.\n"
       },
       "flags": [
         "c",

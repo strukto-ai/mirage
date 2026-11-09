@@ -258,6 +258,42 @@ async def gunzip_stream(
             yield part
 
 
+async def encode_stream(
+    source: AsyncIterator[bytes], codec: str, level: int
+) -> AsyncIterator[bytes]:
+    """Compress with ``xz`` or ``bzip2``.
+
+    Args:
+        source (AsyncIterator[bytes]): uncompressed chunks.
+        codec (str): the format.
+        level (int): the preset, -1 for the format's default.
+    """
+    result = _codec_stream(
+        source, {"operation": "encode", "format": codec, "level": level}
+    )
+    async with aclosing(result):
+        async for part in result:
+            yield part
+
+
+async def decode_stream(
+    source: AsyncIterator[bytes], codec: str, test: bool = False
+) -> AsyncIterator[bytes]:
+    """Decompress ``xz`` or ``bzip2``.
+
+    Args:
+        source (AsyncIterator[bytes]): compressed chunks.
+        codec (str): the format.
+        test (bool): whether the input is only checked.
+    """
+    result = _codec_stream(
+        source, {"operation": "decode", "format": codec, "test": test}
+    )
+    async with aclosing(result):
+        async for part in result:
+            yield part
+
+
 async def read_gzip_facts(source: AsyncIterator[bytes]) -> GzipFacts:
     """Read an input's facts the way ``gzip -l`` does: checked whole, as
     ``-t`` checks it, with nothing written.

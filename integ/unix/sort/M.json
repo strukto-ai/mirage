@@ -28,11 +28,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo -e 'Feb\\nJan\\nMar' | sort -M",
+      "command": "echo -e 'Feb\\nJan\\nMar' | sort -M; printf 'b\\na\\n' | sort --batch-size=2 --compress-program=cat; printf 'a\\n' | sort --batch-size=1; echo rc=$?; printf 'a\\n' | sort --batch-size=x; echo rc=$?; printf 'a\\n' | sort --compress-program=a --compress-program=b; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "Jan\nFeb\nMar\n",
-        "stderr": ""
+        "stdout": "Jan\nFeb\nMar\na\nb\nrc=2\nrc=2\nrc=2\n",
+        "stderr": "sort: invalid --batch-size argument '1'\nsort: minimum --batch-size argument is '2'\nsort: invalid --batch-size argument 'x'\nsort: multiple compress programs specified\n"
       },
       "flags": [
         "M"

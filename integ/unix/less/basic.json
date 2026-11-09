@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "less_prints_without_a_terminal",
+      "seq": 16200016,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_l/d; printf 'one\\ntwo\\n' > /data/ez_l/a; printf 'three\\n' > /data/ez_l/b; less /data/ez_l/a /data/ez_l/b; echo rc=$?; less /data/ez_l/a /data/ez_l/a; less -N -R -S -F -X /data/ez_l/a; less +G /data/ez_l/a; less -x 4 /data/ez_l/a; less -p one /data/ez_l/a; less --pattern=one /data/ez_l/a; less --chop-long-lines --quit-if-one-screen /data/ez_l/a; less /data/ez_l/nosuch /data/ez_l/a; echo rc=$?; less /data/ez_l/a /data/ez_l/nosuch /data/ez_l/b; echo rc=$?; less /data/ez_l/a /data/ez_l/d /data/ez_l/b; echo rc=$?; less /data/ez_l/d /data/ez_l/a; echo rc=$?; printf 'piped\\n' | less; printf 'piped\\n' | less -; less -p; echo rc=$?; rm -r /data/ez_l",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\ntwo\nthree\nrc=0\none\ntwo\none\ntwo\none\ntwo\none\ntwo\none\ntwo\none\ntwo\none\ntwo\n/data/ez_l/nosuch: No such file or directory\none\ntwo\nrc=0\none\ntwo\n/data/ez_l/nosuch: No such file or directory\nthree\nrc=0\none\ntwo\n/data/ez_l/d is a directory\nthree\nrc=0\n/data/ez_l/d is a directory\none\ntwo\nrc=0\npiped\npiped\nrc=0\n",
+        "stderr": "Value is required after -p (--pattern)\n"
+      }
+    }
+  ]
+}

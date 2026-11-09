@@ -102,7 +102,8 @@ import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { expandAssignment } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { mirageProgramAt, routedConsumer, wrapperRefusal } from '../lookup/lookup.ts'
+import { RUNNERS } from '../lookup/constants.ts'
+import { mirageProgramAt, routedConsumer, wrapperAnswer, wrapperRefusal } from '../lookup/lookup.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
@@ -1086,6 +1087,28 @@ async function routeArgv(
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
     return runExternal(argv, stdin, session, registry, routing, signal, sink)
+  }
+
+  if (consumer === Consumer.UNKNOWN && RUNNERS.has(name)) {
+    const answer = wrapperAnswer(name, argv.args, session, registry)
+    if (answer.runsFrom !== null) {
+      return runProgram(
+        executeFn,
+        name,
+        shellJoin(argv.args.slice(answer.runsFrom)),
+        session,
+        stdin,
+      )
+    }
+    const err = encodeText(answer.stderr)
+    return [
+      answer.stdout === '' ? null : encodeText(answer.stdout),
+      new IOResult({
+        exitCode: answer.exitCode,
+        ...(err.byteLength > 0 ? { stderr: err } : {}),
+      }),
+      new ExecutionNode({ command: name, exitCode: answer.exitCode, stderr: err }),
+    ]
   }
 
   // `--help` as a builtin's first word: bash answers it with the builtin's

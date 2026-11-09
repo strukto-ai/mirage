@@ -51,6 +51,8 @@ export const CWD_DEFAULT_RAW: Record<string, string> = {
   tree: '.',
   du: '.',
   ls: '.',
+  dir: '.',
+  vdir: '.',
 }
 
 // The path options whose file the handler itself reads or writes through

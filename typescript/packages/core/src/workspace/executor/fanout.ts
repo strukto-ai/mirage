@@ -42,7 +42,14 @@ const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'du'])
 // The walks the fan-out composes over nested mounts: find and du from each
 // mount's rows, ls and the searches from each mount's own part. tree walks
 // them through the dispatcher's listings.
-const COMPOSED: ReadonlySet<string> = new Set([...TRAVERSAL_CMDS, 'ls', 'grep', 'rg'])
+const COMPOSED: ReadonlySet<string> = new Set([
+  ...TRAVERSAL_CMDS,
+  'ls',
+  'dir',
+  'vdir',
+  'grep',
+  'rg',
+])
 
 /**
  * One mount's part of a find or du, on the command that mount serves. A mount

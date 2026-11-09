@@ -52,6 +52,8 @@ CWD_DEFAULT_RAW = {
     "tree": ".",
     "du": ".",
     "ls": ".",
+    "dir": ".",
+    "vdir": ".",
 }
 
 # The path options whose file the handler itself reads or writes through

@@ -12,34 +12,62 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.general.arch import arch
 from mirage.commands.builtin.general.bc import bc
+from mirage.commands.builtin.general.colrm import colrm
 from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.general.date import date
+from mirage.commands.builtin.general.envsubst import envsubst
 from mirage.commands.builtin.general.expr import expr
 from mirage.commands.builtin.general.getconf import getconf
+from mirage.commands.builtin.general.groups import groups
+from mirage.commands.builtin.general.hostid import hostid
 from mirage.commands.builtin.general.hostname import hostname
 from mirage.commands.builtin.general.id import id_cmd
 from mirage.commands.builtin.general.js import js, node
+from mirage.commands.builtin.general.link import link
+from mirage.commands.builtin.general.logname import logname
+from mirage.commands.builtin.general.nproc import nproc
+from mirage.commands.builtin.general.pathchk import pathchk
 from mirage.commands.builtin.general.python import python3, python_cmd
 from mirage.commands.builtin.general.seq import seq
+from mirage.commands.builtin.general.sync import sync
+from mirage.commands.builtin.general.tty import tty
 from mirage.commands.builtin.general.uname import uname
+from mirage.commands.builtin.general.users import users
 from mirage.commands.builtin.general.wget import wget
+from mirage.commands.builtin.general.who import who
+from mirage.commands.builtin.general.yes import yes
 
 _FNS = [
+    arch,
     bc,
+    colrm,
     curl,
     date,
+    envsubst,
     expr,
     getconf,
+    groups,
+    hostid,
     hostname,
     id_cmd,
     js,
+    link,
+    logname,
     node,
+    nproc,
+    pathchk,
     python3,
     python_cmd,
     seq,
+    sync,
+    tty,
     uname,
+    users,
     wget,
+    who,
+    yes,
 ]
 
 COMMANDS = []

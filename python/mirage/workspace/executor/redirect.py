@@ -139,6 +139,8 @@ STREAM_OUTPUT_BUILTINS = frozenset(
         "rev",
         "tac",
         "ls",
+        "dir",
+        "vdir",
         "find",
         "du",
         "stat",

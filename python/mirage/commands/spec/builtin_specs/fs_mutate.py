@@ -379,4 +379,8 @@ SPECS: dict[str, CommandSpec] = {
             PATHS_OPERAND,
         )
     ),
+    "link": CommandSpec(
+        description="Make a hard link to a file.",
+        arguments=(PATHS_OPERAND,),
+    ),
 }

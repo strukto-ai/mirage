@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "who_lists_nobody",
+      "seq": 16200007,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "who; echo rc=$?; who -q; who -H; who a b; echo rc=$?; who a b c; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n\n# users=0\nNAME     LINE         TIME         COMMENT\nrc=0\nrc=1\n",
+        "stderr": "who: extra operand 'c'\nTry 'who --help' for more information.\n"
+      }
+    }
+  ]
+}

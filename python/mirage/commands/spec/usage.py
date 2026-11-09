@@ -18,7 +18,10 @@ from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.builtin_specs import SPECS
 from mirage.commands.spec.constants import (
+    BZIP2_FAMILY,
+    COMPARE_PROGRAMS,
     IN_ORDER_OPERANDS,
+    LESS_FAMILY,
     NOT_GETOPT_LONG,
     OLD_OPTION_EXIT,
     OPERAND_EXIT,
@@ -221,6 +224,23 @@ def unknown_option_error(
         dashed = token if token.startswith("-") else f"-{token}"
         line = f"zgrep: {dashed}: option not supported\n"
         return encode_text(line), usage_exit_code(cmd_name)
+    if builtin and cmd_name in COMPARE_PROGRAMS:
+        return unknown_option_error(COMPARE_PROGRAMS[cmd_name], token)
+    if builtin and cmd_name in LESS_FAMILY:
+        name = token[2:] if token.startswith("--") else f"-{token}"
+        line = f'There is no {name} option ("less --help" for help)\n'
+        return encode_text(line), usage_exit_code(cmd_name)
+    if builtin and cmd_name == "zmore":
+        dashed = token if token.startswith("-") else f"-{token}"
+        line = (
+            f"/usr/bin/zmore: {dashed}: unknown option; "
+            "try '/usr/bin/zmore --help' for help\n"
+        )
+        return encode_text(line), usage_exit_code(cmd_name)
+    if builtin and cmd_name in BZIP2_FAMILY:
+        dashed = token if token.startswith("-") else f"-{token}"
+        line = f"{cmd_name}: Bad flag `{dashed}'\n"
+        return encode_text(line + usage_hint(cmd_name, builtin) + "\n"), 1
     if builtin and cmd_name in PYTHON_NAMES:
         # CPython names the whole typed token, long or short (pinned on
         # 3.14.7; 3.12 still spelled a long one `unknown option`).
@@ -232,6 +252,22 @@ def unknown_option_error(
         line = f"{cmd_name}: invalid option -- '{token}'\n"
     hint = usage_hint(cmd_name, builtin) + "\n"
     return encode_text(line + hint), usage_exit_code(cmd_name, builtin)
+
+
+def _less_missing_value(cmd_name: str, token: str) -> str:
+    """less's line for an option left without its value: both spellings
+    of it, whichever was typed.
+
+    Args:
+        cmd_name (str): ``less`` or ``zless``.
+        token (str): long token ('--pattern') or short char ('p').
+    """
+    dashed = token if token.startswith("-") else f"-{token}"
+    for option in SPECS[cmd_name].arguments:
+        if dashed in option.names and len(option.names) > 1:
+            short, long = option.names[0], option.names[1]
+            return f"Value is required after {short} ({long})\n"
+    return f"Value is required after {dashed}\n"
 
 
 def zgrep_unsupported(token: str) -> bool:
@@ -427,6 +463,8 @@ def missing_value_error(
         return curl_option_error(
             f"curl: option {dashed}: requires parameter\n"
         )
+    if builtin and cmd_name in LESS_FAMILY:
+        return encode_text(_less_missing_value(cmd_name, token)), 0
     if token.startswith("--"):
         line = f"{cmd_name}: option '{token}' requires an argument\n"
     else:

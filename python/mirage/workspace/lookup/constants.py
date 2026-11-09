@@ -59,6 +59,8 @@ EXEC_WRAPPERS = {
     "fgrep": ("grep", "-F"),
     "zegrep": ("zgrep", "-E"),
     "zfgrep": ("zgrep", "-F"),
+    "rgrep": ("grep", "-r"),
+    "uncompress": ("gzip", "-d"),
 }
 
 # bash reserved words that mirage's grammar implements. The parser, not
@@ -383,6 +385,11 @@ PROGRAM_WRAPPERS: dict[str, WrapperOptions] = {
     ),
 }
 
+# The wrappers that answer for themselves with no program left to run:
+# `nice` alone prints the niceness, the rest refuse the line.
+RUNNERS = frozenset({"nice", "nohup", "setsid", "stdbuf"})
+LOWEST_PRIORITY = 19
+
 _SIZE = re.compile(r"\s*\+?(\d*)(?:([kKMGTPEZYRQ])(B|iB)?)?")
 
 
@@ -430,7 +437,11 @@ def read_wrapper(
             if known in grammar.values:
                 if not equals:
                     if i == len(words):
-                        return None, None
+                        said = (
+                            f"{name}: option '{known}' requires an "
+                            f"argument\n{usage}"
+                        )
+                        return None, error or said
                     given = words[i]
                     i += 1
                 error = error or _bad_value(name, known, given, usage)
@@ -450,14 +461,18 @@ def read_wrapper(
             given = word[j:]
             if not given:
                 if i == len(words):
-                    return None, None
+                    said = (
+                        f"{name}: option requires an argument -- "
+                        f"'{letter}'\n{usage}"
+                    )
+                    return None, error or said
                 given = words[i]
                 i += 1
             error = error or _bad_value(name, option, given, usage)
             moded = True
             break
     if i == len(words):
-        return None, None
+        return None, error
     if name == "stdbuf" and not moded:
         error = (
             error
@@ -509,6 +524,38 @@ def _bad_value(name: str, option: str, value: str, usage: str) -> str | None:
             "Value too large for defined data type\n"
         )
     return None
+
+
+def nice_adjustment(words: Sequence[str]) -> int | None:
+    """The niceness change a ``nice`` line asks for, None when it asks
+    for none: the last one typed, in any of its spellings.
+
+    Args:
+        words (Sequence[str]): the option words, a valid line's.
+    """
+    found = None
+    i = 0
+    while i < len(words):
+        word = words[i]
+        i += 1
+        if word == "--":
+            break
+        given = None
+        if word.startswith("--adjustment="):
+            given = word.partition("=")[2]
+        elif len(word) > 2 and "--adjustment".startswith(word):
+            given = words[i]
+            i += 1
+        elif word == "-n":
+            given = words[i]
+            i += 1
+        elif word.startswith("-n"):
+            given = word[2:]
+        elif word[1:].isdigit():
+            given = word[1:]
+        if given is not None:
+            found = int(given)
+    return found
 
 
 # Commands the router must not resolve the last component for, even

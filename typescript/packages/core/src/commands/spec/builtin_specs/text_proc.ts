@@ -180,6 +180,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-R', '--random-sort'], { action: 'store_true' }),
       new Argument('--random-source', { action: 'append', type: 'path' }),
       new Argument('--files0-from', { type: 'path' }),
+      new Argument('--batch-size', { action: 'append' }),
+      new Argument('--compress-program', { action: 'append' }),
       PATHS_OPERAND,
     ],
   }),
