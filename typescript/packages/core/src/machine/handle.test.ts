@@ -19,6 +19,7 @@ import { LookupStatus } from '../cache/index/config.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { materialize, type ByteSource } from '../io/types.ts'
 import { shellJoin } from '../shell/join.ts'
+import { ConnectionLostError } from './errors.ts'
 import { MachineHandle } from './handle.ts'
 import {
   PROCESS,
@@ -83,7 +84,11 @@ class RecordingMachine extends MachineHandle {
 
 // A box whose connection drops while it runs `train`.
 class DroppedBox extends RecordingMachine {
-  errorName = 'ConnectionError'
+  error: Error = new ConnectionLostError(
+    'closed by remote host',
+    ENC.encode('step 0\n'),
+    ENC.encode('warn\n'),
+  )
 
   override async execLine(
     line: string,
@@ -92,9 +97,7 @@ class DroppedBox extends RecordingMachine {
     cwd: string,
   ): Promise<RunResult> {
     const result = await super.execLine(line, stdin, env, cwd)
-    if (line.startsWith('train')) {
-      throw Object.assign(new Error('closed by remote host'), { name: this.errorName })
-    }
+    if (line.startsWith('train')) throw this.error
     return result
   }
 }
@@ -365,7 +368,7 @@ describe('MachineHandle', () => {
     try {
       const io = await ws.shell('train')
       expect(io.exitCode).toBe(129)
-      expect(DEC.decode(io.stderr)).toBe(`mirage: ${String(box.id)}: connection lost\n`)
+      expect(DEC.decode(io.stderr)).toBe(`warn\nmirage: ${String(box.id)}: connection lost\n`)
     } finally {
       await ws.close()
     }
@@ -373,9 +376,27 @@ describe('MachineHandle', () => {
 
   // Only a transport's own ConnectionError means the connection went; an
   // error of another name from elsewhere in the run stays the error it is.
-  it('leaves an error of another name alone', async () => {
+  // A run whose output was kept rather than streamed keeps what it read
+  // before the drop.
+  it('keeps the output a dropped run read', async () => {
     const box = new DroppedBox({ captures: ['train'] })
-    box.errorName = 'Error'
+    const ran = await machineRuntime(box).runLine(undefined, [], [], {
+      flags: { c: 'train' },
+      stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
+    })
+    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr ?? undefined)]).toEqual([
+      129,
+      'step 0\n',
+      `warn\nmirage: ${String(box.id)}: connection lost\n`,
+    ])
+  })
+
+  // Only a transport's ConnectionLostError means the connection went; any
+  // other error from elsewhere in the run stays the error it is.
+  it('leaves another error alone', async () => {
+    const box = new DroppedBox({ captures: ['train'] })
+    box.error = Object.assign(new Error('read ECONNRESET'), { name: 'ConnectionError' })
     const ws = sandboxWorkspace(box)
     try {
       const io = await ws.shell('train')

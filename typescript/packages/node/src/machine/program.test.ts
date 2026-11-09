@@ -40,6 +40,7 @@ import {
 } from './program.ts'
 import { runWithSystemClock, ShiftedClock, SystemClock } from '@struktoai/mirage-core/utils/clock'
 import { FAKETIME_LIBRARIES } from '@struktoai/mirage-core/machine/constants'
+import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
 import { ProcessTable } from '@struktoai/mirage-core/execution/process/table'
 import type { ProcessHandle } from '@struktoai/mirage-core/execution/process/handle'
 import { runAsProcess } from '@struktoai/mirage-core/context/session_context'
@@ -192,9 +193,11 @@ describe('runProgram', () => {
   // it, so how the program in the box ended is unknown; its own exit is the
   // program's.
   it('treats a connection client ended by a signal as a lost connection', async () => {
-    await expect(
-      runProgram('sh', null, ['-c', 'kill -KILL $$'], null, { connection: true }),
-    ).rejects.toMatchObject({ name: 'ConnectionError' })
+    const lost = await runProgram('sh', null, ['-c', 'echo hi; kill -KILL $$'], null, {
+      connection: true,
+    }).catch((error: unknown) => error)
+    expect(lost).toBeInstanceOf(ConnectionLostError)
+    expect(new TextDecoder().decode((lost as ConnectionLostError).stdout)).toBe('hi\n')
     const ran = await runProgram('sh', null, ['-c', 'exit 3'], null, { connection: true })
     expect(ran.exitCode).toBe(3)
   })

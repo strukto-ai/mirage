@@ -49,6 +49,7 @@ import {
   scanLine,
   signalLine,
 } from './constants.ts'
+import { ConnectionLostError } from './errors.ts'
 import { isPipeTransport } from './mixin.ts'
 import { MachineMounts } from './mounts.ts'
 
@@ -201,12 +202,13 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         await this.stop(tag, runner?.signal ?? runner?.interrupted ?? 15)
         throw error
       }
-      if (!(error instanceof Error) || error.name !== 'ConnectionError') throw error
+      if (!(error instanceof ConnectionLostError)) throw error
       logger.debug?.(`${String(this.id)}: connection lost: ${String(error)}`)
       runner?.programSignaled(HANGUP_EXIT_CODE - 128)
+      const said = new TextEncoder().encode(`mirage: ${String(this.id)}: connection lost\n`)
       done = {
-        stdout: new Uint8Array(),
-        stderr: new TextEncoder().encode(`mirage: ${String(this.id)}: connection lost\n`),
+        stdout: error.stdout,
+        stderr: concat([error.stderr ?? new Uint8Array(), said]),
         exitCode: HANGUP_EXIT_CODE,
       }
     } finally {

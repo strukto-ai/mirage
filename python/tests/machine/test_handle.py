@@ -32,6 +32,7 @@ from mirage.machine.constants import (
     faketime_probe,
     stop_line,
 )
+from mirage.machine.errors import ConnectionLostError
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.machine import MachineRuntime
@@ -292,15 +293,31 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
 
 
 class DroppedBox(RecordingMachine):
-    error: type[Exception] = ConnectionError
+    error: Exception = ConnectionLostError(
+        "closed by remote host", b"step 0\n", b"warn\n"
+    )
 
     async def exec_line(
         self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
     ) -> RunResult:
         result = await super().exec_line(line, stdin, env, cwd)
         if line.startswith("train"):
-            raise self.error("closed by remote host")
+            raise self.error
         return result
+
+
+# A run whose output was kept rather than streamed keeps what it read
+# before the drop.
+@pytest.mark.asyncio
+async def test_a_dropped_run_keeps_the_output_it_read():
+    box = DroppedBox(captures=("train",))
+    ctx = Context(flags={"c": "train"}, cwd=PathSpec.from_str_path("/"))
+    ran = await machine_runtime(box).run_line(None, [], [], ctx)
+    assert (ran.exit_code, ran.stdout, ran.stderr) == (
+        129,
+        b"step 0\n",
+        f"warn\nmirage: {box.id}: connection lost\n".encode(),
+    )
 
 
 @pytest.mark.asyncio
@@ -311,18 +328,18 @@ async def test_a_dropped_connection_ends_the_line_as_hung_up():
         io = await ws.shell("train")
         assert io.exit_code == 129
         assert await materialize(io.stderr) == (
-            f"mirage: {box.id}: connection lost\n".encode()
+            f"warn\nmirage: {box.id}: connection lost\n".encode()
         )
     finally:
         await ws.close()
 
 
-# Only a transport's own ConnectionError means the connection went; an OS
+# Only a transport's ConnectionLostError means the connection went; an OS
 # error of that family from elsewhere in the run stays the error it is.
 @pytest.mark.asyncio
 async def test_another_connection_family_error_is_not_a_lost_connection():
     box = DroppedBox(captures=("train",))
-    box.error = ConnectionResetError
+    box.error = ConnectionResetError("closed by remote host")
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
     try:
         io = await ws.shell("train")

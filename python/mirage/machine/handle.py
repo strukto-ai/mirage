@@ -40,6 +40,7 @@ from mirage.machine.constants import (
     signal_line,
     stop_line,
 )
+from mirage.machine.errors import ConnectionLostError
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.mounts import MachineMounts
 from mirage.runtime.binding import WorkspaceBinding
@@ -211,15 +212,14 @@ class MachineHandle:
                 )
             await asyncio.shield(self.stop(tag, signum or 15))
             raise
-        except ConnectionError as exc:
-            if type(exc) is not ConnectionError:
-                raise
+        except ConnectionLostError as exc:
             logger.debug("%s: connection lost", self.id, exc_info=True)
             if runner is not None:
                 runner.program_signaled(HANGUP_EXIT_CODE - 128)
+            said = f"mirage: {self.id}: connection lost\n".encode()
             done = RunResult(
-                stdout=b"",
-                stderr=f"mirage: {self.id}: connection lost\n".encode(),
+                stdout=exc.stdout,
+                stderr=(exc.stderr or b"") + said,
                 exit_code=HANGUP_EXIT_CODE,
             )
         finally:

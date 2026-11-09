@@ -20,6 +20,7 @@ from mirage.context.session_context import current_caller
 from mirage.io.stream import feed
 from mirage.io.types import ByteSource
 from mirage.machine.constants import PROCESS, stop_signal, wrap_line
+from mirage.machine.errors import ConnectionLostError
 from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.program import read_into
@@ -148,10 +149,20 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
                 feeding.cancel()
             return result
 
+        # Kept here rather than by read_into, so a drop mid-read keeps them.
+        out: list[bytes] = []
+        err: list[bytes] = []
+
+        async def keep_out(chunk: bytes) -> None:
+            out.append(chunk)
+
+        async def keep_err(chunk: bytes) -> None:
+            err.append(chunk)
+
         try:
-            stdout, stderr, _, result = await asyncio.gather(
-                read_into(process.stdout, output),
-                read_into(process.stderr, errors),
+            _, _, _, result = await asyncio.gather(
+                read_into(process.stdout, output or keep_out),
+                read_into(process.stderr, errors or keep_err),
                 feeding,
                 wait_exit(),
             )
@@ -162,19 +173,26 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
                 process.kill()
             raise
         except sdk.DisconnectError as exc:
-            raise ConnectionError(f"the connection closed: {exc}") from exc
+            raise ConnectionLostError(
+                f"the connection closed: {exc}",
+                b"".join(out),
+                b"".join(err) or None,
+            ) from exc
         finally:
             if not feeding.done():
                 feeding.cancel()
             await asyncio.gather(feeding, return_exceptions=True)
             process.close()
         await process.wait_closed()
+        stdout, stderr = b"".join(out), b"".join(err) or None
         if result.returncode is None:
-            raise ConnectionError("the channel closed with no exit status")
+            raise ConnectionLostError(
+                "the channel closed with no exit status", stdout, stderr
+            )
         code = result.returncode
         return RunResult(
             stdout=stdout,
-            stderr=stderr or None,
+            stderr=stderr,
             exit_code=128 - code if code < 0 else code,
         )
 

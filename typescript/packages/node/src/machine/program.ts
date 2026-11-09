@@ -20,6 +20,7 @@ import { access, open, stat } from 'node:fs/promises'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
+import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
 import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import {
@@ -392,14 +393,16 @@ export async function runProgram(
         runner?.programExited(child.exitCode)
       throw makeAbortError(signal)
     }
+    const stderr = Buffer.concat(err)
     if (options.connection === true && child.signalCode !== null) {
-      throw Object.assign(new Error(`${executable} ended on ${child.signalCode}`), {
-        name: 'ConnectionError',
-      })
+      throw new ConnectionLostError(
+        `${executable} ended on ${child.signalCode}`,
+        Buffer.concat(out),
+        stderr.length > 0 ? stderr : null,
+      )
     }
     if (options.direct === true && child.signalCode !== null)
       runner?.programSignaled(constants.signals[child.signalCode])
-    const stderr = Buffer.concat(err)
     return { stdout: Buffer.concat(out), stderr: stderr.length > 0 ? stderr : null, exitCode: code }
   } finally {
     if (stopping !== null) await stopping

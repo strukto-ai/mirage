@@ -24,6 +24,7 @@ from mirage.context.session_context import run_as_process
 from mirage.execution.process.table import ProcessTable
 from mirage.io.types import materialize
 from mirage.machine.constants import wrap_line
+from mirage.machine.errors import ConnectionLostError
 from mirage.machine.ssh import SSHMachine, sdk
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
@@ -373,9 +374,25 @@ class LostProcess(HungProcess):
         raise ConnectionResetError("connection lost")
 
 
+class PartialOutput:
+    """A remote stream that gave this much before its connection went."""
+
+    def __init__(self, data: bytes, error: Exception | None) -> None:
+        self.data = data
+        self.error = error
+
+    async def read(self, n: int = -1) -> bytes:
+        data, self.data = self.data, b""
+        if data:
+            return data
+        if self.error is not None:
+            raise self.error
+        return b""
+
+
 class EndedProcess(HungProcess):
     """A remote command whose channel ended with this exit status, or
-    whose wait raised this error."""
+    whose output and wait raised this error, after some output."""
 
     def __init__(
         self, returncode: int | None, error: Exception | None = None
@@ -384,6 +401,7 @@ class EndedProcess(HungProcess):
         self.done.set()
         self.returncode = returncode
         self.error = error
+        self.stdout = PartialOutput(b"before\n", error)
 
     async def wait(self, check: bool = False) -> "EndedProcess":
         if self.error is not None:
@@ -392,7 +410,8 @@ class EndedProcess(HungProcess):
 
 
 # A channel that closed with no exit status, or a connection asyncssh saw
-# drop, lost the remote command's end; a reported exit keeps it.
+# drop, lost the remote command's end, keeping what it read; a reported
+# exit keeps its status.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "error", [None, asyncssh.ConnectionLost("Connection lost")]
@@ -400,8 +419,9 @@ class EndedProcess(HungProcess):
 async def test_a_dropped_channel_is_a_lost_connection(error):
     runtime = SSHMachine("box", config={"host": "box"})
     runtime._conn = HungConn(EndedProcess(None, error))
-    with pytest.raises(ConnectionError, match="closed"):
+    with pytest.raises(ConnectionLostError, match="closed") as lost:
         await runtime._ssh("true", None)
+    assert lost.value.stdout == b"before\n"
 
 
 @pytest.mark.asyncio

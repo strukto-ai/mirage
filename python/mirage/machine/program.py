@@ -44,6 +44,7 @@ from mirage.machine.constants import (
     faketime_env,
     stop_signal,
 )
+from mirage.machine.errors import ConnectionLostError
 from mirage.machine.types import MachinePipe
 from mirage.runtime.types import OutputFn, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
@@ -258,7 +259,9 @@ async def run_program(
             children.pop(process, None)
     code = process.returncode if process.returncode is not None else 1
     if connection and code < 0:
-        raise ConnectionError(f"{executable} ended on signal {-code}")
+        raise ConnectionLostError(
+            f"{executable} ended on signal {-code}", stdout, stderr or None
+        )
     if direct and runner is not None and code < 0:
         runner.program_signaled(-code)
     return RunResult(

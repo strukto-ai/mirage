@@ -21,6 +21,7 @@ import { join } from 'node:path'
 import ssh2 from 'ssh2'
 import { buildMachine } from '@struktoai/mirage-core/machine/registry'
 import { wrapLine } from '@struktoai/mirage-core/machine/constants'
+import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
@@ -354,7 +355,7 @@ describe('SSHMachine cancellation', () => {
     const running = runtime.line('true', new AbortController().signal)
     await started
     runtime.channel.emit('close')
-    await expect(running).rejects.toMatchObject({ name: 'ConnectionError' })
+    await expect(running).rejects.toBeInstanceOf(ConnectionLostError)
   })
 
   it.each([
