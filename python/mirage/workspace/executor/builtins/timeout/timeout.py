@@ -68,7 +68,7 @@ from mirage.shell.constants import (
     STOP_SIGNALS,
     TIMEOUT_STATUS,
 )
-from mirage.shell.helpers import get_text
+from mirage.shell.helpers import ends_line, get_text
 from mirage.shell.join import shell_join
 from mirage.shell.signals import signal_report
 from mirage.shell.types import TSNodeLike
@@ -401,8 +401,8 @@ async def _supervise(
     def killed(number: int) -> str:
         return _killed_report(context, syntax, process, number, foreground)
 
-    def hold_job() -> None:
-        _hold_job(processes, process, syntax)
+    def own_job() -> ProcessHandle | None:
+        return _own_job(processes, process, syntax)
 
     async def run() -> int:
         token = set_current_evaluation(child)
@@ -459,7 +459,7 @@ async def _supervise(
                 verbose,
                 name,
                 killed,
-                hold_job,
+                own_job,
             )
         finally:
             if not process.task.done():
@@ -527,7 +527,7 @@ async def _deadline(
     verbose: bool,
     name: str,
     killed: Callable[[int], str],
-    hold_job: Callable[[], None],
+    own_job: Callable[[], ProcessHandle | None],
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Wait for the run, and at the deadline do what the signal does.
 
@@ -547,15 +547,16 @@ async def _deadline(
         name (str): the command word, which -v names.
         killed (Callable[[int], str]): bash's report of timeout dying of
             a signal.
-        hold_job (Callable[[], None]): holds the job of a timeout that
-            stopped itself.
+        own_job (Callable[[], ProcessHandle | None]): the job that is
+            timeout alone, which a stop of timeout itself holds.
     """
     task = process.task
     deadline = seconds if 0 < seconds < math.inf else None
     done, _ = await asyncio.wait({task}, timeout=deadline)
-    if task not in done and process.paused:
+    job = own_job()
+    if task not in done and job is not None and job.paused:
         # A stopped timeout takes its alarm once it goes on.
-        resumed = asyncio.ensure_future(process.resumed())
+        resumed = asyncio.ensure_future(job.resumed())
         either: set[asyncio.Task[Any]] = {task, resumed}
         done, _ = await asyncio.wait(
             either, return_when=asyncio.FIRST_COMPLETED
@@ -586,20 +587,30 @@ async def _deadline(
     # at STOP; an asynchronous one ignores those.
     sent = SIGSTOP if stops and not process.record.is_program else signal
     await _signal(processes, process, sent, foreground)
-    if not foreground and signal == SIGSTOP:
-        hold_job()
-    if not foreground and signal in (SIGSTOP, SIGCHLD):
-        # timeout stopped itself, or never wakes: only -k's KILL ends the
-        # wait, and not even that once it stopped itself.
-        if kill_after == 0 or signal == SIGSTOP:
-            await asyncio.get_running_loop().create_future()
+    loop = asyncio.get_running_loop()
+    grace: float | None = kill_after or None
+    if not foreground and signal == SIGSTOP and job is None:
+        await loop.create_future()
+    if not foreground and signal == SIGSTOP and job is not None:
+        # timeout stopped itself: a job goes on at CONT, what it stopped
+        # with it too, and -k's KILL comes no sooner, when it is due.
+        sent_at = loop.time()
+        processes.pause(job)
+        await job.resumed()
+        await _signal(processes, process, SIGCONT, foreground)
+        if grace is not None:
+            grace = max(grace - (loop.time() - sent_at), 0)
+    elif not foreground and signal == SIGCHLD:
+        # timeout never wakes: only -k's KILL ends the wait.
+        if kill_after == 0:
+            await loop.create_future()
         await asyncio.sleep(kill_after)
         if not task.done():
             await _signal(processes, process, SIGKILL, foreground)
         say(SIGKILL)
         said.append(killed(SIGKILL))
         return await _ended(console, held, said, 137)
-    done, _ = await asyncio.wait({task}, timeout=kill_after or None)
+    done, _ = await asyncio.wait({task}, timeout=grace)
     if task not in done:
         await _signal(processes, process, SIGKILL, foreground)
         say(SIGKILL)
@@ -619,13 +630,6 @@ async def _deadline(
     return await _ended(
         console, held, said, 128 + signal if preserve else TIMEOUT_STATUS
     )
-
-
-def _ends_line(node: TSNodeLike) -> bool:
-    root = node
-    while root.parent is not None:
-        root = root.parent
-    return not (root.text or b"")[node.end_byte - root.start_byte :].strip()
 
 
 def _killed_report(
@@ -652,19 +656,19 @@ def _killed_report(
         or node is None
         or context.frame.substitution
         or redirected_body(node)
-        or _ends_line(node)
+        or ends_line(node)
     ):
         return ""
     row = (process.record.pid, 128 + number, number, reported_command(node))
     return signal_report(shell_voice(), [row], True)
 
 
-def _hold_job(
+def _own_job(
     processes: ProcessTable,
     process: ProcessHandle,
     syntax: TSNodeLike | None,
-) -> None:
-    # A job that is timeout alone is what stopped itself.
+) -> ProcessHandle | None:
+    # A job that is timeout alone is the process timeout is.
     record = process.record
     job = (
         None
@@ -679,7 +683,8 @@ def _hold_job(
         and syntax is not None
         and job.record.command == get_text(syntax)
     ):
-        processes.pause(job)
+        return job
+    return None
 
 
 async def _signal(

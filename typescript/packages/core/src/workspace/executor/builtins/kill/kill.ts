@@ -25,7 +25,15 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { builtinUsage } from '../shared.ts'
 import { MAX_PID_OPERAND } from '../constants.ts'
-import { grantsOf, jobOfSpec, jobResult, machineProcess, onMachine, sessionOf } from '../jobspec.ts'
+import {
+  grantsOf,
+  jobOfSpec,
+  jobResult,
+  machineProcess,
+  onMachine,
+  sessionOf,
+  type JobMarks,
+} from '../jobspec.ts'
 import { FIRST_PID } from '../../../../execution/process/constants.ts'
 
 /**
@@ -63,10 +71,14 @@ function killList(cmdStr: string, operands: string[], voice: string): RedirectRe
  * no such process, and never reaches the process table, where its
  * stand-in PID may name another process.
  */
-function killPid(jobs: readonly JobHandle[], operand: string): [number | null, string] {
+function killPid(
+  jobs: readonly JobHandle[],
+  operand: string,
+  marks: JobMarks,
+): [number | null, string] {
   if (operand === '') return [null, "`': not a pid or valid job spec"]
   if (operand.startsWith('%')) {
-    const [job, refusal] = jobOfSpec(jobs, operand)
+    const [job, refusal] = jobOfSpec(jobs, operand, marks)
     if (job === null) return [null, refusal]
     if (job.process === null) return [null, `(${String(job.pid)}) - No such process`]
     return [job.pid, '']
@@ -148,7 +160,7 @@ export async function handleKill(
   await jobTable.sync(sid)
   for (const operand of words) {
     const jobs = jobTable.listJobs(sid)
-    let [pid, refusal] = killPid(jobs, operand)
+    let [pid, refusal] = killPid(jobs, operand, jobTable.jobMarks(sid))
     const shown = new Map(jobs.map((job) => [job.pid, job.shownPid]))
     if (pid !== null && pid > 0 && pid < FIRST_PID && /^[0-9]+$/.test(operand)) {
       const [found, ambiguous] = await machineProcess(processes, session, pid, machine)

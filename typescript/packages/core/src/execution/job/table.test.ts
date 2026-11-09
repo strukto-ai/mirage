@@ -639,6 +639,7 @@ describe('JobTable per-session scoping', () => {
     expect(jt.listJobs('a')).toEqual([])
     expect(jt.get(1, 'a')).toBeNull()
     expect(jt.listJobs('b')).toEqual([b1])
+    expect(jt.savedStatuses('a', a2.pid).size).toBe(0)
     // A session reusing the id starts from one and inherits nothing.
     expect((await live(jt, 'a')).id).toBe(1)
     await jt.killAll()

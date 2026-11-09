@@ -20,10 +20,7 @@ import { encodeText } from '../../../../shell/bytes.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { NOT_FOUND_STATUS } from '../../../../shell/constants.ts'
 import type { JobHandle, JobTable } from '../../../../execution/job/index.ts'
-import type { ProcessHandle } from '../../../../execution/process/handle.ts'
-import type { ProcessTable } from '../../../../execution/process/table.ts'
-import { abortable, settledWithin } from '../../../../utils/abort.ts'
-import { RUN_DRAIN_SECONDS } from '../../../../machine/constants.ts'
+import { abortable } from '../../../../utils/abort.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { EvaluationContext } from '../../../evaluation.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -32,14 +29,13 @@ import { builtinUsage, identifierLine } from '../shared.ts'
 import { reportJobs } from '../../background.ts'
 import { IDENTIFIER_RE } from '../constants.ts'
 import {
+  AMBIGUOUS_SPEC,
+  jobOfOperand,
   jobResult,
-  jobWithMachinePid,
-  resolveSpec,
+  savedOnMachine,
   scanningWhile,
   sessionOf,
-  stageWithPid,
 } from '../jobspec.ts'
-import { FIRST_PID } from '../../../../execution/process/constants.ts'
 import { JUST_ENDED_SECONDS } from '../../../../execution/job/constants.ts'
 
 /**
@@ -87,38 +83,6 @@ async function waitFirst(
  * Report one finished job's status, and reap it. Its output already went
  * where its shell writes as it was written.
  */
-/**
- * Wait for one stage of a background pipeline and answer its status. `wait $!`
- * names the last, which answers for the pipeline as far as it has ended under
- * `pipefail`, and leaves the job's list, as bash forgets a job once its last
- * process has been waited for. Mirrors Python's `_waited_stage`.
- */
-async function waitedStage(
-  jobTable: JobTable,
-  processes: ProcessTable,
-  session: SessionState | null,
-  [job, stage]: [JobHandle, ProcessHandle],
-  signal?: AbortSignal,
-): Promise<number> {
-  const ended = await scanningWhile(processes, abortable(stage.join(), signal))
-  const stages = job.process?.stages ?? []
-  if (stages.at(-1) !== stage) return ended.exit ?? 0
-  if (job.state === 'running') await jobTable.disown(job.id, job.sessionId)
-  else await jobTable.reap(job.id, job.sessionId)
-  if (session?.shellOptions.pipefail !== true) return ended.exit ?? 0
-  // What ended with it may be on a machine, which tells a moment later.
-  await settledWithin(
-    Promise.all(stages.slice(0, -1).map((each) => each.join())),
-    RUN_DRAIN_SECONDS,
-  )
-  return (
-    [...stages]
-      .reverse()
-      .map((each) => each.record.exit)
-      .find((code) => code !== null && code !== 0) ?? 0
-  )
-}
-
 async function reaped(jobTable: JobTable, job: JobHandle, cmdStr: string): Promise<RedirectResult> {
   // Reaped like GNU bash reaps a job waited on by id, so a later bare
   // `wait` does not answer for it again.
@@ -223,31 +187,28 @@ export async function handleWait(
   await jobTable.sync(sid)
   const visible = jobTable.listJobs(sid)
   const processes = jobTable.processes
+  const marks = jobTable.jobMarks(sid)
   let answered: number | null = null
+  let answeredPid = 0
+  const named = new Map<number, number>()
   for (const spec of specs) {
-    const stage = /^[0-9]+$/.test(spec) && !nextJob ? stageWithPid(visible, Number(spec)) : null
-    if (stage !== null) {
-      answered = await waitedStage(jobTable, processes, session, stage, signal)
-      continue
-    }
     answered = null
-    let job: JobHandle | null
-    let refusal: string
-    if (/^[0-9]+$/.test(spec) && Number(spec) > 0 && Number(spec) < FIRST_PID) {
-      const [held, ambiguous] = await jobWithMachinePid(processes, visible, Number(spec), machine)
-      if (ambiguous) {
-        errors.push(`${shellVoice()}wait: ${spec}: ambiguous job spec`)
-        continue
-      }
-      job = held
-      refusal = `pid ${spec} is not a child of this shell`
-    } else [job, refusal] = resolveSpec(visible, spec)
-    if (job === null) {
-      answered = /^[0-9]+$/.test(spec) ? jobTable.savedStatus(sid, Number(spec)) : null
-      if (answered === null) errors.push(`${shellVoice()}wait: ${refusal}`)
+    const numeric = /^[0-9]+$/.test(spec)
+    const found = await jobOfOperand(processes, visible, spec, marks, machine)
+    const job = found[0]
+    let refusal = found[1]
+    if (job !== null) {
+      picked.push(job)
+      if (numeric) named.set(job.id, Number(spec))
       continue
     }
-    picked.push(job)
+    if (numeric && !refusal.endsWith(AMBIGUOUS_SPEC)) {
+      answeredPid = Number(spec)
+      const [saved, ambiguous] = savedOnMachine(jobTable.savedStatuses(sid, answeredPid), machine)
+      answered = saved
+      if (ambiguous) refusal = `${spec}: ${AMBIGUOUS_SPEC}`
+    }
+    if (answered === null) errors.push(`${shellVoice()}wait: ${refusal}`)
   }
   const errText = errors.length > 0 ? errors.join('\n') + '\n' : ''
   const errBytes = errText !== '' ? encodeText(errText) : null
@@ -264,7 +225,8 @@ export async function handleWait(
       processes,
       abortable(waitFirst(jobTable, candidates, signal), signal),
     )
-    if (varName !== null && view !== null) await view.set(varName, String(job.shownPid))
+    if (varName !== null && view !== null)
+      await view.set(varName, String(named.get(job.id) ?? job.shownPid))
     const told = waitReports(session, jobTable)
     const [stdout, io, node] = await reaped(jobTable, job, cmdStr)
     if (errBytes !== null || told.length > 0) {
@@ -286,6 +248,7 @@ export async function handleWait(
   }
   if (answered !== null && picked.length === 0) {
     const code = answered
+    if (varName !== null && view !== null) await view.set(varName, String(answeredPid))
     return [
       null,
       new IOResult({ exitCode: code, stderr: errBytes }),
@@ -317,7 +280,8 @@ export async function handleWait(
   // same job however many were waited for. Only the no-operand form
   // leaves the variable unset, since it reports no one job.
   if (varName !== null && view !== null && lastJob !== null) {
-    await view.set(varName, String(lastJob.shownPid))
+    const pid = answered !== null ? answeredPid : (named.get(lastJob.id) ?? lastJob.shownPid)
+    await view.set(varName, String(pid))
   }
   const stderr = concat([errBytes ?? new Uint8Array(), told])
   return [

@@ -964,7 +964,9 @@ async def test_a_background_pipeline_is_its_stages():
             f"     {last}                       | cat &",
             first,
         ]
-        said = await ws.shell(f"kill {last}; wait {last}; echo $?; jobs")
+        said = await ws.shell(
+            f"kill {first} {last}; wait {last}; echo $?; jobs"
+        )
         assert said.stdout == b"143\n"
     finally:
         await ws.close()
@@ -1070,6 +1072,19 @@ async def test_a_stopped_pipeline_moves_no_bytes():
             b"[1]+  Running                 seq 1 300000 | cat > /m/out &\n"
             b"0\n300000\n"
         )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_ppid_is_the_shells_own_whatever_the_environment_says():
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, env={"PPID": "7"}
+    )
+    try:
+        said = await ws.shell("echo $PPID; PPID=5")
+        assert said.stdout == b"0\n"
+        assert said.stderr == b"bash: line 1: PPID: readonly variable\n"
     finally:
         await ws.close()
 

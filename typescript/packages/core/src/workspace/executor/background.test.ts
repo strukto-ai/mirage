@@ -549,7 +549,9 @@ describe('a job as bash runs it', () => {
         `     ${last}                       | cat &`,
         first,
       ])
-      expect(stdoutStr(await ws.shell(`kill ${last}; wait ${last}; echo $?; jobs`))).toBe('143\n')
+      expect(stdoutStr(await ws.shell(`kill ${first} ${last}; wait ${last}; echo $?; jobs`))).toBe(
+        '143\n',
+      )
     } finally {
       await ws.close()
     }
@@ -642,6 +644,20 @@ describe('a job as bash runs it', () => {
       expect(stdoutStr(said)).toBe(
         '[1]+  Running                 seq 1 300000 | cat > /m/out &\n0\n300000\n',
       )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("keeps $PPID the shell's own whatever the environment says", async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, env: { PPID: '7' } },
+    )
+    try {
+      const said = await ws.shell('echo $PPID; PPID=5')
+      expect(stdoutStr(said)).toBe('0\n')
+      expect(new TextDecoder().decode(said.stderr)).toBe('bash: line 1: PPID: readonly variable\n')
     } finally {
       await ws.close()
     }

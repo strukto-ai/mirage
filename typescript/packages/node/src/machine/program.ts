@@ -317,15 +317,32 @@ export async function runProgram(
   )
   // What a direct program left running can hold its output open for as long
   // as it likes, and the program's own end is what a `wait` reports, so its
-  // output gets a moment and no more. Mirrors Python's `let_go`.
-  let lettingGo: ReturnType<typeof setTimeout> | undefined
+  // output gets a moment and no more, counting only time no sink was taking
+  // what had been read. Mirrors Python's `let_go`.
+  let sinking = 0
+  const watched = (sink: OutputFn | undefined): OutputFn | undefined =>
+    sink === undefined
+      ? undefined
+      : async (chunk) => {
+          sinking += 1
+          try {
+            await sink(chunk)
+          } finally {
+            sinking -= 1
+          }
+        }
+  let lettingGo: ReturnType<typeof setInterval> | undefined
   if (options.direct === true)
     child.once('exit', () => {
-      lettingGo = setTimeout(() => {
+      let idle = 0
+      lettingGo = setInterval(() => {
+        if (sinking === 0) idle += STOP_POLL_SECONDS
+        if (idle < RUN_DRAIN_SECONDS) return
+        clearInterval(lettingGo)
         child.stdin.destroy()
         child.stdout.destroy()
         child.stderr.destroy()
-      }, RUN_DRAIN_SECONDS * 1000)
+      }, STOP_POLL_SECONDS * 1000)
     })
   // Set by the abort listener, which flow analysis does not follow.
   let stopping = null as Promise<void> | null
@@ -399,8 +416,8 @@ export async function runProgram(
   })()
   const out: Uint8Array[] = []
   const err: Uint8Array[] = []
-  const reading = readInto(child, child.stdout, options.output, out, signal)
-  const erring = readInto(child, child.stderr, options.errors, err, signal)
+  const reading = readInto(child, child.stdout, watched(options.output), out, signal)
+  const erring = readInto(child, child.stderr, watched(options.errors), err, signal)
   const pumps = Promise.all([reading, erring, feeding])
   try {
     await pumps
@@ -422,7 +439,7 @@ export async function runProgram(
       runner?.programSignaled(mirageSignal(child.signalCode))
     return { stdout: Buffer.concat(out), stderr: stderr.length > 0 ? stderr : null, exitCode: code }
   } finally {
-    clearTimeout(lettingGo)
+    clearInterval(lettingGo)
     if (stopping !== null) await stopping
     if (child.exitCode === null && child.signalCode === null) stopTree(child)
     child.stdin.destroy()

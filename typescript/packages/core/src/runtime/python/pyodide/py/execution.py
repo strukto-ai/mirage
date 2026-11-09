@@ -145,6 +145,44 @@ def carried(_number, frame):
 
 signal.signal(SIGNAL_CARRIER, carried)
 
+_set_signal = signal.signal
+_read_signal = signal.getsignal
+_carrier_handler = signal.SIG_DFL
+
+
+def _program_signal(number, handler):
+    """``signal.signal`` as a program calls it: its handler for the
+    carrier's number is kept apart from the carrier's own.
+
+    Args:
+        number (int): the signal.
+        handler (Callable | signal.Handlers): what it does with it.
+
+    Returns:
+        Callable | signal.Handlers: what it did before.
+    """
+    global _carrier_handler
+    if number != SIGNAL_CARRIER:
+        return _set_signal(number, handler)
+    previous, _carrier_handler = _carrier_handler, handler
+    return previous
+
+
+def _program_getsignal(number):
+    """``signal.getsignal`` as a program calls it (``_program_signal``).
+
+    Args:
+        number (int): the signal.
+
+    Returns:
+        Callable | signal.Handlers: what it does with it.
+    """
+    return _carrier_handler if number == SIGNAL_CARRIER else _read_signal(number)
+
+
+signal.signal = _program_signal
+signal.getsignal = _program_getsignal
+
 
 def take_signals_waiting():
     """Act on what was sent to a program waiting on the host. What a

@@ -58,7 +58,7 @@ def _job_row(job: JobHandle, long: bool, mark: str) -> str:
     running = " &" if job.state == JobState.RUNNING else ""
     stages = () if job.process is None else job.process.stages
     if long and stages:
-        first, *rest = [stage.record for stage in stages]
+        first, *rest = (stage.record for stage in stages)
         rows = [
             f"[{job.id}]{mark} {first.shown_pid:5d} {status}{first.command}"
         ]
@@ -124,7 +124,9 @@ async def handle_jobs(
         picked: list[JobHandle] = []
         for spec in specs:
             job, refusal = job_of_spec(
-                jobs, spec if spec.startswith("%") else f"%{spec}"
+                jobs,
+                spec if spec.startswith("%") else f"%{spec}",
+                (current, previous),
             )
             if job is None:
                 said = f"{shell_voice()}jobs: {spec}: no such job\n"
@@ -146,12 +148,14 @@ async def handle_jobs(
         jobs = []
     if "n" in flags:
         jobs = [j for j in jobs if not j.listed or j.state != JobState.RUNNING]
+    told: set[int] = set()
     if "p" in flags:
         lines = [str(j.shown_pid) for j in jobs]
     else:
         lines = [_job_row(j, "l" in flags, marks.get(j.id, " ")) for j in jobs]
         for j in jobs:
             j.listed = True
-    await job_table.pop_completed(sid)
+        told = {j.id for j in jobs}
+    await job_table.pop_completed(sid, only=told)
     out = encode_text("\n".join(lines) + "\n") if lines else b""
     return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)

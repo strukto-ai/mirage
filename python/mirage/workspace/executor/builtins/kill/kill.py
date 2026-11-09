@@ -34,6 +34,7 @@ from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import MAX_PID_OPERAND
 from mirage.workspace.executor.builtins.jobspec import (
+    JobMarks,
     grants_of,
     job_of_spec,
     job_result,
@@ -80,7 +81,11 @@ def _kill_list(
     )
 
 
-def _kill_pid(jobs: list[JobHandle], operand: str) -> tuple[int | None, str]:
+def _kill_pid(
+    jobs: list[JobHandle],
+    operand: str,
+    marks: JobMarks,
+) -> tuple[int | None, str]:
     """The managed PID one kill operand names, or bash's refusal.
 
     A ``%N`` job with no process, one restored from a snapshot, has
@@ -90,11 +95,12 @@ def _kill_pid(jobs: list[JobHandle], operand: str) -> tuple[int | None, str]:
     Args:
         jobs (list[JobHandle]): the jobs the builtin can see.
         operand (str): the operand as typed.
+        marks (JobMarks): the jobs ``jobs`` marks.
     """
     if operand == "":
         return None, "`': not a pid or valid job spec"
     if operand.startswith("%"):
-        job, refusal = job_of_spec(jobs, operand)
+        job, refusal = job_of_spec(jobs, operand, marks)
         if job is None:
             return None, refusal
         if job.process is None:
@@ -193,7 +199,7 @@ async def handle_kill(
     await job_table.sync(sid)
     for operand in words:
         jobs = job_table.list_jobs(sid)
-        pid, refusal = _kill_pid(jobs, operand)
+        pid, refusal = _kill_pid(jobs, operand, job_table.job_marks(sid))
         shown = {job.pid: job.shown_pid for job in jobs}
         if pid is not None and 0 < pid < FIRST_PID and operand.isdigit():
             found_process, ambiguous = await machine_process(

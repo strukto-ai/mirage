@@ -320,7 +320,25 @@ export class ProcessTable {
   async signal(handle: ProcessHandle, signal: number, group = false): Promise<boolean | null> {
     const sending = signal === 0 ? null : this.send(handle, signal)
     if (sending !== null) return sending
-    return this.signalOwn(handle, signal, group)
+    const found = this.signalOwn(handle, signal, group)
+    if ((signal === SIGSTOP || signal === SIGCONT) && !group)
+      await this.signalStages(handle, signal)
+    return found
+  }
+
+  /**
+   * Send STOP or CONT to the programs on machines that are the stages of a
+   * background pipeline, which no gate of Mirage's holds: bash stops every
+   * stage of such a job, and of a subshell job only the subshell. Mirrors
+   * Python's `_signal_stages`.
+   */
+  private async signalStages(handle: ProcessHandle, signal: number): Promise<void> {
+    const sends = handle.stages
+      .map((stage) => this.send(stage, signal))
+      .filter((sending) => sending !== null)
+    for (const sent of await Promise.allSettled(sends))
+      if (sent.status === 'rejected')
+        console.debug(`signal ${String(signal)} not sent:`, sent.reason)
   }
 
   /**
@@ -515,12 +533,31 @@ export class ProcessTable {
         if ((this.generations.get(sessionId) ?? 0) !== generation)
           throw Object.assign(new Error('process spawn is not permitted'), { code: 'EACCES' })
       },
-      probe: (pid: number) => this.target(pid, sessionId, permissions(), generation) !== null,
+      probe: (pid: number) => {
+        const granted = permissions()
+        return this.namedBy(pid, sessionId, granted).some(
+          (number) => this.target(number, sessionId, granted, generation) !== null,
+        )
+      },
       signal: async (pid: number, signal: number) => {
-        const handle = this.target(pid, sessionId, permissions(), generation)
+        const granted = permissions()
+        const [number = pid] = this.namedBy(pid, sessionId, granted)
+        const handle = this.target(number, sessionId, granted, generation)
         return handle === null ? false : ((await this.signal(handle, signal)) ?? false)
       },
     })
+  }
+
+  /**
+   * Mirage's own numbers for the processes a pid names: under `FIRST_PID`,
+   * the programs the session sees that have it on their machines. Mirrors
+   * Python's `_named_by`.
+   */
+  private namedBy(pid: number, sessionId: string, permissions: ProcessPermissions): number[] {
+    if (pid <= 0 || pid >= FIRST_PID) return [pid]
+    return this.visible(sessionId, permissions)
+      .filter((record) => record.machinePid?.pid === pid && record.machinePid.exited == null)
+      .map((record) => record.id.pid)
   }
 
   /**

@@ -132,7 +132,7 @@ import { commandName, forkForCall } from './utils.ts'
 import { encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { runWithSystemClock } from '../../utils/clock.ts'
 import { runWithEnvLimit } from '../session/budget.ts'
-import { deciding, seedParent, visibleEnv } from '../session/state.ts'
+import { deciding, envIsReadonly, seedParent, visibleEnv } from '../session/state.ts'
 
 /**
  * Everything `executeLine` needs from the workspace, passed explicitly
@@ -430,7 +430,7 @@ async function runLine(
         },
         started: (line) => {
           targetSession.processId = targetSession.shellPid = line.record.id.pid
-          if (!targetSession.vars.has(PPID)) seedParent(targetSession, 0)
+          if (!envIsReadonly(targetSession, PPID)) seedParent(targetSession, 0)
         },
         ignores: SHELL_IGNORED_SIGNALS,
         pid: targetSession.shellPid,

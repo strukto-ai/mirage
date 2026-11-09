@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ProcessHandle } from '../process/handle.ts'
-import { shownPid } from '../process/types.ts'
+import { WORKSPACE_MACHINE } from '../process/constants.ts'
+import { shownMachine, shownPid } from '../process/types.ts'
 import { JobId, type LineId } from '../types.ts'
 import type { IOResult } from '../../io/types.ts'
 import type { ExecutionNode } from '../../workspace/types.ts'
@@ -185,6 +186,18 @@ export class JobHandle {
   get lastPid(): number {
     const last = this.process?.stages.at(-1)
     return last === undefined ? this.shownPid : shownPid(last.record)
+  }
+
+  /**
+   * Every pid that names it, each with the machine `ps` shows it on: Mirage's
+   * own number, its program's and each stage's. Mirrors Python's `named_pids`.
+   */
+  get namedPids(): [number, string][] {
+    if (this.process === null) return [[this.id, WORKSPACE_MACHINE]]
+    return [this.process, ...this.process.stages].flatMap(({ record }): [number, string][] => [
+      [record.id.pid, shownMachine(record)],
+      [shownPid(record), shownMachine(record)],
+    ])
   }
 
   /**

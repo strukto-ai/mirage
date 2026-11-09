@@ -405,7 +405,8 @@ export function runTag(argv: readonly string[]): string {
 
 /** The shell line that prints one run's report, nothing while there is none. */
 export function statusLine(status: string): string {
-  return `PATH=${TOOLS_PATH}; cat ${singleQuote(status)} 2>/dev/null; true`
+  const path = singleQuote(status)
+  return `PATH=${TOOLS_PATH}; [ -O ${path} ] && cat ${path} 2>/dev/null; true`
 }
 
 /** The shell line that removes the reports of runs that have ended. */
@@ -433,7 +434,7 @@ export function scanLine(workspace: string): string {
   return (
     `PATH=${TOOLS_PATH}; m=${mark}; ` +
     `for f in ${reports}*; do ` +
-    '[ -f "$f" ] || continue; a=; b=; ' +
+    '[ -f "$f" ] && [ -O "$f" ] || continue; a=; b=; ' +
     '{ read -r a; read -r b; } <"$f"; ' +
     `printf '${SCAN_RUN_MARK} %s %s;%s\\n' "\${f##*-}" "$a" "$b"; ` +
     'done; ' +

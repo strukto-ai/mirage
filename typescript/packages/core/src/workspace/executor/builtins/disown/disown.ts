@@ -22,7 +22,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { scanOptions } from '../getopt.ts'
 import { builtinUsage } from '../shared.ts'
-import { jobResult, resolveSpec, sessionOf } from '../jobspec.ts'
+import { AMBIGUOUS_SPEC, jobOfOperand, jobOfSpec, jobResult, sessionOf } from '../jobspec.ts'
 
 /**
  * Drop jobs from the table without stopping them. No operand means the
@@ -55,11 +55,13 @@ export async function handleDisown(
   const errors: string[] = []
   await jobTable.sync(sid)
   const jobs = jobTable.listJobs(sid)
+  const marks = jobTable.jobMarks(sid)
   if (specs.length > 0) {
     for (const spec of specs) {
-      const [job] = resolveSpec(jobs, spec)
+      const [job, refusal] = await jobOfOperand(jobTable.processes, jobs, spec, marks)
       if (job === null) {
-        errors.push(`${shellVoice()}disown: ${spec}: no such job`)
+        const said = refusal.endsWith(AMBIGUOUS_SPEC) ? refusal : `${spec}: no such job`
+        errors.push(`${shellVoice()}disown: ${said}`)
         continue
       }
       targets.push(job)
@@ -67,8 +69,8 @@ export async function handleDisown(
   } else if (allJobs || runningOnly) {
     targets = runningOnly ? jobs.filter((j) => j.state === 'running') : jobs
   } else {
-    const current = jobs[jobs.length - 1]
-    if (current === undefined) {
+    const [current] = jobOfSpec(jobs, '%%', marks)
+    if (current === null) {
       return jobResult(cmdStr, `${shellVoice()}disown: current: no such job\n`, 1)
     }
     targets = [current]

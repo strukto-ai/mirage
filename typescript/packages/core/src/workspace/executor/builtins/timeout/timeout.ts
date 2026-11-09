@@ -32,6 +32,7 @@ import { ensureStream, OutputStream, yieldBytes } from '../../../../io/stream.ts
 import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult, materialize, OutputState } from '../../../../io/types.ts'
 import type { ProcessHandle } from '../../../../execution/process/handle.ts'
+import { endsLine } from '../../../../shell/helpers.ts'
 import { ProcessTable } from '../../../../execution/process/table.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
@@ -268,8 +269,10 @@ interface Supervision {
   // The command is a program that got the signal as sent, on a machine or
   // acting on signals itself.
   onMachine: () => boolean
-  // What a `kill -STOP` of it holds it until, null while none does.
+  // What a `kill -STOP` of timeout itself holds it until, null while none does.
   held: () => Promise<void> | null
+  // Whether its job is timeout alone, which a stop of itself holds.
+  ownsJob: () => boolean
   // bash's report of timeout dying of a signal.
   killed: (number: number) => string
   preserve: boolean
@@ -417,16 +420,17 @@ export async function handleTimeout(
   // What `kill` does to the command, or to its process group unless
   // --foreground, so what the command started gets it too. That group then
   // gets CONT, so one that was stopped takes the signal.
-  const send = (number: number): void => {
+  const send = async (number: number): Promise<void> => {
     if (foreground) {
-      void processes.signal(process, number, true)
+      await processes.signal(process, number, true)
       return
     }
     const group = process.record.group
-    void processes.signalGroup(group, number).then(() => {
-      if (number === SIGSTOP) holdJob(processes, process, syntax)
-      else if (number !== SIGKILL && number !== SIGCONT) void processes.signalGroup(group, SIGCONT)
-    })
+    await processes.signalGroup(group, number)
+    if (number === SIGSTOP) {
+      const job = ownJob(processes, process, syntax)
+      if (job !== null) processes.pause(job)
+    } else if (number !== SIGKILL && number !== SIGCONT) await processes.signalGroup(group, SIGCONT)
   }
   const watch = supervise(run, abort.signal, send, sink, held, seconds, lineSignal, {
     signal,
@@ -434,7 +438,11 @@ export async function handleTimeout(
     foreground,
     ignored: process.ignores.has(signal),
     onMachine: () => process.record.runtime !== null || process.takesSignals,
-    held: () => (process.paused ? process.resumed() : null),
+    held: () => {
+      const job = ownJob(processes, process, syntax)
+      return job?.paused === true ? job.resumed() : null
+    },
+    ownsJob: () => ownJob(processes, process, syntax) !== null,
     killed: (number) => killedReport(context, syntax, process, number, foreground),
     preserve: parse.flags.p === true,
     verbose: parse.flags.v === true,
@@ -461,12 +469,6 @@ export async function handleTimeout(
     state.finish()
   }
   return [new OutputStream(streamed(sink, watch, io, node), close), io, node]
-}
-
-function endsLine(node: TSNodeLike): boolean {
-  let root = node
-  while (root.parent !== null && root.parent !== undefined) root = root.parent
-  return root.text.slice((node.endIndex ?? 0) - (root.startIndex ?? 0)).trim() === ''
 }
 
 /**
@@ -497,11 +499,15 @@ function killedReport(
   )
 }
 
-// A job that is timeout alone is what stopped itself.
-function holdJob(processes: ProcessTable, process: ProcessHandle, syntax: TSNodeLike | null): void {
+// A job that is timeout alone is the process timeout is.
+function ownJob(
+  processes: ProcessTable,
+  process: ProcessHandle,
+  syntax: TSNodeLike | null,
+): ProcessHandle | null {
   const { parent, sessionId } = process.record
   const job = parent === null ? null : processes.target(parent, sessionId)
-  if (job?.background === true && job.record.command === syntax?.text) processes.pause(job)
+  return job?.background === true && job.record.command === syntax?.text ? job : null
 }
 
 /**
@@ -527,7 +533,7 @@ async function* streamed(
 async function supervise(
   run: Promise<IOResult>,
   aborted: AbortSignal,
-  send: (signal: number) => void,
+  send: (signal: number) => Promise<void>,
   sink: PipeConsole,
   held: IOResult[],
   seconds: number,
@@ -547,15 +553,24 @@ async function supervise(
     at: null,
     cancel: () => undefined,
   }
+  let sent: Promise<void> = Promise.resolve()
+  let settled = false
   const reached = (): void => {
     // A foreground command Mirage runs itself stops at a terminal stop as at
     // STOP; an asynchronous one ignores those.
-    send(stops && !how.onMachine() ? SIGSTOP : signal)
+    sent = send(stops && !how.onMachine() ? SIGSTOP : signal)
     if (killAfter === 0) return
     kill.at = new Promise((resolve) => {
-      kill.cancel = atDeadline(killAfter, () => {
+      const fire = (): void => {
+        if (settled) return
         resolve(TIMED_OUT)
-        send(SIGKILL)
+        void send(SIGKILL)
+      }
+      // A timeout that stopped itself sends it once it goes on.
+      kill.cancel = atDeadline(killAfter, () => {
+        const stopped = how.held()
+        if (stopped === null) fire()
+        else void stopped.then(fire)
       })
     })
   }
@@ -598,12 +613,16 @@ async function supervise(
       }
     }
     say(signal)
-    if (!foreground && (signal === SIGSTOP || signal === SIGCHLD)) {
-      // timeout stopped itself, or never wakes: only -k's KILL ends the
-      // wait, and not even that once it stopped itself.
-      if (kill.at === null || signal === SIGSTOP) {
-        await abortable(new Promise<never>(() => undefined), lineSignal)
-      }
+    if (!foreground && signal === SIGSTOP) {
+      await sent
+      // timeout stopped itself: a job goes on at CONT, what it stopped with
+      // it too.
+      if (!how.ownsJob()) await abortable(new Promise<never>(() => undefined), lineSignal)
+      await abortable(how.held() ?? Promise.resolve(), lineSignal)
+      await send(SIGCONT)
+    } else if (!foreground && signal === SIGCHLD) {
+      // timeout never wakes: only -k's KILL ends the wait.
+      if (kill.at === null) await abortable(new Promise<never>(() => undefined), lineSignal)
       await kill.at
       say(SIGKILL)
       said.push(how.killed(SIGKILL))
@@ -643,6 +662,7 @@ async function supervise(
     }
     return await stop(said, how.preserve ? 128 + signal : TIMEOUT_STATUS)
   } finally {
+    settled = true
     kill.cancel()
   }
 }

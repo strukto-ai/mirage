@@ -18,6 +18,7 @@ import { currentCaller, type RedirectResult } from '../../../../context/session_
 import { IOResult } from '../../../../io/types.ts'
 import { shownMachine, shownPid, type Process } from '../../../../execution/process/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { endsLine } from '../../../../shell/helpers.ts'
 import { ProcessId } from '../../../../execution/types.ts'
 import type { JobTable } from '../../../../execution/job/index.ts'
 import { systemNow } from '../../../../utils/clock.ts'
@@ -227,6 +228,7 @@ function asBashRunsThem(
   own: string,
   running: Process | null,
   nextPid: number,
+  lastOnLine: boolean,
 ): [readonly Process[], Process | null] {
   const jobs = new Map(
     listed
@@ -240,7 +242,7 @@ function asBashRunsThem(
       return above === undefined ? info : { ...info, parent: above }
     })
   if (running === null || !/[;&|\n]/.test(running.command)) return [rows, running]
-  if (running.command.replace(/["']/g, '').trimEnd().endsWith(own)) {
+  if (lastOnLine) {
     const shown = { ...running, command: own }
     return [rows.map((row) => (row.id.pid === shown.id.pid ? shown : row)), shown]
   }
@@ -310,6 +312,7 @@ export async function handlePs(
     cmdStr,
     currentCaller().process?.record ?? null,
     jobTable.processes.lastPid + 1,
+    session?.lineNode != null && endsLine(session.lineNode),
   )
   const rows = listed.filter((info) => every || options.pids.has(shownPid(info)))
   const columns = options.columns.length > 0 ? options.columns : constants.PLAIN

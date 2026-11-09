@@ -382,7 +382,29 @@ class ProcessTable:
         sending = None if signal == 0 else self.send(handle, signal)
         if sending is not None:
             return await sending
-        return self._signal_own(handle, signal, group)
+        found = self._signal_own(handle, signal, group)
+        if signal in (SIGSTOP, SIGCONT) and not group:
+            await self._signal_stages(handle, signal)
+        return found
+
+    async def _signal_stages(self, handle: ProcessHandle, signal: int) -> None:
+        """Send STOP or CONT to the programs on machines that are the
+        stages of a background pipeline, which no gate of Mirage's holds:
+        bash stops every stage of such a job, and of a subshell job only
+        the subshell.
+
+        Args:
+            handle (ProcessHandle): the pipeline's process.
+            signal (int): the signal.
+        """
+        sends = [
+            sending
+            for stage in handle.stages
+            if (sending := self.send(stage, signal)) is not None
+        ]
+        for sent in await asyncio.gather(*sends, return_exceptions=True):
+            if isinstance(sent, Exception):
+                logger.debug("signal %d not sent: %s", signal, sent)
 
     def _signal_own(
         self, handle: ProcessHandle, signal: int, group: bool
@@ -647,10 +669,36 @@ class ProcessTable:
                 raise PermissionError("process spawn is not permitted")
 
         def probe(pid: int) -> bool:
-            found = self.target(pid, session_id, permissions(), generation)
-            return found is not None
+            granted = permissions()
+            return any(
+                self.target(number, session_id, granted, generation)
+                is not None
+                for number in self._named_by(pid, session_id, granted)
+            )
 
         return SessionProcesses(check_spawn=check_spawn, probe=probe)
+
+    def _named_by(
+        self, pid: int, session_id: str, permissions: ProcessPermissions
+    ) -> list[int]:
+        """Mirage's own numbers for the processes a pid names: under
+        ``FIRST_PID``, the programs the session sees that have it on
+        their machines.
+
+        Args:
+            pid (int): the pid as typed.
+            session_id (str): the session asking.
+            permissions (ProcessPermissions): what its profile grants.
+        """
+        if not 0 < pid < FIRST_PID:
+            return [pid]
+        return [
+            record.pid
+            for record in self.visible(session_id, permissions)
+            if record.machine_pid is not None
+            and record.machine_pid.pid == pid
+            and record.machine_pid.exited is None
+        ]
 
     def revoke_session(self, session_id: str) -> None:
         """Revoke the session's views and cancel its runners.

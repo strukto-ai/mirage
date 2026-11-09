@@ -108,7 +108,10 @@ export async function handleJobs(
   if (specs.length > 0) {
     const picked: JobHandle[] = []
     for (const spec of specs) {
-      const [job, refusal] = jobOfSpec(jobs, spec.startsWith('%') ? spec : `%${spec}`)
+      const [job, refusal] = jobOfSpec(jobs, spec.startsWith('%') ? spec : `%${spec}`, [
+        current,
+        previous,
+      ])
       if (job === null) {
         const said = `${shellVoice()}jobs: ${spec}: no such job\n`
         const err = encodeText(
@@ -133,7 +136,7 @@ export async function handleJobs(
         j.listed = true
         return jobRow(j, flags.has('l'), marks.get(j.id) ?? ' ')
       })
-  await jobTable.popCompleted(sid)
+  await jobTable.popCompleted(sid, null, new Set(flags.has('p') ? [] : jobs.map((j) => j.id)))
   const out = lines.length > 0 ? encodeText(`${lines.join('\n')}\n`) : new Uint8Array()
   return [out, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
 }

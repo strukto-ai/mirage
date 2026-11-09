@@ -421,7 +421,7 @@
       }
     },
     {
-      "id": "job_bg_fg_shows_loop_output",
+      "id": "job_bg_wait_shows_loop_output",
       "seq": 502804,
       "targets": [
         "ram",
@@ -448,15 +448,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(for i in 1 2; do sleep 0.02; echo $i; done & fg) 2>/dev/null",
+      "command": "(for i in 1 2; do sleep 0.02; echo $i; done & wait) 2>/dev/null",
       "expect": {
         "exit": 0,
-        "stdout": "for i in 1 2; do sleep 0.02; echo $i; done\n1\n2\n",
+        "stdout": "1\n2\n",
         "stderr": ""
       }
     },
     {
-      "id": "job_bg_fg_takes_a_finished_job",
+      "id": "job_bg_wait_takes_a_finished_job",
       "seq": 502832,
       "targets": [
         "ram",
@@ -483,10 +483,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(echo hi & sleep 1; fg) 2>/dev/null",
+      "command": "(echo hi & sleep 1; wait) 2>/dev/null",
       "expect": {
         "exit": 0,
-        "stdout": "hi\necho hi\n",
+        "stdout": "hi\n",
         "stderr": ""
       }
     },

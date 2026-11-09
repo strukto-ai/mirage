@@ -310,7 +310,9 @@ async def handle_pipe(
         for stage, io, cmd in zip(stages, ios, commands)
         if stage is not None
     ]
-    if waited:
+    # A background pipeline is the job, which its shell reports itself.
+    owner = current_caller().process
+    if waited and not (owner is not None and owner.pipeline):
         report_reaped(context.frame, waited)
     if session.shell_options.get("pipefail"):
         rightmost_failure = next(

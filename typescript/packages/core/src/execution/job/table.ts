@@ -145,7 +145,7 @@ export class JobTable {
   // daemon tries them again.
   private left: Record<string, RecordFields> = {}
   private jobs = new Map<string, Map<number, JobHandle>>()
-  private readonly statuses = new Map<string, Map<number, number>>()
+  private readonly statuses = new Map<string, Map<number, Map<string, number>>>()
   private readonly marks = new Map<string, [number | null, number | null]>()
   // Jobs `disown` removed while still running, and ones another job's
   // number displaced: the shell forgets them, the workspace still owns
@@ -677,6 +677,7 @@ export class JobTable {
       if (await this.store.delete(sessionId, generationOf(fields))) {
         this.jobs.delete(sessionId)
         this.marks.delete(sessionId)
+        this.statuses.delete(sessionId)
         this.processes.revokeSession(sessionId)
         return [...stopped.values()]
       }
@@ -846,15 +847,21 @@ export class JobTable {
     for (const job of jobs) {
       const code = job.state === 'running' ? runningStatus : job.exitCode
       if (code === null) continue
-      for (const pid of [job.pid, job.shownPid, job.lastPid]) kept.set(pid, code)
+      for (const [pid, machine] of job.namedPids) {
+        const held = kept.get(pid) ?? new Map<string, number>()
+        kept.set(pid, held.set(machine, code))
+      }
     }
     for (const pid of [...kept.keys()].slice(0, Math.max(0, kept.size - SAVED_STATUSES)))
       kept.delete(pid)
   }
 
-  /** How the job a pid named ended, once it has left the list; null for none. */
-  savedStatus(sessionId: string, pid: number): number | null {
-    return this.statuses.get(sessionId)?.get(pid) ?? null
+  /**
+   * How the jobs a pid named ended, once they have left the list: each
+   * machine's status for it, as `ps` shows the machine; empty for none.
+   */
+  savedStatuses(sessionId: string, pid: number): ReadonlyMap<string, number> {
+    return this.statuses.get(sessionId)?.get(pid) ?? new Map<string, number>()
   }
 
   /**
@@ -895,10 +902,16 @@ export class JobTable {
     this.marks.set(sessionId, [running[0] ?? null, running[1] ?? null])
   }
 
-  async popCompleted(sessionId = '', keep: number | null = null): Promise<JobHandle[]> {
+  async popCompleted(
+    sessionId = '',
+    keep: number | null = null,
+    only: ReadonlySet<number> | null = null,
+  ): Promise<JobHandle[]> {
     const jobs = this.jobs.get(sessionId)
     if (jobs === undefined) return []
-    const completed = [...jobs.values()].filter((j) => j.state !== 'running' && j.id !== keep)
+    const completed = [...jobs.values()].filter(
+      (j) => j.state !== 'running' && j.id !== keep && (only === null || only.has(j.id)),
+    )
     this.jobsLeaving(sessionId, new Set(completed.map((j) => j.id)))
     for (const j of completed) jobs.delete(j.id)
     this.keepStatuses(sessionId, completed)

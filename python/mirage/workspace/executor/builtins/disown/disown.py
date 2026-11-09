@@ -21,8 +21,10 @@ from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.jobspec import (
+    AMBIGUOUS_SPEC,
+    job_of_operand,
+    job_of_spec,
     job_result,
-    resolve_spec,
     session_of,
 )
 from mirage.workspace.executor.builtins.shared import builtin_usage
@@ -69,11 +71,19 @@ async def handle_disown(
     errors: list[str] = []
     await job_table.sync(sid)
     jobs = job_table.list_jobs(sid)
+    marks = job_table.job_marks(sid)
     if specs:
         for spec in specs:
-            job, _ = resolve_spec(jobs, spec)
+            job, refusal = await job_of_operand(
+                job_table.processes, jobs, spec, marks
+            )
             if job is None:
-                errors.append(f"{shell_voice()}disown: {spec}: no such job")
+                said = (
+                    refusal
+                    if refusal.endswith(AMBIGUOUS_SPEC)
+                    else f"{spec}: no such job"
+                )
+                errors.append(f"{shell_voice()}disown: {said}")
                 continue
             targets.append(job)
     elif all_jobs or running_only:
@@ -83,11 +93,12 @@ async def handle_disown(
             else jobs
         )
     else:
-        if not jobs:
+        current, _ = job_of_spec(jobs, "%%", marks)
+        if current is None:
             return job_result(
                 cmd_str, f"{shell_voice()}disown: current: no such job\n", 1
             )
-        targets = [jobs[-1]]
+        targets = [current]
     if not keep:
         for job in targets:
             await job_table.disown(job.id, sid)

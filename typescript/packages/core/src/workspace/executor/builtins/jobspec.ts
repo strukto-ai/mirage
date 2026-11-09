@@ -14,7 +14,7 @@
 
 import type { RedirectResult } from '../../../context/session_context.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { ProcessHandle } from '../../../execution/process/handle.ts'
+import { FIRST_PID } from '../../../execution/process/constants.ts'
 import { shownMachine, shownPid, type Process } from '../../../execution/process/types.ts'
 import { RUN_WATCH_SECONDS } from '../../../machine/constants.ts'
 import { settledWithin } from '../../../utils/abort.ts'
@@ -66,12 +66,16 @@ export async function scanningWhile<T>(processes: ProcessTable, waiting: Promise
 }
 
 /**
- * Whether `-m` picks a process: `name` as `ps` shows its machine, or without
- * the provider; null for no `-m`. Mirrors Python's `on_machine`.
+ * Whether `-m` picks a machine: `name` as `ps` shows it, or without the
+ * provider; null for no `-m`. Mirrors Python's `names_machine`.
  */
-export function onMachine(process: Process, name: string | null): boolean {
-  const shown = shownMachine(process)
+export function namesMachine(shown: string, name: string | null): boolean {
   return name === null || name === shown || name === shown.slice(shown.lastIndexOf(':') + 1)
+}
+
+/** Whether `-m` picks a process (`namesMachine`). Mirrors Python's `on_machine`. */
+export function onMachine(process: Process, name: string | null): boolean {
+  return namesMachine(shownMachine(process), name)
 }
 
 /**
@@ -110,19 +114,16 @@ export async function machineProcess(
 /**
  * The job whose own process ran the program a machine pid names, which
  * `wait` reads as the pid of a program on its machine. A job whose program
- * has ended still answers until the job is collected. The view is brought
- * in step with the machines first (`scan`), which learns a program's pid
- * there. Returns the job, a running program's before an ended one's, null
- * for none, and whether jobs on more than one machine ran a program with
- * that pid, which bash's `ambiguous job spec` refuses.
+ * has ended still answers until the job is collected. Returns the job, a
+ * running program's before an ended one's, null for none, and whether jobs on
+ * more than one machine ran a program with that pid, which bash's
+ * `ambiguous job spec` refuses.
  */
-export async function jobWithMachinePid(
-  processes: ProcessTable,
+export function jobWithMachinePid(
   jobs: readonly JobHandle[],
   number: number,
   machine: string | null = null,
-): Promise<[JobHandle | null, boolean]> {
-  await processes.scan()
+): [JobHandle | null, boolean] {
   const held: [JobHandle, boolean][] = []
   const machines = new Set<string>()
   for (const job of jobs) {
@@ -141,26 +142,62 @@ export function jobNumbered(jobs: readonly JobHandle[], jobId: number): JobHandl
   return jobs.find((j) => j.id === jobId && !j.reported) ?? null
 }
 
-/** The stage of a background pipeline a pid names, as `ps` shows it, and its job. */
-export function stageWithPid(
+/**
+ * The background pipeline one of whose stages a pid names, as `ps` shows it:
+ * bash waits for and forgets a job by any of its pids. Returns the job, null
+ * for none, and whether stages on more than one machine have that pid, which
+ * bash's `ambiguous job spec` refuses. Mirrors Python's `job_with_stage`.
+ */
+export function jobWithStage(
   jobs: readonly JobHandle[],
   pid: number,
-): [JobHandle, ProcessHandle] | null {
-  for (const job of jobs)
-    for (const stage of job.process?.stages ?? [])
-      if (shownPid(stage.record) === pid) return [job, stage]
-  return null
+  machine: string | null = null,
+): [JobHandle | null, boolean] {
+  const found = jobs.flatMap((job) =>
+    (job.process?.stages ?? [])
+      .filter((stage) => shownPid(stage.record) === pid && onMachine(stage.record, machine))
+      .map((stage) => [job, stage.record.machine.toString()] as const),
+  )
+  if (new Set(found.map(([, shown]) => shown)).size > 1) return [null, true]
+  return [found[0]?.[0] ?? null, false]
+}
+
+/**
+ * How a pid that has left the list ended, of the statuses each machine that
+ * had it keeps: the status, null for none, and whether more than one machine
+ * had that pid, which bash's `ambiguous job spec` refuses. Mirrors Python's
+ * `saved_on_machine`.
+ */
+export function savedOnMachine(
+  saved: ReadonlyMap<string, number>,
+  machine: string | null,
+): [number | null, boolean] {
+  const codes = [...saved].filter(([shown]) => namesMachine(shown, machine))
+  if (codes.length > 1) return [null, true]
+  return [codes[0]?.[1] ?? null, false]
 }
 
 export const AMBIGUOUS_SPEC = 'ambiguous job spec'
 
+export type JobMarks = readonly [number | null, number | null]
+
+export const NO_MARKS: JobMarks = [null, null]
+
 /**
  * The job a `%` spec names, or bash's refusal: `%N`; `%%`, `%+` or a bare `%`
- * for the newest, `%-` for the one before it; `%name` for the job whose
- * command starts with `name` and `%?text` for the one whose command holds
- * `text`. Mirrors Python's `job_of_spec`.
+ * for the job `jobs` marks `+`, `%-` for the one it marks `-`, the `+` job
+ * when none is; `%name` for the job whose command starts with `name` and
+ * `%?text` for the one whose command holds `text`. Mirrors Python's
+ * `job_of_spec`.
+ *
+ * @param marks the jobs `jobs` marks (`JobTable.jobMarks`); none reads the
+ * newest two.
  */
-export function jobOfSpec(jobs: readonly JobHandle[], spec: string): [JobHandle | null, string] {
+export function jobOfSpec(
+  jobs: readonly JobHandle[],
+  spec: string,
+  marks: JobMarks = NO_MARKS,
+): [JobHandle | null, string] {
   const body = spec.slice(1)
   const missing = `${spec}: no such job`
   if (/^[0-9]+$/.test(body)) {
@@ -169,7 +206,10 @@ export function jobOfSpec(jobs: readonly JobHandle[], spec: string): [JobHandle 
   }
   const listed = jobs.filter((job) => !job.reported).sort((a, b) => b.id - a.id)
   if (body === '' || body === '%' || body === '+' || body === '-') {
-    const job = listed[body === '-' && listed.length > 1 ? 1 : 0]
+    const [current, previous] = marks
+    const wanted = body === '-' && previous !== null ? previous : current
+    const job =
+      listed.find((each) => each.id === wanted) ?? listed[body === '-' && listed.length > 1 ? 1 : 0]
     return job === undefined ? [null, missing] : [job, '']
   }
   const anywhere = body.startsWith('?')
@@ -206,11 +246,40 @@ export function jobWithPid(jobs: readonly JobHandle[], pid: number): JobHandle |
  * also returned by `$!`, so an unknown one is `pid N is not a child of
  * this shell`. Anything else is `not a pid or valid job spec`.
  */
-export function resolveSpec(jobs: readonly JobHandle[], spec: string): [JobHandle | null, string] {
-  if (spec.startsWith('%')) return jobOfSpec(jobs, spec)
+export function resolveSpec(
+  jobs: readonly JobHandle[],
+  spec: string,
+  marks: JobMarks = NO_MARKS,
+): [JobHandle | null, string] {
+  if (spec.startsWith('%')) return jobOfSpec(jobs, spec, marks)
   if (/^[0-9]+$/.test(spec)) {
     const job = jobWithPid(jobs, Number(spec))
     return [job, job !== null ? '' : `pid ${spec} is not a child of this shell`]
   }
   return [null, `\`${spec}': not a pid or valid job spec`]
+}
+
+/**
+ * The job a `wait` or `disown` operand names, by every pid the agent is
+ * shown for it, or bash's refusal: a pid any stage of a pipeline has, then
+ * under `FIRST_PID` a program's on its machine, then what `resolveSpec`
+ * reads. The table is brought in step with the machines first (`scan`),
+ * which learns a program's pid there. Mirrors Python's `job_of_operand`.
+ */
+export async function jobOfOperand(
+  processes: ProcessTable,
+  jobs: readonly JobHandle[],
+  spec: string,
+  marks: JobMarks = NO_MARKS,
+  machine: string | null = null,
+): Promise<[JobHandle | null, string]> {
+  if (!/^[0-9]+$/.test(spec)) return resolveSpec(jobs, spec, marks)
+  const number = Number(spec)
+  const onAMachine = number > 0 && number < FIRST_PID
+  if (onAMachine) await processes.scan()
+  let [job, ambiguous] = jobWithStage(jobs, number, machine)
+  if (job === null && !ambiguous && onAMachine)
+    [job, ambiguous] = jobWithMachinePid(jobs, number, machine)
+  if (ambiguous) return [null, `${spec}: ${AMBIGUOUS_SPEC}`]
+  return job !== null ? [job, ''] : resolveSpec(jobs, spec, marks)
 }

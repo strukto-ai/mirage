@@ -121,6 +121,26 @@ def test_signal_zero_stays_zero():
 
 
 @pytest.mark.asyncio
+async def test_a_slow_sink_gets_all_a_direct_program_wrote():
+    got = bytearray()
+
+    async def slow(chunk: bytes) -> None:
+        await asyncio.sleep(0.6)
+        got.extend(chunk)
+
+    ran = await run_program(
+        "sh",
+        None,
+        ["-c", "head -c 150000 /dev/zero"],
+        None,
+        output=slow,
+        direct=True,
+    )
+    assert ran.exit_code == 0
+    assert len(got) == 150000
+
+
+@pytest.mark.asyncio
 async def test_run_cli_returns_both_streams_and_the_status():
     ran = await run_program(
         "sh", "no sh", ["-c", "cat; echo e >&2; exit 3"], b"in"

@@ -199,12 +199,33 @@ async def run_program(
                 exited()
     assert process.stdout is not None and process.stderr is not None
 
+    sinking = 0
+
+    def watched(sink: OutputFn | None) -> OutputFn | None:
+        if sink is None:
+            return None
+
+        async def write(chunk: bytes) -> None:
+            nonlocal sinking
+            sinking += 1
+            try:
+                await sink(chunk)
+            finally:
+                sinking -= 1
+
+        return write
+
     async def let_go() -> None:
         # What a direct program left running can hold its output open for
         # as long as it likes, and the program's own end is what a `wait`
-        # reports, so its output gets a moment and no more.
+        # reports, so its output gets a moment and no more, counting only
+        # time no sink was taking what had been read.
         await ended.wait()
-        await asyncio.sleep(RUN_DRAIN_SECONDS)
+        idle = 0.0
+        while idle < RUN_DRAIN_SECONDS:
+            await asyncio.sleep(STOP_POLL_SECONDS)
+            if not sinking:
+                idle += STOP_POLL_SECONDS
         transport.close()
 
     letting_go = asyncio.create_task(let_go()) if direct else None
@@ -230,8 +251,8 @@ async def run_program(
             feeding.cancel()
 
     waiting = asyncio.create_task(wait_exit())
-    reading = asyncio.create_task(read_into(process.stdout, output))
-    erring = asyncio.create_task(read_into(process.stderr, errors))
+    reading = asyncio.create_task(read_into(process.stdout, watched(output)))
+    erring = asyncio.create_task(read_into(process.stderr, watched(errors)))
     try:
         stdout, stderr, _, _ = await asyncio.gather(
             reading, erring, feeding, waiting

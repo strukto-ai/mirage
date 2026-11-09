@@ -372,6 +372,7 @@ async def test_close_session_stops_and_forgets_its_jobs():
     assert table.get(1, "a") is None
     assert table.list_jobs("b") == [b1]
     # A session reusing the id starts from one and inherits nothing.
+    assert table.saved_statuses("a", a2.pid) == {}
     assert (await _submit(table, "a")).id == 1
     await table.kill_all()
     assert a2.signal is not None

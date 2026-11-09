@@ -30,9 +30,10 @@ import { isNode } from './loader.ts'
  * which the watchdog re-checks at the deadline so a countdown
  * cancelled just as it fires cannot poison the next run. Cell [3]
  * records an abort from the host before the worker has armed a run.
- * Cell [4] holds the signals sent to the program and not yet taken, a
- * bit each, [5] is 1 while a `kill -STOP` holds it, and [6] names the
- * signal that ended it. A signal reaches a guest by the carrier: written
+ * Cells [4] and [7] hold the signals sent to the program and not yet
+ * taken, a bit each, 1 to 32 and 33 to 64, [5] is 1 while a `kill -STOP`
+ * holds it, and [6] names the signal that ended it. A signal reaches a
+ * guest by the carrier: written
  * to the interrupt cell, it runs the handler the guest harness installs
  * for it, which takes what was sent.
  *
@@ -42,12 +43,14 @@ import { isNode } from './loader.ts'
  */
 
 /** The size of the shared cells above. */
-export const INTERRUPT_BYTES = 28
+export const INTERRUPT_BYTES = 32
 /** The signal number the interrupt cell carries sent signals under. */
 const SIGNAL_CARRIER = 64
 const PENDING = 4
 const HELD = 5
 const ENDED = 6
+const PENDING_HIGH = 7
+const CELL_BITS = 32
 
 /** What the guest harness calls about the signals sent to its program. */
 export interface GuestSignals {
@@ -76,11 +79,17 @@ export function guestSignals(cells: Int32Array | undefined): GuestSignals {
         Atomics.wait(cells, HELD, 1, 100)
     },
     take: () => {
-      const pending = Atomics.load(cells, PENDING)
-      if (pending === 0) return 0
-      const signal = 32 - Math.clz32(pending & -pending)
-      Atomics.and(cells, PENDING, ~(1 << (signal - 1)))
-      return signal
+      for (const [cell, below] of [
+        [PENDING, 0],
+        [PENDING_HIGH, CELL_BITS],
+      ] as const) {
+        const pending = Atomics.load(cells, cell)
+        if (pending === 0) continue
+        const bit = 32 - Math.clz32(pending & -pending)
+        Atomics.and(cells, cell, ~(1 << (bit - 1)))
+        return below + bit
+      }
+      return 0
     },
     ended: (signal) => {
       Atomics.store(cells, ENDED, signal)
@@ -91,17 +100,22 @@ export function guestSignals(cells: Int32Array | undefined): GuestSignals {
 
 /** Whether the cells have something for the guest to act on. */
 export function signalled(cells: Int32Array): boolean {
-  return Atomics.load(cells, PENDING) !== 0 || Atomics.load(cells, HELD) === 1
+  return (
+    Atomics.load(cells, PENDING) !== 0 ||
+    Atomics.load(cells, PENDING_HIGH) !== 0 ||
+    Atomics.load(cells, HELD) === 1
+  )
 }
 
 /** Clear the cells for a new run. */
 export function clearSignals(cells: Int32Array): void {
-  for (const cell of [PENDING, HELD, ENDED]) Atomics.store(cells, cell, 0)
+  for (const cell of [PENDING, PENDING_HIGH, HELD, ENDED]) Atomics.store(cells, cell, 0)
 }
 
 /** Send the guest a signal, which its harness acts on. */
 export function sendSignal(cells: Int32Array, signal: number): void {
-  Atomics.or(cells, PENDING, 1 << (signal - 1))
+  const high = signal > CELL_BITS
+  Atomics.or(cells, high ? PENDING_HIGH : PENDING, 1 << (signal - (high ? CELL_BITS : 0) - 1))
   Atomics.store(cells, 0, SIGNAL_CARRIER)
 }
 

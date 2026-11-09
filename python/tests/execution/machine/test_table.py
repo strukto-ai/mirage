@@ -92,6 +92,7 @@ class _Sleeper(MachineHandle):
         self.rows: list[MachineProcess] = []
         self.sent: list[tuple[str | MachinePid, int]] = []
         self.ended = asyncio.Event()
+        self.code = 143
 
     async def connect(self) -> None:
         return None
@@ -104,7 +105,7 @@ class _Sleeper(MachineHandle):
         ]
         await self.ended.wait()
         self.rows = []
-        return RunResult(stdout=b"", stderr=None, exit_code=143)
+        return RunResult(stdout=b"", stderr=None, exit_code=self.code)
 
     async def exec_line(self, line, stdin, env, cwd):
         return RunResult(
@@ -225,6 +226,69 @@ async def test_a_machine_pid_names_the_process_whose_program_has_it():
     finally:
         a.ended.set()
         b.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_saved_status_stays_with_its_machine():
+    a, b = _Sleeper("a"), _Sleeper("b")
+    b.code = 7
+    ws = _sleepers(a=a, b=b)
+    try:
+        await ws.shell("train 1 &")
+        await _started(a)
+        await ws.shell("train 1 &", machine="b")
+        await _started(b)
+        a.ended.set()
+        b.ended.set()
+        await ws.shell("wait -m a 412; wait -m b 412")
+        said = await ws.shell(
+            "wait -m a 412; echo $?; wait -m box:b 412; echo $?; "
+            "wait 412; echo $?"
+        )
+        assert said.stdout == b"143\n7\n127\n"
+        assert said.stderr == b"bash: line 1: wait: 412: ambiguous job spec\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_disown_and_tail_take_a_machine_pid():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        await ws.shell("echo x > /f")
+        await ws.shell("train 1 &")
+        await _started(box)
+        said = await ws.shell("timeout 0.3 tail -f --pid=412 /f; echo $?")
+        assert said.stdout == b"x\n124\n"
+        said = await ws.shell("disown 412; echo $?; jobs")
+        assert said.stdout == b"0\n"
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_stop_reaches_a_pipelines_programs_and_not_a_subshells():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        await ws.shell("( train 1; true ) &")
+        await _started(box)
+        await ws.shell("kill -STOP %1; kill -CONT %1")
+        assert box.sent == []
+        await ws.shell("kill -9 %1; wait; jobs >/dev/null")
+        box.sent.clear()
+        await ws.shell("train 1 | train 2 &")
+        await _started(box)
+        await asyncio.sleep(0.05)
+        await ws.shell("kill -STOP %1")
+        assert [signal for _, signal in box.sent] == [19, 19]
+        await ws.shell("kill -CONT %1")
+        assert [signal for _, signal in box.sent] == [19, 19, 18, 18]
+    finally:
+        box.ended.set()
         await ws.close()
 
 

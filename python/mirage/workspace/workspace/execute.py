@@ -115,6 +115,7 @@ from mirage.workspace.session.budget import run_with_env_limit
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.state import (
     deciding,
+    env_is_readonly,
     seed_parent,
     visible_env,
 )
@@ -759,7 +760,7 @@ async def _run_as_shell(
 
     def started(process: ProcessHandle) -> None:
         session.process_id = session.shell_pid = process.record.pid
-        if PPID not in session.vars:
+        if not env_is_readonly(session, PPID):
             seed_parent(session, 0)
 
     try:

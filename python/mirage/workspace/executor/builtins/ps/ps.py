@@ -23,6 +23,7 @@ from mirage.execution.process.types import Process, ProcessState
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
+from mirage.shell.helpers import ends_line
 from mirage.utils.clock import system_now
 from mirage.utils.timezone import zone_from_env
 from mirage.view.types import SessionView
@@ -276,6 +277,7 @@ def _as_bash_runs_them(
     own: str,
     running: Process | None,
     next_pid: int,
+    last_on_line: bool,
 ) -> tuple[tuple[Process, ...], Process | None]:
     """The processes as bash runs them. A background pipeline's stages
     are its shell's children, with nothing between them, and ``ps`` is a
@@ -287,6 +289,7 @@ def _as_bash_runs_them(
         own (str): the words ``ps`` was run with.
         running (Process | None): the process running ``ps``.
         next_pid (int): the pid ``ps`` has as a child.
+        last_on_line (bool): whether ``ps`` is run last on its line.
 
     Returns:
         tuple[tuple[Process, ...], Process | None]: the processes to
@@ -302,8 +305,7 @@ def _as_bash_runs_them(
     )
     if running is None or not any(c in running.command for c in ";&|\n"):
         return rows, running
-    line = running.command.replace('"', "").replace("'", "").rstrip()
-    if line.endswith(own):
+    if last_on_line:
         shown = replace(running, command=own)
         return tuple(shown if r.pid == shown.pid else r for r in rows), shown
     child = replace(
@@ -386,11 +388,13 @@ async def handle_ps(
     await job_table.processes.scan()
     every = options.all or not options.pids
     runner = current_caller().process
+    node = session._line_node if session is not None else None
     listed, running = _as_bash_runs_them(
         job_table.processes.visible(sid, grants_of(session)),
         cmd_str,
         runner.record if runner is not None else None,
         job_table.processes.last_pid + 1,
+        node is not None and ends_line(node),
     )
     rows = [info for info in listed if every or info.shown_pid in options.pids]
     columns = options.columns or constants.PLAIN

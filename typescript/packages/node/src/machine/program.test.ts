@@ -730,6 +730,19 @@ describe('host runs', () => {
     expect((await runner.join()).exit).toBe(0)
   })
 
+  it('gives a slow sink all a direct program wrote', async () => {
+    let got = 0
+    const ran = await runProgram('sh', null, ['-c', 'head -c 150000 /dev/zero'], null, {
+      direct: true,
+      output: async (chunk) => {
+        await delay(600)
+        got += chunk.byteLength
+      },
+    })
+    expect(ran.exitCode).toBe(0)
+    expect(got).toBe(150000)
+  })
+
   it('ends a direct program though what it left holds its output', async () => {
     const started = Date.now()
     const ran = await runProgram('sh', null, ['-c', 'sleep 4 & echo out'], null, { direct: true })

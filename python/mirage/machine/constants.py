@@ -451,7 +451,8 @@ def status_line(status: str) -> str:
     Args:
         status (str): the file it reports in.
     """
-    return f"PATH={TOOLS_PATH}; cat {single_quote(status)} 2>/dev/null; true"
+    path = single_quote(status)
+    return f"PATH={TOOLS_PATH}; [ -O {path} ] && cat {path} 2>/dev/null; true"
 
 
 def remove_line(spent: Sequence[str]) -> str:
@@ -486,7 +487,7 @@ def scan_line(workspace: str) -> str:
     return (
         f"PATH={TOOLS_PATH}; m={mark}; "
         f"for f in {reports}*; do "
-        '[ -f "$f" ] || continue; a=; b=; '
+        '[ -f "$f" ] && [ -O "$f" ] || continue; a=; b=; '
         '{ read -r a; read -r b; } <"$f"; '
         f'printf \'{SCAN_RUN_MARK} %s %s;%s\\n\' "${{f##*-}}" "$a" "$b"; '
         "done; "

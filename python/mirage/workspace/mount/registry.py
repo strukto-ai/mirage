@@ -151,7 +151,9 @@ class MountRegistry:
         # Scopes the redis index stores this registry builds; the
         # workspace sets it.
         self.workspace_id: str | None = None
-        self.session_processes: Callable[[SessionState], SessionProcesses] | None = None
+        self.session_processes: (
+            Callable[[SessionState], SessionProcesses] | None
+        ) = None
         # Fetches the managed names a tree a mount serves reads, once the
         # executor has picked that mount; the workspace sets it.
         self.fill_env: (

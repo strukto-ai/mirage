@@ -24,6 +24,7 @@ from mirage.execution.job.constants import (
     WATCH_RETRY_SECONDS,
 )
 from mirage.execution.job.types import Job, JobState
+from mirage.execution.process.constants import WORKSPACE_MACHINE
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.types import JobId, LineId
 from mirage.io.types import IOResult
@@ -175,6 +176,19 @@ class JobHandle:
         if self.process is None or not self.process.stages:
             return self.shown_pid
         return self.process.stages[-1].record.shown_pid
+
+    @property
+    def named_pids(self) -> list[tuple[int, str]]:
+        """Every pid that names it, each with the machine ``ps`` shows it
+        on: Mirage's own number, its program's and each stage's."""
+        if self.process is None:
+            return [(self.id, WORKSPACE_MACHINE)]
+        members = (self.process, *self.process.stages)
+        return [
+            (pid, member.record.shown_machine)
+            for member in members
+            for pid in (member.record.pid, member.record.shown_pid)
+        ]
 
     def take(self, outcome: str) -> None:
         """Take how the job ended from its console's ending.

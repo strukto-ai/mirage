@@ -17,12 +17,8 @@ import asyncio
 from mirage.context import get_current_evaluation
 from mirage.execution.job import JobHandle, JobState, JobTable
 from mirage.execution.job.constants import JUST_ENDED_SECONDS
-from mirage.execution.process.constants import FIRST_PID
-from mirage.execution.process.handle import ProcessHandle
-from mirage.execution.process.table import ProcessTable
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.machine.constants import RUN_DRAIN_SECONDS
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.shell.voice import shell_voice
@@ -31,12 +27,12 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.background import report_jobs
 from mirage.workspace.executor.builtins.constants import IDENTIFIER_RE
 from mirage.workspace.executor.builtins.jobspec import (
+    AMBIGUOUS_SPEC,
+    job_of_operand,
     job_result,
-    job_with_machine_pid,
-    resolve_spec,
+    saved_on_machine,
     scanning_while,
     session_of,
-    stage_with_pid,
 )
 from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
@@ -89,44 +85,6 @@ async def _reaped(
         IOResult(exit_code=job.exit_code),
         ExecutionNode(command=cmd_str, exit_code=job.exit_code),
     )
-
-
-async def _waited_stage(
-    job_table: JobTable,
-    processes: ProcessTable,
-    session: SessionState | None,
-    job: JobHandle,
-    stage: ProcessHandle,
-) -> int:
-    """Wait for one stage of a background pipeline and answer its status.
-    ``wait $!`` names the last, which answers for the pipeline as far as
-    it has ended under ``pipefail``, and leaves the job's list, as bash
-    forgets a job once its last process has been waited for.
-
-    Args:
-        job_table (JobTable): the session's jobs.
-        processes (ProcessTable): the workspace's processes.
-        session (SessionState | None): the shell, None for a bare table.
-        job (JobHandle): the stage's job.
-        stage (ProcessHandle): the stage.
-    """
-    ended = await scanning_while(processes, stage.join())
-    assert job.process is not None
-    stages = job.process.stages
-    if stages[-1] is not stage:
-        return ended.exit or 0
-    if job.state == JobState.RUNNING:
-        await job_table.disown(job.id, job.session_id)
-    else:
-        await job_table.reap(job.id, job.session_id)
-    if session is None or not session.shell_options.get("pipefail"):
-        return ended.exit or 0
-    # What ended with it may be on a machine, which tells a moment later.
-    others = [asyncio.ensure_future(s.join()) for s in stages[:-1]]
-    await asyncio.wait(others, timeout=RUN_DRAIN_SECONDS)
-    for other in others:
-        other.cancel()
-    return next((s.record.exit for s in reversed(stages) if s.record.exit), 0)
 
 
 async def handle_wait(
@@ -228,41 +186,29 @@ async def handle_wait(
     await job_table.sync(sid)
     visible = job_table.list_jobs(sid)
     processes = job_table.processes
+    marks = job_table.job_marks(sid)
     answered: int | None = None
+    answered_pid = 0
+    named: dict[int, int] = {}
     for spec in specs:
-        stage = (
-            stage_with_pid(visible, int(spec))
-            if spec.isdigit() and not next_job
-            else None
-        )
-        if stage is not None:
-            answered = await _waited_stage(
-                job_table, processes, session, *stage
-            )
-            continue
         answered = None
-        if spec.isdigit() and 0 < int(spec) < FIRST_PID:
-            job, ambiguous = await job_with_machine_pid(
-                processes, visible, int(spec), machine
+        job, refusal = await job_of_operand(
+            processes, visible, spec, marks, machine
+        )
+        if job is not None:
+            picked.append(job)
+            if spec.isdigit():
+                named[job.id] = int(spec)
+            continue
+        if spec.isdigit() and not refusal.endswith(AMBIGUOUS_SPEC):
+            answered_pid = int(spec)
+            answered, ambiguous = saved_on_machine(
+                job_table.saved_statuses(sid, answered_pid), machine
             )
             if ambiguous:
-                errors.append(
-                    f"{shell_voice()}wait: {spec}: ambiguous job spec"
-                )
-                continue
-            refusal = f"pid {spec} is not a child of this shell"
-        else:
-            job, refusal = resolve_spec(visible, spec)
-        if job is None:
-            answered = (
-                job_table.saved_status(sid, int(spec))
-                if spec.isdigit()
-                else None
-            )
-            if answered is None:
-                errors.append(f"{shell_voice()}wait: {refusal}")
-            continue
-        picked.append(job)
+                refusal = f"{spec}: {AMBIGUOUS_SPEC}"
+        if answered is None:
+            errors.append(f"{shell_voice()}wait: {refusal}")
     err_text = ("\n".join(errors) + "\n") if errors else ""
     if next_job:
         candidates = picked if specs else visible
@@ -279,7 +225,7 @@ async def handle_wait(
             processes, _wait_first(job_table, candidates)
         )
         if var is not None and view is not None:
-            await view.set(var, str(job.shown_pid))
+            await view.set(var, str(named.get(job.id, job.shown_pid)))
         told = _wait_reports(session, job_table)
         stdout, io, node = await _reaped(job_table, job, cmd_str)
         if err_text or told:
@@ -298,6 +244,8 @@ async def handle_wait(
         )
     if answered is not None and not picked:
         code = answered
+        if var is not None and view is not None:
+            await view.set(var, str(answered_pid))
         return (
             None,
             IOResult(exit_code=code, stderr=encode_text(err_text) or None),
@@ -331,7 +279,12 @@ async def handle_wait(
     # that same job however many were waited for. Only the no-operand
     # form leaves the variable unset, since it reports no one job.
     if var is not None and view is not None and last_job is not None:
-        await view.set(var, str(last_job.shown_pid))
+        pid = (
+            answered_pid
+            if answered is not None
+            else named.get(last_job.id, last_job.shown_pid)
+        )
+        await view.set(var, str(pid))
     return (
         None,
         IOResult(

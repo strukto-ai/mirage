@@ -181,7 +181,7 @@ class JobTable:
         # claim or another daemon tries them again.
         self._left: dict[str, RecordFields] = {}
         self._jobs: dict[str, dict[int, JobHandle]] = {}
-        self._statuses: dict[str, dict[int, int]] = {}
+        self._statuses: dict[str, dict[int, dict[str, int]]] = {}
         self._marks: dict[str, tuple[int | None, int | None]] = {}
         # Jobs `disown` removed from the table while they still run, and
         # ones another job's number displaced. The shell no longer lists,
@@ -689,6 +689,7 @@ class JobTable:
             if await self.store.delete(session_id, generation_of(fields)):
                 self._jobs.pop(session_id, None)
                 self._marks.pop(session_id, None)
+                self._statuses.pop(session_id, None)
                 self.processes.revoke_session(session_id)
                 return list(stopped.values())
         raise RuntimeError(
@@ -860,22 +861,23 @@ class JobTable:
                 else job.exit_code
             )
             if code is not None:
-                kept[job.pid] = kept[job.shown_pid] = code
-                kept[job.last_pid] = code
+                for pid, machine in job.named_pids:
+                    kept.setdefault(pid, {})[machine] = code
         for pid in list(kept)[: max(0, len(kept) - SAVED_STATUSES)]:
             del kept[pid]
 
-    def saved_status(self, session_id: str, pid: int) -> int | None:
-        """How the job a pid named ended, once it has left the list.
+    def saved_statuses(self, session_id: str, pid: int) -> dict[str, int]:
+        """How the jobs a pid named ended, once they have left the list.
 
         Args:
-            session_id (str): the session whose job it was.
+            session_id (str): the session whose jobs they were.
             pid (int): the pid.
 
         Returns:
-            int | None: its status, None for a pid no ended job had.
+            dict[str, int]: each machine's status for it, as ``ps`` shows
+            the machine; empty for a pid no ended job had.
         """
-        return self._statuses.get(session_id, {}).get(pid)
+        return self._statuses.get(session_id, {}).get(pid, {})
 
     def job_marks(self, session_id: str = "") -> tuple[int | None, int | None]:
         """The jobs ``jobs`` marks ``+`` and ``-``: the newest two, until
@@ -918,7 +920,10 @@ class JobTable:
         )
 
     async def pop_completed(
-        self, session_id: str = "", keep: int | None = None
+        self,
+        session_id: str = "",
+        keep: int | None = None,
+        only: set[int] | None = None,
     ) -> list[JobHandle]:
         """Return a session's completed/killed jobs and remove them from
         its list.
@@ -929,12 +934,16 @@ class JobTable:
         Args:
             session_id (str): the session whose list is pruned.
             keep (int | None): a job that stays listed all the same.
+            only (set[int] | None): the jobs that may go, as ``jobs``
+                forgets only what it printed; None for any.
         """
         jobs = self._jobs.get(session_id, {})
         completed = [
             j
             for j in jobs.values()
-            if j.state != JobState.RUNNING and j.id != keep
+            if j.state != JobState.RUNNING
+            and j.id != keep
+            and (only is None or j.id in only)
         ]
         self._jobs_leaving(session_id, {j.id for j in completed})
         for j in completed:

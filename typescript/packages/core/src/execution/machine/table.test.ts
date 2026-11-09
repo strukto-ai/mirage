@@ -95,6 +95,7 @@ class Sleeper extends MachineHandle {
   static override readonly provider = 'box'
   rows: MachineProcess[] = []
   readonly sent: [string | MachinePid, number][] = []
+  code = 143
   private end: () => void = () => undefined
   private readonly stopped = new Promise<void>((resolve) => {
     this.end = resolve
@@ -138,7 +139,7 @@ class Sleeper extends MachineHandle {
       }),
     ])
     this.rows = []
-    return { stdout: new Uint8Array(), stderr: null, exitCode: 143 }
+    return { stdout: new Uint8Array(), stderr: null, exitCode: this.code }
   }
 
   override execLine(): Promise<RunResult> {
@@ -362,6 +363,69 @@ describe('MachineTable scans', () => {
     } finally {
       a.finish()
       b.finish()
+      await ws.close()
+    }
+  })
+
+  it('keeps a saved status with its machine', async () => {
+    const a = new Sleeper('a')
+    const b = new Sleeper('b')
+    b.code = 7
+    const ws = sleepers({ a, b })
+    try {
+      await ws.shell('train 1 &')
+      await started(a)
+      await ws.shell('train 1 &', { machine: 'b' })
+      await started(b)
+      a.finish()
+      b.finish()
+      await ws.shell('wait -m a 412; wait -m b 412')
+      const said = await ws.shell(
+        'wait -m a 412; echo $?; wait -m box:b 412; echo $?; wait 412; echo $?',
+      )
+      expect(DEC.decode(said.stdout)).toBe('143\n7\n127\n')
+      expect(DEC.decode(said.stderr)).toBe('bash: line 1: wait: 412: ambiguous job spec\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('lets disown and tail take a machine pid', async () => {
+    const box = new Sleeper('a')
+    const ws = sleepers({ a: box })
+    try {
+      await ws.shell('echo x > /f')
+      await ws.shell('train 1 &')
+      await started(box)
+      let said = await ws.shell('timeout 0.3 tail -f --pid=412 /f; echo $?')
+      expect(DEC.decode(said.stdout)).toBe('x\n124\n')
+      said = await ws.shell('disown 412; echo $?; jobs')
+      expect(DEC.decode(said.stdout)).toBe('0\n')
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  })
+
+  it("stops a pipeline's programs and not a subshell's", async () => {
+    const box = new Sleeper('a')
+    const ws = sleepers({ a: box })
+    try {
+      await ws.shell('( train 1; true ) &')
+      await started(box)
+      await ws.shell('kill -STOP %1; kill -CONT %1')
+      expect(box.sent).toEqual([])
+      await ws.shell('kill -9 %1; wait; jobs >/dev/null')
+      box.sent.length = 0
+      await ws.shell('train 1 | train 2 &')
+      await started(box)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      await ws.shell('kill -STOP %1')
+      expect(box.sent.map(([, number]) => number)).toEqual([19, 19])
+      await ws.shell('kill -CONT %1')
+      expect(box.sent.map(([, number]) => number)).toEqual([19, 19, 18, 18])
+    } finally {
+      box.finish()
       await ws.close()
     }
   })
