@@ -170,6 +170,7 @@ export class PipeRecorder extends Recorder {
   claimed: ReadonlySet<Channel> = new Set()
   file: FileDescription | null = null
   failure: unknown = null
+  route: JobRoute | null = null
 
   streamTo(file: FileDescription, channel: Channel = Channel.STDOUT): void {
     this.bound.set(channel, file)
@@ -362,10 +363,19 @@ export class PipeRecorder extends Recorder {
 
   /**
    * Write bytes through the level's own descriptors, as a write through the
-   * description it opened does whatever `exec` did.
+   * description it opened does whatever `exec` did. A write that waited while
+   * `finishWriter` committed the file goes back through the job route: the
+   * level may have taken what it recorded for the last time, and nothing
+   * would read it here.
    */
   async emitLevel(channel: Channel, data: Uint8Array): Promise<void> {
-    if (this.bound.has(channel) && (await this.streamed(channel, data))) return
+    if (this.bound.has(channel)) {
+      if (await this.streamed(channel, data)) return
+      if (this.route !== null) {
+        await this.route.emit(channel, data)
+        return
+      }
+    }
     const scope = this.streams.get(channel)
     if (scope === undefined) {
       const channelTo = this.forward.get(channel)
@@ -931,6 +941,7 @@ async function runRedirects(
   session.terminalOutput = terminalOutput && outputs.get(1) === TO_STDOUT
   const jobOutput = session.jobOutput
   const route = new JobRoute(recorder, outputs, jobOutput ?? session.tty.jobs, dispatch, session)
+  recorder.route = route
   const leave = route.record(recorder)
   session.jobOutput = route
   const unbound = {

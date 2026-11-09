@@ -1649,6 +1649,24 @@ describe('JobRoute.release', () => {
   })
 })
 
+describe('a job writing while its redirect commits', () => {
+  it.each(['echo second', 'echo second >&3'])('lands after the commit: %s', async (job) => {
+    const data = new RAMVFS()
+    const write = data.write.bind(data)
+    vi.spyOn(data, 'write').mockImplementation(async (path, source) => {
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      await write(path, source)
+    })
+    const ws = new Workspace({ '/': data }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell(`{ echo first; (sleep .05; ${job}) & } > /f 3>&1; wait`)
+      expect((await ws.shell('cat /f')).stdoutText).toBe('first\nsecond\n')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 // Each live channel fails on its own: a stdout file that refuses its upload
 // leaves the stderr streaming into a healthy file untouched, and the first
 // failure is the one reported.

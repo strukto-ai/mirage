@@ -1265,6 +1265,24 @@ async def test_a_job_write_under_way_when_the_route_releases_lands():
     assert landed == [b"job\n"]
 
 
+class SlowWriteVFS(RAMVFS):
+    """A store whose upload outlasts a job's short sleep."""
+
+    async def write(
+        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
+    ) -> None:
+        await asyncio.sleep(0.2)
+        await super().write(path, data, atomic=atomic)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("job", ["echo second", "echo second >&3"])
+async def test_a_job_writing_while_its_redirect_commits_lands_after_it(job):
+    ws = Workspace({"/": SlowWriteVFS()}, mode=MountMode.WRITE)
+    await ws.shell(f"{{ echo first; (sleep .05; {job}) & }} > /f 3>&1; wait")
+    assert await _out(ws, "cat /f") == "first\nsecond\n"
+
+
 class RejectingVFS(RAMVFS):
     """A store whose uploads fail with its own error, no ``OSError``: a
     Drive 503 or a botocore ``ClientError`` on commit.

@@ -21,6 +21,7 @@ from functools import partial
 from typing import Any
 
 from mirage.cache.index.scope import command_scope
+from mirage.concurrency.limiter import shallow
 from mirage.context import (
     current_caller,
     program_invocation,
@@ -992,14 +993,14 @@ async def execute_node(
         # out with the node's own stderr, unless its caller collects it: a
         # simple command's words expand before its redirects apply.
         if not own_diagnostics:
-            stdout, io, exec_node = await run(own_diagnostics=False)
+            stdout, io, exec_node = await shallow(run(own_diagnostics=False))
         else:
             outer = context.frame.diagnostics
             outer_reports = context.frame.reports
             context.frame.diagnostics = []
             context.frame.reports = []
             try:
-                stdout, io, exec_node = await run()
+                stdout, io, exec_node = await shallow(run())
                 if context.frame.diagnostics:
                     err = diagnostic_stderr(node, context)
                     io.stderr = err + await io.materialize_stderr()

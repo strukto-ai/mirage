@@ -483,11 +483,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "fdef() { echo $(fdef); }; fdef; echo \"after $?\"; FUNCNEST=100; fdef() { fdef; }; fdef\necho \"next $?\"\nunset -f fdef; unset FUNCNEST",
+      "command": "fdef() { echo $(fdef); }; fdef; echo \"after $?\"; FUNCNEST=100; fdef() { fdef; }; fdef\necho \"next $?\"\nfdef() { if :; then while :; do case x in x) { ( ( fdef ) ); };; esac; break; done; fi; }; fdef; echo \"deep $?\"\nfdef() { if :; then case x in x) { echo $(fdef) \"|\"; };; esac; fi; }; fdef; echo \"sub $?\"\nunset -f fdef; unset FUNCNEST",
       "expect": {
         "exit": 0,
-        "stdout": "\nafter 0\nnext 1\n",
-        "stderr": "environment: line 1: fdef: maximum function nesting level exceeded (32)\nenvironment: line 1: fdef: maximum function nesting level exceeded (32)\n"
+        "stdout": "\nafter 0\nnext 1\ndeep 0\n| | | | | | | | | | | | | | | | | | | | | | | | | | | | | | | |\nsub 0\n",
+        "stderr": "environment: line 1: fdef: maximum function nesting level exceeded (32)\nenvironment: line 1: fdef: maximum function nesting level exceeded (32)\nenvironment: line 3: fdef: maximum function nesting level exceeded (32)\nenvironment: line 4: fdef: maximum function nesting level exceeded (32)\n"
       }
     }
   ]
