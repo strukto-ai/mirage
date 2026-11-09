@@ -40,7 +40,7 @@ from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.assignment import expand_array_items
 from mirage.workspace.node.types import ExpandedWords
-from mirage.workspace.session.state import prefix_temporaries
+from mirage.workspace.session.state import deciding, prefix_temporaries
 from mirage.workspace.types import ExecutionNode
 
 # Every letter GNU's `declare` accepts, so a typo refuses with the usage
@@ -240,6 +240,7 @@ async def execute_declaration(
             operands,
             temporaries,
             True,
+            deciding(),
         ),
         context,
         execute_fn,

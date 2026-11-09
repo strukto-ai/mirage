@@ -1,12 +1,22 @@
+import asyncio
+
 import pytest
 
 from mirage.io.stream import materialize
 from mirage.shell.array import make_array
 from mirage.shell.variable import VarAttr
 from mirage.workspace.evaluation import EvaluationContext
-from mirage.workspace.executor.builtins.declare.declare import mark_names
+from mirage.workspace.executor.builtins.declare.declare import (
+    declared,
+    mark_names,
+)
 from mirage.workspace.session.session import SessionState
-from mirage.workspace.session.state import seed_var, set_attr
+from mirage.workspace.session.state import (
+    env_get,
+    seed_var,
+    set_attr,
+    set_var,
+)
 
 
 def make_session() -> SessionState:
@@ -15,6 +25,41 @@ def make_session() -> SessionState:
 
 async def no_lines(*args, **kwargs):
     raise AssertionError("no nested line runs here")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop", [RuntimeError, asyncio.CancelledError])
+async def test_a_failed_subscript_gives_the_shell_back(
+    stop: type[BaseException],
+):
+    async def stopping(*args, **kwargs):
+        raise stop("stopped")
+
+    session = make_session()
+    seed_var(session, "KEPT", "outer")
+    outer = session.vars.shell.enter()
+    with pytest.raises(stop):
+        await declared(
+            "declare",
+            lambda shell: shell.declare(
+                "declare",
+                "",
+                "",
+                ["KEPT=local", "LANDED=1", "a[$(x)]=v"],
+                [],
+                True,
+                False,
+            ),
+            EvaluationContext(session),
+            stopping,
+            None,
+        )
+    assert env_get(session, "LANDED") == "1"
+    assert env_get(session, "KEPT") == "local"
+    session.vars.shell.leave(outer)
+    assert env_get(session, "KEPT") == "outer"
+    await set_var(session, "LATER", "1")
+    assert env_get(session, "LATER") == "1"
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import pytest
 
+from mirage.context.session_context import reset_explaining, set_explaining
+from mirage.policy.types import DryRun
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -25,6 +27,47 @@ def _ws() -> Workspace:
 async def _run(ws: Workspace, cmd: str) -> tuple[str, str, int]:
     io = await ws.shell(cmd)
     return (await io.stdout_str()), (await io.stderr_str()), io.exit_code
+
+
+async def _run_deciding(ws: Workspace, cmd: str) -> tuple[str, str, int]:
+    token = set_explaining(DryRun.DECIDING)
+    try:
+        return await _run(ws, cmd)
+    finally:
+        reset_explaining(token)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,name",
+    [
+        ("export A=1", "A"),
+        ("export B", "B"),
+        ("readonly C=1", "C"),
+        ("declare D=1", "D"),
+        ("declare -x E", "E"),
+        ("declare -a F=(a b)", "F"),
+        ("declare -a G", "G"),
+    ],
+)
+async def test_a_deciding_policy_cannot_declare(line: str, name: str):
+    ws = _ws()
+    _, err, code = await _run_deciding(ws, line)
+    assert err == f"{name}: permission denied\n"
+    assert code == 1
+    _, _, listed = await _run(ws, f"declare -p {name}")
+    assert listed == 1
+
+
+@pytest.mark.asyncio
+async def test_a_deciding_policy_is_refused_a_local_and_still_lists():
+    ws = _ws()
+    await _run(ws, "HELD=1")
+    out, err, _ = await _run_deciding(
+        ws, 'f() { local L=1; echo "in=$L"; }; f; declare -p HELD'
+    )
+    assert out == 'in=\ndeclare -- HELD="1"\n'
+    assert err == "L: permission denied\n"
 
 
 @pytest.mark.asyncio

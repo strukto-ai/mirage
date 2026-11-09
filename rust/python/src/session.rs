@@ -646,6 +646,7 @@ impl Shell {
     /// Run a `declare`, `typeset` or `local` statement: `operands` each a
     /// word, or `(name, append, items)` for an array literal.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn declare(
         slf: &Bound<'_, Self>,
         cmd: String,
@@ -654,6 +655,7 @@ impl Shell {
         operands: Vec<Bound<'_, PyAny>>,
         temporaries: Vec<String>,
         subscripts: bool,
+        deciding: bool,
     ) -> PyResult<ShellTask> {
         let declaration = Declaration {
             cmd,
@@ -662,6 +664,7 @@ impl Shell {
             operands: operands_in(&operands)?,
             temporaries,
             subscripts,
+            deciding,
         };
         ShellTask::start(slf, no_tree(), |inner| task::declare(inner, declaration))
     }
@@ -678,6 +681,7 @@ impl Shell {
         operands: Vec<Bound<'_, PyAny>>,
         temporaries: Vec<String>,
         functions: bool,
+        deciding: bool,
     ) -> PyResult<ShellTask> {
         let marking = Marking {
             cmd,
@@ -686,6 +690,7 @@ impl Shell {
             flags: flags.as_bytes().to_vec(),
             operands: operands_in(&operands)?,
             temporaries,
+            deciding,
         };
         ShellTask::start(slf, no_tree(), |inner| {
             task::mark_names(inner, marking, functions)

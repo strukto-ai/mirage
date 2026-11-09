@@ -26,7 +26,7 @@ import type { EvaluationContext } from '../../../evaluation.ts'
 import { runOnShell } from '../../../expand/node.ts'
 import type { ExecuteFn } from '../../../expand/types.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { prefixTemporaries } from '../../../session/state.ts'
+import { deciding, prefixTemporaries } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { bodyAliasValues } from '../alias/alias.ts'
 import { builtinUsage, fail, ok, result, written } from '../shared.ts'
@@ -224,6 +224,7 @@ export async function markNames(
         names,
         prefixTemporaries(session),
         functions,
+        deciding(),
       )
   if (!flags.has('f')) return declared(cmd, marking(false), context, executeFn, callStack)
   const marked = exporting ? session.exportedFunctions : session.readonlyFunctions

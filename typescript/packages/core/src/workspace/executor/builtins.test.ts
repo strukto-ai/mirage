@@ -19,7 +19,7 @@ import { helpPage, versionLine } from '../../commands/spec/standard.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import { specOf } from '../../commands/spec/index.ts'
 import { makeVar } from '../../shell/variable.ts'
-import { envSnapshot, seedVar, sessionView, setAttr } from '../session/state.ts'
+import { envGet, envSnapshot, seedVar, sessionView, setAttr } from '../session/state.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import { declared, markNames } from './builtins/declare/declare.ts'
 import type { DeclarationOperand } from './builtins/declare/types.ts'
@@ -98,13 +98,43 @@ const handleExport = (
 const runLocal = (cmd: string, s: SessionState): Promise<RedirectResult> =>
   declared(
     cmd,
-    (shell) => shell.declare(cmd, '', '', ['X=1'], [], false),
+    (shell) => shell.declare(cmd, '', '', ['X=1'], [], false, false),
     new EvaluationContext(s),
     noLines,
     null,
   )
 
 describe('handleExport / handleUnset / handlePrintenv', () => {
+  it('gives the shell back when a subscript fails', async () => {
+    const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ KEPT: 'outer' }) })
+    const outer = s.vars.shell.enter()
+    const stopping: ExecuteFn = () => Promise.reject(new Error('stopped'))
+    await expect(
+      declared(
+        'declare',
+        (shell) =>
+          shell.declare(
+            'declare',
+            '',
+            '',
+            ['KEPT=local', 'LANDED=1', 'a[$(x)]=v'],
+            [],
+            true,
+            false,
+          ),
+        new EvaluationContext(s),
+        stopping,
+        null,
+      ),
+    ).rejects.toThrow('stopped')
+    expect(envGet(s, 'LANDED')).toBe('1')
+    expect(envGet(s, 'KEPT')).toBe('local')
+    s.vars.shell.leave(outer)
+    expect(envGet(s, 'KEPT')).toBe('outer')
+    await sessionView(s).set('LATER', '1')
+    expect(envGet(s, 'LATER')).toBe('1')
+  })
+
   it('export KEY=VAL sets session env', async () => {
     const s = new SessionState({ sessionId: 'test' })
     await handleExport(['FOO=bar', 'BAZ=qux'], s)

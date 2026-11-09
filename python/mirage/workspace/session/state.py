@@ -86,14 +86,19 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
     )
 
 
+def deciding() -> bool:
+    """Whether a policy is deciding here: a method may read the session
+    it is handed but not change it."""
+    return explaining() is DryRun.DECIDING
+
+
 def _refuse_deciding(name: str) -> None:
-    """Refuse a write a policy makes while it decides: a method may read
-    the session it is handed but not change it.
+    """Refuse a write a policy makes while it decides.
 
     Args:
         name (str): the variable written.
     """
-    if explaining() is DryRun.DECIDING:
+    if deciding():
         raise PolicyDenied(errno.EACCES, f"{name}: permission denied", name)
 
 

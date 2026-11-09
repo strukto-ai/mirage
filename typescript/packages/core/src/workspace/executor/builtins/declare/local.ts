@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { prefixTemporaries } from '../../../session/state.ts'
+import { deciding, prefixTemporaries } from '../../../session/state.ts'
 import type { BuiltinCall } from '../types.ts'
 import { declared } from './declare.ts'
 
@@ -27,7 +27,7 @@ export function localBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   const temporaries = prefixTemporaries(call.context.session)
   return declared(
     'local',
-    (shell) => shell.declare('local', '', '', args, temporaries, false),
+    (shell) => shell.declare('local', '', '', args, temporaries, false, deciding()),
     call.context,
     call.executeFn,
     call.callStack,

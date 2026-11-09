@@ -104,6 +104,9 @@ pub struct Writer<'a> {
     /// functions, aliases, positional parameters.
     pub limit: Option<usize>,
     pub outside: usize,
+    /// A policy is deciding: it may read the session but not change it, so
+    /// every write refuses as one to a hidden name.
+    pub deciding: bool,
 }
 
 impl<'a> Writer<'a> {
@@ -117,6 +120,7 @@ impl<'a> Writer<'a> {
             outside: shell.outside,
             store: &mut shell.vars,
             diagnostics,
+            deciding: false,
         }
     }
 
@@ -130,7 +134,7 @@ impl<'a> Writer<'a> {
     }
 
     fn visible(&self, name: &str) -> Result<(), Fault> {
-        if self.store.hidden(name) {
+        if self.deciding || self.store.hidden(name) {
             return Err(Fault::Hidden(name.to_owned()));
         }
         Ok(())
@@ -683,7 +687,7 @@ impl<'a> Writer<'a> {
         append: bool,
     ) -> Result<Element, Fault> {
         let name = self.store.target(name);
-        if self.store.hidden(&name) {
+        if self.deciding || self.store.hidden(&name) {
             return Ok(Element::Hidden);
         }
         // An existing scalar becomes element 0, even when empty: bash
@@ -819,6 +823,7 @@ mod tests {
             diagnostics: None,
             limit: None,
             outside: 0,
+            deciding: false,
         }
     }
 

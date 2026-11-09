@@ -217,6 +217,7 @@ class Shell:
         operands: Sequence[str | tuple[str, bool, list[str]]],
         temporaries: list[str],
         subscripts: bool,
+        deciding: bool,
     ) -> ShellTask: ...
     def mark_names(
         self,
@@ -227,6 +228,7 @@ class Shell:
         operands: Sequence[str | tuple[str, bool, list[str]]],
         temporaries: list[str],
         functions: bool,
+        deciding: bool,
     ) -> ShellTask: ...
     def set(
         self,

@@ -1059,6 +1059,7 @@ export class Shell {
     operands: readonly DeclarationItem[],
     temporaries: readonly string[],
     subscripts: boolean,
+    deciding: boolean,
   ): ShellTask {
     const [handle, step] = this.call(
       'declare',
@@ -1068,6 +1069,7 @@ export class Shell {
       operands.map(operandItem),
       [...temporaries],
       subscripts,
+      deciding,
     ) as readonly [number, Item]
     return new ShellTask(handle, step, null)
   }
@@ -1084,6 +1086,7 @@ export class Shell {
     operands: readonly DeclarationItem[],
     temporaries: readonly string[],
     functions: boolean,
+    deciding: boolean,
   ): ShellTask {
     const [handle, step] = this.call(
       'mark_names',
@@ -1094,6 +1097,7 @@ export class Shell {
       operands.map(operandItem),
       [...temporaries],
       functions,
+      deciding,
     ) as readonly [number, Item]
     return new ShellTask(handle, step, null)
   }

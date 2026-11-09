@@ -70,6 +70,8 @@ pub struct Declaration {
     /// Whether an element operand's subscript expands once more
     /// (`declare 'd[$i]=w'`); false takes it as typed.
     pub subscripts: bool,
+    /// A policy is deciding: a write refuses, a listing still prints.
+    pub deciding: bool,
 }
 
 /// `export` or `readonly` on variables, options already read.
@@ -80,6 +82,7 @@ pub struct Marking {
     pub flags: Vec<u8>,
     pub operands: Vec<Operand>,
     pub temporaries: Vec<String>,
+    pub deciding: bool,
 }
 
 /// The letters a no-name `declare` listing filters on.
@@ -345,6 +348,7 @@ struct Run<'a, H: Host> {
     diagnostics: &'a mut Vec<Diagnostic>,
     cmd: String,
     voice: Vec<u8>,
+    deciding: bool,
 }
 
 /// Where a `declare` operand's scope and letters come from.
@@ -365,7 +369,10 @@ impl<H: Host> Run<'_, H> {
     }
 
     fn writer(&mut self) -> Writer<'_> {
-        Writer::of(self.shell, Some(&mut *self.diagnostics))
+        Writer {
+            deciding: self.deciding,
+            ..Writer::of(self.shell, Some(&mut *self.diagnostics))
+        }
     }
 
     fn said(&self, parts: &[&[u8]]) -> Vec<u8> {
@@ -1057,8 +1064,11 @@ impl<H: Host> Run<'_, H> {
             raw.to_vec()
         };
         self.premark(&name, &scope.shaping, true)?;
-        let element =
-            Writer::of(self.shell, None).element(&name, Some(&subscript), value, append)?;
+        let element = Writer {
+            deciding: self.deciding,
+            ..Writer::of(self.shell, None)
+        }
+        .element(&name, Some(&subscript), value, append)?;
         match element {
             Element::Landed => {}
             Element::Readonly => return Ok(Some(self.readonly_line(name.as_bytes()))),
@@ -1340,7 +1350,7 @@ impl<H: Host> Run<'_, H> {
                 continue;
             };
             let name = text(bare);
-            if self.store().hidden(&name) {
+            if self.deciding || self.store().hidden(&name) {
                 return Err(discard(Fault::Hidden(name)));
             }
             let fresh = !global && self.store().in_function() && !self.store().is_local(&name);
@@ -1580,6 +1590,7 @@ pub async fn run_declaration<H: Host>(
         diagnostics,
         cmd: declaration.cmd.clone(),
         voice,
+        deciding: declaration.deciding,
     };
     run.declaration(declaration).await
 }
@@ -1600,6 +1611,7 @@ pub fn run_marking<H: Host>(
         diagnostics,
         cmd: marking.cmd.clone(),
         voice,
+        deciding: marking.deciding,
     };
     if functions {
         staged(&mut run, marking)
@@ -1651,6 +1663,7 @@ mod tests {
             operands: words.iter().map(|w| Operand::Word(w.to_vec())).collect(),
             temporaries: Vec::new(),
             subscripts: true,
+            deciding: false,
         }
     }
 
@@ -1726,6 +1739,44 @@ mod tests {
         );
         assert_eq!(shell.vars.scalar("R"), Some(&b"1"[..]));
         assert_eq!(shell.vars.scalar("X"), Some(&b"3"[..]));
+    }
+
+    #[test]
+    fn a_deciding_policy_lists_but_cannot_write() {
+        let mut shell = shell();
+        run(&mut shell, &declaration("declare", b"", &[b"HELD=1"])).unwrap();
+        let writes: [(&[u8], &[&[u8]]); 3] = [(b"", &[b"X=1"]), (b"x", &[b"Y"]), (b"a", &[b"Z"])];
+        for (flags, words) in writes {
+            let result = run(
+                &mut shell,
+                &Declaration {
+                    deciding: true,
+                    ..declaration("declare", flags, words)
+                },
+            );
+            let refused = match result {
+                Ok(declared) => declared.status,
+                Err(Fault::Signal(_)) => 1,
+                Err(_) => panic!("refused as a hidden name"),
+            };
+            assert_eq!(refused, 1);
+        }
+        assert_eq!(shell.vars.record("X").map(|_| ()), None);
+        assert_eq!(shell.vars.record("Y").map(|_| ()), None);
+        assert_eq!(shell.vars.record("Z").map(|_| ()), None);
+        let listed = run(
+            &mut shell,
+            &Declaration {
+                deciding: true,
+                ..declaration("declare", b"p", &[b"HELD"])
+            },
+        )
+        .unwrap();
+        assert_eq!(listed.status, 0);
+        assert_eq!(
+            listed.pieces,
+            vec![(false, b"declare -- HELD=\"1\"\n".to_vec())]
+        );
     }
 
     #[test]

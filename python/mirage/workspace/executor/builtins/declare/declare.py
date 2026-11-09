@@ -41,7 +41,7 @@ from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.expand.node import run_on_shell
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.state import prefix_temporaries
+from mirage.workspace.session.state import deciding, prefix_temporaries
 from mirage.workspace.types import ExecutionNode
 
 
@@ -263,6 +263,7 @@ async def mark_names(
             names,
             prefix_temporaries(session),
             functions,
+            deciding(),
         )
 
     if "f" not in flags:

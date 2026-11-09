@@ -340,6 +340,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 operands: operands_in(args.list()?)?,
                 temporaries: strings(args.list()?)?,
                 subscripts: args.flag()?,
+                deciding: args.flag()?,
             };
             return engine.start(handle, |inner| task::declare(inner, declaration));
         }
@@ -351,6 +352,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let operands = operands_in(args.list()?)?;
             let temporaries = strings(args.list()?)?;
             let functions = args.flag()?;
+            let deciding = args.flag()?;
             let marking = Marking {
                 cmd,
                 attr,
@@ -358,6 +360,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 flags,
                 operands,
                 temporaries,
+                deciding,
             };
             return engine.start(handle, |inner| task::mark_names(inner, marking, functions));
         }

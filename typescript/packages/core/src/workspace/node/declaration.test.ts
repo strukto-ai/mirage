@@ -16,6 +16,8 @@
 // python/tests/workspace/node/test_declaration.py.
 
 import { describe, expect, it } from 'vitest'
+import { runExplaining } from '../../context/session_context.ts'
+import { DryRun } from '../../policy/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
@@ -26,6 +28,32 @@ function makeWs(): Workspace {
 }
 
 describe('executeDeclaration', () => {
+  it.each([
+    ['export A=1', 'A'],
+    ['export B', 'B'],
+    ['readonly C=1', 'C'],
+    ['declare D=1', 'D'],
+    ['declare -x E', 'E'],
+    ['declare -a F=(a b)', 'F'],
+    ['declare -a G', 'G'],
+  ])('refuses a deciding policy writing with %s', async (line, name) => {
+    const ws = makeWs()
+    const io = await runExplaining(DryRun.DECIDING, () => ws.shell(line))
+    expect(stderrStr(io)).toBe(`${name}: permission denied\n`)
+    expect(io.exitCode).toBe(1)
+    expect((await ws.shell(`declare -p ${name}`)).exitCode).toBe(1)
+  })
+
+  it('refuses a deciding policy a local and lets it list', async () => {
+    const ws = makeWs()
+    await ws.shell('HELD=1')
+    const io = await runExplaining(DryRun.DECIDING, () =>
+      ws.shell('f() { local L=1; echo "in=$L"; }; f; declare -p HELD'),
+    )
+    expect(stdoutStr(io)).toBe('in=\ndeclare -- HELD="1"\n')
+    expect(stderrStr(io)).toBe('L: permission denied\n')
+  })
+
   it('refuses an unknown option letter before any operand', async () => {
     const ws = makeWs()
     const io = await ws.shell('declare -q NAME')
