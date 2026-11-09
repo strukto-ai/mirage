@@ -18,7 +18,6 @@ from datetime import datetime, timezone, tzinfo
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.builtin.utils.strftime import (
-    gnu_strftime,
     strftime_stream,
 )
 from mirage.commands.config import Context, command
@@ -36,10 +35,13 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
 from mirage.io.stream import OutputStream, async_chain, close_quietly
 from mirage.io.types import ByteSource, IOResult
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.io.yield_budget import YieldBudget
+from mirage.rs.stream import open_stream
+from mirage.shell.bytes import byte_view, encode_text
 from mirage.types import PathSpec
-from mirage.utils.clock import system_date
+from mirage.utils.clock import system_date, system_now
 from mirage.utils.dates import (
+    date_reply,
     iso_timestamp,
     parse_date_expr_async,
     parse_posix_time_async,
@@ -145,8 +147,9 @@ async def _dated(
     fmt: str,
     io: IOResult,
 ) -> AsyncIterator[bytes]:
-    """``-f``'s output, a line at a time as the expressions arrive; what
-    names no date goes to ``io``'s stderr, exit 1, once the input ends.
+    """``-f``'s output, a line at a time as the expressions arrive, read
+    and printed by one mirage-rs stream; what names no date goes to
+    ``io``'s stderr, exit 1.
 
     Args:
         first (bytes): the input's first chunk, already read.
@@ -155,38 +158,38 @@ async def _dated(
         fmt (str): the output format.
         io (IOResult): the result the refusals settle into.
     """
-    errors: list[str] = []
-
-    async def one(raw: bytes) -> bytes:
-        text = decode_text(raw)
-        dt = await _named(text, zone)
-        if dt is None:
-            errors.append(f"date: invalid date '{quote_text(text)}'\n")
-            return b""
-        return encode_text(
-            gnu_strftime(dt if zone else dt.astimezone(), fmt) + "\n"
-        )
-
-    held = bytearray()
-    chunk = first
+    current, nanos = divmod(round(system_now() * 1_000_000_000), 1_000_000_000)
+    engine = open_stream(
+        "date_lines",
+        {"format": byte_view(fmt), "now": current, "nanos": nanos},
+    )
+    zones: dict[str, tzinfo] = {}
+    budget = YieldBudget()
+    pending: bytes | None = first
     while True:
-        start = 0
-        while (at := chunk.find(b"\n", start)) != -1:
-            held += chunk[start:at]
-            if out := await one(bytes(held)):
+        while engine.busy():
+            await budget.run()
+            if out := engine.drain():
                 yield out
-            held.clear()
-            start = at + 1
-        held += chunk[start:]
-        try:
-            chunk = await anext(rest)
-        except StopAsyncIteration:
+        taken = engine.request()
+        if taken is None:
             break
-    if held and (out := await one(bytes(held))):
+        await budget.run()
+        header, _ = taken
+        if header["op"] == "read":
+            chunk, pending = pending, None
+            if chunk is None:
+                chunk = await anext(rest, None)
+            out = engine.respond({"end": chunk is None}, chunk or b"")
+        else:
+            out = engine.respond(*date_reply(header, zone, zones))
+        if out:
+            yield out
+    if out := engine.finish():
         yield out
-    if errors:
-        io.exit_code = 1
-        io.stderr = encode_text("".join(errors))
+    io.exit_code = engine.status()
+    if errors := engine.take_stderr():
+        io.stderr = errors
 
 
 async def _each_line(

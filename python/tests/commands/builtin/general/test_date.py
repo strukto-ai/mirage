@@ -201,3 +201,40 @@ async def test_date_f_closed_early_closes_its_input(pulls):
         assert await anext(out) == b"0\n"
     await close_quietly(out)
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_date_f_prints_each_line_and_reports_the_rest():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell(
+            "printf '2001-02-03 04:05:06.123456789\\n\\n  \\nnot a date\\n@5'"
+            " > /l"
+        )
+        assert await _run(ws, "date -u -f /l '+%T.%N'") == (
+            "04:05:06.123456789\n"
+            "00:00:00.000000000\n"
+            "00:00:00.000000000\n"
+            "00:00:05.000000000\n",
+            "date: invalid date 'not a date'\n",
+            1,
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_date_f_answers_a_line_naming_its_own_zone():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell(
+            "printf 'TZ=\"Asia/Tokyo\" 2001-02-03 04:05:06\\n' > /z"
+        )
+        line = "TZ=America/New_York date -f /z '+%F %T %Z %z'"
+        assert await _run(ws, line) == (
+            "2001-02-02 14:05:06 EST -0500\n",
+            "",
+            0,
+        )
+    finally:
+        await ws.close()

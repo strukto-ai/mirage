@@ -5,9 +5,11 @@ from collections.abc import AsyncGenerator, Callable
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, TypeVar, cast
 
-from mirage.concurrency.limiter import settle
+from mirage.concurrency.limiter import owned_task, settle
 from mirage.concurrency.worker import Worker
 from mirage.io.cooperative import chunks
+from mirage.io.spool import ByteSpool
+from mirage.io.types import ByteSource
 from mirage.rs import diff_worker
 from mirage.rs.diff_types import (
     DiffOptions,
@@ -22,9 +24,38 @@ WORKER_LIMIT = 2
 IDLE_TTL = 1.0
 QUEUE_LIMIT = 32
 RETIRE_BYTES = 16 * 1024 * 1024
+KEPT_BYTES = 16 * 1024 * 1024
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 EntryState = Literal["leased", "idle", "stopping", "stop_failed"]
+
+
+class _Kept:
+    """A comparison's output: chunks in memory up to ``KEPT_BYTES``, what
+    follows them in a spool."""
+
+    def __init__(self) -> None:
+        self.chunks: list[bytes] = []
+        self.size = 0
+        self.spool: ByteSpool | None = None
+
+    async def add(self, chunk: bytes) -> None:
+        if self.size < KEPT_BYTES:
+            self.chunks.append(chunk)
+            self.size += len(chunk)
+            return
+        if self.spool is None:
+            self.spool = ByteSpool()
+        await self.spool.append(chunk)
+
+    async def parts(self) -> tuple[ByteSource, ...]:
+        if self.spool is None:
+            return tuple(self.chunks)
+        return (*self.chunks, await self.spool.output())
+
+    async def close(self) -> None:
+        if self.spool is not None:
+            await self.spool.close()
 
 
 @dataclass(eq=False, slots=True)
@@ -198,11 +229,11 @@ class DiffPool:
         return index
 
     @staticmethod
-    def _append(parts: list[bytes], chunk: bytes) -> int:
+    async def _append(kept: _Kept, chunk: bytes) -> int:
         if not isinstance(chunk, bytes) or len(chunk) > CHUNK_SIZE:
             raise RuntimeError("invalid diff worker output chunk")
         if chunk:
-            parts.append(chunk)
+            await kept.add(chunk)
         return len(chunk)
 
     async def compare(
@@ -210,7 +241,7 @@ class DiffPool:
     ) -> PairResult:
         lease = await self._acquire()
         size = 0
-        output: list[bytes] = []
+        kept = _Kept()
         try:
             wants = self._wants(
                 await lease.call(diff_worker.open_pair, asdict(options))
@@ -235,7 +266,7 @@ class DiffPool:
                         )
                     if not isinstance(reply, tuple) or len(reply) != 2:
                         raise RuntimeError("invalid diff worker feed reply")
-                    size += self._append(output, reply[0])
+                    size += await self._append(kept, reply[0])
                     wants = self._wants(reply[1])
             finally:
                 try:
@@ -252,7 +283,7 @@ class DiffPool:
                 chunk, busy = drain_reply
                 if not isinstance(busy, bool):
                     raise RuntimeError("invalid diff worker busy state")
-                size += self._append(output, chunk)
+                size += await self._append(kept, chunk)
             outcome, status, stderr = await lease.call(
                 diff_worker.inspect_pair
             )
@@ -268,7 +299,7 @@ class DiffPool:
             await lease.call(diff_worker.drop_pair)
             result = PairResult(
                 cast(PairOutcome, outcome),
-                tuple(output),
+                await kept.parts(),
                 cast(Literal[0, 1, 2], status),
                 (stderr,) if stderr else (),
             )
@@ -276,6 +307,7 @@ class DiffPool:
             await self._release(lease, size)
             return result
         except BaseException:
+            await settle(owned_task(kept.close()))
             await settle(self._retire(lease.entry))
             raise
         finally:

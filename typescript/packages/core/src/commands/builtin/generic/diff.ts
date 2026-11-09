@@ -14,6 +14,7 @@
 
 import { chunks } from '../../../io/cooperative.ts'
 import { PipeClosed } from '../../../io/errors.ts'
+import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 import { DiffPool } from '../../../rs/diff_pool.ts'
 import type { DiffComputer, DiffMode, PairResult } from '../../../rs/diff_types.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
@@ -511,7 +512,7 @@ async function diffDirs(
   dirB: PathSpec,
   absent: Absent = PRESENT,
   above: readonly [readonly string[], readonly string[]] = [[], []],
-): Promise<[readonly Uint8Array[], boolean]> {
+): Promise<[readonly ByteSource[], boolean]> {
   const flags = walk.flags
   const real = walk.real
   const opened: readonly [readonly string[], readonly string[]] =
@@ -526,7 +527,7 @@ async function diffDirs(
   const names = [...new Set([...namesA, ...namesB])].sort(compareCodePoints)
   const left = rstripSlash(dirA.rawPath)
   const right = rstripSlash(dirB.rawPath)
-  const parts: Uint8Array[] = []
+  const parts: ByteSource[] = []
   let differ = false
   for (const name of names) {
     const inA = namesA.has(name)
@@ -647,7 +648,7 @@ export async function diffGeneric(
   const errorPaths = [...paths, ...flags.excludeFrom]
   const links = linksOf(ctx)
   const trouble: Uint8Array[] = []
-  let output: readonly Uint8Array[] | undefined
+  let output: readonly ByteSource[] | undefined
   let differ = false
   const owned = ctx.diff === undefined ? new DiffPool() : undefined
   const computer = ctx.diff ?? owned
@@ -745,11 +746,16 @@ export async function diffGeneric(
   } finally {
     await owned?.close()
   }
-  const out: ByteSource = outputChunks(output)
+  const held = output
+  const out: ByteSource = new OutputStream(outputChunks(held), () => closeParts(held))
   if (trouble.length > 0) return [out, new IOResult({ exitCode: 2, stderr: concat(trouble) })]
   return [out, new IOResult({ exitCode: differ ? 1 : 0 })]
 }
 
-async function* outputChunks(parts: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
+async function* outputChunks(parts: readonly ByteSource[]): AsyncGenerator<Uint8Array> {
   for (const part of parts) yield* chunks(part)
+}
+
+async function closeParts(parts: readonly ByteSource[]): Promise<void> {
+  for (const part of parts) await closeQuietly(part)
 }

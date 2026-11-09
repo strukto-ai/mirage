@@ -1,17 +1,19 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
-use std::ops::Range;
+use std::hash::{BuildHasher, RandomState};
+use std::ops::{Index, Range};
 
 use crate::regex::{Options as RegexOptions, Regex, STEPS, Step, Syntax};
 use crate::width::char_width;
 use crate::{Stream, StreamError, number};
 use serde::Deserialize;
-use similar::{
-    Algorithm, DiffOp, DiffTag, capture_diff_slices, capture_diff_slices_by_key, group_diff_ops,
-    udiff::UnifiedHunkHeader,
-};
+use similar::{Algorithm, DiffOp, DiffTag, capture_diff, group_diff_ops, udiff::UnifiedHunkHeader};
 
 const BINARY_PROBE_BYTES: usize = 4096;
+/// The lines past which a comparison pins what each side holds once and
+/// searches only between the pins; below it one search covers everything,
+/// and its tables cost about 120 bytes a line.
+const ANCHORED_LINES: usize = 1 << 17;
 const HINT: &[u8] = b"diff: Try 'diff --help' for more information.";
 /// The widest `-W` mirage lays out: the reference takes any width and pads
 /// every side-by-side row to half of it, so a wider one only writes blanks.
@@ -295,6 +297,230 @@ struct Diff {
     equal: bool,
 }
 
+/// One input's lines by the offsets `records` keeps: what a comparison
+/// reads, at one number a line.
+struct Lines<'a> {
+    bytes: &'a [u8],
+    ends: &'a [usize],
+}
+
+impl<'a> Lines<'a> {
+    fn len(&self) -> usize {
+        self.ends.len() - 1
+    }
+    fn line(&self, at: usize) -> &'a [u8] {
+        &self.bytes[self.ends[at]..self.ends[at + 1]]
+    }
+    /// Each line as the options compare it.
+    fn keys(&self, config: &Config) -> Vec<Cow<'a, [u8]>> {
+        (0..self.len())
+            .map(|at| key(self.line(at), config))
+            .collect()
+    }
+}
+
+impl Index<usize> for Lines<'_> {
+    type Output = [u8];
+    fn index(&self, line: usize) -> &[u8] {
+        self.line(line)
+    }
+}
+
+/// Both inputs' lines as numbers, equal lines the same one, the old side's
+/// first; and for each number how many lines of each side hold it, two at
+/// most.
+struct Numbered {
+    numbers: Vec<u32>,
+    old_len: usize,
+    held: Vec<[u8; 2]>,
+}
+
+impl Numbered {
+    fn sides(&self) -> (&[u32], &[u32]) {
+        self.numbers.split_at(self.old_len)
+    }
+    fn on_both_once(&self, number: u32) -> bool {
+        self.held[number as usize] == [1, 1]
+    }
+}
+
+/// Numbers the lines through one table of four bytes a slot: each slot names
+/// the first line holding a text, so a text is kept once and only as an
+/// offset.
+fn numbered<'a>(
+    old: (usize, impl Fn(usize) -> &'a [u8]),
+    new: (usize, impl Fn(usize) -> &'a [u8]),
+) -> Numbered {
+    let (old_len, total) = (old.0, old.0 + new.0);
+    let text = |at: usize| {
+        if at < old_len {
+            (old.1)(at)
+        } else {
+            (new.1)(at - old_len)
+        }
+    };
+    let slots = (total + total / 3 + 1).next_power_of_two();
+    let mut table = vec![0u32; slots];
+    let mut numbers = vec![0u32; total];
+    let mut held: Vec<[u8; 2]> = Vec::new();
+    let state = RandomState::new();
+    for at in 0..total {
+        let line = text(at);
+        let mut slot = state.hash_one(line) as usize & (slots - 1);
+        let number = loop {
+            match table[slot] {
+                0 => {
+                    table[slot] = at as u32 + 1;
+                    held.push([0, 0]);
+                    break held.len() - 1;
+                }
+                first if text(first as usize - 1) == line => {
+                    break numbers[first as usize - 1] as usize;
+                }
+                _ => slot = (slot + 1) & (slots - 1),
+            }
+        };
+        numbers[at] = number as u32;
+        let count = &mut held[number][usize::from(at >= old_len)];
+        *count = (*count + 1).min(2);
+    }
+    held.shrink_to_fit();
+    Numbered {
+        numbers,
+        old_len,
+        held,
+    }
+}
+
+/// The longest run of lines each side holds once that stands in the same
+/// order on both, as (old, new) positions.
+fn pins(numbered: &Numbered) -> Vec<(u32, u32)> {
+    let (old, new) = numbered.sides();
+    let mut in_new = vec![0u32; numbered.held.len()];
+    for (at, number) in new.iter().enumerate() {
+        if numbered.on_both_once(*number) {
+            in_new[*number as usize] = at as u32;
+        }
+    }
+    let pairs: Vec<(u32, u32)> = old
+        .iter()
+        .enumerate()
+        .filter(|(_, number)| numbered.on_both_once(**number))
+        .map(|(at, number)| (at as u32, in_new[*number as usize]))
+        .collect();
+    drop(in_new);
+    let mut tails: Vec<u32> = Vec::new();
+    let mut before = vec![u32::MAX; pairs.len()];
+    for (at, pair) in pairs.iter().enumerate() {
+        let longest = tails
+            .last()
+            .is_some_and(|tail| pairs[*tail as usize].1 < pair.1);
+        let length = if longest {
+            tails.len()
+        } else {
+            tails.partition_point(|tail| pairs[*tail as usize].1 < pair.1)
+        };
+        if length > 0 {
+            before[at] = tails[length - 1];
+        }
+        if length == tails.len() {
+            tails.push(at as u32);
+        } else {
+            tails[length] = at as u32;
+        }
+    }
+    let mut chain = Vec::with_capacity(tails.len());
+    let mut at = tails.last().copied().unwrap_or(u32::MAX);
+    while at != u32::MAX {
+        chain.push(pairs[at as usize]);
+        at = before[at as usize];
+    }
+    chain.reverse();
+    chain
+}
+
+fn push_equal(ops: &mut Vec<DiffOp>, old_index: usize, new_index: usize, count: usize) {
+    if let Some(DiffOp::Equal { len, .. }) = ops.last_mut() {
+        *len += count;
+    } else {
+        ops.push(DiffOp::Equal {
+            old_index,
+            new_index,
+            len: count,
+        });
+    }
+}
+
+/// One stretch between pins. Nothing in it can match when no line of its old
+/// side stands anywhere in the new input, so that takes no search.
+fn search_between(
+    numbered: &Numbered,
+    old_range: Range<usize>,
+    new_range: Range<usize>,
+    ops: &mut Vec<DiffOp>,
+) {
+    let (old, new) = numbered.sides();
+    let matchless = old[old_range.clone()]
+        .iter()
+        .all(|number| numbered.held[*number as usize][1] == 0);
+    if !matchless {
+        for op in capture_diff(Algorithm::Myers, old, old_range, new, new_range) {
+            match op {
+                DiffOp::Equal {
+                    old_index,
+                    new_index,
+                    len,
+                } => push_equal(ops, old_index, new_index, len),
+                other => ops.push(other),
+            }
+        }
+        return;
+    }
+    let (old_index, new_index) = (old_range.start, new_range.start);
+    ops.push(match (old_range.len(), new_range.len()) {
+        (0, new_len) => DiffOp::Insert {
+            old_index,
+            new_index,
+            new_len,
+        },
+        (old_len, 0) => DiffOp::Delete {
+            old_index,
+            old_len,
+            new_index,
+        },
+        (old_len, new_len) => DiffOp::Replace {
+            old_index,
+            old_len,
+            new_index,
+            new_len,
+        },
+    });
+}
+
+/// A comparison of large inputs: the lines each side holds once are pinned
+/// first and only the stretches between them searched, so what a search
+/// keeps a line for is kept for a stretch at a time. A change cannot slide
+/// across a pin, which would take a second copy of that line, and a pinned
+/// line that changed order is reported as removed and added.
+fn anchored_ops(numbered: &Numbered) -> Vec<DiffOp> {
+    let (old, new) = numbered.sides();
+    let chain = pins(numbered);
+    let mut ops = Vec::new();
+    let (mut at_old, mut at_new) = (0, 0);
+    for pin in chain.iter().map(Some).chain([None]) {
+        let (to_old, to_new) =
+            pin.map_or((old.len(), new.len()), |(o, n)| (*o as usize, *n as usize));
+        if at_old < to_old || at_new < to_new {
+            search_between(numbered, at_old..to_old, at_new..to_new, &mut ops);
+        }
+        if pin.is_some() {
+            push_equal(&mut ops, to_old, to_new, 1);
+        }
+        (at_old, at_new) = (to_old + 1, to_new + 1);
+    }
+    ops
+}
+
 /// How far `-B` and `-I` have read through a comparison's changes.
 struct Marking {
     ops: Vec<DiffOp>,
@@ -339,7 +565,20 @@ fn is_white(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\r' | 0x0b | 0x0c)
 }
 
-fn key<'a>(line: &&'a [u8], config: &Config) -> Cow<'a, [u8]> {
+/// Whether `-b` or `-w` would write this line's blanks differently.
+fn rewrites_blanks(line: &[u8], config: &Config) -> bool {
+    if config.ignore_all_space {
+        return line.iter().any(|b| is_white(*b));
+    }
+    config.ignore_space_change
+        && (line.last().is_some_and(|b| is_white(*b))
+            || line.iter().any(|b| is_white(*b) && *b != b' ')
+            || line
+                .windows(2)
+                .any(|pair| pair[0] == b' ' && pair[1] == b' '))
+}
+
+fn key<'a>(whole: &'a [u8], config: &Config) -> Cow<'a, [u8]> {
     if !config.ignore_case
         && !config.ignore_all_space
         && !config.ignore_space_change
@@ -347,16 +586,39 @@ fn key<'a>(line: &&'a [u8], config: &Config) -> Cow<'a, [u8]> {
         && !config.ignore_trailing_space
     {
         return Cow::Borrowed(if config.mode == Mode::Ed {
-            line.strip_suffix(b"\n").unwrap_or(line)
+            whole.strip_suffix(b"\n").unwrap_or(whole)
         } else {
-            line
+            whole
         });
     }
-    let mut line = *line;
-    let newline = line.ends_with(b"\n");
-    if newline {
-        line = &line[..line.len() - 1];
+    let newline = whole.ends_with(b"\n");
+    let stripped: &'a [u8] = whole.strip_suffix(b"\n").unwrap_or(whole);
+    let trailing =
+        config.ignore_all_space || config.ignore_space_change || config.ignore_trailing_space;
+    let plain = !(config.ignore_case
+        && stripped
+            .iter()
+            .any(|b| b.is_ascii_uppercase() || !b.is_ascii()))
+        && !(config.ignore_tab_expansion
+            && !config.ignore_all_space
+            && !config.ignore_space_change
+            && stripped.contains(&b'\t'))
+        && !rewrites_blanks(stripped, config);
+    if plain {
+        if newline && !trailing && config.mode != Mode::Ed {
+            return Cow::Borrowed(whole);
+        }
+        let kept = if config.ignore_trailing_space {
+            stripped
+                .iter()
+                .rposition(|b| !is_white(*b))
+                .map_or(0, |i| i + 1)
+        } else {
+            stripped.len()
+        };
+        return Cow::Borrowed(&stripped[..kept]);
     }
+    let mut line = stripped;
     let lowercase;
     if config.ignore_case {
         lowercase = {
@@ -402,8 +664,6 @@ fn key<'a>(line: &&'a [u8], config: &Config) -> Cow<'a, [u8]> {
         }
         out.push(byte);
     }
-    let trailing =
-        config.ignore_all_space || config.ignore_space_change || config.ignore_trailing_space;
     if config.ignore_trailing_space {
         let kept = out.iter().rposition(|b| !is_white(*b)).map_or(0, |i| i + 1);
         out.truncate(kept);
@@ -481,7 +741,7 @@ fn ignorable_line(
     budget: &mut u64,
 ) -> Step<bool> {
     let text = line.strip_suffix(b"\n").unwrap_or(line);
-    if config.ignore_blank_lines && key(&text, config).is_empty() {
+    if config.ignore_blank_lines && key(text, config).is_empty() {
         return Step::Done(true);
     }
     while let Some(regex) = ignore.get_mut(*pattern) {
@@ -593,8 +853,28 @@ impl Diff {
             self.release_inputs();
             return;
         }
-        let old: Vec<&[u8]> = self.inputs[0].split_inclusive(|b| *b == b'\n').collect();
-        let new: Vec<&[u8]> = self.inputs[1].split_inclusive(|b| *b == b'\n').collect();
+        for (input, ends) in self.inputs.iter().zip(&mut self.records) {
+            ends.reserve_exact(input.iter().filter(|byte| **byte == b'\n').count() + 2);
+            ends.push(0);
+            ends.extend(
+                input
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, byte)| **byte == b'\n')
+                    .map(|(at, _)| at + 1),
+            );
+            if ends.last() != Some(&input.len()) {
+                ends.push(input.len());
+            }
+        }
+        let old = Lines {
+            bytes: &self.inputs[0],
+            ends: &self.records[0],
+        };
+        let new = Lines {
+            bytes: &self.inputs[1],
+            ends: &self.records[1],
+        };
         let normalize = self.config.ignore_case
             || self.config.ignore_all_space
             || self.config.ignore_space_change
@@ -602,21 +882,33 @@ impl Diff {
             || self.config.ignore_trailing_space
             || self.config.mode == Mode::Ed;
         let filters = self.config.ignore_blank_lines || !self.config.ignore_lines.is_empty();
+        let anchored = (ANCHORED_LINES..u32::MAX as usize).contains(&(old.len() + new.len()));
         let ops = if normalize {
-            capture_diff_slices_by_key(Algorithm::Myers, &old, &new, |record| {
-                key(record, &self.config)
-            })
-        } else {
-            capture_diff_slices(Algorithm::Myers, &old, &new)
-        };
-        for (index, lines) in [&old, &new].into_iter().enumerate() {
-            let mut offset = 0;
-            self.records[index].push(0);
-            for line in lines {
-                offset += line.len();
-                self.records[index].push(offset);
+            let (old_keys, new_keys) = (old.keys(&self.config), new.keys(&self.config));
+            if anchored {
+                let numbers = numbered(
+                    (old_keys.len(), |at| old_keys[at].as_ref()),
+                    (new_keys.len(), |at| new_keys[at].as_ref()),
+                );
+                drop((old_keys, new_keys));
+                anchored_ops(&numbers)
+            } else {
+                capture_diff(
+                    Algorithm::Myers,
+                    &old_keys,
+                    0..old_keys.len(),
+                    &new_keys,
+                    0..new_keys.len(),
+                )
             }
-        }
+        } else if anchored {
+            anchored_ops(&numbered(
+                (old.len(), |at| old.line(at)),
+                (new.len(), |at| new.line(at)),
+            ))
+        } else {
+            capture_diff(Algorithm::Myers, &old, 0..old.len(), &new, 0..new.len())
+        };
         if filters {
             self.marking = Some(Marking {
                 marked: Vec::with_capacity(ops.len()),
@@ -1194,7 +1486,12 @@ impl Stream for Diff {
         if index > 1 || self.ended[index] {
             return Err(StreamError::new("invalid or ended input"));
         }
-        self.inputs[index].extend_from_slice(input);
+        let bytes = &mut self.inputs[index];
+        let wanted = bytes.len() + input.len();
+        if wanted > bytes.capacity() {
+            bytes.reserve_exact(wanted.max(bytes.capacity() / 4 * 5) - bytes.len());
+        }
+        bytes.extend_from_slice(input);
         Ok(())
     }
     fn end_input(&mut self, index: usize, _: &mut Vec<u8>) -> Result<(), StreamError> {
@@ -1324,7 +1621,7 @@ impl Brief {
             match (old, new) {
                 (Some(old), Some(new)) => {
                     let lines = [&self.held[0][at[0]..old], &self.held[1][at[1]..new]];
-                    if key(&lines[0], &self.config) != key(&lines[1], &self.config) {
+                    if key(lines[0], &self.config) != key(lines[1], &self.config) {
                         break Some(true);
                     }
                     at = [old, new];
@@ -1606,5 +1903,89 @@ mod brief_tests {
         stream.end_input(1, &mut out).unwrap();
         assert_eq!(stream.wants(), None);
         assert_eq!(stream.status(), 1);
+    }
+}
+
+#[cfg(test)]
+mod anchored_tests {
+    use super::*;
+
+    fn anchored(old: &[Vec<u8>], new: &[Vec<u8>]) -> Vec<DiffOp> {
+        anchored_ops(&numbered(
+            (old.len(), |at| old[at].as_slice()),
+            (new.len(), |at| new[at].as_slice()),
+        ))
+    }
+
+    fn lines(numbers: impl IntoIterator<Item = usize>) -> Vec<Vec<u8>> {
+        numbers
+            .into_iter()
+            .map(|n| format!("{n}\n").into_bytes())
+            .collect()
+    }
+
+    /// Walks the ops in order: each side covered once, what is called equal
+    /// equal.
+    fn assert_describes(ops: &[DiffOp], old: &[Vec<u8>], new: &[Vec<u8>]) {
+        let (mut at_old, mut at_new) = (0, 0);
+        for op in ops {
+            let (o, n) = (op.old_range(), op.new_range());
+            assert_eq!((o.start, n.start), (at_old, at_new), "{op:?}");
+            if matches!(op, DiffOp::Equal { .. }) {
+                assert_eq!(old[o.clone()], new[n.clone()]);
+            }
+            (at_old, at_new) = (o.end, n.end);
+        }
+        assert_eq!((at_old, at_new), (old.len(), new.len()));
+    }
+
+    #[test]
+    fn sparse_changes_come_out_as_one_search_reports_them() {
+        let old = lines(1..=2000);
+        let mut new = old.clone();
+        new[4] = b"x\n".to_vec();
+        new.remove(900);
+        new.insert(1500, b"y\n".to_vec());
+        let whole = capture_diff(Algorithm::Myers, &old, 0..old.len(), &new, 0..new.len());
+        assert_eq!(anchored(&old, &new), whole);
+    }
+
+    #[test]
+    fn repeated_lines_shuffled_and_moved_still_describe_both_inputs() {
+        let mut seed = 7u32;
+        let mut next = |bound: u32| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            ((seed >> 8) % bound) as usize
+        };
+        for _ in 0..200 {
+            let old = lines((0..next(60)).map(|_| next(25)));
+            let new = lines((0..next(60)).map(|_| next(25)));
+            assert_describes(&anchored(&old, &new), &old, &new);
+        }
+        let old = lines(0..100);
+        let new = lines((50..100).chain(0..50));
+        assert_describes(&anchored(&old, &new), &old, &new);
+    }
+
+    #[test]
+    fn inputs_sharing_nothing_take_no_search() {
+        let (old, new) = (lines(0..50), lines(100..120));
+        assert_eq!(
+            anchored(&old, &new),
+            [DiffOp::Replace {
+                old_index: 0,
+                old_len: 50,
+                new_index: 0,
+                new_len: 20
+            }]
+        );
+    }
+
+    #[test]
+    fn either_side_may_be_empty() {
+        let some = lines(0..3);
+        assert_describes(&anchored(&[], &some), &[], &some);
+        assert_describes(&anchored(&some, &[]), &some, &[]);
+        assert!(anchored(&[], &[]).is_empty());
     }
 }

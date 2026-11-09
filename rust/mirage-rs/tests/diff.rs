@@ -459,3 +459,25 @@ fn expanded_tabs_count_only_printable_ascii() {
         assert_eq!(printed, Some(expected), "{line:?}");
     }
 }
+
+#[test]
+fn large_inputs_report_sparse_changes_the_same() {
+    let old: String = (1..=200_000).map(|n| format!("{n}\n")).collect();
+    let mut new = String::new();
+    for n in 1..=200_000 {
+        match n {
+            5 => new.push_str("x\n"),
+            100_000 => {}
+            150_000 => new.push_str("150000\ny\n"),
+            _ => new.push_str(&format!("{n}\n")),
+        }
+    }
+    let (output, stderr, status, _) =
+        compare(r#"{"mode":"normal"}"#, old.as_bytes(), new.as_bytes());
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "5c5\n< 5\n---\n> x\n100000d99999\n< 100000\n150000a150000\n> y\n"
+    );
+    assert!(stderr.is_empty());
+    assert_eq!(status, 1);
+}

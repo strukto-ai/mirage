@@ -255,3 +255,40 @@ it.each([0, 1])('closes the -f input when its output closes after %i pulls', asy
   await out.return?.()
   expect(closed).toBe(1)
 })
+
+// Mirrors test_date_f_prints_each_line_and_reports_the_rest and
+// test_date_f_answers_a_line_naming_its_own_zone.
+describe('date -f', () => {
+  async function run(setup: string, line: string): Promise<[string, string, number]> {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell(setup)
+      const io = await ws.shell(line)
+      return [io.stdoutText, io.stderrText, io.exitCode]
+    } finally {
+      await ws.close()
+    }
+  }
+
+  it('prints each line and reports the rest', async () => {
+    expect(
+      await run(
+        "printf '2001-02-03 04:05:06.123456789\\n\\n  \\nnot a date\\n@5' > /l",
+        "date -u -f /l '+%T.%N'",
+      ),
+    ).toEqual([
+      '04:05:06.123456789\n00:00:00.000000000\n00:00:00.000000000\n00:00:05.000000000\n',
+      "date: invalid date 'not a date'\n",
+      1,
+    ])
+  })
+
+  it('answers a line naming its own zone', async () => {
+    expect(
+      await run(
+        `printf 'TZ="Asia/Tokyo" 2001-02-03 04:05:06\\n' > /z`,
+        "TZ=America/New_York date -f /z '+%F %T %Z %z'",
+      ),
+    ).toEqual(['2001-02-02 14:05:06 EST -0500\n', '', 0])
+  })
+})

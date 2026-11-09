@@ -39,6 +39,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.diff_pool import DiffPool
 from mirage.rs.diff_types import (
@@ -465,7 +466,7 @@ async def _diff_dirs(
     walk: _Walk,
     absent: Absent = PRESENT,
     above: tuple[tuple[str, ...], tuple[str, ...]] = ((), ()),
-) -> tuple[list[bytes], bool]:
+) -> tuple[list[ByteSource], bool]:
     """Compare two directories, one of which -N may read as empty.
 
     Where diff follows links, a pair whose every side is a directory
@@ -482,7 +483,8 @@ async def _diff_dirs(
             to.
 
     Returns:
-        tuple[list[bytes], bool]: output chunks and whether any pair differed.
+        tuple[list[ByteSource], bool]: output parts and whether any pair
+            differed.
     """
     flags = walk.flags
     real = walk.real
@@ -498,7 +500,7 @@ async def _diff_dirs(
     names_b = await _entries(walk, dir_b, absent[1])
     left = _name(dir_a).rstrip("/")
     right = _name(dir_b).rstrip("/")
-    parts: list[bytes] = []
+    parts: list[ByteSource] = []
     differ = False
     for name in sorted(names_a | names_b):
         in_a = name in names_a
@@ -708,10 +710,19 @@ async def diff(
     return _output(output), IOResult(exit_code=1 if differ else 0)
 
 
-async def _output(parts: list[bytes]) -> AsyncIterator[bytes]:
+async def _output_chunks(parts: Sequence[ByteSource]) -> AsyncIterator[bytes]:
     for part in parts:
         async for chunk in chunks(part):
             yield chunk
+
+
+async def _close_parts(parts: Sequence[ByteSource]) -> None:
+    for part in parts:
+        await close_quietly(part)
+
+
+def _output(parts: Sequence[ByteSource]) -> OutputStream:
+    return OutputStream(_output_chunks(parts), partial(_close_parts, parts))
 
 
 __all__ = ["diff"]

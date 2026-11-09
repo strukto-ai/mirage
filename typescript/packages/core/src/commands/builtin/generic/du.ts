@@ -34,7 +34,6 @@ import {
 } from '../utils/formatting.ts'
 import { gnuStrftime } from '../utils/strftime.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
-import { fnmatch } from '../../../utils/fnmatch.ts'
 import { UTC_ZONE } from '../../../utils/timezone.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
 import { isFsError } from '../../../errors/fs.ts'
@@ -46,6 +45,7 @@ import { posixPhrase } from '../../../errors/posix.ts'
 import { mountsOf } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
+import { anyTailMatcher } from '../../../rs/glob.ts'
 import { refused, scan } from '../../../rs/scan.ts'
 export type ComputeSize = (p: PathSpec) => Promise<number>
 export type DuEntries = [entries: [string, number][], total: number]
@@ -203,9 +203,7 @@ export function inodeCount(
  */
 export function excluded(patterns: readonly string[], shown: string): boolean {
   if (patterns.length === 0) return false
-  const tails = [shown]
-  for (let at = 0; at < shown.length; at++) if (shown[at] === '/') tails.push(shown.slice(at + 1))
-  return patterns.some((pattern) => tails.some((tail) => fnmatch(tail, pattern)))
+  return anyTailMatcher(patterns).matches(shown)
 }
 
 /**
