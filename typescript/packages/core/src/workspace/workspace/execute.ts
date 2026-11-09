@@ -817,6 +817,21 @@ async function openHistory(
   return history
 }
 
+/** Settle what a line's passes and gates claimed, however it ended. Mirrors Python's _settle_grants. */
+async function settleGrants(
+  env: ExecuteEnv,
+  sessionId: string,
+  handed: HandOff,
+  held: boolean,
+  killed?: AbortSignal,
+): Promise<void> {
+  if (held) env.registry.decisions.release(sessionId, handed)
+  // A nested evaluation's claims are the outer line's to keep for the
+  // next evaluation from the same node and to spend at its own end.
+  else if (handed.parent !== null) env.registry.decisions.handUp(sessionId, handed)
+  else await runCancellable(env.registry.decisions.revoke(sessionId, handed), killed)
+}
+
 /** Record how a line ended, on its history or as one result. */
 function endRecord(
   env: ExecuteEnv,
@@ -996,11 +1011,8 @@ async function runPreparedLine(
             )
           // A line placement refuses ends here, so what admission claimed
           // for it is swept as the line's end sweeps it.
-          const sweep = async (): Promise<void> => {
-            if (handed.parent !== null)
-              env.registry.decisions.handUp(effectiveSession.sessionId, handed)
-            else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
-          }
+          const sweep = (): Promise<void> =>
+            settleGrants(env, effectiveSession.sessionId, handed, false)
           let placed: RouteDecision<Runtime> | Deny | Pending
           try {
             // Judged as the session the line runs in, a call's cwd and env
@@ -1728,16 +1740,7 @@ async function runParsedLine(
       return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
     }
   } finally {
-    if (held) env.registry.decisions.release(effectiveSession.sessionId, handed)
-    // A nested evaluation's claims are the outer line's to keep for the
-    // next evaluation from the same node and to spend at its own end.
-    else if (handed.parent !== null)
-      env.registry.decisions.handUp(effectiveSession.sessionId, handed)
-    else
-      await runCancellable(
-        env.registry.decisions.revoke(effectiveSession.sessionId, handed),
-        killed,
-      )
+    await settleGrants(env, effectiveSession.sessionId, handed, held, killed)
   }
   const [[materialized, io], opRecords] = execResult
   const callerError =

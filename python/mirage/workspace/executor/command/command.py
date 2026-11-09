@@ -823,7 +823,7 @@ async def _standard_answer(
     )
 
 
-def _routing_scopes(
+def _routed_scopes(
     cmd_name: str,
     cmd_mount: MountEntry | None,
     raw_argv: list[str],
@@ -1226,7 +1226,7 @@ async def handle_command(
     routing_scopes, flag_scopes = (
         (operands, [])
         if borrowed
-        else _routing_scopes(
+        else _routed_scopes(
             cmd_name,
             cmd_mount,
             raw_argv,

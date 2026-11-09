@@ -210,7 +210,7 @@ export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
 
 /** A workspace's secret source declarations and its seed variables. Mirrors Python's _declared_sources. */
-function declaredSecrets(options: WorkspaceOptions) {
+function declaredSources(options: WorkspaceOptions) {
   // The env block, translated once: a literal entry becomes an
   // exported var, a managed one becomes a pointer the fill step
   // resolves at command time. Each managed entry's source is
@@ -425,8 +425,8 @@ export class Workspace {
     })
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
-    const [declaredSources, seedVars] = declaredSecrets(options)
-    this.declaredSecretSources = declaredSources
+    const [sources, seedVars] = declaredSources(options)
+    this.declaredSecretSources = sources
     this.sessionManager = new SessionManager(
       sessionId,
       stores.sessions,

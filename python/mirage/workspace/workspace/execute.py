@@ -1206,6 +1206,38 @@ async def _run_limited(
     return io
 
 
+async def _end_record(
+    ws: ExecuteEnv,
+    io: IOResult,
+    records: list[OpRecord],
+    history: LineHistory | None,
+    session: SessionState,
+    line_handle: LineHandle,
+    sink: JobConsole | None,
+) -> None:
+    """Record how a line ended, on its history or as one result.
+
+    Args:
+        ws (ExecuteEnv): the workspace running the line.
+        io (IOResult): how it ended.
+        records (list[OpRecord]): the ops it made.
+        history (LineHistory | None): its history.
+        session (SessionState): the session it ran on.
+        line_handle (LineHandle): its handle.
+        sink (JobConsole | None): where its output streamed.
+    """
+    if history is not None:
+        await history.end(io, records)
+        return
+    await ws.observer.log_result(
+        await _shown(io, sink),
+        records,
+        session.session_id,
+        session.cwd,
+        str(line_handle.id),
+    )
+
+
 async def _settle_grants(
     ws: ExecuteEnv, session_id: str, handed: HandOff, held: bool
 ) -> None:
@@ -1647,13 +1679,13 @@ async def run_prepared_line(
         reset_current_session(session_token)
         await ws.sessions.end_line(session_id, parent is None)
         ws.records.extend(scope.records)
-        if history is not None:
-            await history.end(io, scope.records)
-        elif recorded:
-            await ws.observer.log_result(
-                await _shown(io, sink),
+        if recorded:
+            await _end_record(
+                ws,
+                io,
                 scope.records,
-                session_id,
-                effective_session.cwd,
-                str(line_handle.id),
+                history,
+                effective_session,
+                line_handle,
+                sink,
             )

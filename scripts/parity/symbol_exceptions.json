@@ -1507,6 +1507,7 @@
   },
   "workspace/workspace/execute": {
    "python_only": {
+    "_run_limited": "Python wraps the line's tree in its clock, egress, memory, timeout and env limits as nested contexts; TypeScript carries them on the line's stop and frame.",
     "_run_as_shell": "Python runs the line as its session's process in a module function given what it needs; TypeScript's runAsShell is a closure inside runLine over the line's options, frame and argv."
    }
   },
