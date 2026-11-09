@@ -63,7 +63,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(sleep 0.2 & fg) 2>/dev/null; echo rc=$?",
+      "command": "(sleep 0.2 & p=$!; fg; s=$?; wait $p; exit $s) 2>/dev/null; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",

@@ -76,7 +76,7 @@ export class ProcessHandle {
   private completion!: Promise<Process>
   // Resolved once `$!` can name it: its program's pid is known, or it ended.
   private readonly isPlaced = newPauseGate()
-  private readonly stopRequested = newPauseGate()
+  private readonly stopWaiters = new Set<() => void>()
   // It runs a pipeline (`cmd | cmd &`), whose stages are the job.
   pipeline = false
   stages: readonly ProcessHandle[] = []
@@ -318,7 +318,18 @@ export class ProcessHandle {
       held !== null && this.current.state === 'running';
       held = this.heldBy()
     )
-      await Promise.race([held.promise, this.stopRequested.promise])
+      await this.heldOrStopped(held)
+  }
+
+  private heldOrStopped(held: PauseGate): Promise<void> {
+    return new Promise((done) => {
+      const finish = (): void => {
+        this.stopWaiters.delete(finish)
+        done()
+      }
+      this.stopWaiters.add(finish)
+      void held.promise.then(finish)
+    })
   }
 
   /**
@@ -430,7 +441,7 @@ export class ProcessHandle {
       throw error
     }
     this.tell()
-    this.stopRequested.resolve()
+    for (const wake of [...this.stopWaiters]) wake()
     return true
   }
 

@@ -889,17 +889,13 @@ async def test_a_killed_shell_tells_what_it_started_that_it_goes_on():
     processes = ProcessTable()
     done = asyncio.Event()
 
-    async def shell_run():
-        await asyncio.Event().wait()
-        return 0
-
     async def program_run():
         await done.wait()
         return 0
 
     cwd = PathSpec.from_str_path("/")
     shell = processes.start(
-        session_id="a", command="shell", cwd=cwd, run=shell_run
+        session_id="a", command="shell", cwd=cwd, run=_hangs
     )
     program = processes.start(
         session_id="a",
