@@ -4121,59 +4121,6 @@ paths:
       x-mint:
         metadata:
           sidebarTitle: truncate
-  /v1/workspaces/{workspace_id}/glob:
-    post:
-      summary: Find paths
-      operationId: glob_v1_workspaces__workspace_id__glob_post
-      parameters:
-        - $ref: '#/components/parameters/workspaceId'
-        - $ref: '#/components/parameters/sessionId'
-      responses:
-        '200':
-          description: Every matching path visible to the session
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: string
-        '401':
-          $ref: '#/components/responses/401'
-        '403':
-          $ref: '#/components/responses/403'
-        '404':
-          $ref: '#/components/responses/404'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-        '429':
-          $ref: '#/components/responses/429'
-      description: Find workspace paths that match a glob pattern, such as `/src/**/*.py`. Results include
-        only paths visible to the selected session.
-      tags:
-        - VFS
-      x-hosts:
-        - daemon
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                pattern:
-                  type: string
-                  description: A pathname pattern, such as /src/**/*.py.
-              required:
-                - pattern
-            example:
-              pattern: /**/*.txt
-      x-mint:
-        metadata:
-          sidebarTitle: glob
   /v1/workspaces/{workspace_id}/vfs/{name}:
     post:
       summary: Call VFS function

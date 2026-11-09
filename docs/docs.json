@@ -796,8 +796,7 @@
                   "POST /v1/workspaces/{workspace_id}/vfs/setxattr",
                   "POST /v1/workspaces/{workspace_id}/vfs/removexattr",
                   "POST /v1/workspaces/{workspace_id}/vfs/truncate",
-                  "POST /v1/workspaces/{workspace_id}/vfs/{name}",
-                  "POST /v1/workspaces/{workspace_id}/glob"
+                  "POST /v1/workspaces/{workspace_id}/vfs/{name}"
                 ]
               },
               {

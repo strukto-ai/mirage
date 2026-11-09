@@ -63,7 +63,6 @@ the header itself.
 | `shell` | `command`, `cwd?`, `env?`, `stdin?`, `open_stdin?`, `explain?` | `{exit_code, stdout, stderr, refusal}` |
 | `stdin/write` | `id`, `data` | `null` |
 | `stdin/close` | `id` | `null` |
-| `glob` | `pattern` | `string[]`, the matching paths |
 | `vfs/<call>` | the call's arguments, `explain?` | what the call returns |
 | `tools/<tool>` | the tool's input | `{text, is_error}` |
 | `tools/list` | | `{tools}`, as MCP lists them |
@@ -80,9 +79,6 @@ the header itself.
 - Bytes, `stdin` included, are base64 strings. A message is at most 4 MiB, so
   send larger stdin over [HTTP](/api/streaming#send-stdin) or SSH.
 - A line that exits non-zero is a result, not an error.
-- A `glob` that matches more files than a mount's
-  [`walk_limit`](/home/integration/search#walk_limit) is the error
-  `-32602`, and its message names the limit.
 
 ## Sessions
 
