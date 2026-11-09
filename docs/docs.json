@@ -817,7 +817,7 @@
                 ]
               },
               {
-                "group": "Command executions",
+                "group": "Commands",
                 "pages": [
                   "GET /v1/workspaces/{workspace_id}/lines",
                   "GET /v1/workspaces/{workspace_id}/lines/{line_id}"
@@ -1231,20 +1231,16 @@
       "destination": "/api/operations/documents/write-skillmd"
     },
     {
-      "source": "/api/operations/asks/list-asks",
-      "destination": "/api/operations/asks/list-approval-requests"
-    },
-    {
       "source": "/api/operations/asks/answer-an-ask",
-      "destination": "/api/operations/asks/respond-to-approval-request"
+      "destination": "/api/operations/asks/respond-to-ask"
     },
     {
       "source": "/api/operations/lines/list-lines",
-      "destination": "/api/operations/lines/list-command-executions"
+      "destination": "/api/operations/lines/list-commands"
     },
     {
       "source": "/api/operations/lines/get-a-line",
-      "destination": "/api/operations/lines/get-command-execution"
+      "destination": "/api/operations/lines/get-command"
     },
     {
       "source": "/api/operations/jobs/get-a-job",
@@ -1541,6 +1537,22 @@
     {
       "source": "/api/operations/saved-machines/delete-machine-config",
       "destination": "/api/operations/saved-machines/delete-machine"
+    },
+    {
+      "source": "/api/operations/asks/list-approval-requests",
+      "destination": "/api/operations/asks/list-asks"
+    },
+    {
+      "source": "/api/operations/asks/respond-to-approval-request",
+      "destination": "/api/operations/asks/respond-to-ask"
+    },
+    {
+      "source": "/api/operations/lines/list-command-executions",
+      "destination": "/api/operations/lines/list-commands"
+    },
+    {
+      "source": "/api/operations/lines/get-command-execution",
+      "destination": "/api/operations/lines/get-command"
     }
   ],
   "navbar": {

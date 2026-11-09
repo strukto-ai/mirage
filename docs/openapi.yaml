@@ -40,7 +40,7 @@ tags:
     x-group: Approval requests
   - name: Lines
     parent: Workspace operations
-    x-group: Command executions
+    x-group: Commands
   - name: Jobs
     parent: Workspace operations
   - name: Processes
@@ -288,7 +288,8 @@ paths:
           in: query
           description: Use `json` for paginated results, newest first, or `jsonl` to export all retained
             matches oldest first. JSONL ignores `limit` and `after` and contains `command`, `vfs`, and
-            `result` records linked by `parent`. Values other than `jsonl` select JSON.
+            `result` records linked by `parent`. Each record has a `timestamp` in Unix milliseconds.
+            Values other than `jsonl` select JSON.
           schema:
             type: string
             default: json
@@ -1414,7 +1415,7 @@ paths:
       x-excluded: true
   /v1/workspaces/{workspace_id}/asks:
     get:
-      summary: List approval requests
+      summary: List asks
       operationId: list_asks_v1_workspaces__workspace_id__asks_get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -1452,7 +1453,7 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: List pending command approval requests. Set `all=true` to include requests that have
+      description: List pending approval requests. Set `all=true` to include requests that have
         already been approved or denied.
       tags:
         - Asks
@@ -1460,7 +1461,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/asks/{ask_id}:
     post:
-      summary: Respond to approval request
+      summary: Respond to ask
       operationId: answer_ask_v1_workspaces__workspace_id__asks__ask_id__post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -1497,7 +1498,7 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: Approve or deny a pending command request and return the recorded decision. Returns
+      description: Approve or deny a pending request and return the recorded decision. Returns
         `409` if the request has already been answered.
       tags:
         - Asks
@@ -1505,7 +1506,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/lines:
     get:
-      summary: List command executions
+      summary: List commands
       operationId: list_lines_v1_workspaces__workspace_id__lines_get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -1554,16 +1555,16 @@ paths:
         '429':
           $ref: '#/components/responses/429'
       description: |-
-        List running and recently completed command executions, oldest first. Each execution represents one submitted shell command or script.
+        List running and recently completed commands, oldest first. Each record represents one submitted shell command or script.
 
-        Completed executions are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Timestamps are Unix seconds.
+        Completed commands are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Timestamps are Unix seconds.
       tags:
         - Lines
       x-hosts:
         - daemon
   /v1/workspaces/{workspace_id}/lines/{line_id}:
     get:
-      summary: Get command execution
+      summary: Get command
       operationId: get_line_v1_workspaces__workspace_id__lines__line_id__get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
@@ -1611,7 +1612,7 @@ paths:
       description: |-
         Get a command execution with its job, process, and machine IDs. Use the `line_id` returned by the shell endpoint.
 
-        Completed executions are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Timestamps are Unix seconds.
+        Completed commands are retained for up to one hour, with a maximum of 1,024 records. Servers sharing a workspace store share these records; snapshots preserve completed records. Timestamps are Unix seconds.
       tags:
         - Lines
       x-hosts:
@@ -2012,7 +2013,7 @@ paths:
         '404':
           $ref: '#/components/responses/404'
         '409':
-          description: Another server is executing commands for this workspace. The error detail identifies
+          description: Another server owns command execution for this workspace. The error detail identifies
             that server.
           content:
             application/json:
