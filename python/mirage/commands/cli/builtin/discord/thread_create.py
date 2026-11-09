@@ -34,5 +34,4 @@ async def thread_create(
         fl.as_str("name") or "",
         message_id=fl.as_str("message"),
     )
-    out = compact_json_bytes(result)
-    return out, IOResult()
+    return compact_json_bytes(result), IOResult()

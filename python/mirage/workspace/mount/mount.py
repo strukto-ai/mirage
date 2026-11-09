@@ -397,7 +397,10 @@ def _tree_command(cli: CLI) -> Command:
         vfs=None,
         filetype=None,
         fn=_tree_root,
-        write=any(handler.write for handler in cli.handlers.values()),
+        write=any(
+            handler.write or handler.write_when
+            for handler in cli.handlers.values()
+        ),
     )
 
 
@@ -1527,7 +1530,7 @@ class MountEntry:
             vfs=None,
             filetype=None,
             fn=fn,
-            write=handler.write,
+            write=handler.writes(ctx.argv),
             limit=handler.limit,
         )
         async with self.use():
@@ -1564,7 +1567,7 @@ class MountEntry:
                             cli_voice(prog),
                             drop=(
                                 self.drop_caches
-                                if handler.write
+                                if handler.writes(ctx.argv)
                                 and self._is_user_command(root)
                                 else None
                             ),

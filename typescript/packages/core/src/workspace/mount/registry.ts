@@ -932,7 +932,7 @@ export class MountRegistry {
         const result = walk(cmdName, tree.spec, argv, cwd, undefined, true)
         if (result.leaf === null) continue
         if (result.path.length > 0) subcommands.add(mount)
-        writes = tree.handlers[result.path.join(' ')]?.write === true
+        writes = tree.handlers[result.path.join(' ')]?.writes(argv) === true
       }
       if (!writes) readers.push(mount)
       else if (strongestModeUnder(mount.prefix, mount.mode, access) !== MountMode.READ)

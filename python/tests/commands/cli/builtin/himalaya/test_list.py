@@ -64,13 +64,15 @@ def patched(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_defaults_to_inbox_and_matches_everything(patched):
-    out, io = await list_envelopes(EMAIL, [], [], Context())
+    out, io = await list_envelopes(
+        EMAIL, [], [], Context(flags={"json": True})
+    )
     assert io.exit_code == 0
     assert patched["folder"] == "INBOX"
     assert patched["criteria"] == "ALL"
-    data = json.loads(await materialize(out))
+    data = json.loads(await materialize(out))["envelopes"]
     # Most recent first, like upstream's `envelope list`.
-    assert [d["uid"] for d in data] == ["3", "2", "1"]
+    assert [d["id"] for d in data] == ["3", "2", "1"]
     # INTERNALDATE only picks the date directory; it is not an envelope
     # field, and every envelope renders through the mount's renderer.
     assert all("internal_date" not in d for d in data)
@@ -78,17 +80,19 @@ async def test_list_defaults_to_inbox_and_matches_everything(patched):
 
 @pytest.mark.asyncio
 async def test_mailbox_flag_selects_the_folder(patched):
-    await list_envelopes(EMAIL, [], [], Context(flags={"mailbox": "Archive"}))
+    await list_envelopes(
+        EMAIL, [], [], Context(flags={"json": True, "mailbox": "Archive"})
+    )
     assert patched["folder"] == "Archive"
 
 
 @pytest.mark.asyncio
 async def test_pages_count_from_one(patched):
     out, _ = await list_envelopes(
-        EMAIL, [], [], Context(flags={"page": 2, "page_size": 2})
+        EMAIL, [], [], Context(flags={"json": True, "page": 2, "page_size": 2})
     )
-    data = json.loads(await materialize(out))
-    assert [d["uid"] for d in data] == ["1"]
+    data = json.loads(await materialize(out))["envelopes"]
+    assert [d["id"] for d in data] == ["1"]
 
 
 @pytest.mark.asyncio
@@ -98,15 +102,17 @@ async def test_empty_result_skips_the_header_fetch(patched, monkeypatch):
 
     patched["uids"] = []
     monkeypatch.setitem(list_envelopes.__globals__, "fetch_headers", boom)
-    out, io = await list_envelopes(EMAIL, [], [], Context())
+    out, io = await list_envelopes(
+        EMAIL, [], [], Context(flags={"json": True})
+    )
     assert io.exit_code == 0
-    assert json.loads(await materialize(out)) == []
+    assert json.loads(await materialize(out))["envelopes"] == []
 
 
 @pytest.mark.asyncio
 async def test_only_the_pages_asked_for_are_fetched(patched):
     await list_envelopes(
-        EMAIL, [], [], Context(flags={"page": 2, "page_size": 2})
+        EMAIL, [], [], Context(flags={"json": True, "page": 2, "page_size": 2})
     )
     # Not the whole mailbox: one page-worth of headers per page asked for.
     assert patched["budget"] == 4
@@ -115,7 +121,10 @@ async def test_only_the_pages_asked_for_are_fetched(patched):
 @pytest.mark.asyncio
 async def test_the_account_window_caps_the_fetch(patched):
     await list_envelopes(
-        EMAIL, [], [], Context(flags={"page": 100, "page_size": 25})
+        EMAIL,
+        [],
+        [],
+        Context(flags={"json": True, "page": 100, "page_size": 25}),
     )
     assert patched["budget"] == EMAIL.config.max_messages
 
@@ -126,11 +135,11 @@ async def test_a_listing_is_header_only(patched):
     # in the MIME structure, but the listing is the envelope: a page of 25
     # messages must not carry 25 HTML bodies. `message read` and the mounted
     # .email.json keep them (#1067).
-    out, _ = await list_envelopes(EMAIL, [], [], Context())
-    data = json.loads(await materialize(out))
+    out, _ = await list_envelopes(EMAIL, [], [], Context(flags={"json": True}))
+    data = json.loads(await materialize(out))["envelopes"]
     assert data
     for row in data:
         assert "body_text" not in row
         assert "body_html" not in row
         assert "snippet" not in row
-        assert row["subject"] == f"s{row['uid']}"
+        assert row["subject"] == f"s{row['id']}"

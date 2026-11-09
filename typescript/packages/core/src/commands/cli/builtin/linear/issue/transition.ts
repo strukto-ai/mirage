@@ -20,7 +20,8 @@ import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { firstText, resolveIssue, resolveStateId } from '../util.ts'
+import { resolveIssue, resolveStateId } from '../util.ts'
+import { firstText } from '../../../operand.ts'
 
 export async function transition(
   accessor: LinearAccessor,
@@ -28,7 +29,7 @@ export async function transition(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const issueId = await resolveIssue(accessor, firstText(texts, 'issue key'))
   const stateId = await resolveStateId(accessor, fl.asStr('state_id'), fl.asStr('state_name'))
   const issue = await issueUpdate(accessor.transport, { issueId, stateId })

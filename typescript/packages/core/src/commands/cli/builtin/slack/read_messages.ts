@@ -14,7 +14,7 @@
 
 import { FlagView } from '../../../spec/flag_view.ts'
 import { fetchRecentMessages } from '../../../../core/slack/history.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { SlackAccessor } from '../../../../accessor/slack.ts'
@@ -32,6 +32,5 @@ export async function readMessages(
     fl.asStr('channel') ?? '',
     fl.asInt('limit', 20),
   )
-  const out: ByteSource = compactJsonBytes(messages)
-  return [out, new IOResult()]
+  return [compactJsonBytes(messages), new IOResult()]
 }

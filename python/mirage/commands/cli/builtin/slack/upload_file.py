@@ -15,11 +15,11 @@
 import posixpath
 
 from mirage.accessor.slack import SlackAccessor
+from mirage.commands.cli.operand import read_operand
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.post import upload_file as share_file
-from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -34,14 +34,7 @@ async def upload_file(
     source = fl.as_path("file")
     if source is None:
         raise ValueError("--file expects a file")
-    if ctx.vfs is None:
-        raise ValueError("--file needs a workspace to read files from")
-    try:
-        data = await ctx.vfs.read(source)
-    except (FileNotFoundError, NotADirectoryError) as exc:
-        raise ValueError(
-            f"read {source.virtual}: {fs_strerror(exc)}"
-        ) from None
+    data = await read_operand(ctx.vfs, source, "--file")
     result = await share_file(
         accessor,
         fl.as_str("channel") or "",

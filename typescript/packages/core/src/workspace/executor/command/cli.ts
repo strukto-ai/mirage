@@ -17,6 +17,7 @@ import {
   ARGPARSE_EXIT,
   directoryRefusal,
   clapMissingOperands,
+  clapStrayOperand,
   leafRefusal,
 } from '../../../commands/cli/refusal.ts'
 import { missCondition, pathStat } from '../../mount/namespace/probe.ts'
@@ -430,7 +431,10 @@ export async function walkLeaf(
     return [helpText, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
   }
 
-  const refusal = optionError(prog, parsed)
+  const typed = parsed.texts.map(String)
+  const stray =
+    style === UsageStyle.CLAP ? clapStrayOperand(prog, parseSpec, typed, result.argv) : null
+  const refusal = stray !== null ? ([stray, CLAP_EXIT] as const) : optionError(prog, parsed)
   let msg: Uint8Array | null = null
   let shown: Uint8Array | null = null
   let code = 0
@@ -442,7 +446,7 @@ export async function walkLeaf(
     msg = encodeText(cobraRefusal(wording, prog, leaf))
     code = COBRA_EXIT
   } else if (refusal !== null) {
-    ;[msg, code, shown] = leafRefusal(style, refusal[0], parsed, result.path.join(' '), leaf)
+    ;[msg, code, shown] = leafRefusal(style, refusal[0], parsed, result.path.join(' '), leaf, prog)
   } else if (parsed.missingRequiredOperands.length > 0 && style === UsageStyle.CLAP) {
     msg = clapMissingOperands(
       prog,
@@ -625,7 +629,7 @@ async function runCli(
       cliVoice(prog),
       {
         settle: settled,
-        ...(binding.write && dropCaches !== null ? { drop: dropCaches } : {}),
+        ...(binding.writes(walked.argv) && dropCaches !== null ? { drop: dropCaches } : {}),
         ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
         ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
       },

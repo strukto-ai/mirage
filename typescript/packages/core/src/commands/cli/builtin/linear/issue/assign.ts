@@ -20,7 +20,8 @@ import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { firstText, resolveIssue } from '../util.ts'
+import { resolveIssue } from '../util.ts'
+import { firstText } from '../../../operand.ts'
 
 export async function assign(
   accessor: LinearAccessor,
@@ -28,7 +29,7 @@ export async function assign(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const issueId = await resolveIssue(accessor, firstText(texts, 'issue key'))
   const assigneeId = await resolveUserId(
     accessor.transport,

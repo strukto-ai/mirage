@@ -14,13 +14,13 @@
 
 import { jsonBytes } from '../../../../../core/render/json.ts'
 import type { LinearAccessor } from '../../../../../accessor/linear.ts'
-import { getIssue, issueUpdate } from '../../../../../core/linear/client.ts'
+import { issueUpdate } from '../../../../../core/linear/client.ts'
 import { normalizeIssue } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { firstText, resolveIssue, resolveLabelId } from '../util.ts'
+import { issueLabels } from '../util.ts'
 
 export async function addLabel(
   accessor: LinearAccessor,
@@ -28,23 +28,11 @@ export async function addLabel(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
-  const issueId = await resolveIssue(accessor, firstText(texts, 'issue key'))
-  const issue = await getIssue(accessor.transport, issueId)
-  const team = issue.team
-  const rawTeamId =
-    team !== null && typeof team === 'object' ? (team as Record<string, unknown>).id : undefined
-  const teamId = typeof rawTeamId === 'string' ? rawTeamId : ''
-  const labelId = await resolveLabelId(accessor, teamId, fl.asStr('label'), fl.asStr('label_name'))
-  const labels = issue.labels
-  const nodes =
-    labels !== null && typeof labels === 'object'
-      ? ((labels as Record<string, unknown>).nodes as Record<string, unknown>[] | undefined)
-      : undefined
-  const existing: string[] = []
-  for (const node of nodes ?? []) {
-    if (typeof node.id === 'string') existing.push(node.id)
-  }
+  const { issueId, existing, labelId } = await issueLabels(
+    accessor,
+    texts,
+    new FlagView(ctx.flags, ctx.spec),
+  )
   if (!existing.includes(labelId)) existing.push(labelId)
   const updated = await issueUpdate(accessor.transport, { issueId, labelIds: existing })
   return [jsonBytes(normalizeIssue(updated)), new IOResult()]

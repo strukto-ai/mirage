@@ -47,3 +47,7 @@ class EmailConfig(TimeoutConfig):
     sent_folder: str | None = None
     """Mailbox a sent copy goes to. Unset asks the server for the mailbox
     tagged `\\Sent` and falls back to `Sent`."""
+    trash_folder: str | None = None
+    """Mailbox `himalaya message delete` moves messages to, as upstream's
+    `mailbox.alias.trash`. Unset asks the server for the mailbox tagged
+    `\\Trash` and falls back to `Trash`."""

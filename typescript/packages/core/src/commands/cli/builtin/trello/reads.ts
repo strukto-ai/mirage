@@ -36,12 +36,7 @@ import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { requireBoard, requireCard, requireList } from './scope.ts'
-
-function first(texts: readonly string[], label: string): string {
-  const value = texts[0]
-  if (value === undefined || value === '') throw new Error(`${label} is required`)
-  return value
-}
+import { firstText } from '../../operand.ts'
 
 export async function boardList(
   accessor: TrelloAccessor,
@@ -65,7 +60,7 @@ export async function boardShow(
   texts: string[],
   _ctx: Context,
 ): Promise<CommandFnResult> {
-  const boardId = first(texts, 'board id')
+  const boardId = firstText(texts, 'board id')
   await requireBoard(accessor, boardId)
   const board = await getBoard(accessor.transport, boardId)
   return [jsonBytes(normalizeBoard(board)), new IOResult()]
@@ -77,7 +72,7 @@ export async function boardMembers(
   texts: string[],
   _ctx: Context,
 ): Promise<CommandFnResult> {
-  const boardId = first(texts, 'board id')
+  const boardId = firstText(texts, 'board id')
   await requireBoard(accessor, boardId)
   const members = await listBoardMembers(accessor.transport, boardId)
   return [jsonBytes(members.map((member) => normalizeMember(member))), new IOResult()]
@@ -89,7 +84,7 @@ export async function listList(
   texts: string[],
   _ctx: Context,
 ): Promise<CommandFnResult> {
-  const boardId = first(texts, 'board id')
+  const boardId = firstText(texts, 'board id')
   await requireBoard(accessor, boardId)
   const lists = await listBoardLists(accessor.transport, boardId)
   return [jsonBytes(lists.map((lst) => normalizeList(lst))), new IOResult()]
@@ -101,7 +96,7 @@ export async function labelList(
   texts: string[],
   _ctx: Context,
 ): Promise<CommandFnResult> {
-  const boardId = first(texts, 'board id')
+  const boardId = firstText(texts, 'board id')
   await requireBoard(accessor, boardId)
   const labels = await listBoardLabels(accessor.transport, boardId)
   return [jsonBytes(labels.map((label) => normalizeLabel(label))), new IOResult()]
@@ -113,7 +108,7 @@ export async function cardList(
   texts: string[],
   _ctx: Context,
 ): Promise<CommandFnResult> {
-  const listId = first(texts, 'list id')
+  const listId = firstText(texts, 'list id')
   await requireList(accessor, listId)
   const cards = await listListCards(accessor.transport, listId)
   return [jsonBytes(cards.map((card) => normalizeCard(card))), new IOResult()]
@@ -125,7 +120,7 @@ export async function cardShow(
   texts: string[],
   _ctx: Context,
 ): Promise<CommandFnResult> {
-  const cardId = first(texts, 'card id')
+  const cardId = firstText(texts, 'card id')
   await requireCard(accessor, cardId)
   const card = await getCard(accessor.transport, cardId)
   return [jsonBytes(normalizeCard(card)), new IOResult()]
@@ -137,7 +132,7 @@ export async function cardComments(
   texts: string[],
   _ctx: Context,
 ): Promise<CommandFnResult> {
-  const cardId = first(texts, 'card id')
+  const cardId = firstText(texts, 'card id')
   await requireCard(accessor, cardId)
   const comments = await listCardComments(accessor.transport, cardId)
   return [jsonBytes(comments.map((comment) => normalizeComment(comment, cardId))), new IOResult()]

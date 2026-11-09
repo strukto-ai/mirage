@@ -67,17 +67,17 @@ def test_flags_map_to_imap_keywords():
     assert criteria("flag DRAFT") == "DRAFT"
 
 
-def test_unknown_flag_is_a_query_error():
-    with pytest.raises(QueryError, match="unknown flag"):
-        parse_query("flag urgent")
+def test_an_unknown_flag_is_a_keyword_search():
+    assert criteria("flag nope") == "KEYWORD nope"
 
 
 def test_date_condition_is_an_exact_day():
     assert criteria("date 2026-02-03") == "SENTON 03-Feb-2026"
 
 
-def test_before_condition_is_exclusive_like_imap():
-    assert criteria("before 2026-02-03") == "SENTBEFORE 03-Feb-2026"
+def test_upstream_has_no_before_condition():
+    with pytest.raises(QueryError, match="found 'e' expected `body`"):
+        parse_query("before 2026-02-03")
 
 
 def test_after_is_strictly_greater_so_it_asks_for_the_next_day():
@@ -88,12 +88,12 @@ def test_after_is_strictly_greater_so_it_asks_for_the_next_day():
 def test_dates_search_the_header_not_the_received_at_timestamp():
     # ON/BEFORE/SINCE would match the mailbox internal date, which is
     # the wrong day for imported or delayed mail.
-    for source in ("date 2026-02-03", "before 2026-02-03", "after 2026-02-03"):
+    for source in ("date 2026-02-03", "after 2026-02-03"):
         assert criteria(source).startswith("SENT")
 
 
 def test_bad_date_is_a_query_error():
-    with pytest.raises(QueryError, match="invalid date"):
+    with pytest.raises(QueryError, match="date format after `date`"):
         parse_query("date 2026-13-40")
 
 
@@ -105,9 +105,8 @@ def test_quotes_inside_a_pattern_are_escaped_for_imap():
     assert criteria('subject "say \\"hi\\""') == 'SUBJECT "say \\"hi\\""'
 
 
-def test_unterminated_quote_is_a_query_error():
-    with pytest.raises(QueryError, match="unterminated"):
-        parse_query('subject "open')
+def test_an_unterminated_quote_reads_as_an_unquoted_word():
+    assert criteria('subject "open') == 'SUBJECT "\\"open"'
 
 
 def test_sorters_parse_with_asc_default():
@@ -122,18 +121,17 @@ def test_filter_and_sort_combine():
     assert query.sorters == (Sorter("date", True),)
 
 
-def test_order_by_without_a_key_is_a_query_error():
-    with pytest.raises(QueryError, match="expected a sort key"):
-        parse_query("order by")
+def test_order_by_without_a_key_keeps_the_default_order():
+    assert parse_query("order by").sorters == ()
 
 
 def test_trailing_tokens_are_rejected():
-    with pytest.raises(QueryError, match="unexpected"):
+    with pytest.raises(QueryError, match="expected"):
         parse_query("from alice bogus")
 
 
 def test_unknown_condition_is_a_query_error():
-    with pytest.raises(QueryError, match="expected a condition"):
+    with pytest.raises(QueryError, match="found 'e' expected `subject`"):
         parse_query("sender alice")
 
 
@@ -191,3 +189,73 @@ def test_an_explicit_sort_has_to_consider_the_whole_window():
 
 def test_page_zero_still_costs_one_page():
     assert uid_budget(0, 25, (), 200) == 25
+
+
+def _message(source: str) -> str:
+    with pytest.raises(QueryError) as caught:
+        parse_query(source)
+    return str(caught.value)
+
+
+def test_a_report_shows_only_the_failing_line():
+    assert _message("subject a\nand\n  zzz qq") == (
+        "Error: cannot parse search emails query `subject a\nand\n  zzz qq`\n"
+        "   ╭─[ query:3:3 ]\n"
+        "   │\n"
+        " 3 │   zzz qq\n"
+        "   │   ┬  \n"
+        "   │   ╰── found 'z' expected space between filters, `and`, `or`, "
+        "or end of input\n"
+        "───╯\n"
+    )
+
+
+def test_the_gutter_grows_with_the_line_number():
+    report = _message("subject a" + "\n" * 10 + "and zzz")
+    assert "    ╭─[ query:11:5 ]\n" in report
+    assert " 11 │ and zzz\n" in report
+    assert report.endswith("\n────╯\n")
+
+
+def test_a_position_counts_bytes():
+    assert "query:1:12 ]" in _message("subject é zz")
+    assert _message("subject é and") == (
+        "Error: cannot parse search emails query `subject é and`\n"
+    )
+
+
+def test_a_wide_found_character_underlines_its_bytes():
+    report = _message("not 日abc")
+    assert "   │     ──┬─  \n" in report
+    assert "   │       ╰─── found '日' expected" in report
+
+
+def test_a_label_past_its_line_draws_no_text():
+    assert _message("not é") == (
+        "Error: cannot parse search emails query `not é`\n"
+        "   ╭─[ query:1:5 ]\n"
+        "   │\n"
+        "   │ \n"
+        "───╯\n"
+    )
+
+
+def test_a_keyword_must_be_an_atom():
+    assert _message('flag a"b') == 'Invalid IMAP keyword `a"b`'
+    assert parse_query("flag custom").criteria == "KEYWORD custom"
+
+
+def test_a_pattern_with_a_line_break_finds_nothing():
+    assert parse_query("subject a\nzzz").criteria == "NOT ALL"
+
+
+def test_a_mark_on_a_combining_accent_draws_nothing():
+    report = _message("subject é x\u0301")
+    assert "   │              \n" in report
+    assert "   │            ── found 'x' expected" in report
+
+
+def test_the_margin_counts_a_combining_accent():
+    report = _message("not x\u0301 y")
+    assert "   │     ┬ \n" in report
+    assert "   │     ╰─ found 'x' expected" in report

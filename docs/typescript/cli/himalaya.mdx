@@ -30,11 +30,21 @@ This list is generated from Mirage's registered command tree.
 
 | Command | Description |
 | --- | --- |
-| `himalaya envelope list` | List envelopes as JSON headers. Aliases: `ls`. |
+| `himalaya mailbox list` | List the mailboxes of the account. Aliases: `ls`. |
+| `himalaya flag add` | Add flags to messages |
+| `himalaya flag set` | Replace the flags of messages |
+| `himalaya flag remove` | Remove flags from messages. Aliases: `rm`. |
+| `himalaya attachment list` | List the attachments of one message. Aliases: `ls`. |
+| `himalaya attachment download` | Save a message's attachments to the workspace. Aliases: `dl`. |
+| `himalaya envelope list` | List the envelopes of a mailbox, most recent first. Aliases: `ls`. |
 | `himalaya envelope search` | Search envelopes with the query DSL. Aliases: `sr`. |
-| `himalaya message read` | Read one message as JSON |
+| `himalaya message copy` | Copy messages to another mailbox. Aliases: `cp`. |
+| `himalaya message move` | Move messages to another mailbox. Aliases: `mv`. |
+| `himalaya message delete` | Move messages to the trash, or remove them once they are there. Aliases: `rm`. |
+| `himalaya message read` | Read a message |
 | `himalaya message compose` | Compose a new message from flags. Aliases: `write`, `new`. |
-| `himalaya message send` | Send a raw RFC 5322 message |
+| `himalaya message send` | Send a message through the account |
+| `himalaya message add` | Add a raw RFC 5322 message to a mailbox. Aliases: `save`. |
 | `himalaya message reply` | Reply to a message |
 | `himalaya message forward` | Forward a message. Aliases: `fwd`. |
 {/* END GENERATED CLI COMMANDS */}
@@ -46,24 +56,37 @@ himalaya envelope list -m INBOX --page 1 --page-size 10
 himalaya envelope search -m INBOX not flag seen and from alice@example.com
 himalaya envelope search after 2026-01-01 order by subject asc
 himalaya envelope search subject '"quarterly review"'
+himalaya --json envelope list -m INBOX | jq -r '.envelopes[].subject'
 himalaya message read -m INBOX 12345
 himalaya message read -m INBOX 12345 --raw
+himalaya mailbox list --counts
+himalaya flag add 12345 -f seen -f flagged
+himalaya message move 12345 --to Archive
+himalaya message copy 12345 --from Archive --to Projects
+himalaya message delete 12345
+himalaya attachment list 12345
+himalaya attachment download 12345 -d /data/attachments
 ```
 
-Messages take positional IDs. `-m/--mailbox` defaults to `INBOX`. Envelopes
-include headers, identifiers, flags and attachment metadata; bodies and
-snippets appear in `message read`. `--raw` returns RFC 5322 bytes.
+Output matches upstream Himalaya. Listings print tables and confirmations
+print a sentence; add the global `--json` for JSON, in any position. `message
+read` shows the headers and walks the MIME parts, `--raw` returns RFC 5322
+bytes, and `--seen` marks the message as seen, which reading alone does not.
+
+Messages take positional IDs. `-m/--mailbox` defaults to `INBOX`. An
+attachment's ID is its position among the message's MIME parts.
 
 Listings are newest first, with pages starting at 1 and a default page size
 of 25. The account's `max_messages` (default 200) bounds the search and paging
 window. Sorted search considers that whole window.
 
-Search conditions are `date`, `before`, `after`, `from`, `to`, `subject`,
-`body` and `flag`. Combine them with `and`, `or`, `not` and parentheses;
+Search conditions are `date`, `after`, `from`, `to`, `subject`, `body` and
+`flag`. Combine them with `and`, `or`, `not` and parentheses;
 sort with `order by date|from|to|subject [asc|desc]`. Date conditions use the
 message's `Date:` header, and `after` is exclusive. A pattern containing
 spaces needs literal double quotes inside the shell quotes, as above.
-Malformed queries exit 1 before contacting the server.
+A malformed query exits 1 before contacting the server, and the report points
+at where it stopped.
 
 ## Compose, reply and send
 
@@ -76,14 +99,16 @@ himalaya message forward -m INBOX 12345 --to colleague@example.com --send
 ```
 
 **Without `--send`, compose/reply/forward print MIME bytes and send nothing.**
-Bodies come from `--body` or stdin. `message send` accepts raw MIME on stdin
-or as its inline operand. `--attach` is repeatable and reads workspace files
-through the VFS; `--from`, `--to`, `--cc`, `--bcc`, `--subject` and
-`--signature` control the composed message.
+With `--json` they print the decoded fields instead. Bodies come from `--body`,
+`--body-file` or stdin. `message send` accepts raw MIME on stdin, or after `--`
+as text or a file path. `--attach` is repeatable and reads workspace files
+through the VFS; `--from`, `--to`, `--cc`, `--bcc`, `--subject`, `--signature`
+and `--signature-file` control the composed message. `message add -m MAILBOX`
+appends raw MIME to a mailbox and reports the new id.
 
 Reply uses `Reply-To` or `From`, adds reply headers and quotes the source.
 Forward prefixes the subject with `Fwd:` and keeps `References`. Both accept
-`--posting-style top|bottom` and `--quote-headline`. There is no reply-all
+`--posting-style top|bottom|none` and `--quote-headline`. There is no reply-all
 switch; supply the extra recipients through `--cc`.
 
 ## Save drafts and sent copies
@@ -99,9 +124,9 @@ when set. `save_copy=False` (`saveCopy: false`) disables the default copy.
 `--save MAILBOX` overrides both settings for one command; without `--send`
 on a composer, it saves a draft and sends nothing.
 
-A sent-copy failure after delivery is a warning with exit 0: retrying would
-send the message twice. Saving a draft without sending fails normally if
-IMAP refuses it.
+`--no-save` skips the configured copy. A copy that fails after delivery exits
+1 and says the message was already sent, so do not retry it. Saving a draft
+without sending fails normally if IMAP refuses it.
 
 ## VFS and limits
 
@@ -109,11 +134,11 @@ The optional [Email VFS](/typescript/setup/email) exposes the mailbox as files.
 Reading a message does not mark it seen. The CLI uses its own account config;
 attachments can come from any readable workspace mount.
 
-Mailbox management, moving/deleting messages, flag mutation and attachment
-download commands are absent. `--body-file` and `--signature-file` are also
-absent; use stdin. Output is JSON rather than upstream's tables, and sent-copy
-saving defaults on in Mirage. Server matching rules still determine how
-search patterns match addresses and text.
+Server matching rules determine how search patterns match addresses and text.
+`trashFolder` picks the mailbox `message delete` moves to, as upstream's
+`mailbox.alias.trash`; unset, the server's `\\Trash` tag decides. Only the
+mailbox, envelope, flag, message and attachment commands are present, and
+`-c`, `-a` and `-b` are not accepted since an install is one account.
 
 Upstream Himalaya offers a choice of
 [MIT](https://github.com/pimalaya/himalaya/blob/master/LICENSE-MIT) or

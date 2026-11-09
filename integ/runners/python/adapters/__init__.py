@@ -1027,6 +1027,7 @@ class EmailService:
             "username": EMAIL_USERNAME,
             "password": self.password,
             "use_ssl": False,
+            "trash_folder": "Trash",
         }
         alpha = dict(integ, username=EMAIL_USERNAME_ALPHA)
         beta = dict(integ, username=EMAIL_USERNAME_BETA)

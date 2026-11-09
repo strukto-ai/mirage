@@ -48,6 +48,17 @@ async def content_or_stdin(
     return (await materialize(stdin)).decode("utf-8", "replace")
 
 
+UPLOAD_COLUMNS = (
+    "id",
+    "filename",
+    "status",
+    "content_type",
+    "content_length",
+    "created_time",
+    "expiry_time",
+)
+
+
 def pretty_json(value: JsonValue) -> bytes:
     """Render a payload the way `ntn <verb> --json` does.
 
@@ -63,6 +74,33 @@ def pretty_json(value: JsonValue) -> bytes:
     """
     text = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False)
     return f"{text}\n".encode()
+
+
+def upload_row(upload: dict[str, JsonValue], columns: tuple[str, ...]) -> str:
+    """One tab-separated line of a file upload, an absent value left empty.
+
+    Args:
+        upload (dict[str, JsonValue]): the API's file upload object.
+        columns (tuple[str, ...]): the fields to show, in order.
+    """
+    return "\t".join(
+        "" if upload.get(key) is None else str(upload[key]) for key in columns
+    )
+
+
+def upload_output(upload: dict[str, JsonValue], as_json: bool) -> bytes:
+    """Render one file upload: the API's object, or its plain row.
+
+    A line never reaches a terminal here, so the default is the row the
+    real CLI prints to a pipe.
+
+    Args:
+        upload (dict[str, JsonValue]): the API's file upload object.
+        as_json (bool): whether --json was given.
+    """
+    if as_json:
+        return pretty_json(upload)
+    return f"{upload_row(upload, UPLOAD_COLUMNS)}\n".encode()
 
 
 def compact_json(value: JsonValue) -> bytes:
@@ -243,7 +281,7 @@ def notion_transport(accessor: NotionAccessor, ctx: Context) -> NotionAccessor:
     Returns:
         NotionAccessor: the accessor to hand the client.
     """
-    version = FlagView(ctx.flags).as_str("notion_version")
+    version = FlagView(ctx.flags, ctx.spec).as_str("notion_version")
     if not version:
         return accessor
     line = copy.copy(accessor)

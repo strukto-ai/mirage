@@ -31,7 +31,7 @@ async def resolve(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     database_id = first_text(texts, "database id")
     database = await get_database(notion_transport(accessor, ctx), database_id)
     stubs = database.get("data_sources") or []

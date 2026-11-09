@@ -27,9 +27,8 @@ async def read(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     processed = await get_message_processed(
         accessor.token_manager, fl.as_str("id") or ""
     )
-    out = compact_json_bytes(processed)
-    return out, IOResult()
+    return compact_json_bytes(processed), IOResult()

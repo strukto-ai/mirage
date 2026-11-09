@@ -32,7 +32,7 @@ async def get(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     page_id = first_text(texts, "page id")
     # Both calls happen either way: the body comes from the markdown
     # endpoint and the title heading the frontmatter only exists on the

@@ -123,6 +123,24 @@ model NotionUser {
   @@id([tenant, id])
 }
 
+model NotionFileUpload {
+  tenant        String
+  id            String
+  seq           Int
+  mode          String
+  status        String
+  filename      String
+  contentType   String?
+  contentLength Int?
+  numberOfParts Int?
+  partsJson     String  @default("[]")
+  createdTime   String
+  expiryTime    String
+
+  @@id([tenant, id])
+  @@index([tenant, seq])
+}
+
 model NotionComment {
   tenant         String
   id             String

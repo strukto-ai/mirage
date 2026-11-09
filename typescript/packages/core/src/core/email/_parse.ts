@@ -93,6 +93,7 @@ export function fromParsed(parsed: ParsedMail, headersOnly: boolean) {
     references,
     has_attachments: attachments.length > 0,
     attachments,
+    attached: parsed.attachments.some((a) => a.contentDisposition === 'attachment'),
   }
 }
 

@@ -85,6 +85,10 @@ const VERBS = [
   'edit',
   'delete',
   'react',
+  'reactions',
+  'pin-message',
+  'unpin-message',
+  'list-pins',
   'search',
   'thread-create',
   'poll',
@@ -103,7 +107,18 @@ describe('discord tree', () => {
     const writers = new Set(
       DISCORD.spec.subcommands.filter((v) => DISCORD.handlers[v.name]?.write).map((v) => v.name),
     )
-    expect(writers).toEqual(new Set(['send', 'edit', 'delete', 'react', 'thread-create', 'poll']))
+    expect(writers).toEqual(
+      new Set([
+        'send',
+        'edit',
+        'delete',
+        'react',
+        'pin-message',
+        'unpin-message',
+        'thread-create',
+        'poll',
+      ]),
+    )
     const pollSpec = DISCORD.spec.subcommands.find((v) => v.name === 'poll')
     if (pollSpec === undefined) throw new Error('missing poll grammar')
     const answer = compileSpec(pollSpec).options.find((o) => o.names.includes('--answer'))

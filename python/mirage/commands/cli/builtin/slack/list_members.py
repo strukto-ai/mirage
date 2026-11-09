@@ -33,5 +33,4 @@ async def list_members(
         users = await search_users(accessor, query)
     else:
         users = await list_users(accessor)
-    out = compact_json_bytes(users)
-    return out, IOResult()
+    return compact_json_bytes(users), IOResult()

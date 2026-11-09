@@ -16,7 +16,10 @@ import re
 from typing import cast
 
 from mirage.accessor.linear import LinearAccessor
+from mirage.commands.cli.operand import first_text
+from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import (
+    get_issue,
     list_team_labels,
     list_team_projects,
     list_teams,
@@ -25,12 +28,6 @@ from mirage.core.linear.client import (
 from mirage.io.types import ByteSource, materialize
 
 ISSUE_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-[0-9]+$")
-
-
-def first_text(texts: list[str], label: str) -> str:
-    if not texts:
-        raise ValueError(f"{label} is required")
-    return texts[0]
 
 
 async def resolve_issue(accessor: LinearAccessor, token: str) -> str:
@@ -100,6 +97,30 @@ async def resolve_label_id(
         if label.get("name") == label_name:
             return cast(str, label["id"])
     raise FileNotFoundError(label_name)
+
+
+async def issue_labels(
+    accessor: LinearAccessor, texts: list[str], fl: FlagView
+) -> tuple[str, list[str], str]:
+    """Resolve what add-label and remove-label act on.
+
+    Args:
+        accessor (LinearAccessor): the install's Linear handle.
+        texts (list[str]): the leaf's operands, the issue first.
+        fl (FlagView): the leaf's flags, naming the label.
+
+    Returns:
+        tuple[str, list[str], str]: the issue's ID, its label IDs and
+        the ID of the label the line names.
+    """
+    issue_id = await resolve_issue(accessor, first_text(texts, "issue key"))
+    issue = await get_issue(accessor, issue_id)
+    team_id = (issue.get("team") or {}).get("id") or ""
+    label_id = await resolve_label_id(
+        accessor, team_id, fl.as_str("label"), fl.as_str("label_name")
+    )
+    nodes = issue.get("labels", {}).get("nodes", [])
+    return issue_id, [n["id"] for n in nodes], label_id
 
 
 async def resolve_project_id(

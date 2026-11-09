@@ -31,5 +31,4 @@ async def delete_verb(
     await delete_message(
         accessor, fl.as_str("channel") or "", fl.as_str("message") or ""
     )
-    out = compact_json_bytes({"ok": True})
-    return out, IOResult()
+    return compact_json_bytes({"ok": True}), IOResult()

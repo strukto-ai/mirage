@@ -29,7 +29,7 @@ async def create(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     team = await resolve_team(accessor, fl.as_str("team") or "")
     description = None
     if fl.as_str("description") is not None or ctx.stdin is not None:

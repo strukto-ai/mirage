@@ -206,7 +206,7 @@ describe('a uid that would end the command line', () => {
           },
         }
         await expect(fetch(accessor as never, `1${bad}X1 EXPUNGE`)).rejects.toThrow(
-          'line break or NUL',
+          'Invalid message UID',
         )
         expect(connected).toBe(false)
       })

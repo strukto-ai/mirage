@@ -20,7 +20,11 @@ import { deleteVerb } from './delete.ts'
 import { edit } from './edit.ts'
 import { members } from './members.ts'
 import { poll } from './poll.ts'
+import { listPins } from './list_pins.ts'
+import { pinMessage } from './pin_message.ts'
 import { react } from './react.ts'
+import { reactions } from './reactions.ts'
+import { unpinMessage } from './unpin_message.ts'
 import { read } from './read.ts'
 import { search } from './search.ts'
 import { send } from './send.ts'
@@ -82,6 +86,35 @@ export const DISCORD = new CLI({
         ],
       }),
       new CommandSpec({
+        name: 'reactions',
+        description: 'List the reactions on a message',
+        arguments: [
+          new Argument('--channel', { required: true }),
+          new Argument('--message', { required: true }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'pin-message',
+        description: 'Pin a message to its channel',
+        arguments: [
+          new Argument('--channel', { required: true }),
+          new Argument('--message', { required: true }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'unpin-message',
+        description: 'Remove a pin from a message',
+        arguments: [
+          new Argument('--channel', { required: true }),
+          new Argument('--message', { required: true }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'list-pins',
+        description: "List a channel's pinned messages",
+        arguments: [new Argument('--channel', { required: true })],
+      }),
+      new CommandSpec({
         name: 'search',
         description: "Search a guild's messages by content",
         arguments: [
@@ -138,6 +171,10 @@ export const DISCORD = new CLI({
     edit: new CLIHandler({ fn: edit, write: true }),
     delete: new CLIHandler({ fn: deleteVerb, write: true }),
     react: new CLIHandler({ fn: react, write: true }),
+    reactions: new CLIHandler({ fn: reactions }),
+    'pin-message': new CLIHandler({ fn: pinMessage, write: true }),
+    'unpin-message': new CLIHandler({ fn: unpinMessage, write: true }),
+    'list-pins': new CLIHandler({ fn: listPins }),
     search: new CLIHandler({ fn: search }),
     'thread-create': new CLIHandler({ fn: threadCreate, write: true }),
     poll: new CLIHandler({ fn: poll, write: true }),

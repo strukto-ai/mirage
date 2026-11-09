@@ -34,6 +34,10 @@ This list is generated from Mirage's registered command tree.
 | `discord edit` | Edit a message the bot authored |
 | `discord delete` | Delete a message |
 | `discord react` | Add an emoji reaction to a message |
+| `discord reactions` | List the reactions on a message |
+| `discord pin-message` | Pin a message to its channel |
+| `discord unpin-message` | Remove a pin from a message |
+| `discord list-pins` | List a channel's pinned messages |
 | `discord search` | Search a guild's messages by content |
 | `discord thread-create` | Create a thread, standalone or from a message |
 | `discord poll` | Post a poll message to a channel |
@@ -60,6 +64,10 @@ attaches it.
 
 ```bash
 discord react --channel 1256522563555819574 --message 1489887688978075769 --emoji "👍"
+discord reactions --channel 1256522563555819574 --message 1293847561029384756
+discord pin-message --channel 1256522563555819574 --message 1293847561029384756
+discord list-pins --channel 1256522563555819574
+discord unpin-message --channel 1256522563555819574 --message 1293847561029384756
 discord thread-create --channel 1256522563555819574 --message 1489887688978075769 --name "Release review"
 discord poll --channel 1256522563555819574 --question "Ship today?" --answer Yes --answer Tomorrow --duration 24
 discord server-info --guild 1256522563555819574

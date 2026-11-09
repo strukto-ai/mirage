@@ -32,7 +32,7 @@ async def trash(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     page_id = first_text(texts, "page id")
     # A mirage session has no terminal, so this is the branch the
     # upstream CLI takes when it cannot prompt: refuse and say how.

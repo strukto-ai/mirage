@@ -12,16 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readOperand } from '../../operand.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { sendMessage } from '../../../../core/discord/post.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { DiscordAccessor } from '../../../../accessor/discord.ts'
 import { compactJsonBytes } from '../../../../core/render/json.ts'
 import type { DiscordFile } from '../../../../core/discord/client.ts'
-import { fsStrerror, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
-import { posixPhrase } from '../../../../errors/posix.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
@@ -30,16 +29,7 @@ async function attachment(
   source: PathSpec | undefined,
 ): Promise<DiscordFile | undefined> {
   if (source === undefined) return undefined
-  if (vfs === undefined) throw new Error('--file needs a workspace to read files from')
-  let data: Uint8Array
-  try {
-    data = await vfs.read(source)
-  } catch (err) {
-    if (isMissingPath(err) || isEnotdir(err)) {
-      throw new Error(`read ${source.virtual}: ${fsStrerror(err) ?? posixPhrase('ENOENT')}`)
-    }
-    throw err
-  }
+  const data = await readOperand(vfs, source, '--file')
   const trimmed = rstripSlash(source.virtual)
   return { name: trimmed.slice(trimmed.lastIndexOf('/') + 1), data }
 }
@@ -58,6 +48,5 @@ export async function send(
     fl.asStr('reply_to') ?? undefined,
     await attachment(ctx.vfs, fl.asPath('file')),
   )
-  const out: ByteSource = compactJsonBytes(result)
-  return [out, new IOResult()]
+  return [compactJsonBytes(result), new IOResult()]
 }

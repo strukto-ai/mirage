@@ -18,6 +18,7 @@ from mirage.commands.cli.builtin.trello.scope import (
     require_card,
     require_list,
 )
+from mirage.commands.cli.operand import first_text
 from mirage.commands.config import Context
 from mirage.core.render.json import json_bytes
 from mirage.core.trello.client import (
@@ -42,12 +43,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 
 
-def _first(texts: list[str], label: str) -> str:
-    if not texts:
-        raise ValueError(f"{label} is required")
-    return texts[0]
-
-
 async def board_list(
     accessor: TrelloAccessor,
     paths: list[PathSpec],
@@ -67,7 +62,7 @@ async def board_show(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    board_id = _first(texts, "board id")
+    board_id = first_text(texts, "board id")
     await require_board(accessor, board_id)
     board = await get_board(accessor, board_id)
     return json_bytes(normalize_board(board)), IOResult()
@@ -79,7 +74,7 @@ async def board_members(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    board_id = _first(texts, "board id")
+    board_id = first_text(texts, "board id")
     await require_board(accessor, board_id)
     members = await list_board_members(accessor, board_id)
     return json_bytes(
@@ -93,7 +88,7 @@ async def list_list(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    board_id = _first(texts, "board id")
+    board_id = first_text(texts, "board id")
     await require_board(accessor, board_id)
     lists = await list_board_lists(accessor, board_id)
     return json_bytes([normalize_list(lst) for lst in lists]), IOResult()
@@ -105,7 +100,7 @@ async def label_list(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    board_id = _first(texts, "board id")
+    board_id = first_text(texts, "board id")
     await require_board(accessor, board_id)
     labels = await list_board_labels(accessor, board_id)
     return json_bytes([normalize_label(label) for label in labels]), IOResult()
@@ -117,7 +112,7 @@ async def card_list(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    list_id = _first(texts, "list id")
+    list_id = first_text(texts, "list id")
     await require_list(accessor, list_id)
     cards = await list_list_cards(accessor, list_id)
     return json_bytes([normalize_card(card) for card in cards]), IOResult()
@@ -129,7 +124,7 @@ async def card_show(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    card_id = _first(texts, "card id")
+    card_id = first_text(texts, "card id")
     await require_card(accessor, card_id)
     card = await get_card(accessor, card_id)
     return json_bytes(normalize_card(card)), IOResult()
@@ -141,7 +136,7 @@ async def card_comments(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    card_id = _first(texts, "card id")
+    card_id = first_text(texts, "card id")
     await require_card(accessor, card_id)
     comments = await list_card_comments(accessor, card_id)
     return json_bytes(

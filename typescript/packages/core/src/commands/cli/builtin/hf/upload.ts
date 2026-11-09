@@ -119,6 +119,44 @@ export function inRepoBase(value: string): string {
 }
 
 /** Upload a workspace file or folder to a repository, as one commit. */
+/** Collect the upload's files, refusing a source that does not exist. */
+async function sourceFiles(
+  vfs: Files,
+  source: PathSpec,
+  named: boolean,
+): Promise<{ rows: Addition[]; fromDir: boolean }> {
+  try {
+    return await collect(vfs, source)
+  } catch (err) {
+    if (!isMissingPath(err) && !isEnotdir(err)) throw err
+    throw new UsageError(
+      named
+        ? `${shellQuote(source.rawPath)}: ${fsStrerror(err) ?? posixPhrase('ENOENT')}`
+        : `'${source.rawPath}' is not a local file or folder. Please set local_path explicitly.`,
+    )
+  }
+}
+
+/**
+ * Give each collected file its path in the repository. Folder contents spread
+ * under path_in_repo; a single file lands at it. Upstream applies filters only
+ * to folders.
+ */
+function placed(
+  collected: { rows: Addition[]; fromDir: boolean },
+  base: string,
+  include: readonly string[],
+  exclude: readonly string[],
+): Addition[] {
+  if (!collected.fromDir) {
+    return collected.rows.map(({ path, data }) => ({ path: base || path, data }))
+  }
+  return keep(collected.rows, include, [...exclude, ...DEFAULT_IGNORE_PATTERNS]).map((row) => ({
+    path: base === '' ? row.path : `${base}/${row.path}`,
+    data: row.data,
+  }))
+}
+
 export async function uploadCmd(
   accessor: HfAccountAccessor,
   paths: PathSpec[],
@@ -127,7 +165,7 @@ export async function uploadCmd(
 ): Promise<CommandFnResult> {
   requireOperands(texts, ['repo_id'])
   requireToken(accessor, 'upload')
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const vfs = ctx.vfs
   if (vfs === undefined) {
     throw new UsageError('hf upload needs a workspace to read from')
@@ -152,31 +190,14 @@ export async function uploadCmd(
     if (patterns.length > 0) refuseVariadic(operands, flag, patterns)
   }
   const inRepo = texts[1] ?? ''
-  let collected: { rows: Addition[]; fromDir: boolean }
-  try {
-    collected = await collect(vfs, source)
-  } catch (err) {
-    if (!isMissingPath(err) && !isEnotdir(err)) throw err
-    throw new UsageError(
-      paths.length > 0
-        ? `${shellQuote(source.rawPath)}: ${fsStrerror(err) ?? posixPhrase('ENOENT')}`
-        : `'${source.rawPath}' is not a local file or folder. Please set local_path explicitly.`,
-    )
-  }
+  const collected = await sourceFiles(vfs, source, paths.length > 0)
   const base = inRepoBase(inRepo)
+  const additions = placed(collected, base, include, exclude)
   let warnings = ''
-  // Folder contents spread under path_in_repo; a single file lands at it.
-  // Upstream applies filters only to folders and warns for single files.
-  let additions: Addition[]
-  if (collected.fromDir) {
-    additions = keep(collected.rows, include, [...exclude, ...DEFAULT_IGNORE_PATTERNS]).map(
-      (row) => ({ path: base === '' ? row.path : `${base}/${row.path}`, data: row.data }),
-    )
-  } else {
-    for (const [flag, patterns] of patternFlags) {
-      if (patterns.length > 0) warnings += `Ignoring ${flag} since a single file is uploaded.\n`
+  for (const [flag, patterns] of patternFlags) {
+    if (patterns.length > 0 && !collected.fromDir) {
+      warnings += `Ignoring ${flag} since a single file is uploaded.\n`
     }
-    additions = collected.rows.map(({ path, data }) => ({ path: base || path, data }))
   }
   const repoType = repoTypeOf(fl)
   // Upstream creates the repository if it is missing and ignores --private

@@ -14,6 +14,7 @@
 
 import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { listFolderEntries } from '../../../../core/email/client.ts'
+import { ChainedError } from './printer.ts'
 import { sendRaw } from './smtp.ts'
 
 const SENT_ATTRIBUTE = '\\sent'
@@ -35,30 +36,47 @@ export async function resolveSentFolder(
   configured: string | null,
 ): Promise<string> {
   if (configured !== null && configured !== '') return configured
+  return taggedFolder(accessor, SENT_ATTRIBUTE, DEFAULT_SENT_FOLDER)
+}
+
+/** The mailbox the server tags with an RFC 6154 attribute, lowercase. */
+export async function taggedFolder(
+  accessor: EmailAccessor,
+  attribute: string,
+  fallback: string,
+): Promise<string> {
   const entries = await listFolderEntries(accessor)
-  const tagged = entries.find((entry) => entry.specialUse?.toLowerCase() === SENT_ATTRIBUTE)
-  return tagged?.name ?? DEFAULT_SENT_FOLDER
+  const tagged = entries.find((entry) =>
+    entry.attributes.some((name) => name.toLowerCase() === attribute),
+  )
+  return tagged?.name ?? fallback
 }
 
 /**
- * APPENDs a message to a mailbox, seen, and answers with the mailbox it
- * landed in. `named` is the mailbox --save gave; without one the
- * account's own sent mailbox is resolved. The APPEND rides the install's
- * IMAP connection, which stays open after it.
- *
- * Unlike python's, this path quotes nothing: imapflow builds the
- * command from typed attributes, so a mailbox holding a space arrives
- * as one argument on its own.
+ * APPENDs a message and reports the UID the server assigned, null when
+ * it does not report one. imapflow builds the command from typed
+ * attributes, so a mailbox holding a space arrives as one argument.
  */
+export async function appendMessage(
+  accessor: EmailAccessor,
+  raw: Uint8Array,
+  folder: string,
+  flags: readonly string[],
+): Promise<string | null> {
+  const imap = await accessor.getImap()
+  const result = await imap.append(folder, Buffer.from(raw), [...flags])
+  if (result === false) throw new Error(`${folder}: the server refused the message`)
+  return result.uid === undefined ? null : String(result.uid)
+}
+
+/** APPENDs a message to a mailbox, seen, the way upstream saves one. */
 export async function saveSentCopy(
   accessor: EmailAccessor,
   raw: Uint8Array,
   named: string | null = null,
 ): Promise<string> {
   const folder = named ?? (await resolveSentFolder(accessor, accessor.config.sentFolder))
-  const imap = await accessor.getImap()
-  const result = await imap.append(folder, Buffer.from(raw), [SEEN_FLAG])
-  if (result === false) throw new Error(`${folder}: the server refused the message`)
+  await appendMessage(accessor, raw, folder, [SEEN_FLAG])
   return folder
 }
 
@@ -67,34 +85,28 @@ export async function saveSentCopy(
  *
  * Two conversations with two servers: SMTP hands the message to the
  * recipient's side and keeps no record, so the copy in the sender's
- * Sent mailbox is a separate IMAP APPEND that every mail client makes
- * on its own. Upstream v2 spells that APPEND as `--save <MAILBOX>` and
- * does nothing without it; mirage keeps the account-level `saveCopy` on
- * top, defaulted on, so an agent that never learned the flag still
- * leaves the record a human sender would.
- *
- * The other deliberate divergence is the failure arm. Upstream
- * propagates, which fails the command after the mail has already left;
- * here the APPEND failure is reported on stderr and the verb still
- * succeeds, because a non-zero exit invites a retry that sends the
- * message twice. A `--save` that sends nothing does not go through here
- * at all, precisely because nothing happened yet and failing is safe.
+ * Sent mailbox is a separate IMAP APPEND. `--save <MAILBOX>` names it,
+ * the account's `saveCopy` asks for one without the flag, and
+ * `--no-save` skips it. The send goes first, so a failed send leaves no
+ * copy behind; a copy that then fails is reported as a failure of the
+ * command, the way upstream reports it, saying the message left.
  */
 export async function deliver(
   accessor: EmailAccessor,
   raw: Uint8Array,
   save: string | null = null,
-) {
-  const parsed = await sendRaw(accessor.config, raw)
-  if (save === null && !accessor.config.saveCopy) return { parsed, warning: '' }
+  noSave = false,
+): Promise<boolean> {
+  await sendRaw(accessor.config, raw)
+  if (noSave || (save === null && !accessor.config.saveCopy)) return false
+  let folder = save ?? accessor.config.sentFolder ?? DEFAULT_SENT_FOLDER
   try {
-    await saveSentCopy(accessor, raw, save)
+    folder = save ?? (await resolveSentFolder(accessor, accessor.config.sentFolder))
+    await appendMessage(accessor, raw, folder, [SEEN_FLAG])
   } catch (error) {
-    // Every failure mode is caught on purpose: the message is already
-    // delivered by this point, so no fault of the copy may turn into a
-    // failed send. Nothing is swallowed, the reason is printed.
-    const reason = error instanceof Error ? error.message : String(error)
-    return { parsed, warning: `himalaya: sent copy not saved: ${reason}\n` }
+    throw new ChainedError(`Message sent, but saving a copy to ${folder} failed`, [
+      error instanceof Error ? error.message : String(error),
+    ])
   }
-  return { parsed, warning: '' }
+  return true
 }

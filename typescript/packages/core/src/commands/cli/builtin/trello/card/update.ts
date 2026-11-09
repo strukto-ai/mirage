@@ -21,7 +21,7 @@ import type { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { requireCard } from '../scope.ts'
-import { fileOperand, requiredFlag, resolveTextInput } from '../util.ts'
+import { boolFlag, fileOperand, requiredFlag, resolveTextInput } from '../util.ts'
 
 export async function update(
   accessor: TrelloAccessor,
@@ -44,9 +44,7 @@ export async function update(
       errorMessage: 'desc is required',
     })
   }
-  const closedFlag = fl.asStr('closed')
-  const closed =
-    closedFlag === undefined ? null : ['true', '1', 'yes'].includes(closedFlag.toLowerCase())
+  const closed = boolFlag(fl, 'closed')
   const due = fl.asStr('due') ?? null
   await requireCard(accessor, cardId)
   const card = await cardUpdate(accessor.transport, {

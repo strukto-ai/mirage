@@ -19,6 +19,8 @@ from mirage.core.slack.config import SlackConfig
 
 VERBS = [
     "send-message",
+    "edit-message",
+    "delete-message",
     "upload-file",
     "read-messages",
     "react",
@@ -50,6 +52,8 @@ def test_write_classification():
     }
     assert writers == {
         "send-message",
+        "edit-message",
+        "delete-message",
         "upload-file",
         "react",
         "pin-message",

@@ -33,6 +33,9 @@ This list is generated from Mirage's registered command tree.
 | `ntn auth token` | Print the current authentication token |
 | `ntn datasources query` | Query pages in a data source |
 | `ntn datasources resolve` | Resolve a Notion database ID to its data source IDs |
+| `ntn files create` | Create a file upload from stdin or an external URL |
+| `ntn files get` | Retrieve a file upload by id |
+| `ntn files list` | List file uploads. Aliases: `ls`. |
 | `ntn pages get` | Retrieve a page as Markdown |
 | `ntn pages create` | Create a page from Markdown content |
 | `ntn pages edit` | Edit a page's content from Markdown |
@@ -50,6 +53,10 @@ ntn pages create --parent page:PARENT_ID --content '# Release notes'
 echo '# Release notes' | ntn pages create --parent data-source:SOURCE_ID
 ntn pages edit PAGE_ID --content '# Updated body'
 ntn pages trash PAGE_ID --yes
+cat /data/photo.png | ntn files create --filename photo.png
+ntn files create --external-url https://example.com/photo.png
+ntn files get UPLOAD_ID
+ntn files list --json
 ```
 
 Page IDs are positional. Bodies are Markdown; the first heading becomes the

@@ -14,7 +14,7 @@
 
 import { FlagView } from '../../../spec/flag_view.ts'
 import { postMessage, replyToThread } from '../../../../core/slack/post.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { SlackAccessor } from '../../../../accessor/slack.ts'
@@ -34,6 +34,5 @@ export async function sendMessage(
     threadTs !== undefined && threadTs !== ''
       ? await replyToThread(accessor, channel, threadTs, text)
       : await postMessage(accessor, channel, text)
-  const out: ByteSource = compactJsonBytes(result)
-  return [out, new IOResult()]
+  return [compactJsonBytes(result), new IOResult()]
 }

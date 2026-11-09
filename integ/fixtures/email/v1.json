@@ -36,6 +36,14 @@
     "body": "disk usage at 91 percent on worker-3"
   },
   {
+    "folder": "Trash",
+    "from": "ops@example.com",
+    "to": "integ@example.com",
+    "subject": "Old rota",
+    "date": "Tue, 06 Jan 2026 08:00:00 +0000",
+    "body": "last month's rota"
+  },
+  {
     "folder": "Archive",
     "from": "billing@vendor.example",
     "to": "integ@example.com",
@@ -67,5 +75,19 @@
     "subject": "Mail only beta can see",
     "date": "Wed, 07 Jan 2026 10:00:00 +0000",
     "body": "second cli account, own mailbox"
+  },
+  {
+    "account": "beta@example.com",
+    "folder": "Projects/2026",
+    "from": "boss@example.com",
+    "to": "beta@example.com",
+    "subject": "Mail under a parent mailbox",
+    "date": "Thu, 08 Jan 2026 10:00:00 +0000",
+    "body": "the parent mailbox holds no mail of its own",
+    "attachments": [
+      { "filename": "README", "content": "no extension\n" },
+      { "filename": "../../etc/passwd", "content": "not a path\n" },
+      { "filename": "logo.png", "content": "inline image\n", "inline": true, "contentType": "image/png" }
+    ]
   }
 ]

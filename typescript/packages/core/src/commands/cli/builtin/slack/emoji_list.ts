@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { listEmoji } from '../../../../core/slack/emoji.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { SlackAccessor } from '../../../../accessor/slack.ts'
@@ -26,6 +26,5 @@ export async function emojiList(
   _ctx: Context,
 ): Promise<CommandFnResult> {
   const emoji = await listEmoji(accessor)
-  const out: ByteSource = compactJsonBytes(emoji)
-  return [out, new IOResult()]
+  return [compactJsonBytes(emoji), new IOResult()]
 }

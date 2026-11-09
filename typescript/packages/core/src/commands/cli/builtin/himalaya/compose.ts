@@ -24,5 +24,5 @@ export async function compose(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  return route(accessor, new FlagView(ctx.flags), ctx.stdin, null, ctx.vfs)
+  return route(accessor, new FlagView(ctx.flags, ctx.spec), ctx.stdin, null, ctx.vfs, ctx.ids)
 }

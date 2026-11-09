@@ -46,6 +46,7 @@ ws = Workspace({"/email": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>max_messages</code><br />default `200` | How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through. |
 | <code style={{ whiteSpace: 'nowrap' }}>save_copy</code><br />default `True` | After `himalaya` sends a message, append a copy to `sent_folder`, as upstream himalaya's `message.send.save-copy`. Off saves a copy only when `--save` names a mailbox. |
 | <code style={{ whiteSpace: 'nowrap' }}>sent_folder</code> | Mailbox a sent copy goes to. Unset asks the server for the mailbox tagged `\Sent` and falls back to `Sent`. |
+| <code style={{ whiteSpace: 'nowrap' }}>trash_folder</code> | Mailbox `himalaya message delete` moves messages to, as upstream's `mailbox.alias.trash`. Unset asks the server for the mailbox tagged `\Trash` and falls back to `Trash`. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table email end */}

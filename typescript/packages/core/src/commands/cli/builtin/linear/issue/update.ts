@@ -20,7 +20,8 @@ import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { firstText, resolveIssue, textOrStdin } from '../util.ts'
+import { resolveIssue, textOrStdin } from '../util.ts'
+import { firstText } from '../../../operand.ts'
 
 export async function update(
   accessor: LinearAccessor,
@@ -28,7 +29,7 @@ export async function update(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const issueId = await resolveIssue(accessor, firstText(texts, 'issue key'))
   let description: string | null = null
   if (fl.asStr('description') !== undefined || ctx.stdin !== null) {

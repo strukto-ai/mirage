@@ -247,6 +247,15 @@ class IMAPClient:
         """
         return await self._command("UID", command.upper(), *args)
 
+    async def status(self, mailbox: str, items: str) -> IMAPResponse:
+        """STATUS a mailbox.
+
+        Args:
+            mailbox (str): the mailbox, already spelled (quoted).
+            items (str): the status items, already spelled.
+        """
+        return await self._command("STATUS", mailbox, items)
+
     async def append(
         self, message: bytes, mailbox: str, flags: str | None = None
     ) -> IMAPResponse:

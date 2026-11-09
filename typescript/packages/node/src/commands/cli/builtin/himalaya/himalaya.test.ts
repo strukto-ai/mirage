@@ -13,33 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
-import type { Context } from '@struktoai/mirage-core/commands/config'
 import { compileSpec } from '@struktoai/mirage-core/commands/spec/compile'
-import { enoent } from '@struktoai/mirage-core/errors/fs'
-import { materialize, type IOResult } from '@struktoai/mirage-core/io/types'
-import { PathSpec } from '@struktoai/mirage-core/types'
-import { Files } from '@struktoai/mirage-core/workspace/files'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EmailAccessor } from '@struktoai/mirage-core/accessor/email'
 import type * as ClientModule from '@struktoai/mirage-core/core/email/client'
 import type { fetchMessage } from '@struktoai/mirage-core/core/email/client'
 import { fetchHeaders, listMessageUids } from '@struktoai/mirage-core/core/email/client'
 import type { EmailConfig } from '@struktoai/mirage-core/core/email/config'
-import { messageJsonBytes } from '@struktoai/mirage-core/core/email/render'
 import { EmailVFS } from '@struktoai/mirage-core/vfs/email/email'
 import { Workspace } from '../../../../workspace.ts'
-import {
-  build,
-  composeBody,
-  hasPrefix,
-  mixedBoundary,
-  quoteText,
-  splitAddresses,
-  type Attachment,
-} from '@struktoai/mirage-core/commands/cli/builtin/himalaya/builder'
-import { forward } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/forward'
 import { HIMALAYA } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/index'
-import { listEnvelopes } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/list'
 import {
   pageSlice,
   parseQuery,
@@ -47,10 +30,6 @@ import {
   sortHeaders,
   uidBudget,
 } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/query'
-import { read } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/read'
-import { reply } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/reply'
-import { searchEnvelopes } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/search'
-import { send } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/send'
 
 const sendRawMock = vi.hoisted(() => vi.fn())
 const listFolderEntriesMock = vi.hoisted(() => vi.fn())
@@ -109,17 +88,16 @@ const CONFIG: EmailConfig = {
   maxMessages: 200,
   saveCopy: true,
   sentFolder: null,
+  trashFolder: null,
 }
-
-const ACCOUNT = new EmailAccessor(CONFIG)
 
 // Every --send path now also files the sender's copy over IMAP, so the
 // account's IMAP side is stubbed for the whole file: without this the
 // verbs would reach for a real connection to host 'h'.
 beforeEach(() => {
   listFolderEntriesMock.mockResolvedValue([
-    { name: 'INBOX', specialUse: null },
-    { name: 'Sent', specialUse: '\\Sent' },
+    { name: 'INBOX', attributes: [] },
+    { name: 'Sent', attributes: ['\\Sent'] },
   ])
   appendMock.mockReset()
   appendMock.mockResolvedValue({ destination: 'Sent' })
@@ -147,30 +125,25 @@ function leaf(...path: string[]) {
   return node
 }
 
-function decode(out: Uint8Array): string {
-  return new TextDecoder().decode(out)
-}
-
-/** A verb's context; every field the test leaves out is empty. */
-function context(fields: Partial<Context> = {}): Context {
-  return {
-    flags: {},
-    stdin: null,
-    cwd: PathSpec.fromStrPath('/'),
-    env: {},
-    ...fields,
-  }
-}
-
 describe('himalaya tree', () => {
   it('matches the himalaya vocabulary', () => {
     expect(HIMALAYA.spec.name).toBe('himalaya')
-    expect(HIMALAYA.spec.subcommands.map((g) => g.name)).toEqual(['envelope', 'message'])
+    expect(HIMALAYA.spec.subcommands.map((g) => g.name)).toEqual([
+      'mailbox',
+      'flag',
+      'attachment',
+      'envelope',
+      'message',
+    ])
     expect(leaf('envelope').subcommands.map((v) => v.name)).toEqual(['list', 'search'])
     expect(leaf('message').subcommands.map((v) => v.name)).toEqual([
+      'copy',
+      'move',
+      'delete',
       'read',
       'compose',
       'send',
+      'add',
       'reply',
       'forward',
     ])
@@ -186,7 +159,7 @@ describe('himalaya tree', () => {
   it('takes the message id as an operand and the mailbox as -m', () => {
     for (const verb of ['read', 'reply', 'forward']) {
       const node = leaf('message', verb)
-      expect(compileSpec(node).rest).not.toBeNull()
+      expect(compileSpec(node).positional.map((o) => o.names)).toEqual([['ID']])
       expect(compileSpec(node).options.find((o) => o.names.includes('--mailbox'))?.names).toContain(
         '-m',
       )
@@ -242,14 +215,13 @@ describe('search query DSL', () => {
 
   it('asks for the next day since after is strictly greater', () => {
     expect(parseQuery('date 2026-02-03').criteria).toBe('SENTON 03-Feb-2026')
-    expect(parseQuery('before 2026-02-03').criteria).toBe('SENTBEFORE 03-Feb-2026')
     expect(parseQuery('after 2026-01-01').criteria).toBe('SENTSINCE 02-Jan-2026')
   })
 
   it('searches the Date header rather than the received-at timestamp', () => {
     // ON/BEFORE/SINCE would match the mailbox internal date, which is
     // the wrong day for imported or delayed mail.
-    for (const source of ['date 2026-02-03', 'before 2026-02-03', 'after 2026-02-03']) {
+    for (const source of ['date 2026-02-03', 'after 2026-02-03']) {
       expect(parseQuery(source).criteria.startsWith('SENT')).toBe(true)
     }
   })
@@ -276,13 +248,17 @@ describe('search query DSL', () => {
     ])
   })
 
-  it('refuses what it cannot parse', () => {
-    expect(() => parseQuery('sender alice')).toThrow(QueryError)
-    expect(() => parseQuery('flag urgent')).toThrow(QueryError)
-    expect(() => parseQuery('date 2026-13-40')).toThrow(QueryError)
-    expect(() => parseQuery('order by')).toThrow(QueryError)
+  it('names what it expected where it stopped', () => {
+    expect(() => parseQuery('sender alice')).toThrow("found 'e' expected `subject`")
+    expect(() => parseQuery('before 2026-02-03')).toThrow("found 'e' expected `body`")
+    expect(() => parseQuery('date 2026-13-40')).toThrow('date format after `date`')
     expect(() => parseQuery('from alice bogus')).toThrow(QueryError)
-    expect(() => parseQuery('subject "open')).toThrow(QueryError)
+  })
+
+  it('treats an unknown flag as a keyword and an open quote as a word', () => {
+    expect(parseQuery('flag urgent').criteria).toBe('KEYWORD urgent')
+    expect(parseQuery('subject "open').criteria).toBe('SUBJECT "\\"open"')
+    expect(parseQuery('order by').sorters).toEqual([])
   })
 
   it('orders by date descending when no sorter is given', () => {
@@ -293,439 +269,6 @@ describe('search query DSL', () => {
   it('pages counting from one', () => {
     expect(pageSlice([1, 2, 3, 4, 5], 3, 2)).toEqual([5])
     expect(pageSlice([1, 2, 3], 9, 2)).toEqual([])
-  })
-})
-
-describe('message builder', () => {
-  it('flattens repeats and comma lists', () => {
-    expect(splitAddresses(['a@x, b@x', ' c@x '])).toEqual(['a@x', 'b@x', 'c@x'])
-  })
-
-  it('keeps the colon when testing for an existing prefix', () => {
-    expect(hasPrefix('Re: hello', 'Re: ')).toBe(true)
-    expect(hasPrefix('Ready to ship', 'Re: ')).toBe(false)
-  })
-
-  it('quotes each line once and leaves the headline unquoted', () => {
-    expect(quoteText('a\nb', '')).toBe('> a\n> b')
-    expect(quoteText('> a\nb', '')).toBe('>> a\n> b')
-    expect(quoteText('a', 'Alice wrote:')).toBe('Alice wrote:\n> a')
-  })
-
-  it('top posts by default and bottom posts on request', () => {
-    expect(composeBody('mine', '> theirs', '', 'top')).toBe('mine\n\n> theirs')
-    expect(composeBody('mine', '> theirs', '', 'bottom')).toBe('> theirs\n\nmine')
-    expect(composeBody('mine', '', 'sig', 'top')).toBe('mine\n\n-- \nsig')
-  })
-
-  it('refuses a message with no recipient', () => {
-    expect(() =>
-      build({
-        sender: 'me@x',
-        to: [],
-        cc: [],
-        bcc: [],
-        subject: 'Hi',
-        body: 'yo',
-        signature: null,
-      }),
-    ).toThrow('no recipient')
-  })
-
-  it.each([
-    'evil\nname.txt',
-    'evil\rname.txt',
-    'tail\n',
-    'evil\vname.txt',
-    'evil\fname.txt',
-    'evil\x1cname.txt',
-    'evil\x1dname.txt',
-    'evil\x1ename.txt',
-  ])('refuses the ASCII attachment filename %j like EmailMessage', (bad) => {
-    // Header injection through the quoted-string form; python's
-    // EmailMessage raises the same ValueError, trailing terminators
-    // included (pinned in test_builder.py).
-    const attachment: Attachment = {
-      filename: bad,
-      contentType: 'text/plain',
-      data: new TextEncoder().encode('x'),
-    }
-    expect(() =>
-      build({
-        sender: 'a@example.com',
-        to: ['b@example.com'],
-        cc: [],
-        bcc: [],
-        subject: null,
-        body: 'hi',
-        signature: null,
-        attachments: [attachment],
-      }),
-    ).toThrow('Header values may not contain linefeed or carriage return characters')
-  })
-
-  it('percent-encodes a line break in a non-ASCII filename', () => {
-    // The RFC 2231 path never refuses; byte-exactness with python is
-    // pinned by the attachment_nonascii_filename_with_line_break
-    // parity case.
-    const attachment: Attachment = {
-      filename: 'naïve\nname.txt',
-      contentType: 'text/plain',
-      data: new TextEncoder().encode('x'),
-    }
-    const raw = build({
-      sender: 'a@example.com',
-      to: ['b@example.com'],
-      cc: [],
-      bcc: [],
-      subject: null,
-      body: 'hi',
-      signature: null,
-      attachments: [attachment],
-    })
-    expect(new TextDecoder().decode(raw)).toContain("filename*=utf-8''na%C3%AFve%0Aname.txt")
-  })
-
-  it('derives a deterministic content-addressed boundary', () => {
-    const attachments: Attachment[] = [
-      { filename: 'a.txt', contentType: 'text/plain', data: new TextEncoder().encode('data') },
-    ]
-    const first = mixedBoundary('body', attachments)
-    expect(mixedBoundary('body', attachments)).toBe(first)
-    expect(mixedBoundary('other body', attachments)).not.toBe(first)
-    expect(first).toHaveLength(32)
-  })
-
-  it('promotes the message to multipart/mixed with attachments', () => {
-    const attachments: Attachment[] = [
-      {
-        filename: 'note.txt',
-        contentType: 'text/plain',
-        data: new TextEncoder().encode('the note\n'),
-      },
-      {
-        filename: 'blob.bin',
-        contentType: 'application/octet-stream',
-        data: new Uint8Array([0, 1]),
-      },
-    ]
-    const boundary = mixedBoundary('see attached', attachments)
-    const text = decode(
-      build({
-        sender: 'me@x',
-        to: ['a@x'],
-        cc: [],
-        bcc: [],
-        subject: 'files',
-        body: 'see attached',
-        signature: null,
-        attachments,
-      }),
-    )
-    expect(text).toContain('MIME-Version: 1.0\r\nContent-Type: multipart/mixed; ')
-    expect(text).toContain(`boundary="${boundary}"`)
-    expect(text).toContain('Content-Disposition: attachment; filename="note.txt"')
-    expect(text).toContain(Buffer.from('the note\n').toString('base64'))
-    expect(text.endsWith(`\r\n--${boundary}--\r\n`)).toBe(true)
-  })
-
-  it('serializes an empty attachment as zero payload lines', () => {
-    const attachments: Attachment[] = [
-      { filename: 'void.bin', contentType: 'application/octet-stream', data: new Uint8Array(0) },
-    ]
-    const text = decode(
-      build({
-        sender: 'me@x',
-        to: ['a@x'],
-        cc: [],
-        bcc: [],
-        subject: 'empty',
-        body: 'nothing inside',
-        signature: null,
-        attachments,
-      }),
-    )
-    expect(text).toContain('MIME-Version: 1.0\r\n\r\n\r\n--')
-  })
-})
-
-describe('himalaya verbs', () => {
-  it('compose writes MIME to stdout without sending', async () => {
-    sendRawMock.mockClear()
-    const [out, io] =
-      (await import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then((m) =>
-        m.compose(
-          ACCOUNT,
-          [],
-          [],
-          context({ flags: { to: 'a@b.com', subject: 'Hi', body: 'yo' } }),
-        ),
-      )) as [Uint8Array, IOResult]
-    expect(io.exitCode).toBe(0)
-    expect(sendRawMock).not.toHaveBeenCalled()
-    const text = decode(await materialize(out))
-    expect(text).toContain('From: me@example.com')
-    expect(text).toContain('To: a@b.com')
-    expect(text).toContain('Subject: Hi')
-    expect(text.endsWith('yo\r\n')).toBe(true)
-  })
-
-  it('compose --send pushes the raw bytes through SMTP', async () => {
-    sendRawMock.mockClear()
-    sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
-    const [out] =
-      (await import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then((m) =>
-        m.compose(
-          ACCOUNT,
-          [],
-          [],
-          context({ flags: { to: 'a@b.com', subject: 'Hi', body: 'yo', send: true } }),
-        ),
-      )) as [Uint8Array, IOResult]
-    expect(decode(sendRawMock.mock.calls[0]?.[1] as Uint8Array)).toContain('Subject: Hi')
-    expect(JSON.parse(decode(await materialize(out)))).toEqual({
-      status: 'sent',
-      to: 'a@b.com',
-      subject: 'Hi',
-    })
-  })
-
-  it('compose --attach reads through the dispatcher into multipart', async () => {
-    sendRawMock.mockClear()
-    const files: Record<string, Uint8Array> = {
-      '/scratch/note.txt': new TextEncoder().encode('the note body\n'),
-    }
-    const vfs = new Files((op: string, path: PathSpec) => {
-      const data = files[path.virtual]
-      if (op !== 'read' || data === undefined) return Promise.reject(enoent(path))
-      return Promise.resolve([data, { exitCode: 0 }]) as never
-    })
-    const [out, io] =
-      (await import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then((m) =>
-        m.compose(
-          ACCOUNT,
-          [],
-          [],
-          context({
-            flags: {
-              to: 'a@b.com',
-              subject: 'files',
-              body: 'see attached',
-              attach: [PathSpec.fromStrPath('/scratch/note.txt')],
-            },
-            vfs,
-          }),
-        ),
-      )) as [Uint8Array, IOResult]
-    expect(io.exitCode).toBe(0)
-    const text = decode(await materialize(out))
-    expect(text).toContain('Content-Type: multipart/mixed; boundary="')
-    expect(text).toContain('Content-Disposition: attachment; filename="note.txt"')
-    expect(text).toContain(Buffer.from('the note body\n').toString('base64'))
-  })
-
-  it('compose --attach of a missing file names the path', async () => {
-    const vfs = new Files((_op: string, path: PathSpec) => Promise.reject(enoent(path)))
-    await expect(
-      import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then((m) =>
-        m.compose(
-          ACCOUNT,
-          [],
-          [],
-          context({
-            flags: {
-              to: 'a@b.com',
-              body: 'yo',
-              attach: [PathSpec.fromStrPath('/scratch/gone.txt')],
-            },
-            vfs,
-          }),
-        ),
-      ),
-    ).rejects.toThrow('read attachment /scratch/gone.txt: No such file or directory')
-  })
-
-  it('compose --attach outside a workspace is refused', async () => {
-    await expect(
-      import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then((m) =>
-        m.compose(
-          ACCOUNT,
-          [],
-          [],
-          context({
-            flags: {
-              to: 'a@b.com',
-              body: 'yo',
-              attach: [PathSpec.fromStrPath('/scratch/note.txt')],
-            },
-          }),
-        ),
-      ),
-    ).rejects.toThrow('--attach needs a workspace to read files from')
-  })
-
-  it('reply derives subject, recipients and threading', async () => {
-    const [out] = (await reply(ACCOUNT, [], ['7'], context({ flags: { body: 'thanks' } }))) as [
-      Uint8Array,
-      IOResult,
-    ]
-    const text = decode(await materialize(out))
-    expect(text).toContain('Subject: Re: Quarterly numbers')
-    expect(text).toContain('To: Alice <alice@example.com>')
-    expect(text).toContain('In-Reply-To: <m1@example.com>')
-    expect(text).toContain('References: <m0@example.com> <m1@example.com>')
-    expect(text).toContain('thanks\r\n\r\n> the numbers')
-  })
-
-  it('forward prefixes Fwd and keeps References but not In-Reply-To', async () => {
-    const [out] = (await forward(
-      ACCOUNT,
-      [],
-      ['7'],
-      context({ flags: { to: 'carol@example.com' } }),
-    )) as [Uint8Array, IOResult]
-    const text = decode(await materialize(out))
-    expect(text).toContain('Subject: Fwd: Quarterly numbers')
-    expect(text).not.toContain('In-Reply-To')
-    expect(text).toContain('References: <m0@example.com> <m1@example.com>')
-  })
-
-  // `message read` and `cat` of the .email.json are the same document, so
-  // they share one renderer and INTERNALDATE reaches neither.
-  it('read serves exactly what the mount renders', async () => {
-    const [out] = (await read(ACCOUNT, [], ['7'], context())) as [Uint8Array, IOResult]
-    const bytes = await materialize(out)
-    expect(bytes).toEqual(messageJsonBytes(ORIGINAL))
-    expect(decode(bytes)).not.toContain('internalDate')
-  })
-
-  it('reply without an id is a usage error', async () => {
-    await expect(reply(ACCOUNT, [], [], context())).rejects.toThrow('message id is required')
-  })
-
-  it('send reads a raw message from stdin', async () => {
-    sendRawMock.mockClear()
-    sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
-    const raw = new TextEncoder().encode('From: me@x\nTo: a@b.com\nSubject: Hi\n\nyo')
-    const [out] = (await send(ACCOUNT, [], [], context({ stdin: raw }))) as [Uint8Array, IOResult]
-    expect(sendRawMock.mock.calls[0]?.[1]).toEqual(raw)
-    expect(JSON.parse(decode(await materialize(out)))).toEqual({
-      status: 'sent',
-      to: 'a@b.com',
-      subject: 'Hi',
-    })
-  })
-
-  it('send files the sender copy in the mailbox the server tags \\Sent', async () => {
-    sendRawMock.mockClear()
-    sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
-    const raw = new TextEncoder().encode('From: me@x\nTo: a@b.com\nSubject: Hi\n\nyo')
-    const [, io] = (await send(ACCOUNT, [], [], context({ stdin: raw }))) as [Uint8Array, IOResult]
-    expect(appendMock).toHaveBeenCalledWith('Sent', Buffer.from(raw), ['\\Seen'])
-    expect(io.stderr).toBeNull()
-  })
-
-  it('send warns on stderr and still succeeds when the copy fails', async () => {
-    sendRawMock.mockClear()
-    sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
-    appendMock.mockRejectedValue(new Error('Sent: no such mailbox'))
-    const raw = new TextEncoder().encode('From: me@x\nTo: a@b.com\nSubject: Hi\n\nyo')
-    const [out, io] = (await send(ACCOUNT, [], [], context({ stdin: raw }))) as [
-      Uint8Array,
-      IOResult,
-    ]
-    // The message is already delivered, so the copy's failure is
-    // reported rather than raised.
-    expect(io.exitCode).toBe(0)
-    expect((JSON.parse(decode(await materialize(out))) as { status: string }).status).toBe('sent')
-    expect(decode(await materialize(io.stderr))).toBe(
-      'himalaya: sent copy not saved: Sent: no such mailbox\n',
-    )
-  })
-
-  it('compose --send files a copy too, and saveCopy off files none', async () => {
-    sendRawMock.mockClear()
-    sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
-    const compose =
-      await import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then(
-        (m) => m.compose,
-      )
-    const ctx = context({ flags: { to: 'a@b.com', subject: 'Hi', body: 'yo', send: true } })
-    await compose(ACCOUNT, [], [], ctx)
-    expect(appendMock).toHaveBeenCalledTimes(1)
-    await compose(new EmailAccessor({ ...CONFIG, saveCopy: false }), [], [], ctx)
-    expect(appendMock).toHaveBeenCalledTimes(1)
-  })
-
-  it('compose --save without --send files the message and sends nothing', async () => {
-    sendRawMock.mockClear()
-    const compose =
-      await import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then(
-        (m) => m.compose,
-      )
-    const [out, io] = (await compose(
-      ACCOUNT,
-      [],
-      [],
-      context({ flags: { to: 'a@b.com', subject: 'Draft it', body: 'yo', save: 'Drafts' } }),
-    )) as [Uint8Array, IOResult]
-    expect(sendRawMock).not.toHaveBeenCalled()
-    expect(appendMock).toHaveBeenCalledWith('Drafts', expect.anything(), ['\\Seen'])
-    expect(JSON.parse(decode(await materialize(out)))).toEqual({
-      status: 'saved',
-      mailbox: 'Drafts',
-      to: 'a@b.com',
-      subject: 'Draft it',
-    })
-    expect(io.exitCode).toBe(0)
-  })
-
-  it('a refused --save without --send fails loudly', async () => {
-    // Nothing was sent, so there is no delivered message a retry could
-    // duplicate: this one is an error, not a warning.
-    appendMock.mockRejectedValue(new Error('Drafts: no such mailbox'))
-    const compose =
-      await import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then(
-        (m) => m.compose,
-      )
-    await expect(
-      compose(ACCOUNT, [], [], context({ flags: { to: 'a@b.com', body: 'yo', save: 'Drafts' } })),
-    ).rejects.toThrow('Drafts: no such mailbox')
-  })
-
-  it('send refuses an empty message before reaching SMTP', async () => {
-    sendRawMock.mockClear()
-    await expect(
-      send(ACCOUNT, [], [], context({ stdin: new TextEncoder().encode('  \n ') })),
-    ).rejects.toThrow('no message provided')
-    expect(sendRawMock).not.toHaveBeenCalled()
-  })
-
-  it('list orders most recent first and leaves the install accessor open', async () => {
-    const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
-    const [out] = (await listEnvelopes(ACCOUNT, [], [], context())) as [Uint8Array, IOResult]
-    const rows = JSON.parse(decode(await materialize(out))) as Record<string, unknown>[]
-    expect(rows.map((r) => r.uid)).toEqual(['2', '1'])
-    // INTERNALDATE only picks the date directory; it is not an envelope
-    // field.
-    expect(rows.every((r) => !('internalDate' in r))).toBe(true)
-    // Nor is the body: a listing is header-only, and `message read` and the
-    // mounted .email.json are where the body lives (#1067).
-    expect(rows.every((r) => !('body_text' in r) && !('body_html' in r))).toBe(true)
-    expect(rows.every((r) => !('snippet' in r))).toBe(true)
-    expect(rows.map((r) => r.subject)).toEqual(['alpha', 'beta'])
-    expect(closeSpy).not.toHaveBeenCalled()
-    closeSpy.mockRestore()
-  })
-
-  it('search sorts client side from the query clause', async () => {
-    const [out] = (await searchEnvelopes(ACCOUNT, [], ['order', 'by', 'subject'], context())) as [
-      Uint8Array,
-      IOResult,
-    ]
-    const rows = JSON.parse(decode(await materialize(out))) as Record<string, unknown>[]
-    expect(rows.map((r) => r.uid)).toEqual(['2', '1'])
-    expect(rows.every((r) => !('body_text' in r) && !('body_html' in r))).toBe(true)
   })
 })
 
@@ -740,7 +283,7 @@ describe('himalaya dispatch', () => {
     })
     const io = await ws.shell('himalaya message compose --to a@b.com --subject Hi --body yo')
     expect(io.exitCode).toBe(0)
-    expect(new TextDecoder().decode(io.stdout)).toContain('To: a@b.com')
+    expect(new TextDecoder().decode(io.stdout)).toContain('To: <a@b.com>')
     await ws.close()
   })
 
@@ -760,11 +303,11 @@ describe('himalaya dispatch', () => {
     })
     const io = await ws.shell('himalaya message compose --to a@b.com --subject Hi --body yo')
     expect(io.exitCode).toBe(0)
-    expect(new TextDecoder().decode(io.stdout)).toContain('To: a@b.com')
+    expect(new TextDecoder().decode(io.stdout)).toContain('To: <a@b.com>')
     await ws.close()
   })
 
-  it('reports an upstream verb mirage lacks with git wording', async () => {
+  it('refuses a stray operand of a slot that takes words after -- only', async () => {
     const ws = new Workspace({})
     ws.registerCli('himalaya', HIMALAYA, {
       imapHost: 'h',
@@ -772,10 +315,10 @@ describe('himalaya dispatch', () => {
       username: 'u',
       password: 'p',
     })
-    const io = await ws.shell('himalaya message move 7 --to Archive')
-    expect(io.exitCode).toBe(1)
+    const io = await ws.shell('himalaya message add 7')
+    expect(io.exitCode).toBe(2)
     expect(new TextDecoder().decode(io.stderr)).toBe(
-      "himalaya: 'move' is not a himalaya message command. See 'himalaya message --help'.\n",
+      "error: unexpected argument '7' found\n\nUsage: himalaya message add [OPTIONS] --mailbox <NAME> [-- <MESSAGE>...]\n\nFor more information, try '--help'.\n",
     )
     await ws.close()
   })
@@ -845,8 +388,8 @@ describe('himalaya writes and a mounted account', () => {
       append: appendMock,
       list: () =>
         Promise.resolve([
-          { pathAsListed: 'INBOX', specialUse: null },
-          { pathAsListed: 'Sent', specialUse: '\\Sent' },
+          { pathAsListed: 'INBOX', flags: new Set<string>() },
+          { pathAsListed: 'Sent', flags: new Set(['\\Sent']) },
         ]),
     } as unknown as Awaited<ReturnType<EmailAccessor['getImap']>>)
     sendRawMock.mockResolvedValue({

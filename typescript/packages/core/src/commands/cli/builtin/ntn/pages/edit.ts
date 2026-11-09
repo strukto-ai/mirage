@@ -28,7 +28,7 @@ export async function edit(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   let pageId: string
   let markdown: string
   try {

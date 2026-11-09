@@ -32,7 +32,7 @@ export async function createCmd(
 ): Promise<CommandFnResult> {
   requireOperands(texts, ['repo_id'])
   requireToken(accessor, 'repo create')
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const repoId = texts[0] ?? ''
   const repoType = repoTypeOf(fl)
   const sdk = fl.asStr('space_sdk')
@@ -63,7 +63,7 @@ export async function tagCreateCmd(
 ): Promise<CommandFnResult> {
   requireOperands(texts, ['repo_id', 'tag'])
   requireToken(accessor, 'repo tag create')
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const repoId = texts[0] ?? ''
   const tag = texts[1] ?? ''
   await createTag(
@@ -85,7 +85,7 @@ export async function tagListCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   requireOperands(texts, ['repo_id'])
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const tags = await listTags(accessor, texts[0] ?? '', repoTypeOf(fl))
   return textOut(tags.map((name) => `${name}\n`).join(''))
 }
@@ -100,7 +100,7 @@ export async function tagListCmd(
  * declines rather than assuming yes.
  */
 async function confirmed(ctx: Context): Promise<boolean> {
-  if (new FlagView(ctx.flags).asBool('yes')) return true
+  if (new FlagView(ctx.flags, ctx.spec).asBool('yes')) return true
   if (ctx.stdin === null) return false
   const answer = new TextDecoder().decode(await materialize(ctx.stdin))
   const trimmed = answer.trim().toLowerCase()
@@ -121,7 +121,7 @@ export async function tagDeleteCmd(
 ): Promise<CommandFnResult> {
   requireOperands(texts, ['repo_id', 'tag'])
   requireToken(accessor, 'repo tag delete')
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const repoId = texts[0] ?? ''
   const tag = texts[1] ?? ''
   if (!(await confirmed(ctx))) {

@@ -14,7 +14,7 @@
 
 import { FlagView } from '../../../spec/flag_view.ts'
 import { getReactions } from '../../../../core/slack/react.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { SlackAccessor } from '../../../../accessor/slack.ts'
@@ -28,6 +28,5 @@ export async function reactions(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
   const message = await getReactions(accessor, fl.asStr('channel') ?? '', fl.asStr('ts') ?? '')
-  const out: ByteSource = compactJsonBytes(message)
-  return [out, new IOResult()]
+  return [compactJsonBytes(message), new IOResult()]
 }

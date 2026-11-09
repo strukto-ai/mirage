@@ -61,6 +61,13 @@ export const EmailConfig = z.object({
     .describe(
       'Mailbox a sent copy goes to. Unset asks the server for the mailbox tagged `\\Sent` and falls back to `Sent`.',
     ),
+  trashFolder: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe(
+      "Mailbox `himalaya message delete` moves messages to, as upstream's `mailbox.alias.trash`. Unset asks the server for the mailbox tagged `\\Trash` and falls back to `Trash`.",
+    ),
 })
 
 export type EmailConfig = ConfigOf<typeof EmailConfig>
@@ -80,6 +87,7 @@ export function buildEmailConfig(input: EmailConfigInput): EmailConfig {
     maxMessages: input.maxMessages ?? 200,
     saveCopy: input.saveCopy ?? true,
     sentFolder: input.sentFolder ?? null,
+    trashFolder: input.trashFolder ?? null,
     ...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
   }
 }

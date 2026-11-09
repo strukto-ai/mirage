@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.email import EmailAccessor
+from mirage.commands.cli.builtin.himalaya.envelopes import envelopes_table
 from mirage.commands.cli.builtin.himalaya.list import DEFAULT_PAGE_SIZE
+from mirage.commands.cli.builtin.himalaya.printer import rendered
 from mirage.commands.cli.builtin.himalaya.query import (
     page_slice,
     page_window,
@@ -24,7 +26,7 @@ from mirage.commands.cli.builtin.himalaya.query import (
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.client import fetch_headers, list_message_uids
-from mirage.core.email.render import envelopes_json_bytes
+from mirage.core.email.render import envelope_documents
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -35,7 +37,7 @@ async def search_envelopes(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     mailbox = fl.as_str("mailbox", "INBOX")
     page, page_size = page_window(
         fl.as_int("page", 1),
@@ -51,5 +53,16 @@ async def search_envelopes(
     uids = await list_message_uids(accessor, mailbox, query.criteria, budget)
     headers = await fetch_headers(accessor, mailbox, uids) if uids else []
     page_of = page_slice(sort_headers(headers, query.sorters), page, page_size)
-    out = envelopes_json_bytes(page_of)
+    with_attachment = fl.as_bool("has_attachment")
+    documents = envelope_documents(page_of, with_attachment)
+    out = rendered(
+        fl,
+        {"queued": 0, "envelopes": documents},
+        envelopes_table(
+            documents,
+            with_attachment,
+            fl.as_bool("recipient"),
+            fl.as_int("max_width"),
+        ),
+    )
     return out, IOResult()

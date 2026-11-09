@@ -77,6 +77,7 @@ describe('ntn tree', () => {
       'api',
       'auth',
       'datasources',
+      'files',
       'pages',
       'whoami',
     ])

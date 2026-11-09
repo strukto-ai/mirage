@@ -24,6 +24,7 @@ from mirage.commands.cli.builtin.hf.accessor import (
     require_operands,
     text_out,
 )
+from mirage.commands.cli.operand import ensure_dir
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
@@ -92,39 +93,6 @@ def selected(
     if names:
         return [path for path in files if path in set(names)]
     return filter_repo_paths(files, include, exclude)
-
-
-async def ensure_dir(vfs: Files, path: PathSpec) -> None:
-    """Create a directory and every missing directory above it.
-
-    Written out rather than delegated to ``mkdir -p`` because the
-    parents flag is a per-backend capability: the ops factory only wires
-    ``parents=True`` for backends that declare it, so a plain ``mkdir``
-    of ``a/b`` fails on the rest.
-
-    Args:
-        vfs (Files): the session's files.
-        path (PathSpec): absolute virtual path of the directory.
-    """
-    missing: list[PathSpec] = []
-    current = path
-    while current.virtual != "/":
-        try:
-            await vfs.stat(current)
-            break
-        except MISS_ERRORS:
-            missing.append(current)
-            current = current.parent
-    for target in reversed(missing):
-        try:
-            await vfs.mkdir(target)
-        except FileExistsError:
-            # A parallel download fans out over files that share parents,
-            # so two workers can read the same parent as missing and then
-            # both create it. EEXIST here says the directory is present,
-            # which is what the caller asked for; raising would fail the
-            # whole gather over a race that already succeeded.
-            continue
 
 
 async def write_file(
@@ -427,7 +395,7 @@ async def download_cmd(
     repository a workspace has not mounted.
     """
     require_operands(texts, ["repo_id"])
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     local_dir = fl.as_path("local_dir")
     cache_word = cache_root(dict(ctx.env or {}))
     cache_dir = fl.as_path("cache_dir") or (

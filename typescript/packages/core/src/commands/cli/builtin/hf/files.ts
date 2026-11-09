@@ -40,7 +40,7 @@ export async function deleteCmd(
 ): Promise<CommandFnResult> {
   requireOperands(texts, ['repo_id', 'patterns'])
   requireToken(accessor, 'repo-files delete')
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const [repoId, ...patterns] = texts
   const target = repoId ?? ''
   const hub = hubFor(accessor, target, repoTypeOf(fl), fl.asStr('revision'))

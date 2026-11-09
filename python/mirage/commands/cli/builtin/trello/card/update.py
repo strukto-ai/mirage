@@ -15,6 +15,7 @@
 from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.cli.builtin.trello.scope import require_card
 from mirage.commands.cli.builtin.trello.util import (
+    bool_flag,
     file_operand,
     required_flag,
     resolve_text_input,
@@ -50,10 +51,7 @@ async def update(
             file="desc_file",
             error_message="desc is required",
         )
-    closed = None
-    closed_flag = fl.as_str("closed")
-    if closed_flag is not None:
-        closed = closed_flag.lower() in ("true", "1", "yes")
+    closed = bool_flag(fl, "closed")
     due = fl.as_str("due")
     await require_card(accessor, card_id)
     card = await card_update(

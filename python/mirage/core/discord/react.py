@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any, cast
 from urllib.parse import quote
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.client import discord_put
+from mirage.core.discord.client import discord_get, discord_put
 
 
 async def add_reaction(
@@ -35,3 +36,22 @@ async def add_reaction(
         f"/channels/{channel_id}/messages"
         f"/{message_id}/reactions/{encoded}/@me",
     )
+
+
+async def message_reactions(
+    accessor: DiscordAccessor, channel_id: str, message_id: str
+) -> list[dict[str, Any]]:
+    """The reactions on a message; Discord leaves the field out when none.
+
+    Args:
+        accessor (DiscordAccessor): Discord accessor.
+        channel_id (str): channel ID.
+        message_id (str): message ID.
+    """
+    message = cast(
+        dict[str, Any],
+        await discord_get(
+            accessor, f"/channels/{channel_id}/messages/{message_id}"
+        ),
+    )
+    return cast(list[dict[str, Any]], message.get("reactions", []))

@@ -30,17 +30,22 @@ export interface MailEntry {
   labels?: string[]
   folder?: string
   seen?: boolean
-  attachments?: { filename: string; content: string }[]
+  attachments?: { filename: string; content: string; inline?: boolean; contentType?: string }[]
 }
 
-export function mimeTextPart(content: string, filename?: string): string {
+export function mimeTextPart(
+  content: string,
+  filename?: string,
+  options: { inline?: boolean; contentType?: string } = {},
+): string {
   const lines = [
-    'Content-Type: text/plain; charset="utf-8"',
+    `Content-Type: ${options.contentType ?? 'text/plain; charset="utf-8"'}`,
     'MIME-Version: 1.0',
     'Content-Transfer-Encoding: base64',
   ]
   if (filename !== undefined) {
-    lines.push(`Content-Disposition: attachment; filename="${filename}"`)
+    const disposition = options.inline === true ? 'inline' : 'attachment'
+    lines.push(`Content-Disposition: ${disposition}; filename="${filename}"`)
   }
   return `${lines.join('\r\n')}\r\n\r\n${Buffer.from(content, 'utf-8').toString('base64')}`
 }
@@ -58,7 +63,7 @@ export function buildRfc822(entry: MailEntry): string {
   const boundary = 'integ-mime-boundary'
   const parts = [
     mimeTextPart(entry.body),
-    ...attachments.map((att) => mimeTextPart(att.content, att.filename)),
+    ...attachments.map((att) => mimeTextPart(att.content, att.filename, att)),
   ]
   return [
     ...headers,

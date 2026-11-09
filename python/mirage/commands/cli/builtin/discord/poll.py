@@ -37,5 +37,4 @@ async def poll(
         duration_hours=fl.as_int("duration", 24),
         multiselect=fl.as_bool("multiselect"),
     )
-    out = compact_json_bytes(result)
-    return out, IOResult()
+    return compact_json_bytes(result), IOResult()

@@ -105,18 +105,27 @@ async def notion_post(
     body: JsonValue = None,
     extra_headers: Mapping[str, str] | None = None,
     params: dict[str, Any] | None = None,
+    form: aiohttp.FormData | None = None,
 ) -> dict[str, Any]:
     # `body or {}` would rewrite an empty list or a zero into an object.
     # `ntn api` can be handed any JSON value and sends it verbatim, so only
-    # a genuinely absent body becomes `{}`.
+    # a genuinely absent body becomes `{}`. A multipart body replaces the
+    # JSON one, and its boundary sets its own content type.
+    headers = notion_headers(accessor.config, extra_headers)
+    json_body: JsonValue = None
+    if form is not None:
+        del headers["Content-Type"]
+    else:
+        json_body = body if body is not None else {}
     data: dict[str, Any] = await api_request(
         "POST",
         f"{accessor.config.base_url}{path}",
         error_of=_error_of,
         retry=_RATE_LIMIT_RETRY,
-        headers=notion_headers(accessor.config, extra_headers),
+        headers=headers,
         params=params,
-        json_body=body if body is not None else {},
+        json_body=json_body,
+        data=form,
         session=accessor.pool,
     )
     return data
