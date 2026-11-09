@@ -39,6 +39,23 @@ export async function replyToThread(
   })
 }
 
+export async function editMessage(
+  accessor: SlackAccessor,
+  channelId: string,
+  ts: string,
+  text: string,
+): Promise<SlackResponse> {
+  return accessor.transport.call('chat.update', undefined, { channel: channelId, ts, text })
+}
+
+export async function deleteMessage(
+  accessor: SlackAccessor,
+  channelId: string,
+  ts: string,
+): Promise<SlackResponse> {
+  return accessor.transport.call('chat.delete', undefined, { channel: channelId, ts })
+}
+
 /**
  * Share a file in a channel or thread, the way Slack's own SDKs do: ask for
  * an upload URL, send the bytes there, then complete the upload into the

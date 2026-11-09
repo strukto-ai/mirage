@@ -26,3 +26,16 @@ export async function addReaction(
     `/channels/${channelId}/messages/${messageId}/reactions/${encoded}/@me`,
   )
 }
+
+/** The reactions on a message; Discord leaves the field out when none. */
+export async function messageReactions(
+  accessor: DiscordAccessor,
+  channelId: string,
+  messageId: string,
+): Promise<unknown[]> {
+  const message = (await accessor.transport.call(
+    'GET',
+    `/channels/${channelId}/messages/${messageId}`,
+  )) as unknown as { reactions?: unknown[] }
+  return message.reactions ?? []
+}

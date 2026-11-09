@@ -144,7 +144,7 @@ async def query(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     # clap checks a value as it parses it, ahead of the missing operand.
     limit = fl.as_int("limit", DEFAULT_LIMIT)
     if limit < 1:

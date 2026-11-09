@@ -57,6 +57,45 @@ async def reply_to_thread(
     )
 
 
+async def edit_message(
+    accessor: SlackAccessor, channel_id: str, ts: str, text: str
+) -> dict[str, Any]:
+    """Replace the text of a message.
+
+    Args:
+        accessor (SlackAccessor): Slack accessor.
+        channel_id (str): channel ID.
+        ts (str): the message's ts.
+        text (str): the new text.
+
+    Returns:
+        dict: API response.
+    """
+    return await slack_post(
+        accessor,
+        "chat.update",
+        {"channel": channel_id, "ts": ts, "text": text},
+    )
+
+
+async def delete_message(
+    accessor: SlackAccessor, channel_id: str, ts: str
+) -> dict[str, Any]:
+    """Delete a message.
+
+    Args:
+        accessor (SlackAccessor): Slack accessor.
+        channel_id (str): channel ID.
+        ts (str): the message's ts.
+
+    Returns:
+        dict: API response.
+    """
+    return await slack_post(
+        accessor, "chat.delete", {"channel": channel_id, "ts": ts}
+    )
+
+
 async def upload_file(
     accessor: SlackAccessor,
     channel_id: str,

@@ -47,7 +47,7 @@ async def delete_cmd(
     """
     require_operands(texts, ["repo_id", "patterns"])
     require_token(accessor, "repo-files delete")
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     repo_id, *patterns = list(texts)
     stderr = ""
     hub = hub_for(accessor, repo_id, repo_type_of(fl), fl.as_str("revision"))

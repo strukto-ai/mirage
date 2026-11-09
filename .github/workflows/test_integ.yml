@@ -731,6 +731,19 @@ jobs:
           (cd /tmp/ntncli && npm i --no-audit --no-fund ntn@0.21.9)
           NTN_BIN=/tmp/ntncli/node_modules/.bin/ntn pnpm exec tsx ntn_conformance.ts
 
+      # Runs every cli-himalaya case through the REAL himalaya against the same
+      # mail fake, so the goldens are by construction what the upstream program
+      # prints. Pinned by version and checksum.
+      - name: Run himalaya CLI conformance against the real binary
+        working-directory: integ
+        run: |
+          mkdir -p /tmp/himalaya-real
+          curl -sSfL --retry 3 -o /tmp/himalaya-real/himalaya.tgz \
+            https://github.com/pimalaya/himalaya/releases/download/v2.2.1/himalaya.x86_64-linux.tgz
+          echo "5c5ba2724c162f82d0a0c71b6c03224ed44f8bef7b14ace5da0635d3af2665a0  /tmp/himalaya-real/himalaya.tgz" | sha256sum -c -
+          tar -xzf /tmp/himalaya-real/himalaya.tgz -C /tmp/himalaya-real himalaya
+          HIMALAYA_BIN=/tmp/himalaya-real/himalaya pnpm exec tsx himalaya_conformance.ts
+
       - name: Run lancedb integ (TS, embedded, JSON harness)
         working-directory: integ
         env:

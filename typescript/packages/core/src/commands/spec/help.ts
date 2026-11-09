@@ -113,12 +113,18 @@ export function usageLine(
   const clap = style === UsageStyle.CLAP
   const bits = [name]
   if (compileSpec(spec).options.length > 0) bits.push(clap ? '[OPTIONS]' : '[flags]')
+  if (clap) {
+    for (const opt of cs.options) {
+      if (opt.required) bits.push(`${argumentDest(opt)} <${optionMetavar(opt)}>`)
+    }
+  }
   if (subcommands.length > 0) bits.push(clap ? '<COMMAND>' : '<command> [<args>]')
   for (const op of cs.positional) {
     bits.push(clap ? operandSlot(op) : slot(op))
   }
   if (cs.rest !== null) {
-    if (clap) bits.push(operandSlot(cs.rest, !positionalRequired(cs.rest)))
+    if (clap && cs.rest.nargs === 'REMAINDER') bits.push(`[-- <${cs.rest.names[0]!}>...]`)
+    else if (clap) bits.push(operandSlot(cs.rest, !positionalRequired(cs.rest)))
     else bits.push(`[${slot(cs.rest)}...]`)
   }
   return `Usage: ${bits.join(' ')}`

@@ -13,14 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.commands.cli.builtin.linear.util import (
-    first_text,
-    resolve_issue,
-    resolve_label_id,
-)
+from mirage.commands.cli.builtin.linear.util import issue_labels
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.linear.client import get_issue, issue_update
+from mirage.core.linear.client import issue_update
 from mirage.core.linear.normalize import normalize_issue
 from mirage.core.render.json import json_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -33,15 +29,9 @@ async def add_label(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
-    issue_id = await resolve_issue(accessor, first_text(texts, "issue key"))
-    issue = await get_issue(accessor, issue_id)
-    team_id = (issue.get("team") or {}).get("id") or ""
-    label_id = await resolve_label_id(
-        accessor, team_id, fl.as_str("label"), fl.as_str("label_name")
+    issue_id, existing, label_id = await issue_labels(
+        accessor, texts, FlagView(ctx.flags, ctx.spec)
     )
-    nodes = issue.get("labels", {}).get("nodes", [])
-    existing = [n["id"] for n in nodes]
     if label_id not in existing:
         existing.append(label_id)
     updated = await issue_update(

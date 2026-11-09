@@ -12,10 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import base64
-import json
-from email.policy import SMTP
-from pathlib import Path
+import re
 
 import pytest
 
@@ -26,10 +23,8 @@ from mirage.commands.cli.builtin.himalaya.builder import (
     build,
     compose_body,
     has_prefix,
-    mixed_boundary,
-    quote_text,
+    parse_mailboxes,
     reply_recipients,
-    split_addresses,
 )
 
 ORIGINAL = {
@@ -43,8 +38,22 @@ ORIGINAL = {
 }
 
 
-def test_split_addresses_flattens_repeats_and_comma_lists():
-    assert split_addresses(["a@x, b@x", " c@x "]) == ("a@x", "b@x", "c@x")
+def stable(raw: bytes) -> str:
+    text = raw.decode()
+    text = re.sub(r"Message-ID: <[^>]*>\r\n", "", text)
+    return re.sub(r"Date: [^\r]*\r\n", "", text)
+
+
+def test_parse_mailboxes_keeps_display_names_apart():
+    assert parse_mailboxes('"Doe, J." <j@x>, b@x') == [
+        ("Doe, J.", "j@x"),
+        (None, "b@x"),
+    ]
+
+
+def test_parse_mailboxes_refuses_what_has_no_address():
+    with pytest.raises(ValueError, match="Could not parse address ``"):
+        parse_mailboxes("")
 
 
 def test_has_prefix_keeps_the_colon():
@@ -54,267 +63,98 @@ def test_has_prefix_keeps_the_colon():
     assert not has_prefix("Ready to ship", "Re: ")
 
 
-def test_quote_text_prefixes_each_line_once():
-    assert quote_text("a\nb", "") == "> a\n> b"
-
-
-def test_quote_text_does_not_double_space_already_quoted_lines():
-    assert quote_text("> a\nb", "") == ">> a\n> b"
-
-
-def test_quote_headline_is_not_itself_quoted():
-    assert quote_text("a", "On Monday, Alice wrote:") == (
-        "On Monday, Alice wrote:\n> a"
+def test_compose_body_lays_out_quote_and_signature():
+    assert compose_body("mine\n", "a\n> b\n", "", "", "top") == (
+        "mine\n\n> a\n>> b"
     )
-
-
-def test_quote_text_of_an_empty_body_is_empty():
-    assert quote_text("   \n  ", "headline") == ""
-
-
-def test_compose_body_top_posts_by_default():
-    assert compose_body("mine", "> theirs", "", "top") == "mine\n\n> theirs"
-
-
-def test_compose_body_bottom_posts_when_asked():
-    assert compose_body("mine", "> theirs", "", "bottom") == "> theirs\n\nmine"
-
-
-def test_compose_body_drops_the_blank_line_when_the_user_wrote_nothing():
-    assert compose_body("", "> theirs", "", "top") == "> theirs"
-
-
-def test_signature_rides_after_the_standard_delimiter():
-    assert (
-        compose_body("mine", "", "Sent from mirage", "top")
-        == "mine\n\n-- \nSent from mirage"
+    assert compose_body("mine", "a", "On Monday:", "", "bottom") == (
+        "On Monday:\n> a\n\nmine"
     )
+    assert compose_body("mine", "a", "", "", "none") == "mine"
+    assert compose_body("", "a", "", "sig\n", "top") == "> a\n\n-- \nsig"
 
 
-def test_reply_recipients_prefer_reply_to_over_from():
-    message = {**ORIGINAL, "reply_to": [{"name": "", "email": "list@x"}]}
-    assert reply_recipients(message) == ("list@x",)
+def test_reply_recipients_prefers_reply_to():
+    assert reply_recipients(
+        {"reply_to": [{"name": "", "email": "r@x"}], "from": ORIGINAL["from"]}
+    ) == [(None, "r@x")]
+    assert reply_recipients(ORIGINAL) == [("Alice", "alice@example.com")]
 
 
-def test_reply_recipients_fall_back_to_from_with_the_display_name():
-    assert reply_recipients(ORIGINAL) == ("Alice <alice@example.com>",)
-
-
-def test_compose_needs_a_recipient():
-    with pytest.raises(ValueError, match="no recipient"):
-        build(Compose(sender="me@example.com"))
-
-
-def test_compose_renders_every_address_header():
-    message = build(
+def test_build_lays_headers_out_in_upstreams_order():
+    raw = build(
         Compose(
-            sender="me@example.com",
-            to=("a@x",),
-            cc=("b@x",),
-            bcc=("c@x",),
+            sender="me@x",
+            to=("a@x", "B <b@x>"),
+            cc=("c@x",),
             subject="Hi",
-            body="yo",
+            body="hello",
         )
     )
-    assert message["From"] == "me@example.com"
-    assert message["To"] == "a@x"
-    assert message["Cc"] == "b@x"
-    assert message["Bcc"] == "c@x"
-    assert message["Subject"] == "Hi"
-    assert message.get_content().strip() == "yo"
+    assert stable(raw) == (
+        'From: <me@x>\r\nTo: <a@x>, "B" <b@x>\r\nCc: <c@x>\r\nSubject: Hi\r\n'
+        'MIME-Version: 1.0\r\nContent-Type: text/plain; charset="utf-8"\r\n'
+        "Content-Transfer-Encoding: 7bit\r\n\r\nhello"
+    )
 
 
-def test_reply_derives_subject_recipients_and_threading():
-    message = build(
-        Compose(sender="me@example.com", body="thanks"),
+def test_build_writes_an_id_and_a_date():
+    text = build(Compose(sender="me@x", body="x")).decode()
+    assert re.search(r"Message-ID: <[0-9a-f.]+@localhost>\r\n", text)
+    assert re.search(r"Date: \w{3}, \d{1,2} \w{3} \d{4} ", text)
+
+
+def test_a_trailing_space_line_forces_quoted_printable():
+    raw = build(Compose(sender="me@x", body="hello", signature="sig"))
+    text = stable(raw)
+    assert "Content-Transfer-Encoding: quoted-printable" in text
+    assert text.endswith("hello\r\n\r\n--=20\r\nsig")
+
+
+def test_non_ascii_subject_is_an_encoded_word():
+    assert "Subject: =?utf-8?B?UsOpc3Vtw6k=?=\r\n" in stable(
+        build(Compose(sender="me@x", subject="Résumé", body="x"))
+    )
+
+
+def test_a_reply_threads_and_quotes():
+    raw = build(
+        Compose(sender="me@x", body="ack"),
         Source(message=ORIGINAL, mode="reply"),
     )
-    assert message["Subject"] == "Re: Quarterly numbers"
-    assert message["To"] == "Alice <alice@example.com>"
-    assert message["In-Reply-To"] == "<m1@example.com>"
-    assert message["References"] == "<m0@example.com> <m1@example.com>"
-    assert message.get_content() == "thanks\n\n> line one\n> line two\n"
+    text = stable(raw)
+    assert 'To: "Alice" <alice@example.com>\r\n' in text
+    assert "In-Reply-To: <m1@example.com>\r\n" in text
+    assert "References: <m0@example.com> <m1@example.com>\r\n" in text
+    assert "Subject: Re: Quarterly numbers\r\n" in text
+    assert text.endswith("ack\r\n\r\n> line one\r\n> line two")
 
 
-def test_reply_does_not_stack_a_second_re_prefix():
-    original = {**ORIGINAL, "subject": "Re: Quarterly numbers"}
-    message = build(
-        Compose(sender="me@example.com", body="ok"),
-        Source(message=original, mode="reply"),
-    )
-    assert message["Subject"] == "Re: Quarterly numbers"
-
-
-def test_explicit_to_wins_over_the_derived_reply_recipients():
-    message = build(
-        Compose(sender="me@example.com", to=("other@x",)),
-        Source(message=ORIGINAL, mode="reply"),
-    )
-    assert message["To"] == "other@x"
-
-
-def test_forward_prefixes_fwd_and_carries_references_but_not_in_reply_to():
-    message = build(
-        Compose(sender="me@example.com", to=("c@x",)),
-        Source(message=ORIGINAL, mode="forward"),
-    )
-    assert message["Subject"] == "Fwd: Quarterly numbers"
-    assert message["In-Reply-To"] is None
-    assert message["References"] == "<m0@example.com> <m1@example.com>"
-
-
-def test_forward_still_needs_an_explicit_recipient():
-    with pytest.raises(ValueError, match="no recipient"):
+def test_a_forward_keeps_references_only():
+    text = stable(
         build(
-            Compose(sender="me@example.com"),
+            Compose(sender="me@x", to=("x@y",), body=""),
             Source(message=ORIGINAL, mode="forward"),
         )
+    )
+    assert "In-Reply-To" not in text
+    assert "Subject: Fwd: Quarterly numbers\r\n" in text
 
 
-def test_mixed_boundary_is_deterministic_and_content_addressed():
-    attachments = (Attachment("a.txt", "text/plain", b"data"),)
-    first = mixed_boundary("body", attachments)
-    assert first == mixed_boundary("body", attachments)
-    assert first != mixed_boundary("other body", attachments)
-    assert len(first) == 32
-
-
-ATTACHMENTS = (
-    Attachment("note.txt", "text/plain", b"the note\n"),
-    Attachment("blob.bin", "application/octet-stream", b"\x00\x01"),
-)
-
-
-def test_attachments_promote_the_message_to_multipart_mixed():
-    message = build(
+def test_attachments_build_multipart_mixed():
+    raw = build(
         Compose(
-            sender="me@example.com",
+            sender="me@x",
             to=("a@x",),
-            subject="files",
-            body="see attached",
-            attachments=ATTACHMENTS,
-        )
-    )
-    assert message.get_content_type() == "multipart/mixed"
-    assert message.get_boundary() == mixed_boundary(
-        "see attached", ATTACHMENTS
-    )
-    parts = list(message.iter_parts())
-    assert parts[0].get_content() == "see attached\n"
-    assert parts[1].get_filename() == "note.txt"
-    # text/* parts decode to str under the content manager; binary
-    # parts stay bytes.
-    assert parts[1].get_content() == "the note\n"
-    assert parts[2].get_filename() == "blob.bin"
-    assert parts[2].get_content() == b"\x00\x01"
-
-
-def test_a_message_without_attachments_stays_single_part():
-    message = build(
-        Compose(sender="me@example.com", to=("a@x",), body="plain")
-    )
-    assert message.get_content_type() == "text/plain"
-
-
-def load_parity_cases() -> list[tuple[str, dict]]:
-    """The shared serialization pins both implementations assert against.
-
-    The fixture was generated from this very builder
-    (``build(...).as_bytes(policy=SMTP)``), so on the python side the
-    test guards against drift away from the pinned bytes; the twin
-    TypeScript test (``mime_parity.test.ts``) proves the two builders
-    serialize identically.
-    """
-    root = Path(__file__).parents[6]
-    fixture = root / "integ" / "fixtures" / "himalaya" / "mime_parity.json"
-    data = json.loads(fixture.read_text())
-    return sorted(data.items())
-
-
-def parity_compose(entry: dict) -> Compose:
-    attachments = tuple(
-        Attachment(
-            filename=a["filename"],
-            content_type=a["contentType"],
-            data=base64.b64decode(a["dataB64"]),
-        )
-        for a in entry["attachments"]
-    )
-    return Compose(
-        sender=entry["sender"],
-        to=tuple(entry["to"]),
-        cc=tuple(entry["cc"]),
-        bcc=tuple(entry["bcc"]),
-        subject=entry["subject"],
-        body=entry["body"],
-        signature=entry["signature"],
-        attachments=attachments,
-    )
-
-
-def parity_source(entry: dict) -> Source | None:
-    if "source" not in entry:
-        return None
-    return Source(
-        message=entry["source"],
-        mode=entry["mode"],
-        posting_style=entry["postingStyle"],
-        quote_headline=entry["quoteHeadline"],
-    )
-
-
-@pytest.mark.parametrize("name,case", load_parity_cases())
-def test_serialization_matches_the_shared_parity_pins(name, case):
-    compose = parity_compose(case["compose"])
-    raw = build(compose, parity_source(case["compose"])).as_bytes(policy=SMTP)
-    assert raw == base64.b64decode(case["bytesB64"])
-
-
-@pytest.mark.parametrize(
-    "bad",
-    [
-        "evil\nname.txt",
-        "evil\rname.txt",
-        "tail\n",
-        "evil\vname.txt",
-        "evil\fname.txt",
-        "evil\x1cname.txt",
-        "evil\x1dname.txt",
-        "evil\x1ename.txt",
-    ],
-)
-def test_ascii_filename_with_a_line_break_is_refused(bad):
-    # EmailMessage refuses the quoted-string form outright (header
-    # injection); trailing terminators are refused too, unlike the
-    # header-value guard. The TypeScript serializer mirrors this.
-    compose = Compose(
-        sender="a@example.com",
-        to=("b@example.com",),
-        body="hi",
-        attachments=(
-            Attachment(filename=bad, content_type="text/plain", data=b"x"),
-        ),
-    )
-    with pytest.raises(
-        ValueError, match="may not contain linefeed or carriage return"
-    ):
-        build(compose).as_bytes(policy=SMTP)
-
-
-def test_nonascii_filename_percent_encodes_line_breaks():
-    # The RFC 2231 path never refuses: percent-encoding neutralizes the
-    # same characters the quoted-string form cannot carry.
-    compose = Compose(
-        sender="a@example.com",
-        to=("b@example.com",),
-        body="hi",
-        attachments=(
-            Attachment(
-                filename="naïve\nname.txt",
-                content_type="text/plain",
-                data=b"x",
+            body="see",
+            attachments=(
+                Attachment("note.txt", "text/plain", b"note\n"),
+                Attachment("a.bin", "application/octet-stream", b"\x00\xff"),
             ),
-        ),
+        )
     )
-    raw = build(compose).as_bytes(policy=SMTP)
-    assert b"filename*=utf-8''na%C3%AFve%0Aname.txt" in raw
+    text = stable(raw)
+    boundary = re.search(r'boundary="([^"]+)"', text).group(1)
+    assert 'Content-Disposition: attachment; filename="note.txt"' in text
+    assert "Content-Transfer-Encoding: base64\r\n\r\nAP8=\r\n" in text
+    assert text.endswith(f"\r\n--{boundary}--\r\n")

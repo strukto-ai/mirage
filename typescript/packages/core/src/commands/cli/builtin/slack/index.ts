@@ -25,13 +25,16 @@ import { react } from './react.ts'
 import { reactions } from './reactions.ts'
 import { readMessages } from './read_messages.ts'
 import { search } from './search.ts'
+import { deleteMessage } from './delete_message.ts'
+import { editMessage } from './edit_message.ts'
 import { sendMessage } from './send_message.ts'
 import { unpinMessage } from './unpin_message.ts'
 import { uploadFile } from './upload_file.ts'
 
 // The slack program, spelled with the OpenClaw Slack action vocabulary
-// (kebab verbs: send-message, upload-file, read-messages, pin-message,
-// list-pins, member-info, emoji-list). search and list-members are mirage
+// (kebab verbs: send-message, edit-message, delete-message, upload-file,
+// read-messages, pin-message, list-pins, member-info, emoji-list). search
+// and list-members are mirage
 // extensions carrying over the old mount commands' capabilities.
 // Install with a SlackConfig; two installs are two workspaces.
 export const SLACK = new CLI({
@@ -46,6 +49,23 @@ export const SLACK = new CLI({
           new Argument('--channel', { required: true }),
           new Argument('--text', { required: true }),
           new Argument('--thread-ts', { help: 'Reply in this thread' }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'edit-message',
+        description: 'Replace the text of a message',
+        arguments: [
+          new Argument('--channel', { required: true }),
+          new Argument('--ts', { required: true }),
+          new Argument('--text', { required: true }),
+        ],
+      }),
+      new CommandSpec({
+        name: 'delete-message',
+        description: 'Delete a message',
+        arguments: [
+          new Argument('--channel', { required: true }),
+          new Argument('--ts', { required: true }),
         ],
       }),
       new CommandSpec({
@@ -135,6 +155,8 @@ export const SLACK = new CLI({
   }),
   handlers: {
     'send-message': new CLIHandler({ fn: sendMessage, write: true }),
+    'edit-message': new CLIHandler({ fn: editMessage, write: true }),
+    'delete-message': new CLIHandler({ fn: deleteMessage, write: true }),
     'upload-file': new CLIHandler({ fn: uploadFile, write: true }),
     'read-messages': new CLIHandler({ fn: readMessages }),
     react: new CLIHandler({ fn: react, write: true }),

@@ -46,6 +46,24 @@ def required_flag(fl: FlagView, name: str) -> str:
     return value
 
 
+def bool_flag(fl: FlagView, name: str) -> bool | None:
+    """A true/false flag, None when absent; any other value is refused.
+
+    Args:
+        fl (FlagView): Flag view constructed with the leaf's spec.
+        name (str): Canonical flag name, e.g. ``closed``.
+    """
+    value = fl.as_str(name)
+    if value is None:
+        return None
+    lowered = value.lower()
+    if lowered in ("true", "1", "yes"):
+        return True
+    if lowered in ("false", "0", "no"):
+        return False
+    raise ValueError(f"--{name} expects true or false, got '{value}'")
+
+
 async def resolve_text_input(
     ctx: Context,
     fl: FlagView,

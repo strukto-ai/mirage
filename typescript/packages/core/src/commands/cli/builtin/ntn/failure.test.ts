@@ -182,6 +182,6 @@ describe('the tree', () => {
   it('finds the leaves it claims to check', () => {
     // Guards the guard: an empty walk would make the assertion above vacuous.
     expect(leaves(NTN, []).map(([name]) => name)).toContain('ntn api')
-    expect(leaves(NTN, []).length).toBe(9)
+    expect(leaves(NTN, []).length).toBe(12)
   })
 })

@@ -34,5 +34,4 @@ async def edit(
         fl.as_str("message") or "",
         fl.as_str("text") or "",
     )
-    out = compact_json_bytes(result)
-    return out, IOResult()
+    return compact_json_bytes(result), IOResult()

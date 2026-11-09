@@ -226,7 +226,7 @@ async def api(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     path = first_text(texts, "api path")
 
     # Upstream validates the three body sources in this order and only

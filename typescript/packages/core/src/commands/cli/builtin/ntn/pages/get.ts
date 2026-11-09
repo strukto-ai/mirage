@@ -28,7 +28,7 @@ export async function get(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   let pageId: string
   try {
     pageId = firstText(texts, 'page id')

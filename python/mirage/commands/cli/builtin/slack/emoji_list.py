@@ -27,5 +27,4 @@ async def emoji_list(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     emoji = await list_emoji(accessor)
-    out = compact_json_bytes(emoji)
-    return out, IOResult()
+    return compact_json_bytes(emoji), IOResult()

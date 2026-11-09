@@ -34,5 +34,4 @@ async def search(
         fl.as_str("query") or "",
         channel_id=fl.as_str("channel"),
     )
-    out = compact_json_bytes(results)
-    return out, IOResult()
+    return compact_json_bytes(results), IOResult()

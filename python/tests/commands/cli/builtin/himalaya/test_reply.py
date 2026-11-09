@@ -49,9 +49,9 @@ def patched(monkeypatch):
         seen["args"] = (folder, uid)
         return ORIGINAL
 
-    async def fake_deliver(accessor, raw, save=None):
+    async def fake_deliver(accessor, raw, save=None, no_save=False):
         seen["raw"] = raw
-        return BytesParser(policy=default_policy).parsebytes(raw), ""
+        return BytesParser(policy=default_policy).parsebytes(raw), False
 
     async def fake_close(self):
         seen["closed"] = True
@@ -82,7 +82,7 @@ async def test_reply_writes_mime_to_stdout_without_send(patched):
     assert message["Subject"] == "Re: Quarterly numbers"
     assert message["To"] == "Alice <alice@example.com>"
     assert message["In-Reply-To"] == "<m1@example.com>"
-    assert message.get_content() == "thanks\r\n\r\n> the numbers\r\n"
+    assert message.get_content() == "thanks\r\n\r\n> the numbers"
 
 
 @pytest.mark.asyncio
@@ -114,25 +114,20 @@ async def test_bottom_posting_puts_the_quote_first(patched):
     )
     message = parse(await materialize(out))
     assert message.get_content() == (
-        "Alice wrote:\r\n> the numbers\r\n\r\nthanks\r\n"
+        "Alice wrote:\r\n> the numbers\r\n\r\nthanks"
     )
 
 
 @pytest.mark.asyncio
 async def test_send_flag_pushes_through_smtp_and_reports_json(patched):
     out, io = await reply(
-        EMAIL, [], ["7"], Context(flags={"body": "thanks", "send": True})
+        EMAIL,
+        [],
+        ["7"],
+        Context(flags={"body": "thanks", "send": True, "json": True}),
     )
     assert io.exit_code == 0
     assert b"Re: Quarterly numbers" in patched["raw"]
     assert json.loads(await materialize(out)) == {
-        "status": "sent",
-        "to": "Alice <alice@example.com>",
-        "subject": "Re: Quarterly numbers",
+        "message": "Message successfully sent"
     }
-
-
-@pytest.mark.asyncio
-async def test_reply_without_an_id_is_a_usage_error(patched):
-    with pytest.raises(ValueError, match="message id is required"):
-        await reply(EMAIL, [], [], Context(flags={"body": "thanks"}))

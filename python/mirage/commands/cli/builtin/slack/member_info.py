@@ -29,5 +29,4 @@ async def member_info(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, ctx.spec)
     user = await get_user_profile(accessor, fl.as_str("user") or "")
-    out = compact_json_bytes(user)
-    return out, IOResult()
+    return compact_json_bytes(user), IOResult()

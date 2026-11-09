@@ -14,10 +14,10 @@
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.cli.builtin.linear.util import (
-    first_text,
     resolve_issue,
     text_or_stdin,
 )
+from mirage.commands.cli.operand import first_text
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import issue_update
@@ -33,7 +33,7 @@ async def update(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     issue_id = await resolve_issue(accessor, first_text(texts, "issue key"))
     description = None
     if fl.as_str("description") is not None or ctx.stdin is not None:

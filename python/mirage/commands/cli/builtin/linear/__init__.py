@@ -22,6 +22,7 @@ from mirage.commands.cli.builtin.linear.issue import relation
 from mirage.commands.cli.builtin.linear.issue.add_label import add_label
 from mirage.commands.cli.builtin.linear.issue.assign import assign
 from mirage.commands.cli.builtin.linear.issue.create import create
+from mirage.commands.cli.builtin.linear.issue.remove_label import remove_label
 from mirage.commands.cli.builtin.linear.issue.set_priority import set_priority
 from mirage.commands.cli.builtin.linear.issue.set_project import set_project
 from mirage.commands.cli.builtin.linear.issue.transition import transition
@@ -195,6 +196,19 @@ LINEAR = CLI(
                             ),
                         ),
                     ),
+                    CommandSpec(
+                        name="remove-label",
+                        description="Remove a label from an issue",
+                        arguments=(
+                            ARG,
+                            Argument("--label", help="Label ID"),
+                            Argument(
+                                "--label-name",
+                                help="Label name, looked up on "
+                                "the issue's team",
+                            ),
+                        ),
+                    ),
                 ),
             ),
             CommandSpec(
@@ -349,6 +363,7 @@ LINEAR = CLI(
             fn=relation.delete_relation, write=True
         ),
         "issue add-label": CLIHandler(fn=add_label, write=True),
+        "issue remove-label": CLIHandler(fn=remove_label, write=True),
         "project list": CLIHandler(fn=reads.project_list),
         "project get": CLIHandler(fn=reads.project_get),
         "cycle list": CLIHandler(fn=reads.cycle_list),

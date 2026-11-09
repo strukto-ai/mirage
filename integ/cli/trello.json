@@ -240,11 +240,11 @@
       "targets": [
         "cli-trello"
       ],
-      "command": "trello card update --card_id crd_nope --name x",
+      "command": "trello card update --card_id crd_nope --closed maybe; trello card update --card_id crd_nope --name x",
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "trello card update: Trello API error (/cards/crd_nope): HTTP 404: {\"message\":\"card not found\"}\n"
+        "stderr": "trello card update: --closed expects true or false, got 'maybe'\ntrello card update: Trello API error (/cards/crd_nope): HTTP 404: {\"message\":\"card not found\"}\n"
       }
     },
     {
@@ -375,6 +375,17 @@
         "exit": 1,
         "stdout": "",
         "stderr": "trello: 'nope' is not a trello card command. See 'trello card --help'.\n"
+      }
+    },
+    {
+      "id": "tr_write_card_update_closed_true_and_false",
+      "seq": 9940009,
+      "targets": ["cli-trello"],
+      "command": "trello card update --card_id crd_search --closed true | jq -c .closed; trello card update --card_id crd_search --closed false | jq -c .closed",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\nfalse\n",
+        "stderr": ""
       }
     }
   ]

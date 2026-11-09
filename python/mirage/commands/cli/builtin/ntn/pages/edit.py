@@ -32,7 +32,7 @@ async def edit(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     page_id = first_text(texts, "page id")
     markdown = await content_or_stdin(fl.as_str("content"), ctx.stdin)
     # The PATCH answers with the page's new markdown, which is what

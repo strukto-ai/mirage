@@ -15,7 +15,7 @@
 import { FlagView } from '../../../../spec/flag_view.ts'
 import type { GoogleApiAccessor } from '../../../../../accessor/google_api.ts'
 import { updateValues } from '../../../../../core/gsheets/write.ts'
-import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { compactJsonBytes } from '../../../../../core/render/json.ts'
@@ -37,13 +37,12 @@ export async function write(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const result = await updateValues(
     accessor.tokenManager,
     fl.asStr('spreadsheet') ?? '',
     fl.asStr('range') ?? '',
     valuesJsonFromFlags(fl),
   )
-  const out: ByteSource = compactJsonBytes(result)
-  return [out, new IOResult()]
+  return [compactJsonBytes(result), new IOResult()]
 }

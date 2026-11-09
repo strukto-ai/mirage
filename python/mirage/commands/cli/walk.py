@@ -45,6 +45,7 @@ from mirage.commands.spec.help import (
     clap_group_refusal,
     clap_unexpected_argument,
     render_help,
+    usage_line,
 )
 from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.shell.bytes import encode_text
@@ -443,14 +444,34 @@ def _usage_error(
     )
 
 
-def _unknown_verb(head: str, name: str, word: str) -> WalkResult:
-    """git's unknown-command refusal, with the group path in the noun.
+def _unknown_verb(
+    head: str, name: str, word: str, node: CommandSpec, style: UsageStyle
+) -> WalkResult:
+    """The refusal of a word that names no subcommand.
+
+    git's wording with the group path in the noun, or clap's own under
+    its style, whose usage line says `[COMMAND]` at the root where a bare
+    invocation is legal and `<COMMAND>` below it.
 
     Args:
         head (str): installed head word ("gws").
         name (str): display path walked so far ("gws gmail").
         word (str): the word that matched no subcommand.
+        node (CommandSpec): the group being walked.
+        style (UsageStyle): the root's dialect.
     """
+    if style is UsageStyle.CLAP:
+        usage = usage_line(name, node, subcommand_rows(node), style)
+        if " " not in name:
+            usage = usage.replace("<COMMAND>", "[COMMAND]")
+        return WalkResult(
+            output=encode_text(
+                f"error: unrecognized subcommand '{word}'\n\n{usage}\n\n"
+                "For more information, try '--help'.\n"
+            ),
+            stream="stderr",
+            exit_code=CLAP_EXIT,
+        )
     text = f"{head}: '{word}' is not a {name} command. See '{name} --help'.\n"
     return WalkResult(output=encode_text(text), stream="stderr", exit_code=1)
 
@@ -1037,7 +1058,7 @@ def walk(
                         stream="stderr",
                         exit_code=COBRA_EXIT,
                     )
-                return _unknown_verb(head, name, token)
+                return _unknown_verb(head, name, token, node, style)
             node = child
             path = path + (child.name,)
             positions = positions + (i,)
@@ -1051,6 +1072,7 @@ def walk(
         )
         if refused is not None:
             return refused
+        clap_group = style is UsageStyle.CLAP and bool(path)
         return WalkResult(
             output=encode_text(
                 node_help(
@@ -1059,6 +1081,12 @@ def walk(
                     style,
                 )
             ),
-            stream="stdout",
-            exit_code=0 if style is UsageStyle.COBRA else 1,
+            stream="stderr" if clap_group else "stdout",
+            exit_code=(
+                CLAP_EXIT
+                if clap_group
+                else 0
+                if style is UsageStyle.COBRA or style is UsageStyle.CLAP
+                else 1
+            ),
         )

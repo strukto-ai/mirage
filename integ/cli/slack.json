@@ -7,7 +7,7 @@
       "command": "slack --help | head -n 1",
       "expect": {
         "exit": 0,
-        "stdout": "usage: slack [-h] {send-message,upload-file,read-messages,react,reactions,pin-message,unpin-message,list-pins,member-info,list-members,emoji-list,search} ...\n",
+        "stdout": "usage: slack [-h] {send-message,edit-message,delete-message,upload-file,read-messages,react,reactions,pin-message,unpin-message,list-pins,member-info,list-members,emoji-list,search} ...\n",
         "stderr": ""
       }
     },
@@ -341,6 +341,17 @@
         "exit": 0,
         "stdout": "20000\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "sl_edit_and_delete_message",
+      "seq": 9940002,
+      "targets": ["cli-slack"],
+      "command": "ts=$(slack send-message --channel C1 --text draft | jq -r .ts); slack edit-message --channel C1 --ts \"$ts\" --text final | jq -c '{ok,text}'; slack read-messages --channel C1 --limit 1 | jq -r '.[0].text'; slack delete-message --channel C1 --ts \"$ts\" | jq -c '{ok}'; slack read-messages --channel C1 --limit 1 | jq -r --arg ts \"$ts\" '.[0].ts != $ts'; slack delete-message --channel C1 --ts \"$ts\"; echo rc=$?; slack edit-message --channel C1 --ts 1766165985.000426 --text nope; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"text\":\"final\"}\nfinal\n{\"ok\":true}\ntrue\nrc=1\nrc=1\n",
+        "stderr": "slack delete-message: Slack API error (chat.delete): message_not_found\nslack edit-message: Slack API error (chat.update): cant_update_message\n"
       }
     }
   ]

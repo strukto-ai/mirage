@@ -52,6 +52,35 @@ export async function postMessage(ctx: Ctx<C>): Promise<Reply> {
   return { status: 200, body: { ok: true, channel, ts, message } }
 }
 
+// A bot token may only change what the bot posted.
+export async function chatUpdate(ctx: Ctx<C>): Promise<Reply> {
+  if (!authed(ctx)) return fail('not_authed')
+  const payload = obj(ctx.json())
+  const channel = str(payload.channel)
+  const ts = str(payload.ts)
+  const text = str(payload.text)
+  const msg = await messageAt(ctx.db, ctx.tenant, channel, ts)
+  if (msg === null) return fail('message_not_found')
+  if (msg.userId !== BOT_USER_ID) return fail('cant_update_message')
+  await ctx.db.message.update({ where: messageKey(ctx.tenant, channel, ts), data: { text } })
+  return {
+    status: 200,
+    body: { ok: true, channel, ts, text, message: { text, user: BOT_USER_ID } },
+  }
+}
+
+export async function chatDelete(ctx: Ctx<C>): Promise<Reply> {
+  if (!authed(ctx)) return fail('not_authed')
+  const payload = obj(ctx.json())
+  const channel = str(payload.channel)
+  const ts = str(payload.ts)
+  const msg = await messageAt(ctx.db, ctx.tenant, channel, ts)
+  if (msg === null) return fail('message_not_found')
+  if (msg.userId !== BOT_USER_ID) return fail('cant_delete_message')
+  await ctx.db.message.delete({ where: messageKey(ctx.tenant, channel, ts) })
+  return { status: 200, body: { ok: true, channel, ts } }
+}
+
 // A message from the bot, at the next synthetic ts.
 async function post(
   ctx: Ctx<C>,

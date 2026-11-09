@@ -25,6 +25,9 @@ import { edit } from './pages/edit.ts'
 import { get } from './pages/get.ts'
 import { trash } from './pages/trash.ts'
 import { ntnAccessor } from './util.ts'
+import { filesCreate } from './files/create.ts'
+import { filesGet } from './files/get.ts'
+import { filesList } from './files/list.ts'
 import { whoami } from './whoami.ts'
 
 // Operand names are upstream's, verbatim: they are what the refusal for a
@@ -33,6 +36,7 @@ import { whoami } from './whoami.ts'
 // ID slot.
 const PAGE_ID = new Argument('PAGE_ID')
 const DATA_SOURCE_ID = new Argument('ID_OR_URL')
+const UPLOAD_ID = new Argument('UPLOAD_ID')
 const DATABASE_ID = new Argument('ID')
 const API_PATH = new Argument('PATH', { nargs: '*' })
 const jsonOut = (): Argument =>
@@ -121,6 +125,40 @@ export const NTN = new CLI({
         ],
       }),
       new CommandSpec({
+        name: 'files',
+        description: 'Manage file uploads (beta)',
+        subcommands: [
+          new CommandSpec({
+            name: 'create',
+            description: 'Create a file upload from stdin or an external URL',
+            arguments: [
+              new Argument('--filename', {
+                help: 'Override the uploaded filename when reading file bytes from stdin',
+              }),
+              new Argument('--content-type', { help: 'Override the uploaded MIME type' }),
+              new Argument('--external-url', {
+                metavar: 'URL',
+                help: 'Import a publicly accessible HTTPS file instead of reading bytes from stdin',
+              }),
+              jsonOut(),
+              plain(),
+              notionVersion(),
+            ],
+          }),
+          new CommandSpec({
+            name: 'get',
+            description: 'Retrieve a file upload by id',
+            arguments: [UPLOAD_ID, jsonOut(), plain(), notionVersion()],
+          }),
+          new CommandSpec({
+            name: 'list',
+            aliases: ['ls'],
+            description: 'List file uploads',
+            arguments: [jsonOut(), plain(), notionVersion()],
+          }),
+        ],
+      }),
+      new CommandSpec({
         name: 'pages',
         description: 'Manage pages',
         subcommands: [
@@ -171,6 +209,9 @@ export const NTN = new CLI({
     'pages create': new CLIHandler({ fn: guarded(create), write: true }),
     'pages edit': new CLIHandler({ fn: guarded(edit), write: true }),
     'pages trash': new CLIHandler({ fn: guarded(trash), write: true }),
+    'files create': new CLIHandler({ fn: guarded(filesCreate), write: true }),
+    'files get': new CLIHandler({ fn: guarded(filesGet) }),
+    'files list': new CLIHandler({ fn: guarded(filesList) }),
     whoami: new CLIHandler({ fn: guarded(whoami) }),
   },
   configModel: NotionConfig,

@@ -51,6 +51,7 @@ def test_tree_shape_keeps_the_mount_grammar():
         "set-project",
         "relation",
         "add-label",
+        "remove-label",
     ]
     assert [v.name for v in leaf("comment").subcommands] == [
         "list",
@@ -68,6 +69,7 @@ def test_write_classification():
         ("issue", "set-priority"),
         ("issue", "set-project"),
         ("issue", "add-label"),
+        ("issue", "remove-label"),
         ("comment", "add"),
         ("comment", "update"),
     ):

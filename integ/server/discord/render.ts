@@ -56,7 +56,7 @@ export function renderMessage(row: DiscordMessage): JsonValue {
     timestamp: row.timestamp,
     edited_timestamp: row.editedTimestamp,
     tts: false,
-    pinned: false,
+    pinned: row.pinnedAt !== null,
     mention_everyone: false,
     mentions: [],
     mention_roles: [],

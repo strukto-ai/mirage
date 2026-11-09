@@ -35,5 +35,4 @@ async def send_message(
         result = await reply_to_thread(accessor, channel, thread_ts, text)
     else:
         result = await post_message(accessor, channel, text)
-    out = compact_json_bytes(result)
-    return out, IOResult()
+    return compact_json_bytes(result), IOResult()

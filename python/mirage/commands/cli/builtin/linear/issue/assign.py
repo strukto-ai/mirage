@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.commands.cli.builtin.linear.util import first_text, resolve_issue
+from mirage.commands.cli.builtin.linear.util import resolve_issue
+from mirage.commands.cli.operand import first_text
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import issue_update, resolve_user_id
@@ -29,7 +30,7 @@ async def assign(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     issue_id = await resolve_issue(accessor, first_text(texts, "issue key"))
     assignee_id = await resolve_user_id(
         accessor,

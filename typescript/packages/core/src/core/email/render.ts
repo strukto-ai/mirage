@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { compactJsonBytes } from '../render/json.ts'
 import type { fetchMessage } from './client.ts'
 
 const encoder = new TextEncoder()
@@ -29,7 +28,7 @@ function messageDocument(
   message: Awaited<ReturnType<typeof fetchMessage>>,
 ): Partial<Awaited<ReturnType<typeof fetchMessage>>> {
   const body: Partial<Awaited<ReturnType<typeof fetchMessage>>> = { ...message }
-  delete body.internalDate
+  for (const key of TRANSPORT_KEYS) delete body[key]
   return body
 }
 
@@ -46,32 +45,134 @@ export function messageJsonBytes(message: Awaited<ReturnType<typeof fetchMessage
   return encoder.encode(messageJsonText(message))
 }
 
-export type Envelope = Omit<
-  Awaited<ReturnType<typeof fetchMessage>>,
-  'internalDate' | 'body_text' | 'body_html' | 'snippet'
->
-
-/**
- * Projects a fetched message onto its envelope.
- *
- * The envelope is the message without its body: identifiers, headers,
- * flags and attachment metadata stay; `body_text`, `body_html` and the
- * body-derived `snippet` go, along with INTERNALDATE. Listing a mailbox
- * fetches every full source because attachment names live in the MIME
- * structure, but a page of envelopes must not carry a page of HTML
- * bodies. Those are `message read`'s and the mounted .email.json's,
- * which render through `messageDocument`.
- */
-function envelopeDocument(message: Awaited<ReturnType<typeof fetchMessage>>): Envelope {
-  const body = messageDocument(message)
-  delete body.body_text
-  delete body.body_html
-  delete body.snippet
-  return body as Envelope
+const TRANSPORT_KEYS = ['internalDate', 'rawSize', 'attached'] as const
+const IANA_FLAGS = [
+  'seen',
+  'answered',
+  'flagged',
+  'draft',
+  'deleted',
+  'forwarded',
+  'junk',
+  'not-junk',
+  'phishing',
+  'important',
+  'mdn-sent',
+]
+const IANA_BY_BARE_NAME = new Map(IANA_FLAGS.map((name) => [name.replace('-', ''), name]))
+export interface Envelope {
+  id: string
+  'message-id': string | null
+  'in-reply-to': string[]
+  flags: { raw: string; iana: string | null }[]
+  subject: string
+  from: { name: string | null; email: string }[]
+  to: { name: string | null; email: string }[]
+  date: string | null
+  size: number
+  'has-attachment': boolean | null
 }
 
-export function envelopesJsonBytes(
+function normalizedId(raw: string): string | null {
+  let trimmed = raw.trim()
+  if (trimmed.startsWith('<') && trimmed.endsWith('>')) trimmed = trimmed.slice(1, -1).trim()
+  return trimmed === '' ? null : trimmed
+}
+
+function messageIds(raw: string): string[] {
+  const chunks = raw.includes('<')
+    ? raw
+        .split('<')
+        .filter((chunk) => chunk.includes('>'))
+        .map((chunk) => chunk.slice(0, chunk.indexOf('>')))
+    : raw.split(/\s+/)
+  return chunks.map(normalizedId).filter((id): id is string => id !== null)
+}
+
+function flagRank(flag: Envelope['flags'][number]): number {
+  return flag.iana === null ? IANA_FLAGS.length : IANA_FLAGS.indexOf(flag.iana)
+}
+
+/**
+ * A message's flags as upstream renders them: classified against the IANA
+ * registry, one entry per flag, IANA flags first in the registry's order and
+ * keywords after them by name. `\\Recent` is the server's own bookkeeping and is
+ * left out.
+ */
+function flagDocuments(flags: readonly string[]): Envelope['flags'] {
+  const found = new Map<string, Envelope['flags'][number]>()
+  for (const raw of flags) {
+    if (raw.toLowerCase() === '\\recent') continue
+    const bare = raw.startsWith('\\') || raw.startsWith('$') ? raw.slice(1) : raw
+    const iana = IANA_BY_BARE_NAME.get(bare.toLowerCase()) ?? null
+    const key = iana ?? raw.toLowerCase()
+    if (!found.has(key)) found.set(key, { raw, iana })
+  }
+  return [...found.values()].sort(
+    (a, b) => flagRank(a) - flagRank(b) || a.raw.toLowerCase().localeCompare(b.raw.toLowerCase()),
+  )
+}
+
+function addresses(entries: readonly { name: string; email: string }[]): Envelope['to'] {
+  return entries
+    .filter((entry) => entry.email !== '')
+    .map((entry) => ({ name: entry.name === '' ? null : entry.name, email: entry.email }))
+}
+
+/** A `Date:` header as RFC 3339, null when it cannot be read. */
+function rfc3339(date: string): string | null {
+  const stamp = Date.parse(date)
+  const shape = /^(?:[A-Za-z]{3},\s*)?\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4}\s+\d{1,2}:\d{2}/
+  if (Number.isNaN(stamp) || !shape.test(date.trim())) return null
+  const named: Record<string, number> = {
+    EST: -300,
+    EDT: -240,
+    CST: -360,
+    CDT: -300,
+    MST: -420,
+    MDT: -360,
+    PST: -480,
+    PDT: -420,
+  }
+  const tokens = date
+    .trim()
+    .split(/\s+/)
+    .filter((token) => !token.startsWith('('))
+  const label = tokens[tokens.length - 1] ?? ''
+  const numeric = /^([+-])(\d{2})(\d{2})$/.exec(label)
+  const span = numeric === null ? 0 : Number(numeric[2]) * 60 + Number(numeric[3])
+  const zone =
+    numeric === null ? (named[label.toUpperCase()] ?? 0) : numeric[1] === '-' ? -span : span
+  const local = new Date(stamp + zone * 60_000).toISOString().slice(0, 19)
+  if (zone === 0) return `${local}Z`
+  const hours = String(Math.floor(Math.abs(zone) / 60)).padStart(2, '0')
+  const minutes = String(Math.abs(zone) % 60).padStart(2, '0')
+  return `${local}${zone < 0 ? '-' : '+'}${hours}:${minutes}`
+}
+
+/** Projects a fetched message onto upstream himalaya's envelope. */
+function envelopeDocument(
+  message: Awaited<ReturnType<typeof fetchMessage>>,
+  withAttachment: boolean,
+): Envelope {
+  return {
+    id: message.uid,
+    'message-id': normalizedId(message.message_id),
+    'in-reply-to': messageIds(message.in_reply_to ?? ''),
+    flags: flagDocuments(message.flags),
+    subject: message.subject,
+    from: addresses([message.from]),
+    to: addresses(message.to),
+    date: rfc3339(message.date),
+    size: message.rawSize,
+    'has-attachment': withAttachment ? message.attached : null,
+  }
+}
+
+/** Renders fetched messages as upstream himalaya's envelope listing. */
+export function envelopeDocuments(
   messages: readonly Awaited<ReturnType<typeof fetchMessage>>[],
-): Uint8Array {
-  return compactJsonBytes(messages.map((m) => envelopeDocument(m)))
+  withAttachment = false,
+): Envelope[] {
+  return messages.map((m) => envelopeDocument(m, withAttachment))
 }

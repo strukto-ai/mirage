@@ -18,6 +18,7 @@ import { CLI, CLIHandler } from '../../types.ts'
 import { add as commentAdd } from './comment/add.ts'
 import { update as commentUpdate } from './comment/update.ts'
 import { addLabel } from './issue/add_label.ts'
+import { removeLabel } from './issue/remove_label.ts'
 import { assign } from './issue/assign.ts'
 import { create } from './issue/create.ts'
 import { setPriority } from './issue/set_priority.ts'
@@ -166,6 +167,15 @@ export const LINEAR = new CLI({
               ARG,
             ],
           }),
+          new CommandSpec({
+            name: 'remove-label',
+            description: 'Remove a label from an issue',
+            arguments: [
+              new Argument('--label', { help: 'Label ID' }),
+              new Argument('--label-name', { help: "Label name, looked up on the issue's team" }),
+              ARG,
+            ],
+          }),
         ],
       }),
       new CommandSpec({
@@ -287,6 +297,7 @@ export const LINEAR = new CLI({
     'issue relation list': new CLIHandler({ fn: relation.listRelations }),
     'issue relation delete': new CLIHandler({ fn: relation.deleteRelation, write: true }),
     'issue add-label': new CLIHandler({ fn: addLabel, write: true }),
+    'issue remove-label': new CLIHandler({ fn: removeLabel, write: true }),
     'project list': new CLIHandler({ fn: reads.projectList }),
     'project get': new CLIHandler({ fn: reads.projectGet }),
     'cycle list': new CLIHandler({ fn: reads.cycleList }),

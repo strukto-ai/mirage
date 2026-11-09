@@ -178,7 +178,7 @@ export async function runGwsMethod(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   let params: Record<string, unknown>
   let body: Record<string, unknown>
   try {

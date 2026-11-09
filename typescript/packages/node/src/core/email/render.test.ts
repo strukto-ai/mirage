@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { fetchMessage } from '@struktoai/mirage-core/core/email/client'
-import { envelopesJsonBytes, messageJsonBytes } from '@struktoai/mirage-core/core/email/render'
+import { envelopeDocuments, messageJsonBytes } from '@struktoai/mirage-core/core/email/render'
 
 const MESSAGE: Awaited<ReturnType<typeof fetchMessage>> = {
   from: { name: 'Alice', email: 'alice@example.com' },
@@ -34,6 +34,8 @@ const MESSAGE: Awaited<ReturnType<typeof fetchMessage>> = {
   uid: '101',
   flags: [],
   internalDate: '2026-08-07T20:54:05.000Z',
+  rawSize: 0,
+  attached: false,
 }
 
 const decoder = new TextDecoder()
@@ -63,15 +65,12 @@ const FULL: Awaited<ReturnType<typeof fetchMessage>> = {
   attachments: [{ filename: 'a.txt', content_type: 'text/plain', size: 3 }],
 }
 
-describe('envelopesJsonBytes', () => {
+describe('envelopeDocuments', () => {
   it('carries no body', () => {
     // Listing a mailbox fetches every full source, because attachment
     // metadata lives in the MIME structure, but the listing itself is the
     // envelope: 25 HTML bodies do not belong in it (#1067).
-    const [row] = JSON.parse(decoder.decode(envelopesJsonBytes([FULL]))) as Record<
-      string,
-      unknown
-    >[]
+    const [row] = envelopeDocuments([FULL]) as unknown as Record<string, unknown>[]
     expect(row).toBeDefined()
     expect('body_text' in (row ?? {})).toBe(false)
     expect('body_html' in (row ?? {})).toBe(false)
@@ -80,16 +79,12 @@ describe('envelopesJsonBytes', () => {
   })
 
   it('keeps identifiers, headers, flags and attachment metadata', () => {
-    const [row] = JSON.parse(decoder.decode(envelopesJsonBytes([FULL]))) as Record<
-      string,
-      unknown
-    >[]
-    expect(row?.uid).toBe('101')
+    const [row] = envelopeDocuments([FULL]) as unknown as Record<string, unknown>[]
+    expect(row?.id).toBe('101')
     expect(row?.subject).toBe('Hello')
-    expect(row?.from).toEqual({ name: 'Alice', email: 'alice@example.com' })
+    expect(row?.from).toEqual([{ name: 'Alice', email: 'alice@example.com' }])
     expect(row?.flags).toEqual([])
-    expect(row?.has_attachments).toBe(true)
-    expect(row?.attachments).toEqual(FULL.attachments)
+    expect(row?.['has-attachment']).toBeNull()
   })
 
   it('leaves the document renderer carrying the body', () => {

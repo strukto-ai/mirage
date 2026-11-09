@@ -35,7 +35,7 @@
       "command": "gws gmail --help | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "usage: gws gmail [-h] {users,send,read,reply,reply-all,forward,triage} ...\n",
+        "stdout": "usage: gws gmail [-h] {users,send (+send),read (+read),reply (+reply),reply-all (+reply-all),forward (+forward),triage (+triage)} ...\n",
         "stderr": ""
       }
     },
@@ -305,10 +305,10 @@
       "targets": [
         "cli-gws"
       ],
-      "command": "gws gmail triage --query from:billing | jq -r '.[].id'",
+      "command": "gws gmail triage --query from:billing | jq -r '.[].id'; gws gmail +triage --query from:billing | jq -r '.[].id'",
       "expect": {
         "exit": 0,
-        "stdout": "msg0005\n",
+        "stdout": "msg0005\nmsg0005\n",
         "stderr": ""
       }
     },
@@ -1611,6 +1611,17 @@
       "expect": {
         "exit": 0,
         "stdout": "{\"resultSizeEstimate\":0}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_helpers_answer_to_upstream_plus_spellings",
+      "seq": 9940012,
+      "targets": ["cli-gws"],
+      "command": "gws gmail +send --to lila@example.com --subject Plus --body 'plus send' | jq -r '.labelIds[0]'; gws gmail +read --id msg0005 | jq -r .snippet; gws gmail +reply --message-id msg0001 --body 'plus reply' | jq -r .threadId; gws gmail +reply-all --message-id msg0003 --body 'plus all' | jq -r .threadId; gws gmail forward --message-id msg0005 --to marcus@example.com | jq -r '.labelIds[0]'; gws gmail +forward --message-id msg0005 --to marcus@example.com | jq -r '.labelIds[0]'; gws sheets +read --spreadsheet sheet0001 --range Sheet1 | jq -r .range; gws sheets +append --spreadsheet sheet0001 --range Sheet1 --json-values '[[\"emea\",\"70\"]]' | jq -r .updates.updatedRange; gws docs +write --document doc0001 --text 'plus line' | jq -r .documentId",
+      "expect": {
+        "exit": 0,
+        "stdout": "SENT\ninvoice 4471 attached, total 240 usd\nmsg0001\nmsg0003\nSENT\nSENT\nSheet1!A1:Z1000\nSheet1!A4:B4\ndoc0001\n",
         "stderr": ""
       }
     }

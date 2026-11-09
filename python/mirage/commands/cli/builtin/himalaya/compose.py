@@ -26,4 +26,6 @@ async def compose(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await route(accessor, FlagView(ctx.flags), ctx.stdin, None, ctx.vfs)
+    return await route(
+        accessor, FlagView(ctx.flags, ctx.spec), ctx.stdin, None, ctx.vfs
+    )

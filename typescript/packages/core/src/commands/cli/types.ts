@@ -18,9 +18,9 @@ import { type ScriptSource } from '../../runtime/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { CommandFnResult, Context } from '../config.ts'
-import { compileSpec } from '../spec/compile.ts'
+import { argumentDest, compileSpec } from '../spec/compile.ts'
 import type { MCPSource } from './mcp/types.ts'
-import { CommandSpec, type CommandSpecInit, type FlagValue } from '../spec/types.ts'
+import { Argument, CommandSpec, type CommandSpecInit, type FlagValue } from '../spec/types.ts'
 
 /** A leaf callback: the install's accessor, the operands and the `Context` a command gets. */
 export type CLIVerbFn<A extends Accessor = Accessor> = (
@@ -124,7 +124,7 @@ function validateCli(cli: CLI): void {
   } else if (cli.runtime !== null) {
     throw new Error(`cli '${name}': runtime names the entry that runs script; it takes script`)
   }
-  const leaves = validateTree(cli.spec, [], new Set())
+  const leaves = validateTree(cli.spec, [], new Map())
   const missing = [...leaves].filter((path) => !Object.hasOwn(cli.handlers, path))
   const extra = Object.keys(cli.handlers).filter((path) => !leaves.has(path))
   if (missing.length > 0)
@@ -143,7 +143,7 @@ function validateCli(cli: CLI): void {
 function validateTree(
   node: CommandSpec,
   path: readonly string[],
-  ancestors: ReadonlySet<string>,
+  ancestors: ReadonlyMap<string, Argument | null>,
 ): Set<string> {
   if (!node.name || /\s/.test(node.name))
     throw new Error(`cli name '${node.name}' must be a single non-empty word`)
@@ -152,9 +152,14 @@ function validateTree(
       throw new Error(`cli '${node.name}': alias '${alias}' must be a single non-empty word`)
   }
   const compiled = compileSpec(node)
-  const own = new Set(compiled.dest.values())
-  for (const dest of own) {
-    if (ancestors.has(dest))
+  // A node may repeat its parent's very object, which is how a program's
+  // global option stays legal at every level.
+  const options = new Map(compiled.options.map((option) => [argumentDest(option), option]))
+  const own = new Map<string, Argument | null>(
+    [...new Set(compiled.dest.values())].map((dest) => [dest, options.get(dest) ?? null]),
+  )
+  for (const [dest, option] of own) {
+    if (ancestors.has(dest) && (option === null || option !== ancestors.get(dest)))
       throw new Error(`option '${dest}' collides with subcommand '${path.join(' ')}'`)
   }
   if (node.subcommands.length === 0) return new Set([path.join(' ')])
@@ -168,7 +173,7 @@ function validateTree(
       if (seen.has(word)) throw new Error(`cli '${node.name}': duplicate subcommand '${word}'`)
       seen.add(word)
     }
-    for (const leaf of validateTree(child, [...path, child.name], new Set([...ancestors, ...own])))
+    for (const leaf of validateTree(child, [...path, child.name], new Map([...ancestors, ...own])))
       leaves.add(leaf)
   }
   return leaves

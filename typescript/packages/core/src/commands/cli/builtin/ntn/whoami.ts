@@ -63,7 +63,7 @@ export async function whoami(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const me = await getSelf(notionTransport(accessor, ctx.flags))
   if (fl.asBool('json')) return [prettyJson(me), new IOResult()]
   return [whoamiRow(me), new IOResult()]

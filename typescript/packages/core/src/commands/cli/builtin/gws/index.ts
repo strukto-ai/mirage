@@ -37,9 +37,8 @@ export function googleApiAccessor(config: unknown): GoogleApiAccessor {
 // The gws program tree, mirroring the official Google Workspace CLI:
 // one passthrough leaf per Discovery method (`gws drive files list`,
 // speaking --params/--json like the raw API) plus hand-written helper
-// verbs directly under their service (`gws gmail send`). The old mount
-// registrations spelled the helpers `+send`; the tree does not need the
-// marker. Install with a GoogleConfig; two installs are two accounts.
+// verbs directly under their service (`gws gmail send`), each also answering
+// to upstream's own `+send` spelling. Install with a GoogleConfig; two installs are two accounts.
 export const GWS = new CLI({
   spec: new CommandSpec({
     name: 'gws',
@@ -57,6 +56,7 @@ export const GWS = new CLI({
           ...apiGroups('sheets'),
           new CommandSpec({
             name: 'read',
+            aliases: ['+read'],
             description: 'Read a cell range',
             arguments: [
               new Argument('--spreadsheet', { required: true }),
@@ -75,6 +75,7 @@ export const GWS = new CLI({
           }),
           new CommandSpec({
             name: 'append',
+            aliases: ['+append'],
             description: 'Append rows after a range',
             arguments: [
               new Argument('--spreadsheet', { required: true }),
@@ -92,6 +93,7 @@ export const GWS = new CLI({
           ...apiGroups('docs'),
           new CommandSpec({
             name: 'write',
+            aliases: ['+write'],
             description: 'Append text to a document',
             arguments: [
               new Argument('--document', { required: true }),
@@ -125,6 +127,7 @@ export const GWS = new CLI({
           ...apiGroups('gmail'),
           new CommandSpec({
             name: 'send',
+            aliases: ['+send'],
             description: 'Send a new email via Gmail',
             arguments: [
               new Argument('--to', { required: true }),
@@ -134,12 +137,14 @@ export const GWS = new CLI({
           }),
           new CommandSpec({
             name: 'read',
+            aliases: ['+read'],
             description:
               'Fetch one Gmail message as processed JSON (same shape as cat <path>.gmail.json)',
             arguments: [new Argument('--id', { required: true })],
           }),
           new CommandSpec({
             name: 'reply',
+            aliases: ['+reply'],
             description: 'Reply to the sender of a Gmail message (excludes CC)',
             arguments: [
               new Argument('--message-id', { required: true }),
@@ -148,6 +153,7 @@ export const GWS = new CLI({
           }),
           new CommandSpec({
             name: 'reply-all',
+            aliases: ['+reply-all'],
             description: 'Reply to a Gmail message including all recipients (To+CC)',
             arguments: [
               new Argument('--message-id', { required: true }),
@@ -156,6 +162,7 @@ export const GWS = new CLI({
           }),
           new CommandSpec({
             name: 'forward',
+            aliases: ['+forward'],
             description: 'Forward a Gmail message to a new recipient',
             arguments: [
               new Argument('--message-id', { required: true }),
@@ -164,6 +171,7 @@ export const GWS = new CLI({
           }),
           new CommandSpec({
             name: 'triage',
+            aliases: ['+triage'],
             description:
               'List message summaries (id, from, subject, date, snippet) for a Gmail search query',
             arguments: [

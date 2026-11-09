@@ -27,12 +27,11 @@ async def send(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     result = await send_message(
         accessor.token_manager,
         fl.as_str("to") or "",
         fl.as_str("subject") or "",
         fl.as_str("body") or "",
     )
-    out = compact_json_bytes(result)
-    return out, IOResult()
+    return compact_json_bytes(result), IOResult()

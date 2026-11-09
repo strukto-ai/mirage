@@ -67,17 +67,17 @@ def test_flags_map_to_imap_keywords():
     assert criteria("flag DRAFT") == "DRAFT"
 
 
-def test_unknown_flag_is_a_query_error():
-    with pytest.raises(QueryError, match="unknown flag"):
-        parse_query("flag urgent")
+def test_an_unknown_flag_is_a_keyword_search():
+    assert criteria("flag nope") == "KEYWORD nope"
 
 
 def test_date_condition_is_an_exact_day():
     assert criteria("date 2026-02-03") == "SENTON 03-Feb-2026"
 
 
-def test_before_condition_is_exclusive_like_imap():
-    assert criteria("before 2026-02-03") == "SENTBEFORE 03-Feb-2026"
+def test_upstream_has_no_before_condition():
+    with pytest.raises(QueryError, match="found 'e' expected `body`"):
+        parse_query("before 2026-02-03")
 
 
 def test_after_is_strictly_greater_so_it_asks_for_the_next_day():
@@ -88,12 +88,12 @@ def test_after_is_strictly_greater_so_it_asks_for_the_next_day():
 def test_dates_search_the_header_not_the_received_at_timestamp():
     # ON/BEFORE/SINCE would match the mailbox internal date, which is
     # the wrong day for imported or delayed mail.
-    for source in ("date 2026-02-03", "before 2026-02-03", "after 2026-02-03"):
+    for source in ("date 2026-02-03", "after 2026-02-03"):
         assert criteria(source).startswith("SENT")
 
 
 def test_bad_date_is_a_query_error():
-    with pytest.raises(QueryError, match="invalid date"):
+    with pytest.raises(QueryError, match="date format after `date`"):
         parse_query("date 2026-13-40")
 
 
@@ -105,9 +105,8 @@ def test_quotes_inside_a_pattern_are_escaped_for_imap():
     assert criteria('subject "say \\"hi\\""') == 'SUBJECT "say \\"hi\\""'
 
 
-def test_unterminated_quote_is_a_query_error():
-    with pytest.raises(QueryError, match="unterminated"):
-        parse_query('subject "open')
+def test_an_unterminated_quote_reads_as_an_unquoted_word():
+    assert criteria('subject "open') == 'SUBJECT "\\"open"'
 
 
 def test_sorters_parse_with_asc_default():
@@ -122,18 +121,17 @@ def test_filter_and_sort_combine():
     assert query.sorters == (Sorter("date", True),)
 
 
-def test_order_by_without_a_key_is_a_query_error():
-    with pytest.raises(QueryError, match="expected a sort key"):
-        parse_query("order by")
+def test_order_by_without_a_key_keeps_the_default_order():
+    assert parse_query("order by").sorters == ()
 
 
 def test_trailing_tokens_are_rejected():
-    with pytest.raises(QueryError, match="unexpected"):
+    with pytest.raises(QueryError, match="expected"):
         parse_query("from alice bogus")
 
 
 def test_unknown_condition_is_a_query_error():
-    with pytest.raises(QueryError, match="expected a condition"):
+    with pytest.raises(QueryError, match="found 'e' expected `subject`"):
         parse_query("sender alice")
 
 

@@ -29,5 +29,4 @@ async def list_pins(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, ctx.spec)
     items = await list_pins_core(accessor, fl.as_str("channel") or "")
-    out = compact_json_bytes(items)
-    return out, IOResult()
+    return compact_json_bytes(items), IOResult()

@@ -31,5 +31,4 @@ async def read_messages(
     channel = fl.as_str("channel") or ""
     limit = fl.as_int("limit", 20)
     messages = await fetch_recent_messages(accessor, channel, limit)
-    out = compact_json_bytes(messages)
-    return out, IOResult()
+    return compact_json_bytes(messages), IOResult()

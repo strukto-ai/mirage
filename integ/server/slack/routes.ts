@@ -30,6 +30,8 @@ import {
 } from './reads.ts'
 import { searchAll, searchFiles, searchMessages } from './search.ts'
 import {
+  chatDelete,
+  chatUpdate,
   completeUpload,
   getUploadUrl,
   pins,
@@ -44,6 +46,8 @@ import {
 export function slackRoutes(): KitRoute<C>[] {
   return [
     route('POST', '/api/chat.postMessage', postMessage, { write: true }),
+    route('POST', '/api/chat.update', chatUpdate, { write: true }),
+    route('POST', '/api/chat.delete', chatDelete, { write: true }),
     route('POST', '/api/reactions.add', reactionsAdd, { write: true }),
     route('POST', '/api/pins.add', pins(true), { write: true }),
     route('POST', '/api/pins.remove', pins(false), { write: true }),

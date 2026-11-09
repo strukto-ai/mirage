@@ -16,10 +16,10 @@ import logging
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from mirage.accessor.email import EmailAccessor
-from mirage.accessor.imap import IMAPClient, IMAPResponse, check_line
+from mirage.accessor.imap import IMAPClient, IMAPResponse
 from mirage.core.email._parse import parse_rfc822, parse_with_payloads
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ INTERNAL_DATE_RE = re.compile(r'INTERNALDATE "([^"]*)"')
 # in the order they were requested, and anything after BODY[] lands on
 # the line *behind* the literal, where the parsers below never look.
 FETCH_ITEMS = "(UID FLAGS INTERNALDATE BODY.PEEK[])"
+FlagOp = Literal["add", "set", "remove"]
 
 
 def quote_string(value: str) -> str:
@@ -140,6 +141,32 @@ async def list_folder_entries(
     return entries
 
 
+class MailboxNotFound(FileNotFoundError):
+    """A mailbox the server refused, with the server's own answer.
+
+    Args:
+        folder (str): the mailbox.
+        detail (str): the server's status and text.
+        verb (str): the command the server refused.
+    """
+
+    def __init__(self, folder: str, detail: str, verb: str = "SELECT") -> None:
+        super().__init__(f"no such mailbox {folder!r}")
+        self.detail = detail
+        self.verb = verb
+
+
+def _server_text(response: IMAPResponse) -> str:
+    text = " ".join(
+        line.decode(errors="replace").strip()
+        for line in response.lines
+        if line.strip()
+    )
+    if text.startswith("[") and "]" in text:
+        text = text[text.index("]") + 1 :].strip()
+    return f"{response.result} {text}".strip()
+
+
 async def select_folder(imap: IMAPClient, folder: str) -> None:
     """Select a mailbox, failing loudly when it does not exist.
 
@@ -157,7 +184,7 @@ async def select_folder(imap: IMAPClient, folder: str) -> None:
     """
     response = await imap.select(quote_string(folder))
     if response.result != "OK":
-        raise FileNotFoundError(f"no such mailbox {folder!r}")
+        raise MailboxNotFound(folder, _server_text(response))
 
 
 @asynccontextmanager
@@ -208,19 +235,7 @@ async def list_message_uids(
         for i in range(0, len(seq_nums), batch_size):
             batch = seq_nums[i : i + batch_size]
             seq_set = ",".join(batch)
-            uid_response = await imap.fetch(seq_set, "(UID)")
-            for line in _text_lines(uid_response):
-                if "UID" in line:
-                    try:
-                        uid_idx = line.index("UID") + 4
-                        rest = line[uid_idx:].strip()
-                        uid_val = rest.split(")")[0].split()[0]
-                        uids.append(uid_val)
-                    except (ValueError, IndexError) as exc:
-                        # tolerant IMAP parse: skip lines that do not match
-                        logger.debug(
-                            "no UID value in FETCH line %r: %s", line, exc
-                        )
+            uids.extend(_fetched_uids(await imap.fetch(seq_set, "(UID)")))
     return uids
 
 
@@ -252,6 +267,7 @@ async def fetch_message(
     msg_dict["uid"] = uid
     msg_dict["flags"] = flags
     msg_dict[INTERNAL_DATE_KEY] = _extract_internal_date(response)
+    msg_dict["raw_size"] = len(raw_bytes)
     return msg_dict
 
 
@@ -313,6 +329,179 @@ async def fetch_attachment(
     return None
 
 
+async def mailbox_counts(
+    accessor: EmailAccessor, folder: str
+) -> tuple[int, int]:
+    """A mailbox's total and unread message counts.
+
+    Args:
+        accessor (EmailAccessor): the account.
+        folder (str): the mailbox.
+
+    Raises:
+        FileNotFoundError: the server refused the mailbox.
+    """
+    imap = await accessor.get_imap()
+    response = await imap.status(quote_string(folder), "(MESSAGES UNSEEN)")
+    if response.result != "OK":
+        raise FileNotFoundError(f"no such mailbox {folder!r}")
+    values: dict[str, str] = {}
+    for line in _text_lines(response):
+        if "(" in line:
+            tokens = line[line.rindex("(") + 1 :].rstrip(") ").split()
+            values = dict(zip(tokens[::2], tokens[1::2]))
+    return int(values.get("MESSAGES", 0)), int(values.get("UNSEEN", 0))
+
+
+async def store_flags(
+    accessor: EmailAccessor,
+    folder: str,
+    uids: list[str],
+    flags: list[str],
+    op: FlagOp,
+) -> None:
+    """Add, set or remove flags on messages.
+
+    Args:
+        accessor (EmailAccessor): the account.
+        folder (str): the mailbox holding them.
+        uids (list[str]): the messages.
+        flags (list[str]): the IMAP flags, such as ``\\Seen``.
+        op (FlagOp): how the flags combine with the ones already set.
+
+    Raises:
+        ValueError: a uid is not a number, or the server refused.
+    """
+    uid_set = _uid_set(uids)
+    sign = {"add": "+", "set": "", "remove": "-"}[op]
+    async with lock_mailbox(accessor, folder) as imap:
+        response = await imap.uid(
+            "store", uid_set, f"{sign}FLAGS.SILENT", f"({' '.join(flags)})"
+        )
+    if response.result != "OK":
+        raise ValueError(f"IMAP refused the flags on {uid_set}")
+
+
+async def copy_messages(
+    accessor: EmailAccessor, folder: str, target: str, uids: list[str]
+) -> int:
+    """Copy messages to another mailbox.
+
+    Args:
+        accessor (EmailAccessor): the account.
+        folder (str): the mailbox holding them.
+        target (str): the mailbox receiving them.
+        uids (list[str]): the messages.
+
+    Returns:
+        int: how many of them the mailbox held.
+    """
+    uid_set = _uid_set(uids)
+    async with lock_mailbox(accessor, folder) as imap:
+        held = _fetched_uids(await imap.uid("fetch", uid_set, "(UID)"))
+        if held:
+            await _uid_copy(imap, ",".join(held), target)
+    return len(held)
+
+
+async def move_messages(
+    accessor: EmailAccessor, folder: str, target: str, uids: list[str]
+) -> int:
+    """Move messages to another mailbox, with MOVE where the server has it.
+
+    Args:
+        accessor (EmailAccessor): the account.
+        folder (str): the mailbox holding them.
+        target (str): the mailbox receiving them.
+        uids (list[str]): the messages.
+
+    Returns:
+        int: how many of them the mailbox held.
+    """
+    uid_set = _uid_set(uids)
+    async with lock_mailbox(accessor, folder) as imap:
+        held = _fetched_uids(await imap.uid("fetch", uid_set, "(UID)"))
+        if held:
+            spelled = ",".join(held)
+            moved = await imap.uid("move", spelled, quote_string(target))
+            if moved.result != "OK":
+                # A copy that fails raises first, so nothing is removed
+                # from the source unless it has landed in the target.
+                await _uid_copy(imap, spelled, target)
+                await _uid_remove(imap, spelled)
+    return len(held)
+
+
+async def delete_messages(
+    accessor: EmailAccessor, folder: str, uids: list[str]
+) -> bool:
+    """Remove messages from a mailbox for good.
+
+    Args:
+        accessor (EmailAccessor): the account.
+        folder (str): the mailbox holding them.
+        uids (list[str]): the messages.
+
+    Returns:
+        bool: True when they are gone, False when the server has no UID
+        EXPUNGE and they are only flagged ``\\Deleted``.
+    """
+    uid_set = _uid_set(uids)
+    async with lock_mailbox(accessor, folder) as imap:
+        return await _uid_remove(imap, uid_set)
+
+
+async def _uid_copy(imap: IMAPClient, uid_set: str, target: str) -> None:
+    response = await imap.uid("copy", uid_set, quote_string(target))
+    if response.result != "OK":
+        raise MailboxNotFound(target, _server_text(response), "COPY")
+
+
+async def _uid_remove(imap: IMAPClient, uid_set: str) -> bool:
+    stored = await imap.uid("store", uid_set, "+FLAGS.SILENT", "(\\Deleted)")
+    if stored.result != "OK":
+        raise ValueError(f"IMAP refused to delete {uid_set}")
+    # A plain EXPUNGE would also take messages someone else flagged, so
+    # without UID EXPUNGE the flag is as far as this goes.
+    return (await imap.uid("expunge", uid_set)).result == "OK"
+
+
+def _uid_set(uids: list[str]) -> str:
+    """The message ids spelled as one IMAP sequence set.
+
+    Args:
+        uids (list[str]): the message ids as typed.
+
+    Raises:
+        ValueError: one is not a nonzero 32-bit number.
+    """
+    if not uids:
+        raise ValueError("Empty UID set")
+    for uid in uids:
+        if not (uid.isascii() and uid.isdigit() and 0 < int(uid) < 2**32):
+            raise ValueError(f"Invalid message UID `{uid}`")
+    return ",".join(uids)
+
+
+def _fetched_uids(response: IMAPResponse) -> list[str]:
+    """The uids a ``(UID)`` FETCH answer reports.
+
+    Args:
+        response (IMAPResponse): the answer.
+    """
+    uids: list[str] = []
+    for line in _text_lines(response):
+        if "UID" in line:
+            try:
+                uid_idx = line.index("UID") + 4
+                rest = line[uid_idx:].strip()
+                uids.append(rest.split(")")[0].split()[0])
+            except (ValueError, IndexError) as exc:
+                # tolerant IMAP parse: skip lines that do not match
+                logger.debug("no UID value in FETCH line %r: %s", line, exc)
+    return uids
+
+
 def _text_lines(response: IMAPResponse) -> list[str]:
     """An answer's text lines, decoded, its literals left out: a message
     whose own text names FLAGS or INTERNALDATE must not be read as the
@@ -370,6 +559,7 @@ def _parse_multi_fetch(
             )
             msg_dict["flags"] = current_flags
             msg_dict[INTERNAL_DATE_KEY] = current_internal
+            msg_dict["raw_size"] = len(item)
             results.append(msg_dict)
             current_uid = None
             current_flags = []
@@ -423,16 +613,12 @@ def _extract_flags_from_line(line: str) -> list[str]:
 
 
 def _check_uid(uid: str) -> None:
-    """Refuse a uid holding a CR, LF or NUL before any connection.
-
-    IMAPClient refuses one too, but only once the mailbox is selected;
-    checking first keeps a refused read off the server, as the
-    TypeScript client does.
+    """Refuse an id that is not a message UID before any connection.
 
     Args:
-        uid (str): the uid or uid set, as given.
+        uid (str): the uid as given.
 
     Raises:
-        ValueError: the uid would end the command line early.
+        ValueError: the uid is not a nonzero 32-bit number.
     """
-    check_line(uid)
+    _uid_set([uid])

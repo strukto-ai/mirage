@@ -97,6 +97,7 @@ model DiscordMessage {
   authorJson      String
   attachmentsJson String
   pollJson        String?
+  pinnedAt        String?
 
   @@id([tenant, id])
   @@index([tenant, channelId])

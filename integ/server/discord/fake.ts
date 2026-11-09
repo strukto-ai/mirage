@@ -408,6 +408,75 @@ async function addReaction(ctx: Ctx<C>): Promise<Reply> {
   return { status: 204 }
 }
 
+// One message, with the reactions the bare listing leaves out. Discord omits
+// the field entirely on a message nobody reacted to.
+async function getMessage(ctx: Ctx<C>): Promise<Reply> {
+  if (!authed(ctx)) return unauthorized()
+  const channelId = ctx.params.channel_id ?? ''
+  const messageId = ctx.params.message_id ?? ''
+  const row = await messageIn(ctx, channelId, messageId)
+  if (row === null) return unknownMessage()
+  const added = await ctx.db.discordReaction.findMany({
+    where: { ...tenantWhere<Prisma.DiscordReactionWhereInput>(ctx.tenant, KIND), messageId },
+    orderBy: { seq: 'asc' },
+  })
+  const body = renderMessage(row) as { [key: string]: JsonValue }
+  const emojis = [...new Set(added.map((one) => one.emoji))]
+  if (emojis.length > 0) {
+    body.reactions = emojis.map((name) => {
+      const count = added.filter((one) => one.emoji === name).length
+      return {
+        count,
+        count_details: { burst: 0, normal: count },
+        me: true,
+        me_burst: false,
+        emoji: { id: null, name },
+        burst_colors: [],
+      }
+    })
+  }
+  return { status: 200, body }
+}
+
+async function setPin(ctx: Ctx<C>, pinnedAt: string | null): Promise<Reply> {
+  if (!authed(ctx)) return unauthorized()
+  const channelId = ctx.params.channel_id ?? ''
+  const messageId = ctx.params.message_id ?? ''
+  if ((await messageIn(ctx, channelId, messageId)) === null) return unknownMessage()
+  await ctx.db.discordMessage.update({
+    where: idWhere<Prisma.DiscordMessageWhereUniqueInput>(ctx.tenant, messageId, KIND),
+    data: { pinnedAt },
+  })
+  return { status: 204 }
+}
+
+function addPin(ctx: Ctx<C>): Promise<Reply> {
+  return setPin(ctx, new Date(ctx.clock.nowMs()).toISOString())
+}
+
+function removePin(ctx: Ctx<C>): Promise<Reply> {
+  return setPin(ctx, null)
+}
+
+// Most recent pin first, a page at a time, `before` a pin's own timestamp.
+async function channelPins(ctx: Ctx<C>): Promise<Reply> {
+  if (!authed(ctx)) return unauthorized()
+  const limit = Number(ctx.url.searchParams.get('limit') ?? '50')
+  const before = ctx.url.searchParams.get('before')
+  const rows = await ctx.db.discordMessage.findMany({
+    where: {
+      ...scope(ctx),
+      channelId: ctx.params.channel_id ?? '',
+      pinnedAt: before === null ? { not: null } : { not: null, lt: before },
+    },
+    orderBy: [{ pinnedAt: 'desc' }, { seq: 'desc' }],
+  })
+  const items = rows
+    .slice(0, limit)
+    .map((row) => ({ pinned_at: row.pinnedAt ?? '', message: renderMessage(row) }))
+  return { status: 200, body: { items, has_more: rows.length > limit } }
+}
+
 // The CDN serves attachments without the Authorization header, and it honors
 // Range: a fake that answered 200 with the whole body would let a client that
 // never applies the window pass anyway.
@@ -459,6 +528,14 @@ export const discordFake: Fake<C> = {
     route('GET', '/api/v10/guilds/:guild_id/members', guildMembers),
     route('GET', '/api/v10/guilds/:guild_id/messages/search', searchMessages),
     route('GET', '/api/v10/guilds/:guild_id', guildInfo),
+    route('GET', '/api/v10/channels/:channel_id/messages/pins', channelPins),
+    route('PUT', '/api/v10/channels/:channel_id/messages/pins/:message_id', addPin, {
+      write: true,
+    }),
+    route('DELETE', '/api/v10/channels/:channel_id/messages/pins/:message_id', removePin, {
+      write: true,
+    }),
+    route('GET', '/api/v10/channels/:channel_id/messages/:message_id', getMessage),
     route('GET', '/api/v10/channels/:channel_id/messages', channelMessages),
     route('POST', '/api/v10/channels/:channel_id/messages', createMessage, { write: true }),
     route('PATCH', '/api/v10/channels/:channel_id/messages/:message_id', editMessage, {

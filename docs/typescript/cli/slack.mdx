@@ -30,6 +30,8 @@ This list is generated from Mirage's registered command tree.
 | Command | Description |
 | --- | --- |
 | `slack send-message` | Post a message to a channel or thread |
+| `slack edit-message` | Replace the text of a message |
+| `slack delete-message` | Delete a message |
 | `slack upload-file` | Share a workspace file in a channel or thread |
 | `slack read-messages` | Read the most recent messages of a channel |
 | `slack react` | Add an emoji reaction to a message |
@@ -49,6 +51,8 @@ This list is generated from Mirage's registered command tree.
 slack read-messages --channel C04KEPWF6V7 --limit 20
 slack send-message --channel C04KEPWF6V7 --text "Release is ready"
 slack send-message --channel C04KEPWF6V7 --thread-ts 1712345678.123456 --text "Thread reply"
+slack edit-message --channel C04KEPWF6V7 --ts 1712345678.123456 --text "Release shipped"
+slack delete-message --channel C04KEPWF6V7 --ts 1712345678.123456
 slack upload-file --channel C04KEPWF6V7 --file /data/reply.wav --initial-comment "Spoken reply"
 slack react --channel C04KEPWF6V7 --ts 1712345678.123456 --emoji thumbsup
 slack reactions --channel C04KEPWF6V7 --ts 1712345678.123456

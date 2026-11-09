@@ -33,7 +33,6 @@ OUT_OF_SCOPE = (
     "workers",
     "notion-as-code",
     "doctor",
-    "files",
 )
 
 
@@ -65,6 +64,7 @@ def test_tree_shape_matches_the_official_grammar():
         "api",
         "auth",
         "datasources",
+        "files",
         "pages",
         "whoami",
     ]

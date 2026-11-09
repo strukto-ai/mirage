@@ -14,7 +14,7 @@
 
 import { FlagView } from '../../../spec/flag_view.ts'
 import { addReaction } from '../../../../core/discord/react.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { DiscordAccessor } from '../../../../accessor/discord.ts'
@@ -33,6 +33,5 @@ export async function react(
     fl.asStr('message') ?? '',
     fl.asStr('emoji') ?? '',
   )
-  const out: ByteSource = compactJsonBytes({ ok: true })
-  return [out, new IOResult()]
+  return [compactJsonBytes({ ok: true }), new IOResult()]
 }

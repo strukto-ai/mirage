@@ -22,7 +22,7 @@ import {
   HELP_EXIT,
   USAGE_EXIT,
 } from './constants.ts'
-import { operandSlot, optionMetavar } from '../spec/help.ts'
+import { clapUnexpectedArgument, operandSlot, optionMetavar, usageLine } from '../spec/help.ts'
 import { type CommandSpec, UsageStyle } from '../spec/types.ts'
 import type { ParsedCommand } from '../../workspace/executor/command/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -32,6 +32,7 @@ import type { FsCondition } from '../../errors/types.ts'
 export const ARGPARSE_EXIT = 2
 const LONG_PREFIX = '--'
 const NEGATION = '--no-'
+const END_OF_OPTIONS = '--'
 export const HELP_SWITCH = '-h'
 
 const ENC = new TextEncoder()
@@ -234,6 +235,104 @@ export function clapMissingOperands(
   )
 }
 
+/** clap's refusal of an operand a `--`-only slot was typed without. */
+export function clapStrayOperand(
+  prog: string,
+  spec: CommandSpec,
+  typed: readonly string[],
+  argv: readonly string[],
+): Uint8Array | null {
+  const rest = compileSpec(spec).rest
+  if (rest === null || rest.nargs !== 'REMAINDER' || typed.length === 0) return null
+  if (argv.includes(END_OF_OPTIONS)) return null
+  const usage = usageLine(prog, spec, [], UsageStyle.CLAP)
+  return ENC.encode(
+    `${clapUnexpectedArgument(typed[0]!)}\n\n${usage}\n\nFor more information, try '--help'.\n`,
+  )
+}
+
+type ClapRefusalFacts = Pick<
+  ParsedCommand,
+  | 'invalidOptions'
+  | 'ambiguousOptions'
+  | 'optionErrorKinds'
+  | 'needsValueOptions'
+  | 'invalidIntOptions'
+  | 'invalidValueOptions'
+  | 'missingRequiredOptions'
+  | 'texts'
+  | 'paths'
+>
+
+/**
+ * clap's refusal for a leaf's option error, null when not one of them.
+ * Pinned against himalaya 2.2.1: a bad value names the option with its
+ * placeholder and says no usage line, an unknown option prints the
+ * leaf's usage line, and a missing required option echoes what the line
+ * supplied the way a missing operand does.
+ */
+export function clapLeafRefusal(
+  prog: string,
+  spec: CommandSpec,
+  parsed: ClapRefusalFacts,
+): Uint8Array | null {
+  const footer = "\n\nFor more information, try '--help'.\n"
+  const compiled = compileSpec(spec)
+  const byDest = new Map(compiled.options.map((opt) => [argumentDest(opt), opt]))
+  const shown = (spelling: string): string => {
+    const word = spelling.startsWith('-') ? spelling : `-${spelling}`
+    const dest = compiled.dest.get(word) ?? word
+    const opt = byDest.get(dest)
+    return opt === undefined ? word : `${dest} <${optionMetavar(opt)}>`
+  }
+  const usage = usageLine(prog, spec, [], UsageStyle.CLAP)
+  for (const kind of parsed.optionErrorKinds) {
+    if (kind === 'needs_value' && parsed.needsValueOptions.length > 0) {
+      return ENC.encode(
+        `error: a value is required for '${shown(parsed.needsValueOptions[0]!)}' but none was supplied${footer}`,
+      )
+    }
+    if ((kind === 'invalid' || kind === 'unexpected_value') && parsed.invalidOptions.length > 0) {
+      const token = parsed.invalidOptions[0]!
+      const word = token.startsWith('-') ? token : `-${token}`
+      const tip =
+        compiled.rest !== null && compiled.rest.nargs === 'REMAINDER'
+          ? `\n\n  tip: to pass '${word}' as a value, use '-- ${word}'`
+          : ''
+      return ENC.encode(`${clapUnexpectedArgument(word)}${tip}\n\n${usage}${footer}`)
+    }
+    if (kind === 'int' && (parsed.invalidIntOptions ?? []).length > 0) {
+      const [dest, value] = parsed.invalidIntOptions[0]!
+      return ENC.encode(
+        `error: invalid value '${value}' for '${shown(dest)}': invalid digit found in string${footer}`,
+      )
+    }
+    if (kind === 'value' && (parsed.invalidValueOptions ?? []).length > 0) {
+      const [dest, value] = parsed.invalidValueOptions[0]!
+      const allowed = (byDest.get(dest)?.choices ?? []).join(', ')
+      return ENC.encode(
+        `error: invalid value '${value}' for '${shown(dest)}'\n  [possible values: ${allowed}]${footer}`,
+      )
+    }
+  }
+  const missingOptions = parsed.missingRequiredOptions ?? []
+  if (missingOptions.length > 0) {
+    const wanted = missingOptions.map(shown)
+    const missing = wanted.map((one) => `  ${one}`).join('\n')
+    const operands = compiled.positional.map((operand) => operandSlot(operand))
+    if (compiled.rest !== null) {
+      const slot = operandSlot(compiled.rest, true)
+      const typed = parsed.texts.length > 0 || parsed.paths.length > 0
+      operands.push(typed ? slot.replace('[', '<').replace(']', '>') : slot)
+    }
+    const bits = [prog, ...wanted, ...operands].join(' ')
+    return ENC.encode(
+      `error: the following required arguments were not provided:\n${missing}\n\nUsage: ${bits}${footer}`,
+    )
+  }
+  return null
+}
+
 /**
  * The message and exit code a leaf answers a bad option with.
  *
@@ -268,8 +367,18 @@ export function leafRefusal(
   >,
   path: string,
   spec: CommandSpec,
+  prog = '',
 ): [Uint8Array, number, Uint8Array | null] {
-  if (style === UsageStyle.CLAP) return [argparseMessage, CLAP_EXIT, null]
+  if (style === UsageStyle.CLAP) {
+    if (
+      argparseMessage[0] === 0x65 &&
+      new TextDecoder().decode(argparseMessage).startsWith('error:')
+    ) {
+      return [argparseMessage, CLAP_EXIT, null]
+    }
+    const worded = clapLeafRefusal(prog, spec, parsed as unknown as ClapRefusalFacts)
+    return [worded ?? argparseMessage, CLAP_EXIT, null]
+  }
   if (style !== UsageStyle.GIT) return [argparseMessage, ARGPARSE_EXIT, null]
   const kind = parsed.optionErrorKinds[0]
   const ambiguous = parsed.ambiguousOptions[0]

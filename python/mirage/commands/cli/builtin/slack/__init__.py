@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.slack import SlackAccessor
+from mirage.commands.cli.builtin.slack.delete_message import delete_message
+from mirage.commands.cli.builtin.slack.edit_message import edit_message
 from mirage.commands.cli.builtin.slack.emoji_list import emoji_list
 from mirage.commands.cli.builtin.slack.list_members import list_members
 from mirage.commands.cli.builtin.slack.list_pins import list_pins
@@ -30,8 +32,9 @@ from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.slack.config import SlackConfig
 
 # The slack program, spelled with the OpenClaw Slack action vocabulary
-# (kebab verbs: send-message, upload-file, read-messages, pin-message,
-# list-pins, member-info, emoji-list). search and list-members are mirage
+# (kebab verbs: send-message, edit-message, delete-message, upload-file,
+# read-messages, pin-message, list-pins, member-info, emoji-list). search
+# and list-members are mirage
 # extensions carrying over the old mount commands' capabilities.
 # Install with a SlackConfig; two installs are two workspaces.
 SLACK = CLI(
@@ -46,6 +49,23 @@ SLACK = CLI(
                     Argument("--channel", required=True),
                     Argument("--text", required=True),
                     Argument("--thread-ts", help="Reply in this thread"),
+                ),
+            ),
+            CommandSpec(
+                name="edit-message",
+                description="Replace the text of a message",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--ts", required=True),
+                    Argument("--text", required=True),
+                ),
+            ),
+            CommandSpec(
+                name="delete-message",
+                description="Delete a message",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--ts", required=True),
                 ),
             ),
             CommandSpec(
@@ -160,6 +180,8 @@ SLACK = CLI(
     ),
     handlers={
         "send-message": CLIHandler(fn=send_message, write=True),
+        "edit-message": CLIHandler(fn=edit_message, write=True),
+        "delete-message": CLIHandler(fn=delete_message, write=True),
         "upload-file": CLIHandler(fn=upload_file, write=True),
         "read-messages": CLIHandler(fn=read_messages),
         "react": CLIHandler(fn=react, write=True),

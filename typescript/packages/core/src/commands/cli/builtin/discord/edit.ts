@@ -14,7 +14,7 @@
 
 import { FlagView } from '../../../spec/flag_view.ts'
 import { editMessage } from '../../../../core/discord/post.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { DiscordAccessor } from '../../../../accessor/discord.ts'
@@ -33,6 +33,5 @@ export async function edit(
     fl.asStr('message') ?? '',
     fl.asStr('text') ?? '',
   )
-  const out: ByteSource = compactJsonBytes(result)
-  return [out, new IOResult()]
+  return [compactJsonBytes(result), new IOResult()]
 }

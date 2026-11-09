@@ -28,7 +28,7 @@ export async function update(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const body = await textOrStdin(fl.asStr('body'), ctx.stdin, 'comment body is required')
   const comment = await commentUpdate(accessor.transport, fl.asStr('comment') ?? '', body)
   const issue = comment.issue

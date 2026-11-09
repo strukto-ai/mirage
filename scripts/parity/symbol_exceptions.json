@@ -1,5 +1,5 @@
 {
- "baseline": 1642,
+ "baseline": 1638,
  "modules": {
   "server/app": {
    "python_only": {
@@ -1004,9 +1004,74 @@
     "runtimeUnavailable": "A TypeScript engine (Pyodide, Monty, QuickJS) can find it cannot run only when a run starts, and says so with its own error, which the interpreter and a script CLI both answer with 127; a Python entry that cannot run fails to build and is left out of the world, so no run raises it."
    }
   },
+  "commands/cli/builtin/himalaya/builder": {
+   "typescript_only": {
+    "MailAddress": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "bytesToBase64": "A byte or formatting helper Python's standard library already provides.",
+    "hexPair": "A byte or formatting helper Python's standard library already provides.",
+    "randomHex": "A byte or formatting helper Python's standard library already provides."
+   }
+  },
+  "commands/cli/builtin/himalaya/envelopes": {
+   "typescript_only": {
+    "EnvelopeAddress": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "EnvelopeDocument": "A TypeScript shape for dynamic data; Python reads the same values as dicts."
+   }
+  },
+  "commands/cli/builtin/himalaya/query": {
+   "python_only": {
+    "DATE_FORMATS": "strptime takes format strings; TypeScript parses the same four date forms by pattern."
+   },
+   "typescript_only": {
+    "Parsed": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "SortKind": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "validDate": "Date normalizes an impossible day where strptime refuses it, so TypeScript checks the round trip."
+   }
+  },
+  "commands/cli/builtin/himalaya/read": {
+   "typescript_only": {
+    "DateFields": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MailAddress": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "pad": "A byte or formatting helper Python's standard library already provides."
+   }
+  },
+  "commands/cli/builtin/himalaya/util": {
+   "typescript_only": {
+    "MISSING_UID": "fetchRawMessage throws for a missing UID here and returns empty bytes in Python.",
+    "MailAddress": "A TypeScript shape for dynamic data; Python reads the same values as dicts."
+   }
+  },
+  "commands/cli/refusal": {
+   "typescript_only": {
+    "ClapRefusalFacts": "A TypeScript shape for dynamic data; Python reads the same values as dicts."
+   }
+  },
+  "core/email/mime": {
+   "typescript_only": {
+    "Attribute": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "BASE64_CHARS": "A byte or formatting helper Python's standard library already provides.",
+    "ContentFields": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MailAddress": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MimeBody": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MimeHeader": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MimeHeaderName": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MimePart": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MimeValue": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "base64Decode": "A byte or formatting helper Python's standard library already provides.",
+    "concat": "A byte or formatting helper Python's standard library already provides.",
+    "hexValue": "A byte or formatting helper Python's standard library already provides.",
+    "isAlpha": "A byte or formatting helper Python's standard library already provides.",
+    "isHex": "A byte or formatting helper Python's standard library already provides.",
+    "newState": "A dataclass carries these defaults in Python."
+   }
+  },
   "core/email/client": {
    "python_only": {
-    "_text_lines": "Reads the text lines of an IMAPResponse from mirage's own Python IMAP client (accessor/imap); node's imapflow hands back parsed messages, so its client has no lines to read."
+    "_text_lines": "Reads the text lines of an IMAPResponse from mirage's own Python IMAP client (accessor/imap); node's imapflow hands back parsed messages, so its client has no lines to read.",
+    "_server_text": "aioimaplib hands back the raw response lines; imapflow has already parsed them onto the error."
+   },
+   "typescript_only": {
+    "NO_SUCH_MAILBOX": "imapflow reports a failed COPY as false without the server's text, so TypeScript words the refusal itself."
    }
   },
   "commands/spec/parser": {

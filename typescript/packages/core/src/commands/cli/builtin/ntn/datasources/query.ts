@@ -119,7 +119,7 @@ export async function query(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const body: Record<string, unknown> = {}
   let ref: string
   try {

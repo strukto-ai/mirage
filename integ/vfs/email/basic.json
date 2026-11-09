@@ -10,7 +10,7 @@
       "command": "ls /mail",
       "expect": {
         "exit": 0,
-        "stdout": "Archive\nINBOX\nSent\n",
+        "stdout": "Archive\nINBOX\nSent\nTrash\n",
         "stderr": ""
       }
     },
@@ -218,7 +218,7 @@
       "command": "find /mail -name '*.email.json' | wc -l",
       "expect": {
         "exit": 0,
-        "stdout": "4\n",
+        "stdout": "5\n",
         "stderr": ""
       }
     },
@@ -293,7 +293,7 @@
       "targets": [
         "email"
       ],
-      "command": "himalaya envelope search not flag seen | jq -r '.[].subject'",
+      "command": "himalaya --json envelope search not flag seen | jq -r '.envelopes[].subject'",
       "expect": {
         "exit": 0,
         "stdout": "Server alert: worker-3\nQ2 Budget Review\n",
@@ -306,7 +306,7 @@
       "targets": [
         "email"
       ],
-      "command": "himalaya envelope search -m Archive from billing@vendor.example | jq -r '.[].uid'",
+      "command": "himalaya --json envelope search -m Archive from billing@vendor.example | jq -r '.envelopes[].id'",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
@@ -319,7 +319,7 @@
       "targets": [
         "email"
       ],
-      "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && himalaya message read -m Archive $U | jq -r .snippet",
+      "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && himalaya --json message read -m Archive $U | jq -r '.parts[1].body.Text'",
       "expect": {
         "exit": 0,
         "stdout": "invoice 4471 attached, total 240 usd\n",
@@ -335,7 +335,7 @@
       "command": "himalaya message compose --to integ@example.com --subject 'Ship update' --body 'departing tuesday' --send",
       "expect": {
         "exit": 0,
-        "stdout": "{\"status\":\"sent\",\"to\":\"integ@example.com\",\"subject\":\"Ship update\"}",
+        "stdout": "Message successfully saved and sent\n",
         "stderr": ""
       }
     },
@@ -360,10 +360,10 @@
         "email"
       ],
       "clear_cache": true,
-      "command": "U=$(cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | jq -r .uid) && himalaya message reply -m INBOX $U --body 'numbers look good' --send | jq -r .subject",
+      "command": "U=$(cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | jq -r .uid) && himalaya --json message reply -m INBOX $U --body 'numbers look good' --send | jq -r .message",
       "expect": {
         "exit": 0,
-        "stdout": "Re: Q2 Budget Review\n",
+        "stdout": "Message successfully saved and sent\n",
         "stderr": ""
       }
     },
@@ -374,10 +374,10 @@
         "email"
       ],
       "clear_cache": true,
-      "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && himalaya message forward -m Archive $U --to integ@example.com --send | jq -r .status",
+      "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && himalaya --json message forward -m Archive $U --to integ@example.com --send | jq -r .message",
       "expect": {
         "exit": 0,
-        "stdout": "sent\n",
+        "stdout": "Message successfully saved and sent\n",
         "stderr": ""
       }
     },

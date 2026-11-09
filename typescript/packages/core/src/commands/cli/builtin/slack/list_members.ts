@@ -14,7 +14,7 @@
 
 import { FlagView } from '../../../spec/flag_view.ts'
 import { listUsers, searchUsers } from '../../../../core/slack/users.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { SlackAccessor } from '../../../../accessor/slack.ts'
@@ -32,6 +32,5 @@ export async function listMembers(
     query !== undefined && query !== ''
       ? await searchUsers(accessor, query)
       : await listUsers(accessor)
-  const out: ByteSource = compactJsonBytes(users)
-  return [out, new IOResult()]
+  return [compactJsonBytes(users), new IOResult()]
 }

@@ -154,19 +154,15 @@ async def test_add_label_resolves_label_name(monkeypatch):
     def fake_normalize(issue):
         return issue
 
-    monkeypatch.setitem(
-        add_label.__globals__, "resolve_issue", fake_resolve_issue
-    )
-    monkeypatch.setitem(add_label.__globals__, "get_issue", fake_get_issue)
+    helpers = add_label.__globals__["issue_labels"].__globals__
+    monkeypatch.setitem(helpers, "resolve_issue", fake_resolve_issue)
+    monkeypatch.setitem(helpers, "get_issue", fake_get_issue)
+    monkeypatch.setitem(helpers, "list_team_labels", fake_list_team_labels)
     monkeypatch.setitem(
         add_label.__globals__, "issue_update", fake_issue_update
     )
     monkeypatch.setitem(
         add_label.__globals__, "normalize_issue", fake_normalize
-    )
-    resolve_label = add_label.__globals__["resolve_label_id"]
-    monkeypatch.setitem(
-        resolve_label.__globals__, "list_team_labels", fake_list_team_labels
     )
     out, _io = await add_label(
         ACCESSOR, [], ["ENG-42"], Context(flags={"label_name": "bug"})

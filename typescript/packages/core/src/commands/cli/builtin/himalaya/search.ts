@@ -19,7 +19,9 @@ import { IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchHeaders, listMessageUids } from '../../../../core/email/client.ts'
-import { envelopesJsonBytes } from '../../../../core/email/render.ts'
+import { envelopeDocuments } from '../../../../core/email/render.ts'
+import { envelopesTable, type EnvelopeDocument } from './envelopes.ts'
+import { rendered } from './printer.ts'
 import { DEFAULT_PAGE_SIZE } from './list.ts'
 import { pageSlice, pageWindow, parseQuery, sortHeaders, uidBudget } from './query.ts'
 
@@ -29,7 +31,7 @@ export async function searchEnvelopes(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const mailbox = fl.asStr('mailbox', 'INBOX')
   const [page, pageSize] = pageWindow(
     fl.asInt('page', 1),
@@ -43,6 +45,17 @@ export async function searchEnvelopes(
   const uids = await listMessageUids(accessor, mailbox, query.criteria, budget)
   const headers = uids.length > 0 ? await fetchHeaders(accessor, mailbox, uids) : []
   const pageOf = pageSlice(sortHeaders(headers, query.sorters), page, pageSize)
-  const out: ByteSource = envelopesJsonBytes(pageOf)
+  const withAttachment = fl.asBool('has_attachment')
+  const documents = envelopeDocuments(pageOf, withAttachment) as unknown as EnvelopeDocument[]
+  const out: ByteSource = rendered(
+    fl,
+    { queued: 0, envelopes: documents },
+    envelopesTable(
+      documents,
+      withAttachment,
+      fl.asBool('recipient'),
+      fl.asInt('max_width') ?? null,
+    ),
+  )
   return [out, new IOResult()]
 }

@@ -24,7 +24,7 @@ export async function read(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const result: ByteSource = await accessor.sheets.readValues(
     fl.asStr('spreadsheet') ?? '',
     fl.asStr('range') ?? '',

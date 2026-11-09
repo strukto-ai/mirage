@@ -37,6 +37,8 @@ function message(
     uid: '101',
     flags: ['\\Seen'],
     internalDate: '2024-03-18T08:00:00.000Z',
+    rawSize: 0,
+    attached: false,
     ...overrides,
   }
 }

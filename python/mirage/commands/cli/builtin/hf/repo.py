@@ -39,7 +39,7 @@ async def create_cmd(
     """Create a repository on the Hub."""
     require_operands(texts, ["repo_id"])
     require_token(accessor, "repo create")
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     repo_id = texts[0]
     repo_type = repo_type_of(fl)
     sdk = fl.as_str("space_sdk")
@@ -74,7 +74,7 @@ async def tag_create_cmd(
     """Tag a revision of a repository."""
     require_operands(texts, ["repo_id", "tag"])
     require_token(accessor, "repo tag create")
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     repo_id, tag = texts[0], texts[1]
     await create_tag(
         accessor,
@@ -95,7 +95,7 @@ async def tag_list_cmd(
 ) -> tuple[ByteSource | None, IOResult]:
     """List a repository's tags."""
     require_operands(texts, ["repo_id"])
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     repo_id = texts[0]
     tags = await list_tags(accessor, repo_id, repo_type_of(fl))
     return text_out("".join(f"{name}\n" for name in tags))
@@ -117,7 +117,7 @@ async def confirmed(ctx: Context) -> bool:
     Returns:
         bool: whether to go ahead.
     """
-    if FlagView(ctx.flags).as_bool("yes"):
+    if FlagView(ctx.flags, ctx.spec).as_bool("yes"):
         return True
     if ctx.stdin is None:
         return False
@@ -138,7 +138,7 @@ async def tag_delete_cmd(
     """
     require_operands(texts, ["repo_id", "tag"])
     require_token(accessor, "repo tag delete")
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     repo_id, tag = texts[0], texts[1]
     if not await confirmed(ctx):
         raise UsageError(

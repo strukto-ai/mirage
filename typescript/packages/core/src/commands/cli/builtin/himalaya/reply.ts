@@ -17,7 +17,8 @@ import type { PathSpec } from '../../../../types.ts'
 import { FlagView } from '../../../spec/index.ts'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchMessage } from '../../../../core/email/client.ts'
-import { firstText, route } from './util.ts'
+import type { PostingStyle } from './builder.ts'
+import { route } from './util.ts'
 
 export async function reply(
   accessor: EmailAccessor,
@@ -25,10 +26,8 @@ export async function reply(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
-  const uid = firstText(texts, 'message id')
-  const mailbox = fl.asStr('mailbox', 'INBOX')
-  const original = await fetchMessage(accessor, mailbox, uid)
+  const fl = new FlagView(ctx.flags, ctx.spec)
+  const original = await fetchMessage(accessor, fl.asStr('mailbox', 'INBOX'), texts[0]!)
   return route(
     accessor,
     fl,
@@ -36,7 +35,7 @@ export async function reply(
     {
       message: original,
       mode: 'reply',
-      postingStyle: fl.asStr('posting_style') === 'bottom' ? 'bottom' : 'top',
+      postingStyle: fl.asStr('posting_style', 'top') as PostingStyle,
       quoteHeadline: fl.asStr('quote_headline') ?? '',
     },
     ctx.vfs,

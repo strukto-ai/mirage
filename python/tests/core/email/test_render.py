@@ -14,7 +14,7 @@
 
 import json
 
-from mirage.core.email.render import envelopes_json_bytes, message_json_bytes
+from mirage.core.email.render import envelope_documents, message_json_bytes
 
 MESSAGE = {
     "from": {"name": "Alice", "email": "alice@example.com"},
@@ -56,21 +56,52 @@ def test_an_envelope_carries_no_body():
     # Listing a mailbox fetches every full source, because attachment
     # metadata lives in the MIME structure, but the listing itself is the
     # envelope: 25 HTML bodies do not belong in it (#1067).
-    [row] = json.loads(envelopes_json_bytes([FULL]))
+    [row] = envelope_documents([FULL])
     assert "body_text" not in row
     assert "body_html" not in row
     assert "snippet" not in row
     assert "internal_date" not in row
 
 
-def test_an_envelope_keeps_identifiers_headers_flags_and_attachments():
-    [row] = json.loads(envelopes_json_bytes([FULL]))
-    assert row["uid"] == "101"
+def test_an_envelope_keeps_identifiers_headers_and_flags():
+    [row] = envelope_documents([FULL])
+    assert row["id"] == "101"
     assert row["subject"] == "Hello"
-    assert row["from"] == {"name": "Alice", "email": "alice@example.com"}
+    assert row["from"] == [{"name": "Alice", "email": "alice@example.com"}]
     assert row["flags"] == []
-    assert row["has_attachments"] is True
-    assert row["attachments"] == FULL["attachments"]
+    assert row["has-attachment"] is None
+
+
+def test_an_envelope_reports_attachments_only_when_asked():
+    listing = {"envelopes": envelope_documents([FULL], with_attachment=True)}
+    assert listing["envelopes"][0]["has-attachment"] is True
+
+
+def test_an_envelope_uses_upstreams_field_forms():
+    message = dict(
+        FULL,
+        date="Tue, 06 Jan 2026 08:45:00 +0200",
+        message_id="<a@b>",
+        in_reply_to="<x@y> <z@w>",
+        flags=["\\Flagged", "\\Recent", "custom", "\\Seen"],
+        raw_size=42,
+    )
+    listing = {"envelopes": envelope_documents([message])}
+    [row] = listing["envelopes"]
+    assert row["message-id"] == "a@b"
+    assert row["in-reply-to"] == ["x@y", "z@w"]
+    assert row["date"] == "2026-01-06T08:45:00+02:00"
+    assert row["size"] == 42
+    assert row["flags"] == [
+        {"raw": "\\Seen", "iana": "seen"},
+        {"raw": "\\Flagged", "iana": "flagged"},
+        {"raw": "custom", "iana": None},
+    ]
+
+
+def test_an_unreadable_date_renders_as_null():
+    [row] = envelope_documents([dict(FULL, date="soon")])
+    assert row["date"] is None
 
 
 def test_the_document_renderer_still_carries_the_body():

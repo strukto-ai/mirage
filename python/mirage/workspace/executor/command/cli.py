@@ -24,6 +24,7 @@ from mirage.commands.cli.refusal import (
     ARGPARSE_EXIT,
     CLAP_EXIT,
     clap_missing_operands,
+    clap_stray_operand,
     directory_refusal,
     leaf_refusal,
 )
@@ -520,6 +521,13 @@ async def walk_leaf(
         )
 
     refusal = option_error(prog, parsed)
+    stray = (
+        clap_stray_operand(prog, parse_spec, list(parsed.texts), result.argv)
+        if style is UsageStyle.CLAP
+        else None
+    )
+    if stray is not None:
+        refusal = (stray, CLAP_EXIT)
     msg: bytes | None = None
     shown: bytes | None = None
     code = 0
@@ -533,7 +541,7 @@ async def walk_leaf(
         code = COBRA_EXIT
     elif refusal is not None:
         msg, code, shown = leaf_refusal(
-            style, refusal[0], parsed, " ".join(result.path), leaf
+            style, refusal[0], parsed, " ".join(result.path), leaf, prog
         )
     elif parsed.missing_required_operands and style is UsageStyle.CLAP:
         msg = clap_missing_operands(

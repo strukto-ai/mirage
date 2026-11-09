@@ -49,6 +49,16 @@ export function requiredFlag(fl: FlagView, name: string): string {
   return value
 }
 
+/** A true/false flag, null when absent; any other value is refused. */
+export function boolFlag(fl: FlagView, name: string): boolean | null {
+  const value = fl.asStr(name)
+  if (value === undefined) return null
+  const lowered = value.toLowerCase()
+  if (['true', '1', 'yes'].includes(lowered)) return true
+  if (['false', '0', 'no'].includes(lowered)) return false
+  throw new Error(`--${name} expects true or false, got '${value}'`)
+}
+
 /**
  * A card's text from its flag, its `--*_file` operand, or stdin. The operand
  * is a workspace file the line names, read through `ctx.vfs` as any CLI reads

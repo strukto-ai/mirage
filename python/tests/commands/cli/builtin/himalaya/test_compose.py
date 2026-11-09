@@ -52,10 +52,10 @@ def files_with_note() -> Files:
 def sent(monkeypatch):
     seen: dict = {}
 
-    async def fake_deliver(accessor, raw, save=None):
+    async def fake_deliver(accessor, raw, save=None, no_save=False):
         seen["raw"] = raw
         seen["save"] = save
-        return BytesParser(policy=default_policy).parsebytes(raw), ""
+        return BytesParser(policy=default_policy).parsebytes(raw), False
 
     async def fake_save(accessor, raw, folder=None):
         if seen.get("refuse"):
@@ -99,15 +99,14 @@ async def test_send_flag_pushes_through_smtp_and_reports_json(sent):
                 "subject": "Hi",
                 "body": "yo",
                 "send": True,
+                "json": True,
             }
         ),
     )
     assert io.exit_code == 0
     assert b"Subject: Hi" in sent["raw"]
     assert json.loads(await materialize(out)) == {
-        "status": "sent",
-        "to": "a@b.com",
-        "subject": "Hi",
+        "message": "Message successfully sent"
     }
 
 
@@ -162,11 +161,12 @@ async def test_from_flag_overrides_the_account_username(sent):
 
 
 @pytest.mark.asyncio
-async def test_compose_without_a_recipient_is_refused(sent):
-    with pytest.raises(ValueError, match="no recipient"):
-        await compose(
-            EMAIL, [], [], Context(flags={"subject": "Hi", "body": "yo"})
-        )
+async def test_compose_without_a_recipient_still_builds(sent):
+    out, io = await compose(
+        EMAIL, [], [], Context(flags={"subject": "Hi", "body": "yo"})
+    )
+    assert io.exit_code == 0
+    assert b"\r\nTo:" not in await materialize(out)
 
 
 @pytest.mark.asyncio
@@ -192,7 +192,7 @@ async def test_attach_reads_through_the_dispatcher_into_multipart(sent):
     assert message.get_content_type() == "multipart/mixed"
     parts = list(message.iter_parts())
     # The stdout bytes ride the SMTP policy, so the body keeps CRLF.
-    assert parts[0].get_content() == "see attached\r\n"
+    assert parts[0].get_content() == "see attached"
     assert parts[1].get_filename() == "note.txt"
     assert parts[1].get_content_type() == "text/plain"
     assert parts[1].get_content() == "the note body\n"
@@ -267,6 +267,7 @@ async def test_save_without_send_files_the_message_and_sends_nothing(sent):
                 "subject": "Draft it",
                 "body": "yo",
                 "save": "Drafts",
+                "json": True,
             }
         ),
     )
@@ -274,10 +275,7 @@ async def test_save_without_send_files_the_message_and_sends_nothing(sent):
     assert "raw" not in sent
     assert sent["saved"][1] == "Drafts"
     assert json.loads(await materialize(out)) == {
-        "status": "saved",
-        "mailbox": "Drafts",
-        "to": "a@b.com",
-        "subject": "Draft it",
+        "message": "Message successfully saved"
     }
 
 

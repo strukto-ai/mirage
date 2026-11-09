@@ -70,25 +70,28 @@ def patched(monkeypatch):
 @pytest.mark.asyncio
 async def test_query_tokens_rejoin_before_parsing(patched):
     await search_envelopes(
-        EMAIL, [], ["from", "alice", "and", "subject", "invoice"], Context()
+        EMAIL,
+        [],
+        ["from", "alice", "and", "subject", "invoice"],
+        Context(flags={"json": True}),
     )
     assert patched["criteria"] == '(FROM "alice" SUBJECT "invoice")'
 
 
 @pytest.mark.asyncio
 async def test_no_query_searches_everything(patched):
-    await search_envelopes(EMAIL, [], [], Context())
+    await search_envelopes(EMAIL, [], [], Context(flags={"json": True}))
     assert patched["criteria"] == "ALL"
 
 
 @pytest.mark.asyncio
 async def test_sort_clause_orders_the_results_client_side(patched):
     out, io = await search_envelopes(
-        EMAIL, [], ["order", "by", "subject"], Context()
+        EMAIL, [], ["order", "by", "subject"], Context(flags={"json": True})
     )
     assert io.exit_code == 0
-    data = json.loads(await materialize(out))
-    assert [d["uid"] for d in data] == ["2", "1"]
+    data = json.loads(await materialize(out))["envelopes"]
+    assert [d["id"] for d in data] == ["2", "1"]
 
 
 @pytest.mark.asyncio
@@ -97,17 +100,26 @@ async def test_mailbox_and_paging_flags_apply(patched):
         EMAIL,
         [],
         [],
-        Context(flags={"mailbox": "Archive", "page": 2, "page_size": 1}),
+        Context(
+            flags={
+                "json": True,
+                "mailbox": "Archive",
+                "page": 2,
+                "page_size": 1,
+            }
+        ),
     )
     assert patched["folder"] == "Archive"
-    data = json.loads(await materialize(out))
-    assert [d["uid"] for d in data] == ["1"]
+    data = json.loads(await materialize(out))["envelopes"]
+    assert [d["id"] for d in data] == ["1"]
 
 
 @pytest.mark.asyncio
 async def test_a_bad_query_never_reaches_the_server(patched):
     with pytest.raises(QueryError):
-        await search_envelopes(EMAIL, [], ["sender", "alice"], Context())
+        await search_envelopes(
+            EMAIL, [], ["sender", "alice"], Context(flags={"json": True})
+        )
     assert "criteria" not in patched
 
 
@@ -117,7 +129,7 @@ async def test_the_default_order_only_fetches_the_pages_asked_for(patched):
         EMAIL,
         [],
         ["subject", "alpha"],
-        Context(flags={"page": 2, "page_size": 10}),
+        Context(flags={"json": True, "page": 2, "page_size": 10}),
     )
     assert patched["budget"] == 20
 
@@ -128,13 +140,17 @@ async def test_an_explicit_sort_widens_the_fetch_to_the_account_window(
 ):
     # `order by` is unrelated to arrival order, so the newest N is not
     # enough to know what belongs on page one.
-    await search_envelopes(EMAIL, [], ["order", "by", "subject"], Context())
+    await search_envelopes(
+        EMAIL, [], ["order", "by", "subject"], Context(flags={"json": True})
+    )
     assert patched["budget"] == EMAIL.config.max_messages
 
 
 @pytest.mark.asyncio
 async def test_search_results_are_header_only_like_list(patched):
-    out, _ = await search_envelopes(EMAIL, [], ["subject", "alpha"], Context())
-    data = json.loads(await materialize(out))
+    out, _ = await search_envelopes(
+        EMAIL, [], ["subject", "alpha"], Context(flags={"json": True})
+    )
+    data = json.loads(await materialize(out))["envelopes"]
     assert [d["subject"] for d in data] == ["alpha", "beta"]
     assert all("body_text" not in d and "body_html" not in d for d in data)
