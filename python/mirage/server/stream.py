@@ -82,8 +82,19 @@ class ShellResponse(Response):
         self._part = part
 
     async def _completed(self) -> LineRequest:
-        await self._jobs.drain(self._job.id)
-        finished = await self._jobs.wait(self._job.id)
+        try:
+            await self._jobs.drain(self._job.id)
+            finished = await self._jobs.wait(self._job.id)
+        finally:
+            if self._job.stdin is not None:
+                try:
+                    self._loop.call_soon_threadsafe(
+                        self._job.stdin.close_reader
+                    )
+                except RuntimeError as exc:
+                    logger.debug(
+                        "the workspace stopped with its line: %s", exc
+                    )
         # A job cancelled before its work started never opened the line.
         if not self._execution.done():
             self._execution.set_result(None)
@@ -109,6 +120,17 @@ class ShellResponse(Response):
                 "headers": self.raw_headers,
             }
         )
+        if self._job.stdin is not None:
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": json.dumps(
+                        {"line_id": str(self._job.id)}, separators=(",", ":")
+                    ).encode()
+                    + b"\n",
+                    "more_body": True,
+                }
+            )
         # Shielded: a hang-up cancels this task, and the handover must
         # still reach _close, which closes the line.
         execution = await asyncio.shield(self._execution)

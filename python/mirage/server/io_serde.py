@@ -80,26 +80,23 @@ def failure_to_dict(exc: Exception) -> dict[str, JsonValue]:
     return body
 
 
-async def io_result_to_dict(result: IOResult | None) -> dict[str, Any]:
+async def io_result_to_dict(result: IOResult) -> dict[str, Any]:
     """Materialize an IOResult into a JSON-friendly dict.
 
     Args:
-        result (IOResult | None): the workspace.shell return value.
+        result (IOResult): the workspace.shell return value.
 
     Returns:
         dict[str, Any]: serializable response payload.
     """
-    if isinstance(result, IOResult):
-        stdout = await result.materialize_stdout()
-        stderr = await result.materialize_stderr()
-        return {
-            "kind": "io",
-            "exit_code": result.exit_code,
-            "stdout": stdout.decode(errors="replace"),
-            "stderr": stderr.decode(errors="replace"),
-            "refusal": refusal_to_dict(result.refusal),
-        }
-    return {"kind": "raw", "value": str(result)}
+    stdout = await result.materialize_stdout()
+    stderr = await result.materialize_stderr()
+    return {
+        "exit_code": result.exit_code,
+        "stdout": stdout.decode(errors="replace"),
+        "stderr": stderr.decode(errors="replace"),
+        "refusal": refusal_to_dict(result.refusal),
+    }
 
 
 def explanation_to_dict(expl: Explanation) -> dict[str, JsonValue]:

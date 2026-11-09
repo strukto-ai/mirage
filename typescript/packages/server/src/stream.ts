@@ -41,7 +41,12 @@ export function shellResponse(
   failed: Promise<unknown>,
   stdin: UploadStdin | Uint8Array | undefined,
 ): RouteReply {
-  const completed = jobs.drain(job.id).then(() => jobs.wait(job.id))
+  const completed = jobs
+    .drain(job.id)
+    .then(() => jobs.wait(job.id))
+    .finally(() => {
+      job.stdin?.closeReader()
+    })
   void completed.catch((error: unknown) => {
     console.error('streamed shell completion failed', error)
   })
@@ -70,6 +75,9 @@ export function shellResponse(
   })
   async function* body(): AsyncGenerator<Uint8Array> {
     try {
+      if (job.stdin !== undefined) {
+        yield Buffer.from(JSON.stringify({ line_id: job.id.value }) + '\n')
+      }
       const opened = await execution
       if (opened !== null) {
         try {

@@ -1637,6 +1637,82 @@ paths:
         - Lines
       x-hosts:
         - daemon
+  /v1/workspaces/{workspace_id}/lines/{line_id}/stdin:
+    post:
+      summary: Write to a running line
+      operationId: write_stdin_v1_workspaces__workspace_id__lines__line_id__stdin_post
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+        - name: line_id
+          in: path
+          required: true
+          description: The line's id, from the first record of its stream.
+          schema:
+            type: string
+            title: Line Id
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '204':
+          description: The bytes are buffered for the line.
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+      description: Send the body to a running line's open stdin. It answers once the bytes are buffered, so a line that stops reading holds its writer back.
+      tags:
+        - Lines
+      x-hosts:
+        - daemon
+    delete:
+      summary: Close stdin of a running line
+      operationId: close_stdin_v1_workspaces__workspace_id__lines__line_id__stdin_delete
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+        - name: line_id
+          in: path
+          required: true
+          description: The line's id, from the first record of its stream.
+          schema:
+            type: string
+            title: Line Id
+      responses:
+        '204':
+          description: The line reads what was sent, then end of file.
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+      description: 'End a running line''s open stdin: the line reads what was sent, then end of file.'
+      tags:
+        - Lines
+      x-hosts:
+        - daemon
   /v1/workspaces/{workspace_id}/jobs:
     get:
       summary: List jobs
@@ -2039,7 +2115,8 @@ paths:
       responses:
         '200':
           description: The line's result; with explain=true, its explanation; with stream=true,
-            an NDJSON stream ending in a status record
+            an NDJSON stream ending in a status record. With open_stdin, the first record names
+            the line.
           content:
             application/json:
               schema:
@@ -2047,7 +2124,6 @@ paths:
                   - $ref: '#/components/schemas/ShellResult'
                   - $ref: '#/components/schemas/ShellExplanation'
               example:
-                kind: io
                 exit_code: 0
                 stdout: 'hello
 
@@ -2058,6 +2134,13 @@ paths:
             application/x-ndjson:
               schema:
                 type: string
+              examples:
+                open_stdin:
+                  summary: Stream with open_stdin
+                  value: |
+                    {"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"}
+                    {"stream":"stdout","data":"aGVsbG8K"}
+                    {"status":"done","result":{"exit_code":0,"stdout":"","stderr":"","refusal":null,"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"},"error":null}
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2112,7 +2195,8 @@ paths:
       description: Run a shell line in a workspace. HTTP 200 means the request completed. Check
         exit_code to determine whether the command succeeded. Set stream=true for NDJSON output
         records. See [Streaming and stdin](/api/streaming#stream-command-output) for the record
-        format.
+        format. Set open_stdin with stream=true to keep writing to the line's stdin while it
+        runs; see [Write to a running line](/api/streaming#write-to-a-running-line).
   /v1/workspaces/{workspace_id}/tools/shell:
     post:
       summary: Shell tool
@@ -7854,8 +7938,6 @@ components:
     ShellResult:
       type: object
       properties:
-        kind:
-          type: string
         exit_code:
           type: integer
         stdout:
@@ -7870,7 +7952,6 @@ components:
           type: string
           description: The line's id, by which `GET .../lines/{line_id}` finds it.
       required:
-        - kind
         - exit_code
         - stdout
         - stderr
@@ -7896,6 +7977,10 @@ components:
           type: boolean
           default: true
           description: Add the line to the session's history.
+        open_stdin:
+          type: boolean
+          default: false
+          description: Keep the line's stdin open for writes while it runs. Needs `stream=true`; the first record names the line.
       required:
         - command
     LoadRequest:

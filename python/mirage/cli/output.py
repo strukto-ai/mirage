@@ -77,13 +77,9 @@ def fail(message: str, exit_code: int = 1) -> NoReturn:
 def exit_code_from_response(r: Any) -> int:
     if not isinstance(r, dict):
         return 0
-    if r.get("kind") == "io":
-        inner: dict[str, Any] | None = r
-    else:
-        result = r.get("result")
-        inner = result if isinstance(result, dict) else None
-    if inner is not None and inner.get("kind") == "io":
-        code = inner.get("exit_code")
+    inner = r if "exit_code" in r else r.get("result")
+    if isinstance(inner, dict) and "exit_code" in inner:
+        code = inner["exit_code"]
         if isinstance(code, bool) or not isinstance(code, (int, float)):
             return 0
         if not math.isfinite(code):

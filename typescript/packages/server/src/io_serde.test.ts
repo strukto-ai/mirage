@@ -81,7 +81,6 @@ describe('failureToDict', () => {
 describe('ioResultToDict', () => {
   it('carries a null refusal on an ordinary run', () => {
     expect(ioResultToDict(new ExecuteResult(enc('hi\n'), enc(''), 0))).toEqual({
-      kind: 'io',
       exit_code: 0,
       stdout: 'hi\n',
       stderr: '',
@@ -97,7 +96,6 @@ describe('ioResultToDict', () => {
       askId: 'abc123',
     })
     expect(ioResultToDict(refused)).toEqual({
-      kind: 'io',
       exit_code: 126,
       stdout: '',
       stderr: 'rm: Permission denied\n',

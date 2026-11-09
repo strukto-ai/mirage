@@ -47,6 +47,57 @@ describe('MirageRpcServer', () => {
     expect(result.methods).toContain('vfs/read')
   })
 
+  it('open_stdin reads what stdin/write sends', async () => {
+    const rpc = server()
+    const running = rpc.handle({
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'shell',
+      params: { command: 'cat', open_stdin: true },
+    })
+    for (const word of ['one\n', 'two\n']) {
+      expect((await call(rpc, 'stdin/write', { id: 7, data: b64(word) })).result).toBeNull()
+    }
+    expect((await call(rpc, 'stdin/close', { id: 7 })).result).toBeNull()
+    const response = await running
+    expect((response?.result as Record<string, unknown>).stdout).toBe('one\ntwo\n')
+    const gone = await call(rpc, 'stdin/write', { id: 7, data: b64('x') })
+    expect((gone.error as { code: number }).code).toBe(-32004)
+  })
+
+  it('stops a stdin/write whose request is cancelled', async () => {
+    const rpc = server()
+    const running = rpc.handle({
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'shell',
+      params: { command: 'sleep 0.2; cat', open_stdin: true },
+    })
+    const stop = new AbortController()
+    const write = rpc.handle(
+      {
+        jsonrpc: '2.0',
+        id: 8,
+        method: 'stdin/write',
+        params: { id: 7, data: b64('x'.repeat(1024 * 1024)) },
+      },
+      stop.signal,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    stop.abort()
+    expect(((await write)?.error as { code: number }).code).toBe(-32800)
+    await call(rpc, 'stdin/close', { id: 7 })
+    await running
+  })
+
+  it('open_stdin refuses stdin and explain', async () => {
+    const rpc = server()
+    const both = await call(rpc, 'shell', { command: 'cat', open_stdin: true, stdin: b64('x') })
+    expect((both.error as { code: number }).code).toBe(-32602)
+    const explained = await call(rpc, 'shell', { command: 'cat', open_stdin: true, explain: true })
+    expect((explained.error as { code: number }).code).toBe(-32602)
+  })
+
   it('shell answers like session.shell', async () => {
     const rpc = server()
     const result = (await call(rpc, 'shell', { command: 'echo hi; echo err >&2' }))

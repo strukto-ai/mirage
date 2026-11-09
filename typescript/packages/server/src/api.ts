@@ -75,7 +75,7 @@ export function registerApi(app: RouteApp, deps: ApiDeps): McpEndpoint {
   registerSessionsRoutes(app, { registry, loadProfile: (profile) => host.loadProfile(profile) })
   registerDocumentsRoutes(app, { registry })
   registerAsksRoutes(app, { registry })
-  registerLinesRoutes(app, { registry })
+  registerLinesRoutes(app, { registry, jobs })
   registerJobsRoutes(app, { registry })
   registerProcessesRoutes(app, { registry })
   registerMachinesRoutes(app, { registry })

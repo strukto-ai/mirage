@@ -109,7 +109,8 @@
     {"id": "matches_unicode_in_bulk", "input": {"command": "grep -o α | wc -l", "stdin": {"repeat": "α x\n", "times": 16000}}, "expect": {"text": "16000\n", "is_error": false}},
     {"id": "streams_into_a_running_line", "accesses": ["inapp", "http", "cli", "ssh"], "input": {"command": "touch /begun; head -n 1", "stream": ["first\n", "second\n"]}, "expect": {"text": "first\n", "is_error": false}},
     {"id": "starts_before_its_stdin_sends_a_byte", "accesses": ["inapp", "http", "cli", "ssh"], "input": {"command": "touch /begun; echo started", "stream": ["", "unread\n"]}, "expect": {"text": "started\n", "is_error": false}},
-    {"id": "streams_stdin_through_stdout_and_stderr", "accesses": ["inapp", "http", "cli"], "input": {"command": "cat; echo err >&2", "stdin": "hé\u0000世界\n", "output_stream": true}, "expect": {"text": "hé\u0000世界\n\nerr\n", "is_error": false}}
+    {"id": "streams_stdin_through_stdout_and_stderr", "accesses": ["inapp", "http", "cli"], "input": {"command": "cat; echo err >&2", "stdin": "hé\u0000世界\n", "output_stream": true}, "expect": {"text": "hé\u0000世界\n\nerr\n", "is_error": false}},
+    {"id": "takes_writes_while_it_runs", "accesses": ["http", "rpc", "rpc_stdio"], "input": {"command": "touch /begun; cat", "open_stdin": ["first\n", "second\n"]}, "expect": {"text": "first\nsecond\n", "is_error": false}}
    ]
   },
   {

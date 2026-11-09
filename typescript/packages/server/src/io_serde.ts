@@ -30,12 +30,11 @@ import type {
 import { FileStat, PathSpec, type JsonValue, type Refusal } from '@struktoai/mirage-core/types'
 import { CALLS } from '@struktoai/mirage-core/workspace/dispatcher/constants'
 import type { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { RESERVED_KWARGS } from './constants.ts'
 import { BYTES, schemaOf, type Args, type VfsCall } from './vfs_calls.ts'
 
-interface IoResultDict {
-  kind: 'io'
+export interface ResultDict {
   exit_code: number
   stdout: string
   stderr: string
@@ -47,15 +46,8 @@ interface IoResultDict {
   } | null
 }
 
-interface RawResultDict {
-  kind: 'raw'
-  value: string
-}
-
-export type ResultDict = IoResultDict | RawResultDict
-
 /** A refusal record as the server's entry points carry it. Mirrors Python's `refusal_to_dict`. */
-export function refusalToDict(refusal: Refusal | null): IoResultDict['refusal'] {
+export function refusalToDict(refusal: Refusal | null): ResultDict['refusal'] {
   return refusal === null
     ? null
     : {
@@ -81,17 +73,13 @@ export function failureToDict(err: unknown): Record<string, JsonValue> & { detai
   return body
 }
 
-export function ioResultToDict(result: unknown): ResultDict & JsonValue {
-  if (result instanceof ExecuteResult) {
-    return {
-      kind: 'io',
-      exit_code: result.exitCode,
-      stdout: result.stdoutText,
-      stderr: result.stderrText,
-      refusal: refusalToDict(result.refusal),
-    }
+export function ioResultToDict(result: ExecuteResult): ResultDict & JsonValue {
+  return {
+    exit_code: result.exitCode,
+    stdout: result.stdoutText,
+    stderr: result.stderrText,
+    refusal: refusalToDict(result.refusal),
   }
-  return { kind: 'raw', value: String(result) }
 }
 
 /** One policy's answer as the server's entry points carry it. Mirrors Python's `answer_to_dict`. */

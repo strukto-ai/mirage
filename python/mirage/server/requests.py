@@ -24,6 +24,7 @@ from mirage.execution.context import new_line_id
 from mirage.execution.line.handle import LineHandle
 from mirage.execution.line.types import LineState
 from mirage.execution.types import LineId
+from mirage.io.pipe import BytePipe
 from mirage.types import JsonValue
 from mirage.utils.abort import MirageAbortError
 
@@ -53,6 +54,7 @@ class LineRequest:
         self.work: asyncio.Task[JsonValue] | None = None
         self.completion: asyncio.Task[None] | None = None
         self.settled = asyncio.Event()
+        self.stdin: BytePipe | None = None
 
     @property
     def id(self) -> LineId:
@@ -80,6 +82,14 @@ class RequestTable:
     def requests(self) -> list[LineRequest]:
         """The requests held, as of now, read off the server's loop too."""
         return list(self._requests.values())
+
+    def get(self, line_id: LineId) -> LineRequest | None:
+        """A request still held, or None.
+
+        Args:
+            line_id (LineId): the request's line.
+        """
+        return self._requests.get(line_id)
 
     def discard_workspace(self, workspace_id: str) -> None:
         """Forget requests after their workspace's runner has stopped.

@@ -50,6 +50,22 @@ TAG_ORDER = (
     "Auth",
 )
 METHOD_ORDER = ("get", "post", "put", "patch", "delete")
+SAMPLES = {
+    ("/v1/workspaces/{workspace_id}/shell", "post"): [
+        {
+            "lang": "bash",
+            "label": "Keep stdin open",
+            "source": (
+                "curl --no-buffer --request POST \\\n"
+                "  --url 'http://127.0.0.1:8765/v1/workspaces/"
+                "{workspace_id}/shell?stream=true' \\\n"
+                "  --header 'Authorization: Bearer <token>' \\\n"
+                "  --header 'Content-Type: application/json' \\\n"
+                '  --data \'{"command":"cat","open_stdin":true}\'\n'
+            ),
+        }
+    ]
+}
 
 
 def attr(text: str) -> str:
@@ -240,6 +256,12 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
     generic = (
         responses.get("200", {}).get("content", {}).get("application/json", {})
     )
+    streamed = (
+        responses.get("200", {})
+        .get("content", {})
+        .get("application/x-ndjson", {})
+        .get("examples", {})
+    )
     example = []
     if "200" in responses and "example" in created:
         example = [
@@ -260,6 +282,19 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
             "HTTP/1.1 200 OK\nContent-Type: application/json",
             "```",
         ]
+    elif streamed:
+        example = [
+            "```json 200",
+            json.dumps(generic["example"], indent=2),
+            "```",
+        ]
+        for item in streamed.values():
+            example += [
+                "",
+                f"```json 200 {item['summary']}",
+                item["value"].rstrip("\n"),
+                "```",
+            ]
     if example:
         lines += [
             '<div className="hidden">',
@@ -305,17 +340,25 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
 def render_overlay(doc: dict[str, Any]) -> str:
     """Presentation changes that leave the source API contract complete.
 
+    A generated request sample cannot set a query parameter, so one that
+    needs its own comes from `SAMPLES`.
+
     Args:
         doc (dict[str, Any]): the OpenAPI document.
     """
     actions: list[dict[str, Any]] = []
     for path, method, op in operations(doc):
+        update: dict[str, Any] = {}
         content = response_content(doc, op)
         if content:
+            update["x-mint"] = {"content": content}
+        if (path, method) in SAMPLES:
+            update["x-codeSamples"] = SAMPLES[(path, method)]
+        if update:
             actions.append(
                 {
                     "target": f"$.paths[{json.dumps(path)}].{method}",
-                    "update": {"x-mint": {"content": content}},
+                    "update": update,
                 }
             )
         for code in op.get("responses", {}):
@@ -462,6 +505,30 @@ def selftest() -> None:
     assert (
         "200 Headers only" in generic_response
         and "Content-Type: application/json" in generic_response
+    )
+    streamed_response = response_content(
+        doc,
+        {
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {"example": {"id": "demo"}},
+                        "application/x-ndjson": {
+                            "examples": {
+                                "live": {
+                                    "summary": "Stream",
+                                    "value": '{"line_id":"a"}\n',
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+        },
+    )
+    assert (
+        '"id": "demo"' in streamed_response
+        and '```json 200 Stream\n{"line_id":"a"}\n```' in streamed_response
     )
     print("API reference self-test passed")
 

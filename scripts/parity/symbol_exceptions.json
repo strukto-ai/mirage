@@ -1,5 +1,5 @@
 {
- "baseline": 1655,
+ "baseline": 1653,
  "modules": {
   "server/app": {
    "python_only": {
@@ -1525,9 +1525,11 @@
   },
   "server/routers/lines": {
    "python_only": {
+    "close_stdin": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes.",
     "get_line": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes.",
     "list_lines": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes.",
-    "router": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes."
+    "router": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes.",
+    "write_stdin": "FastAPI routes are module functions on a module router; Fastify registers the same handlers inline in registerLinesRoutes."
    },
    "typescript_only": {
     "ListLinesQuery": "Fastify types a route's path and query parameters as interfaces; FastAPI reads them from the handler's signature.",

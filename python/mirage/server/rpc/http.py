@@ -24,6 +24,8 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from mirage.execution.line.handle import LineHandle
+from mirage.io.pipe import BytePipe
+from mirage.io.types import ByteSource
 from mirage.server.inflight import InFlight
 from mirage.server.io_serde import io_result_to_dict
 from mirage.server.mcp.http import McpEndpoint
@@ -65,6 +67,8 @@ class DaemonRpcServer(MirageRpcServer):
         session_id (str): the session the methods act as.
         operations (MirageToolOperations): the session's tool table, the
             one MCP and the tool routes share.
+        stdins (dict[str, BytePipe]): the open stdins, which a write
+            arriving on another HTTP request finds.
     """
 
     def __init__(
@@ -73,17 +77,20 @@ class DaemonRpcServer(MirageRpcServer):
         jobs: RequestTable,
         session_id: str,
         operations: MirageToolOperations,
+        stdins: dict[str, BytePipe],
     ) -> None:
         super().__init__(entry.runner.ws, session_id, operations)
         self._entry = entry
         self._jobs = jobs
+        self._stdins = stdins
 
     async def run_line(
         self,
         command: str,
         cwd: str | None,
         env: dict[str, str] | None,
-        stdin: bytes | None,
+        stdin: ByteSource | None,
+        pipe: BytePipe | None = None,
     ) -> JsonValue:
         """Run one shell line as a daemon job.
 
@@ -91,10 +98,11 @@ class DaemonRpcServer(MirageRpcServer):
             command (str): the line.
             cwd (str | None): a working directory for this line only.
             env (dict[str, str] | None): variables for this line only.
-            stdin (bytes | None): the line's stdin.
+            stdin (ByteSource | None): the line's stdin.
+            pipe (BytePipe | None): the pipe behind an open ``stdin``.
 
         Returns:
-            JsonValue: ``{kind, exit_code, stdout, stderr, refusal}``.
+            JsonValue: ``{exit_code, stdout, stderr, refusal}``.
 
         Raises:
             RpcError: the job was cancelled or failed.
@@ -127,6 +135,7 @@ class DaemonRpcServer(MirageRpcServer):
             factory=run,
             session_id=session_id,
         )
+        job.stdin = pipe
         job = await self._jobs.join(job.id)
         if job.line.record.signal is not None:
             raise RpcError(RPC_REQUEST_CANCELLED, "job canceled")
@@ -173,6 +182,7 @@ class RpcEndpoint:
         self._jobs = jobs
         self._mcp = mcp
         self.inflight = InFlight()
+        self.stdins: dict[str, BytePipe] = {}
 
     async def server(
         self,
@@ -208,6 +218,7 @@ class RpcEndpoint:
             self._jobs,
             session_id or entry.runner.ws.default_session_id,
             operations,
+            self.stdins,
         )
 
     async def handle(self, request: Request) -> Response:

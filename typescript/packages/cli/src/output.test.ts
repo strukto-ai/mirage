@@ -27,15 +27,13 @@ describe('exitCodeFromResponse', () => {
     ['nonnumeric', 'one', 0],
     ['NaN', NaN, 0],
   ])('IO exit code: %s', (_name, code, expected) => {
-    expect(exitCodeFromResponse({ kind: 'io', exit_code: code, stdout: '', stderr: '' })).toBe(
-      expected,
-    )
+    expect(exitCodeFromResponse({ exit_code: code, stdout: '', stderr: '' })).toBe(expected)
   })
 
   it.each([
     {
       status: 'done',
-      result: { kind: 'io', exit_code: 7, stdout: '', stderr: '' },
+      result: { exit_code: 7, stdout: '', stderr: '' },
       error: null,
       expected: 7,
     },
@@ -45,7 +43,7 @@ describe('exitCodeFromResponse', () => {
     { status: 'canceled', result: null, error: null, expected: 2 },
     {
       status: 'failed',
-      result: { kind: 'io', exit_code: 9, stdout: '', stderr: '' },
+      result: { exit_code: 9, stdout: '', stderr: '' },
       error: null,
       expected: 9,
     },
@@ -55,8 +53,8 @@ describe('exitCodeFromResponse', () => {
 
   it.each([
     ['background submission', { job_id: 'job_abc', workspace_id: 'ws', submitted_at: 0 }],
-    ['raw output', { kind: 'raw', value: 'hi' }],
-    ['missing exit code', { kind: 'io', stdout: '', stderr: '' }],
+    ['no exit code field', { value: 'hi' }],
+    ['missing exit code', { stdout: '', stderr: '' }],
     ['null', null],
     ['undefined', undefined],
     ['string', 'string'],

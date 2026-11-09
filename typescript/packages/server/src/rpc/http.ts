@@ -16,6 +16,8 @@ import { refused } from '../metrics.ts'
 import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
 import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import type { BytePipe } from '@struktoai/mirage-core/io/pipe'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { InFlight } from '../inflight.ts'
 import { ioResultToDict } from '../io_serde.ts'
 import type { RequestTable } from '../requests.ts'
@@ -44,14 +46,17 @@ class DaemonRpcServer extends MirageRpcServer {
     private readonly jobs: RequestTable,
     sessionId: string,
     operations: MirageToolOperations,
+    stdins: Map<string, BytePipe>,
   ) {
     super(entry.runner.ws, { sessionId, operations })
+    this.stdins = stdins
   }
 
   override async runLine(
     command: string,
-    options: { cwd?: string; env?: Record<string, string>; stdin?: Uint8Array },
+    options: { cwd?: string; env?: Record<string, string>; stdin?: ByteSource },
     signal?: AbortSignal,
+    pipe?: BytePipe,
   ): Promise<JsonValue> {
     const ws = this.entry.runner.ws
     const sessionId = this.sessionId
@@ -69,6 +74,7 @@ class DaemonRpcServer extends MirageRpcServer {
         ),
       sessionId,
     )
+    submitted.stdin = pipe
     const job = await this.jobs.join(submitted.id, signal)
     if (job.line.record.signal !== null) throw new RpcError(RPC_REQUEST_CANCELLED, 'job canceled')
     if (job.error !== null) throw new RpcError(RPC_INTERNAL_ERROR, job.error)
@@ -87,6 +93,7 @@ class DaemonRpcServer extends MirageRpcServer {
  */
 class RpcEndpoint {
   readonly inflight = new InFlight()
+  readonly stdins = new Map<string, BytePipe>()
 
   constructor(
     private readonly registry: WorkspaceRegistry,
@@ -111,6 +118,7 @@ class RpcEndpoint {
       this.jobs,
       sessionId ?? entry.runner.ws.defaultSessionId,
       operations,
+      this.stdins,
     )
   }
 
