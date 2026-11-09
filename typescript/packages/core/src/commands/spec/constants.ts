@@ -88,7 +88,6 @@ export const STDIN_DASH_COMMANDS: ReadonlySet<string> = new Set([
   'gzip',
   'head',
   'join',
-  'less',
   'md5sum',
   'nl',
   'od',
@@ -111,8 +110,6 @@ export const STDIN_DASH_COMMANDS: ReadonlySet<string> = new Set([
   'xxd',
   'xz',
   'zcat',
-  'zless',
-  'zmore',
 ])
 
 // How many leading operands may read standard input, for a command whose
@@ -784,9 +781,7 @@ export const COMPARE_PROGRAMS: Readonly<Record<string, string>> = Object.freeze(
   zdiff: 'diff',
 })
 
-// The programs that answer an option they do not know on one line and go on,
-// and the two that say `Bad flag` with their usage page.
-export const LESS_FAMILY: ReadonlySet<string> = new Set(['less', 'zless'])
+// The two programs that say `Bad flag` with their usage page.
 export const BZIP2_FAMILY: ReadonlySet<string> = new Set(['bzip2', 'bunzip2'])
 
 // An old-style cluster letter left without its argument exits 2, not
@@ -810,8 +805,6 @@ export const USAGE_EXIT: Readonly<Record<string, number>> = Object.freeze({
   tty: 2,
   zcmp: 2,
   zdiff: 2,
-  less: 0,
-  zless: 0,
   grep: 2,
   egrep: 2,
   fgrep: 2,

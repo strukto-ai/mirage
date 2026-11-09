@@ -51,7 +51,6 @@ import * as nl from './nl.ts'
 import * as numfmt from './numfmt.ts'
 import * as od from './od.ts'
 import * as paste from './paste.ts'
-import * as pager from './pager.ts'
 import * as patch from './patch.ts'
 import * as readlink from './readlink.ts'
 import * as realpath from './realpath.ts'
@@ -165,7 +164,6 @@ export const BUILDERS: readonly GenericCommand[] = [
   xxd.BUILDER,
   zcat.BUILDER,
   ...compressors.BUILDERS,
-  ...pager.BUILDERS,
   ...zcompare.BUILDERS,
   zgrep.BUILDER,
   zipCmd.BUILDER,

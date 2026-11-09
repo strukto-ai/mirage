@@ -61,7 +61,6 @@ SYNOPSES: dict[str, str] = {
     "id": "id [OPTION]... [USER]...",
     "iconv": "iconv [OPTION...] [FILE...]",
     "join": "join [OPTION]... FILE1 FILE2",
-    "less": "less [OPTION]... [FILE]...",
     "link": "link FILE1 FILE2",
     "ln": "ln [OPTION]... [-T] TARGET LINK_NAME",
     "logname": "logname [OPTION]",
@@ -70,7 +69,6 @@ SYNOPSES: dict[str, str] = {
     "md5sum": "md5sum [OPTION]... [FILE]...",
     "mkdir": "mkdir [OPTION]... DIRECTORY...",
     "mktemp": "mktemp [OPTION]... [TEMPLATE]",
-    "more": "more [OPTION]... FILE...",
     "mount": "mount [-lhV]",
     "mv": "mv [OPTION]... [-T] SOURCE DEST",
     "nice": "nice [OPTION] [COMMAND [ARG]...]",
@@ -127,8 +125,6 @@ SYNOPSES: dict[str, str] = {
     "zcmp": "zcmp [OPTION]... FILE1 [FILE2]",
     "zdiff": "zdiff [OPTION]... FILE1 [FILE2]",
     "zgrep": "zgrep [OPTION]... [-e] PATTERN [FILE]...",
-    "zless": "zless [OPTION]... [FILE]...",
-    "zmore": "zmore [FILE]...",
 }
 
 # The synopsis of each command the shell runs itself and of each compound

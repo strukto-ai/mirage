@@ -84,7 +84,6 @@ STDIN_DASH_COMMANDS = frozenset(
         "gzip",
         "head",
         "join",
-        "less",
         "md5sum",
         "nl",
         "od",
@@ -107,8 +106,6 @@ STDIN_DASH_COMMANDS = frozenset(
         "xxd",
         "xz",
         "zcat",
-        "zless",
-        "zmore",
     }
 )
 
@@ -763,8 +760,6 @@ USAGE_EXIT = {
     "tty": 2,
     "zcmp": 2,
     "zdiff": 2,
-    "less": 0,
-    "zless": 0,
     "tar": 64,
     "timeout": 125,
     "hostname": 255,
@@ -865,9 +860,7 @@ USAGE_PAGE = frozenset({"sed", "bzip2", "bunzip2"})
 # know is theirs, not the wrapper's.
 COMPARE_PROGRAMS = {"zcmp": "cmp", "zdiff": "diff"}
 
-# The programs that answer an option they do not know on one line and go
-# on, and the two that say `Bad flag` with their usage page.
-LESS_FAMILY = frozenset({"less", "zless"})
+# The two programs that say `Bad flag` with their usage page.
 BZIP2_FAMILY = frozenset({"bzip2", "bunzip2"})
 
 # How many distinct readings one spec keeps before it starts over. A

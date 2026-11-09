@@ -51,7 +51,6 @@ from mirage.commands.builtin.generic_bind.builders import nl
 from mirage.commands.builtin.generic_bind.builders import numfmt
 from mirage.commands.builtin.generic_bind.builders import od
 from mirage.commands.builtin.generic_bind.builders import paste
-from mirage.commands.builtin.generic_bind.builders import pager
 from mirage.commands.builtin.generic_bind.builders import patch
 from mirage.commands.builtin.generic_bind.builders import readlink
 from mirage.commands.builtin.generic_bind.builders import realpath
@@ -165,7 +164,6 @@ BUILDERS = (
     xxd.BUILDER,
     zcat.BUILDER,
     *compressors.BUILDERS,
-    *pager.BUILDERS,
     *zcompare.BUILDERS,
     zgrep.BUILDER,
     zip_cmd.BUILDER,

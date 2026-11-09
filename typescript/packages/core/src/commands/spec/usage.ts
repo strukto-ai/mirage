@@ -22,7 +22,6 @@ import {
   BZIP2_FAMILY,
   COMPARE_PROGRAMS,
   IN_ORDER_OPERANDS,
-  LESS_FAMILY,
   NOT_GETOPT_LONG,
   OLD_OPTION_EXIT,
   OPERAND_EXIT,
@@ -202,18 +201,6 @@ export function unknownOptionError(
   if (builtin && COMPARE_PROGRAMS[cmdName] !== undefined) {
     return unknownOptionError(COMPARE_PROGRAMS[cmdName], token)
   }
-  if (builtin && LESS_FAMILY.has(cmdName)) {
-    const name = token.startsWith('--') ? token.slice(2) : `-${token}`
-    return [
-      encodeText(`There is no ${name} option ("less --help" for help)\n`),
-      usageExitCode(cmdName),
-    ]
-  }
-  if (builtin && cmdName === 'zmore') {
-    const dashed = token.startsWith('-') ? token : `-${token}`
-    const line = `/usr/bin/zmore: ${dashed}: unknown option; try '/usr/bin/zmore --help' for help\n`
-    return [encodeText(line), usageExitCode(cmdName)]
-  }
   if (builtin && BZIP2_FAMILY.has(cmdName)) {
     const dashed = token.startsWith('-') ? token : `-${token}`
     return [encodeText(`${cmdName}: Bad flag \`${dashed}'\n${usageHint(cmdName, builtin)}\n`), 1]
@@ -367,17 +354,6 @@ export function invalidFloatError(
   return [encodeText(line + hint), usageExitCode(cmdName, builtin)]
 }
 
-function lessMissingValue(cmdName: string, token: string): string {
-  const dashed = token.startsWith('-') ? token : `-${token}`
-  for (const option of specOf(cmdName).arguments) {
-    const [short, long] = option.names
-    if (option.names.includes(dashed) && long !== undefined) {
-      return `Value is required after ${String(short)} (${long})\n`
-    }
-  }
-  return `Value is required after ${dashed}\n`
-}
-
 /** GNU-shaped error for a declared value flag with no argument left. */
 export function missingValueError(
   cmdName: string,
@@ -392,7 +368,6 @@ export function missingValueError(
     const dashed = token.startsWith('-') ? token : `-${token}`
     return curlOptionError(`curl: option ${dashed}: requires parameter\n`)
   }
-  if (builtin && LESS_FAMILY.has(cmdName)) return [encodeText(lessMissingValue(cmdName, token)), 0]
   const line = token.startsWith('--')
     ? `${cmdName}: option '${token}' requires an argument\n`
     : `${cmdName}: option requires an argument -- '${token}'\n`

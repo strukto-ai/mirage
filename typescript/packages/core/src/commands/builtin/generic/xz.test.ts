@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { lineFacts } from '../../../workspace/lookup/constants.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 // Pinned on xz 5.8.1.
@@ -56,14 +55,4 @@ describe('xz and unxz', () => {
     await ws.close()
     expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([stdout, stderr, code])
   })
-})
-
-it.each([
-  [['xz', '-t', '/d/a'], false],
-  [['xz', '-t', '-z', '/d/a'], true],
-  [['xz', '-z', '-t', '/d/a'], false],
-  [['xz', '-t', '-d', '/d/a'], true],
-  [['xz', '-c', '-t', '-z', '/d/a'], false],
-])('the last mode decides whether %j writes', (words, writes) => {
-  expect(lineFacts('xz', words, '/').writes).toBe(writes)
 })

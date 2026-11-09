@@ -1,0 +1,36 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import pytest
+
+from mirage import RAMVFS, MountMode, Workspace
+
+
+# Pinned on coreutils 9.7.
+@pytest.mark.asyncio
+async def test_tty():
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell(
+        (
+            "tty; echo rc=$?; tty -s; echo rc=$?; tty x; echo rc=$?; "
+            "tty --bogus; echo rc=$?; tty --silent x; echo rc=$?"
+        )
+    )
+    assert await io.stdout_str() == "not a tty\nrc=1\nrc=1\nrc=2\nrc=2\nrc=2\n"
+    assert await io.stderr_str() == (
+        "tty: extra operand 'x'\nTry 'tty --help' for more informa"
+        "tion.\ntty: unrecognized option '--bogus'\nTry 'tty --help"
+        "' for more information.\ntty: extra operand 'x'\nTry 'tty "
+        "--help' for more information.\n"
+    )
+    assert io.exit_code == 0
