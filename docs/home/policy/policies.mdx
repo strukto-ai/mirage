@@ -190,14 +190,16 @@ claim to check, not as a credential:
 | --- | --- |
 | `line`, `command`, `words`, `argv`, `paths`, `walks` | the line it types, after expansion |
 | `cwd`, `session.cwd()`, `caller.session.cwd` | `cd` |
-| `env`, `session.get()`, `session.snapshot()` | `export` and assignments, except a name `session.is_readonly()` reports |
+| `env`, `session.get()`, `session.snapshot()` | `export`, assignments and `readonly` |
 | `call`, `path`, `write` at `pre_vfs` | the file call it made |
 | `exit_code`, `stderr`, `output`, `records`, `result` | what its own command or call produced |
 
 The host sets `session_id` (`caller.session.session_id` too), `profile`,
 `mounts`, `prefix` and `mode`, and what `vfs` shows: the agent cannot
-change them from inside the session. Decide who may do what from those, and from a variable only
-when the profile marks it read-only.
+change them from inside the session. Decide who may do what from those, and
+from a variable only when the workspace's or the profile's `env` sets it with
+`readonly: true`. `session.is_readonly()` is also true for a name the agent
+marked with `readonly NAME` itself.
 
 A policy written as a program, on monty or Python on wasm, gets the same
 `ctx` as JSON: see [Scripts](/home/policy/scripts).
@@ -441,7 +443,10 @@ const budget: Policy = {
 
 A runtime that starts a process on this machine (`local`, Sandlock) would
 connect around the gateway, so while a policy judges connections it refuses
-to run. In a browser a page sees no socket: `fetch` is judged by host name with an
+to run. A program on a [machine](/home/setup/machine/overview) connects from
+that machine, and no policy sees its connections.
+
+In a browser a page sees no socket: `fetch` is judged by host name with an
 empty `address`, and the counts are the bodies' bytes. While a policy
 listens for connections, a request whose upload passes the Limit, or whose
 size a page cannot know (a form, a stream), is refused before it is sent; a

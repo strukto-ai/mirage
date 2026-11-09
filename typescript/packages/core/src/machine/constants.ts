@@ -84,7 +84,7 @@ export const SSHFS_LOG_PREFIX = '/tmp/.mirage_sshfs'
 export const SSHFS_SOURCE_PREFIX = 'mirage-'
 
 export const SSHFS_HINT =
-  'serving the workspace into a machine needs sshfs there; install it in the image (apt-get install sshfs)'
+  'serving the workspace into a machine needs sshfs there; install it in the image (apt-get update && apt-get install sshfs)'
 export const PIPE_SERVER_HINT =
   'serving the workspace into a machine needs @struktoai/mirage-node and its ssh2 peer'
 

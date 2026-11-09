@@ -135,9 +135,9 @@ with the same config on each. Then:
 
 - One instance runs the workspace's lines at a time: the first to run one.
   Any other is refused with an error naming that instance, which a server
-  answers with `409`, until it closes the workspace.
-- If it stops without closing, the workspace is free 30 seconds after it
-  was last seen. The next instance to run a line reports the jobs it left
+  answers with `409`, until it stops, deletes or closes the workspace.
+- If it goes away without doing so, the workspace is free 30 seconds after
+  it was last seen. The next instance to run a line reports the jobs it left
   as ended with status 129 and stops the programs they left running.
 - A server keeps its id under its state root, so a restarted server runs its
   workspaces again at once.

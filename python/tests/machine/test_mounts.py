@@ -497,7 +497,7 @@ async def test_a_sandbox_without_sshfs_fails_loud():
     assert result.exit_code == 1
     assert await result.stderr_str() == (
         "python3: fake: serving the workspace into a machine needs sshfs there; "
-        "install it in the image (apt-get install sshfs)\n"
+        "install it in the image (apt-get update && apt-get install sshfs)\n"
     )
     assert sandbox.pipes == []
     await ws.close()

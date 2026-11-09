@@ -20,7 +20,8 @@ export SLACK_BOT_TOKEN=xoxb-your-token
 
 If the local CLI daemon is already running, run `mirage daemon restart` after
 exporting the token. The next workspace creation inherits the updated environment.
-Restarting discards existing workspaces. See [daemon commands](/home/access/cli#daemon).
+Restarting stops every workspace and keeps it; `mirage workspace start ID`
+brings one back. See [daemon commands](/home/access/cli#daemon).
 
 ```yaml workspace.yaml
 mounts:
@@ -103,6 +104,7 @@ non-empty `ref` overrides the source's configured `path`.
 | --- | --- | --- | --- |
 | `aws-sm` | `mirage/slack` or a secret ARN | `SLACK_BOT_TOKEN` | AWS credentials and region in the SDK's normal environment. Python needs `mirage-ai[aws-sm]`; Node includes the source dependency. |
 | `1password` | `op://Engineering/Slack/credential` | `credential` | `OP_SERVICE_ACCOUNT_TOKEN` in the Mirage process environment. Python needs `mirage-ai[1password]`; Node needs `@1password/sdk`. |
+| `strukto` | `slack`, a saved entry's name | `token` | A Mirage server, the daemon or the hosted API, and an entry saved with [`mirage vfs`, `cli`, `runtime` or `machine`](/home/access/cli#saved-connections). |
 
 Use these values in place of `from`, `ref` and `key` in the mount pointer above.
 Install source dependencies in the same environment that runs Mirage, using

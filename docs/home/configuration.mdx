@@ -123,7 +123,9 @@ workspace's `max_memory`, which refuses a write the same way.
 
 `network` decides where the workspace's connections may go: every
 connection a line or a file call opens, whichever command, CLI, runtime or
-mount opens it.
+mount opens it. A program on a [machine](/home/setup/machine/overview)
+connects from that machine, under its own network settings: `network`,
+`pre_network` and `routes` do not reach it.
 
 | Value | Behavior |
 | --- | --- |
@@ -165,9 +167,7 @@ runtime a limited workspace follows each redirect under the same rule; in
 a browser it follows none, since a page cannot see where one goes. A runtime that starts a
 process on this machine (`local`, Sandlock) opens its connections where
 Mirage cannot judge them, so while `network` limits anything, or a policy
-judges connections, it refuses to run: `Permission denied`, exit 126. A
-sandbox runtime connects from its own machine, under that sandbox's own
-network settings.
+judges connections, it refuses to run: `Permission denied`, exit 126.
 
 ## System time
 
@@ -202,9 +202,9 @@ Programs that `local` or Sandlock run on this machine see the time through
 [libfaketime](https://github.com/wolfcw/libfaketime) when it is installed,
 on Linux (`apt install libfaketime`). Without it, or on macOS, they run on
 the machine's clock. A statically linked program, as many Go tools are,
-also reads the machine's clock. Sandbox runtimes work the same way, with
-libfaketime in the [machine image](/home/setup/machine/overview#the-machine-image)
-and the sandbox's clock without it.
+also reads the machine's clock. Programs on a machine work the same way,
+with libfaketime in the [machine image](/home/setup/machine/overview#the-machine-image)
+and the machine's clock without it.
 
 ## Read and write policies
 

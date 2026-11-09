@@ -21,9 +21,9 @@ specific to the TypeScript SDK.
   caps a run at 64 MiB of memory and 1 MiB of stack.
 - **Local:** in `@struktoai/mirage-node` only. With neither `home` nor
   `MIRAGE_LOCAL_HOME`, `python3` is the one on `PATH`.
-- **Sandboxes:** in `@struktoai/mirage-node`; `e2b` also runs in browsers.
+- **Machines:** in `@struktoai/mirage-node`; `e2b` also runs in browsers.
   `mountType` `ssh` and `both` need Node and the `ssh2` package. The `ssh`
-  runtime authenticates through `SSH_AUTH_SOCK` when there is no
+  machine authenticates through `SSH_AUTH_SOCK` when there is no
   `identityFile`, and `username` defaults to the local user.
 - **Config objects** are camelCase in code (`sandboxId`, `mountType`); YAML
   spells the same keys in snake_case.
@@ -165,7 +165,7 @@ gets its own worker.
 These measures close known host access paths. They do not make arbitrary
 JavaScript safe: Pyodide exposes mutable interpreter internals, and a worker
 thread shares the host process. For hostile code, use a
-[sandbox](/home/setup/machine/overview) with a process and kernel boundary.
+[machine](/home/setup/machine/overview) with a process and kernel boundary.
 
 ### Child processes
 

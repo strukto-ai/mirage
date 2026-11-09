@@ -99,7 +99,7 @@ SSHFS_SOURCE_PREFIX = "mirage-"
 
 SSHFS_HINT = (
     "serving the workspace into a machine needs sshfs there; "
-    "install it in the image (apt-get install sshfs)"
+    "install it in the image (apt-get update && apt-get install sshfs)"
 )
 PIPE_SERVER_HINT = (
     "serving the workspace into a machine needs asyncssh; "

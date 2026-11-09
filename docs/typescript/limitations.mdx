@@ -30,7 +30,7 @@ Node requirement.
 
 A workspace session persists across `shell()` calls, so a call that returns does not fire `EXIT`. Register the cleanup inside `bash -c` when it has to finish before the call returns. Registrations are live shell state: session stores do not keep them.
 
-Mirage has no OS signals. Cancellation, `kill`, timeouts and closing a workspace or session stop the work without running cleanup, and they interrupt cleanup that is already running (bash runs `EXIT` on a `SIGTERM`). `trap` refuses every other event (`INT`, `TERM`, `DEBUG`, ...) with `mirage: trap: NAME: not supported`, and `trap -l` the same way.
+`trap` cannot catch a signal. Cancellation, `kill`, timeouts, and stopping or closing a workspace or a session end the work without running cleanup, and they interrupt cleanup that is already running (bash runs `EXIT` on a `SIGTERM`). `trap` refuses every other event (`INT`, `TERM`, `DEBUG`, ...) as `bash: line 1: trap: TERM: not supported`, and `trap -l` the same way.
 
 ## Background job output (Python, Node and Browser)
 
@@ -124,7 +124,7 @@ execFileSync('cat', [`${mp}/x.txt`])
 
 **Why Python doesn't hit this.** Python's FUSE loop runs on a dedicated thread, so the main thread can block on the mount freely.
 
-**Workarounds.** Use async `fs` APIs and async subprocess spawns from the mounting process, or dedicate a child process to owning the mount (see `examples/typescript/fuse/helper.ts` for the pattern). External processes (a sandbox runtime, another terminal, your shell) are unaffected — the constraint only binds the process that created the mount.
+**Workarounds.** Use async `fs` APIs and async subprocess spawns from the mounting process, or dedicate a child process to owning the mount (see `examples/typescript/fuse/helper.ts` for the pattern). External processes (a program on a machine, another terminal, your shell) are unaffected — the constraint only binds the process that created the mount.
 
 ---
 

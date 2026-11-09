@@ -39,6 +39,8 @@ A line or a command can also name its machine: `execute(machine=)`, a
 [Sandlock](/home/setup/runtime/sandlock) is a runtime, not a machine: it runs
 programs on this Linux host, confined.
 
+To try one, start with [Docker](/home/setup/machine/docker).
+
 ## Connecting the workspace
 
 A program on a machine opens workspace files at the same paths as in Mirage,
@@ -51,8 +53,8 @@ so the machine must see the mounts. `mount_type` picks how:
 | `both` | The machine's own FUSE mounts where it has them, `ssh` for the rest | Each side's own |
 | unset | Nothing; you put the files there yourself | The machine's |
 
-Daytona has no `mount_type`: it always uses a Mirage on the machine. Once
-connected, run the shared
+Daytona takes no `mount_type`: run a Mirage on the machine, as `fuse` does,
+or put the files there yourself. Once connected, run the shared
 [workspace file check](/home/setup/runtime/overview#verify-workspace-file-access).
 
 ### ssh
@@ -65,6 +67,10 @@ connected, run the shared
   1. Give each agent and each workspace its own machine.
 - If the machine restarts, Mirage mounts the paths again. A line caught
   mid-restart exits 126 without running.
+- A write the workspace refuses, such as one past a mount's `capacity`,
+  looks done to the program, but its command fails when the program ends:
+  stderr names the file, as `docker: /data/big.bin: Disk quota exceeded`,
+  and a command that would exit 0 exits 1.
 - The root mount and `/dev` are not served.
 
 Mirage refuses to run a program when it cannot enforce the session's file
@@ -102,7 +108,7 @@ mounts:
 | --- | --- |
 | Command | The captured program and its words, as typed |
 | Piped input | stdin |
-| Environment | The session's, over the config `env`, plus `MIRAGE_PROCESS`, the id of its Mirage process |
+| Environment | The session's, over the config `env`, plus `MIRAGE_PROCESS`, the id of its Mirage process. Docker, Apple Container, smolvm and Microsandbox pass it on the exec command line, where other users of the host can see it in `ps`. |
 | Working directory | The shell's, unchanged; one the machine lacks exits 126 |
 | Disk, network, language modules | The machine's own |
 
@@ -143,19 +149,28 @@ of this follows the session's `processes` grants.
 | `reachable` | Mirage reached it, but sees and stops only what it started itself. The machine lacks `/proc`, `sh`, `tr` or `grep`. |
 | `unreachable` | The last check failed. |
 
-`GET /v1/workspaces/{id}/machines` checks every machine,
+Mirage finds a run's processes by `MIRAGE_PROCESS` in `/proc`, so it misses
+one that drops the variable or whose `/proc` entry it cannot read, such as a
+process of another user.
+
+`GET /v1/workspaces/{id}/machines` checks every machine, and
 `GET /v1/workspaces/{id}/machines/{machine}` checks one and lists its
-processes, and `mirage workspace list-machines` prints the table.
+processes. `{machine}` is the id `ps` shows, `provider:name` such as
+`docker:box`; a bare name answers 400. `mirage workspace list-machines ID`
+prints each machine and its state.
 
 ## The machine image
 
-Every machine needs a POSIX shell at `/bin/sh` and `grep`. With
+Every machine needs a POSIX shell at `/bin/sh` and `grep`. E2B and Daytona
+also need `dd` and `base64`, which carry a program's output back. With
 [libfaketime](https://github.com/wolfcw/libfaketime) in the image, programs
 see the workspace's [`system_time`](/home/configuration#system-time). With
 `mount_type: ssh` the machine also needs `sshfs`, and a machine that runs its
 own Mirage needs `fuse3` and Mirage.
 
-The repository's Dockerfile builds that image for every provider:
+The repository's Dockerfile builds an image with `fuse3`, Mirage and
+libfaketime for every provider. It has no `sshfs`: add it for
+`mount_type: ssh`.
 
 ```bash
 docker build -f docker/sandbox/Dockerfile --target fuse \

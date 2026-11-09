@@ -127,12 +127,12 @@ Build a template with `sshfs` and pass its sandbox ID as `sandbox_id`:
 </Tabs>
 
 Keep the base image's user, which has `sudo` for mountpoints such as
-`/data`. On the default template, run `sudo apt-get install -y sshfs`
-instead.
+`/data`. On the default template, run
+`sudo apt-get update && sudo apt-get install -y sshfs` instead.
 
 ## Notes
 
-- Closing the workspace leaves the sandbox running.
+- Stopping or closing the workspace leaves the sandbox running.
 - Output comes back as the program wrote it, binary included: the
   sandbox base64-encodes it on the way out, so the image needs `dd` and
   `base64` (Debian, Ubuntu and Alpine images have both), and output

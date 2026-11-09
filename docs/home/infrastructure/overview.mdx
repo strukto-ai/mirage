@@ -18,7 +18,8 @@ with the others.
 | [Index](/home/infrastructure/file-index) | Directory listings and file metadata | `ram`, `redis` | `index`, or a mount's `index` |
 
 The rest has pages of its own: [runtimes](/home/setup/runtime/overview) run
-programs inside Mirage, on the host or in a sandbox;
+programs inside Mirage, on the host or on a
+[machine](/home/setup/machine/overview);
 [host folders](/home/setup/fuse) show a mount through FUSE, FSKit or NFS;
 and [credentials](/home/authentication) come from the environment, a dotenv
 file, AWS Secrets Manager or 1Password.
@@ -26,7 +27,7 @@ file, AWS Secrets Manager or 1Password.
 ## One store or several
 
 `store.type` places the namespace, sessions, history and jobs together. A
-group key (`namespace`, `workspace`, `observer`, `jobs`) moves one of them to
+group key (`namespace`, `workspace`, `observer`, `execution`) moves one of them to
 a backend of its own. Here symlinks and jobs live on Redis, history on disk
 and sessions in a bucket:
 

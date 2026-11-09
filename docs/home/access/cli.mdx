@@ -211,7 +211,7 @@ a `workspace_id`.
 | `mirage workspace use ID` | Make it the current workspace of the [context](#log-in). |
 | `mirage workspace get ID [--verbose]` | Show its status, mounts and sessions. A stopped workspace shows the mounts its config names and no sessions. |
 | `mirage workspace delete ID` | Delete a workspace, running or stopped, with its state and config. |
-| `mirage workspace stop ID` | Stop a workspace and keep its state and config. Stopping a stopped workspace does nothing. |
+| `mirage workspace stop ID` | Stop a workspace and keep its state and config. A `ram` mount, and the sessions on a `ram` store, come back empty. Stopping a stopped workspace does nothing. |
 | `mirage workspace start ID` | Start a stopped workspace again from the config it was created with. Starting a running workspace does nothing. |
 | `mirage workspace set-profile ID NAME FILE` | Add a [profile](/home/policy/overview) from a YAML or JSON file, or replace what `NAME` means. Sessions keep their rules until `session update` moves them, and the workspace's config is not rewritten. |
 | `mirage workspace logs ID [--session S] [--limit N] [--after CURSOR] [--jsonl]` | Show completed commands newest first, with cursor pagination. `--jsonl` exports all retained matching commands oldest first. |
@@ -294,13 +294,14 @@ name the daemon has no saved policy for is read as a file too.
 | `mirage workspace list-lines ID [--session S] [--state STATE]` | List the lines the workspace keeps. |
 | `mirage workspace list-jobs ID [--session S] [--state STATE] [--line LINE]` | List its jobs. |
 | `mirage workspace list-processes ID [--session S] [--state STATE] [--line LINE] [--job JOB] [--machine M]` | List its processes. |
+| `mirage workspace list-machines ID` | Check each [machine](/home/setup/machine/overview#machine-states) it runs programs on, and print its state. |
 
 ## Saved connections
 
-`mirage vfs`, `mirage cli` and `mirage runtime` keep connections on the
-server: a type, its settings and its credentials, saved once under a name. They
-are the [`/v1/vfs`, `/v1/clis` and
-`/v1/runtimes`](/api/reference) routes, and work the same
+`mirage vfs`, `mirage cli`, `mirage runtime` and `mirage machine` keep
+connections on the server: a type, its settings and its credentials, saved
+once under a name. They are the [`/v1/vfs`, `/v1/clis`, `/v1/runtimes` and
+`/v1/machines`](/api/reference) routes, and work the same
 against the local daemon and the hosted API. `ID` is an entry's ID or its
 name: a name is unique, so it works as an ID. On the local daemon an entry's
 ID is its name.
@@ -314,7 +315,7 @@ ID is its name.
 | `mirage vfs update ID [--set K=V] [--secret K] [--unset K] [-f FILE]` | Change an entry. Fields not named keep their values. |
 | `mirage vfs delete ID` | Delete an entry and wipe its secrets. There is no restore. |
 
-`mirage cli` and `mirage runtime` take the same commands.
+`mirage cli`, `mirage runtime` and `mirage machine` take the same commands.
 
 ```bash
 mirage vfs types github
@@ -359,6 +360,25 @@ uses the entry. The local
 daemon keeps entries under `~/.mirage/resources`, their secrets in a separate
 file only you can read.
 
+### Use a saved connection
+
+A workspace config or a template names a saved field with
+`{from: strukto, ref: NAME, key: FIELD}`, where it would write the value:
+
+```yaml workspace.yaml
+mounts:
+  /github:
+    vfs: github
+    config:
+      owner: {from: strukto, ref: github, key: owner}
+      repo: {from: strukto, ref: github, key: repo}
+      token: {from: strukto, ref: github, key: token}
+```
+
+The server fills each pointer in when it creates or starts the workspace, so
+a later `update` reaches the next start. A workspace built in your own code
+cannot read `from: strukto`.
+
 ## Sessions
 
 | Command | Does |
@@ -374,13 +394,13 @@ Each takes `-w ID`, else the current workspace, as `shell` and `vfs` do.
 
 ## Daemon
 
-The server the CLI starts. It exits 30 seconds after its last workspace is deleted, and logs to `~/.mirage/daemon.log`.
+The server the CLI starts. It exits 30 seconds after its last running workspace stops or is deleted, and logs to `~/.mirage/daemon.log`.
 
 | Command | Does |
 | --- | --- |
 | `mirage daemon status` | Show PID, uptime and workspace count. |
-| `mirage daemon stop` | Close its workspaces and exit. |
-| `mirage daemon restart [--eager]` | Stop it; the next command, or `--eager`, starts a new one. Workspaces are lost. |
+| `mirage daemon stop` | Stop its workspaces and exit. They stay stopped until `mirage workspace start`. |
+| `mirage daemon restart [--eager]` | Stop it; the next command, or `--eager`, starts a new one. Its workspaces stay stopped until `mirage workspace start`. |
 | `mirage daemon kill` | Kill it. A last resort. |
 
 ## Log in
@@ -507,5 +527,8 @@ environment variable wins over the file. Changes apply on the next start.
 | `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#set-up) |
 | `jwt_*` | `MIRAGE_JWT_*` | see [Configure authentication](/home/access/http#configure-authentication) |
 | `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Log in](#log-in) |
+
+`jwt_clock_skew` is `MIRAGE_JWT_CLOCK_SKEW_SECONDS`, and `MIRAGE_JWT_PUBKEY`
+has no key: use `jwt_pubkey_file`.
 
 `MIRAGE_HOME` moves everything under `~/.mirage`.

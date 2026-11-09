@@ -552,7 +552,7 @@ describe('MachineMounts', () => {
     expect(result.exitCode).toBe(1)
     expect(DEC.decode(result.stderr)).toBe(
       'python3: fake: serving the workspace into a machine needs sshfs there; ' +
-        'install it in the image (apt-get install sshfs)\n',
+        'install it in the image (apt-get update && apt-get install sshfs)\n',
     )
     expect(sandbox.pipes).toEqual([])
     await ws.close()
