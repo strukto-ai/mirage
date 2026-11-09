@@ -1,5 +1,7 @@
 import { Worker } from '../concurrency/worker.ts'
 import { chunks } from '../io/cooperative.ts'
+import { ByteSpool } from '../io/spool.ts'
+import type { ByteSource } from '../io/types.ts'
 import { abortable, makeAbortError } from '../utils/abort.ts'
 import { DiffReply, type DiffRequest } from './diff_worker.ts'
 import type { DiffComputer, DiffOptions, InputFactory, PairResult } from './diff_types.ts'
@@ -9,6 +11,33 @@ export const WORKER_LIMIT = 2
 export const IDLE_TTL = 1000
 export const QUEUE_LIMIT = 32
 export const RETIRE_BYTES = 16 * 1024 * 1024
+export const KEPT_BYTES = 16 * 1024 * 1024
+
+/** A comparison's output: chunks in memory up to KEPT_BYTES, what follows them in a spool. */
+class Kept {
+  private readonly chunks: Uint8Array[] = []
+  private size = 0
+  private spool: ByteSpool | null = null
+
+  async add(chunk: Uint8Array): Promise<void> {
+    if (this.size < KEPT_BYTES) {
+      this.chunks.push(chunk)
+      this.size += chunk.byteLength
+      return
+    }
+    this.spool ??= new ByteSpool()
+    await this.spool.append(chunk)
+  }
+
+  async parts(): Promise<readonly ByteSource[]> {
+    if (this.spool === null) return this.chunks
+    return [...this.chunks, await this.spool.output()]
+  }
+
+  async close(): Promise<void> {
+    await this.spool?.close()
+  }
+}
 
 type EntryState =
   | { kind: 'leased'; abort: AbortController }
@@ -154,7 +183,7 @@ export class DiffPool implements DiffComputer {
         : AbortSignal.any([signal, entry.state.abort.signal])
     let success = false
     let bytes = 0
-    const output: Uint8Array[] = []
+    const kept = new Kept()
     const stderr: Uint8Array[] = []
     const call = async (request: DiffRequest): Promise<DiffReply> => {
       const pending = entry.worker.call<unknown>('diffDispatch', [request], combined)
@@ -170,7 +199,7 @@ export class DiffPool implements DiffComputer {
       if (reply.kind === 'output') {
         if (reply.output.byteLength > CHUNK_SIZE)
           throw new Error('diff worker output exceeds limit')
-        if (reply.output.byteLength > 0) output.push(reply.output)
+        if (reply.output.byteLength > 0) await kept.add(reply.output)
         bytes += reply.output.byteLength
       } else {
         if (reply.stderr.byteLength > CHUNK_SIZE)
@@ -216,12 +245,14 @@ export class DiffPool implements DiffComputer {
         if (!state.busy) {
           if (state.status !== 2 && state.status !== (state.outcome === 'equal' ? 0 : 1))
             throw new Error('diff worker outcome disagrees with status')
+          const output = await kept.parts()
           success = true
           return { outcome: state.outcome, status: state.status, output, stderr }
         }
         await call({ kind: 'drain' })
       }
     } finally {
+      if (!success) await kept.close()
       await this.release(entry, success, bytes)
     }
   }

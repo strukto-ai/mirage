@@ -45,7 +45,7 @@ class DiffOptions:
 @dataclass(frozen=True, slots=True)
 class PairResult:
     outcome: PairOutcome
-    output: tuple[bytes, ...]
+    output: tuple[ByteSource, ...]
     status: Literal[0, 1, 2]
     stderr: tuple[bytes, ...]
 

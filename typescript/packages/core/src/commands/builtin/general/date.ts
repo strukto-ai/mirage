@@ -16,9 +16,16 @@ import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import { OutputStream, asyncChain, closeQuietly } from '../../../io/stream.ts'
-import { concat } from '../../../utils/bytes.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { isoTimestamp, parseDateExprAsync, parsePosixTimeAsync } from '../../../utils/dates.ts'
+import {
+  clockReply,
+  dateReply,
+  isoTimestamp,
+  parseDateExprAsync,
+  parsePosixTimeAsync,
+} from '../../../utils/dates.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
+import { openStreamSync } from '../../../rs/stream.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
@@ -31,7 +38,7 @@ import { CommandName } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { LOCAL_ZONE, UTC_ZONE, zoneFromEnv, type Zone } from '../../../utils/timezone.ts'
 import { systemDate } from '../../../utils/clock.ts'
-import { decodeText, encodeText } from '../../../shell/bytes.ts'
+import { byteView, encodeText } from '../../../shell/bytes.ts'
 
 const ENC = new TextEncoder()
 
@@ -114,9 +121,9 @@ async function named(expression: string, zone: Zone, signal?: AbortSignal): Prom
 }
 
 /**
- * `-f`'s output, a line at a time as the expressions arrive; what names no
- * date goes to `io`'s stderr, exit 1, once the input ends. Mirrors Python's
- * `_dated`.
+ * `-f`'s output, a line at a time as the expressions arrive, read and printed
+ * by one mirage-rs stream; what names no date goes to `io`'s stderr, exit 1.
+ * Mirrors Python's `_dated`.
  */
 async function* dated(
   first: Uint8Array,
@@ -126,38 +133,44 @@ async function* dated(
   io: IOResult,
   signal?: AbortSignal,
 ): AsyncGenerator<Uint8Array> {
-  const errors: string[] = []
-  const one = async (raw: Uint8Array): Promise<Uint8Array | null> => {
-    const text = decodeText(raw)
-    const dt = await named(text, zone, signal)
-    if (dt === null) {
-      errors.push(`date: invalid date '${quoteText(text)}'\n`)
-      return null
+  const engine = openStreamSync('date_lines', { format: byteView(fmt) })
+  const zones = new Map<string, Zone>()
+  const budget = new YieldBudget(signal)
+  let pending: Uint8Array | undefined = first
+  try {
+    for (;;) {
+      while (engine.busy()) {
+        await budget.run()
+        const out = engine.drain()
+        if (out.length > 0) yield out
+      }
+      const taken = engine.request()
+      if (taken === null) break
+      await budget.run()
+      let out: Uint8Array
+      if (taken[0].op === 'read') {
+        let chunk = pending
+        pending = undefined
+        if (chunk === undefined) {
+          const next = await rest.next()
+          chunk = next.done === true ? undefined : next.value
+        }
+        out = engine.respond({ end: chunk === undefined }, chunk ?? new Uint8Array())
+      } else if (taken[0].op === 'clock') {
+        out = engine.respond({}, clockReply())
+      } else {
+        const [reply, data] = dateReply(taken[0], zone, zones)
+        out = engine.respond(reply, data)
+      }
+      if (out.length > 0) yield out
     }
-    return encodeText(gnuStrftime(dt, fmt, zone) + '\n')
-  }
-  let held: Uint8Array[] = []
-  let chunk: Uint8Array | undefined = first
-  while (chunk !== undefined) {
-    let start = 0
-    for (let at = chunk.indexOf(0x0a); at !== -1; at = chunk.indexOf(0x0a, start)) {
-      held.push(chunk.subarray(start, at))
-      const out = await one(concat(held))
-      if (out !== null) yield out
-      held = []
-      start = at + 1
-    }
-    if (start < chunk.length) held.push(chunk.subarray(start))
-    const next = await rest.next()
-    chunk = next.done === true ? undefined : next.value
-  }
-  if (held.length > 0) {
-    const out = await one(concat(held))
-    if (out !== null) yield out
-  }
-  if (errors.length > 0) {
-    io.exitCode = 1
-    io.stderr = encodeText(errors.join(''))
+    const last = engine.finish()
+    if (last.length > 0) yield last
+    io.exitCode = engine.status()
+    const errors = engine.takeStderr()
+    if (errors.length > 0) io.stderr = errors
+  } finally {
+    engine.close()
   }
 }
 

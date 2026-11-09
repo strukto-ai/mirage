@@ -951,6 +951,32 @@ fn test_agrees_with_the_stepped_match() {
         );
     }
 }
+fn tails(patterns: &[&str], name: &str) -> bool {
+    let patterns: Vec<Vec<u32>> = patterns.iter().map(|text| units(text)).collect();
+    let config = serde_json::to_vec(&json!({"patterns": patterns})).unwrap();
+    let subject: Vec<u8> = units(name)
+        .iter()
+        .flat_map(|unit| unit.to_le_bytes())
+        .collect();
+    open_tails(&config).unwrap().test(&subject).unwrap()
+}
+
+#[test]
+fn test_tails_answer_for_the_name_or_any_part_after_a_slash() {
+    assert!(tails(&["b"], "d/x/b"));
+    assert!(tails(&["q", "x/b"], "d/x/b"));
+    assert!(tails(&["d*b"], "d/x/b"));
+    assert!(!tails(&["x"], "d/x/b"));
+    assert!(!tails(&["B"], "d/x/b"));
+    assert!(!tails(&[], "d"));
+}
+
+#[test]
+fn test_tails_refuse_a_split_unit() {
+    let config = serde_json::to_vec(&json!({"patterns": [units("a")]})).unwrap();
+    assert!(open_tails(&config).unwrap().test(&[97, 0]).is_err());
+}
+
 #[test]
 fn test_refuses_a_split_unit_and_a_busy_stream() {
     let config =

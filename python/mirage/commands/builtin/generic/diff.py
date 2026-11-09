@@ -32,6 +32,7 @@ from mirage.commands.spec.usage import (
     extra_operand_error,
     missing_operand_error,
 )
+from mirage.concurrency.limiter import owned_task, settle
 from mirage.core.api.errors import ApiError
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
@@ -39,6 +40,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.diff_pool import DiffPool
 from mirage.rs.diff_types import (
@@ -463,9 +465,10 @@ async def _diff_dirs(
     dir_a: PathSpec,
     dir_b: PathSpec,
     walk: _Walk,
+    parts: list[ByteSource],
     absent: Absent = PRESENT,
     above: tuple[tuple[str, ...], tuple[str, ...]] = ((), ()),
-) -> tuple[list[bytes], bool]:
+) -> bool:
     """Compare two directories, one of which -N may read as empty.
 
     Where diff follows links, a pair whose every side is a directory
@@ -476,13 +479,15 @@ async def _diff_dirs(
         dir_a (PathSpec): the first directory.
         dir_b (PathSpec): the second directory.
         walk (_Walk): the reads and the parsed line.
+        parts (list[ByteSource]): the output so far, which the caller
+            closes if the walk fails.
         absent (Absent): which side is missing.
         above (tuple[tuple[str, ...], tuple[str, ...]]): each side's
             directories open above this pair, as the paths they resolve
             to.
 
     Returns:
-        tuple[list[bytes], bool]: output chunks and whether any pair differed.
+        bool: whether any pair differed.
     """
     flags = walk.flags
     real = walk.real
@@ -498,7 +503,6 @@ async def _diff_dirs(
     names_b = await _entries(walk, dir_b, absent[1])
     left = _name(dir_a).rstrip("/")
     right = _name(dir_b).rstrip("/")
-    parts: list[bytes] = []
     differ = False
     for name in sorted(names_a | names_b):
         in_a = name in names_a
@@ -532,10 +536,9 @@ async def _diff_dirs(
                     f"diff: {named}: recursive directory loop\n".encode()
                 )
                 continue
-            children, changed = await _diff_dirs(
-                child_a, child_b, walk, gone, opened
+            changed = await _diff_dirs(
+                child_a, child_b, walk, parts, gone, opened
             )
-            parts.extend(children)
             differ = differ or changed
         elif not a_dir and not b_dir:
             result = await _diff_pair(child_a, child_b, walk, gone)
@@ -573,7 +576,7 @@ async def _diff_dirs(
                     f"{_name(child_b)} is a directory\n"
                 ).encode()
             )
-    return parts, differ
+    return differ
 
 
 async def _missing(
@@ -677,7 +680,12 @@ async def diff(
         if both_dirs:
             for path in paths:
                 await before_full_walk(dispatch, path, "diff")
-            output, differ = await _diff_dirs(paths[0], paths[1], walk)
+            output: list[ByteSource] = []
+            try:
+                differ = await _diff_dirs(paths[0], paths[1], walk, output)
+            except BaseException:
+                await settle(owned_task(_close_parts(output)))
+                raise
         else:
             result = await _diff_pair(paths[0], paths[1], walk, absent)
             output, differ = list(result.output), result.outcome == "different"
@@ -708,10 +716,19 @@ async def diff(
     return _output(output), IOResult(exit_code=1 if differ else 0)
 
 
-async def _output(parts: list[bytes]) -> AsyncIterator[bytes]:
+async def _output_chunks(parts: Sequence[ByteSource]) -> AsyncIterator[bytes]:
     for part in parts:
         async for chunk in chunks(part):
             yield chunk
+
+
+async def _close_parts(parts: Sequence[ByteSource]) -> None:
+    for part in parts:
+        await close_quietly(part)
+
+
+def _output(parts: Sequence[ByteSource]) -> OutputStream:
+    return OutputStream(_output_chunks(parts), partial(_close_parts, parts))
 
 
 __all__ = ["diff"]

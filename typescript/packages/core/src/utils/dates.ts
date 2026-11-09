@@ -125,6 +125,27 @@ function dateRequest(
   return { offset: shown.offsetSec, name: shown.abbrev }
 }
 
+/** The answer to a date stream asking the time, in seconds and nanoseconds. Mirrors Python's clock_reply. */
+export function clockReply(): Uint8Array {
+  const ms = systemDate().getTime()
+  const seconds = Math.floor(ms / 1000)
+  return encodeText(JSON.stringify([seconds, (ms - seconds * 1000) * 1000000]))
+}
+
+/** The answer to one of a date stream's zone questions. Mirrors Python's date_reply. */
+export function dateReply(
+  header: Record<string, util.JSONType>,
+  zone: Zone,
+  zones: Map<string, Zone>,
+): [Record<string, util.JSONType>, Uint8Array] {
+  try {
+    return [{}, encodeText(JSON.stringify(dateRequest(header, zone, zones)))]
+  } catch (err) {
+    if (!(err instanceof RangeError)) throw err
+    return [{ error: 'invalid date' }, new Uint8Array()]
+  }
+}
+
 function* dateSteps(
   text: string,
   mode: 'expr' | 'posix',
@@ -150,15 +171,7 @@ function* dateSteps(
       while (engine.busy()) yield engine.drain()
       const taken = engine.request()
       if (taken === null) break
-      let data: Uint8Array
-      let reply: Record<string, util.JSONType> = {}
-      try {
-        data = encodeText(JSON.stringify(dateRequest(taken[0], zone, zones)))
-      } catch (err) {
-        if (!(err instanceof RangeError)) throw err
-        data = new Uint8Array()
-        reply = { error: 'invalid date' }
-      }
+      const [reply, data] = dateReply(taken[0], zone, zones)
       yield engine.respond(reply, data)
     }
   } finally {

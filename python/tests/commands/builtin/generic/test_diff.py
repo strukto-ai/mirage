@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,8 +26,10 @@ from mirage.commands.builtin.generic.diff import (
 from mirage.commands.spec import SPECS
 from mirage.core.api.errors import ApiError
 from mirage.io.memory import MemoryBudget, run_with_memory
+from mirage.io.stream import OutputStream
 from mirage.io.types import IOResult, materialize
 from mirage.rs.diff_pool import DiffPool
+from mirage.rs.diff_types import PairResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.timezone import resolve_tz
 from mirage.workspace.executor.command.flags import (
@@ -428,3 +431,45 @@ async def test_recursive_side_by_side_heads_every_pair_it_shows():
             pair, stream=read, readdir_fn=readdir, stat_fn=stat, flags=flags
         )
         assert (await materialize(out), io.exit_code) == (expected, 1)
+
+
+async def _one_empty_chunk():
+    yield b""
+
+
+@pytest.mark.asyncio
+async def test_a_walk_that_fails_closes_the_output_it_kept():
+    closed: list[bool] = []
+    calls: list[bool] = []
+
+    async def close() -> None:
+        closed.append(True)
+
+    async def compare(options, old, new) -> PairResult:
+        calls.append(True)
+        if len(calls) > 1:
+            raise FileNotFoundError("gone")
+        kept = OutputStream(_one_empty_chunk(), close)
+        return PairResult("different", (kept,), 1, ())
+
+    async def readdir(path: PathSpec) -> list[str]:
+        return [f"{path.virtual}/1", f"{path.virtual}/2"]
+
+    async def stat(path: PathSpec) -> FileStat:
+        kind = (
+            FileType.DIRECTORY
+            if path.virtual in ("/d/a", "/d/b")
+            else FileType.FILE
+        )
+        return FileStat(name=path.virtual, type=kind)
+
+    out, io = await diff(
+        [_operand("a", "/d/a"), _operand("b", "/d/b")],
+        stream=_readdir,
+        readdir_fn=readdir,
+        stat_fn=stat,
+        flags=DiffFlags(recursive=True),
+        computer=SimpleNamespace(compare=compare),
+    )
+    assert (out, io.exit_code) == (None, 2)
+    assert closed == [True]

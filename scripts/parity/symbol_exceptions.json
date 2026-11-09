@@ -126,10 +126,12 @@
   "commands/builtin/generic/diff": {
    "python_only": {
     "_side": "Python read callbacks are awaitable and partial binds an absent-or-read input factory; TypeScript closures provide a lazy ByteSource.",
-    "_output": "Python exposes stored output chunks as an async iterator; TypeScript outputChunks provides the same ByteSource."
-   },
+    "_output": "Python wraps the stored output in an OutputStream in a helper; TypeScript builds it where it returns."
+   }
+  },
+  "commands/builtin/generic/tree": {
    "typescript_only": {
-    "outputChunks": "TypeScript exposes stored output chunks as an async iterator; Python _output provides the same ByteSource."
+    "nameMatchers": "The matcher kept for each list of .gitignore rules; Python's any_tail_matcher cache holds the same entries."
    }
   },
   "rs/diff_worker": {
@@ -203,7 +205,8 @@
     "units": "Validates character-value arrays returned by Rust; Python checks integer units while constructing a string.",
     "finalizer": "Closes Wasm slots for abandoned synchronous matcher objects; Python releases native streams by reference counting.",
     "matchers": "The compiled-pattern map behind globMatcher; Python's functools.lru_cache holds the same entries.",
-    "scratch": "One reused buffer for the code units a synchronous call copies into Wasm; Python's str.encode builds them natively."
+    "scratch": "One reused buffer for the code units a synchronous call copies into Wasm; Python's str.encode builds them natively.",
+    "tailMatchers": "The compiled-matcher map behind anyTailMatcher; Python's functools.lru_cache holds the same entries."
    }
   },
   "rs/regex": {

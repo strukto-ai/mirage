@@ -75,6 +75,32 @@ def _date_request(
     return json.dumps({"offset": offset, "name": abbreviation}).encode()
 
 
+def clock_reply() -> bytes:
+    """The answer to a date stream asking the time, in seconds and
+    nanoseconds."""
+    return json.dumps(
+        divmod(round(system_now() * 1_000_000_000), 1_000_000_000)
+    ).encode()
+
+
+def date_reply(
+    header: Mapping[str, JsonValue],
+    tz: tzinfo | None,
+    zones: dict[str, tzinfo],
+) -> tuple[dict[str, JsonValue], bytes]:
+    """The answer to one of a date stream's zone questions.
+
+    Args:
+        header (Mapping[str, JsonValue]): the question.
+        tz (tzinfo | None): the command's zone; None is the host's.
+        zones (dict[str, tzinfo]): the named zones resolved so far.
+    """
+    try:
+        return {}, _date_request(header, tz, zones)
+    except (OverflowError, ValueError, OSError):
+        return {"error": "invalid date"}, b""
+
+
 def _date_steps(
     text: str, mode: str, tz: tzinfo | None, now: datetime | None
 ) -> Generator[bytes, None, None]:
@@ -103,12 +129,7 @@ def _date_steps(
         if taken is None:
             break
         header, _ = taken
-        try:
-            data = _date_request(header, tz, zones)
-            reply: dict[str, JsonValue] = {}
-        except (OverflowError, ValueError, OSError):
-            data, reply = b"", {"error": "invalid date"}
-        yield engine.respond(reply, data)
+        yield engine.respond(*date_reply(header, tz, zones))
 
 
 def _date_result(

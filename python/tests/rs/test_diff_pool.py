@@ -334,6 +334,34 @@ async def test_close_cancels_active_rejects_queued_and_waits_for_all_children(
 
 
 @pytest.mark.asyncio
+async def test_output_past_the_kept_size_goes_to_a_spool(monkeypatch):
+    monkeypatch.setattr(diff_pool, "KEPT_BYTES", 1024)
+    pool = DiffPool()
+    try:
+        result = await pool.compare(
+            DiffOptions(),
+            partial(_bytes, b"a" * 500000),
+            partial(_bytes, b"b" * 500000),
+        )
+        assert len(result.output) == 2
+        kept, spooled = result.output
+        assert isinstance(kept, bytes)
+        if not isinstance(spooled, bytes):
+            spooled = b"".join([chunk async for chunk in spooled])
+        note = b"\n\\ No newline at end of file\n"
+        assert kept + spooled == (
+            b"1c1\n< "
+            + b"a" * 500000
+            + note
+            + b"---\n> "
+            + b"b" * 500000
+            + note
+        )
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
 async def test_large_output_is_bounded_and_event_loop_runs():
     pool = DiffPool()
     heartbeat = asyncio.Event()

@@ -21,6 +21,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.builtin.general.date import _each_line
 from mirage.commands.config import Context
 from mirage.io.stream import close_quietly
+from mirage.io.types import materialize
 from mirage.types import PathSpec
 
 
@@ -201,3 +202,59 @@ async def test_date_f_closed_early_closes_its_input(pulls):
         assert await anext(out) == b"0\n"
     await close_quietly(out)
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_date_f_prints_each_line_and_reports_the_rest():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell(
+            "printf '2001-02-03 04:05:06.123456789\\n\\n  \\nnot a date\\n@5'"
+            " > /l"
+        )
+        assert await _run(ws, "date -u -f /l '+%T.%N'") == (
+            "04:05:06.123456789\n"
+            "00:00:00.000000000\n"
+            "00:00:00.000000000\n"
+            "00:00:05.000000000\n",
+            "date: invalid date 'not a date'\n",
+            1,
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_date_f_answers_a_line_naming_its_own_zone():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell(
+            "printf 'TZ=\"Asia/Tokyo\" 2001-02-03 04:05:06\\n' > /z"
+        )
+        line = "TZ=America/New_York date -f /z '+%F %T %Z %z'"
+        assert await _run(ws, line) == (
+            "2001-02-02 14:05:06 EST -0500\n",
+            "",
+            0,
+        )
+    finally:
+        await ws.close()
+
+
+async def _two_nows():
+    yield b"now\n"
+    yield b"now\n"
+
+
+class _TwoNows:
+    async def read(self, path, *, stream):
+        return _two_nows()
+
+
+@pytest.mark.asyncio
+async def test_date_f_reads_the_clock_as_each_read_returns(monkeypatch):
+    moments = iter([1000.0, 2000.0])
+    monkeypatch.setattr("mirage.utils.dates.system_now", lambda: next(moments))
+    ctx = Context(flags={"u": True}, vfs=_TwoNows())
+    out, _ = await _each_line(ctx, PathSpec.from_str_path("/l"), None, "%s")
+    assert await materialize(out) == b"1000\n2000\n"

@@ -101,7 +101,18 @@ impl Strftime {
     }
 
     pub(crate) fn utc(epoch: i64, nanosecond: u32) -> Result<Self, StreamError> {
-        let (year, month, day, hour, minute, second) = crate::calendar::fields(i128::from(epoch));
+        Self::zoned(epoch, nanosecond, 0, "UTC".into())
+    }
+
+    /// One moment as a zone shows it, by that zone's offset and name.
+    pub(crate) fn zoned(
+        epoch: i64,
+        nanosecond: u32,
+        offset: i64,
+        zone: String,
+    ) -> Result<Self, StreamError> {
+        let (year, month, day, hour, minute, second) =
+            crate::calendar::fields(i128::from(epoch) + i128::from(offset));
         Self::new(Config {
             year: year as i64,
             month: month as usize,
@@ -111,8 +122,8 @@ impl Strftime {
             second: second as i64,
             nanosecond,
             epoch,
-            offset: 0,
-            zone: "UTC".into(),
+            offset,
+            zone,
         })
     }
 }

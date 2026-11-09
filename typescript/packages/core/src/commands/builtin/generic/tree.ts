@@ -15,14 +15,17 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { asyncChain } from '../../../io/stream.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import {
   LINK_TARGET_KEY,
   FileStat,
   FileType,
   LineFacts,
   PathSpec,
+  type ReaddirFn,
   type ReadStreamFn,
+  type StatFn,
 } from '../../../types.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { enoent, isMissError, isWalkError } from '../../../errors/fs.ts'
@@ -35,6 +38,7 @@ import { linksOf, mountsOf } from '../utils/links.ts'
 import { vfsReaddirPath, vfsStatPath } from '../utils/paths.ts'
 import { WalkBudget } from '../utils/tree.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
+import { AnyTailMatcher } from '../../../rs/glob.ts'
 import { refused, scan } from '../../../rs/scan.ts'
 import { lsModeString, styledTime } from '../utils/formatting.ts'
 import { sortByVersion } from './ls.ts'
@@ -42,6 +46,8 @@ import { isoTimestamp } from '../../../utils/dates.ts'
 import { contentSize, posixMode } from '../../../utils/stat_view.ts'
 
 const UNOPENABLE_MARK = '  [error opening dir]'
+// The lines a drawing holds before it writes them, whatever comes next.
+const HELD_LINES = 1024
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
@@ -267,15 +273,46 @@ export function segmentsMatch(parts: readonly string[], pattern: readonly string
 
 // Whether the last .gitignore pattern that matches an entry leaves it out.
 // Mirrors Python's `_ignored`.
-function ignored(rules: readonly Ignore[], virtual: string, isDir: boolean): boolean {
+// One matcher over the patterns a name alone decides, so an entry none of them
+// matches costs one call however many there are. Mirrors Python's
+// `_name_matcher`, one for each list of rules.
+const nameMatchers = new WeakMap<readonly Ignore[], AnyTailMatcher | null>()
+
+function nameMatcher(rules: readonly Ignore[]): AnyTailMatcher | null {
+  let matcher = nameMatchers.get(rules)
+  if (matcher === undefined) {
+    const patterns = rules.filter((rule) => !rule.anchored).map((rule) => rule.pattern)
+    matcher = patterns.length > 0 ? new AnyTailMatcher(patterns) : null
+    nameMatchers.set(rules, matcher)
+  }
+  return matcher
+}
+
+function ignored(
+  rules: readonly Ignore[],
+  names: AnyTailMatcher | null,
+  virtual: string,
+  isDir: boolean,
+): boolean {
   let out = false
+  const name = virtual.slice(virtual.lastIndexOf('/') + 1)
+  const named = names?.matches(name) === true
+  let base: string | null = null
+  let parts: string[] = []
   for (const rule of rules) {
     if (rule.directory && !isDir) continue
-    const base = rstripSlash(rule.base)
-    const relative = virtual.startsWith(`${base}/`) ? virtual.slice(base.length + 1) : virtual
-    const hit = rule.anchored
-      ? segmentsMatch(relative.split('/'), rule.pattern.split('/'))
-      : fnmatch(virtual.slice(virtual.lastIndexOf('/') + 1), rule.pattern)
+    let hit: boolean
+    if (!rule.anchored) hit = named && fnmatch(name, rule.pattern)
+    else {
+      if (rule.base !== base) {
+        base = rule.base
+        const root = rstripSlash(base)
+        parts = (virtual.startsWith(`${root}/`) ? virtual.slice(root.length + 1) : virtual).split(
+          '/',
+        )
+      }
+      hit = segmentsMatch(parts, rule.pattern.split('/'))
+    }
     if (hit) out = !rule.negated
   }
   return out
@@ -373,14 +410,35 @@ function childMounts(mounts: MountView | null, directory: string): string[] {
 // the run exits 2. A directory past the budget is drawn but not opened, and
 // one holding more entries than --filelimit is drawn with a note instead.
 // Mirrors Python's `_walk_tree`.
-async function walkTree(
-  readdir: (p: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>,
-  stat: (p: PathSpec) => Promise<FileStat>,
+// One opened directory: its entries in drawing order (null when it has none
+// to draw, `note` then saying why), which of them are mounts it crosses into,
+// and the ignore rules its subtree inherits. Mirrors Python's `_Listing`.
+interface Listing {
+  readonly nodes: TreeNode[] | null
+  readonly note: string
+  readonly unopened: number
+  readonly crossed: ReadonlySet<TreeNode>
+  readonly rules: readonly Ignore[]
+}
+
+// One operand's drawing in progress: lines not yet written and what has been
+// counted so far. Mirrors Python's `_Drawing`.
+interface Drawing {
+  lines: string[]
+  dirs: number
+  files: number
+  unopened: number
+}
+
+// One directory's own entries, in the order they are drawn. Mirrors Python's
+// `_open_dir`.
+async function openDir(
+  readdir: ReaddirFn<[p: PathSpec, nofollow?: boolean, limit?: number]>,
+  stat: StatFn,
   path: PathSpec,
   treeOpts: TreeOpts,
-  depth: number,
-  inherited: readonly Ignore[] = [],
-): Promise<{ nodes: TreeNode[] | null; note: string; unopened: number }> {
+  inherited: readonly Ignore[],
+): Promise<Listing> {
   const flags = treeOpts.flags
   // The mount table is read before the backend, not merged after it. A
   // directory that exists only because mounts sit under it (`/repos` when
@@ -399,7 +457,7 @@ async function walkTree(
     // when mounts sit under it; swallowing that to draw the children would
     // report a readable tree that is not.
     if (nested.length === 0 || !isMissError(err)) {
-      return { nodes: null, note: UNOPENABLE_MARK, unopened: 1 }
+      return { nodes: null, note: UNOPENABLE_MARK, unopened: 1, crossed: new Set(), rules: [] }
     }
     entries = []
   }
@@ -407,9 +465,9 @@ async function walkTree(
   if (flags.sort !== 'none') entries.sort(compareCodePoints)
   const budget = treeOpts.budget
   if (budget !== undefined) entries = entries.filter(() => budget.spend(path.virtual))
-  const rules = flags.gitignore
-    ? [...inherited, ...(await gitignore(treeOpts.read, path, entries))]
-    : inherited
+  const found = flags.gitignore ? await gitignore(treeOpts.read, path, entries) : []
+  const rules = found.length > 0 ? [...inherited, ...found] : inherited
+  const names = nameMatcher(rules)
   const kept: { node: TreeNode; crossing: boolean }[] = []
   for (const entry of entries) {
     const childPath = rstripSlash(entry)
@@ -456,7 +514,7 @@ async function walkTree(
       !fnmatch(s.name, flags.matchPattern)
     )
       continue
-    if (rules.length > 0 && ignored(rules, childPath, isDir)) continue
+    if (rules.length > 0 && ignored(rules, names, childPath, isDir)) continue
     kept.push({
       node: {
         spec: sub,
@@ -477,33 +535,67 @@ async function walkTree(
       nodes: null,
       note: `  [${String(kept.length)} entries exceeds filelimit, not opening dir]`,
       unopened: 0,
+      crossed: new Set(),
+      rules: [],
     }
-  const crossed = new Set(kept.filter((k) => k.crossing).map((k) => k.node))
-  let nodes: TreeNode[] = []
+  return {
+    nodes: await sorted(
+      flags,
+      kept.map((k) => k.node),
+    ),
+    note: '',
+    unopened: 0,
+    crossed: new Set(kept.filter((k) => k.crossing).map((k) => k.node)),
+    rules,
+  }
+}
+
+// Whether the walk goes into a drawn entry: a real directory, above -L, and
+// inside the budget. A directory past the budget is drawn but not opened.
+function opens(treeOpts: TreeOpts, node: TreeNode, depth: number): boolean {
+  if (node.stat.type !== FileType.DIRECTORY) return false
+  const { maxDepth } = treeOpts.flags
+  if (maxDepth !== null && depth + 1 >= maxDepth) return false
+  return treeOpts.budget === undefined || treeOpts.budget.opens(node.spec.virtual)
+}
+
+// Past a mount root the subtree belongs to another VFS, so the rest of this
+// branch reads through the dispatcher. Deeper mounts under it need no second
+// switch: the dispatcher already routes every path to its owner.
+function readBelow(
+  treeOpts: TreeOpts,
+  listing: Listing,
+  node: TreeNode,
+  readdir: ReaddirFn<[p: PathSpec, nofollow?: boolean, limit?: number]>,
+  stat: StatFn,
+): [ReaddirFn<[p: PathSpec, nofollow?: boolean, limit?: number]>, StatFn] {
+  if (!listing.crossed.has(node)) return [readdir, stat]
+  return [treeOpts.crossReaddir ?? readdir, treeOpts.crossStat ?? stat]
+}
+
+async function walkTree(
+  readdir: ReaddirFn<[p: PathSpec, nofollow?: boolean, limit?: number]>,
+  stat: StatFn,
+  path: PathSpec,
+  treeOpts: TreeOpts,
+  depth: number,
+  inherited: readonly Ignore[] = [],
+): Promise<{ nodes: TreeNode[] | null; note: string; unopened: number }> {
+  const listing = await openDir(readdir, stat, path, treeOpts, inherited)
+  if (listing.nodes === null) return listing
+  let nodes = listing.nodes
   let unopened = 0
-  for (const node of await sorted(
-    flags,
-    kept.map((k) => k.node),
-  )) {
-    nodes.push(node)
-    if (node.stat.type !== FileType.DIRECTORY) continue
-    if (flags.maxDepth !== null && depth + 1 >= flags.maxDepth) continue
-    if (budget !== undefined && !budget.opens(node.spec.virtual)) continue
-    // Past a mount root the subtree belongs to another VFS, so the rest of
-    // this branch reads through the dispatcher. Deeper mounts under it need
-    // no second switch: the dispatcher already routes every path to its
-    // owner.
-    const crossing = crossed.has(node)
-    const subReaddir = crossing ? (treeOpts.crossReaddir ?? readdir) : readdir
-    const subStat = crossing ? (treeOpts.crossStat ?? stat) : stat
-    const child = await walkTree(subReaddir, subStat, node.spec, treeOpts, depth + 1, rules)
+  for (const node of nodes) {
+    if (!opens(treeOpts, node, depth)) continue
+    const [subReaddir, subStat] = readBelow(treeOpts, listing, node, readdir, stat)
+    const child = await walkTree(subReaddir, subStat, node.spec, treeOpts, depth + 1, listing.rules)
     node.children = child.nodes
     node.note = child.note
     node.unopened = child.unopened
     if (child.nodes !== null) node.du += child.nodes.reduce((sum, c) => sum + c.du, 0)
     unopened += child.unopened
   }
-  if (flags.prune && !flags.dirsOnly)
+  if (treeOpts.flags.prune && !treeOpts.flags.dirsOnly)
     nodes = nodes.filter(
       (n) => n.stat.type !== FileType.DIRECTORY || (n.children?.length ?? 0) > 0 || n.note !== '',
     )
@@ -561,17 +653,74 @@ function shown(flags: TreeFlags, node: TreeNode, root = false): string {
   return name + (flags.classify ? classify(node.stat) : '')
 }
 
+function textLine(flags: TreeFlags, node: TreeNode, prefix: string, last: boolean): string {
+  const lead = flags.noIndent ? '' : prefix + (last ? LAST : BRANCH)
+  return lead + meta(flags, node) + shown(flags, node) + node.note
+}
+
+function rootLine(flags: TreeFlags, root: TreeNode): string {
+  const line = root.missing ? root.spec.rawPath : meta(flags, root) + shown(flags, root, true)
+  return line + root.note
+}
+
 function textLines(flags: TreeFlags, nodes: readonly TreeNode[], prefix: string): string[] {
   const lines: string[] = []
   nodes.forEach((node, i) => {
     const last = i === nodes.length - 1
-    const lead = flags.noIndent ? '' : prefix + (last ? LAST : BRANCH)
-    lines.push(lead + meta(flags, node) + shown(flags, node) + node.note)
+    lines.push(textLine(flags, node, prefix, last))
     if (node.children !== null && node.children.length > 0)
       for (const line of textLines(flags, node.children, prefix + (last ? INDENT : VERTICAL)))
         lines.push(line)
   })
   return lines
+}
+
+function flushed(drawing: Drawing): Uint8Array {
+  const out = formatRecords(drawing.lines)
+  drawing.lines = []
+  return out
+}
+
+// A listed directory's lines, each written once its own listing is read. What
+// is drawn so far goes out before the next directory is opened, so a reader
+// that stops early stops the walk. Mirrors Python's `_draw`.
+async function* draw(
+  listing: Listing,
+  readdir: ReaddirFn<[p: PathSpec, nofollow?: boolean, limit?: number]>,
+  stat: StatFn,
+  treeOpts: TreeOpts,
+  depth: number,
+  prefix: string,
+  drawing: Drawing,
+): AsyncGenerator<Uint8Array> {
+  const nodes = listing.nodes ?? []
+  for (const [i, node] of nodes.entries()) {
+    const last = i === nodes.length - 1
+    let below: Listing | null = null
+    let subReaddir = readdir
+    let subStat = stat
+    if (opens(treeOpts, node, depth)) {
+      if (drawing.lines.length > 0) yield flushed(drawing)
+      ;[subReaddir, subStat] = readBelow(treeOpts, listing, node, readdir, stat)
+      below = await openDir(subReaddir, subStat, node.spec, treeOpts, listing.rules)
+      node.note = below.note
+      drawing.unopened += below.unopened
+    }
+    drawing.lines.push(textLine(treeOpts.flags, node, prefix, last))
+    if (node.isDir) drawing.dirs += 1
+    else drawing.files += 1
+    if (drawing.lines.length >= HELD_LINES) yield flushed(drawing)
+    if (below === null) continue
+    yield* draw(
+      below,
+      subReaddir,
+      subStat,
+      treeOpts,
+      depth + 1,
+      prefix + (last ? INDENT : VERTICAL),
+      drawing,
+    )
+  }
 }
 
 const JSON_TYPES: ReadonlyMap<FileType, string> = new Map([
@@ -631,12 +780,161 @@ function notCrossed(): Promise<string[]> {
   return Promise.resolve([])
 }
 
+// The operands' drawing, under one summary; see `treeGeneric`. Mirrors
+// Python's `_rendered`.
+async function* rendered(
+  targets: readonly PathSpec[],
+  readdir: ReaddirFn<[p: PathSpec, nofollow?: boolean, limit?: number]>,
+  stat: StatFn,
+  treeOpts: TreeOpts,
+  statPath: ReturnType<typeof vfsStatPath>,
+  io: IOResult,
+): AsyncGenerator<Uint8Array> {
+  const flags = treeOpts.flags
+  const live = !(flags.json || flags.prune || flags.du)
+  const roots: TreeNode[] = []
+  let totalDirs = 0
+  let totalFiles = 0
+  let anyError = false
+  const stopped: string[] = []
+  for (const p of targets) {
+    let label = p.rawPath !== '' ? p.rawPath : p.virtual
+    // -f names every entry from the operand, which drops the operand's
+    // trailing slashes first (tree 2.2.1).
+    if (flags.fullPath) label = rstripSlash(label) || '/'
+    const spec = new PathSpec({
+      virtual: p.virtual,
+      directory: p.directory,
+      resolved: p.resolved,
+      vfsPath: p.vfsPath,
+      rawPath: label,
+    })
+    // What the operand is decides the whole result, so it is resolved
+    // before the walk rather than inferred from how a backend answered
+    // readdir on it: an object store lists a file key as an empty prefix,
+    // lists a missing path as one too, and Graph 404s, which read as
+    // three different trees. The probe asks both channels a backend can
+    // answer on, so a directory that exists only as its children still
+    // reports as one and null means nothing is there.
+    //
+    // tree prints the same inline marker either way; what differs is the
+    // count and the status. A non-directory exists, so it is counted and
+    // the exit stays 0; a path that is not there is not counted and exits 2.
+    const start = statPath === undefined ? null : await statPath(p)
+    const row =
+      start ??
+      new FileStat({ name: label.slice(label.lastIndexOf('/') + 1), type: FileType.DIRECTORY })
+    const root: TreeNode = {
+      spec,
+      stat: row,
+      isDir: true,
+      leads: null,
+      children: null,
+      note: '',
+      unopened: 0,
+      du: contentSize(row),
+      missing: false,
+    }
+    roots.push(root)
+    if (statPath !== undefined && start === null) {
+      root.note = UNOPENABLE_MARK
+      root.missing = true
+      root.du = 0
+      anyError = true
+      if (live) yield formatRecords([rootLine(flags, root)])
+      continue
+    }
+    if (start !== null && start.type !== FileType.DIRECTORY) {
+      root.isDir = false
+      root.note = UNOPENABLE_MARK
+      totalFiles += 1
+      if (live) yield formatRecords([rootLine(flags, root)])
+      continue
+    }
+    const budget = new WalkBudget(p, treeOpts.mounts)
+    const opts: TreeOpts = { ...treeOpts, budget }
+    let counted: [number, number]
+    if (live) {
+      const listing = await openDir(readdir, stat, spec, opts, [])
+      root.children = listing.nodes
+      root.note = listing.note
+      const drawing: Drawing = {
+        lines: [rootLine(flags, root)],
+        dirs: 0,
+        files: 0,
+        unopened: listing.unopened,
+      }
+      yield* draw(listing, readdir, stat, opts, 0, '', drawing)
+      if (drawing.lines.length > 0) yield flushed(drawing)
+      root.unopened = drawing.unopened
+      counted = [drawing.dirs, drawing.files]
+    } else {
+      const walked = await walkTree(readdir, stat, spec, opts, 0)
+      root.children = walked.nodes
+      root.note = walked.note
+      root.unopened = walked.unopened
+      counted = counts(root.children ?? [])
+    }
+    for (const line of budget.stopped) stopped.push(`tree: ${line}`)
+    if (root.children !== null) root.du += root.children.reduce((sum, c) => sum + c.du, 0)
+    // With statPath wired the two clear cases are already answered above,
+    // so this covers a directory that exists but could not be read (a
+    // permission error).
+    if (root.unopened > 0 && root.children === null) {
+      anyError = true
+      continue
+    }
+    // tree counts the root as a directory once it has any listed entry (an
+    // empty root reports 0), or a note in place of them.
+    if ((root.children?.length ?? 0) > 0 || root.note !== '') {
+      totalDirs += counted[0] + 1
+      totalFiles += counted[1]
+    }
+    // A directory below the root it could not open is marked inline and
+    // makes the run exit 2, as tree does, with nothing on stderr.
+    if (root.unopened > 0) anyError = true
+  }
+  // A walk past walkLimit draws what it listed and says where it stopped,
+  // exiting 2 as for a directory it could not open.
+  io.exitCode = anyError || stopped.length > 0 ? 2 : 0
+  if (stopped.length > 0) io.stderr = formatRecords(stopped)
+  const du = roots.reduce((sum, root) => sum + root.du, 0)
+  if (live) {
+    if (!flags.noReport) yield formatRecords(['', summary(totalDirs, totalFiles, flags.dirsOnly)])
+  } else if (flags.json) {
+    const report = jsonReport(flags, totalDirs, totalFiles, du)
+    if (flags.noIndent) {
+      const entries = roots.map((root) => jsonEntry(flags, root, 1, true))
+      if (!flags.noReport) entries.push(report)
+      yield ENC.encode(`[${entries.join(',')}]\n`)
+    } else {
+      const body = roots.map((root) => `  ${jsonEntry(flags, root, 1, true)}`).join(',\n')
+      yield ENC.encode(`[\n${body}${flags.noReport ? '\n' : `\n,\n  ${report}`}\n]\n`)
+    }
+  } else {
+    const lines: string[] = []
+    for (const root of roots) {
+      lines.push(rootLine(flags, root))
+      for (const below of textLines(flags, root.children ?? [], '')) lines.push(below)
+    }
+    if (!flags.noReport) {
+      let tail = summary(totalDirs, totalFiles, flags.dirsOnly)
+      if (flags.du) tail = ` ${String(du).padStart(11)} bytes used in ${tail}`
+      lines.push('', tail)
+    }
+    yield formatRecords(lines)
+  }
+}
+
 /**
  * Run tree over resolved operands, tree's drawing or its -J JSON, under one
  * summary. `unbounded` is the walk to take when no `-L` bounds it (one the
  * mount answers whole), else `readdir` and `stat`; `read` is the mount's
  * reader, for --gitignore. Mirrors Python's `tree_generic` and `tree`;
- * `parsed` holds the options, read before the operands were.
+ * `parsed` holds the options, read before the operands were. The drawing is
+ * written as the walk goes, unless an option needs a directory's whole subtree
+ * before its first line: -J, --prune and --du. The status and any stderr
+ * settle into the returned IOResult when the output has been read.
  */
 export async function treeGeneric(
   parsed: TreeFlags,
@@ -688,123 +986,12 @@ export async function treeGeneric(
     targetStat: links === undefined ? null : (path: string) => links.targetStat(path),
     read,
   }
-  const roots: TreeNode[] = []
-  let totalDirs = 0
-  let totalFiles = 0
-  let anyError = false
-  const stopped: string[] = []
-  for (const p of targets) {
-    let label = p.rawPath !== '' ? p.rawPath : p.virtual
-    // -f names every entry from the operand, which drops the operand's
-    // trailing slashes first (tree 2.2.1).
-    if (flags.fullPath) label = rstripSlash(label) || '/'
-    const spec = new PathSpec({
-      virtual: p.virtual,
-      directory: p.directory,
-      resolved: p.resolved,
-      vfsPath: p.vfsPath,
-      rawPath: label,
-    })
-    // What the operand is decides the whole result, so it is resolved
-    // before the walk rather than inferred from how a backend answered
-    // readdir on it: an object store lists a file key as an empty prefix,
-    // lists a missing path as one too, and Graph 404s, which read as
-    // three different trees. The probe asks both channels a backend can
-    // answer on, so a directory that exists only as its children still
-    // reports as one and null means nothing is there.
-    //
-    // tree prints the same inline marker either way; what differs is the
-    // count and the status. A non-directory exists, so it is counted and
-    // the exit stays 0; a path that is not there is not counted and exits 2.
-    const start = statPath === undefined ? null : await statPath(p)
-    const row =
-      start ??
-      new FileStat({ name: label.slice(label.lastIndexOf('/') + 1), type: FileType.DIRECTORY })
-    const root: TreeNode = {
-      spec,
-      stat: row,
-      isDir: true,
-      leads: null,
-      children: null,
-      note: '',
-      unopened: 0,
-      du: contentSize(row),
-      missing: false,
-    }
-    roots.push(root)
-    if (statPath !== undefined && start === null) {
-      root.note = UNOPENABLE_MARK
-      root.missing = true
-      root.du = 0
-      anyError = true
-      continue
-    }
-    if (start !== null && start.type !== FileType.DIRECTORY) {
-      root.isDir = false
-      root.note = UNOPENABLE_MARK
-      totalFiles += 1
-      continue
-    }
-    const budget = new WalkBudget(p, treeOpts.mounts)
-    const walked = await walkTree(readdir, stat, spec, { ...treeOpts, budget }, 0)
-    root.children = walked.nodes
-    root.note = walked.note
-    root.unopened = walked.unopened
-    for (const line of budget.stopped) stopped.push(`tree: ${line}`)
-    if (walked.nodes !== null) root.du += walked.nodes.reduce((sum, c) => sum + c.du, 0)
-    // With statPath wired the two clear cases are already answered above,
-    // so this covers a directory that exists but could not be read (a
-    // permission error).
-    if (root.unopened > 0 && root.children === null) {
-      anyError = true
-      continue
-    }
-    // tree counts the root as a directory once it has any listed entry (an
-    // empty root reports 0), or a note in place of them.
-    if ((root.children?.length ?? 0) > 0 || root.note !== '') {
-      const [dirs, files] = counts(root.children ?? [])
-      totalDirs += dirs + 1
-      totalFiles += files
-    }
-    // A directory below the root it could not open is marked inline and
-    // makes the run exit 2, as tree does, with nothing on stderr.
-    if (root.unopened > 0) anyError = true
-  }
-  const du = roots.reduce((sum, root) => sum + root.du, 0)
-  let out: ByteSource
-  if (flags.json) {
-    const report = jsonReport(flags, totalDirs, totalFiles, du)
-    if (flags.noIndent) {
-      const entries = roots.map((root) => jsonEntry(flags, root, 1, true))
-      if (!flags.noReport) entries.push(report)
-      out = ENC.encode(`[${entries.join(',')}]\n`)
-    } else {
-      const body = roots.map((root) => `  ${jsonEntry(flags, root, 1, true)}`).join(',\n')
-      out = ENC.encode(`[\n${body}${flags.noReport ? '\n' : `\n,\n  ${report}`}\n]\n`)
-    }
-  } else {
-    const lines: string[] = []
-    for (const root of roots) {
-      const line = root.missing ? root.spec.rawPath : meta(flags, root) + shown(flags, root, true)
-      lines.push(line + root.note)
-      for (const below of textLines(flags, root.children ?? [], '')) lines.push(below)
-    }
-    if (!flags.noReport) {
-      let tail = summary(totalDirs, totalFiles, flags.dirsOnly)
-      if (flags.du) tail = ` ${String(du).padStart(11)} bytes used in ${tail}`
-      lines.push('', tail)
-    }
-    out = formatRecords(lines)
-  }
-  // A walk past walkLimit draws what it listed and says where it stopped,
-  // exiting 2 as for a directory it could not open.
-  return [
-    out,
-    new IOResult({
-      exitCode: anyError || stopped.length > 0 ? 2 : 0,
-      stderr: stopped.length > 0 ? formatRecords(stopped) : null,
-    }),
-  ]
+  const io = new IOResult()
+  const pieces = rendered(targets, readdir, stat, treeOpts, statPath, io)
+  // The first piece is drawn here, so what refuses the walk outright still
+  // rejects before there is any output.
+  const first = await pieces.next()
+  return [asyncChain([first.done === true ? null : first.value, pieces]), io]
 }
 
 /**

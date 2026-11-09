@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from mirage.rs.glob import GlobMatcher, glob_matcher
+from mirage.rs.glob import GlobMatcher, any_tail_matcher, glob_matcher
 
 
 @pytest.mark.parametrize(
@@ -54,3 +54,27 @@ def test_threads_sharing_one_matcher_keep_their_names_apart():
             assert all(pool.map(scan, range(64)))
     finally:
         sys.setswitchinterval(interval)
+
+
+@pytest.mark.parametrize(
+    "patterns,shown,expected",
+    [
+        (("b.log",), "b.log", True),
+        (("b.log",), "a/b.log", True),
+        (("a/b*",), "x/a/b.log", True),
+        (("*.log",), "a/b.log", True),
+        (("c*",), "a/bc", False),
+        (("a",), "a/b", False),
+        (("*.txt", "b*"), "a/b.log", True),
+        ((), "a/b.log", False),
+    ],
+)
+def test_any_tail_answers_for_the_name_or_a_part_after_a_slash(
+    patterns, shown, expected
+):
+    assert any_tail_matcher(patterns).matches(shown) is expected
+
+
+def test_any_tail_is_shared_by_callers_asking_the_same():
+    assert any_tail_matcher(("a", "b")) is any_tail_matcher(("a", "b"))
+    assert any_tail_matcher(("a", "b")) is not any_tail_matcher(("b", "a"))

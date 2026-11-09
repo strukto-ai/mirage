@@ -1,8 +1,8 @@
 import json
 import logging
 import posixpath
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Literal
 
@@ -21,8 +21,10 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import MISS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import enoent
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.errors import StreamRefusal
+from mirage.rs.glob import AnyTailMatcher, any_tail_matcher
 from mirage.rs.scan import refused, scan
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -56,6 +58,8 @@ _VERTICAL = "|   "
 _INDENT = "    "
 
 UNOPENABLE_MARK = "  [error opening dir]"
+# The lines a drawing holds before it writes them, whatever comes next.
+_HELD_LINES = 1024
 
 
 TreeSort = Literal["name", "version", "size", "mtime", "ctime", "none"]
@@ -210,6 +214,37 @@ class _TreeNode:
 
 
 @dataclass(frozen=True, slots=True)
+class _TreeOpts:
+    """What one operand's walk reads through and how far it may go.
+
+    Unlike find and du, tree's output is a single document (one root
+    line, one drawing, one count), so a per-mount run cannot be
+    concatenated: it would print two of each. ``mounts`` says where the
+    boundaries are and the ``cross_`` pair reads past one, the way real
+    tree crosses one.
+    """
+
+    flags: TreeFlags
+    read: ReadStreamFn | None
+    mounts: MountView | None
+    cross_readdir: ReaddirFn | None
+    cross_stat: StatFn | None
+    target_stat: LinkTargetStat | None
+    budget: WalkBudget
+
+
+@dataclass(slots=True)
+class _Drawing:
+    """One operand's drawing in progress: lines not yet written and what
+    has been counted so far."""
+
+    lines: list[str] = field(default_factory=list)
+    dirs: int = 0
+    files: int = 0
+    unopened: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class _Ignore:
     """One .gitignore line: the pattern, where it was read, and whether it
     re-includes, names only directories, or is anchored to its file's
@@ -253,6 +288,19 @@ def _gitignore_lines(text: str, base: str) -> list[_Ignore]:
     return rules
 
 
+@dataclass(slots=True)
+class _Listing:
+    """One opened directory: its entries in drawing order (None when it
+    has none to draw, ``note`` then saying why), which of them are mounts
+    it crosses into, and the ignore rules its subtree inherits."""
+
+    nodes: list[_TreeNode] | None
+    note: str = ""
+    unopened: int = 0
+    crossed: set[int] = field(default_factory=set)
+    rules: Sequence[_Ignore] = ()
+
+
 def _segments_match(parts: list[str], pattern: list[str]) -> bool:
     """Whether a path fits a pattern, a ``**`` for any run of segments
     and, last in the pattern, at least one.
@@ -282,24 +330,47 @@ def _segments_match(parts: list[str], pattern: list[str]) -> bool:
     return want == len(pattern)
 
 
-def _ignored(rules: Sequence[_Ignore], virtual: str, is_dir: bool) -> bool:
+def _name_matcher(rules: Sequence[_Ignore]) -> AnyTailMatcher | None:
+    """One matcher over the patterns a name alone decides, so an entry
+    none of them matches costs one call however many there are.
+
+    Args:
+        rules (Sequence[_Ignore]): the patterns in force.
+    """
+    patterns = tuple(rule.pattern for rule in rules if not rule.anchored)
+    return any_tail_matcher(patterns) if patterns else None
+
+
+def _ignored(
+    rules: Sequence[_Ignore],
+    names: AnyTailMatcher | None,
+    virtual: str,
+    is_dir: bool,
+) -> bool:
     """Whether the last .gitignore pattern that matches an entry leaves it
     out.
 
     Args:
         rules (Sequence[_Ignore]): the patterns in force, outermost first.
+        names (AnyTailMatcher | None): ``_name_matcher`` of ``rules``.
         virtual (str): the entry's virtual path.
         is_dir (bool): whether it is a directory.
     """
     out = False
+    name = posixpath.basename(virtual)
+    named = names is not None and names.matches(name)
+    base = None
+    parts: list[str] = []
     for rule in rules:
         if rule.directory and not is_dir:
             continue
-        relative = posixpath.relpath(virtual, rule.base)
-        if rule.anchored:
-            hit = _segments_match(relative.split("/"), rule.pattern.split("/"))
+        if not rule.anchored:
+            hit = named and fnmatch(name, rule.pattern)
         else:
-            hit = fnmatch(posixpath.basename(virtual), rule.pattern)
+            if rule.base != base:
+                base = rule.base
+                parts = posixpath.relpath(virtual, base).split("/")
+            hit = _segments_match(parts, rule.pattern.split("/"))
         if hit:
             out = not rule.negated
     return out
@@ -371,24 +442,14 @@ async def _gitignore(
     return _gitignore_lines(text, directory.virtual)
 
 
-async def _walk_tree(
+async def _open_dir(
     path: PathSpec,
     readdir: ReaddirFn,
     stat: StatFn,
-    flags: TreeFlags,
-    *,
-    depth: int,
-    rules: Sequence[_Ignore] = (),
-    read: ReadStreamFn | None = None,
-    mounts: MountView | None = None,
-    cross_readdir: ReaddirFn | None = None,
-    cross_stat: StatFn | None = None,
-    target_stat: LinkTargetStat | None = None,
-    budget: WalkBudget | None = None,
-) -> tuple[list[_TreeNode] | None, str, int]:
-    """One directory's drawn entries, the note its own line carries, and
-    how many directories in its subtree (itself included) could not be
-    opened.
+    opts: _TreeOpts,
+    rules: Sequence[_Ignore],
+) -> _Listing:
+    """One directory's own entries, in the order they are drawn.
 
     A link is drawn as ``name -> target`` and never walked; one leading
     to a directory counts, and filters, as a directory, and one whose
@@ -397,17 +458,24 @@ async def _walk_tree(
 
     A directory the walk could not open (a rule refused it below the
     operand) has no entries and counts itself, so the caller marks its
-    own line the way tree does and the run exits 2. A directory past
-    ``budget`` is drawn but not opened, and one holding more entries than
-    ``--filelimit`` is drawn with a note instead.
+    own line the way tree does and the run exits 2. One holding more
+    entries than ``--filelimit`` is drawn with a note instead.
+
+    Args:
+        path (PathSpec): the directory.
+        readdir (ReaddirFn): the listing this subtree is read through.
+        stat (StatFn): the stat this subtree is read through.
+        opts (_TreeOpts): the operand's walk.
+        rules (Sequence[_Ignore]): the ignore rules read above it.
     """
     # The mount table is read before the backend, not merged after it. A
     # directory that exists only because mounts sit under it (`/repos`
     # when `/repos/alpha` is mounted) has no backend to list it, so the
     # readdir raises and a merge below it never runs: `tree` reported the
     # one path whose children it could name for certain as unopenable.
-    child_mounts = _child_mounts(mounts, path.virtual)
-    limit = None if budget is None else budget.listing_limit(path.virtual)
+    flags = opts.flags
+    child_mounts = _child_mounts(opts.mounts, path.virtual)
+    limit = opts.budget.listing_limit(path.virtual)
     try:
         entries = await (
             readdir(path) if limit is None else readdir(path, limit=limit)
@@ -419,16 +487,16 @@ async def _walk_tree(
         # draw the children would report a readable tree that is not.
         if not (child_mounts and isinstance(exc, MISS_ERRORS)):
             logger.debug("tree: cannot open %s: %s", path.raw_path, exc)
-            return None, UNOPENABLE_MARK, 1
+            return _Listing(None, UNOPENABLE_MARK, 1)
         entries = []
     if child_mounts:
         entries = [*entries, *(m for m in child_mounts if m not in entries)]
     if flags.sort != "none":
         entries = sorted(entries)
-    if budget is not None:
-        entries = [e for e in entries if budget.spend(path.virtual)]
+    entries = [e for e in entries if opts.budget.spend(path.virtual)]
     if flags.gitignore:
-        rules = [*rules, *await _gitignore(read, path, entries)]
+        rules = [*rules, *await _gitignore(opts.read, path, entries)]
+    names = _name_matcher(rules)
 
     kept: list[tuple[_TreeNode, bool]] = []
     for entry in entries:
@@ -439,9 +507,9 @@ async def _walk_tree(
             vfs_path=entry.strip("/"),
             raw_path=f"{path.raw_path.rstrip('/')}/{posixpath.basename(entry)}",
         )
-        crossing = entry in child_mounts and cross_readdir is not None
+        crossing = entry in child_mounts and opts.cross_readdir is not None
         if crossing:
-            s = await _mount_row(flags, cross_stat, entry_spec)
+            s = await _mount_row(flags, opts.cross_stat, entry_spec)
         else:
             try:
                 s = await stat(entry_spec)
@@ -454,9 +522,9 @@ async def _walk_tree(
             continue
         is_dir = s.type == FileType.DIRECTORY
         leads: FileStat | None = None
-        if s.type == FileType.SYMLINK and target_stat is not None:
+        if s.type == FileType.SYMLINK and opts.target_stat is not None:
             try:
-                leads = await target_stat(entry)
+                leads = await opts.target_stat(entry)
             except WALK_ERRORS as exc:
                 logger.debug("tree: cannot stat through %s: %s", entry, exc)
             is_dir = leads is not None and leads.type == FileType.DIRECTORY
@@ -470,7 +538,7 @@ async def _walk_tree(
             and not fnmatch(s.name, flags.match_pattern)
         ):
             continue
-        if rules and _ignored(rules, entry, is_dir):
+        if rules and _ignored(rules, names, entry, is_dir):
             continue
         kept.append(
             (
@@ -479,47 +547,96 @@ async def _walk_tree(
             )
         )
     if flags.file_limit is not None and len(kept) > flags.file_limit:
-        return (
-            None,
-            f"  [{len(kept)} entries exceeds filelimit, not opening dir]",
-            0,
+        return _Listing(
+            None, f"  [{len(kept)} entries exceeds filelimit, not opening dir]"
         )
     crossed = {id(node) for node, crossing in kept if crossing}
-    nodes: list[_TreeNode] = []
+    return _Listing(
+        _sorted(flags, [node for node, _ in kept]),
+        crossed=crossed,
+        rules=rules,
+    )
+
+
+def _opens(opts: _TreeOpts, node: _TreeNode, depth: int) -> bool:
+    """Whether the walk goes into a drawn entry: a real directory, above
+    ``-L``, and inside the budget. A directory past the budget is drawn
+    but not opened.
+
+    Args:
+        opts (_TreeOpts): the operand's walk.
+        node (_TreeNode): the entry.
+        depth (int): how far down the directory holding it is.
+    """
+    if node.stat.type != FileType.DIRECTORY:
+        return False
+    if opts.flags.max_depth is not None and depth + 1 >= opts.flags.max_depth:
+        return False
+    return opts.budget.opens(node.spec.virtual)
+
+
+def _read_below(
+    opts: _TreeOpts,
+    listing: _Listing,
+    node: _TreeNode,
+    readdir: ReaddirFn,
+    stat: StatFn,
+) -> tuple[ReaddirFn, StatFn]:
+    """The pair a directory's subtree is read through.
+
+    Past a mount root the subtree belongs to another VFS, so the rest of
+    this branch reads through the dispatcher. Deeper mounts under it need
+    no second switch: the dispatcher already routes every path to its
+    owner.
+
+    Args:
+        opts (_TreeOpts): the operand's walk.
+        listing (_Listing): the directory holding it.
+        node (_TreeNode): the directory.
+        readdir (ReaddirFn): the listing its parent is read through.
+        stat (StatFn): the stat its parent is read through.
+    """
+    if id(node) not in listing.crossed:
+        return readdir, stat
+    return opts.cross_readdir or readdir, opts.cross_stat or stat
+
+
+async def _walk_tree(
+    path: PathSpec,
+    readdir: ReaddirFn,
+    stat: StatFn,
+    opts: _TreeOpts,
+    depth: int,
+    rules: Sequence[_Ignore] = (),
+) -> tuple[list[_TreeNode] | None, str, int]:
+    """One directory's whole subtree: its drawn entries, the note its own
+    line carries, and how many directories below it (itself included)
+    could not be opened.
+
+    Args:
+        path (PathSpec): the directory.
+        readdir (ReaddirFn): the listing this subtree is read through.
+        stat (StatFn): the stat this subtree is read through.
+        opts (_TreeOpts): the operand's walk.
+        depth (int): how far down it is.
+        rules (Sequence[_Ignore]): the ignore rules read above it.
+    """
+    listing = await _open_dir(path, readdir, stat, opts, rules)
+    if listing.nodes is None:
+        return None, listing.note, listing.unopened
+    nodes = listing.nodes
     unopened = 0
-    for node in _sorted(flags, [node for node, _ in kept]):
-        nodes.append(node)
-        if node.stat.type != FileType.DIRECTORY:
+    for node in nodes:
+        if not _opens(opts, node, depth):
             continue
-        if flags.max_depth is not None and depth + 1 >= flags.max_depth:
-            continue
-        if budget is not None and not budget.opens(node.spec.virtual):
-            continue
-        # Past a mount root the subtree belongs to another VFS, so
-        # the rest of this branch reads through the dispatcher. Deeper
-        # mounts under it need no second switch: the dispatcher already
-        # routes every path to its owner.
-        crossing = id(node) in crossed
-        sub_readdir = cross_readdir if crossing and cross_readdir else readdir
-        sub_stat = cross_stat if crossing and cross_stat else stat
+        sub_readdir, sub_stat = _read_below(opts, listing, node, readdir, stat)
         node.children, node.note, node.unopened = await _walk_tree(
-            node.spec,
-            sub_readdir,
-            sub_stat,
-            flags,
-            depth=depth + 1,
-            rules=rules,
-            read=read,
-            mounts=mounts,
-            cross_readdir=cross_readdir,
-            cross_stat=cross_stat,
-            target_stat=target_stat,
-            budget=budget,
+            node.spec, sub_readdir, sub_stat, opts, depth + 1, listing.rules
         )
         if node.children is not None:
             node.du += sum(child.du for child in node.children)
         unopened += node.unopened
-    if flags.prune and not flags.dirs_only:
+    if opts.flags.prune and not opts.flags.dirs_only:
         nodes = [
             n
             for n in nodes
@@ -590,20 +707,98 @@ def _shown(flags: TreeFlags, node: _TreeNode, root: bool = False) -> str:
     return shown + (_classify(node.stat) if flags.classify else "")
 
 
+def _text_line(
+    flags: TreeFlags, node: _TreeNode, prefix: str, last: bool
+) -> str:
+    lead = "" if flags.no_indent else prefix + (_LAST if last else _BRANCH)
+    return lead + _meta(flags, node) + _shown(flags, node) + node.note
+
+
+def _root_line(flags: TreeFlags, root: _TreeNode) -> str:
+    shown = (
+        root.spec.raw_path
+        if root.missing
+        else _meta(flags, root) + _shown(flags, root, True)
+    )
+    return shown + root.note
+
+
 def _text_lines(
     flags: TreeFlags, nodes: Sequence[_TreeNode], prefix: str
 ) -> list[str]:
     lines: list[str] = []
     for i, node in enumerate(nodes):
         last = i == len(nodes) - 1
-        lead = "" if flags.no_indent else prefix + (_LAST if last else _BRANCH)
-        lines.append(
-            lead + _meta(flags, node) + _shown(flags, node) + node.note
-        )
+        lines.append(_text_line(flags, node, prefix, last))
         if node.children:
             extension = _INDENT if last else _VERTICAL
             lines.extend(_text_lines(flags, node.children, prefix + extension))
     return lines
+
+
+def _flushed(drawing: _Drawing) -> bytes:
+    out = format_records(drawing.lines)
+    drawing.lines.clear()
+    return out
+
+
+async def _draw(
+    listing: _Listing,
+    readdir: ReaddirFn,
+    stat: StatFn,
+    opts: _TreeOpts,
+    depth: int,
+    prefix: str,
+    drawing: _Drawing,
+) -> AsyncIterator[bytes]:
+    """A listed directory's lines, each written once its own listing is
+    read. What is drawn so far goes out before the next directory is
+    opened, so a reader that stops early stops the walk.
+
+    Args:
+        listing (_Listing): the directory, already opened.
+        readdir (ReaddirFn): the listing it was read through.
+        stat (StatFn): the stat it was read through.
+        opts (_TreeOpts): the operand's walk.
+        depth (int): how far down it is.
+        prefix (str): the drawing to the left of its entries.
+        drawing (_Drawing): the lines and counts so far.
+    """
+    nodes = listing.nodes or ()
+    for i, node in enumerate(nodes):
+        last = i == len(nodes) - 1
+        below: _Listing | None = None
+        sub_readdir, sub_stat = readdir, stat
+        if _opens(opts, node, depth):
+            if drawing.lines:
+                yield _flushed(drawing)
+            sub_readdir, sub_stat = _read_below(
+                opts, listing, node, readdir, stat
+            )
+            below = await _open_dir(
+                node.spec, sub_readdir, sub_stat, opts, listing.rules
+            )
+            node.note = below.note
+            drawing.unopened += below.unopened
+        drawing.lines.append(_text_line(opts.flags, node, prefix, last))
+        if node.is_dir:
+            drawing.dirs += 1
+        else:
+            drawing.files += 1
+        if len(drawing.lines) >= _HELD_LINES:
+            yield _flushed(drawing)
+        if below is None:
+            continue
+        async for piece in _draw(
+            below,
+            sub_readdir,
+            sub_stat,
+            opts,
+            depth + 1,
+            prefix + (_INDENT if last else _VERTICAL),
+            drawing,
+        ):
+            yield piece
 
 
 _JSON_TYPES = {
@@ -673,43 +868,31 @@ def _json_report(flags: TreeFlags, dirs: int, files: int, du: int) -> str:
     return text + "}"
 
 
-async def tree(
+async def _rendered(
     paths: list[PathSpec],
-    *,
     readdir: ReaddirFn,
     stat: StatFn,
-    flags: TreeFlags = TreeFlags(),
-    read: ReadStreamFn | None = None,
-    stat_path: StatPath | None = None,
-    readdir_path: ReaddirPath | None = None,
-    mounts: MountView | None = None,
-    links: LinkView | None = None,
-) -> tuple[bytes, IOResult]:
-    """Render each operand's tree, tree's drawing or its ``-J`` JSON, under
-    one summary.
-
-    Unlike find and du, tree's output is a single document: each root
-    line and its drawing in operand order, then one count. Concatenating
-    a per-mount run would print two counts, so a nested mount is crossed
-    here instead, the way real ``tree`` crosses one (pinned on tree
-    2.2.1: the mounted filesystem's entries are drawn under the mount
-    point, the covered ones are not drawn at all, and the summary counts
-    the whole thing).
+    flags: TreeFlags,
+    read: ReadStreamFn | None,
+    stat_path: StatPath | None,
+    readdir_path: ReaddirPath | None,
+    mounts: MountView | None,
+    links: LinkView | None,
+    io: IOResult,
+) -> AsyncIterator[bytes]:
+    """The operands' drawing, under one summary; see ``tree``.
 
     Args:
         paths (list[PathSpec]): the operands to draw, in order.
         readdir (ReaddirFn): this mount's directory listing.
         stat (StatFn): this mount's stat.
         flags (TreeFlags): the options.
-        read (ReadStreamFn | None): this mount's reader, for the
-            .gitignore files ``--gitignore`` reads.
-        stat_path (StatPath | None): dispatcher-backed stat, used for the
-            operand itself and for entries past a mount boundary.
-        readdir_path (ReaddirPath | None): dispatcher-backed readdir,
-            which is how a subtree on another mount is read at all.
+        read (ReadStreamFn | None): this mount's reader.
+        stat_path (StatPath | None): dispatcher-backed stat.
+        readdir_path (ReaddirPath | None): dispatcher-backed readdir.
         mounts (MountView | None): where the mount boundaries are.
-        links (LinkView | None): the namespace's symlink facts, which say
-            what a drawn link leads to.
+        links (LinkView | None): the namespace's symlink facts.
+        io (IOResult): the result the status and stderr settle into.
     """
     cross_readdir: ReaddirFn | None = (
         partial(_cross_readdir, readdir_path)
@@ -721,6 +904,7 @@ async def tree(
     cross_stat = (
         partial(_cross_stat, stat_path) if stat_path is not None else None
     )
+    live = not (flags.json or flags.prune or flags.du)
     roots: list[_TreeNode] = []
     stopped: list[str] = []
     total_dirs = 0
@@ -762,26 +946,45 @@ async def tree(
             root.missing = True
             root.du = 0
             failed = True
+            if live:
+                yield format_records([_root_line(flags, root)])
             continue
         if start is not None and start.type != FileType.DIRECTORY:
             root.is_dir = False
             root.note = UNOPENABLE_MARK
             total_files += 1
+            if live:
+                yield format_records([_root_line(flags, root)])
             continue
         budget = WalkBudget(path, mounts)
-        root.children, root.note, root.unopened = await _walk_tree(
-            spec,
-            readdir,
-            stat,
+        opts = _TreeOpts(
             flags,
-            depth=0,
-            read=read,
-            mounts=mounts,
-            cross_readdir=cross_readdir,
-            cross_stat=cross_stat,
-            target_stat=links.target_stat if links is not None else None,
-            budget=budget,
+            read,
+            mounts,
+            cross_readdir,
+            cross_stat,
+            links.target_stat if links is not None else None,
+            budget,
         )
+        if live:
+            listing = await _open_dir(spec, readdir, stat, opts, ())
+            root.children, root.note = listing.nodes, listing.note
+            drawing = _Drawing(
+                [_root_line(flags, root)], unopened=listing.unopened
+            )
+            async for piece in _draw(
+                listing, readdir, stat, opts, 0, "", drawing
+            ):
+                yield piece
+            if drawing.lines:
+                yield _flushed(drawing)
+            root.unopened = drawing.unopened
+            counted = (drawing.dirs, drawing.files)
+        else:
+            root.children, root.note, root.unopened = await _walk_tree(
+                spec, readdir, stat, opts, 0
+            )
+            counted = _counts(root.children or ())
         stopped.extend(f"tree: {line}" for line in budget.stopped)
         if root.children is not None:
             root.du += sum(child.du for child in root.children)
@@ -795,22 +998,31 @@ async def tree(
         # tree counts the root as a directory once it has any listed
         # entry (an empty root reports 0), or a note in place of them.
         if root.children or root.note:
-            dirs, files = _counts(root.children or ())
-            total_dirs += dirs + 1
-            total_files += files
+            total_dirs += counted[0] + 1
+            total_files += counted[1]
         # A directory below the root it could not open is marked inline
         # and makes the run exit 2, as tree does, with nothing on stderr.
         failed = failed or root.unopened > 0
+    # A walk past walk_limit draws what it listed and says where it
+    # stopped, exiting 2 as for a directory it could not open.
+    io.exit_code = 2 if failed or stopped else 0
+    if stopped:
+        io.stderr = format_records(stopped)
     du = sum(root.du for root in roots)
-    if flags.json:
+    if live:
+        if not flags.no_report:
+            yield format_records(
+                ["", _summary(total_dirs, total_files, flags.dirs_only)]
+            )
+    elif flags.json:
         report = _json_report(flags, total_dirs, total_files, du)
         if flags.no_indent:
             entries = [_json_entry(flags, root, 1, True) for root in roots]
             if not flags.no_report:
                 entries.append(report)
-            body = f"[{','.join(entries)}]\n"
+            yield encode_text(f"[{','.join(entries)}]\n")
         else:
-            body = (
+            yield encode_text(
                 "[\n"
                 + ",\n".join(
                     "  " + _json_entry(flags, root, 1, True) for root in roots
@@ -818,29 +1030,79 @@ async def tree(
                 + ("\n,\n  " + report if not flags.no_report else "\n")
                 + "\n]\n"
             )
-        out = encode_text(body)
     else:
         lines: list[str] = []
         for root in roots:
-            shown = (
-                root.spec.raw_path
-                if root.missing
-                else _meta(flags, root) + _shown(flags, root, True)
-            )
-            lines.append(shown + root.note)
+            lines.append(_root_line(flags, root))
             lines.extend(_text_lines(flags, root.children or (), ""))
         if not flags.no_report:
             summary = _summary(total_dirs, total_files, flags.dirs_only)
             if flags.du:
                 summary = f" {du:>11} bytes used in {summary}"
             lines += ["", summary]
-        out = format_records(lines)
-    # A walk past walk_limit draws what it listed and says where it
-    # stopped, exiting 2 as for a directory it could not open.
-    return out, IOResult(
-        exit_code=2 if failed or stopped else 0,
-        stderr=format_records(stopped) if stopped else None,
+        yield format_records(lines)
+
+
+async def tree(
+    paths: list[PathSpec],
+    *,
+    readdir: ReaddirFn,
+    stat: StatFn,
+    flags: TreeFlags = TreeFlags(),
+    read: ReadStreamFn | None = None,
+    stat_path: StatPath | None = None,
+    readdir_path: ReaddirPath | None = None,
+    mounts: MountView | None = None,
+    links: LinkView | None = None,
+) -> tuple[ByteSource, IOResult]:
+    """Render each operand's tree, tree's drawing or its ``-J`` JSON, under
+    one summary.
+
+    Unlike find and du, tree's output is a single document: each root
+    line and its drawing in operand order, then one count. Concatenating
+    a per-mount run would print two counts, so a nested mount is crossed
+    here instead, the way real ``tree`` crosses one (pinned on tree
+    2.2.1: the mounted filesystem's entries are drawn under the mount
+    point, the covered ones are not drawn at all, and the summary counts
+    the whole thing).
+
+    The drawing is written as the walk goes, unless an option needs a
+    directory's whole subtree before its first line: ``-J``, ``--prune``
+    and ``--du``. The exit status and any stderr settle into the returned
+    ``IOResult`` when the output has been read.
+
+    Args:
+        paths (list[PathSpec]): the operands to draw, in order.
+        readdir (ReaddirFn): this mount's directory listing.
+        stat (StatFn): this mount's stat.
+        flags (TreeFlags): the options.
+        read (ReadStreamFn | None): this mount's reader, for the
+            .gitignore files ``--gitignore`` reads.
+        stat_path (StatPath | None): dispatcher-backed stat, used for the
+            operand itself and for entries past a mount boundary.
+        readdir_path (ReaddirPath | None): dispatcher-backed readdir,
+            which is how a subtree on another mount is read at all.
+        mounts (MountView | None): where the mount boundaries are.
+        links (LinkView | None): the namespace's symlink facts, which say
+            what a drawn link leads to.
+    """
+    io = IOResult()
+    pieces = _rendered(
+        paths,
+        readdir,
+        stat,
+        flags,
+        read,
+        stat_path,
+        readdir_path,
+        mounts,
+        links,
+        io,
     )
+    # The first piece is drawn here, so what refuses the walk outright
+    # still raises before there is any output.
+    first = await anext(pieces, b"")
+    return async_chain([first, pieces]), io
 
 
 def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:

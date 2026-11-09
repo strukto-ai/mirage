@@ -177,6 +177,39 @@ export class GlobMatcher {
   }
 }
 
+/**
+ * Several patterns asked, one Wasm call per name, whether any matches the name
+ * whole or the part after any slash in it. Mirrors Python's AnyTailMatcher.
+ */
+export class AnyTailMatcher {
+  private readonly stream: MovableStream
+
+  constructor(patterns: readonly string[]) {
+    this.stream = new MovableStream('glob_tails', {
+      patterns: patterns.map((pattern) => Array.from(pattern, (ch) => ch.codePointAt(0) ?? 0)),
+    })
+  }
+
+  matches(name: string): boolean {
+    return this.stream.live.test(encoded(name, true))
+  }
+}
+
+const tailMatchers = new WeakMap<readonly string[], AnyTailMatcher>()
+
+/**
+ * A compiled AnyTailMatcher, shared by every caller holding the same list.
+ * Mirrors Python's any_tail_matcher.
+ */
+export function anyTailMatcher(patterns: readonly string[]): AnyTailMatcher {
+  let matcher = tailMatchers.get(patterns)
+  if (matcher === undefined) {
+    matcher = new AnyTailMatcher(patterns)
+    tailMatchers.set(patterns, matcher)
+  }
+  return matcher
+}
+
 const matchers = new Map<string, (GlobMatcher | undefined)[]>()
 
 /**

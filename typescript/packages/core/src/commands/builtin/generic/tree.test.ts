@@ -19,7 +19,7 @@ import { runWithMountGate } from '../../../context/session_context.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { Files } from '../../../workspace/files.ts'
 import { parseFlags, segmentsMatch, treeGeneric as generic, type TreeFlags } from './tree.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -30,13 +30,20 @@ const DEC = new TextDecoder()
 
 type Operands<T> = T extends [unknown, ...infer R] ? R : never
 
+// The output read through, so the status has settled.
+async function whole(...args: Parameters<typeof generic>): Promise<CommandFnResult> {
+  const result = await generic(...args)
+  if (result === null) return null
+  return [await materialize(result[0]), result[1]]
+}
+
 // tree as its builder runs it: the options read first, a refusal returned.
 async function treeGeneric(
   ...args: Operands<Parameters<typeof generic>>
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(args[1].flags)
   if (parsed instanceof IOResult) return [null, parsed]
-  return generic(parsed, ...args)
+  return whole(parsed, ...args)
 }
 
 const FOLDERS = new Set(['/', '/docs', '/.secret'])
@@ -383,7 +390,7 @@ describe('tree sizes, orders and JSON', () => {
       vfsPath: 'r',
       rawPath: '/r',
     })
-    const [out, io] = (await generic(
+    const [out, io] = (await whole(
       flags,
       [root],
       ctx({}),
@@ -398,7 +405,7 @@ describe('tree sizes, orders and JSON', () => {
   it('draws a tree too long for one call', { timeout: 60_000 }, async () => {
     const names = Array.from({ length: 200_000 }, (_, i) => `/r/f${String(i)}`)
     const flags = lineFlags(['--noreport']) as TreeFlags
-    const [out] = (await generic(
+    const [out] = (await whole(
       flags,
       [
         new PathSpec({
@@ -446,7 +453,7 @@ describe('tree sizes, orders and JSON', () => {
     })
     const last = async (sort: string): Promise<string | undefined> => {
       const flags = lineFlags([`--sort=${sort}`, '--noreport']) as TreeFlags
-      const [out] = (await generic(
+      const [out] = (await whole(
         flags,
         [root],
         ctx({}),
@@ -501,5 +508,36 @@ describe('tree sizes, orders and JSON', () => {
       'name,version,size,mtime,ctime,none\n',
       "tree: Sort type 'n' not valid, should be one of: ",
     ])
+  })
+})
+
+// Mirrors test_tree_reads_no_further_than_its_reader_when_it_can.
+describe('treeGeneric while it is read', () => {
+  // Mirrors test_tree_writes_a_flat_directory_a_bounded_run_at_a_time.
+  it('writes a flat directory a bounded run at a time', async () => {
+    const flat = Array.from({ length: 3000 }, (_, n) => `/f${String(n).padStart(4, '0')}`)
+    const noting = (): Promise<string[]> => Promise.resolve(flat)
+    const result = await generic(parseFlags({}) as TreeFlags, [spec('/')], ctx({}), noting, stat)
+    const out = (result?.[0] as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+    const step = await out.next()
+    await out.return?.()
+    expect(step.done === true ? 0 : DEC.decode(step.value).split('\n').length - 1).toBe(1024)
+  })
+
+  it.each([
+    ['plain text', false, ['/']],
+    ['-J', true, ['/', '/.secret', '/docs']],
+  ])('reads as far as %s needs', async (_name, json, opened) => {
+    const parsed = parseFlags({ a: json }) as TreeFlags
+    const seen: string[] = []
+    const noting = (p: PathSpec): Promise<string[]> => {
+      seen.push(key(p))
+      return boxReaddir(p)
+    }
+    const result = await generic({ ...parsed, json }, [spec('/')], ctx({}), noting, stat)
+    const out = (result?.[0] as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+    await out.next()
+    await out.return?.()
+    expect(seen).toEqual(opened)
   })
 })

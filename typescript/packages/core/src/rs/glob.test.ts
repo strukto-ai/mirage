@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { Glob, GlobMatcher, globMatcher } from './glob.ts'
+import { Glob, GlobMatcher, anyTailMatcher, globMatcher } from './glob.ts'
 
 it('feeds a long subject in pieces without splitting a surrogate pair', async () => {
   const glob = new Glob('*😀b')
@@ -47,5 +47,26 @@ describe('GlobMatcher', () => {
     expect(globMatcher('a*')).toBe(globMatcher('a*'))
     expect(globMatcher('a*', true)).not.toBe(globMatcher('a*'))
     expect(globMatcher('a*', false, false, 'python')).not.toBe(globMatcher('a*'))
+  })
+})
+
+describe('anyTailMatcher', () => {
+  it.each<[readonly string[], string, boolean]>([
+    [['b.log'], 'b.log', true],
+    [['b.log'], 'a/b.log', true],
+    [['a/b*'], 'x/a/b.log', true],
+    [['*.log'], 'a/b.log', true],
+    [['c*'], 'a/bc', false],
+    [['a'], 'a/b', false],
+    [['*.txt', 'b*'], 'a/b.log', true],
+    [[], 'a/b.log', false],
+  ])('answers %j for the name or a part after a slash of %j', (patterns, shown, expected) => {
+    expect(anyTailMatcher(patterns).matches(shown)).toBe(expected)
+  })
+
+  it('is shared by callers holding the same list', () => {
+    const patterns = ['a', 'b']
+    expect(anyTailMatcher(patterns)).toBe(anyTailMatcher(patterns))
+    expect(anyTailMatcher(patterns)).not.toBe(anyTailMatcher(['a', 'b']))
   })
 })

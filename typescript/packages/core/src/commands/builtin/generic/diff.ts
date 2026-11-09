@@ -14,6 +14,7 @@
 
 import { chunks } from '../../../io/cooperative.ts'
 import { PipeClosed } from '../../../io/errors.ts'
+import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 import { DiffPool } from '../../../rs/diff_pool.ts'
 import type { DiffComputer, DiffMode, PairResult } from '../../../rs/diff_types.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
@@ -507,11 +508,12 @@ async function entryKind(walk: Walk, path: PathSpec): Promise<FileType | null> {
  */
 async function diffDirs(
   walk: Walk,
+  parts: ByteSource[],
   dirA: PathSpec,
   dirB: PathSpec,
   absent: Absent = PRESENT,
   above: readonly [readonly string[], readonly string[]] = [[], []],
-): Promise<[readonly Uint8Array[], boolean]> {
+): Promise<boolean> {
   const flags = walk.flags
   const real = walk.real
   const opened: readonly [readonly string[], readonly string[]] =
@@ -526,7 +528,6 @@ async function diffDirs(
   const names = [...new Set([...namesA, ...namesB])].sort(compareCodePoints)
   const left = rstripSlash(dirA.rawPath)
   const right = rstripSlash(dirB.rawPath)
-  const parts: Uint8Array[] = []
   let differ = false
   for (const name of names) {
     const inA = namesA.has(name)
@@ -560,9 +561,7 @@ async function diffDirs(
         walk.trouble.push(ENC.encode(`diff: ${named.rawPath}: recursive directory loop\n`))
         continue
       }
-      const [body, changed] = await diffDirs(walk, childA, childB, gone, opened)
-      for (const chunk of body) parts.push(chunk)
-      differ ||= changed
+      differ = (await diffDirs(walk, parts, childA, childB, gone, opened)) || differ
     } else if (!aDir && !bDir) {
       const pair = await diffPair(walk, childA, childB, gone)
       for (const chunk of pair.stderr) walk.trouble.push(chunk)
@@ -597,7 +596,7 @@ async function diffDirs(
       )
     }
   }
-  return [parts, differ]
+  return differ
 }
 
 async function missing(stat: StatFn, path: PathSpec, allowed: boolean): Promise<boolean> {
@@ -647,7 +646,7 @@ export async function diffGeneric(
   const errorPaths = [...paths, ...flags.excludeFrom]
   const links = linksOf(ctx)
   const trouble: Uint8Array[] = []
-  let output: readonly Uint8Array[] | undefined
+  let output: readonly ByteSource[] | undefined
   let differ = false
   const owned = ctx.diff === undefined ? new DiffPool() : undefined
   const computer = ctx.diff ?? owned
@@ -706,7 +705,14 @@ export async function diffGeneric(
         (await stat(p0)).type === FileType.DIRECTORY && (await stat(p1)).type === FileType.DIRECTORY
       if (bothDirs) {
         for (const path of [p0, p1]) await beforeFullWalk(dispatchOf(ctx), path, 'diff')
-        ;[output, differ] = await diffDirs(walk, p0, p1)
+        const parts: ByteSource[] = []
+        output = parts
+        try {
+          differ = await diffDirs(walk, parts, p0, p1)
+        } catch (err) {
+          await closeParts(parts)
+          throw err
+        }
       }
     }
     if (output === undefined) {
@@ -745,11 +751,16 @@ export async function diffGeneric(
   } finally {
     await owned?.close()
   }
-  const out: ByteSource = outputChunks(output)
+  const held = output
+  const out: ByteSource = new OutputStream(outputChunks(held), () => closeParts(held))
   if (trouble.length > 0) return [out, new IOResult({ exitCode: 2, stderr: concat(trouble) })]
   return [out, new IOResult({ exitCode: differ ? 1 : 0 })]
 }
 
-async function* outputChunks(parts: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
+async function* outputChunks(parts: readonly ByteSource[]): AsyncGenerator<Uint8Array> {
   for (const part of parts) yield* chunks(part)
+}
+
+async function closeParts(parts: readonly ByteSource[]): Promise<void> {
+  for (const part of parts) await closeQuietly(part)
 }

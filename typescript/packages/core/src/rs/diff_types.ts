@@ -34,7 +34,7 @@ export type PairOutcome = 'equal' | 'different'
 export interface PairResult {
   readonly outcome: PairOutcome
   readonly status: 0 | 1 | 2
-  readonly output: readonly Uint8Array[]
+  readonly output: readonly ByteSource[]
   readonly stderr: readonly Uint8Array[]
 }
 export type InputFactory = () => Promise<ByteSource> | ByteSource

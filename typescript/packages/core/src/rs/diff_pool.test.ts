@@ -1,6 +1,7 @@
 import { Worker as NodeWorker } from 'node:worker_threads'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Worker } from '../concurrency/worker.ts'
+import type { ByteSource } from '../io/types.ts'
 import { concat } from '../utils/bytes.ts'
 import { DiffPool, IDLE_TTL, QUEUE_LIMIT, RETIRE_BYTES } from './diff_pool.ts'
 import { DiffRequest } from './diff_worker.ts'
@@ -33,6 +34,18 @@ const options: DiffOptions = {
   new_header: '',
 }
 const empty: InputFactory = () => new Uint8Array()
+function held(output: readonly ByteSource[]): Uint8Array[] {
+  return output.map((part) => {
+    if (!(part instanceof Uint8Array)) throw new Error('expected bytes held in memory')
+    return part
+  })
+}
+async function read(part: ByteSource): Promise<number> {
+  if (part instanceof Uint8Array) return part.byteLength
+  let size = 0
+  for await (const chunk of part) size += chunk.byteLength
+  return size
+}
 const pools: DiffPool[] = []
 function pool(): DiffPool {
   const result = new DiffPool()
@@ -251,7 +264,7 @@ describe('diff pool with its Rust worker', () => {
     )
     expect(result.status).toBe(1)
     expect(result.outcome).toBe('different')
-    expect(concat(result.output)).toEqual(
+    expect(concat(held(result.output))).toEqual(
       new Uint8Array([
         ...new TextEncoder().encode('1,2c1,2\n< '),
         0xff,
@@ -271,8 +284,20 @@ describe('diff pool with its Rust worker', () => {
     const huge = new Uint8Array(200_000).fill(65)
     const large = await owner.compare({ ...options, text: true }, () => huge, empty)
     expect(large.output.length).toBeGreaterThan(1)
-    expect(large.output.every((chunk) => chunk.byteLength <= 64 * 1024)).toBe(true)
-    expect(concat(large.output).byteLength).toBeGreaterThan(huge.byteLength)
+    expect(held(large.output).every((chunk) => chunk.byteLength <= 64 * 1024)).toBe(true)
+    expect(concat(held(large.output)).byteLength).toBeGreaterThan(huge.byteLength)
+  })
+
+  it('keeps what is past the kept size in a spool', async () => {
+    const owner = pool()
+    const huge = new Uint8Array(17 * 1024 * 1024).fill(65)
+    const result = await owner.compare({ ...options, text: true }, () => huge, empty)
+    const last = result.output[result.output.length - 1]
+    if (last === undefined) throw new Error('no output')
+    expect(last instanceof Uint8Array && last.byteLength <= 64 * 1024).toBe(false)
+    let size = 0
+    for (const part of result.output) size += await read(part)
+    expect(size).toBeGreaterThan(huge.byteLength)
   })
 
   it('closes both -q inputs when one close fails', async () => {

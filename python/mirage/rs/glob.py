@@ -200,3 +200,37 @@ def glob_matcher(
         dialect (str): shell or Python fnmatchcase grammar.
     """
     return GlobMatcher(pattern, extglob, period, dialect)
+
+
+class AnyTailMatcher:
+    """Several patterns asked, one native call per name, whether any
+    matches the name whole or the part after any slash in it.
+
+    Args:
+        patterns (tuple[str, ...]): the patterns.
+    """
+
+    def __init__(self, patterns: tuple[str, ...]) -> None:
+        # Shared like a GlobMatcher, so one test at a time goes through.
+        self._lock = threading.Lock()
+        self._stream = Stream(
+            "glob_tails",
+            json.dumps(
+                {"patterns": [[ord(ch) for ch in p] for p in patterns]}
+            ).encode(),
+        )
+
+    def matches(self, name: str) -> bool:
+        data = _encoded(name)
+        with self._lock:
+            return self._stream.test(data)
+
+
+@lru_cache(maxsize=_CACHE_SIZE)
+def any_tail_matcher(patterns: tuple[str, ...]) -> AnyTailMatcher:
+    """A compiled AnyTailMatcher, shared by every caller asking the same.
+
+    Args:
+        patterns (tuple[str, ...]): the patterns.
+    """
+    return AnyTailMatcher(patterns)

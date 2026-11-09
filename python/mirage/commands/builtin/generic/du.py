@@ -33,11 +33,11 @@ from mirage.errors.render import ZERO_LENGTH_NAME
 from mirage.errors.types import DotWalkError, FsCondition
 from mirage.io.types import ByteSource, IOResult, PathRecord
 from mirage.rs.errors import StreamRefusal
+from mirage.rs.glob import any_tail_matcher
 from mirage.rs.scan import refused, scan
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, Follow, LineFacts, LsTimeKind, PathSpec
 from mirage.utils.dates import iso_timestamp
-from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_one, respell_raw
 from mirage.view.namespace_view import paths_scoped
@@ -246,12 +246,7 @@ def excluded(patterns: Sequence[str], shown: str) -> bool:
     """
     if not patterns:
         return False
-    tails = [shown] + [
-        shown[at + 1 :] for at, char in enumerate(shown) if char == "/"
-    ]
-    return any(
-        fnmatch(tail, pattern) for pattern in patterns for tail in tails
-    )
+    return any_tail_matcher(tuple(patterns)).matches(shown)
 
 
 def excluded_start(

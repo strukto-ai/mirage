@@ -47,6 +47,66 @@ impl CompiledGlob {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TailsConfig {
+    patterns: Vec<Vec<u32>>,
+}
+
+/// Several patterns, asked once per name whether any matches the name or
+/// the part after any slash in it.
+struct Tails {
+    patterns: Vec<CompiledGlob>,
+    subject: Vec<u32>,
+}
+
+pub(crate) fn open_tails(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
+    let config: TailsConfig = parse_config(config)?;
+    if config.patterns.iter().flatten().any(|&cp| cp > 0x10ffff) {
+        return Err(StreamError::new("glob unit is past U+10FFFF"));
+    }
+    Ok(Box::new(Tails {
+        patterns: config.patterns.into_iter().map(CompiledGlob::new).collect(),
+        subject: Vec::new(),
+    }))
+}
+
+impl Stream for Tails {
+    fn feed(&mut self, _input: &[u8], _out: &mut Vec<u8>) -> Result<(), StreamError> {
+        Err(StreamError::new("this stream answers only tests"))
+    }
+
+    fn finish(&mut self, _out: &mut Vec<u8>) -> Result<(), StreamError> {
+        Ok(())
+    }
+
+    fn test(&mut self, input: &[u8]) -> Result<bool, StreamError> {
+        if input.len() % 4 != 0 {
+            return Err(StreamError::new("glob subject ends inside a u32 unit"));
+        }
+        self.subject.clear();
+        self.subject.extend(
+            input
+                .chunks_exact(4)
+                .map(|unit| u32::from_le_bytes([unit[0], unit[1], unit[2], unit[3]])),
+        );
+        let subject = &self.subject;
+        let slash = u32::from(b'/');
+        let mut starts = std::iter::once(0).chain(
+            subject
+                .iter()
+                .enumerate()
+                .filter(|(_, unit)| **unit == slash)
+                .map(|(at, _)| at + 1),
+        );
+        Ok(starts.any(|start| {
+            self.patterns
+                .iter()
+                .any(|pattern| pattern.matches(&subject[start..]))
+        }))
+    }
+}
+
 fn yes() -> bool {
     true
 }

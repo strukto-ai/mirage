@@ -3,17 +3,24 @@ from types import SimpleNamespace
 import pytest
 
 from mirage.commands.builtin.generic.tree import (
+    _HELD_LINES,
     TreeFlags,
     _segments_match,
     parse_flags,
     tree,
 )
 from mirage.commands.spec import SPECS
-from mirage.io.types import IOResult
+from mirage.io.stream import close_quietly
+from mirage.io.types import IOResult, materialize
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.workspace.executor.command.flags import (
     parse_flags as parse_line_flags,
 )
+
+
+async def _tree(*args, **kwargs):
+    output, io = await tree(*args, **kwargs)
+    return await materialize(output), io
 
 
 def _spec(path: str) -> PathSpec:
@@ -63,7 +70,7 @@ async def test_tree_hides_dotfiles_by_default():
         "/r/visible.txt": _file("visible.txt"),
     }
     readdir, stat = _make_backend(tree_map)
-    output, _ = await tree([_spec("/r")], readdir=readdir, stat=stat)
+    output, _ = await _tree([_spec("/r")], readdir=readdir, stat=stat)
     decoded = output.decode()
     assert ".hidden" not in decoded
     assert "visible.txt" in decoded
@@ -73,7 +80,7 @@ async def test_tree_hides_dotfiles_by_default():
 async def test_tree_empty_dir_reports_zero_counts():
     tree_map = {"/r": _dir("r")}
     readdir, stat = _make_backend(tree_map)
-    output, io = await tree([_spec("/r")], readdir=readdir, stat=stat)
+    output, io = await _tree([_spec("/r")], readdir=readdir, stat=stat)
     assert output.decode().splitlines() == ["/r", "", "0 directories, 0 files"]
     assert io.exit_code == 0
 
@@ -90,7 +97,7 @@ async def test_tree_not_a_directory_matches_the_missing_path_shape():
     async def stat(p: PathSpec, index=None) -> FileStat:
         raise NotADirectoryError(p.virtual)
 
-    output, io = await tree([_spec("/a.txt/x")], readdir=readdir, stat=stat)
+    output, io = await _tree([_spec("/a.txt/x")], readdir=readdir, stat=stat)
     lines = output.decode().splitlines()
     assert lines == [
         "/a.txt/x  [error opening dir]",
@@ -113,7 +120,7 @@ async def test_tree_root_whose_entries_all_fail_to_stat_is_drawn_plainly():
     async def stat(p: PathSpec, index=None) -> FileStat:
         raise PermissionError(p.virtual)
 
-    output, io = await tree([_spec("/r")], readdir=readdir, stat=stat)
+    output, io = await _tree([_spec("/r")], readdir=readdir, stat=stat)
     assert output.decode().splitlines() == ["/r", "", "0 directories, 0 files"]
     assert io.exit_code == 0
 
@@ -183,7 +190,7 @@ async def test_tree_crosses_into_a_nested_mount():
     }
     readdir, stat = _make_backend(parent)
     readdir_path, stat_path = _dispatch_pair(parent, child, "/base/inner")
-    output, io = await tree(
+    output, io = await _tree(
         [_spec("/base")],
         readdir=readdir,
         stat=stat,
@@ -226,7 +233,7 @@ async def test_tree_prints_a_mount_roots_own_details(known):
         virtual = path.virtual if isinstance(path, PathSpec) else path
         return None if virtual == "/base/inner" else await stat_path(path)
 
-    output, _ = await tree(
+    output, _ = await _tree(
         [_spec("/base")],
         flags=TreeFlags(perms=True, no_report=True),
         readdir=readdir,
@@ -243,7 +250,7 @@ async def test_tree_prints_a_mount_roots_own_details(known):
 @pytest.mark.asyncio
 async def test_tree_counts_no_bytes_for_a_missing_path():
     readdir, stat = _make_backend({})
-    output, io = await tree(
+    output, io = await _tree(
         [_spec("/gone")],
         flags=TreeFlags(du=True),
         readdir=readdir,
@@ -258,7 +265,7 @@ async def test_tree_counts_no_bytes_for_a_missing_path():
 async def test_tree_json_writes_a_name_it_cannot_decode_as_its_bytes():
     name = "bad\udcff"
     readdir, stat = _make_backend({"/r": _dir("r"), f"/r/{name}": _file(name)})
-    output, _ = await tree(
+    output, _ = await _tree(
         [_spec("/r")],
         flags=TreeFlags(json=True, no_report=True),
         readdir=readdir,
@@ -321,7 +328,7 @@ async def test_tree_lays_out_sizes_orders_and_json(
     flags: TreeFlags, expected: str
 ):
     readdir, stat = _make_backend(_SIZED)
-    output, io = await tree(
+    output, io = await _tree(
         [_spec("/r")],
         readdir=readdir,
         stat=stat,
@@ -357,7 +364,7 @@ async def test_tree_sorts_by_status_change_where_a_backend_keeps_one():
     readdir, stat = _make_backend(tree_map)
     orders = {}
     for sort in ("mtime", "ctime"):
-        output, _ = await tree(
+        output, _ = await _tree(
             [_spec("/r")],
             flags=TreeFlags(sort=sort, no_report=True),
             readdir=readdir,
@@ -419,3 +426,45 @@ def test_tree_names_the_orders_when_one_is_unknown():
         b"name,version,size,mtime,ctime,none\n",
         b"tree: Sort type 'n' not valid, should be one of: ",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,opened",
+    [
+        (TreeFlags(), ["/r"]),
+        (TreeFlags(json=True), ["/r", "/r/a", "/r/b"]),
+    ],
+)
+async def test_tree_reads_no_further_than_its_reader_when_it_can(
+    flags, opened
+):
+    tree_map = {
+        "/r": _dir("r"),
+        "/r/a": _dir("a"),
+        "/r/a/x": _file("x"),
+        "/r/b": _dir("b"),
+    }
+    readdir, stat = _make_backend(tree_map)
+    seen: list[str] = []
+
+    async def noting(p: PathSpec) -> list[str]:
+        seen.append(p.virtual)
+        return await readdir(p)
+
+    output, _ = await tree(
+        [_spec("/r")], readdir=noting, stat=stat, flags=flags
+    )
+    await anext(output)
+    await close_quietly(output)
+    assert seen == opened
+
+
+@pytest.mark.asyncio
+async def test_tree_writes_a_flat_directory_a_bounded_run_at_a_time():
+    names = {f"/r/{n:04}": _file(f"{n:04}") for n in range(3000)}
+    readdir, stat = _make_backend({"/r": _dir("r"), **names})
+    output, _ = await tree([_spec("/r")], readdir=readdir, stat=stat)
+    first = await anext(output)
+    await close_quietly(output)
+    assert first.count(b"\n") == _HELD_LINES
