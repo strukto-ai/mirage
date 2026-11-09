@@ -26,6 +26,10 @@ def _fake_mount(monkeypatch):
     )
 
 
+def _refuse(*_args, **_kwargs):
+    raise RuntimeError("no fuse")
+
+
 def _ws():
     return Workspace({"/a/": RAMVFS(), "/b/": RAMVFS()}, mode=MountMode.WRITE)
 
@@ -69,11 +73,7 @@ def test_a_failed_replacement_forgets_the_backend(monkeypatch):
     _fake_mount(monkeypatch)
     with _ws() as ws:
         ws.add_fuse_mount("/a/", "/tmp/mp-a")
-
-        def refuse(*_args, **_kwargs):
-            raise RuntimeError("no fuse")
-
-        monkeypatch.setattr("mirage.workspace.fuse.mount_background", refuse)
+        monkeypatch.setattr("mirage.workspace.fuse.mount_background", _refuse)
         with pytest.raises(RuntimeError, match="no fuse"):
             ws.add_fuse_mount("/a/", "/tmp/mp-a2")
         assert ws.fuse_mountpoints == {}
