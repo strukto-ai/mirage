@@ -138,8 +138,7 @@ describe('execute router', () => {
       payload: { command: 'echo hi' },
     })
     expect(res.statusCode).toBe(200)
-    const body = res.json<{ kind: string; stdout: string; exit_code: number }>()
-    expect(body.kind).toBe('io')
+    const body = res.json<{ stdout: string; exit_code: number }>()
     expect(body.stdout.trim()).toBe('hi')
     expect(body.exit_code).toBe(0)
     await app.close()

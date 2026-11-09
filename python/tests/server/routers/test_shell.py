@@ -71,7 +71,6 @@ async def test_shell_sync_returns_io_result():
         )
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["kind"] == "io"
         assert body["exit_code"] == 0
         assert body["stdout"].startswith("hello")
 

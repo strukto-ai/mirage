@@ -66,7 +66,6 @@ def test_failure_keeps_the_policy_refusal_record():
 async def test_a_plain_result_carries_no_refusal():
     body = await io_result_to_dict(IOResult(stdout=b"hi\n"))
     assert body == {
-        "kind": "io",
         "exit_code": 0,
         "stdout": "hi\n",
         "stderr": "",

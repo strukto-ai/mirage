@@ -54,7 +54,7 @@ describe('mirage shell', () => {
               { stream: 'stdout', data: Buffer.from([0x82, 0xac, 0xff, 0]).toString('base64') },
               {
                 status: 'done',
-                result: { kind: 'io', exit_code: 7, refusal: { reason: 'test' } },
+                result: { exit_code: 7, refusal: { reason: 'test' } },
                 error: null,
               },
             ]
@@ -96,7 +96,6 @@ describe('mirage shell', () => {
         expect(seen).toEqual(['GET /v1/health', 'POST /v1/workspaces/w/shell?stream=true'])
         if (jsonOutput) {
           expect(JSON.parse(Buffer.concat(out).toString())).toEqual({
-            kind: 'io',
             exit_code: 7,
             refusal: { reason: 'test' },
             stdout: '€�\0',
