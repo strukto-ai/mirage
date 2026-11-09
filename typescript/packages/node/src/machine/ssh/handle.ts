@@ -16,6 +16,7 @@ import { constants } from 'node:os'
 import { Readable } from 'node:stream'
 import { once } from 'node:events'
 import { connectOptions } from '../../utils/ssh.ts'
+import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
 import { MachineHandle } from '@struktoai/mirage-core/machine/handle'
 import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/machine/mixin'
@@ -194,7 +195,7 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
             c ??
             (signalName
               ? 128 + constants.signals[`SIG${signalName.replace(/^SIG/, '')}` as NodeJS.Signals]
-              : 1)
+              : null)
         })
         stream.on('close', () => {
           state.closed = true
@@ -203,10 +204,20 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
             state.done = true
             signal?.removeEventListener('abort', abort)
             const stderr = Buffer.concat(errs)
+            if (code === null) {
+              rejectFn(
+                new ConnectionLostError(
+                  'the channel closed with no exit status',
+                  new Uint8Array(Buffer.concat(out)),
+                  stderr.length > 0 ? new Uint8Array(stderr) : null,
+                ),
+              )
+              return
+            }
             resolveFn({
               stdout: new Uint8Array(Buffer.concat(out)),
               stderr: stderr.length > 0 ? new Uint8Array(stderr) : null,
-              exitCode: code ?? 1,
+              exitCode: code,
             })
           })
         })

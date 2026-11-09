@@ -21,6 +21,7 @@ import { join } from 'node:path'
 import ssh2 from 'ssh2'
 import { buildMachine } from '@struktoai/mirage-core/machine/registry'
 import { wrapLine } from '@struktoai/mirage-core/machine/constants'
+import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
@@ -344,6 +345,31 @@ describe('SSHMachine cancellation', () => {
     expect(runner.terminate(15)).toBe(true)
     expect((await runner.join()).exit).toBe(143)
     expect([runtime.channel.signals, runtime.channel.closed]).toEqual([signals, true])
+  })
+
+  // A channel that closed with no exit status and no signal lost the remote
+  // command's end; one that reported either keeps it.
+  it('treats a channel closed without an exit as a lost connection', async () => {
+    const runtime = new HungRuntime()
+    const started = new Promise((resolve) => runtime.channel.once('eof', resolve))
+    const running = runtime.line('true', new AbortController().signal)
+    await started
+    runtime.channel.emit('close')
+    await expect(running).rejects.toBeInstanceOf(ConnectionLostError)
+  })
+
+  it.each([
+    [0, undefined, 0],
+    [3, undefined, 3],
+    [null, 'TERM', 143],
+  ])('keeps a reported exit %s %s as %s', async (code, signalName, exitCode) => {
+    const runtime = new HungRuntime()
+    const started = new Promise((resolve) => runtime.channel.once('eof', resolve))
+    const running = runtime.line('true', new AbortController().signal)
+    await started
+    runtime.channel.emit('exit', code, signalName)
+    runtime.channel.emit('close')
+    await expect(running).resolves.toMatchObject({ exitCode })
   })
 
   it('closes its channel and stops listening when the channel fails', async () => {

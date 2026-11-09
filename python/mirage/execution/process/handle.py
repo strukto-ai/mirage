@@ -157,6 +157,13 @@ class ProcessHandle:
         with self._lock:
             return self._program_code
 
+    @property
+    def ended_on(self) -> int | None:
+        """The signal the native program the runner last started ended
+        on (``program_signaled``), None once one exited on its own."""
+        with self._lock:
+            return self._program_signal
+
     def take(self, machine: MachineId | None, runtime: str) -> bool:
         """Take the runner as the program it was started for
         (``one_command``), which runs on ``machine`` with ``runtime``, as

@@ -19,6 +19,7 @@ import { LookupStatus } from '../cache/index/config.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { materialize, type ByteSource } from '../io/types.ts'
 import { shellJoin } from '../shell/join.ts'
+import { ConnectionLostError } from './errors.ts'
 import { MachineHandle } from './handle.ts'
 import {
   PROCESS,
@@ -78,6 +79,26 @@ class RecordingMachine extends MachineHandle {
     cwd: string,
   ): Promise<RunResult> {
     return this.execLine(lineOf(argv), stdin === null ? null : await materialize(stdin), env, cwd)
+  }
+}
+
+// A box whose connection drops while it runs `train`.
+class DroppedBox extends RecordingMachine {
+  error: Error = new ConnectionLostError(
+    'closed by remote host',
+    ENC.encode('step 0\n'),
+    ENC.encode('warn\n'),
+  )
+
+  override async execLine(
+    line: string,
+    stdin: Uint8Array | null,
+    env: Record<string, string>,
+    cwd: string,
+  ): Promise<RunResult> {
+    const result = await super.execLine(line, stdin, env, cwd)
+    if (line.startsWith('train')) throw this.error
+    return result
   }
 }
 
@@ -339,6 +360,80 @@ describe('MachineHandle', () => {
     const runtime = machineRuntime(new RecordingMachine())
     expect(isLineExecutor(runtime)).toBe(true)
     expect(runtime).not.toBeInstanceOf(LanguageRuntime)
+  })
+
+  it('ends a line whose connection dropped as hung up', async () => {
+    const box = new DroppedBox({ captures: ['train'] })
+    const ws = sandboxWorkspace(box)
+    try {
+      const io = await ws.shell('train')
+      expect(io.exitCode).toBe(129)
+      expect(DEC.decode(io.stderr)).toBe(`warn\nmirage: ${String(box.id)}: connection lost\n`)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Only a transport's own ConnectionError means the connection went; an
+  // error of another name from elsewhere in the run stays the error it is.
+  // A run whose output was kept rather than streamed keeps what it read
+  // before the drop.
+  it('keeps the output a dropped run read', async () => {
+    const box = new DroppedBox({ captures: ['train'] })
+    const ran = await machineRuntime(box).runLine(undefined, [], [], {
+      flags: { c: 'train' },
+      stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
+    })
+    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr ?? undefined)]).toEqual([
+      129,
+      'step 0\n',
+      `warn\nmirage: ${String(box.id)}: connection lost\n`,
+    ])
+  })
+
+  it('lists a job whose connection dropped as killed', async () => {
+    const box = new DroppedBox({ captures: ['train'] })
+    const ws = sandboxWorkspace(box)
+    try {
+      await ws.shell('train &')
+      let rows = 'running'
+      while (rows.includes('running')) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        rows = DEC.decode((await ws.shell('jobs')).stdout)
+      }
+      expect(rows.endsWith('[1] killed train\n')).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Only a transport's ConnectionLostError means the connection went; any
+  // other error from elsewhere in the run stays the error it is.
+  it('leaves another error alone', async () => {
+    const box = new DroppedBox({ captures: ['train'] })
+    box.error = Object.assign(new Error('read ECONNRESET'), { name: 'ConnectionError' })
+    const ws = sandboxWorkspace(box)
+    try {
+      const io = await ws.shell('train')
+      expect(io.exitCode).not.toBe(129)
+      expect(DEC.decode(io.stderr)).not.toContain('connection lost')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reports a job whose connection dropped as hung up', async () => {
+    const box = new DroppedBox({ captures: ['train'] })
+    const ws = sandboxWorkspace(box)
+    try {
+      await ws.shell('train &')
+      const io = await ws.shell('wait %1')
+      expect(io.exitCode).toBe(129)
+      expect(DEC.decode(io.stderr)).toContain('Hangup')
+    } finally {
+      await ws.close()
+    }
   })
 
   it('a line timeout answers 124', async () => {

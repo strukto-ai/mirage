@@ -63,6 +63,7 @@ class ProgramMachine(MachineHandle, PipeTransportMixin):
             stdin,
             output=output,
             errors=errors,
+            connection=True,
         )
 
     async def _exec_argv(

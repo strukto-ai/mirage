@@ -29,6 +29,7 @@ from mirage.context.session_context import run_as_process
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachinePid
 from mirage.machine.constants import PIPE_DIAGNOSTIC_BYTES
+from mirage.machine.errors import ConnectionLostError
 from mirage.machine.program import (
     FAKETIME_LIBRARIES,
     Children,
@@ -136,6 +137,22 @@ async def test_run_cli_streams_input_and_output_and_maps_a_signal():
         b"ab",
         128 + signal.SIGTERM,
     )
+
+
+# A client to a machine that ends on a signal took the connection with it,
+# so how the program in the box ended is unknown; its own exit is the
+# program's.
+@pytest.mark.asyncio
+async def test_a_connection_client_ended_by_a_signal_is_a_lost_connection():
+    with pytest.raises(ConnectionLostError) as lost:
+        await run_program(
+            "sh", None, ["-c", "echo hi; kill -KILL $$"], None, connection=True
+        )
+    assert lost.value.stdout == b"hi\n"
+    ran = await run_program(
+        "sh", None, ["-c", "exit 3"], None, connection=True
+    )
+    assert ran.exit_code == 3
 
 
 # stderr goes to its own callback as it arrives, as stdout goes to output.

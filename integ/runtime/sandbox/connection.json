@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "id": "dropped_connection_hangs_up",
+      "runtimes": [
+        "ssh"
+      ],
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "sh -c 'echo before; p=$$; while p=$(cut -d\" \" -f4 /proc/$p/stat) && [ $p -gt 1 ]; do case $(cat /proc/$p/comm) in sshd*) kill -9 $p; sleep 5;; esac; done'",
+          "expect": {
+            "exit": 129,
+            "stdout": "before\n",
+            "stderr": "mirage: ssh:ssh: connection lost\n"
+          }
+        },
+        {
+          "command": "echo after",
+          "expect": {
+            "exit": 0,
+            "stdout": "after\n"
+          }
+        }
+      ]
+    }
+  ]
+}

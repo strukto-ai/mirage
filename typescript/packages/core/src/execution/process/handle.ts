@@ -122,6 +122,11 @@ export class ProcessHandle {
     return this.exitedCode
   }
 
+  /** The signal the native program the runner last started ended on (`programSignaled`), null once one exited on its own. */
+  get endedOn(): number | null {
+    return this.programSignal
+  }
+
   /**
    * Take the runner as the program it was started for (`oneCommand`),
    * which runs on `machine` with `runtime`, as bash execs a stage's or a

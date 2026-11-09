@@ -52,7 +52,9 @@ async def test_refuses_unusable_status_before_exec(
 ):
     calls = []
 
-    async def invoke(executable, hint, args, stdin, output=None, errors=None):
+    async def invoke(
+        executable, hint, args, stdin, output=None, errors=None, **_
+    ):
         calls.append(args)
         return RunResult(status, b"", 0)
 
@@ -74,7 +76,7 @@ async def test_refuses_unusable_status_before_exec(
 
 
 async def _missing_sandbox(
-    executable, hint, args, stdin, output=None, errors=None
+    executable, hint, args, stdin, output=None, errors=None, **_
 ):
     return RunResult(b"", b"sandbox not found", 1)
 
@@ -109,9 +111,13 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
         lambda: SimpleNamespace(hex="run"),
     )
     calls = []
+    connections = []
 
-    async def invoke(executable, hint, args, stdin, output=None, errors=None):
+    async def invoke(
+        executable, hint, args, stdin, output=None, errors=None, **options
+    ):
         calls.append((executable, args, stdin))
+        connections.append(options.get("connection"))
         if args[0] == "status":
             return RunResult(b'{"status":"Running"}', b"", 0)
         return RunResult(b"output", b"diagnostic", 7)
@@ -164,6 +170,8 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
         b"diagnostic",
         7,
     )
+    # The msb client is the connection, so its death on a signal is one lost.
+    assert set(connections) == {True}
 
 
 @pytest.mark.asyncio

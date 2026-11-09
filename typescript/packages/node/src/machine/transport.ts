@@ -48,6 +48,7 @@ export abstract class ProgramMachine<C extends MachineConfig = MachineConfig>
       ...(signal !== undefined ? { signal } : {}),
       ...(output !== null ? { output } : {}),
       ...(errors !== null ? { errors } : {}),
+      connection: true,
     })
   }
 

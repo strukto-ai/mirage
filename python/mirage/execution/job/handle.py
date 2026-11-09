@@ -222,7 +222,9 @@ class JobHandle:
         self.cancel(signal)
         await self.end(128 + signal, signal)
 
-    async def end(self, exit_code: int, signal: int | None = None) -> None:
+    async def end(
+        self, exit_code: int, signal: int | None = None, marker: bool = True
+    ) -> None:
         """End the job's console with how it ended, then take the ending
         the console holds.
 
@@ -237,13 +239,18 @@ class JobHandle:
             exit_code (int): the status it answers.
             signal (int | None): the signal it was stopped with, None
                 for a job that ran to completion.
+            marker (bool): write the ``Killed`` marker a stop leaves in
+                the output; a program a signal ended outside a kill
+                leaves none.
         """
         self.exit_code, self.signal = exit_code, signal
         self._mark_ended()
-        if signal is not None:
+        if signal is None:
+            await self.console.finish(exit_outcome(exit_code))
+        elif marker:
             await mark_killed(self.console, exit_code, signal)
         else:
-            await self.console.finish(exit_outcome(exit_code))
+            await self.console.finish(killed_outcome(exit_code, signal))
         if not self.console.store.closed:
             outcome = await self.console.outcome()
             if outcome is not None:
@@ -306,11 +313,15 @@ class JobHandle:
             await self.console.emit(Channel.STDERR, encode_text(str(exc)))
             await self.end(1)
             return 1
+        code = io_result.exit_code
+        ended = self.process.ended_on if self.process is not None else None
         if self.state != JobState.RUNNING:
             await self.end(*self._stopped())
+        elif ended is not None and code == 128 + ended:
+            await self.end(code, ended, marker=False)
         else:
-            await self.end(io_result.exit_code)
-        return io_result.exit_code
+            await self.end(code)
+        return code
 
     async def adopt_ending(self) -> None:
         """Stop the job's runner if another workspace ended its console.

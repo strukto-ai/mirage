@@ -157,6 +157,8 @@ describe('MicrosandboxMachine', () => {
           input,
         ],
       ])
+      // The msb client is the connection, so its death on a signal is one lost.
+      expect(new Set(invoke.mock.calls.map((call) => call[4]?.connection))).toEqual(new Set([true]))
       expect(DEC.decode(result.stdout)).toBe('output')
       expect(DEC.decode(result.stderr)).toBe('diagnostic')
       expect(result.exitCode).toBe(7)

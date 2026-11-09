@@ -231,14 +231,16 @@ export class JobHandle {
    * ending, and every workspace answers that one. The job's fields are set
    * before the console is finished, so a reader released by the ending
    * chunk always sees them settled. `signal` is null for a job that ran to
-   * completion.
+   * completion; `marker` writes the `Killed` marker a stop leaves in the
+   * output, which a program a signal ended outside a kill leaves out.
    */
-  async end(exitCode: number, signal: number | null = null): Promise<void> {
+  async end(exitCode: number, signal: number | null = null, marker = true): Promise<void> {
     this.exitCode = exitCode
     this.signal = signal
     this.markEnded()
-    if (signal !== null) await markKilled(this.console, exitCode, signal)
-    else await this.console.finish(exitOutcome(exitCode))
+    if (signal === null) await this.console.finish(exitOutcome(exitCode))
+    else if (marker) await markKilled(this.console, exitCode, signal)
+    else await this.console.finish(killedOutcome(exitCode, signal))
     if (!this.console.store.closed) {
       const outcome = await this.console.outcome()
       if (outcome !== null) this.take(outcome)
@@ -287,9 +289,12 @@ export class JobHandle {
       return 1
     }
     const [ioResult] = result
+    const code = ioResult.exitCode
+    const ended = this.process?.endedOn ?? null
     if (this.state !== 'running') await this.end(...this.stopped())
-    else await this.end(ioResult.exitCode)
-    return ioResult.exitCode
+    else if (ended !== null && code === 128 + ended) await this.end(code, ended, false)
+    else await this.end(code)
+    return code
   }
 
   /**
