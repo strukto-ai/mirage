@@ -240,6 +240,7 @@ class PipeRecorder(Recorder):
         self.file: FileDescription | None = None
         self.failure: Exception | None = None
         self.streaming = asyncio.Lock()
+        self.route: "JobRoute | None" = None
 
     async def consume(self, file: FileDescription, source: ByteSource) -> None:
         # The write is the redirect's own, so it waits on no hold of its file.
@@ -428,12 +429,20 @@ class PipeRecorder(Recorder):
         """Write bytes through the level's own descriptors, as a write
         through the description it opened does whatever ``exec`` did.
 
+        A write that waited while ``finish_writer`` committed the file
+        goes back through the job route: the level may have taken what
+        it recorded for the last time, and nothing would read it here.
+
         Args:
             channel (Channel): the stream the write is on.
             data (bytes): the bytes written.
         """
-        if channel in self.bound and await self._streamed(channel, data):
-            return
+        if channel in self.bound:
+            if await self._streamed(channel, data):
+                return
+            if self.route is not None:
+                await self.route.emit(channel, data)
+                return
         scope = self.streams.get(channel)
         if scope is None:
             if self.sink is not None and channel in self.forward:
@@ -1141,6 +1150,7 @@ async def _handle_redirect(
         dispatch,
         context,
     )
+    recorder.route = route
     leave = route.record(recorder)
     session.job_output = route
     outer = current_caller()
