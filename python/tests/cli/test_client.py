@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
 import socket
 import threading
 import time
@@ -51,6 +52,23 @@ def test_spawn_daemon_uses_mirage_home_for_log_and_token(
     assert (tmp_path / "daemon.log").exists()
     assert (tmp_path / "auth_token").exists()
     assert client.settings.auth_token
+
+
+def test_the_daemon_log_is_owner_only(tmp_path, monkeypatch, umask_022):
+    # The log keeps the daemon's tracebacks, which can quote a config; one
+    # an earlier version made 0644 is tightened at the next spawn.
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    monkeypatch.delenv("MIRAGE_AUTH_MODE", raising=False)
+    monkeypatch.setattr(
+        "mirage.cli.client.subprocess.Popen", lambda *args, **kwargs: None
+    )
+    log = tmp_path / "daemon.log"
+    for before in (None, 0o644):
+        if before is not None:
+            log.chmod(before)
+        with DaemonClient(DaemonSettings()) as client:
+            client._spawn_daemon()
+        assert os.stat(log).st_mode & 0o777 == 0o600
 
 
 def test_spawn_daemon_rejects_bad_config(tmp_path, monkeypatch):

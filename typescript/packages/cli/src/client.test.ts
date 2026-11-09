@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import * as childProcess from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -22,6 +23,11 @@ import { DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DaemonClient, DaemonUnreachable } from './client.ts'
 import { LoginError, readLogin, removeLogin, writeLogin, type Login } from './credentials.ts'
+
+vi.mock('node:child_process', async (original) => {
+  const real = await original<typeof childProcess>()
+  return { ...real, spawn: vi.fn(real.spawn) }
+})
 
 describe('DaemonClient spawn config validation', () => {
   let home: string
@@ -62,6 +68,31 @@ describe('DaemonClient spawn config validation', () => {
     await expect(client.ensureRunning({ timeoutMs: 500 })).rejects.toThrow(DaemonUnreachable)
     expect(existsSync(join(home, 'auth_token'))).toBe(false)
     expect(existsSync(join(home, 'daemon.log'))).toBe(false)
+  })
+
+  // The log keeps the daemon's tracebacks, which can quote a config; one an
+  // earlier version made 0644 is tightened at the next spawn.
+  it('keeps the daemon log owner-only', () => {
+    const child = { on: vi.fn(), unref: vi.fn() } as unknown as ChildProcess
+    const spawn = vi.mocked(childProcess.spawn).mockReturnValue(child)
+    const umask = process.umask(0o022)
+    const log = join(home, 'daemon.log')
+    try {
+      for (const before of [null, 0o644]) {
+        if (before !== null) chmodSync(log, before)
+        const client = new DaemonClient({
+          context: 'local',
+          url: 'http://127.0.0.1:1',
+          authToken: 't',
+          idleGraceSeconds: 30,
+        })
+        ;(client as unknown as { spawnDaemon: () => ChildProcess }).spawnDaemon()
+        expect(statSync(log).mode & 0o777).toBe(0o600)
+      }
+    } finally {
+      process.umask(umask)
+      spawn.mockRestore()
+    }
   })
 
   it('gives a remote server 10 s to answer, and a local daemon half a second', async () => {
