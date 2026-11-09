@@ -1,10 +1,45 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CHUNK_SIZE } from './cooperative.ts'
 import { PipeClosed } from './errors.ts'
 import { CAPACITY, BytePipe, SEALED } from './pipe.ts'
 import { concat } from '../utils/bytes.ts'
 
 describe('BytePipe', () => {
+  it('wakes a polled reader on its own timer, never from the writer', async () => {
+    vi.useFakeTimers()
+    try {
+      const pipe = new BytePipe(CAPACITY, true)
+      const reader = pipe.stream()
+      let got: Uint8Array | undefined
+      const reading = reader.next().then((next) => {
+        got = next.value as Uint8Array
+      })
+      await pipe.write(new Uint8Array([1]))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(got).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(10)
+      await reading
+      expect(got).toEqual(new Uint8Array([1]))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops a polled write on abort and leaves no timer', async () => {
+    vi.useFakeTimers()
+    try {
+      const pipe = new BytePipe(CHUNK_SIZE, true)
+      await pipe.write(new Uint8Array(CHUNK_SIZE))
+      const abort = new AbortController()
+      const writing = pipe.write(new Uint8Array(1), abort.signal)
+      abort.abort()
+      await expect(writing).rejects.toThrow()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each(
     [CHUNK_SIZE, CAPACITY, 262144].flatMap((capacity) =>
       [false, true].map((joined) => [capacity, joined] as const),

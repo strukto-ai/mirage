@@ -19,6 +19,7 @@ import { fromJsonSchema } from '@modelcontextprotocol/server'
 import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import { PipeClosed } from '@struktoai/mirage-core/io/errors'
 import { BytePipe } from '@struktoai/mirage-core/io/pipe'
+import { currentRequest } from '@struktoai/mirage-core/io/web/request'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { TooManyMatches } from '@struktoai/mirage-core/shell/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
@@ -346,7 +347,7 @@ export class MirageRpcServer {
     if (this.stdins.has(key)) {
       throw new RpcError(RPC_INVALID_PARAMS, 'that id already holds an open stdin')
     }
-    const pipe = new BytePipe(this.ws.io.bufferBytes)
+    const pipe = new BytePipe(this.ws.io.bufferBytes, currentRequest() !== null)
     this.stdins.set(key, pipe)
     try {
       return await this.runLine(command, { ...options, stdin: pipe.stream() }, signal)

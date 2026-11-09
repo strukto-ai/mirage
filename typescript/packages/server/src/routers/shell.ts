@@ -15,6 +15,7 @@
 import { WorkspaceHeldError } from '@struktoai/mirage-core/execution/errors'
 import type { LineId } from '@struktoai/mirage-core/execution/types'
 import { BytePipe } from '@struktoai/mirage-core/io/pipe'
+import { currentRequest } from '@struktoai/mirage-core/io/web/request'
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
@@ -284,7 +285,9 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
         return reply.status(400).send({ detail: 'open_stdin takes stream=true and no stdin part' })
       }
       const pipe =
-        body.open_stdin === true ? new BytePipe(entry.runner.ws.io.bufferBytes) : undefined
+        body.open_stdin === true
+          ? new BytePipe(entry.runner.ws.io.bufferBytes, currentRequest() !== null)
+          : undefined
       const source = pipe?.stream() ?? stdin
       await entry.runner.ws.ensureSessionsLoaded()
       const sessionId = req.query.session_id ?? entry.runner.ws.defaultSessionId
