@@ -28,10 +28,10 @@
     {
       "id": "zip_update_preserves_document_parts",
       "seq": 10000001,
-      "command": "(mkdir -p /data/zip-update/word; echo types > /data/zip-update/types.xml; echo old > /data/zip-update/word/document.xml; cd /data/zip-update; zip -q report.docx types.xml word/document.xml; echo updated > word/document.xml; echo added > extra.xml; zip -X report.docx extra.xml word/document.xml; unzip -Z1 report.docx; unzip -p report.docx types.xml word/document.xml extra.xml)",
+      "command": "(mkdir -p /data/zip-update/word; echo types > /data/zip-update/types.xml; echo old > /data/zip-update/word/document.xml; cd /data/zip-update; zip -q report.docx types.xml word/document.xml; echo updated > word/document.xml; echo added > extra.xml; zip -X report.docx extra.xml word/document.xml; unzip -Z1 report.docx; unzip -p report.docx types.xml word/document.xml extra.xml); mkdir -p /data/fz3/d/sub; touch /data/fz3/d/a.txt /data/fz3/d/sub/b.txt; cd /data/fz3; echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa > d/a.txt; echo bb > d/sub/b.txt; echo cc > c.log; echo ee > e.log; touch -d 2001-02-03T04:05:06Z c.log e.log; zip -q a.zip c.log; echo new >> c.log; touch -d 2005-01-01T00:00:00Z c.log; zip -q -u a.zip c.log e.log; echo rc=$?; unzip -Z1 a.zip; zip -q -u a.zip c.log; echo rc=$?; touch -d 1999-01-01T00:00:00Z c.log; zip -q -u a.zip c.log; echo rc=$?; zip -q -u nope.zip c.log; echo rc=$?; ls nope.zip; zip -q -f none.zip c.log; echo rc=$?; zip -q b.zip c.log; touch -d 2009-01-01T00:00:00Z c.log; zip -q -f b.zip c.log e.log; echo rc=$?; unzip -Z1 b.zip; zip -q -f b.zip; echo rc=$?; cd /; rm -r /data/fz3",
       "expect": {
         "exit": 0,
-        "stdout": "updating: word/document.xml\n  adding: extra.xml\ntypes.xml\nword/document.xml\nextra.xml\ntypes\nupdated\nadded\n",
+        "stdout": "updating: word/document.xml\n  adding: extra.xml\ntypes.xml\nword/document.xml\nextra.xml\ntypes\nupdated\nadded\nrc=0\nc.log\ne.log\nrc=12\nrc=12\nrc=0\nnope.zip\nrc=12\nrc=0\nc.log\nrc=12\n",
         "stderr": ""
       }
     },

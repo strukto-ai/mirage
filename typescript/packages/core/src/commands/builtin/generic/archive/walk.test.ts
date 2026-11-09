@@ -17,7 +17,7 @@ import { fsError } from '../../../../errors/fs.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import type { LinkView } from '../../../../view/types.ts'
-import { scanOperand } from './walk.ts'
+import { recordedStamp, scanOperand } from './walk.ts'
 
 const REFUSALS = ['EACCES', 'EPERM', 'EROFS'] as const
 
@@ -59,5 +59,21 @@ describe('scanOperand', () => {
     })
     expect(scan.missing).toBe(true)
     expect(scan.problems).toEqual([{ path: '/rd/l', reason: posixPhrase(code), fatal: true }])
+  })
+
+  it.each<[string, string | null, [number | null, number | null]]>([
+    ['time and bits', '/f', [1_000_000_000, 0o640]],
+    ['no time', '/timeless', [null, 0o640]],
+    ['unreadable', '/gone', [null, null]],
+    ['not a file', null, [null, null]],
+  ])('records a stamp: %s', async (_name, path, expected) => {
+    const stat = async (p: PathSpec): Promise<FileStat> => {
+      await Promise.resolve()
+      if (p.virtual === '/gone') throw fsError(p, 'ENOENT')
+      const modified = p.virtual === '/timeless' ? null : '2001-09-09T01:46:40Z'
+      return new FileStat({ name: 'f', type: FileType.FILE, modified, mode: 0o100640 })
+    }
+    const spec = path === null ? null : PathSpec.fromStrPath(path)
+    expect(await recordedStamp(stat, spec)).toEqual(expected)
   })
 })

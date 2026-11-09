@@ -20,7 +20,13 @@ import { respellOne } from '../../../../utils/path.ts'
 import { lstripSlash, rstripSlash } from '../../../../utils/slash.ts'
 import type { LinkView, MountView } from '../../../../view/types.ts'
 import type { MemberKind } from '../archive/types.ts'
-import { OTHER_FILESYSTEM, scanOperand, type DirProbe, type WalkFn } from '../archive/walk.ts'
+import {
+  OTHER_FILESYSTEM,
+  recordedStamp,
+  scanOperand,
+  type DirProbe,
+  type WalkFn,
+} from '../archive/walk.ts'
 import {
   CREATE_ERROR_EXIT,
   EMPTY_ARCHIVE,
@@ -30,6 +36,13 @@ import {
   USAGE_HINT,
 } from './constants.ts'
 import type { CreateResult, Member } from './types.ts'
+
+/** One --exclude or -X pattern and how it was asked to match. Mirrors Python's Exclusion. */
+export interface Exclusion {
+  readonly pattern: string
+  readonly anchored: boolean
+  readonly wildcards: boolean
+}
 
 function refusal(notices: string[]): CreateResult {
   return { members: [], notices, exitCode: CREATE_ERROR_EXIT, write: false }
@@ -43,12 +56,15 @@ function refusal(notices: string[]): CreateResult {
 // exclusion patterns. A directory's trailing slash is not part of what
 // the pattern sees. Info-ZIP's `-x` is the anchored counterpart, which
 // is why the two are not shared.
-function excluded(name: string, pattern: string): boolean {
+function excluded(name: string, rule: Exclusion): boolean {
+  const same = (part: string): boolean =>
+    rule.wildcards ? fnmatch(part, rule.pattern) : part === rule.pattern
   const bare = rstripSlash(name)
-  if (fnmatch(bare, pattern)) return true
+  if (same(bare)) return true
+  if (rule.anchored) return false
   let cut = bare.indexOf('/')
   while (cut !== -1) {
-    if (fnmatch(bare.slice(cut + 1), pattern)) return true
+    if (same(bare.slice(cut + 1))) return true
     cut = bare.indexOf('/', cut + 1)
   }
   return false
@@ -58,13 +74,13 @@ function excluded(name: string, pattern: string): boolean {
 // does not walk into a directory it excluded, so `--exclude sub` takes
 // `d/sub/` and `d/sub/b.txt` together; matching each name in isolation
 // would keep the children of a pruned directory.
-function pruned(names: readonly string[], pattern: string | null): string[] {
-  if (pattern === null) return [...names]
+function pruned(names: readonly string[], rules: readonly Exclusion[]): string[] {
+  if (rules.length === 0) return [...names]
   const kept: string[] = []
   const cutDirs: string[] = []
   for (const name of names) {
     if (cutDirs.some((cut) => name.startsWith(cut))) continue
-    if (excluded(name, pattern)) {
+    if (rules.some((rule) => excluded(name, rule))) {
       if (name.endsWith('/')) cutDirs.push(name)
       continue
     }
@@ -117,8 +133,8 @@ function announcePrefix(prefix: string, dropped: string[], notices: string[]): v
 // the trailing slash that tells an extractor it holds no content. An
 // operand that is all traversal — `tar -cf a.tar ..` — leaves nothing to
 // name, and GNU stores that directory as `./`.
-function memberName(spelled: string, kind: MemberKind): string {
-  const [name] = stripPrefix(spelled)
+function memberName(spelled: string, kind: MemberKind, absolute = false): string {
+  const name = absolute ? spelled : stripPrefix(spelled)[0]
   if (kind === 'dir') {
     if (name === '') return './'
     if (!name.endsWith('/')) return `${name}/`
@@ -169,7 +185,7 @@ export async function planCreate(
   paths: readonly PathSpec[],
   deps: {
     archive: PathSpec
-    exclude: string | null
+    exclude: readonly Exclusion[]
     dereference: boolean
     stat: StatFn
     walk: WalkFn
@@ -180,15 +196,23 @@ export async function planCreate(
     links?: LinkView | null
     mounts?: MountView | null
     oneFileSystem?: boolean
+    // -P: names are stored as spelled and no prefix is removed from them.
+    absolute?: boolean
+    // An archive of no members is what was asked for (-r, -u, or a -T list).
+    allowEmpty?: boolean
+    // What reading the -T lists already said, and the status it came to.
+    leading?: readonly string[]
+    leadingStatus?: number
   },
 ): Promise<CreateResult> {
-  if (paths.length === 0) return refusal([EMPTY_ARCHIVE, USAGE_HINT])
+  if (paths.length === 0 && deps.allowEmpty !== true) return refusal([EMPTY_ARCHIVE, USAGE_HINT])
+  const absolute = deps.absolute === true
   const directoryErrors = await checkDirectories(deps.directories ?? [], deps.isDir, deps.stat)
   if (directoryErrors.length > 0) return refusal(directoryErrors)
   const members: Member[] = []
-  const notices: string[] = []
+  const notices: string[] = [...(deps.leading ?? [])]
   const dropped: string[] = []
-  let exitCode = 0
+  let exitCode = deps.leadingStatus ?? 0
   for (const path of paths) {
     if (path.walkError !== null) {
       // The walk refused the operand before tar ran (the empty name, a
@@ -196,7 +220,8 @@ export async function planCreate(
       // is still announced first, as for any operand it cannot stat.
       if (path.rawPath === '') notices.push(EMPTY_MEMBER)
       const trimmed = rstripSlash(path.rawPath)
-      announcePrefix(stripPrefix(trimmed === '' ? path.rawPath : trimmed)[1], dropped, notices)
+      if (!absolute)
+        announcePrefix(stripPrefix(trimmed === '' ? path.rawPath : trimmed)[1], dropped, notices)
       notices.push(cannot(path.rawPath, 'stat', String(fsStrerror(walkRefusal(path)))))
       exitCode = CREATE_ERROR_EXIT
       continue
@@ -222,14 +247,14 @@ export async function planCreate(
     // The operand's own spelling carries the prefix even when nothing
     // under it can be archived, which is why `tar -cf a.tar sub/../missing`
     // still announces `sub/../`.
-    announcePrefix(stripPrefix(raw)[1], dropped, notices)
+    if (!absolute) announcePrefix(stripPrefix(raw)[1], dropped, notices)
     // Each name is then stripped on its own, so one operand can owe two
     // notices: `tar -cf a.tar ..` drops `..` from the directory and `../`
     // from everything under it.
     const named = scan.entries.map((entry) => {
       const spelled = respellOne(entry.namePath, base, raw)
-      announcePrefix(stripPrefix(spelled)[1], dropped, notices)
-      return [memberName(spelled, entry.kind), spelled, entry] as const
+      if (!absolute) announcePrefix(stripPrefix(spelled)[1], dropped, notices)
+      return [memberName(spelled, entry.kind, absolute), spelled, entry] as const
     })
     for (const problem of scan.problems) {
       const shown = respellOne(problem.path, base, raw)
@@ -252,7 +277,7 @@ export async function planCreate(
     }
     if (scan.missing) continue
     for (const crossing of deps.oneFileSystem === true ? [] : scan.crossings) {
-      const shown = memberName(respellOne(crossing, base, raw), 'dir')
+      const shown = memberName(respellOne(crossing, base, raw), 'dir', absolute)
       notices.push(`tar: ${shown}: ${OTHER_FILESYSTEM}`)
     }
     const keep = new Set(
@@ -268,6 +293,7 @@ export async function planCreate(
         notices.push(`tar: ${name}: ${SELF_DUMP}`)
         continue
       }
+      const [mtime, mode] = await recordedStamp(deps.stat, read)
       members.push({
         name,
         kind: entry.kind,
@@ -275,6 +301,8 @@ export async function planCreate(
         target: entry.target ?? '',
         spelled,
         size: entry.size ?? null,
+        mtime,
+        mode,
       })
     }
   }

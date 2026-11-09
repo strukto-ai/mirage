@@ -117,10 +117,10 @@
         "redis",
         "opfs"
       ],
-      "command": "(mkdir -p /data/fcA_q && cd /data/fcA_q && printf x > 'back\\slash' && tar -cvf a.tar 'back\\slash' && rm 'back\\slash' && tar -xvf a.tar && cat 'back\\slash'; rc=$?; cd / && rm -r /data/fcA_q; exit $rc)",
+      "command": "(mkdir -p /data/fcA_q && cd /data/fcA_q && printf x > 'back\\slash' && tar -cvf a.tar 'back\\slash' && rm 'back\\slash' && tar -xvf a.tar && cat 'back\\slash'; rc=$?; cd / && rm -r /data/fcA_q; exit $rc); mkdir -p /data/ft6/d/sub; cd /data/ft6; echo aa > d/a.txt; echo bb > d/sub/b.txt; echo cc > c.log; echo ee > e.log; touch -d 2001-02-03T04:05:06Z c.log e.log d/a.txt; tar -cf u.tar c.log d/a.txt; echo new > c.log; touch -d 2005-01-01T00:00:00Z c.log; tar -uf u.tar c.log d/a.txt e.log; tar -tvf u.tar | awk '{print $1, $4, $5, $6}'; tar -uvf u.tar c.log; echo rc=$?; touch -d 1999-01-01T00:00:00Z c.log; tar -uf u.tar c.log; tar -tf u.tar | wc -l; touch -d 2009-01-01T00:00:00Z c.log; tar -uf u.tar c.log; tar -tf u.tar | wc -l; tar -uf new2.tar c.log; tar -uf new2.tar c.log; tar -tf new2.tar; cd /; rm -r /data/ft6",
       "expect": {
         "exit": 0,
-        "stdout": "back\\\\slash\nback\\\\slash\nx",
+        "stdout": "back\\\\slash\nback\\\\slash\nx-rw-r--r-- 2001-02-03 04:05 c.log\n-rw-r--r-- 2001-02-03 04:05 d/a.txt\n-rw-r--r-- 2005-01-01 00:00 c.log\n-rw-r--r-- 2001-02-03 04:05 e.log\nrc=0\n4\n5\nc.log\n",
         "stderr": ""
       },
       "flags": [

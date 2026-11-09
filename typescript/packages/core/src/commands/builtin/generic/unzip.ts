@@ -49,6 +49,11 @@ const LETTERS: Record<string, string> = {
   h: 'h',
   o: 'o',
   n: 'n',
+  j: 'j',
+  u: 'u',
+  f: 'f',
+  z: 'z',
+  C: 'C',
 }
 
 // The flags unzip reads, parsed once. Mirrors unzip.py's UnzipFlags.
@@ -58,6 +63,8 @@ interface UnzipFlags {
   readonly dest: PathSpec | null
   readonly typed: boolean
   readonly excludes: readonly string[]
+  readonly textMode: number
+  readonly lower: number
 }
 
 function parseFlags(fl: FlagView): UnzipFlags {
@@ -72,6 +79,8 @@ function parseFlags(fl: FlagView): UnzipFlags {
     dest: fl.asPath('d') ?? null,
     typed: fl.raw('d') !== undefined,
     excludes: fl.asList('x'),
+    textMode: Math.min(fl.asInt('a', 0), 2),
+    lower: Math.min(fl.asInt('L', 0), 2),
   }
 }
 
@@ -165,6 +174,8 @@ export function unzipGeneric(
     excludes: excludes.map((pattern) => byteView(pattern)),
     base: byteView(rstripSlash(extractDest(dest, ctx.cwd.virtual))),
     q: flags.quiet,
+    a: flags.textMode,
+    L: flags.lower,
     ...letters,
   }
   if (flags.typed) config.dest = byteView(dest?.rawPath ?? '')

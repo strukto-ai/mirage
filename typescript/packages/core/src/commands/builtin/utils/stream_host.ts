@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isoToEpoch } from '../../../utils/dates.ts'
 import type { util } from 'zod'
 import { currentCaller } from '../../../context/session_context.ts'
 import { classify } from '../../../errors/classify.ts'
@@ -209,7 +210,13 @@ export class StreamHost {
       case 'unlink':
       case 'mkdir':
       case 'stat':
+      case 'rmdir':
         return this.pathOp(request.op, typeof request.path === 'string' ? request.path : '')
+      case 'chmod':
+        return this.chmod(
+          typeof request.path === 'string' ? request.path : '',
+          typeof request.mode === 'number' ? request.mode : 0,
+        )
       case 'readlink':
         return this.readlink(typeof request.path === 'string' ? request.path : '')
       case 'copy':
@@ -494,8 +501,22 @@ export class StreamHost {
     return { reply: {} }
   }
 
+  /** Give a path a mode, through the workspace's attribute overlay. */
+  private async chmod(name: string, mode: number): Promise<Served> {
+    if (this.ctx.vfs === undefined) return { reply: { fatal: 'file output requires a workspace' } }
+    try {
+      await this.ctx.vfs.setattr(PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd), {
+        mode,
+      })
+    } catch (error) {
+      if (!isWalkError(error)) throw error
+      return { reply: failure(error) }
+    }
+    return { reply: {} }
+  }
+
   /** Unlink, make (one level) or stat a path; a stat answers what stands there, `dir` or `file`, or why it found nothing. */
-  private async pathOp(op: 'unlink' | 'mkdir' | 'stat', name: string): Promise<Served> {
+  private async pathOp(op: 'unlink' | 'mkdir' | 'stat' | 'rmdir', name: string): Promise<Served> {
     const dispatch = dispatchOf(this.ctx)
     if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
     let found: unknown
@@ -506,7 +527,13 @@ export class StreamHost {
       return { reply: failure(error) }
     }
     if (op !== 'stat' || found === null || found === undefined) return { reply: {} }
-    return { reply: { kind: (found as FileStat).type === FileType.DIRECTORY ? 'dir' : 'file' } }
+    const row = found as FileStat
+    return {
+      reply: {
+        kind: row.type === FileType.DIRECTORY ? 'dir' : 'file',
+        mtime: row.modified === null ? null : isoToEpoch(row.modified),
+      },
+    }
   }
 
   /**

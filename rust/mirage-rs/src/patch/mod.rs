@@ -47,6 +47,77 @@ struct Config {
     /// `--dry-run`: each file checked as it would be patched, and nothing
     /// written.
     dry_run: bool,
+    /// `-b`: a backup whether or not the file matched.
+    backup: bool,
+    /// `-z`, `-B` and `-V` as typed: how a backup is named.
+    #[serde(deserialize_with = "crate::latin1_opt")]
+    suffix: Option<Vec<u8>>,
+    #[serde(deserialize_with = "crate::latin1_opt")]
+    prefix: Option<Vec<u8>>,
+    #[serde(deserialize_with = "crate::latin1_opt")]
+    version: Option<Vec<u8>>,
+    /// `-o`: the patched text goes here, `-` for the output.
+    #[serde(deserialize_with = "crate::latin1_opt")]
+    output: Option<Vec<u8>>,
+    /// `-r`: where rejects go, `-` for nowhere.
+    #[serde(deserialize_with = "crate::latin1_opt")]
+    reject: Option<Vec<u8>>,
+    /// `-s`, `-f`, `-t`, `-l`, `-E` and `--verbose`.
+    silent: bool,
+    force: bool,
+    batch: bool,
+    whitespace: bool,
+    remove_empty: bool,
+    verbose: bool,
+    /// `-F` as typed, and read: how much outer context may go unmatched.
+    #[serde(rename = "fuzz", deserialize_with = "crate::latin1_opt")]
+    typed_fuzz: Option<Vec<u8>>,
+    #[serde(skip)]
+    fuzz: i64,
+}
+
+/// `-F` as patch 2.8 reads it; anything but a count refuses the line.
+fn fuzz_factor(raw: &[u8]) -> Result<i64, StreamError> {
+    let parts = crate::number::parts(raw, false);
+    let problem = if !matches!(raw.first(), Some(b'+' | b'-' | b'0'..=b'9')) || !parts.whole() {
+        "is not a number"
+    } else if parts.negative() && parts.saturating() > 0 {
+        "is negative"
+    } else {
+        return Ok(i64::try_from(parts.saturating()).unwrap_or(i64::MAX));
+    };
+    let refused = [
+        b"patch: **** fuzz factor ".as_slice(),
+        raw,
+        b" ",
+        problem.as_bytes(),
+    ]
+    .concat();
+    Err(StreamError::refusal(&refused, 2))
+}
+
+/// `-V` as patch 2.8 reads it.
+fn check_version(raw: &[u8]) -> Result<(), StreamError> {
+    const WORDS: [&[u8]; 8] = [
+        b"none",
+        b"off",
+        b"simple",
+        b"never",
+        b"existing",
+        b"nil",
+        b"numbered",
+        b"t",
+    ];
+    if WORDS.contains(&raw) {
+        return Ok(());
+    }
+    let refused = [
+        b"patch: invalid argument '".as_slice(),
+        raw,
+        b"' for '--version-control or -V option'\nValid arguments are:\n  - 'none', 'off'\n  - 'simple', 'never'\n  - 'existing', 'nil'\n  - 'numbered', 't'",
+    ]
+    .concat();
+    Err(StreamError::refusal(&refused, 2))
 }
 
 /// `-p` as GNU patch 2.8 reads it: one optional sign, then decimal digits
@@ -75,6 +146,13 @@ fn strip_count(raw: &[u8]) -> Result<usize, StreamError> {
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let mut config: Config = parse_config(config)?;
     config.strip = config.typed_strip.as_deref().map(strip_count).transpose()?;
+    config.fuzz = match config.typed_fuzz.as_deref() {
+        Some(raw) => fuzz_factor(raw)?,
+        None => 2,
+    };
+    if let Some(raw) = &config.version {
+        check_version(raw)?;
+    }
     Ok(task::spawn(|host| run(host, config)))
 }
 
@@ -88,6 +166,9 @@ struct Files {
     host: Host,
     fds: u32,
     dry_run: bool,
+    silent: bool,
+    /// `-o -`: the patched text takes the output, its report stderr.
+    report_to_stderr: bool,
 }
 
 impl Files {
@@ -114,9 +195,55 @@ impl Files {
         }
     }
 
+    /// What `-s` leaves unsaid.
+    fn note(&self, parts: &[&[u8]]) {
+        if !self.silent {
+            self.say(parts);
+        }
+    }
+
+    /// Write a file `-o` or `-r` named; a failure stops the run.
+    async fn create(&self, path: Vec<u8>, data: Vec<u8>) -> Result<(), i32> {
+        let name = path.clone();
+        let mode = WriteMode::Whole;
+        let (reply, _) = self.host.ask(Request::Write { path, mode, data }).await;
+        if failed(&reply) {
+            let text = crate::request::failure_text(&reply);
+            self.host.warn(
+                &[
+                    b"patch: **** Can't create file ",
+                    &name[..],
+                    b" : ",
+                    &text,
+                    b"\n",
+                ]
+                .concat(),
+            );
+            return Err(2);
+        }
+        Ok(())
+    }
+
+    /// The next numbered backup of a name, past the highest within reach.
+    async fn numbered(&self, name: &[u8]) -> (bool, Vec<u8>) {
+        let mut highest = 0;
+        for number in 1..=64 {
+            let candidate = [name, format!(".~{number}~").as_bytes()].concat();
+            if self.stands(&candidate).await {
+                highest = number;
+            }
+        }
+        let next = [name, format!(".~{}~", highest + 1).as_bytes()].concat();
+        (highest > 0, next)
+    }
+
     fn say(&self, parts: &[&[u8]]) {
-        self.host
-            .print(&[parts.concat().as_slice(), b"\n"].concat());
+        let line = [parts.concat().as_slice(), b"\n"].concat();
+        if self.report_to_stderr {
+            self.host.warn(&line);
+        } else {
+            self.host.print(&line);
+        }
     }
 
     /// Ask the host to change a path; false, with the failure said, when it
@@ -214,6 +341,8 @@ impl Files {
 struct Done {
     written: HashSet<Vec<u8>>,
     rejects: HashMap<Vec<u8>, Vec<u8>>,
+    /// What every section sent to `-o`, written once when the run ends.
+    output: Vec<u8>,
 }
 
 async fn run(host: Host, config: Config) -> i32 {
@@ -221,7 +350,16 @@ async fn run(host: Host, config: Config) -> i32 {
         host,
         fds: 0,
         dry_run: config.dry_run,
+        silent: config.silent,
+        report_to_stderr: config.output.as_deref() == Some(b"-"),
     };
+    // `-o` empties its file before anything is read, under `--dry-run` too.
+    let output = config.output.clone().filter(|path| path != b"-");
+    if let Some(path) = &output {
+        if let Err(stop) = files.create(path.clone(), Vec::new()).await {
+            return stop;
+        }
+    }
     let raw = match files.whole(b"-", Opening::Name).await {
         Ok(patch) => patch,
         Err(reply) => {
@@ -248,17 +386,53 @@ async fn run(host: Host, config: Config) -> i32 {
     }
     let mut done = Done::default();
     let mut status = 0;
+    let mut stopped = None;
     for section in &parsed.sections {
         match patch_file(&mut files, &config, &lines, section, &mut done).await {
             Ok(true) => status = 1,
             Ok(false) => {}
-            Err(stop) => return stop,
+            Err(stop) => {
+                stopped = Some(stop);
+                break;
+            }
         }
+    }
+    if let Some(path) = output.filter(|_| !done.output.is_empty()) {
+        let text = std::mem::take(&mut done.output);
+        if let Err(stop) = files.create(path, text).await {
+            return stop;
+        }
+    }
+    if let Some(stop) = stopped {
+        return stop;
     }
     if parsed.cut {
         files.say(&[CUT.as_bytes()]);
     }
+    if config.verbose {
+        files.note(&[b"done"]);
+    }
     status
+}
+
+/// Where a backup of `name` goes, under `-z`, `-B` and `-V`.
+async fn backup_name(files: &Files, config: &Config, name: &[u8]) -> Vec<u8> {
+    let version = config.version.as_deref().unwrap_or(b"simple");
+    let simple = [
+        config.prefix.as_deref().unwrap_or_default(),
+        name,
+        config.suffix.as_deref().unwrap_or(b".orig"),
+    ]
+    .concat();
+    if matches!(version, b"simple" | b"never") {
+        return simple;
+    }
+    let (any, next) = files.numbered(name).await;
+    if matches!(version, b"existing" | b"nil") && !any {
+        simple
+    } else {
+        next
+    }
 }
 
 /// The best of some names as GNU picks it: the first that has at once the
@@ -542,10 +716,8 @@ async fn patch_file(
             ]);
             fatal(files, &section.end)?;
             let rejected = apply::as_tried(&section.hunks, config.reverse);
-            return save_rejects(files, config, section, &rejected, "ignored", &name, done)
-                .await
-                .then_some(true)
-                .ok_or(1);
+            save_rejects(files, config, section, &rejected, "ignored", &name, done).await?;
+            return Ok(true);
         }
         Err(_) => None,
     };
@@ -571,29 +743,65 @@ async fn patch_file(
     } else {
         b"patching file "
     };
-    files.say(&[verb, &name, &how]);
+    if config.verbose && !config.silent {
+        files.say(&[b"Hmm...  Looks like a unified diff to me..."]);
+        let rule = b"--------------------------";
+        files.say(&[b"The text leading up to this was:\n", rule]);
+        for line in &lines[section.leading.clone()] {
+            files.say(&[b"|", chomp(line)]);
+        }
+        files.say(&[rule]);
+    }
+    let target = config.output.clone().unwrap_or_else(|| name.clone());
+    if target != name {
+        how = [&b" (read from "[..], &name, b")"].concat();
+    }
+    files.note(&[verb, &target, &how]);
     let text = parse::lines(original.as_deref().unwrap_or_default());
-    let outcome = apply::section(&text, &section.hunks, config.reverse, config.forward);
+    let placing = apply::Placing {
+        fuzz: config.fuzz,
+        loose: config.whitespace,
+        force: config.force,
+        batch: config.batch,
+        verbose: config.verbose,
+    };
+    let outcome = apply::section(
+        &text,
+        &section.hunks,
+        config.reverse,
+        config.forward,
+        placing,
+    );
     for note in &outcome.notes {
-        files.say(&[note.as_bytes()]);
+        if !(config.silent && (note.starts_with("Hunk #") || note == "Skipping patch.")) {
+            files.say(&[note.as_bytes()]);
+        }
     }
     fatal(files, &section.end)?;
     let mut refused = false;
     let mut gone = false;
     if let Some(patched) = &outcome.lines {
         let patched = apply::text(patched);
-        if !outcome.exact && !done.written.contains(&name) && !config.dry_run {
+        let backs_up = (!outcome.exact || config.backup) && config.output.is_none();
+        if backs_up && !done.written.contains(&name) && !config.dry_run {
             match &original {
                 None => files.say(&[b"Cannot stat file ", &name, b", skipping backup"]),
                 Some(original) => {
-                    let backup = [&name[..], b".orig"].concat();
-                    if !files.write(backup, original.clone()).await {
+                    let backup = backup_name(files, config, &name).await;
+                    let dirs = files.missing(&backup).await.unwrap_or_default();
+                    if !files.make(dirs).await || !files.write(backup, original.clone()).await {
                         return Err(1);
                     }
                 }
             }
         }
-        if deletes && patched.is_empty() {
+        if config.output.is_some() {
+            if target == b"-" {
+                files.host.print(&patched);
+            } else {
+                done.output.extend_from_slice(&patched);
+            }
+        } else if (deletes || config.remove_empty) && patched.is_empty() {
             remove(files, &name, config.file.is_none()).await?;
             gone = true;
         } else {
@@ -639,9 +847,16 @@ async fn patch_file(
         } else {
             "FAILED"
         };
-        if !save_rejects(files, config, section, &outcome.rejected, verb, &name, done).await {
-            return Err(1);
-        }
+        save_rejects(
+            files,
+            config,
+            section,
+            &outcome.rejected,
+            verb,
+            &target,
+            done,
+        )
+        .await?;
         refused = true;
     }
     if cut {
@@ -692,26 +907,24 @@ async fn save_rejects(
     verb: &str,
     name: &[u8],
     done: &mut Done,
-) -> bool {
+) -> Result<(), i32> {
     let total = section.hunks.len();
     let plural = if total == 1 { "" } else { "s" };
     let counts = format!("{} out of {total} hunk{plural} {verb}", rejected.len());
-    if files.dry_run {
+    if files.dry_run || config.reject.as_deref() == Some(b"-") {
         files.say(&[counts.as_bytes()]);
-        return true;
+        return Ok(());
     }
-    files.say(&[
-        counts.as_bytes(),
-        b" -- saving rejects to file ",
-        name,
-        b".rej",
-    ]);
+    let path = config
+        .reject
+        .clone()
+        .unwrap_or_else(|| [name, b".rej"].concat());
+    files.say(&[counts.as_bytes(), b" -- saving rejects to file ", &path]);
     let (first, second) = if config.reverse {
         (&section.new_label, &section.old_label)
     } else {
         (&section.old_label, &section.new_label)
     };
-    let path = [name, b".rej"].concat();
     let text = done.rejects.entry(path.clone()).or_default();
     for (lead, label) in [(b"--- ", first), (b"+++ ", second)] {
         text.extend_from_slice(lead);
@@ -722,5 +935,12 @@ async fn save_rejects(
         apply::reject(hunk, *grown, text);
     }
     let text = text.clone();
-    files.write(path, text).await
+    if config.reject.is_some() {
+        return files.create(path, text).await;
+    }
+    if files.write(path, text).await {
+        Ok(())
+    } else {
+        Err(1)
+    }
 }

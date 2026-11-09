@@ -2,11 +2,12 @@
 # licenses/third_party/info-zip.txt).
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from mirage.commands.builtin.generic.archive.walk import (
     OTHER_FILESYSTEM,
     WalkFn,
+    recorded_stamp,
     scan_operand,
 )
 from mirage.commands.builtin.utils.stream_host import (
@@ -16,9 +17,9 @@ from mirage.commands.builtin.utils.stream_host import (
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import byte_view
+from mirage.shell.bytes import byte_view, decode_text
 from mirage.types import (
     Follow,
     JsonValue,
@@ -43,17 +44,61 @@ class ZipFlags:
     quiet: bool = False
     store_links: bool = False
     exclude: tuple[str, ...] = ()
+    include: tuple[str, ...] = ()
+    update: bool = False
+    freshen: bool = False
+    delete: bool = False
+    move_files: bool = False
+    level: int | None = None
+    test: bool = False
+    verbose: bool = False
+    line_ends: str = "keep"
+    no_directories: bool = False
+    temp: PathSpec | None = None
+    comment_members: bool = False
+    comment_archive: bool = False
+    names_from_stdin: bool = False
+
+
+_LEVELS = ("0", "args_1", *(str(level) for level in range(2, 10)))
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> ZipFlags:
     fl = FlagView(flags, spec=SPECS["zip"])
+    levels = fl.texts(*_LEVELS)
+    temp = fl.raw("b")
+    ends = fl.as_int("args_l", 0)
     return ZipFlags(
         recursive=fl.as_bool("r"),
         junk_paths=fl.as_bool("j"),
         quiet=fl.as_bool("q"),
         store_links=fl.as_bool("y"),
         exclude=tuple(fl.as_list("x")),
+        include=tuple(fl.as_list("i")),
+        update=fl.as_bool("u"),
+        freshen=fl.as_bool("f"),
+        delete=fl.as_bool("d"),
+        move_files=fl.as_bool("m"),
+        level=int(levels[-1][0][-1]) if levels else None,
+        test=fl.as_bool("T"),
+        verbose=fl.as_bool("v"),
+        line_ends="keep" if ends == 0 else "to_crlf" if ends == 1 else "to_lf",
+        no_directories=fl.as_bool("D"),
+        temp=temp if isinstance(temp, PathSpec) else None,
+        comment_members=fl.as_bool("c"),
+        comment_archive=fl.as_bool("z"),
+        names_from_stdin=fl.as_bool("@"),
     )
+
+
+async def _stdin_lines(stdin: ByteSource | None) -> list[str]:
+    """Standard input, a line each and no trailing empty one.
+
+    Args:
+        stdin (ByteSource | None): standard input.
+    """
+    text = decode_text(await materialize(stdin))
+    return text.removesuffix("\n").split("\n") if text else []
 
 
 async def zip_generic(
@@ -67,6 +112,7 @@ async def zip_generic(
     flags: ZipFlags,
     links: LinkView | None = None,
     mounts: MountView | None = None,
+    stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Walk the operands and hand what they hold to mirage-rs's zip,
     which names each member, refuses a name two paths share, deflates
@@ -88,6 +134,8 @@ async def zip_generic(
         flags (ZipFlags): the parsed flags.
         links (LinkView | None): the namespace's symlink facts.
         mounts (MountView | None): where the mount boundaries are.
+        stdin (ByteSource | None): standard input, which -@ names files on
+            and -c and -z read comments from.
     """
     if not paths:
         raise ValueError("zip: usage: zip archive.zip file1 [file2 ...]")
@@ -95,7 +143,17 @@ async def zip_generic(
     reads = [archive]
     found: list[JsonValue] = []
     warnings: list[JsonValue] = []
-    for path in paths[1:]:
+    operands = list(paths[1:])
+    stdin_lines: list[str] = []
+    if flags.names_from_stdin:
+        operands += [
+            replace(PathSpec.from_str_path(line, cwd=cwd), raw_path=line)
+            for line in await _stdin_lines(stdin)
+            if line
+        ]
+    elif flags.comment_members or flags.comment_archive:
+        stdin_lines = await _stdin_lines(stdin)
+    for path in () if flags.delete else operands:
         raw = path.raw_path
         if path.walk_error is not None:
             # The walk refused the operand before zip ran (the empty name,
@@ -141,6 +199,7 @@ async def zip_generic(
                 ),
                 "kind": entry.kind,
                 "target": byte_view(entry.target),
+                "mtime": (await recorded_stamp(stat, read))[0],
             }
             if read is not None:
                 reads.append(read)
@@ -153,8 +212,25 @@ async def zip_generic(
         "found": found,
         "warnings": warnings,
         "exclude": [byte_view(pattern) for pattern in flags.exclude],
+        "include": [byte_view(pattern) for pattern in flags.include],
         "junk": flags.junk_paths,
         "quiet": flags.quiet,
+        "update": flags.update,
+        "freshen": flags.freshen,
+        "delete": flags.delete,
+        "patterns": [byte_view(path.raw_path) for path in operands]
+        if flags.delete
+        else [],
+        "move_files": flags.move_files,
+        "level": flags.level,
+        "test": flags.test,
+        "verbose": flags.verbose,
+        "line_ends": flags.line_ends,
+        "no_directories": flags.no_directories,
+        "temp": None if flags.temp is None else byte_view(flags.temp.virtual),
+        "comment_members": flags.comment_members,
+        "comment_archive": flags.comment_archive,
+        "stdin_lines": [byte_view(line) for line in stdin_lines],
     }
     host = StreamHost(reads, stream, None, dispatch, cwd, dash=False)
     io = IOResult()

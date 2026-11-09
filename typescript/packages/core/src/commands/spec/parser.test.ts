@@ -2088,15 +2088,15 @@ describe('tar long options against its whole table', () => {
   })
 
   it('names an ambiguity with every option the table holds', () => {
-    // `--fil` could be --files-from, which mirage never declared; glibc names
-    // the word as typed, `=value` and all (GNU tar 1.35).
-    const parsed = parseCommand(specOf('tar'), ['--fil=/data/a.tar', '-t'], '/', 'tar')
-    expect(parsed.ambiguousOptions).toEqual([['--fil=/data/a.tar', ['--file', '--files-from']]])
+    // `--lis` could be --listed-incremental, which mirage never declared; glibc
+    // names the word as typed, `=value` and all (tar 1.35).
+    const parsed = parseCommand(specOf('tar'), ['--lis=/data/a', '-f', 'x'], '/', 'tar')
+    expect(parsed.ambiguousOptions).toEqual([['--lis=/data/a', ['--list', '--listed-incremental']]])
   })
 
   it('keeps an option tar has and mirage does not unrecognized', () => {
-    const parsed = parseCommand(specOf('tar'), ['--files-from=x', '-t'], '/', 'tar')
-    expect(parsed.invalidOptions).toEqual(['--files-from=x'])
+    const parsed = parseCommand(specOf('tar'), ['--listed-incremental=x', '-t'], '/', 'tar')
+    expect(parsed.invalidOptions).toEqual(['--listed-incremental=x'])
   })
 
   it('names an ambiguous long with its value', () => {

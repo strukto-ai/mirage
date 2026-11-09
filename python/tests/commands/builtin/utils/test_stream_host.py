@@ -351,3 +351,54 @@ async def test_a_skip_past_a_whole_file_still_opens_it() -> None:
     reply = (await host.serve(locked, b"")).reply
     assert reply["errno"] == "EACCES"
     assert "skipped" not in reply
+
+
+async def _nothing(path: PathSpec) -> AsyncIterator[bytes]:
+    yield b""
+
+
+@pytest.mark.asyncio
+async def test_a_stat_has_a_time_and_modes_and_rmdir_reach_the_mount() -> None:
+    calls: list[str] = []
+    changed: list[tuple[str, int]] = []
+
+    async def dispatch(
+        name: str,
+        path: PathSpec,
+        /,
+        *,
+        report: OpReport | None = None,
+        **kwargs: Any,
+    ) -> tuple[FileStat | None, IOResult]:
+        calls.append(f"{name} {path.virtual}")
+        if name == "stat":
+            row = FileStat(
+                name="f",
+                type=FileType.FILE,
+                modified="2001-09-09T01:46:40+00:00",
+            )
+            return row, IOResult()
+        return None, IOResult()
+
+    async def chmod(path: PathSpec, mode: int) -> None:
+        if path.virtual == "/gone":
+            raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+        changed.append((path.virtual, mode))
+
+    host = StreamHost([], _nothing, None, dispatch, ROOT_CWD, chmod=chmod)
+    stat = await host.serve({"op": "stat", "path": "/f"}, b"")
+    assert stat.reply == {"kind": "file", "mtime": 1_000_000_000}
+    set_mode: dict[str, JsonValue] = {"op": "chmod", "path": "/f", "mode": 416}
+    assert (await host.serve(set_mode, b"")).reply == {}
+    assert changed == [("/f", 416)]
+    gone = await host.serve({**set_mode, "path": "/gone"}, b"")
+    assert gone.reply == {
+        "error": "No such file or directory",
+        "errno": "ENOENT",
+    }
+    assert (await host.serve({"op": "rmdir", "path": "/d"}, b"")).reply == {}
+    assert "rmdir /d" in calls
+    bare = StreamHost([], _nothing, None, dispatch, ROOT_CWD)
+    assert (await bare.serve(set_mode, b"")).reply == {
+        "fatal": "file output requires a workspace"
+    }

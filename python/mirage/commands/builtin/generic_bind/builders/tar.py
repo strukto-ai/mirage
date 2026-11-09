@@ -32,8 +32,6 @@ from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.links import dispatch_of
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.config import Context
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -51,13 +49,16 @@ async def tar(
     resolved = await files.resolve_glob(paths)
     dispatch = dispatch_of(ctx)
     walk = walk_of(files, dispatch, "tar")
-    if dispatch is not None and not FlagView(
-        ctx.flags, spec=SPECS["tar"]
-    ).as_bool("create"):
+
+    async def chmod(path: PathSpec, mode: int) -> None:
+        await files.set_attrs(path, {"mode": mode})
+
+    if dispatch is not None and not parsed.sources:
         # -t reads and -x writes wherever cwd or -C says, which needs
         # not be this mount, so both run on dispatch-relayed calls and
-        # each path routes to the mount that owns it. Only -c stays on
-        # this mount's own walk: its planner walks this mount's tree.
+        # each path routes to the mount that owns it. Only -c, -r and -u
+        # stay on this mount's own walk: their planner walks this mount's
+        # tree.
         prim = transfer_primitives(dispatch)
         return await tar_generic(
             parsed,
@@ -69,6 +70,7 @@ async def tar(
             walk,
             relay_is_dir_of(dispatch),
             relay=True,
+            chmod=chmod,
         )
     return await tar_generic(
         parsed,
@@ -79,6 +81,7 @@ async def tar(
         files.stat,
         walk,
         is_dir_of(files),
+        chmod=chmod,
     )
 
 

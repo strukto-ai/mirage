@@ -73,6 +73,13 @@ impl Host {
         self.ask(Request::Stat { path }).await.0.kind
     }
 
+    /// What stands at a path and when it last changed.
+    pub(crate) async fn stat_time(&self, path: &[u8]) -> Option<(String, Option<i64>)> {
+        let path = path.to_vec();
+        let (reply, _) = self.ask(Request::Stat { path }).await;
+        reply.kind.map(|kind| (kind, reply.mtime))
+    }
+
     /// Make a directory's chain top-down, each level once a run, skipping
     /// what stands; the level that failed and why.
     pub(crate) async fn ensure(

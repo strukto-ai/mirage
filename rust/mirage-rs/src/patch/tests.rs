@@ -525,3 +525,141 @@ fn a_strip_count_is_refused_in_patch_words_with_exit_2() {
         assert_eq!(refused(typed), None, "{typed:?}");
     }
 }
+
+const TWO_FILES: &str = "--- f\n+++ f\n@@ -1 +1 @@\n-a\n+A\n--- g\n+++ g\n@@ -1 +1 @@\n-b\n+B\n";
+
+#[test]
+fn an_output_file_holds_every_section_in_order() {
+    let mut host = Host::with(&[("f", "a\n"), ("g", "b\n")], TWO_FILES);
+    let (status, out, err) = patch(&mut host, r#"{"output": "out"}"#);
+    assert_eq!((status, err.as_str()), (0, ""));
+    let names = "patching file out (read from f)\npatching file out (read from g)\n";
+    assert_eq!(out, names);
+    assert_eq!(file(&host, "out").as_deref(), Some("A\nB\n"));
+    assert_eq!(file(&host, "f").as_deref(), Some("a\n"));
+}
+
+#[test]
+fn an_output_file_is_emptied_before_the_patch_is_read() {
+    let mut host = Host::with(&[("out", "OLD\n")], "hello\n");
+    let (status, _, err) = patch(&mut host, r#"{"output": "out"}"#);
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "patch: **** Only garbage was found in the patch input.\n"
+    );
+    assert_eq!(file(&host, "out").as_deref(), Some(""));
+}
+
+#[test]
+fn an_output_file_that_will_not_open_stops_the_run_first() {
+    let mut host = Host::with(&[("f", "a\n"), ("g", "b\n")], TWO_FILES);
+    let (status, out, err) = patch(&mut host, r#"{"output": "/missing/out"}"#);
+    assert_eq!((status, out.as_str()), (2, ""));
+    let refused = "patch: **** Can't create file /missing/out : No such file or directory\n";
+    assert_eq!(err, refused);
+}
+
+#[test]
+fn a_dry_run_still_writes_its_output_file() {
+    let mut host = Host::with(&[("f", "a\n"), ("g", "b\n")], TWO_FILES);
+    let (status, out, _) = patch(&mut host, r#"{"output": "out", "dry_run": true}"#);
+    assert_eq!(status, 0);
+    assert!(
+        out.starts_with("checking file out (read from f)\n"),
+        "{out}"
+    );
+    assert_eq!(file(&host, "out").as_deref(), Some("A\nB\n"));
+}
+
+#[test]
+fn an_output_over_its_own_input_reads_it_emptied() {
+    let diff = "--- f\n+++ f\n@@ -1 +1 @@\n-a\n+A\n";
+    let mut host = Host::with(&[("f", "a\n")], diff);
+    let (status, out, _) = patch(&mut host, r#"{"output": "f"}"#);
+    assert_eq!(status, 1);
+    assert!(
+        out.starts_with("patching file f\nHunk #1 FAILED at 1.\n"),
+        "{out}"
+    );
+    assert_eq!(file(&host, "f").as_deref(), Some(""));
+}
+
+#[test]
+fn a_backup_takes_the_name_its_options_ask_for() {
+    let diff = "--- f\n+++ f\n@@ -1 +1 @@\n-a\n+A\n";
+    let cases = [
+        (r#"{"backup": true}"#, "f.orig"),
+        (r#"{"backup": true, "suffix": ".bak"}"#, "f.bak"),
+        (
+            r#"{"backup": true, "prefix": "p_", "suffix": ".s"}"#,
+            "p_f.s",
+        ),
+        (r#"{"backup": true, "version": "numbered"}"#, "f.~1~"),
+        (r#"{"backup": true, "version": "existing"}"#, "f.orig"),
+    ];
+    for (options, name) in cases {
+        let mut host = Host::with(&[("f", "a\n")], diff);
+        let (status, ..) = patch(&mut host, options);
+        assert_eq!(status, 0, "{options}");
+        assert_eq!(file(&host, name).as_deref(), Some("a\n"), "{options}");
+    }
+    let mut host = Host::with(&[("f", "a\n"), ("f.~3~", "old\n")], diff);
+    assert_eq!(
+        patch(&mut host, r#"{"backup": true, "version": "existing"}"#).0,
+        0
+    );
+    assert_eq!(file(&host, "f.~4~").as_deref(), Some("a\n"));
+}
+
+#[test]
+fn loose_whitespace_finds_a_hunk_exact_matching_misses() {
+    let diff = "--- f\n+++ f\n@@ -1 +1 @@\n-a  b\n+C\n";
+    let mut host = Host::with(&[("f", "a b\n")], diff);
+    assert_eq!(patch(&mut host, "{}").0, 1);
+    let mut host = Host::with(&[("f", "a b\n")], diff);
+    assert_eq!(patch(&mut host, r#"{"whitespace": true}"#).0, 0);
+    assert_eq!(file(&host, "f").as_deref(), Some("C\n"));
+}
+
+#[test]
+fn a_fuzz_of_zero_refuses_what_the_default_takes() {
+    let hunk = "--- n.txt\n+++ n.txt\n@@ -5,7 +5,7 @@\n X\n 6\n 7\n-8\n+eight\n 9\n 10\n Y\n";
+    let mut host = Host::with(&[("n.txt", &seq(20))], hunk);
+    assert_eq!(patch(&mut host, r#"{"fuzz": "0"}"#).0, 1);
+    assert_eq!(file(&host, "n.txt"), Some(seq(20)));
+}
+
+#[test]
+fn an_emptied_file_goes_under_remove_empty() {
+    let diff = "--- f\n+++ f\n@@ -1 +0,0 @@\n-a\n";
+    let mut host = Host::with(&[("f", "a\n")], diff);
+    assert_eq!(patch(&mut host, r#"{"remove_empty": true}"#).0, 0);
+    assert_eq!(file(&host, "f"), None);
+}
+
+#[test]
+fn silent_keeps_the_report_and_not_the_failure() {
+    let diff = "--- f\n+++ f\n@@ -1 +1 @@\n-z\n+A\n";
+    let mut host = Host::with(&[("f", "a\n")], diff);
+    let (status, out, _) = patch(&mut host, r#"{"silent": true, "force": true}"#);
+    assert_eq!(status, 1);
+    assert_eq!(
+        out,
+        "1 out of 1 hunk FAILED -- saving rejects to file f.rej\n"
+    );
+}
+
+#[test]
+fn a_named_reject_file_takes_the_failed_hunks() {
+    let diff = "--- f\n+++ f\n@@ -1 +1 @@\n-z\n+A\n";
+    let mut host = Host::with(&[("f", "a\n")], diff);
+    assert_eq!(patch(&mut host, r#"{"reject": "r", "force": true}"#).0, 1);
+    assert!(file(&host, "r").expect("written").contains("-z\n"));
+    assert_eq!(file(&host, "f.rej"), None);
+    let mut host = Host::with(&[("f", "a\n")], diff);
+    let (status, _, err) = patch(&mut host, r#"{"reject": "/missing/r", "force": true}"#);
+    assert_eq!(status, 2);
+    let refused = "patch: **** Can't create file /missing/r : No such file or directory\n";
+    assert_eq!(err, refused);
+}

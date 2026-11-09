@@ -8,12 +8,16 @@ use std::collections::HashSet;
 
 use serde::Deserialize;
 
+use super::create::Output;
 use super::header::{self, BLOCK, Block, Kind, Member, Pax, Rows, padding};
+use super::options::Overwrites;
+use super::transform::Scope;
 use super::{
     Codec, Config, FAILED, FATAL, Mode, TRAILER, WINDOW, escaped, lines, open_failure, read,
 };
 use crate::Stream;
-use crate::request::{Opening, Reply};
+use crate::glob::CompiledGlob;
+use crate::request::{Opening, Reply, Request};
 use crate::task::{File, Host};
 
 /// The archive's input.
@@ -63,23 +67,34 @@ impl Failure {
 }
 
 /// The archive's bytes as the host sends them.
-struct Raw<'h> {
+pub(super) struct Raw<'h> {
     host: &'h Host,
     open: Option<(Vec<u8>, Opening)>,
     data: Vec<u8>,
     used: usize,
     ended: bool,
     /// The host's failure to read the archive.
-    error: Option<Reply>,
+    pub(super) error: Option<Reply>,
 }
 
-impl Raw<'_> {
-    fn unused(&self) -> &[u8] {
+impl<'h> Raw<'h> {
+    pub(super) fn new(host: &'h Host, open: (Vec<u8>, Opening)) -> Raw<'h> {
+        Raw {
+            host,
+            open: Some(open),
+            data: Vec::new(),
+            used: 0,
+            ended: false,
+            error: None,
+        }
+    }
+
+    pub(super) fn unused(&self) -> &[u8] {
         &self.data[self.used..]
     }
 
     /// Read on until `want` bytes are unused or the input ends.
-    async fn gather(&mut self, want: usize) {
+    pub(super) async fn gather(&mut self, want: usize) {
         if self.used > 0 && self.used * 2 >= self.data.len() {
             self.data.drain(..self.used);
             self.used = 0;
@@ -104,7 +119,7 @@ impl Raw<'_> {
 }
 
 /// The archive's bytes as tar reads them, decoded when compressed.
-struct Input<'h> {
+pub(super) struct Input<'h> {
     raw: Raw<'h>,
     codec: Option<Box<dyn Stream>>,
     finished: bool,
@@ -121,7 +136,54 @@ struct Input<'h> {
     oversized: bool,
 }
 
-impl Input<'_> {
+impl<'h> Input<'h> {
+    /// An archive read as it stands, through no compressor.
+    pub(super) fn plain(raw: Raw<'h>) -> Input<'h> {
+        Input {
+            raw,
+            codec: None,
+            finished: false,
+            buf: Vec::new(),
+            at: 0,
+            taken: 0,
+            failure: None,
+            remaining: None,
+            limited: false,
+            room: MAX_ZEROS,
+            oversized: false,
+        }
+    }
+
+    /// The blocks read so far.
+    pub(super) fn taken(&self) -> u64 {
+        self.taken
+    }
+
+    /// The bytes left short of a whole block.
+    pub(super) fn rest(&mut self) -> Vec<u8> {
+        let rest = self.buf[self.at..].to_vec();
+        self.at = self.buf.len();
+        rest
+    }
+
+    /// A member's data and the rest of its last block, unchanged, on to
+    /// `out`; false when the input ends first.
+    pub(super) async fn pass(&mut self, size: u64, out: &mut Output<'_>) -> bool {
+        let mut blocks = size.saturating_add(padding(size) as u64);
+        while blocks > 0 {
+            if !self.fill(BLOCK).await {
+                return false;
+            }
+            let have = ((self.held() / BLOCK * BLOCK) as u64).min(blocks);
+            let bytes = self.buf[self.at..self.at + have as usize].to_vec();
+            out.put(&bytes).await;
+            self.at += have as usize;
+            self.taken += have / BLOCK as u64;
+            blocks -= have;
+        }
+        true
+    }
+
     fn held(&self) -> usize {
         self.buf.len() - self.at
     }
@@ -212,7 +274,7 @@ impl Input<'_> {
     }
 
     /// The next whole block; none at the end of the input.
-    async fn block(&mut self) -> Option<Vec<u8>> {
+    pub(super) async fn block(&mut self) -> Option<Vec<u8>> {
         if !self.fill(BLOCK).await {
             return None;
         }
@@ -251,12 +313,12 @@ impl Input<'_> {
         true
     }
 
-    async fn skip(&mut self, size: u64) -> bool {
+    pub(super) async fn skip(&mut self, size: u64) -> bool {
         self.copy(size, &mut Sink::Skip, None).await
     }
 
     /// A meta header's data whole; none when the input ends first.
-    async fn whole(&mut self, size: u64) -> Option<Vec<u8>> {
+    pub(super) async fn whole(&mut self, size: u64) -> Option<Vec<u8>> {
         let mut data = Vec::new();
         self.copy(size, &mut Sink::Keep(&mut data), None)
             .await
@@ -404,7 +466,7 @@ impl Sink<'_> {
 }
 
 /// `name` without its trailing slashes.
-fn trimmed(name: &[u8]) -> &[u8] {
+pub(super) fn trimmed(name: &[u8]) -> &[u8] {
     &name[..name.len() - name.iter().rev().take_while(|&&b| b == b'/').count()]
 }
 
@@ -426,6 +488,114 @@ fn prefix(name: &[u8]) -> &[u8] {
     )
 }
 
+/// The operands that select members, and which of them have.
+pub(super) struct Selection {
+    selectors: Vec<Vec<u8>>,
+    globs: Vec<CompiledGlob>,
+    wildcards: Option<bool>,
+    unanchored: bool,
+    found: Vec<bool>,
+}
+
+fn units(text: &[u8]) -> Vec<u32> {
+    text.iter().map(|&b| u32::from(b)).collect()
+}
+
+impl Selection {
+    pub(super) fn new(config: &Config) -> Selection {
+        let selectors = config.selectors.clone();
+        let globs = if config.wildcards == Some(true) {
+            selectors
+                .iter()
+                .map(|selector| CompiledGlob::new(units(trimmed(selector))))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Selection {
+            found: vec![false; selectors.len()],
+            selectors,
+            globs,
+            wildcards: config.wildcards,
+            unanchored: config.unanchored,
+        }
+    }
+
+    fn same(&self, index: usize, part: &[u8]) -> bool {
+        match self.globs.get(index) {
+            Some(glob) => glob.matches(&units(part)),
+            None => part == trimmed(&self.selectors[index]),
+        }
+    }
+
+    /// Whether selector `index` names `name` or a directory above it,
+    /// from its start or, unanchored, from after any slash.
+    fn names(&self, index: usize, name: &[u8]) -> bool {
+        let mut start = 0;
+        loop {
+            let tail = &name[start..];
+            let ends = tail
+                .iter()
+                .enumerate()
+                .filter(|(_, byte)| **byte == b'/')
+                .map(|(at, _)| at)
+                .chain([tail.len()]);
+            if ends.into_iter().any(|end| self.same(index, &tail[..end])) {
+                return true;
+            }
+            if !self.unanchored {
+                return false;
+            }
+            match tail.iter().position(|&b| b == b'/') {
+                Some(at) => start += at + 1,
+                None => return false,
+            }
+        }
+    }
+
+    /// Whether the operands select a member; the first that does is found.
+    pub(super) fn hit(&mut self, name: &[u8]) -> bool {
+        if self.selectors.is_empty() {
+            return true;
+        }
+        let name = trimmed(name);
+        let hit = (0..self.selectors.len()).find(|&index| self.names(index, name));
+        if let Some(index) = hit {
+            self.found[index] = true;
+        }
+        hit.is_some()
+    }
+
+    pub(super) fn misses(&self) -> Vec<Vec<u8>> {
+        self.selectors
+            .iter()
+            .zip(&self.found)
+            .filter(|(_, found)| !**found)
+            .map(|(selector, _)| selector.clone())
+            .collect()
+    }
+
+    /// Whether a miss should say it looked like a pattern.
+    fn warns_of_patterns(&self) -> bool {
+        self.wildcards.is_none()
+    }
+}
+
+/// `path` with its `.` and `..` components worked out.
+fn normalized(path: &[u8]) -> Vec<Vec<u8>> {
+    let mut parts: Vec<Vec<u8>> = Vec::new();
+    for part in path.split(|&b| b == b'/') {
+        match part {
+            b"" | b"." => {}
+            b".." => {
+                parts.pop();
+            }
+            other => parts.push(other.to_vec()),
+        }
+    }
+    parts
+}
+
 /// The run's state across members.
 struct Run<'c, 'h> {
     config: &'c Config,
@@ -433,7 +603,7 @@ struct Run<'c, 'h> {
     /// Every stderr line so far, in the order GNU says them.
     notices: Vec<Vec<u8>>,
     removed: HashSet<Vec<u8>>,
-    found: Vec<bool>,
+    selection: Selection,
     failed: bool,
     rows: Rows,
     made: HashSet<Vec<u8>>,
@@ -452,30 +622,27 @@ impl Run<'_, '_> {
         }
     }
 
+    /// Give an extracted path its member's permission bits.
+    async fn chmod(&mut self, path: &[u8], mode: u32, shown: &[u8]) {
+        let (path, mode) = (path.to_vec(), mode & 0o7777);
+        let (reply, _) = self.host.ask(Request::Chmod { path, mode }).await;
+        if crate::request::failed(&reply) {
+            let text = crate::request::failure_text(&reply);
+            self.say([b"tar: ", shown, b": Cannot change mode: ", &text].concat());
+            self.failed = true;
+        }
+    }
+
     /// Say once a run each prefix a member's name loses.
     fn announce(&mut self, name: &[u8]) {
+        if self.config.absolute {
+            return;
+        }
         let prefix = prefix(name);
         if !prefix.is_empty() && self.removed.insert(prefix.to_vec()) {
             let line = [b"tar: Removing leading `", prefix, b"' from member names"].concat();
             self.say(line);
         }
-    }
-
-    /// Whether the operands select a member: one names it or a directory
-    /// above it, and the first that does is found.
-    fn select(&mut self, name: &[u8]) -> bool {
-        if self.config.selectors.is_empty() {
-            return true;
-        }
-        let name = trimmed(name);
-        let hit = self.config.selectors.iter().position(|selector| {
-            let base = trimmed(selector);
-            name == base || (name.starts_with(base) && name.get(base.len()) == Some(&b'/'))
-        });
-        if let Some(index) = hit {
-            self.found[index] = true;
-        }
-        hit.is_some()
     }
 
     /// The components a member extracts to, below the extraction root: its
@@ -505,22 +672,36 @@ impl Run<'_, '_> {
             host.print(&row);
             return input.skip(member.size).await;
         }
-        if member.name.split(|&b| b == b'/').any(|part| part == b"..") {
+        if !config.absolute && member.name.split(|&b| b == b'/').any(|part| part == b"..") {
             let name = escaped(&member.name);
             self.say([b"tar: ", &name[..], b": Member name contains '..'"].concat());
             self.failed = true;
             return input.skip(member.size).await;
         }
-        let parts = self.parts(&member.name);
+        let target = config.transformed(&member.name, Scope::Regular);
+        let (base, parts) = if config.absolute {
+            let joined = if target.starts_with(b"/") {
+                target.clone()
+            } else {
+                [&config.base[..], b"/", &target].concat()
+            };
+            (Vec::new(), normalized(&joined))
+        } else {
+            (config.base.clone(), self.parts(&target))
+        };
         let shown = parts.join(&b'/');
-        let path = [&config.base[..], b"/", &shown].concat();
+        let path = [&base[..], b"/", &shown].concat();
         match member.kind {
             Kind::Dir if !config.to_stdout && !parts.is_empty() => {
                 match host.ensure(&mut self.made, &path).await {
-                    Ok(()) if config.verbose => {
-                        host.print(&[&escaped(trimmed(&member.name))[..], b"/\n"].concat());
+                    Ok(()) => {
+                        if config.preserve {
+                            self.chmod(&path, member.mode, &shown).await;
+                        }
+                        if config.verbose {
+                            host.print(&[&escaped(trimmed(&member.name))[..], b"/\n"].concat());
+                        }
                     }
-                    Ok(()) => {}
                     Err((_, text)) => {
                         self.say([b"tar: ", &shown[..], b": Cannot mkdir: ", &text].concat());
                         self.failed = true;
@@ -550,9 +731,22 @@ impl Run<'_, '_> {
                 if parts.is_empty() {
                     return input.skip(member.size).await;
                 }
+                if config.overwrites != Overwrites::Replace && host.stat(&path).await.is_some() {
+                    let name = escaped(&member.name);
+                    if config.verbose {
+                        host.print(&[&name[..], b"\n"].concat());
+                    }
+                    if config.overwrites == Overwrites::Keep {
+                        self.say([b"tar: ", &name[..], b": Cannot open: File exists"].concat());
+                        self.failed = true;
+                    } else if config.verbose {
+                        self.say([b"tar: ", &name[..], b": skipping existing file"].concat());
+                    }
+                    return input.skip(member.size).await;
+                }
                 let parent = &parts[..parts.len() - 1];
                 if !parent.is_empty() {
-                    let dir = [&config.base[..], b"/", &parent.join(&b'/')].concat();
+                    let dir = [&base[..], b"/", &parent.join(&b'/')].concat();
                     if let Err((_, text)) = host.ensure(&mut self.made, &dir).await {
                         let up = parent.join(&b'/');
                         self.say([b"tar: ", &up[..], b": Cannot mkdir: ", &text].concat());
@@ -568,10 +762,13 @@ impl Run<'_, '_> {
                         return input.skip(member.size).await;
                     }
                 }
-                let mut file = File::new(path);
+                let mut file = File::new(path.clone());
                 let whole = input.data(member, &mut Sink::File(&mut file)).await;
                 if file.failed.is_none() {
                     file.close(host).await;
+                }
+                if config.preserve && file.failed.is_none() {
+                    self.chmod(&path, member.mode, &shown).await;
                 }
                 match &file.failed {
                     Some(text) => {
@@ -629,14 +826,7 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
     } else {
         (config.archive.clone(), Opening::Operand(1))
     };
-    let mut raw = Raw {
-        host,
-        open: Some(opening),
-        data: Vec::new(),
-        used: 0,
-        ended: false,
-        error: None,
-    };
+    let mut raw = Raw::new(host, opening);
     raw.gather(6).await;
     if let Some(mut reply) = raw.error.take() {
         // A backend that keys files alone has no file where a directory is.
@@ -675,9 +865,12 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
         host,
         notices: Vec::new(),
         removed: HashSet::new(),
-        found: vec![false; config.selectors.len()],
+        selection: Selection::new(config),
         failed: false,
-        rows: Rows::default(),
+        rows: Rows {
+            numeric: config.numeric,
+            ..Rows::default()
+        },
         made: HashSet::new(),
     };
     let (mut skipping, mut selected, mut cut) = (false, false, false);
@@ -772,7 +965,7 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
             member.kind = Kind::Dir;
         }
         run.announce(&member.name);
-        if !run.select(&member.name) {
+        if !run.selection.hit(&member.name) {
             if input.skip(member.size).await {
                 continue;
             }
@@ -828,16 +1021,11 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
     if let Some(warning) = lead.strip_suffix(b"\n") {
         run.say(warning);
     }
-    let misses: Vec<&Vec<u8>> = config
-        .selectors
-        .iter()
-        .zip(&run.found)
-        .filter(|(_, found)| !**found)
-        .map(|(selector, _)| selector)
-        .collect();
-    if misses
-        .iter()
-        .any(|miss| miss.iter().any(|b| b"*?[\\".contains(b)))
+    let misses = run.selection.misses();
+    if run.selection.warns_of_patterns()
+        && misses
+            .iter()
+            .any(|miss| miss.iter().any(|b| b"*?[\\".contains(b)))
     {
         run.say("tar: Pattern matching characters used in file names");
         run.say("tar: Use --wildcards to enable pattern matching, or --no-wildcards to suppress this warning");

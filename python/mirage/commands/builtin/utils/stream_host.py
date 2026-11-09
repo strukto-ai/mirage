@@ -56,6 +56,7 @@ from mirage.types import (
     PathSpec,
     ReadStreamFn,
 )
+from mirage.utils.dates import iso_to_epoch
 from mirage.utils.path import CycleError
 from mirage.view.types import LinkView, MountView
 
@@ -131,7 +132,9 @@ class StreamHost:
         mounts: MountView | None = None,
         unbuffered: bool = False,
         sized: Callable[[PathSpec], Awaitable[int | None]] | None = None,
+        chmod: Callable[[PathSpec, int], Awaitable[None]] | None = None,
     ) -> None:
+        self.chmod = chmod
         self.operands = operands
         self.dash = dash
         self.command = command
@@ -274,8 +277,12 @@ class StreamHost:
             return Served({})
         if op == "write":
             return await self._write(request, data)
-        if op in ("unlink", "mkdir", "stat"):
+        if op in ("unlink", "mkdir", "stat", "rmdir"):
             return await self._path_op(op, str(request["path"]))
+        if op == "chmod":
+            return await self._chmod(
+                str(request["path"]), int(str(request["mode"]))
+            )
         if op == "readlink":
             return await self._readlink(str(request["path"]))
         if op in ("copy", "rename"):
@@ -462,6 +469,17 @@ class StreamHost:
         assert self.dispatch is not None
         await self.dispatch("write", path, data=source, atomic=atomic)
 
+    async def _chmod(self, name: str, mode: int) -> Served:
+        """Give a path a mode, through the workspace's attribute overlay."""
+        if self.chmod is None:
+            return Served({"fatal": "file output requires a workspace"})
+        path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
+        try:
+            await self.chmod(path, mode)
+        except WALK_ERRORS as exc:
+            return Served(_failure(exc))
+        return Served({})
+
     async def _path_op(self, op: str, name: str) -> Served:
         """Unlink, make (one level) or stat a path; a stat answers what
         stands there, ``dir`` or ``file``, or why it found nothing."""
@@ -475,7 +493,10 @@ class StreamHost:
         if op != "stat" or found is None:
             return Served({})
         kind = "dir" if found.type == FileType.DIRECTORY else "file"
-        return Served({"kind": kind})
+        mtime = (
+            None if found.modified is None else iso_to_epoch(found.modified)
+        )
+        return Served({"kind": kind, "mtime": mtime})
 
     def _where(self, path: PathSpec) -> str:
         """Where a name stands as lstat reaches it: every link above its
