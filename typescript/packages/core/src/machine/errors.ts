@@ -32,3 +32,15 @@ export class ConnectionLostError extends Error {
     this.stderr = stderr
   }
 }
+
+/**
+ * A detached job's output was held back unwritten: its daemon went too long
+ * without renewing the lease, which another daemon may hold by now
+ * (`ProcessHandle.mayWrite`). Mirrors Python's `WritesHeldError`.
+ */
+export class WritesHeldError extends Error {
+  constructor(message = 'writes held: the lease may have passed') {
+    super(message)
+    this.name = 'WritesHeldError'
+  }
+}

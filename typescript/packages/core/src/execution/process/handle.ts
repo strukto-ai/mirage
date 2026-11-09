@@ -62,6 +62,11 @@ export class ProcessHandle {
    * up at once.
    */
   afterEnding: (() => Promise<void>)[] | null = null
+  /**
+   * Whether its detached program's output may be written now: only while its
+   * daemon surely holds the lease; null writes always.
+   */
+  mayWrite: (() => boolean) | null = null
   /** Told the record each time it changes, as its table keeps it. */
   noted: ((record: Process) => void) | null = null
   private current: Process

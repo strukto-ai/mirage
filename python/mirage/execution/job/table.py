@@ -31,6 +31,7 @@ from mirage.execution.job.constants import (
     LIST_MAX_RETRIES,
     PUBLISH_SECONDS,
     STOP_WAIT_SECONDS,
+    WRITE_LEASE_SHARE,
 )
 from mirage.execution.job.handle import JobHandle, JobRunner, mark_killed
 from mirage.execution.job.types import Job, JobState
@@ -351,6 +352,16 @@ class JobTable:
                 task.add_done_callback(self._stopping_runs.discard)
             self.processes_changed()
 
+    def _holding(self) -> bool:
+        """Whether this table's daemon surely still holds the lease: it
+        renewed it within ``WRITE_LEASE_SHARE`` of its length, so no other
+        daemon can have taken it yet."""
+        lease = self.store.lease_seconds
+        return self._claimed and (
+            lease is None
+            or time.monotonic() - self._renewed < lease * WRITE_LEASE_SHARE
+        )
+
     def _lapsed(self) -> bool:
         """Whether the lease went unrenewed past its length, so another
         daemon may hold it now."""
@@ -393,6 +404,7 @@ class JobTable:
         simple: bool = False,
         detachable: bool = False,
         timeout: float | None = None,
+        deadline: float | None = None,
     ) -> JobHandle:
         """Register a job in its session's list and start it.
 
@@ -422,8 +434,9 @@ class JobTable:
                 lapse is (``ProcessHandle.detachable``), since only there
                 does a restart find it.
             timeout (float | None): the seconds its line's limit gives
-                it from now, which a daemon that adopts it still holds it
-                to; None for none.
+                it; None for none.
+            deadline (float | None): the real time that limit ends at,
+                which a daemon that adopts it still holds it to.
 
         Raises:
             BlockingIOError: the session is at its process cap.
@@ -433,7 +446,6 @@ class JobTable:
         await self.claim()
         name = uuid.uuid4().hex
         created_at = self.clock.now()
-        deadline = time.time() + timeout if timeout else None
         job: JobHandle | None = None
         ready = asyncio.Event()
 
@@ -466,6 +478,7 @@ class JobTable:
         )
         process.on_detach = detached
         process.after_ending = []
+        process.may_write = self._holding
         line, group = process.record.line, process.record.group
         try:
             job_id = await self._allocate(
@@ -724,6 +737,7 @@ class JobTable:
         process.detached = True
         process.tag = entry["detached"].get("tag")
         process.after_ending = []
+        process.may_write = self._holding
         console.bind_process(str(process.record.id))
         self._track(job, process)
         return True

@@ -2025,7 +2025,13 @@ async def _left_detached(
     let go, its job left running."""
     table = _publishing(store)
     job = await table.submit(
-        "train", _run_detached, "/", simple=True, detachable=True, timeout=60
+        "train",
+        _run_detached,
+        "/",
+        simple=True,
+        detachable=True,
+        timeout=60,
+        deadline=time.time() + 60,
     )
     await _until(lambda: _entry_detached(store, job))
     assert table._lease is not None
@@ -2312,6 +2318,25 @@ async def test_a_job_that_runs_attached_after_all_is_not_recorded_detached():
         fields = await store.load(job.session_id)
         assert told == [_WHERE, None]
         assert fields["jobs"][str(job.id)]["detached"] is None
+    finally:
+        await table.kill_all()
+        await table.close()
+
+
+# A daemon writes a detached job's output only while it surely holds the
+# lease: once it went past WRITE_LEASE_SHARE of it unrenewed, another
+# daemon may take the lease, and the output waits.
+@pytest.mark.asyncio
+async def test_a_daemon_holds_detached_output_once_its_lease_may_pass():
+    table = JobTable(RAMExecutionStore(lease_seconds=30.0), ProcessTable())
+    try:
+        job = await table.submit(
+            "train", _run_forever, "/", simple=True, detachable=True
+        )
+        assert job.process is not None and job.process.may_write is not None
+        assert job.process.may_write()
+        table._renewed -= 30.0 * table_module.WRITE_LEASE_SHARE
+        assert not job.process.may_write()
     finally:
         await table.kill_all()
         await table.close()

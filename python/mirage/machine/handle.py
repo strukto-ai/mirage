@@ -54,7 +54,7 @@ from mirage.machine.constants import (
     signal_line,
     stop_line,
 )
-from mirage.machine.errors import ConnectionLostError
+from mirage.machine.errors import ConnectionLostError, WritesHeldError
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.mounts import MachineMounts
 from mirage.runtime.binding import WorkspaceBinding
@@ -580,6 +580,7 @@ class MachineHandle:
             undelivered: list[BaseException] = []
 
             async def out(data: bytes) -> None:
+                _hold_writes(runner, undelivered)
                 if output is None:
                     kept[0].extend(data)
                 else:
@@ -596,6 +597,7 @@ class MachineHandle:
                 if not cut:
                     return
                 chunk = bytes(held[:cut])
+                _hold_writes(runner, undelivered)
                 if errors is None:
                     kept[1].extend(chunk)
                 else:
@@ -828,6 +830,27 @@ class MachineHandle:
                 await self._mounts.close()
         finally:
             self._connected = False
+
+
+def _hold_writes(
+    runner: ProcessHandle | None, undelivered: list[BaseException]
+) -> None:
+    """Hold a detached job's output back while its daemon may no longer
+    hold the lease (``ProcessHandle.may_write``): its view counts the bytes
+    unwritten and views them again, here or at the daemon that adopts it.
+
+    Args:
+        runner (ProcessHandle | None): the process the run is.
+        undelivered (list[BaseException]): this view's failed writes.
+
+    Raises:
+        WritesHeldError: the output may not be written now.
+    """
+    if runner is not None and runner.may_write is not None:
+        if not runner.may_write():
+            held = WritesHeldError(f"{runner.record.id}: writes held")
+            undelivered.append(held)
+            raise held
 
 
 def _stop_with(runner: ProcessHandle | None) -> int:

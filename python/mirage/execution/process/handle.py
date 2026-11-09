@@ -99,6 +99,9 @@ class ProcessHandle:
         # folder removal; None for a process no job ending is recorded for,
         # which cleans up at once.
         self.after_ending: list[Callable[[], Awaitable[None]]] | None = None
+        # Whether its detached program's output may be written now: only
+        # while its daemon surely holds the lease; None writes always.
+        self.may_write: Callable[[], bool] | None = None
         # The host stopped it (its table stopped, its session closed),
         # which ends whoever waits for it as well.
         self.revoked = False

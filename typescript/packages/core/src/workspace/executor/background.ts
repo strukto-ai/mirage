@@ -509,6 +509,9 @@ export async function handleBackground(
   const stopped = AbortSignal.any([killed, expiry.signal])
   childEvaluation.frame.abortSignal = stopped
   const cmdStrInner = left.text
+  // When its line's limit starts, set as it is submitted: the monotonic time
+  // and the real time.
+  const launched = { at: 0, epoch: 0 }
   const runBg = async (job: JobHandle): Promise<[IOResult, ExecutionNode]> => {
     childEvaluation.frame.shell = inPlace ? null : job.process
     // What the job writes stays in its console and goes where its shell
@@ -595,13 +598,16 @@ export async function handleBackground(
     const body = async (): Promise<[IOResult, ExecutionNode]> => {
       const seconds = childEvaluation.frame.lineTimeout
       const limit = seconds !== null && seconds > 0 ? seconds : null
+      // From its launch, which a daemon that adopts it counts from too.
+      const left =
+        limit === null ? null : Math.max(limit - (performance.now() - launched.at) / 1000, 0)
       const expire = (): void => {
         if (limit !== null) expiry.abort(new CommandTimeoutError(LINE_NAME, limit))
       }
-      const disarm = limit === null ? undefined : atDeadline(limit, expire)
+      const disarm = left === null ? undefined : atDeadline(left, expire)
       let result: [IOResult, ExecutionNode]
       try {
-        result = await runWithDeadline(limit, expire, takingInterrupts, true)
+        result = await runWithDeadline(left, expire, takingInterrupts, true)
       } catch (err) {
         // Past its own limit, or stopped by a command's own timeout, the job
         // answers as a line does, 124 and the message; a killed job ends as
@@ -677,6 +683,8 @@ export async function handleBackground(
   // interactive-only); the job stays discoverable via $! and `jobs`.
   let job: JobHandle
   try {
+    launched.at = performance.now()
+    launched.epoch = Date.now() / 1000
     job = await jobTable.submit({
       command: cmdStr,
       run: runBg,
@@ -689,6 +697,7 @@ export async function handleBackground(
       // Its trace lands in its console, past what a restart counts.
       detachable: left.type !== NT.REDIRECTED_STATEMENT && session.shellOptions.xtrace !== true,
       timeout: childEvaluation.frame.lineTimeout,
+      deadline: launched.epoch + (childEvaluation.frame.lineTimeout ?? 0),
       // A job whose runner never begins skips runBg's finally, so its
       // holds on readers go as its process ends.
       ended: () =>

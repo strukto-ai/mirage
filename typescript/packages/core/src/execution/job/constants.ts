@@ -37,6 +37,11 @@ export const PUBLISH_SECONDS = 1
 // dies is seen as gone at most this long after its last renewal.
 export const LEASE_SECONDS = 30
 
+// How much of the lease a daemon still writes a detached job's output under
+// since it last renewed: past it, the lease may soon be another daemon's,
+// which would write the same output again, so the output waits.
+export const WRITE_LEASE_SHARE = 2 / 3
+
 // The status a job lost with its owner answers: SIGHUP's, as bash's job
 // answers when its terminal goes.
 export const HANGUP_EXIT_CODE = 129

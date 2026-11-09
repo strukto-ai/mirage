@@ -28,6 +28,7 @@ import {
   LIST_MAX_RETRIES,
   PUBLISH_SECONDS,
   STOP_WAIT_SECONDS,
+  WRITE_LEASE_SHARE,
 } from './constants.ts'
 import type { ExecutionStore } from '../base.ts'
 import { WorkspaceHeldError } from '../errors.ts'
@@ -345,6 +346,19 @@ export class JobTable {
     this.processesChanged()
   }
 
+  /**
+   * Whether this table's daemon surely still holds the lease: it renewed it
+   * within `WRITE_LEASE_SHARE` of its length, so no other daemon can have
+   * taken it yet. Mirrors Python's `JobTable._holding`.
+   */
+  private holding(): boolean {
+    const lease = this.store.leaseSeconds
+    return (
+      this.held &&
+      (lease === null || performance.now() - this.renewedAt < lease * 1000 * WRITE_LEASE_SHARE)
+    )
+  }
+
   /** Whether the lease went unrenewed past its length, so another daemon may hold it now. */
   private lapsed(): boolean {
     const lease = this.store.leaseSeconds
@@ -410,9 +424,11 @@ export class JobTable {
     // whose leases lapse is (`ProcessHandle.detachable`), since only there
     // does a restart find it.
     detachable?: boolean
-    // The seconds its line's limit gives it from now, which a daemon that
-    // adopts it still holds it to; null for none.
+    // The seconds its line's limit gives it; null for none.
     timeout?: number | null
+    // The real time that limit ends at, which a daemon that adopts it still
+    // holds it to.
+    deadline?: number | null
     // Runs as the job's process ends, whether or not its runner began.
     ended?: () => Promise<void>
   }): Promise<JobHandle> {
@@ -421,7 +437,7 @@ export class JobTable {
     const name = crypto.randomUUID().replaceAll('-', '')
     const createdAt = this.clock.now()
     const timeout = init.timeout ?? null
-    const deadline = timeout ? Date.now() / 1000 + timeout : null
+    const deadline = timeout ? (init.deadline ?? null) : null
     let job: JobHandle | null = null
     let ready!: () => void
     const begun = new Promise<void>((resolve) => {
@@ -461,6 +477,7 @@ export class JobTable {
       if (job !== null) await this.markDetached(job, where)
     }
     process.afterEnding = []
+    process.mayWrite = () => this.holding()
     const { line, group } = process.record
     let jobId: number
     try {
@@ -727,6 +744,7 @@ export class JobTable {
     process.detached = true
     process.tag = (detached.tag as string | null | undefined) ?? null
     process.afterEnding = []
+    process.mayWrite = () => this.holding()
     jobConsole.bindProcess(process.record.id.toString())
     this.track(job, process)
     return true

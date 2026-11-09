@@ -28,6 +28,7 @@ import {
   PUBLISH_SECONDS,
   STOP_WAIT_SECONDS,
   WATCH_RETRY_SECONDS,
+  WRITE_LEASE_SHARE,
 } from './constants.ts'
 import { WorkspaceHeldError } from '../errors.ts'
 import { LineId, MachineId } from '../types.ts'
@@ -2331,6 +2332,7 @@ async function leftDetached(store: RAMExecutionStore): Promise<[JobTable, JobHan
     simple: true,
     detachable: true,
     timeout: 60,
+    deadline: Date.now() / 1000 + 60,
   })
   await until(() => entryDetached(store, job))
   clearTimeout(Reflect.get(table, 'lease') as ReturnType<typeof setTimeout>)
@@ -2575,6 +2577,33 @@ describe('detached jobs a daemon left', () => {
       expect(((fields?.jobs ?? {}) as Record<string, RecordFields>)[String(job.id)]?.detached).toBe(
         null,
       )
+    } finally {
+      await table.killAll()
+      await table.close()
+    }
+  })
+
+  // A daemon writes a detached job's output only while it surely holds the
+  // lease: once it went past WRITE_LEASE_SHARE of it unrenewed, another
+  // daemon may take the lease, and the output waits.
+  it('have their output held once the lease may pass', async () => {
+    const table = new JobTable(new RAMExecutionStore(30), new ProcessTable())
+    try {
+      const job = await table.submit({
+        command: 'train',
+        run: () => new Promise(() => undefined),
+        abort: new AbortController(),
+        cwd: '/',
+        simple: true,
+        detachable: true,
+      })
+      expect(job.process?.mayWrite?.()).toBe(true)
+      Reflect.set(
+        table,
+        'renewedAt',
+        (Reflect.get(table, 'renewedAt') as number) - 30_000 * WRITE_LEASE_SHARE,
+      )
+      expect(job.process?.mayWrite?.()).toBe(false)
     } finally {
       await table.killAll()
       await table.close()

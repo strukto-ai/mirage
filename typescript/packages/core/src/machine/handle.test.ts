@@ -1342,3 +1342,26 @@ it('runs attached a job that could not be recorded', async () => {
   expect(box.execs.at(-1)?.[0]).toBe('train')
   expect(box.execs.at(-1)?.[2][PROCESS]).toBe(runner.record.id.toString())
 })
+
+// Output a daemon may not write now, its lease perhaps passing, is held and
+// viewed again from where it stood, never counted as written.
+it('views again output held while the lease may pass', async () => {
+  const box = new JobBox([
+    [['step 0\n'], [], 0],
+    [['step 0\n'], ['\0mirage-job 0\n'], 0],
+  ])
+  let asked = 0
+  const [done, out] = await jobRun(box, {
+    started: (runner) => {
+      runner.mayWrite = () => {
+        asked += 1
+        return asked > 1
+      }
+    },
+  })
+  expect([done?.exitCode, out]).toEqual([0, 'step 0\n'])
+  expect(box.viewed.map((view) => view.slice(1))).toEqual([
+    ['0', '0'],
+    ['0', '0'],
+  ])
+})

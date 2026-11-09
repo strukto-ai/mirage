@@ -62,7 +62,7 @@ import {
   VIEW_RETRY_MAX_SECONDS,
   VIEW_RETRY_SECONDS,
 } from './constants.ts'
-import { ConnectionLostError } from './errors.ts'
+import { ConnectionLostError, WritesHeldError } from './errors.ts'
 import { isPipeTransport } from './mixin.ts'
 import { MachineMounts } from './mounts.ts'
 
@@ -550,6 +550,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       let held = new Uint8Array()
       const undelivered: unknown[] = []
       const out = async (data: Uint8Array): Promise<void> => {
+        holdWrites(runner, undelivered)
         if (output === null) kept[0].push(data)
         else
           await output(data).catch((error: unknown) => {
@@ -563,6 +564,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         const cut = unmarked(held)
         if (cut === 0) return
         const chunk = held.slice(0, cut)
+        holdWrites(runner, undelivered)
         if (errors === null) kept[1].push(chunk)
         else
           await errors(chunk).catch((error: unknown) => {
@@ -787,6 +789,20 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       this.disconnected()
     }
   }
+}
+
+/**
+ * Hold a detached job's output back while its daemon may no longer hold the
+ * lease (`ProcessHandle.mayWrite`): its view counts the bytes unwritten and
+ * views them again, here or at the daemon that adopts it. Throws
+ * `WritesHeldError` when the output may not be written now. Mirrors Python's
+ * `_hold_writes`.
+ */
+function holdWrites(runner: ProcessHandle | null, undelivered: unknown[]): void {
+  if (runner?.mayWrite == null || runner.mayWrite()) return
+  const held = new WritesHeldError(`${runner.record.id.toString()}: writes held`)
+  undelivered.push(held)
+  throw held
 }
 
 /**

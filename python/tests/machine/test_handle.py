@@ -1230,3 +1230,26 @@ async def test_a_mark_before_stdout_that_did_not_land_is_viewed_again(
     assert (await runner.join()).exit == 0
     assert [v[1:] for v in box.viewed] == [("0", "0"), ("0", "0")]
     assert out == b"x\n"
+
+
+# Output a daemon may not write now, its lease perhaps passing, is held and
+# viewed again from where it stood, never counted as written.
+@pytest.mark.asyncio
+async def test_output_held_while_the_lease_may_pass_is_viewed_again(
+    no_view_wait,
+):
+    box = JobBox(
+        [([b"step 0\n"], [], 0), ([b"step 0\n"], [b"\0mirage-job 0\n"], 0)]
+    )
+    asked: list = []
+
+    def may_write() -> bool:
+        asked.append(True)
+        return len(asked) > 1
+
+    def started(runner) -> None:
+        runner.may_write = may_write
+
+    done, out, _, _ = await _job_run(box, started=started)
+    assert (done.exit_code, out) == (0, b"step 0\n")
+    assert [view[1:] for view in box.viewed] == [("0", "0"), ("0", "0")]

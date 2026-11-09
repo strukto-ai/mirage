@@ -29,3 +29,9 @@ class ConnectionLostError(ConnectionError):
         super().__init__(message)
         self.stdout = stdout
         self.stderr = stderr
+
+
+class WritesHeldError(RuntimeError):
+    """A detached job's output was held back unwritten: its daemon went
+    too long without renewing the lease, which another daemon may hold by
+    now (``ProcessHandle.may_write``)."""

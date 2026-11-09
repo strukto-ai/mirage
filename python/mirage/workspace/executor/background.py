@@ -721,12 +721,13 @@ async def handle_background(
         try:
             try:
                 # The job runs under the `@line` limit of the line that
-                # started it, from its own start, its output included: a
-                # job is past it as a line is, 124 and the line's message.
+                # started it, from its launch, its output included: a job
+                # is past it as a line is, 124 and the line's message.
                 io, exec_node = await run_with_timeout(
                     taking_interrupts(),
                     child_evaluation.frame.line_timeout,
                     LINE_NAME,
+                    launched[0],
                 )
             except CommandTimeoutError as exc:
                 msg = encode_text(str(exc) + "\n")
@@ -766,6 +767,10 @@ async def handle_background(
 
     # Non-interactive bash announces nothing on launch ("[1] <pid>" is
     # interactive-only); the job stays discoverable via $! and `jobs`.
+    # When its line's limit starts, which a daemon that adopts it counts
+    # from too: the loop's time, and the real time.
+    launched = (asyncio.get_running_loop().time(), time.time())
+    timeout = child_evaluation.frame.line_timeout
     try:
         job = await job_table.submit(
             command=cmd_str,
@@ -778,7 +783,8 @@ async def handle_background(
             # Its trace lands in its console, past what a restart counts.
             detachable=left.type != NT.REDIRECTED_STATEMENT
             and not session.shell_options.get("xtrace"),
-            timeout=child_evaluation.frame.line_timeout,
+            timeout=timeout,
+            deadline=launched[1] + timeout if timeout else None,
         )
     except BaseException as exc:
         release_job()
