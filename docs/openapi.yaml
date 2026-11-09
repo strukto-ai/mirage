@@ -47,8 +47,11 @@ tags:
     parent: Workspace operations
   - name: Machines
     parent: Workspace operations
+  - name: Server
   - name: Service
+    parent: Server
   - name: Daemon
+    parent: Server
   - name: Auth
 servers:
   - url: http://127.0.0.1:8765
@@ -225,7 +228,7 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-      description: Get workspace configuration, mounts, and sessions.
+      description: Get workspace details, including mounts and sessions.
     delete:
       summary: Delete workspace
       operationId: delete_workspace_v1_workspaces__workspace_id__delete
@@ -6706,7 +6709,7 @@ components:
       title: ProfilePolicy
       description: Custom policy programs, grouped by the method they handle. Provide a script, its runtime,
         and optional environment variables. If no runtime is specified, Monty is used and must be installed.
-        Policy programs cannot access session environment variables.
+        Policy programs use their configured environment and can read session variables through `ctx["env"]`.
     ProtectedResource:
       properties:
         resource:

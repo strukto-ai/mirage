@@ -925,31 +925,29 @@
             ]
           },
           {
-            "group": "Service",
-            "pages": [
-              "GET /v1/health"
-            ],
+            "group": "Server",
             "openapi": {
               "source": "openapi.yaml",
               "overlays": [
                 "api-display.overlay.json"
               ],
               "directory": "api/operations"
-            }
-          },
-          {
-            "group": "Daemon",
+            },
             "pages": [
-              "GET /v1/daemon/ready",
-              "POST /v1/daemon/shutdown"
-            ],
-            "openapi": {
-              "source": "openapi.yaml",
-              "overlays": [
-                "api-display.overlay.json"
-              ],
-              "directory": "api/operations"
-            }
+              {
+                "group": "Service",
+                "pages": [
+                  "GET /v1/health"
+                ]
+              },
+              {
+                "group": "Daemon",
+                "pages": [
+                  "GET /v1/daemon/ready",
+                  "POST /v1/daemon/shutdown"
+                ]
+              }
+            ]
           }
         ]
       }
