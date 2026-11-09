@@ -62,6 +62,7 @@ const WHITE_SPACE =
     0x3000,
   )
 const TAB_WIDTH = 4
+const LABEL_MARGIN = 2
 const MATCH_NOTHING = 'NOT ALL'
 const ENC = new TextEncoder()
 
@@ -168,6 +169,38 @@ function drawn(line: readonly string[]): [string, number[]] {
   return [shown, columns]
 }
 
+function cells(columns: readonly number[], index: number): number {
+  const start = columns[index]
+  const next = columns[index + 1]
+  return start === undefined || next === undefined ? 1 : next - start
+}
+
+/**
+ * The underline and arrow rows under a label. The trailing margin and a
+ * zero-width character are counted by character, so a mark on a combining
+ * accent draws nothing.
+ */
+function marks(columns: readonly number[], column: number, size: number): [string, string] {
+  const first = ' '.repeat(columns[column] ?? 0)
+  if (size === 0) return [`${first}│ `, `${first}╰─`]
+  const middle = column + Math.floor(size / 2)
+  const last = column + size
+  let underline = ''
+  for (let index = column; index < last + LABEL_MARGIN; index += 1) {
+    const width = cells(columns, index)
+    if (index >= last) underline += ' '.repeat(width)
+    else if (index === middle && width > 0) underline += `┬${'─'.repeat(width - 1)}`
+    else underline += '─'.repeat(width)
+  }
+  let arrow = ''
+  for (let index = middle; index < last + LABEL_MARGIN; index += 1) {
+    const width = cells(columns, index)
+    if (index === middle && width > 0) arrow += `╰${'─'.repeat(width - 1)}`
+    else arrow += '─'.repeat(width)
+  }
+  return [`${first}${underline}`, `${' '.repeat(columns[middle] ?? 0)}${arrow}`]
+}
+
 // The parser counts bytes and the report reads them as characters, so text
 // past a multibyte character sits further right than it is, and can fall off
 // the end of the query altogether.
@@ -188,15 +221,7 @@ function report(source: string, pos: number, message: string): string {
   }
   const columns = drawn(chars.slice(start, lineEnd))[1]
   const shown = drawn(chars.slice(start, textEnd))[0].trimEnd()
-  const first = columns[column] ?? 0
-  let marker = `${' '.repeat(first)}│ `
-  let arrow = `${' '.repeat(first)}╰─`
-  if (size > 0) {
-    const middle = columns[column + Math.floor(size / 2)] ?? first
-    const last = columns[column + size] ?? middle
-    marker = `${' '.repeat(first)}${'─'.repeat(middle - first)}┬${'─'.repeat(last - middle - 1)}  `
-    arrow = `${' '.repeat(middle)}╰${'─'.repeat(last - middle + 1)}`
-  }
+  const [marker, arrow] = marks(columns, column, size)
   return (
     `${head}${title}${margin}│\n` +
     ` ${String(number)} │ ${shown}\n` +

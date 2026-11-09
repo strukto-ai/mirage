@@ -247,3 +247,15 @@ def test_a_keyword_must_be_an_atom():
 
 def test_a_pattern_with_a_line_break_finds_nothing():
     assert parse_query("subject a\nzzz").criteria == "NOT ALL"
+
+
+def test_a_mark_on_a_combining_accent_draws_nothing():
+    report = _message("subject é x\u0301")
+    assert "   │              \n" in report
+    assert "   │            ── found 'x' expected" in report
+
+
+def test_the_margin_counts_a_combining_accent():
+    report = _message("not x\u0301 y")
+    assert "   │     ┬ \n" in report
+    assert "   │     ╰─ found 'x' expected" in report

@@ -52,6 +52,7 @@ WHITE_SPACE = (
     + "\u2007\u2008\u2009\u200a\u202f\u205f\u3000"
 )
 TAB_WIDTH = 4
+LABEL_MARGIN = 2
 MATCH_NOTHING = "NOT ALL"
 
 
@@ -448,6 +449,50 @@ def _drawn(line: str) -> tuple[str, list[int]]:
     return "".join(shown), columns
 
 
+def _cells(columns: list[int], index: int) -> int:
+    return (
+        columns[index + 1] - columns[index] if index + 1 < len(columns) else 1
+    )
+
+
+def _marks(columns: list[int], column: int, size: int) -> tuple[str, str]:
+    """Draw the underline and the arrow under a label.
+
+    The label's trailing margin and a zero-width character are counted by
+    character, so a mark on a combining accent draws nothing.
+
+    Args:
+        columns (list[int]): each character's column, then the end.
+        column (int): the character the label starts on.
+        size (int): the label's length in characters, 0 at the end of input.
+
+    Returns:
+        tuple[str, str]: the underline row and the arrow row.
+    """
+    first = " " * columns[column]
+    if size == 0:
+        return f"{first}│ ", f"{first}╰─"
+    middle = column + size // 2
+    last = column + size
+    underline = ""
+    for index in range(column, last + LABEL_MARGIN):
+        cells = _cells(columns, index)
+        if index >= last:
+            underline += " " * cells
+        elif index == middle and cells:
+            underline += "┬" + "─" * (cells - 1)
+        else:
+            underline += "─" * cells
+    arrow = ""
+    for index in range(middle, last + LABEL_MARGIN):
+        cells = _cells(columns, index)
+        if index == middle and cells:
+            arrow += "╰" + "─" * (cells - 1)
+        else:
+            arrow += "─" * cells
+    return f"{first}{underline}", f"{' ' * columns[middle]}{arrow}"
+
+
 def _report(source: str, pos: int, message: str) -> str:
     # The parser counts bytes and the report reads them as characters, so
     # text past a multibyte character sits further right than it is, and
@@ -470,16 +515,7 @@ def _report(source: str, pos: int, message: str) -> str:
         return f"{head}{title}{margin}│\n{margin}│ \n{bottom}"
     columns = _drawn(source[start:line_end])[1]
     shown = _drawn(source[start:text_end])[0].rstrip()
-    first = columns[column]
-    if size == 0:
-        marker = f"{' ' * first}│ "
-        arrow = f"{' ' * first}╰─"
-    else:
-        middle = columns[column + size // 2]
-        last = columns[column + size]
-        underline = "─" * (middle - first) + "┬" + "─" * (last - middle - 1)
-        marker = f"{' ' * first}{underline}  "
-        arrow = f"{' ' * middle}╰{'─' * (last - middle + 1)}"
+    marker, arrow = _marks(columns, column, size)
     return (
         f"{head}{title}{margin}│\n"
         f" {number} │ {shown}\n"

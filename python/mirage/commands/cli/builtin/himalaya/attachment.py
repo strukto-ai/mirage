@@ -96,7 +96,7 @@ def part_payload(body: dict[str, Any]) -> bytes:
     for kind in ("Binary", "InlineBinary"):
         if kind in body:
             return bytes(body[kind])
-    return body["Message"].raw if "Message" in body else b""
+    return bytes(body["Message"].raw) if "Message" in body else b""
 
 
 def attachment_rows(message: MimeMessage) -> list[AttachmentRow]:

@@ -1617,7 +1617,7 @@ class MimeMessage:
     text_body: list[int] = field(default_factory=list)
     attachments: list[int] = field(default_factory=list)
     parts: list[dict[str, Any]] = field(default_factory=list)
-    raw: bytes = b""
+    raw: bytes | memoryview = b""
 
     def is_empty(self) -> bool:
         return not self.parts
@@ -1964,7 +1964,7 @@ def _close_parts(
                     "Text": _text(raw[part["offset_body"] : position])
                 }
             else:
-                message.raw = raw[part["offset_body"] : position]
+                message.raw = memoryview(raw)[part["offset_body"] : position]
                 part["body"] = {"Message": message}
             message = parent
             previous.boundary = state.boundary
@@ -2025,7 +2025,7 @@ def _finish(
                     "Text": _text(raw[part["offset_body"] : stream.pos])
                 }
             else:
-                message.raw = raw[part["offset_body"] : stream.pos]
+                message.raw = memoryview(raw)[part["offset_body"] : stream.pos]
                 part["body"] = {"Message": message}
             message = parent
         else:

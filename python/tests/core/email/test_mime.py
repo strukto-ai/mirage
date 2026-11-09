@@ -67,3 +67,12 @@ def test_an_attached_message_keeps_its_bytes_on_every_path():
         assert message is not None
         nested = message.parts[message.attachments[0]]["body"]["Message"]
         assert nested.raw == inner
+
+
+def test_nested_messages_share_the_outer_bytes():
+    wrapper = b"Content-Type: message/rfc822\r\n\r\n"
+    message = parse_mime(wrapper * 3 + b"Subject: in\r\n\r\nbody")
+    assert message is not None
+    nested = message.parts[0]["body"]["Message"]
+    assert isinstance(nested.raw, memoryview)
+    assert nested.raw.obj is not None
