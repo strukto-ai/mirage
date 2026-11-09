@@ -224,12 +224,25 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     const tag = runner?.record.id.toString() ?? crypto.randomUUID().replaceAll('-', '')
     const env = { ...given, ...clock }
     const detached = await this.detaches(runner, ctx)
-    let done: RunResult | null = null
+    let done: RunResult
     this.runs += 1
     try {
-      if (detached)
-        done = await this.runDetached(
+      done =
+        (detached
+          ? await this.runDetached(
+              run,
+              env,
+              ctx.cwd.virtual,
+              tag,
+              runner,
+              output,
+              errors,
+              ctx.signal,
+            )
+          : null) ??
+        (await this.runAttached(
           run,
+          ctx.stdin,
           env,
           ctx.cwd.virtual,
           tag,
@@ -237,25 +250,11 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
           output,
           errors,
           ctx.signal,
-        )
-      done ??= await this.runAttached(
-        run,
-        ctx.stdin,
-        env,
-        ctx.cwd.virtual,
-        tag,
-        runner,
-        output,
-        errors,
-        ctx.signal,
-      )
+        ))
     } catch (error) {
-      if (ctx.signal?.aborted === true) {
-        if (runner?.released !== true) await this.stop(tag, stopWith(runner))
-        throw error
-      }
-      if (!(error instanceof ConnectionLostError)) throw error
-      done = this.connectionLost(runner, error)
+      if (ctx.signal?.aborted === true && runner?.released !== true)
+        await this.stop(tag, stopWith(runner))
+      throw error
     } finally {
       this.runs -= 1
     }

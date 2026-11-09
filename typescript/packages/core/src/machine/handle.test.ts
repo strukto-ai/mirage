@@ -1266,6 +1266,32 @@ it('stops the tag of a start that failed', async () => {
   expect(box.removed).toEqual([box.started[0]?.[0]])
 })
 
+// A start the connection dropped in is viewed all the same: its program may
+// run, so it is not stopped.
+it('views a start the connection dropped', async () => {
+  class DroppedStart extends JobBox {
+    protected override async execArgv(
+      argv: readonly string[],
+      stdin: ByteSource | null,
+      env: Record<string, string>,
+      cwd: string,
+      output?: OutputFn | null,
+      errors?: OutputFn | null,
+      signal?: AbortSignal,
+    ): Promise<RunResult> {
+      if (argv[2] === JOB_START) {
+        this.started.push(argv.slice(4))
+        throw new ConnectionLostError('closed by remote host')
+      }
+      return super.execArgv(argv, stdin, env, cwd, output, errors, signal)
+    }
+  }
+  const box = new DroppedStart([[['step 0\n'], ['\0mirage-job 3\n'], 0]])
+  const [done, out, , runner] = await jobRun(box)
+  expect([done?.exitCode, out]).toEqual([3, 'step 0\n'])
+  expect(box.execs.map(([line]) => line)).not.toContain(stopLine(runner.record.id.toString(), 15))
+})
+
 // `$!` names a detached job's program by the pid its start printed.
 it.each([
   ['4242 9000\n', { pid: 4242, started: 9000, exited: null }],

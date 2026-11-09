@@ -259,8 +259,6 @@ class MachineHandle:
             if runner is None or not runner.released:
                 await asyncio.shield(self.stop(tag, _stop_with(runner)))
             raise
-        except ConnectionLostError as exc:
-            done = self._connection_lost(runner, exc)
         finally:
             self._executing -= 1
         if self._mounts is None:

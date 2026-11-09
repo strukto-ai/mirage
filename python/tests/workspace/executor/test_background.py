@@ -21,6 +21,7 @@ from mirage.bridge.sync import handed
 from mirage.execution.errors import WorkspaceHeldError
 from mirage.execution.job import JobState
 from mirage.execution.line.types import LineState
+from mirage.execution.ram import RAMExecutionStore
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import (
     AsyncLineIterator,
@@ -841,6 +842,39 @@ async def test_a_stopped_job_past_its_limit_still_ends():
         async with asyncio.timeout(5):
             await ws.job_table.wait(1, ws.default_session_id)
         job = ws.job_table.get(1, ws.default_session_id)
+        assert job.exit_code == 124
+    finally:
+        await ws.close()
+
+
+class _SlowFirstList(RAMExecutionStore):
+    """A job store whose first list write takes most of a line's limit."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.slow = True
+
+    async def cas_set(self, session_id, fields, expected_generation):
+        if self.slow:
+            self.slow = False
+            await asyncio.sleep(0.3)
+        return await super().cas_set(session_id, fields, expected_generation)
+
+
+# A job's limit counts from its launch: a launch that spent most of the
+# limit leaves the job only the rest.
+@pytest.mark.asyncio
+async def test_a_jobs_limit_counts_from_its_launch():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        command_limits={"@line": Limit(timeout_seconds=0.5)},
+    )
+    try:
+        ws.job_table.store = _SlowFirstList()
+        assert (await ws.shell("sleep 0.4 &")).exit_code == 0
+        async with asyncio.timeout(5):
+            job = await ws.job_table.wait(1, ws.default_session_id)
         assert job.exit_code == 124
     finally:
         await ws.close()

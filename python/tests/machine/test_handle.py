@@ -1154,6 +1154,27 @@ async def test_a_start_that_failed_stops_its_tag():
     assert box.removed == [box.started[0][0]]
 
 
+# A start the connection dropped in is viewed all the same: its program
+# may run, so it is not stopped.
+@pytest.mark.asyncio
+async def test_a_start_the_connection_dropped_is_viewed(no_view_wait):
+    class DroppedStart(JobBox):
+        async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+            if argv[2:3] == (JOB_START,):
+                self.started.append(argv[4:])
+                raise ConnectionLostError("closed by remote host")
+            return await super()._exec_argv(
+                argv, stdin, env, cwd, output, errors
+            )
+
+    box = DroppedStart([([b"step 0\n"], [b"\0mirage-job 3\n"], 0)])
+    done, out, _, runner = await _job_run(box)
+    assert (done.exit_code, out) == (3, b"step 0\n")
+    assert stop_line(str(runner.record.id), 15) not in [
+        line for line, _, _ in box.execs
+    ]
+
+
 # `$!` names a detached job's program by the pid its start printed.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
