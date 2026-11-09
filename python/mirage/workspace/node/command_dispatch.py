@@ -55,6 +55,7 @@ from mirage.io.types import ByteSource, OutputState, materialize
 from mirage.observe.context import command_records
 from mirage.policy import (
     CommandResultContext,
+    Deny,
     PolicyDenied,
     post_command_gate,
     refusal_of,
@@ -138,7 +139,7 @@ from mirage.workspace.lookup import (
     Consumer,
     runtime_refused,
 )
-from mirage.workspace.lookup.constants import RUNNERS
+from mirage.workspace.lookup.constants import PROGRAM_WRAPPERS, RUNNERS
 from mirage.workspace.lookup.lookup import (
     mirage_program_at,
     routed_consumer,
@@ -153,7 +154,14 @@ from mirage.workspace.node.admission import (
     admit,
     classified_words,
 )
-from mirage.workspace.node.occurrence import claimant_for, evaluated_from
+from mirage.workspace.node.explain import UNREADABLE_LINES
+from mirage.workspace.node.inner_lines import Word, inner_lines
+from mirage.workspace.node.occurrence import (
+    argv_frame,
+    claimant_for,
+    evaluated_from,
+    whole_occurrence,
+)
 from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.budget import check_env, entry_bytes
@@ -888,21 +896,7 @@ async def _run_argv(
                 claimant=claimant,
             )
             if isinstance(verdict, Refused):
-                cmd_str = " ".join([name, *argv.args])
-                return (
-                    None,
-                    IOResult(
-                        exit_code=verdict.exit_code,
-                        stderr=verdict.stderr,
-                        refusal=verdict.refusal,
-                    ),
-                    ExecutionNode(
-                        command=cmd_str,
-                        exit_code=verdict.exit_code,
-                        stderr=verdict.stderr,
-                        refused=True,
-                    ),
-                )
+                return _refused(" ".join([name, *argv.args]), verdict)
             admitted = verdict
         return None
 
@@ -982,7 +976,7 @@ async def _run_argv(
                     job_table,
                     cancel,
                     row,
-                    claimant.line if claimant is not None else None,
+                    claimant,
                     output,
                 )
         finally:
@@ -1354,6 +1348,101 @@ async def _purge_removed(
             await namespace.purge_under(item.virtual)
 
 
+def _refused(
+    command: str, verdict: Refused
+) -> tuple[None, IOResult, ExecutionNode]:
+    """A command the gate refused, as its run answers it.
+
+    Args:
+        command (str): the command line as run.
+        verdict (Refused): the gate's refusal.
+    """
+    return (
+        None,
+        IOResult(
+            exit_code=verdict.exit_code,
+            stderr=verdict.stderr,
+            refusal=verdict.refusal,
+        ),
+        ExecutionNode(
+            command=command,
+            exit_code=verdict.exit_code,
+            stderr=verdict.stderr,
+            refused=True,
+        ),
+    )
+
+
+async def _wrapped_refusal(
+    words: Sequence[Word],
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace,
+    stdin: ByteSource | None,
+    cancel: asyncio.Event | None,
+    claimant: Claimant | None,
+) -> Refused | None:
+    """The refusal of a program a wrapper runs where Mirage cannot see it
+    run (``nohup python3`` on a machine). What the words run is followed as
+    the line's pass follows it (``inner_lines``): each program is admitted
+    as ``env`` and ``timeout`` have theirs admitted, at the place the pass
+    judged it, and a line the gate cannot read (``nohup /usr/bin/env``)
+    is refused under an allow list, which only names what it can read.
+
+    Args:
+        words (Sequence[Word]): the command running the others, name
+            first.
+        session (SessionState): the session running the line.
+        registry (MountRegistry): registry holding the policies.
+        namespace (Namespace): the link table.
+        stdin (ByteSource | None): the command's stdin.
+        cancel (asyncio.Event | None): the run's kill channel.
+        claimant (Claimant | None): the command and its line.
+
+    Returns:
+        The first refusal, or None to let the words run.
+    """
+    for inner in inner_lines(words[0].value, words[1:]):
+        if not inner.argv:
+            # shortcut: a line run under the box (`time sh -c`) is not judged.
+            if session.commands is None or session.commands.allow is None:
+                continue
+            deny = Deny(UNREADABLE_LINES)
+            err, code = render_deny(words[0].value, deny)
+            return Refused(err, code, refusal_of(deny))
+        name, args = inner.argv[0].value, [w.value for w in inner.argv[1:]]
+        place = (
+            Claimant(
+                claimant.line,
+                whole_occurrence(
+                    argv_frame([name, *args], claimant.occurrence)
+                ),
+            )
+            if claimant is not None
+            else None
+        )
+        operands = await classified_words(name, args, session, registry)
+        verdict = await admit(
+            name,
+            args,
+            operands[1:],
+            session,
+            registry,
+            namespace,
+            stdin,
+            cancel=cancel,
+            claimant=place,
+        )
+        if isinstance(verdict, Refused):
+            return verdict
+        deeper = await _wrapped_refusal(
+            inner.argv, session, registry, namespace, stdin, cancel, place
+        )
+        if deeper is not None:
+            return deeper
+    return None
+
+
 async def _route_argv(
     recurse: Callable[..., Awaitable[RedirectResult]],
     dispatch: DispatchFn,
@@ -1367,7 +1456,7 @@ async def _route_argv(
     job_table: JobTable,
     cancel: asyncio.Event | None,
     row: int,
-    handed: HandOff | None = None,
+    claimant: Claimant | None = None,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Route one admitted command to its builtin or mount handler.
@@ -1439,6 +1528,21 @@ async def _route_argv(
     )
     if consumer is Consumer.EXTERNAL:
         assert routing is not None
+        denied = (
+            await _wrapped_refusal(
+                [Word(w, w) for w in (name, *argv.args)],
+                session,
+                registry,
+                namespace,
+                stdin,
+                cancel,
+                claimant,
+            )
+            if name in PROGRAM_WRAPPERS
+            else None
+        )
+        if denied is not None:
+            return _refused(" ".join([name, *argv.args]), denied)
         return await run_external(
             argv, stdin, session, registry, routing, sink
         )
@@ -1559,7 +1663,7 @@ async def _route_argv(
         job_table=job_table,
         namespace=namespace,
         execute_fn=execute_fn,
-        handed=handed,
+        handed=claimant.line if claimant is not None else None,
         sink=sink,
     )
 

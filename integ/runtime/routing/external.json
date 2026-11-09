@@ -104,6 +104,87 @@
       ]
     },
     {
+      "id": "external_wrapper_admits_its_program",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          "processbox"
+        ],
+        "profiles": {
+          "default": {
+            "commands": {
+              "allow": [
+                "nohup",
+                "nice",
+                "ionice",
+                "time",
+                "echo"
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "native-tool a",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "native-tool: Permission denied\n"
+          }
+        },
+        {
+          "command": "nohup native-tool a",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "native-tool: Permission denied\n"
+          }
+        },
+        {
+          "command": "nice -n 5 native-tool a",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "native-tool: Permission denied\n"
+          }
+        },
+        {
+          "command": "nohup ionice -c 3 native-tool a",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "native-tool: Permission denied\n"
+          }
+        },
+        {
+          "command": "nohup time native-tool a",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "native-tool: Permission denied\n"
+          }
+        },
+        {
+          "command": "nohup /usr/bin/native-tool a",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "/usr/bin/native-tool: Permission denied\n"
+          }
+        },
+        {
+          "command": "nohup echo hi",
+          "expect": {
+            "exit": 0,
+            "stdout": "hi\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "external_capture_expands_text_slot_globs",
       "world": {
         "register_runtimes": {
