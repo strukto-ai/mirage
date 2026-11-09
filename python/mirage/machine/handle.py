@@ -595,8 +595,6 @@ class MachineHandle:
                     try:
                         await output(data)
                     except BaseException as exc:
-                        # The console keeps what its copy failed on.
-                        delivered[0] += len(data)
                         undelivered.append(exc)
                         raise
                 delivered[0] += len(data)
@@ -614,9 +612,8 @@ class MachineHandle:
                     try:
                         await errors(chunk)
                     except BaseException as exc:
-                        del held[:cut]
-                        delivered[1] += len(chunk)
                         undelivered.append(exc)
+                        await _recount_errors(runner, delivered, exc)
                         raise
                 del held[:cut]
                 delivered[1] += len(chunk)
@@ -863,6 +860,35 @@ def _hold_writes(
             held = WritesHeldError(f"{runner.record.id}: writes held")
             undelivered.append(held)
             raise held
+
+
+async def _recount_errors(
+    runner: ProcessHandle | None, delivered: list[int], exc: BaseException
+) -> None:
+    """Count a view's stderr from what its job's console holds once a
+    write failed (``ProcessHandle.saved``): a chunk the console kept
+    before its copy to the terminal failed is not written again, one it
+    never kept is. Stderr reaches the console as it is written; stdout
+    may still be on its way, so it counts only what was written. Left as
+    it was when nothing tells, or the write was cancelled.
+
+    Args:
+        runner (ProcessHandle | None): the process the run is.
+        delivered (list[int]): the stdout and stderr bytes delivered.
+        exc (BaseException): how the write failed.
+    """
+    if (
+        runner is None
+        or runner.saved is None
+        or not isinstance(exc, Exception)
+    ):
+        return
+    try:
+        delivered[1] = (await runner.saved())[1]
+    except Exception:
+        logger.debug(
+            "%s: job stderr not counted", runner.record.id, exc_info=True
+        )
 
 
 def _stop_with(runner: ProcessHandle | None) -> int:

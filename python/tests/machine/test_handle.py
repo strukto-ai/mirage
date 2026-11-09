@@ -708,6 +708,21 @@ async def _job_run(
     return done[0] if done else None, bytes(out), bytes(err), runner
 
 
+def _keep_endings(runner) -> None:
+    """Have ``runner`` run what waits for its ending once it is recorded."""
+    runner.after_ending = []
+
+
+async def _unrecorded(where) -> None:
+    """A store that cannot record where a job runs."""
+    raise RuntimeError("store unavailable")
+
+
+def _tell_nowhere(runner) -> None:
+    """Have ``runner`` tell its job's detaching to a store that fails."""
+    runner.on_detach = _unrecorded
+
+
 # However a viewer ends without the end mark, the job is viewed again from
 # the bytes each stream delivered, so nothing comes twice or goes missing.
 @pytest.mark.asyncio
@@ -1126,41 +1141,58 @@ async def test_a_job_the_box_cannot_detach_runs_attached():
     assert box.exec_envs[-1][PROCESS] == str(runner.record.id)
 
 
-# The end mark counts only when all the view printed before it landed: a
-# view whose output failed to land is viewed again, however it ended, from
-# after what its sink kept, as a job's console keeps a chunk its terminal
-# copy failed on.
-@pytest.mark.asyncio
-async def test_a_mark_after_output_that_did_not_land_is_viewed_again(
-    no_view_wait,
-):
-    box = JobBox(
-        [
-            ([], [b"warn\n\0mirage-job 0\n"], 0),
-            ([], [b"\0mirage-job 0\n"], 0),
-        ]
-    )
-    err, failed = bytearray(), []
+async def _flaky_run(box, fail, kept=False, saved=False):
+    """Run ``train`` on ``box`` as a job's process whose ``fail`` sink
+    raises once, keeping the chunk first when ``kept``, as a job's console
+    keeps a chunk its terminal copy failed on; its process tells what the
+    console holds when ``saved``: the stdout and stderr that landed."""
+    landed = {"out": bytearray(), "err": bytearray()}
+    failed: list[bytes] = []
     ctx = Context(cwd=PathSpec.from_str_path("/"))
 
-    async def output(data: bytes) -> None:
-        return None
+    def sink(name: str):
+        async def take(data: bytes) -> None:
+            if name == fail and not failed:
+                failed.append(data)
+                if kept:
+                    landed[name].extend(data)
+                raise MemoryError("terminal full")
+            landed[name].extend(data)
 
-    async def errors(data: bytes) -> None:
-        err.extend(data)
-        if not failed:
-            failed.append(data)
-            raise MemoryError("terminal full")
+        return take
+
+    async def console() -> tuple[int, int]:
+        return len(landed["out"]), len(landed["err"])
 
     async def run() -> int:
         runner.detachable = True
-        return (await box.run(("train",), ctx, None, output, errors)).exit_code
+        if saved:
+            runner.saved = console
+        return (
+            await box.run(("train",), ctx, None, sink("out"), sink("err"))
+        ).exit_code
 
     runner = ProcessTable("w1", bind=run_as_process).start(
         session_id="s", command="train", cwd=ctx.cwd, run=run
     )
     assert (await runner.join()).exit == 0
-    assert [view[1:] for view in box.viewed] == [("0", "0"), ("0", "5")]
+    return bytes(landed["out"]), bytes(landed["err"])
+
+
+# The end mark counts only when all the view printed before it landed: a
+# view whose stderr failed to land is viewed again, however it ended, from
+# what the job's console holds, so a chunk it kept before its copy failed
+# comes once and one it never kept comes again.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kept", [True, False])
+async def test_a_mark_after_output_that_did_not_land_is_viewed_again(
+    no_view_wait, kept
+):
+    again = [b"\0mirage-job 0\n"] if kept else [b"warn\n\0mirage-job 0\n"]
+    box = JobBox([([], [b"warn\n\0mirage-job 0\n"], 0), ([], again, 0)])
+    _, err = await _flaky_run(box, "err", kept=kept, saved=True)
+    sent = ("0", "5") if kept else ("0", "0")
+    assert [view[1:] for view in box.viewed] == [("0", "0"), sent]
     assert err == b"warn\n"
 
 
@@ -1169,11 +1201,7 @@ async def test_a_mark_after_output_that_did_not_land_is_viewed_again(
 @pytest.mark.asyncio
 async def test_a_job_folder_goes_once_its_ending_is_recorded():
     box = JobBox([([], [b"\0mirage-job 3\n"], 0)])
-
-    def started(runner) -> None:
-        runner.after_ending = []
-
-    done, _, _, runner = await _job_run(box, started=started)
+    done, _, _, runner = await _job_run(box, started=_keep_endings)
     assert (done.exit_code, box.removed) == (3, [])
     [then] = runner.after_ending
     await then()
@@ -1185,47 +1213,22 @@ async def test_a_job_folder_goes_once_its_ending_is_recorded():
 @pytest.mark.asyncio
 async def test_a_job_that_could_not_be_recorded_runs_attached():
     box = JobBox()
-
-    async def unrecorded(where) -> None:
-        raise RuntimeError("store unavailable")
-
-    def started(runner) -> None:
-        runner.on_detach = unrecorded
-
-    done, _, _, runner = await _job_run(box, started=started)
+    done, _, _, runner = await _job_run(box, started=_tell_nowhere)
     assert (done.exit_code, box.started) == (0, [])
     assert box.execs[-1][0] == "train"
     assert box.exec_envs[-1][PROCESS] == str(runner.record.id)
 
 
-# The same holds for stdout a transport returns whole after the mark.
+# A view whose stdout failed to land is viewed again from what it wrote:
+# stdout may still be on its way to the console, which so cannot tell.
 @pytest.mark.asyncio
 async def test_a_mark_before_stdout_that_did_not_land_is_viewed_again(
     no_view_wait,
 ):
     view = ([], [b"\0mirage-job 0\n"], RunResult(b"x\n", None, 0))
-    box = JobBox([view, ([], [b"\0mirage-job 0\n"], 0)])
-    out, failed = bytearray(), []
-    ctx = Context(cwd=PathSpec.from_str_path("/"))
-
-    async def output(data: bytes) -> None:
-        out.extend(data)
-        if not failed:
-            failed.append(data)
-            raise MemoryError("terminal full")
-
-    async def errors(data: bytes) -> None:
-        return None
-
-    async def run() -> int:
-        runner.detachable = True
-        return (await box.run(("train",), ctx, None, output, errors)).exit_code
-
-    runner = ProcessTable("w1", bind=run_as_process).start(
-        session_id="s", command="train", cwd=ctx.cwd, run=run
-    )
-    assert (await runner.join()).exit == 0
-    assert [v[1:] for v in box.viewed] == [("0", "0"), ("2", "0")]
+    box = JobBox([view, view])
+    out, _ = await _flaky_run(box, "out", saved=True)
+    assert [v[1:] for v in box.viewed] == [("0", "0"), ("0", "0")]
     assert out == b"x\n"
 
 

@@ -115,6 +115,19 @@ def _held_consoles(fields: RecordFields | None) -> set[str]:
     return listed | set(fields.get("disowned", {}))
 
 
+async def _console_bytes(console: JobConsole) -> tuple[int, int]:
+    """The stdout and stderr bytes a job's console holds.
+
+    Args:
+        console (JobConsole): the console.
+    """
+    chunks, _, _ = await console.read_from(0)
+    return (
+        sum(len(c.data) for c in chunks if c.channel == Channel.STDOUT),
+        sum(len(c.data) for c in chunks if c.channel == Channel.STDERR),
+    )
+
+
 async def _after_ending(job: JobHandle) -> None:
     """Run what waited for a job's ending to be recorded, a detached
     job's folder removal; a released job's waits for its adopter.
@@ -573,6 +586,7 @@ class JobTable:
             process (ProcessHandle): its process.
         """
         job.process = process
+        process.saved = lambda: _console_bytes(job.console)
         self._jobs.setdefault(job.session_id, {})[job.id] = job
         plane, pid = self._plane, process.record.pid
         plane._job_tables[pid] = self
@@ -685,11 +699,7 @@ class JobTable:
         """
         machine = MachineId.parse(entry["detached"]["machine"])
         console = JobConsole(self.store.console(entry["console"]))
-        chunks, _, _ = await console.read_from(0)
-        sent = (
-            sum(len(c.data) for c in chunks if c.channel == Channel.STDOUT),
-            sum(len(c.data) for c in chunks if c.channel == Channel.STDERR),
-        )
+        sent = await _console_bytes(console)
         for _ in range(LIST_MAX_RETRIES):
             fields = await self.store.load(session_id)
             jobs = dict((fields or {}).get("jobs", {}))

@@ -1267,20 +1267,22 @@ it('runs attached a job the box cannot detach', async () => {
   expect(runner.detached).toBe(false)
 })
 
-// Run `train` on `box` with output callbacks that fail once each after
-// keeping the chunk, as a job's console keeps a chunk its terminal copy
-// failed on: the stdout and stderr that landed.
-async function flakyRun(box: JobBox, fail: 'out' | 'err'): Promise<[string, string]> {
+// Run `train` on `box` as a job's process whose `fail` callback fails once,
+// keeping the chunk first when `kept`, as a job's console keeps a chunk its
+// terminal copy failed on; its process tells what the console holds: the
+// stdout and stderr that landed.
+async function flakyRun(box: JobBox, fail: 'out' | 'err', kept = false): Promise<[string, string]> {
   const landed = { out: '', err: '' }
   let failed = false
   const deliver =
     (which: 'out' | 'err') =>
     (chunk: Uint8Array): Promise<void> => {
-      landed[which] += DEC.decode(chunk)
       if (which === fail && !failed) {
         failed = true
+        if (kept) landed[which] += DEC.decode(chunk)
         return Promise.reject(new Error('terminal full'))
       }
+      landed[which] += DEC.decode(chunk)
       return Promise.resolve()
     }
   const ctx = { stdin: null, flags: {}, env: {}, cwd: PathSpec.fromStrPath('/') }
@@ -1291,6 +1293,8 @@ async function flakyRun(box: JobBox, fail: 'out' | 'err'): Promise<[string, stri
     cancel: () => undefined,
     run: async () => {
       runner.detachable = true
+      runner.saved = () =>
+        Promise.resolve([ENC.encode(landed.out).length, ENC.encode(landed.err).length])
       return (await box.run(['train'], ctx, null, deliver('out'), deliver('err'))).exitCode
     },
   })
@@ -1299,32 +1303,37 @@ async function flakyRun(box: JobBox, fail: 'out' | 'err'): Promise<[string, stri
 }
 
 // The end mark counts only when all the view printed before it landed: a view
-// whose output failed to land is viewed again, however it ended, from after
-// what its sink kept.
-it('views again a mark after output that did not land', async () => {
-  const box = new JobBox([
-    [[], ['warn\n\0mirage-job 0\n'], 0],
-    [[], ['\0mirage-job 0\n'], 0],
-  ])
-  const [, err] = await flakyRun(box, 'err')
-  expect(box.viewed.map((view) => view.slice(1))).toEqual([
-    ['0', '0'],
-    ['0', '5'],
-  ])
-  expect(err).toBe('warn\n')
-})
+// whose stderr failed to land is viewed again, however it ended, from what the
+// job's console holds, so a chunk it kept before its copy failed comes once
+// and one it never kept comes again.
+it.each([true, false])(
+  'views again a mark after output that did not land (kept %s)',
+  async (kept) => {
+    const box = new JobBox([
+      [[], ['warn\n\0mirage-job 0\n'], 0],
+      [[], [kept ? '\0mirage-job 0\n' : 'warn\n\0mirage-job 0\n'], 0],
+    ])
+    const [, err] = await flakyRun(box, 'err', kept)
+    expect(box.viewed.map((view) => view.slice(1))).toEqual([
+      ['0', '0'],
+      kept ? ['0', '5'] : ['0', '0'],
+    ])
+    expect(err).toBe('warn\n')
+  },
+)
 
-// The same holds for stdout a transport returns whole after the mark.
+// A view whose stdout failed to land is viewed again from what it wrote: stdout
+// may still be on its way to the console, which so cannot tell.
 it('views again a mark before stdout that did not land', async () => {
   const whole: RunResult = { stdout: ENC.encode('x\n'), stderr: null, exitCode: 0 }
   const box = new JobBox([
     [[], ['\0mirage-job 0\n'], whole],
-    [[], ['\0mirage-job 0\n'], 0],
+    [[], ['\0mirage-job 0\n'], whole],
   ])
   const [out] = await flakyRun(box, 'out')
   expect(box.viewed.map((view) => view.slice(1))).toEqual([
     ['0', '0'],
-    ['2', '0'],
+    ['0', '0'],
   ])
   expect(out).toBe('x\n')
 })

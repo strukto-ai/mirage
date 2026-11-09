@@ -559,8 +559,6 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         if (output === null) kept[0].push(data)
         else
           await output(data).catch((error: unknown) => {
-            // The console keeps what its copy failed on.
-            sent.out += data.length
             undelivered.push(error)
             throw error
           })
@@ -574,10 +572,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         holdWrites(runner, undelivered)
         if (errors === null) kept[1].push(chunk)
         else
-          await errors(chunk).catch((error: unknown) => {
-            held = held.slice(cut)
-            sent.err += chunk.length
+          await errors(chunk).catch(async (error: unknown) => {
             undelivered.push(error)
+            await recountErrors(runner, sent, signal)
             throw error
           })
         held = held.slice(cut)
@@ -807,6 +804,27 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
  * `WritesHeldError` when the output may not be written now. Mirrors Python's
  * `_hold_writes`.
  */
+/**
+ * Count a view's stderr from what its job's console holds once a write failed
+ * (`ProcessHandle.saved`): a chunk the console kept before its copy to the
+ * terminal failed is not written again, one it never kept is. Stderr reaches
+ * the console as it is written; stdout may still be on its way, so it counts
+ * only what was written. Left as it was when nothing tells, or the view was
+ * aborted. Mirrors Python's `_recount_errors`.
+ */
+async function recountErrors(
+  runner: ProcessHandle | null,
+  sent: { out: number; err: number },
+  signal?: AbortSignal,
+): Promise<void> {
+  if (runner?.saved == null || signal?.aborted === true) return
+  try {
+    sent.err = (await runner.saved())[1]
+  } catch (error) {
+    logger.debug?.(`${runner.record.id.toString()}: job stderr not counted: ${String(error)}`)
+  }
+}
+
 function holdWrites(runner: ProcessHandle | null, undelivered: unknown[]): void {
   if (runner?.mayWrite == null || runner.mayWrite()) return
   const held = new WritesHeldError(`${runner.record.id.toString()}: writes held`)

@@ -2610,6 +2610,28 @@ describe('detached jobs a daemon left', () => {
     }
   })
 
+  // A job's process tells a detached view what its console holds, which the
+  // view counts its stderr from once a write failed.
+  it('tell a detached view what their console holds', async () => {
+    const store = new RAMExecutionStore(30)
+    const table = publishing(store)
+    const job = await table.submit({
+      command: 'train',
+      run: runDetached,
+      abort: new AbortController(),
+      cwd: '/',
+      simple: true,
+      detachable: true,
+    })
+    await until(() => entryDetached(store, job))
+    await job.console.emit(Channel.STDERR, new TextEncoder().encode('warn\n'))
+    try {
+      expect(await job.process?.saved?.()).toEqual([7, 5])
+    } finally {
+      await table.killAll()
+    }
+  })
+
   // A daemon that lost the lease releases a detached job: it stops viewing,
   // writes no ending, and lists it as the daemon that adopts it does.
   it('are released by a daemon that lost the lease', async () => {

@@ -67,6 +67,12 @@ export class ProcessHandle {
    * daemon surely holds the lease; null writes always.
    */
   mayWrite: (() => boolean) | null = null
+  /**
+   * The stdout and stderr bytes its job's console holds, which a detached
+   * view counts from once a write failed; null for a process no job keeps
+   * output for.
+   */
+  saved: (() => Promise<[number, number]>) | null = null
   /** Told the record each time it changes, as its table keeps it. */
   noted: ((record: Process) => void) | null = null
   private current: Process

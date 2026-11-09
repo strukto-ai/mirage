@@ -102,6 +102,10 @@ class ProcessHandle:
         # Whether its detached program's output may be written now: only
         # while its daemon surely holds the lease; None writes always.
         self.may_write: Callable[[], bool] | None = None
+        # The stdout and stderr bytes its job's console holds, which a
+        # detached view counts from once a write failed; None for a
+        # process no job keeps output for.
+        self.saved: Callable[[], Awaitable[tuple[int, int]]] | None = None
         # The host stopped it (its table stopped, its session closed),
         # which ends whoever waits for it as well.
         self.revoked = False

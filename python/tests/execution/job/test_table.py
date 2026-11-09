@@ -2340,3 +2340,21 @@ async def test_a_daemon_holds_detached_output_once_its_lease_may_pass():
     finally:
         await table.kill_all()
         await table.close()
+
+
+# A job's process tells a detached view what its console holds, which the
+# view counts its stderr from once a write failed.
+@pytest.mark.asyncio
+async def test_a_jobs_process_tells_what_its_console_holds():
+    store = RAMExecutionStore(lease_seconds=30.0)
+    table = _publishing(store)
+    job = await table.submit(
+        "train", _run_detached, "/", simple=True, detachable=True
+    )
+    await _until(lambda: _entry_detached(store, job))
+    await job.console.emit(Channel.STDERR, b"warn\n")
+    assert job.process is not None and job.process.saved is not None
+    try:
+        assert await job.process.saved() == (7, 5)
+    finally:
+        await table.kill_all()

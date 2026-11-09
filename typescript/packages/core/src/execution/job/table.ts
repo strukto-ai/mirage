@@ -120,6 +120,17 @@ function heldConsoles(fields: RecordFields | null): Set<string> {
  * removal; a released job's waits for its adopter. Mirrors Python's
  * `_after_ending`.
  */
+/** The stdout and stderr bytes a job's console holds. */
+async function consoleBytes(console: JobConsole): Promise<[number, number]> {
+  const [chunks] = await console.readFrom(0)
+  const held: [number, number] = [0, 0]
+  for (const chunk of chunks) {
+    if (chunk.channel === Channel.STDOUT) held[0] += chunk.data.length
+    else if (chunk.channel === Channel.STDERR) held[1] += chunk.data.length
+  }
+  return held
+}
+
 async function afterEnding(job: JobHandle): Promise<void> {
   const process = job.process
   if (process === null || process.released) return
@@ -584,6 +595,7 @@ export class JobTable {
    */
   private track(job: JobHandle, process: ProcessHandle, check = true): void {
     job.process = process
+    process.saved = () => consoleBytes(job.console)
     this.sessionJobs(job.sessionId).set(job.id, job)
     const plane = this.plane
     const pid = process.record.id.pid
@@ -681,12 +693,7 @@ export class JobTable {
     const detached = entry.detached ?? {}
     const machine = MachineId.parse(String(detached.machine))
     const jobConsole = new JobConsole(this.store.console(entry.console))
-    const [chunks] = await jobConsole.readFrom(0)
-    const sent: [number, number] = [0, 0]
-    for (const chunk of chunks) {
-      if (chunk.channel === Channel.STDOUT) sent[0] += chunk.data.length
-      else if (chunk.channel === Channel.STDERR) sent[1] += chunk.data.length
-    }
+    const sent = await consoleBytes(jobConsole)
     let swapped = false
     for (let attempt = 0; attempt < LIST_MAX_RETRIES && !swapped; attempt++) {
       const fields = await this.store.load(sessionId)
