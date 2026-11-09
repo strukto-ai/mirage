@@ -408,7 +408,7 @@ class _ConstructHost(ExpandHost):
         lists (list[list[TSNodeLike]]): the construct's lists.
         context (EvaluationContext): the evaluation.
         execute_fn (Callable[..., Any]): evaluator for nested lines.
-        call_stack (CallStack): shell call stack.
+        call_stack (CallStack | None): shell call stack.
         word (TSNodeLike | None): a word of the construct, whose program
             the nodes it names belong to.
         whole_tests (bool): a test's whole result joins the construct's
@@ -421,7 +421,7 @@ class _ConstructHost(ExpandHost):
         lists: list[list[TSNodeLike]],
         context: EvaluationContext,
         execute_fn: Callable[..., Any],
-        call_stack: CallStack,
+        call_stack: CallStack | None,
         word: TSNodeLike | None,
         whole_tests: bool,
     ) -> None:
@@ -482,7 +482,7 @@ async def _run_construct(
     lists: list[list[TSNodeLike]],
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
-    call_stack: CallStack,
+    call_stack: CallStack | None,
     word: TSNodeLike | None = None,
     whole_tests: bool = False,
 ) -> _ConstructHost:
@@ -495,7 +495,7 @@ async def _run_construct(
         lists (list[list[TSNodeLike]]): the construct's lists.
         context (EvaluationContext): the evaluation.
         execute_fn (Callable[..., Any]): evaluator for nested lines.
-        call_stack (CallStack): shell call stack.
+        call_stack (CallStack | None): shell call stack.
         word (TSNodeLike | None): a word of the construct, for the nodes
             its expansions name.
         whole_tests (bool): a test's whole result joins the construct's.
@@ -547,7 +547,7 @@ def _looped(
     return _collect_loop_result(host.all_stdout, host.merged_io, label)
 
 
-def _ended(
+def _finished(
     host: _ConstructHost, label: str
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """An ``if``'s or a ``case``'s result: the last body's node stands
@@ -567,7 +567,7 @@ async def handle_if(
     else_body: list[TSNodeLike] | None,
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
-    call_stack: CallStack,
+    call_stack: CallStack | None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run ``if``: each test in turn, then the branch the first passing
     one opens, or the ``else``.
@@ -578,7 +578,7 @@ async def handle_if(
         else_body (list[TSNodeLike] | None): the ``else`` body.
         context (EvaluationContext): the evaluation.
         execute_fn (Callable[..., Any]): evaluator for nested lines.
-        call_stack (CallStack): shell call stack.
+        call_stack (CallStack | None): shell call stack.
     """
     lists = [else_body or []]
     pairs: list[tuple[int, int]] = []
@@ -594,7 +594,7 @@ async def handle_if(
         call_stack,
         whole_tests=True,
     )
-    return _ended(host, "")
+    return _finished(host, "")
 
 
 async def handle_for(
@@ -604,7 +604,7 @@ async def handle_for(
     body: list[TSNodeLike],
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
-    call_stack: CallStack,
+    call_stack: CallStack | None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run ``for``: bash keeps ``for f in sub/*.txt`` matches relative,
     so the variable takes each word as typed, and keeps the last.
@@ -616,7 +616,7 @@ async def handle_for(
         body (list[TSNodeLike]): the loop's statements.
         context (EvaluationContext): the evaluation.
         execute_fn (Callable[..., Any]): evaluator for nested lines.
-        call_stack (CallStack): shell call stack.
+        call_stack (CallStack | None): shell call stack.
     """
     words = [word_text(value) for value in values]
     host = await _run_construct(
@@ -636,7 +636,7 @@ async def handle_while(
     body: list[TSNodeLike],
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
-    call_stack: CallStack,
+    call_stack: CallStack | None,
     until: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run ``while`` or ``until``.
@@ -647,7 +647,7 @@ async def handle_while(
         body (list[TSNodeLike]): the loop's statements.
         context (EvaluationContext): the evaluation.
         execute_fn (Callable[..., Any]): evaluator for nested lines.
-        call_stack (CallStack): shell call stack.
+        call_stack (CallStack | None): shell call stack.
         until (bool): stop when the condition holds.
     """
     host = await _run_construct(
@@ -689,7 +689,7 @@ async def handle_cfor(
     body: list[TSNodeLike],
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
-    call_stack: CallStack,
+    call_stack: CallStack | None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run bash's C-style for: ((init; cond; update)) around a body.
 
@@ -700,7 +700,7 @@ async def handle_cfor(
         body (list[TSNodeLike]): the loop's statements.
         context (EvaluationContext): the evaluation.
         execute_fn (Callable[..., Any]): evaluator for nested lines.
-        call_stack (CallStack): shell call stack.
+        call_stack (CallStack | None): shell call stack.
     """
     slots = [_slot(expr) for expr in exprs]
     word = next((expr[0] for expr in exprs if expr), None)
@@ -722,7 +722,7 @@ async def handle_case(
     items: list[tuple[list[TSNodeLike], list[TSNodeLike], str]],
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
-    call_stack: CallStack,
+    call_stack: CallStack | None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run the first arm whose pattern matches ``word``, and after it
     the arms its terminator reaches: ``;&`` falls into the next arm's
@@ -734,7 +734,7 @@ async def handle_case(
         items (list): each arm's patterns, body and terminator.
         context (EvaluationContext): the evaluation.
         execute_fn (Callable[..., Any]): evaluator for nested lines.
-        call_stack (CallStack): shell call stack.
+        call_stack (CallStack | None): shell call stack.
     """
     lists = [body for _, body, _ in items]
     arms = [
@@ -751,7 +751,7 @@ async def handle_case(
         call_stack,
         word=first,
     )
-    return _ended(host, "case")
+    return _finished(host, "case")
 
 
 def _select_menu(words: list[str], columns: str) -> str:

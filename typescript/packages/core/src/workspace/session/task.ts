@@ -50,6 +50,12 @@ export interface TaskHost {
   process(shell: Shell, node: ShellTreeNode): Promise<string>
   /** Expand a subscript given as text, on the shell the task lent. */
   subscript(text: string): Promise<string>
+  /**
+   * Run the list a compound command picked, `test` when it is a test, on the
+   * shell the task moved here: its status, how it left, the levels of a
+   * `break` or `continue`, and whether `set -e` is ending the shell.
+   */
+  run(index: number, test: boolean): Promise<[number, string, number, boolean]>
 }
 
 function permissionDenied(name: string): PolicyDenied {
@@ -115,12 +121,13 @@ export async function drive(
   const shown = host.session.visibility
   for (let ask = task.step(); ask !== null; ask = task.step()) {
     const held = records.shell
-    const moved = ask[0] === 'subscript' ? ask[1] : null
+    const moved = ask[0] === 'subscript' || ask[0] === 'run' ? ask[1] : null
     const lent = ask[0] === 'pause' || moved !== null ? ask[1] : ask[1].fork()
     records.shell = lent
     const giveUp = (): void => {
-      if (moved !== null) task.answerSubscript(null, moved)
-      else task.answerFailed()
+      if (moved === null) task.answerFailed()
+      else if (ask[0] === 'run') task.answerRan(moved, 0, 'stop', 0, false)
+      else task.answerSubscript(null, moved)
     }
     let answer = giveUp
     try {
@@ -154,6 +161,13 @@ export async function drive(
           const text = await host.subscript(ask[2])
           answer = () => {
             task.answerSubscript(text, ask[1])
+          }
+          break
+        }
+        case 'run': {
+          const ran = await host.run(ask[2], ask[3])
+          answer = () => {
+            task.answerRan(ask[1], ...ran)
           }
           break
         }

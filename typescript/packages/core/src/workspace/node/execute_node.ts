@@ -77,7 +77,6 @@ import { fail, isValidName, result } from '../executor/builtins/shared.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import {
   type BodyRun,
-  type CforEval,
   executeBody,
   handleCase,
   handleCfor,
@@ -104,7 +103,6 @@ import { endShell } from '../executor/traps.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
 import { expandArith, expandNode } from '../expand/node.ts'
 import { expandAndClassify } from '../expand/parts.ts'
-import { expandPattern } from '../expand/pattern.ts'
 import { expandRedirect } from '../expand/redirects.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -191,63 +189,6 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
   }
   if (opts.handed !== undefined) next = withHandOff(next, opts.handed)
   return next
-}
-
-/**
- * A C-style for slot's text as bash evaluates it: its source up to the `;`
- * or `))` that ends it, each node's expansions substituted. Mirrors
- * Python's _slot_text.
- */
-async function slotText(
-  exprs: readonly TSNodeLike[],
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null,
-): Promise<string> {
-  const first = exprs[0]
-  const last = exprs[exprs.length - 1]
-  if (first === undefined || last === undefined) return ''
-  const parent = first.parent ?? null
-  const source = parent?.text ?? ''
-  const base = parent?.startIndex ?? 0
-  const parts: string[] = []
-  let at = first.startIndex ?? 0
-  for (const expr of exprs) {
-    const start = expr.startIndex ?? at
-    parts.push(source.slice(at - base, start - base))
-    parts.push(
-      expr.isNamed === true ? await expandArith(expr, context, executeFn, callStack) : expr.text,
-    )
-    at = expr.endIndex ?? start + expr.text.length
-  }
-  const end = last.nextSibling?.startIndex ?? at
-  parts.push(source.slice(at - base, end - base))
-  return parts.join('')
-}
-
-/**
- * Evaluate one C-style for expression slot: the slot's integer value,
- * or the default for an empty slot (1 for the condition so `for
- * ((;;))` loops, 0 for init/update). Throws the slot's ArithError, which
- * the loop prints as bash's `((: expr: reason` diagnostic, and
- * ReadonlyVariableError when the expression assigns to a readonly variable, once
- * the writes before it land (ExitSignal for one inside a subscript).
- */
-async function evalCforExpr(
-  exprs: readonly TSNodeLike[],
-  dflt: number,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null,
-): Promise<number> {
-  if (exprs.length === 0) return dflt
-  const text = await slotText(exprs, context, executeFn, callStack)
-  try {
-    return Number(await sessionArith(context.session, text, callStack))
-  } catch (err) {
-    if (err instanceof ReadonlyVariableError && err.inSubscript) throw err.signal()
-    throw err
-  }
 }
 
 /**
@@ -1218,7 +1159,9 @@ async function runFor(
       handleSelect(run, variable, resolved, body, context, stdin, signal, sink),
     )
   }
-  return callStack.loop(() => handleFor(run, variable, resolved, body, context))
+  return callStack.loop(() =>
+    handleFor(run, variable, resolved, body, context, executeFn, callStack),
+  )
 }
 
 /** Store a function definition on the session. Mirrors Python's `_define_function`. */
@@ -1585,13 +1528,12 @@ async function executeNodeBody(
 
   if (kind === NodeKind.IF) {
     const [branches, elseBody] = getIfBranches(node)
-    return handleIf(run, branches, elseBody, session)
+    return handleIf(run, branches, elseBody, context, executeFn, callStack)
   }
 
   if (kind === NodeKind.CFOR) {
     const [exprs, body] = getCforParts(node)
-    const evalExpr: CforEval = (e, d) => evalCforExpr(e, d, context, executeFn, callStack)
-    return callStack.loop(() => handleCfor(run, exprs, body, evalExpr, session))
+    return callStack.loop(() => handleCfor(run, exprs, body, context, executeFn, callStack))
   }
 
   if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
@@ -1600,14 +1542,14 @@ async function executeNodeBody(
 
   if (kind === NodeKind.WHILE || kind === NodeKind.UNTIL) {
     const [test, body] = getWhileParts(node)
-    return callStack.loop(() => handleWhile(run, test, body, session, kind === NodeKind.UNTIL))
+    return callStack.loop(() =>
+      handleWhile(run, test, body, context, executeFn, callStack, kind === NodeKind.UNTIL),
+    )
   }
 
   if (kind === NodeKind.CASE) {
     const word = await expandNode(getCaseWord(node), context, executeFn, callStack)
-    return handleCase(run, word, getCaseItems(node), session, (pattern) =>
-      expandPattern(pattern, context, executeFn, callStack),
-    )
+    return handleCase(run, word, getCaseItems(node), context, executeFn, callStack)
   }
 
   if (kind === NodeKind.FUNCTION_DEF) {

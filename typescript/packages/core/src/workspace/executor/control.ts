@@ -26,16 +26,20 @@ import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { Recorder } from '../../shell/descriptors.ts'
-import { ArithError, ExitSignal, ReadonlyVariableError, ReturnSignal } from '../../shell/errors.ts'
+import { ArithError, ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../execution/job/index.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
+import type { Item, Shell, ShellSlot, ShellTask, ShellTreeNode } from '../../rs/shell.ts'
+import { shellNode } from '../../shell/parse/program.ts'
 import type { PathSpec } from '../../types.ts'
 import { wordText } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
-import { fnmatch } from '../../utils/fnmatch.ts'
 import type { EvaluationContext } from '../evaluation.ts'
+import { ExpandHost } from '../expand/node.ts'
+import type { ExecuteFn } from '../expand/types.ts'
 import type { SessionState } from '../session/session.ts'
-import { sessionView, visibleEnv } from '../session/state.ts'
+import { frame, sessionView, visibleEnv } from '../session/state.ts'
+import { drive } from '../session/task.ts'
 import { ExecutionNode } from '../types.ts'
 import { readReply } from './builtins/read/index.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
@@ -344,195 +348,225 @@ function collectLoopResult(
   return [combined, mergedIo, execNode]
 }
 
+/**
+ * What a compound command asks of the shell: to run the lists of statements
+ * it picks, here, keeping what they wrote. Mirrors Python's _ConstructHost.
+ */
+class ConstructHost extends ExpandHost {
+  readonly allStdout: (ByteSource | null)[] = []
+  mergedIo = new IOResult()
+  lastExec: ExecutionNode | null = null
+  loopSignal: LoopSignal | null = null
+  left: Unwinding | null = null
+  // Each test and body reads the fd 0 the construct started with, so an
+  // `exec < f` in one reaches the rest.
+  private readonly bound: ReturnType<typeof fd0Binding>
+
+  constructor(
+    private readonly body: BodyRun,
+    private readonly lists: readonly (readonly TSNodeLike[])[],
+    context: EvaluationContext,
+    executeFn: ExecuteFn,
+    callStack: CallStack | null,
+    word: TSNodeLike | null,
+    private readonly wholeTests: boolean,
+  ) {
+    super(context, executeFn, callStack, word)
+    this.bound = fd0Binding(context.session)
+  }
+
+  override async run(index: number, test: boolean): Promise<[number, string, number, boolean]> {
+    const session = this.session
+    const statements = this.lists[index] ?? []
+    try {
+      const [stdout, io, ran] = test
+        ? await ignoringErrexit(session, () => this.body(statements, this.bound))
+        : await this.body(statements, this.bound)
+      if (!test) this.lastExec = ran
+      keep(this.allStdout, stdout)
+      this.mergedIo = await this.mergedIo.merge(
+        test && !this.wholeTests
+          ? new IOResult({ stderr: io.stderr, exitCode: this.mergedIo.exitCode })
+          : io,
+      )
+      // The list changed the session; the shell reads it as it goes on.
+      frame(session, this.callStack)
+      return [io.exitCode, '', 0, session.errexitExiting && !test]
+    } catch (sig) {
+      if (sig instanceof LoopSignal) {
+        keep(this.allStdout, sig.stdout)
+        this.mergedIo = await this.mergedIo.merge(sig.io)
+        this.loopSignal = sig
+        const tag = sig instanceof BreakSignal ? 'break' : 'continue'
+        return [sig.io.exitCode, tag, sig.levels, false]
+      }
+      if (!isUnwinding(sig)) throw sig
+      this.left = sig
+      return [0, 'stop', 0, false]
+    }
+  }
+}
+
+/**
+ * Run a compound command on the session's shell, which picks each list and
+ * hands it here to run. Mirrors Python's _run_construct.
+ */
+async function runConstruct(
+  start: (shell: Shell) => ShellTask,
+  body: BodyRun,
+  lists: readonly (readonly TSNodeLike[])[],
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null,
+  word: TSNodeLike | null = null,
+  wholeTests = false,
+): Promise<ConstructHost> {
+  const session = context.session
+  frame(session, callStack)
+  const host = new ConstructHost(body, lists, context, executeFn, callStack, word, wholeTests)
+  let outcome: Item
+  try {
+    outcome = await drive(start(session.vars.shell), host, context.frame.diagnostics)
+  } catch (sig) {
+    if (!isUnwinding(sig)) throw sig
+    throw await carried(sig, chainStreams(host.allStdout), host.mergedIo)
+  }
+  const [said, failed, tag, levels] = outcome as readonly [string, boolean, string, number]
+  if (host.left !== null) {
+    throw await carried(host.left, chainStreams(host.allStdout), host.mergedIo)
+  }
+  const signal = host.loopSignal
+  if (tag !== '' && signal !== null) {
+    signal.stdout = chainStreams(host.allStdout)
+    signal.io = host.mergedIo
+    signal.levels = levels
+    throw signal
+  }
+  if (failed) {
+    const stderr = said !== '' ? encodeText(said) : null
+    host.mergedIo = await host.mergedIo.merge(new IOResult({ exitCode: 1, stderr }))
+  }
+  return host
+}
+
+function looped(host: ConstructHost, label: string): RedirectResult {
+  return collectLoopResult(host.allStdout, host.mergedIo, label)
+}
+
+/** An `if`'s or a `case`'s result: the last body's node stands for it. */
+function finished(host: ConstructHost, label: string): RedirectResult {
+  const node = host.lastExec ?? new ExecutionNode({ command: label, exitCode: 0 })
+  return [chainStreams(host.allStdout), host.mergedIo, node]
+}
+
+/** Run `if`: each test in turn, then the branch the first passing one opens. */
 export async function handleIf(
   run: BodyRun,
   branches: readonly [TSNodeLike[], TSNodeLike[]][],
   elseBody: TSNodeLike[] | null,
-  session: SessionState,
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null,
 ): Promise<RedirectResult> {
-  // Each test and the branch read the fd 0 the `if` started with, so an
-  // `exec < f` or `exec <&-` in one reaches the next; a test runs with
-  // `set -e` ignored.
-  const bound = fd0Binding(session)
-  // What the tests wrote stays, ahead of what the branch writes.
-  const leadStdout: (ByteSource | null)[] = []
-  let lead = new IOResult()
-  try {
-    let chosen = elseBody ?? []
-    for (const [test, body] of branches) {
-      const [stdout, io] = await ignoringErrexit(session, () => run(test, bound))
-      leadStdout.push(stdout)
-      lead = await lead.merge(io)
-      if (io.exitCode === 0) {
-        chosen = body
-        break
-      }
-    }
-    const [stdout, io, lastExec] = await run(chosen, bound)
-    return [chainStreams([...leadStdout, stdout]), await lead.merge(io), lastExec]
-  } catch (sig) {
-    if (!isUnwinding(sig)) throw sig
-    throw await carried(sig, chainStreams(leadStdout), lead)
+  const lists: (readonly TSNodeLike[])[] = [elseBody ?? []]
+  const pairs: [number, number][] = []
+  for (const [test, body] of branches) {
+    pairs.push([lists.length, lists.length + 1])
+    lists.push(test, body)
   }
+  const host = await runConstruct(
+    (shell) => shell.runIf(pairs, 0),
+    run,
+    lists,
+    context,
+    executeFn,
+    callStack,
+    null,
+    true,
+  )
+  return finished(host, '')
 }
 
-// `set -n` inside a loop body has to stop the *driver* too, not only the
-// statements: `executeNode` refuses every node while the option is on, so
-// the `break` or the false condition the driver is waiting for is one of
-// the refused nodes and it would spin forever. GNU never runs the
-// loop at all, which is what falling straight out of it produces. A
-// `set -e` failure in a body stops the driver the same way: the body has
-// stopped at it, and another turn would run the shell on.
+/** Run `for`: the variable takes each word as typed, and keeps the last. */
 export async function handleFor(
   run: BodyRun,
   variable: string,
   values: readonly (string | PathSpec)[],
   body: readonly TSNodeLike[],
   context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null,
 ): Promise<RedirectResult> {
-  const session = context.session
-  let mergedIo = new IOResult()
-  const allStdout: (ByteSource | null)[] = []
-  const view = sessionView(session, context.frame.diagnostics)
-  // The loop variable is the shell's own write: readonly is bash's
-  // rule, checked up front so the loop never starts, exactly as bash
-  // refuses `for x` on a readonly x before the first iteration.
-  if (view.isReadonly(variable)) {
-    const err = encodeText(`${shellVoice()}${variable}: readonly variable\n`)
-    return collectLoopResult([], new IOResult({ exitCode: 1, stderr: err }), 'for')
-  }
-  // Each iteration reads the fd 0 the loop started with, so an `exec < f` in
-  // one reaches the next.
-  const bound = fd0Binding(session)
-  for (const val of values) {
-    if (session.shellOptions.noexec === true) break
-    // bash keeps `for f in sub/*.txt` matches relative, so the loop
-    // variable takes the typed form; a policy denial aborts the loop
-    // before its body runs.
-    try {
-      await view.set(variable, wordText(val))
-    } catch (err) {
-      if (err instanceof ArithError) throw err.signal('', true)
-      if (!(err instanceof PolicyDenied)) throw err
-      mergedIo = await mergedIo.merge(
-        new IOResult({ exitCode: 1, stderr: encodeText(`${err.message}\n`) }),
-      )
-      break
-    }
-    try {
-      const [stdout, io] = await run(body, bound)
-      keep(allStdout, stdout)
-      mergedIo = await mergedIo.merge(io)
-      if (session.errexitExiting) break
-    } catch (sig) {
-      if (!(sig instanceof LoopSignal)) throw sig
-      mergedIo = await absorbed(sig, allStdout, mergedIo)
-      if (sig instanceof BreakSignal) break
-      continue
-    }
-  }
-  // The loop variable is an ordinary variable in bash and keeps its
-  // last value after the loop (`for X in a b; do :; done; echo $X`
-  // prints b); nothing is put back.
-  return collectLoopResult(allStdout, mergedIo, 'for')
+  const words = values.map((value) => wordText(value))
+  const host = await runConstruct(
+    (shell) => shell.runFor(variable, words, 0),
+    run,
+    [body],
+    context,
+    executeFn,
+    callStack,
+  )
+  return looped(host, 'for')
 }
 
+/** Run `while` or `until`. */
 export async function handleWhile(
   run: BodyRun,
   test: readonly TSNodeLike[],
   body: readonly TSNodeLike[],
-  session: SessionState,
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null,
   until = false,
 ): Promise<RedirectResult> {
-  const label = until ? 'until' : 'while'
-  let mergedIo = new IOResult()
-  const allStdout: (ByteSource | null)[] = []
-  // Each test and body reads the fd 0 the loop started with, so an
-  // `exec < f` in one reaches the rest.
-  const bound = fd0Binding(session)
-  while (session.shellOptions.noexec !== true) {
-    try {
-      const [condStdout, condIo] = await ignoringErrexit(session, () => run(test, bound))
-      keep(allStdout, condStdout)
-      mergedIo = await mergedIo.merge(
-        new IOResult({ stderr: condIo.stderr, exitCode: mergedIo.exitCode }),
-      )
-      if ((condIo.exitCode === 0) === until) break
-      const [stdout, io] = await run(body, bound)
-      keep(allStdout, stdout)
-      mergedIo = await mergedIo.merge(io)
-      if (session.errexitExiting) break
-    } catch (sig) {
-      if (!(sig instanceof LoopSignal)) {
-        if (isUnwinding(sig)) throw await carried(sig, chainStreams(allStdout), mergedIo)
-        throw sig
-      }
-      mergedIo = await absorbed(sig, allStdout, mergedIo)
-      if (sig instanceof BreakSignal) break
-      continue
-    }
-  }
-  return collectLoopResult(allStdout, mergedIo, label)
+  const host = await runConstruct(
+    (shell) => shell.runWhile(0, 1, until),
+    run,
+    [test, body],
+    context,
+    executeFn,
+    callStack,
+  )
+  return looped(host, until ? 'until' : 'while')
 }
 
-export type CforEval = (exprs: readonly TSNodeLike[], dflt: number) => Promise<number>
+function nodes(parts: readonly TSNodeLike[]): ShellTreeNode[] {
+  return parts.map(shellNode).filter((node): node is ShellTreeNode => node !== null)
+}
 
 /**
- * Run bash's C-style for: ((init; cond; update)) around a body.
- *
- * `evalExpr` evaluates one expression slot to its integer value (the
- * default when the slot is empty) and throws ArithError with the
- * offending expression text on an invalid expression, or ReadonlyVariableError
- * when it assigns to a readonly variable; bash aborts the loop with
- * status 1, keeping the output of iterations that ran. The update
- * expression still runs after `continue`, per bash. A PolicyDenied is a
- * header expression assigning a hidden name.
+ * A C-style `for` expression as the shell reads it: its nodes and the node
+ * whose start ends its text, null for an empty slot. Mirrors Python's _slot.
  */
+function slot(exprs: readonly TSNodeLike[]): ShellSlot | null {
+  const first = exprs[0]
+  if (first === undefined) return null
+  const closer =
+    (first.parent ?? null) === null ? null : (exprs[exprs.length - 1]?.nextSibling ?? null)
+  return [nodes(exprs), closer === null ? null : shellNode(closer)]
+}
+
+/** Run bash's C-style for: ((init; cond; update)) around a body. */
 export async function handleCfor(
   run: BodyRun,
   exprs: readonly (readonly TSNodeLike[])[],
   body: readonly TSNodeLike[],
-  evalExpr: CforEval,
-  session: SessionState,
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null,
 ): Promise<RedirectResult> {
-  let mergedIo = new IOResult()
-  const allStdout: (ByteSource | null)[] = []
-  const bound = fd0Binding(session)
-  try {
-    await evalExpr(exprs[0] ?? [], 0)
-    while (session.shellOptions.noexec !== true) {
-      if ((await evalExpr(exprs[1] ?? [], 1)) === 0) break
-      try {
-        const [stdout, io] = await run(body, bound)
-        keep(allStdout, stdout)
-        mergedIo = await mergedIo.merge(io)
-        if (session.errexitExiting) break
-      } catch (sig) {
-        if (!(sig instanceof LoopSignal)) throw sig
-        mergedIo = await absorbed(sig, allStdout, mergedIo)
-        if (sig instanceof BreakSignal) break
-        await evalExpr(exprs[2] ?? [], 0)
-        continue
-      }
-      await evalExpr(exprs[2] ?? [], 0)
-    }
-  } catch (err) {
-    if (
-      !(err instanceof ArithError) &&
-      !(err instanceof ReadonlyVariableError) &&
-      !(err instanceof PolicyDenied)
-    ) {
-      throw err
-    }
-    if (err instanceof ArithError && err.inSubscript) {
-      throw await carried(err.signal(), chainStreams(allStdout), mergedIo)
-    }
-    const prefix = err instanceof ArithError ? `${shellVoice()}((: ` : shellVoice()
-    const errBytes = encodeText(`${prefix}${err.message}\n`)
-    mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: errBytes }))
-    mergedIo.exitCode = 1
-  }
-  return collectLoopResult(allStdout, mergedIo, 'for')
+  const slots = exprs.map(slot)
+  const word = exprs.find((expr) => expr.length > 0)?.[0] ?? null
+  const host = await runConstruct(
+    (shell) => shell.runCFor(slots, 0),
+    run,
+    [body],
+    context,
+    executeFn,
+    callStack,
+    word,
+  )
+  return looped(host, 'for')
 }
 
 /**
@@ -544,42 +578,25 @@ export async function handleCase(
   run: BodyRun,
   word: string,
   items: readonly [readonly TSNodeLike[], readonly TSNodeLike[], string][],
-  session: SessionState,
-  expand: (node: TSNodeLike) => Promise<string>,
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null,
 ): Promise<RedirectResult> {
-  const allStdout: (ByteSource | null)[] = []
-  let mergedIo = new IOResult()
-  let lastExec = new ExecutionNode({ command: 'case', exitCode: 0 })
-  let fallthrough = false
-  // Each arm reads the fd 0 the `case` started with, so an `exec < f` in one
-  // reaches an arm it falls into.
-  const bound = fd0Binding(session)
-  for (const [patterns, body, terminator] of items) {
-    // An arm a `;;&` left can have turned extglob on for this one.
-    const extglob = session.shopts.extglob ?? false
-    try {
-      let matched = fallthrough
-      if (!matched) {
-        for (const pattern of patterns) {
-          if (fnmatch(word, await expand(pattern), extglob)) {
-            matched = true
-            break
-          }
-        }
-      }
-      if (!matched) continue
-      const [stdout, io, execNode] = await run(body, bound)
-      allStdout.push(stdout)
-      mergedIo = await mergedIo.merge(io)
-      lastExec = execNode
-    } catch (sig) {
-      if (!isUnwinding(sig)) throw sig
-      throw await carried(sig, chainStreams(allStdout), mergedIo)
-    }
-    fallthrough = terminator === ';&'
-    if (session.errexitExiting || (terminator !== ';&' && terminator !== ';;&')) break
-  }
-  return [chainStreams(allStdout), mergedIo, lastExec]
+  const lists = items.map(([, body]) => body)
+  const arms = items.map(
+    ([patterns, , terminator], index) => [nodes(patterns), index, terminator] as const,
+  )
+  const first = items.find(([patterns]) => patterns.length > 0)?.[0][0] ?? null
+  const host = await runConstruct(
+    (shell) => shell.runCase(word, arms),
+    run,
+    lists,
+    context,
+    executeFn,
+    callStack,
+    first,
+  )
+  return finished(host, 'case')
 }
 
 /**
