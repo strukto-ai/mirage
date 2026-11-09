@@ -328,9 +328,11 @@ impl<H: Host + Runs> Walk<'_, H> {
     async fn list(&mut self, list: usize, test: bool) -> Result<Ran, Fault> {
         let quick = self.quick;
         let mut start = 0;
-        if let Some(statements) = quick.get(list).and_then(Option::as_ref)
-            && self.plain()
-        {
+        let statements = quick
+            .get(list)
+            .and_then(Option::as_ref)
+            .filter(|_| self.plain());
+        if let Some(statements) = statements {
             self.turns = self.turns.wrapping_add(1);
             if self.turns % QUICK_TURNS != 0 {
                 let mut status = 0;

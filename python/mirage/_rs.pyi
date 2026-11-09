@@ -233,7 +233,10 @@ class Shell:
         statements: list[list[tuple[ShellNode, int]] | None],
     ) -> ShellTask: ...
     def run_for(
-        self, variable: str, values: Sequence[str], body: int,
+        self,
+        variable: str,
+        values: Sequence[str],
+        body: int,
         statements: list[list[tuple[ShellNode, int]] | None],
     ) -> ShellTask: ...
     def run_cfor(
