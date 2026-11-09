@@ -1571,7 +1571,6 @@ describe('workspace cancel, kill, stop and start', () => {
       expect(got.json()).toMatchObject({
         id: 'off',
         status: 'stopped',
-        mode: 'write',
         mounts: [{ prefix: '/', vfs: 'ram', mode: 'write', description: '' }],
         sessions: [],
         internals: null,
@@ -1590,7 +1589,7 @@ describe('workspace cancel, kill, stop and start', () => {
     }
   })
 
-  it('deletes a stopped workspace from the store its config names, and reads its mode as written', async () => {
+  it('deletes a stopped workspace from the store its config names', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ws-own-store-'))
     const own = join(root, 'own')
     const app = buildApp({ stateRoot: join(root, 'state') })
@@ -1602,7 +1601,7 @@ describe('workspace cancel, kill, stop and start', () => {
       expect((await post(app, '/v1/workspaces', body)).statusCode).toBe(201)
       await post(app, '/v1/workspaces/mine/stop')
       const got = await app.inject({ method: 'GET', url: '/v1/workspaces/mine' })
-      expect(got.json()).toMatchObject({ status: 'stopped', mode: 'write' })
+      expect(got.json()).toMatchObject({ status: 'stopped' })
       expect(got.json<{ created_at: number }>().created_at).toBeGreaterThan(0)
       expect(existsSync(join(own, 'workspaces', 'mine'))).toBe(true)
       const deleted = await app.inject({ method: 'DELETE', url: '/v1/workspaces/mine' })
@@ -1662,7 +1661,7 @@ describe('workspace cancel, kill, stop and start', () => {
     }
   })
 
-  it('shows a stopped workspace with the mode and mounts it ran with', async () => {
+  it('shows a stopped workspace with the mounts it ran with', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ws-same-view-'))
     const app = buildApp({ stateRoot: join(root, 'state') })
     try {
@@ -1673,16 +1672,15 @@ describe('workspace cancel, kill, stop and start', () => {
       expect((await post(app, '/v1/workspaces', { id: 'w', config })).statusCode).toBe(201)
       const view = async () => {
         const d = (await app.inject({ method: 'GET', url: '/v1/workspaces/w' })).json<{
-          mode: string
           mounts: { prefix: string; vfs: string; mode: string }[]
         }>()
-        return {
-          mode: d.mode,
-          mounts: d.mounts.map(({ prefix, vfs, mode }) => ({ prefix, vfs, mode })),
-        }
+        return d.mounts.map(({ prefix, vfs, mode }) => ({ prefix, vfs, mode }))
       }
       const running = await view()
-      expect(running.mode).toBe('write')
+      expect(running).toEqual([
+        { prefix: '/data/', vfs: 'ram', mode: 'write' },
+        { prefix: '/', vfs: 'ram', mode: 'read' },
+      ])
       await post(app, '/v1/workspaces/w/stop')
       expect(await view()).toEqual(running)
     } finally {

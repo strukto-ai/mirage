@@ -34,6 +34,7 @@ import { NFSManager } from '../nfs.ts'
 export class KernelMounts {
   private readonly workspace: Workspace
   private readonly mountpointsMap = new Map<string, string>()
+  private readonly backendsMap = new Map<string, MountBackend>()
   private readonly managers = new Map<string, FuseManager | NFSManager>()
 
   constructor(workspace: Workspace) {
@@ -83,6 +84,7 @@ export class KernelMounts {
         })
       }
       if (mountpoint === undefined) this.register(key, resolved)
+      this.backendsMap.set(key, backend ?? MountBackend.FUSE)
       return resolved
     } catch (err) {
       // The mount never came up; drop the manager and any registered path
@@ -108,6 +110,7 @@ export class KernelMounts {
     }
     this.managers.delete(key)
     this.mountpointsMap.delete(key)
+    this.backendsMap.delete(key)
   }
 
   /** Unmount everything this workspace exposed. */
@@ -115,6 +118,7 @@ export class KernelMounts {
     for (const manager of this.managers.values()) await manager.unmount()
     this.managers.clear()
     this.mountpointsMap.clear()
+    this.backendsMap.clear()
   }
 
   /** The single active mountpoint, when there is exactly one. */
@@ -128,6 +132,11 @@ export class KernelMounts {
 
   get mountpoints(): Record<string, string> {
     return Object.fromEntries(this.mountpointsMap)
+  }
+
+  /** The backend serving each exposed subtree, keyed as `mountpoints` is. */
+  get backends(): Record<string, MountBackend> {
+    return Object.fromEntries(this.backendsMap)
   }
 
   private register(key: string, mountpoint: string): void {

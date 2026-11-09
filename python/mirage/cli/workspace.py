@@ -129,7 +129,6 @@ def _format_workspace_detail(detail: dict[str, Any]) -> str:
     lines = [
         f"ID:        {detail['id']}",
         f"Status:    {detail['status']}",
-        f"Mode:      {detail['mode']}",
         f"Created:   {format_age(detail['created_at'])} ago",
     ]
     mounts = detail.get("mounts") or []

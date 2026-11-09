@@ -49,6 +49,7 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
 
     expect(ws.fuseMountpoint).toBe('/tmp/fake-_a')
     expect(ws.fuseMountpoints).toEqual({ '/a': '/tmp/fake-_a' })
+    expect(ws.kernelBackends).toEqual({ '/a': MountBackend.FUSE })
 
     await ws.close()
   })

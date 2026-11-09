@@ -98,9 +98,7 @@ paths:
               example:
                 id: demo
                 status: running
-                mode: write
                 created_at: 1794009600
-                fuse_mountpoints: {}
                 system_time: null
                 sessions:
                   - session_id: 01a1b425-ec80-7038-86e0-75b597344043
@@ -110,6 +108,8 @@ paths:
                     vfs: ram
                     mode: write
                     description: ''
+                    backend: workspace
+                    mountpoint: null
                 internals: null
         '201':
           description: Created
@@ -120,9 +120,7 @@ paths:
               example:
                 id: demo
                 status: running
-                mode: write
                 created_at: 1794009600
-                fuse_mountpoints: {}
                 system_time: null
                 sessions:
                   - session_id: 01a1b425-ec80-7038-86e0-75b597344043
@@ -132,6 +130,8 @@ paths:
                     vfs: ram
                     mode: write
                     description: ''
+                    backend: workspace
+                    mountpoint: null
                 internals: null
         '401':
           $ref: '#/components/responses/401'
@@ -6587,6 +6587,17 @@ components:
           type: string
           title: Description
           default: ''
+        backend:
+          $ref: '#/components/schemas/MountBackend'
+          default: workspace
+        mountpoint:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Mountpoint
+          description: Where the server exposes this mount on its own host, the generated
+            path when the config named none; null for a workspace mount, and while the
+            workspace is stopped.
       type: object
       required:
         - prefix
@@ -7553,9 +7564,6 @@ components:
           title: Status
           description: running while the server holds the workspace in memory; stopped while
             it keeps only its config and state, until a start.
-        mode:
-          type: string
-          title: Mode
         created_at:
           type: number
           title: Created At
@@ -7563,11 +7571,6 @@ components:
             Creation time as Unix seconds. For example, 1794009600 is
             2026-11-07T00:00:00Z. Fractional values include sub-second precision.
           example: 1794009600
-        fuse_mountpoints:
-          additionalProperties:
-            type: string
-          type: object
-          title: Fuse Mountpoints
         system_time:
           anyOf:
             - type: string
@@ -7591,7 +7594,6 @@ components:
       required:
         - id
         - status
-        - mode
         - created_at
       title: WorkspaceDetail
     WorkspaceInternals:

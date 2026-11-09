@@ -134,7 +134,7 @@ async def test_create_list_get_delete_round_trip():
         detail = r.json()
         wid = detail["id"]
         assert uuid.UUID(wid).version == 7
-        assert detail["mode"] == "write"
+        assert "mode" not in detail and "fuse_mountpoints" not in detail
         assert any(m["prefix"] == "/" for m in detail["mounts"])
 
         r = await client.get("/v1/workspaces")
@@ -1796,7 +1796,7 @@ async def test_a_stopped_workspace_is_deleted_from_the_store_its_config_names(
         assert r.status_code == 201, r.text
         await client.post("/v1/workspaces/mine/stop")
         got = (await client.get("/v1/workspaces/mine")).json()
-        assert (got["status"], got["mode"]) == ("stopped", "write")
+        assert got["status"] == "stopped"
         assert got["created_at"] > 0
         assert (own / "workspaces" / "mine").exists()
         r = await client.delete("/v1/workspaces/mine")
@@ -1861,7 +1861,7 @@ async def test_a_stopped_workspace_whose_store_cannot_be_read_is_listed(
 
 
 @pytest.mark.asyncio
-async def test_a_stopped_workspace_shows_the_mode_and_mounts_it_ran_with(
+async def test_a_stopped_workspace_shows_the_mounts_it_ran_with(
     tmp_path,
 ):
     app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
@@ -1880,14 +1880,12 @@ async def test_a_stopped_workspace_shows_the_mode_and_mounts_it_ran_with(
             await client.post("/v1/workspaces", json=body)
         ).status_code == 201
 
-        async def view() -> tuple[str, list[tuple[str, str, str]]]:
+        async def view() -> list[tuple[str, str, str]]:
             d = (await client.get("/v1/workspaces/w")).json()
-            return d["mode"], [
-                (m["prefix"], m["vfs"], m["mode"]) for m in d["mounts"]
-            ]
+            return [(m["prefix"], m["vfs"], m["mode"]) for m in d["mounts"]]
 
         running = await view()
-        assert running[0] == "write"
+        assert running == [("/data/", "ram", "write"), ("/", "ram", "read")]
         await client.post("/v1/workspaces/w/stop")
         assert await view() == running
 

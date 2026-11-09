@@ -43,6 +43,7 @@ class KernelMounts:
         self._sessions = sessions
         self._owner = owner
         self._mountpoints: dict[str, str] = {}
+        self._backends: dict[str, MountBackend] = {}
         self._managers: dict[str, FuseManager | NFSManager] = {}
 
     def add(
@@ -102,6 +103,7 @@ class KernelMounts:
             raise
         if mountpoint is None:
             self._register(key, resolved)
+        self._backends[key] = MountBackend(backend)
         return resolved
 
     def remove(self, prefix: str, session_id: str | None = None) -> None:
@@ -119,6 +121,7 @@ class KernelMounts:
                 return
         self._managers.pop(key, None)
         self._mountpoints.pop(key, None)
+        self._backends.pop(key, None)
 
     def close(self) -> None:
         """Unmount everything this workspace exposed."""
@@ -126,6 +129,7 @@ class KernelMounts:
             manager.unmount()
         self._managers.clear()
         self._mountpoints.clear()
+        self._backends.clear()
 
     @property
     def mountpoint(self) -> str | None:
@@ -146,6 +150,12 @@ class KernelMounts:
     @property
     def mountpoints(self) -> dict[str, str]:
         return dict(self._mountpoints)
+
+    @property
+    def backends(self) -> dict[str, MountBackend]:
+        """The backend serving each exposed subtree, keyed as
+        ``mountpoints`` is."""
+        return dict(self._backends)
 
     def _register(self, key: str, mountpoint: str) -> None:
         for other_key, other_mountpoint in self._mountpoints.items():

@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from collections.abc import Mapping
+from typing import TypeVar
 
 from mirage import Workspace
 from mirage.server.registry import WorkspaceEntry
@@ -24,7 +26,7 @@ from mirage.server.schemas import (
     WorkspaceInternals,
 )
 from mirage.shell.constants import BIN_PREFIX
-from mirage.types import JsonValue, parse_mount_mode
+from mirage.types import JsonValue, MountBackend, parse_mount_mode
 from mirage.utils.path import norm_dir
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
@@ -89,13 +91,16 @@ async def make_detail(
 
     async def detail() -> WorkspaceDetail:
         user_mounts = _user_mounts(ws)
-        workspace_mode = user_mounts[0].mode.value if user_mounts else "read"
+        points = _by_dir(ws.fuse_mountpoints)
+        backends = _by_dir(ws.kernel_backends)
         mounts = [
             MountSummary(
                 prefix=m.prefix,
                 vfs=m.vfs.name,
                 mode=m.mode.value,
                 description=_describe_vfs(m.vfs),
+                backend=backends.get(m.prefix, MountBackend.WORKSPACE),
+                mountpoint=points.get(m.prefix),
             )
             for m in user_mounts
         ]
@@ -106,9 +111,7 @@ async def make_detail(
         return WorkspaceDetail(
             id=entry.id,
             status="running",
-            mode=workspace_mode,
             created_at=entry.created_at,
-            fuse_mountpoints=ws.fuse_mountpoints,
             system_time=ws.system_time,
             mounts=mounts,
             sessions=sessions,
@@ -116,6 +119,18 @@ async def make_detail(
         )
 
     return await entry.runner.call(detail())
+
+
+T = TypeVar("T")
+
+
+def _by_dir(mapping: Mapping[str, T]) -> dict[str, T]:
+    """A kernel-mount map keyed by directory prefix, as mounts list theirs.
+
+    Args:
+        mapping (Mapping[str, T]): values keyed by the prefix as exposed.
+    """
+    return {norm_dir(k): v for k, v in mapping.items()}
 
 
 def _config_mounts(config: dict[str, JsonValue] | None) -> list[MountSummary]:
@@ -139,11 +154,28 @@ def _config_mounts(config: dict[str, JsonValue] | None) -> list[MountSummary]:
             vfs=vfs if isinstance(vfs, str) else "",
             mode=_mode_of(spec.get("mode"), fallback),
             description="",
+            backend=_backend_of(spec.get("backend")),
         )
         if not _is_auto_prefix(summary.prefix):
             out.append(summary)
     out.sort(key=lambda m: len(m.prefix), reverse=True)
     return out
+
+
+def _backend_of(value: JsonValue) -> MountBackend:
+    """The backend a saved config's mount names, ``workspace`` when it
+    names none.
+
+    Args:
+        value (JsonValue): the backend the config wrote, if any.
+    """
+    if not isinstance(value, str) or not value:
+        return MountBackend.WORKSPACE
+    try:
+        return MountBackend(value.lower())
+    except ValueError as exc:
+        logger.debug("mirage: a saved config's backend did not parse: %s", exc)
+        return MountBackend.WORKSPACE
 
 
 def _mode_of(value: JsonValue, fallback: str) -> str:
@@ -190,11 +222,9 @@ def make_stopped_detail(
             None when it kept none.
         created_at (float): when it was first created.
     """
-    mounts = _config_mounts(config)
     return WorkspaceDetail(
         id=workspace_id,
         status="stopped",
-        mode=mounts[0].mode if mounts else "read",
         created_at=created_at,
-        mounts=mounts,
+        mounts=_config_mounts(config),
     )

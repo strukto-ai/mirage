@@ -147,6 +147,10 @@ export class Workspace extends CoreWorkspace {
     return this.kernelMounts.mountpoints
   }
 
+  get kernelBackends(): Record<string, MountBackend> {
+    return this.kernelMounts.backends
+  }
+
   get fuseMountpoint(): string | null {
     return this.kernelMounts.mountpoint
   }

@@ -5,6 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.types import MountBackend
 from mirage.vfs.ram import RAMVFS
 
 
@@ -41,6 +42,9 @@ def test_register_one_mount_exposes_singular(monkeypatch):
         ws.add_fuse_mount("/a/", "/tmp/mp-a")
         assert ws.fuse_mountpoints == {"/a/": "/tmp/mp-a"}
         assert ws.fuse_mountpoint == "/tmp/mp-a"
+        assert ws.kernel_backends == {"/a/": MountBackend.FUSE}
+        ws.remove_fuse_mount("/a/")
+        assert ws.kernel_backends == {}
 
 
 def test_register_two_distinct_paths_singular_raises(monkeypatch):

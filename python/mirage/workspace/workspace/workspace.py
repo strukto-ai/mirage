@@ -1362,6 +1362,10 @@ class Workspace:
     def fuse_mountpoints(self) -> dict[str, str]:
         return self._kernel_mounts.mountpoints
 
+    @property
+    def kernel_backends(self) -> dict[str, MountBackend]:
+        return self._kernel_mounts.backends
+
     def register_cli(
         self,
         name: str,
