@@ -84,6 +84,7 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
         line=session.line_number,
         bash_pid=session.bash_pid,
         voice=session_voice(session),
+        err_trap=bool(session.err_trap),
     )
 
 

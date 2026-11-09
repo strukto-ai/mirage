@@ -314,6 +314,16 @@ fn sizes(items: Vec<Item>) -> Result<Vec<usize>, String> {
         .collect()
 }
 
+fn spread_list(item: Item) -> Result<Vec<Item>, String> {
+    one(item, Args::list)
+}
+
+fn maybe_tree(args: &mut Args) -> Result<Option<u32>, String> {
+    args.maybe()?
+        .map(|item| one(item, Args::handle))
+        .transpose()
+}
+
 /// One expression of a C-style `for`: its nodes and the node after them.
 fn slot_in(item: Item) -> Result<Option<Slot>, String> {
     if matches!(item, Item::Nil) {
@@ -332,12 +342,38 @@ fn start_control(
     handle: u32,
     tree: Option<u32>,
     construct: Construct,
+    statements: StatementLists,
 ) -> Reply {
     let tree = match tree {
         Some(tree) => shell_tree(tree).ok_or_else(|| format!("no tree {tree}"))?,
         None => Arc::new(mirage_rs::shell::parse(b"")),
     };
-    engine.start(handle, |inner| task::control(inner, tree, construct))
+    engine.start(handle, |inner| {
+        task::control(inner, tree, construct, statements)
+    })
+}
+
+type StatementLists = Vec<Option<Vec<(usize, usize)>>>;
+
+/// Each list's statements by node, nil for one that was not parsed.
+fn statements_in(items: Vec<Item>) -> Result<StatementLists, String> {
+    items
+        .into_iter()
+        .map(|item| {
+            if matches!(item, Item::Nil) {
+                Ok(None)
+            } else {
+                spread_list(item)?
+                    .into_iter()
+                    .map(|pair| {
+                        let mut pair = spread(pair)?;
+                        Ok((size(pair.int()?)?, size(pair.int()?)?))
+                    })
+                    .collect::<Result<Vec<_>, String>>()
+                    .map(Some)
+            }
+        })
+        .collect()
 }
 
 fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
@@ -420,7 +456,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 branches,
                 otherwise,
             };
-            return start_control(engine, handle, None, construct);
+            return start_control(engine, handle, None, construct, Vec::new());
         }
         "run_while" => {
             let construct = Construct::While {
@@ -428,7 +464,9 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 body: size(args.int()?)?,
                 until: args.flag()?,
             };
-            return start_control(engine, handle, None, construct);
+            let tree = maybe_tree(args)?;
+            let statements = statements_in(args.list()?)?;
+            return start_control(engine, handle, tree, construct, statements);
         }
         "run_for" => {
             let construct = Construct::For {
@@ -436,7 +474,9 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 values: words(args.list()?)?,
                 body: size(args.int()?)?,
             };
-            return start_control(engine, handle, None, construct);
+            let tree = maybe_tree(args)?;
+            let statements = statements_in(args.list()?)?;
+            return start_control(engine, handle, tree, construct, statements);
         }
         "run_cfor" => {
             let tree = args
@@ -450,7 +490,14 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 slots.next().transpose()?.flatten(),
             ];
             let body = size(args.int()?)?;
-            return start_control(engine, handle, tree, Construct::CFor { slots, body });
+            let statements = statements_in(args.list()?)?;
+            return start_control(
+                engine,
+                handle,
+                tree,
+                Construct::CFor { slots, body },
+                statements,
+            );
         }
         "run_case" => {
             let tree = args
@@ -470,7 +517,13 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                     })
                 })
                 .collect::<Result<Vec<_>, String>>()?;
-            return start_control(engine, handle, tree, Construct::Case { word, arms });
+            return start_control(
+                engine,
+                handle,
+                tree,
+                Construct::Case { word, arms },
+                Vec::new(),
+            );
         }
         "let_words" => {
             let words = words(args.list()?)?;
@@ -831,6 +884,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 line: size(args.int()?)?,
                 bash_pid: id(args.int()?)?,
                 voice: args.bytes()?,
+                err_trap: args.flag()?,
             };
             shell.shell_mut()?.apply(frame);
             Item::Nil
@@ -871,11 +925,14 @@ fn ask_out(engine: &mut Engine, ask: Ask) -> Item {
             Item::int(engine.adopt(shell)),
             Item::text(text),
         ]),
-        Ask::Run { shell, list, test } => Item::list([
+        Ask::Run { shell, run } => Item::list([
             Item::text("run"),
             Item::int(engine.adopt(shell)),
-            Item::int(list),
-            Item::Bool(test),
+            Item::int(run.list),
+            Item::Bool(run.test),
+            Item::int(run.start),
+            Item::opt(run.pending, Item::int),
+            Item::Bool(run.framed),
         ]),
         Ask::Pause { view } => Item::list([
             Item::text("pause"),

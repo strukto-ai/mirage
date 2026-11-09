@@ -23,6 +23,9 @@ use crate::shell::ShellNode;
 use crate::text::{bytes_of, text_of};
 
 /// An expression of a C-style `for`: its nodes and the node after them.
+type StatementLists = Vec<Option<Vec<(usize, usize)>>>;
+type TreeAt = (Arc<Tree>, u64);
+type ListNodes<'py> = Vec<Option<Vec<(PyRef<'py, ShellNode>, usize)>>>;
 type SlotNodes<'py> = Option<(Vec<PyRef<'py, ShellNode>>, Option<PyRef<'py, ShellNode>>)>;
 
 /// A managed variable's pointer as Python passes it: source, reference,
@@ -133,10 +136,33 @@ fn start_construct(
     slf: &Bound<'_, Shell>,
     (tree, serial): (Arc<Tree>, u64),
     construct: Construct,
+    statements: StatementLists,
 ) -> PyResult<ShellTask> {
     ShellTask::start(slf, (Arc::clone(&tree), serial), |inner| {
-        task::control(inner, tree, construct)
+        task::control(inner, tree, construct, statements)
     })
+}
+
+/// Each list's parsed statements, by node, and the tree they are in.
+fn statements_in(lists: &ListNodes<'_>) -> (Option<TreeAt>, StatementLists) {
+    let tree = lists
+        .iter()
+        .flatten()
+        .flatten()
+        .next()
+        .map(|(node, _)| (Arc::clone(&node.tree), node.serial));
+    let lists = lists
+        .iter()
+        .map(|list| {
+            list.as_ref().map(|nodes| {
+                nodes
+                    .iter()
+                    .map(|(node, line)| (node.index as usize, *line))
+                    .collect()
+            })
+        })
+        .collect();
+    (tree, lists)
 }
 
 /// Declaration operands: a word, or `(name, append, items)`.
@@ -525,7 +551,7 @@ impl Shell {
     /// `${BASH_LINENO[@]}` and whether the shell is a `( )` subshell or a forked stage, the bytes
     /// left under `max_memory` (None for no cap), `$LINENO`, `$BASHPID`,
     /// and the voice the shell's own diagnostics lead with.
-    #[pyo3(signature = (*, positional, calls, status, pid, last_job, argv0, options, shopts, env_limit, outside, pipe_status, function_names, call_lines, paren, memory_room, line, bash_pid, voice))]
+    #[pyo3(signature = (*, positional, calls, status, pid, last_job, argv0, options, shopts, env_limit, outside, pipe_status, function_names, call_lines, paren, memory_room, line, bash_pid, voice, err_trap))]
     #[allow(clippy::too_many_arguments)]
     fn frame(
         &mut self,
@@ -547,6 +573,7 @@ impl Shell {
         line: usize,
         bash_pid: u32,
         voice: Bound<'_, PyAny>,
+        err_trap: bool,
     ) -> PyResult<()> {
         let texts =
             |list: &[Bound<'_, PyAny>]| list.iter().map(bytes_of).collect::<PyResult<Vec<_>>>();
@@ -601,6 +628,7 @@ impl Shell {
             line,
             bash_pid,
             voice: bytes_of(&voice)?,
+            err_trap,
         };
         self.shell_mut()?.apply(frame);
         self.1 = framed;
@@ -673,6 +701,7 @@ impl Shell {
                 branches,
                 otherwise,
             },
+            Vec::new(),
         )
     }
 
@@ -682,8 +711,15 @@ impl Shell {
         test: usize,
         body: usize,
         until: bool,
+        statements: ListNodes<'_>,
     ) -> PyResult<ShellTask> {
-        start_construct(slf, no_tree(), Construct::While { test, body, until })
+        let (tree, statements) = statements_in(&statements);
+        start_construct(
+            slf,
+            tree.unwrap_or_else(no_tree),
+            Construct::While { test, body, until },
+            statements,
+        )
     }
 
     /// Run `for` over `values`, a body's list each turn.
@@ -692,16 +728,19 @@ impl Shell {
         variable: String,
         values: Vec<Bound<'_, PyAny>>,
         body: usize,
+        statements: ListNodes<'_>,
     ) -> PyResult<ShellTask> {
         let values = values.iter().map(bytes_of).collect::<PyResult<Vec<_>>>()?;
+        let (tree, statements) = statements_in(&statements);
         start_construct(
             slf,
-            no_tree(),
+            tree.unwrap_or_else(no_tree),
             Construct::For {
                 variable,
                 values,
                 body,
             },
+            statements,
         )
     }
 
@@ -711,8 +750,9 @@ impl Shell {
         slf: &Bound<'_, Self>,
         slots: Vec<SlotNodes<'_>>,
         body: usize,
+        statements: ListNodes<'_>,
     ) -> PyResult<ShellTask> {
-        let mut tree = None;
+        let (mut tree, statements) = statements_in(&statements);
         let mut converted = slots.into_iter().map(|slot| {
             slot.map(|(parts, closer)| {
                 if let Some(node) = parts.first() {
@@ -730,6 +770,7 @@ impl Shell {
             slf,
             tree.unwrap_or_else(no_tree),
             Construct::CFor { slots, body },
+            statements,
         )
     }
 
@@ -759,6 +800,7 @@ impl Shell {
             slf,
             tree.unwrap_or_else(no_tree),
             Construct::Case { word, arms },
+            Vec::new(),
         )
     }
 
@@ -1121,7 +1163,15 @@ impl ShellTask {
                     .into_pyobject(py)?
                     .into_any()
             }
-            Ask::Run { shell, list, test } => ("run", Shell::wrap(shell), list, test)
+            Ask::Run { shell, run } => (
+                "run",
+                Shell::wrap(shell),
+                run.list,
+                run.test,
+                run.start,
+                run.pending,
+                run.framed,
+            )
                 .into_pyobject(py)?
                 .into_any(),
             Ask::Pause { view } => ("pause", Shell::wrap(Inner::new(view)))

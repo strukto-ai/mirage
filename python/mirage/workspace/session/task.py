@@ -79,12 +79,24 @@ class TaskHost(Protocol):
         """
         ...
 
-    async def run(self, index: int, test: bool) -> tuple[int, str, int, bool]:
+    async def run(
+        self,
+        index: int,
+        test: bool,
+        start: int,
+        pending: int | None,
+        framed: bool,
+    ) -> tuple[int, str, int, bool]:
         """Run a list of statements on the shell the task lent.
 
         Args:
             index (int): which of the construct's lists.
             test (bool): its status decides a branch.
+            start (int): the first statement, those before it having
+                run on the shell.
+            pending (int | None): what those left in ``$?``, to record.
+            framed (bool): the construct reads the session, so the host
+                frames the shell again once the list has run.
 
         Returns:
             Its status, the tag and levels of what unwinds, and whether
@@ -188,9 +200,11 @@ async def drive(
                         await host.subscript(text),
                         shell,
                     )
-                case ("run", shell, index, test):
+                case ("run", shell, index, test, start, pending, framed):
                     answer = partial(
-                        task.answer_ran, shell, *await host.run(index, test)
+                        task.answer_ran,
+                        shell,
+                        *await host.run(index, test, start, pending, framed),
                     )
                 case ("pause", _):
                     await task_turn()

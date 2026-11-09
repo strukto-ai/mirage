@@ -28,11 +28,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "n=0; while (( n < 3 )); do (( n++ )); done; echo n=$n; unset n; ( i=0; while ((i<10001)); do ((i++)); done; echo $i; for ((j=0;j<10002;j++)); do :; done; echo $j )",
+      "command": "n=0; while (( n < 3 )); do (( n++ )); done; echo n=$n; unset n; ( i=0; while ((i<10001)); do ((i++)); done; echo $i; for ((j=0;j<10002;j++)); do :; done; echo $j ); ( n=0; while ((n<2)); do ((n++)); done; echo \"n=$n $? ${PIPESTATUS[*]}\"; for v in 1 2; do ((0)); s=$?; done; echo \"s=$s\"; echo a b; for v in 1; do x=$v; done; echo \"[$_]\"; for v in 1; do ((y++, 1/0)); done; echo \"y=$y $?\"; for v in 1; do\n  l=$LINENO\n  ((m=LINENO))\ndone; echo \"$l $m\"; L=LINENO; for v in 1; do\n  ((k=L))\ndone; echo \"k=$k\"; i=0; while trap \"echo G\" ERR; ((i<1)); do ((i++)); ((0)); done; echo end )",
       "expect": {
         "exit": 0,
-        "stdout": "n=3\n10001\n10002\n",
-        "stderr": ""
+        "stdout": "n=3\n10001\n10002\nn=2 0 1\ns=1\na b\n[]\ny=1 1\n2 3\nk=5\nG\nG\nend\n",
+        "stderr": "bash: line 1: ((: y++, 1/0: division by 0 (error token is \"0\")\n"
       }
     }
   ]

@@ -42,6 +42,8 @@ pub struct Shell {
     /// The shell is a `( )` subshell, a compound command forked as a stage
     /// or job, or a fork of one, which a refused `${var:=word}` ends with 2.
     pub paren: bool,
+    /// An ERR action is set, which a failing statement runs on the host.
+    pub err_trap: bool,
 }
 
 /// What a host hands the shell before an operation: the parameters, the
@@ -66,6 +68,7 @@ pub struct Frame {
     pub line: usize,
     pub bash_pid: u32,
     pub voice: Vec<u8>,
+    pub err_trap: bool,
 }
 
 impl Shell {
@@ -97,6 +100,13 @@ impl Shell {
         );
         self.paren = frame.paren;
         self.memory_room = frame.memory_room;
+        self.err_trap = frame.err_trap;
+    }
+
+    /// What a finished statement leaves: `$?`, and a `PIPESTATUS` of one.
+    pub fn record_status(&mut self, status: i32) {
+        self.status = status;
+        self.vars.stamp_pipe_status(status);
     }
 
     pub fn new(vars: Store) -> Self {
@@ -114,6 +124,7 @@ impl Shell {
             memory_room: None,
             outside: 0,
             paren: false,
+            err_trap: false,
         }
     }
 

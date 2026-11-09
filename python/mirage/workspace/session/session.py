@@ -997,6 +997,15 @@ class SessionState:
         row = 0 if node is None else self.counted_line(node)
         return self._line_row + row + 1
 
+    def line_of(self, node: TSNodeLike) -> int:
+        """The line ``$LINENO`` reads while a node of the running parse
+        runs.
+
+        Args:
+            node (TSNodeLike): the node.
+        """
+        return self._line_row + self.counted_line(node) + 1
+
     def counted_line(self, node: TSNodeLike, end: bool = False) -> int:
         """The line of the running parse's text a node is numbered by
         (``line_row``), or ends on, as its lines count it: as typed, or

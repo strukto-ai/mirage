@@ -12,7 +12,7 @@ use super::{Diagnostic, Signal};
 use crate::arith::{self, plain_decimal};
 use crate::integer::parse_decimal;
 use crate::vars::{
-    Assigned, Coercion, Draws, INTEGER, Indexed, NAMEREF, Slot, Store, Value, entry_bytes,
+    Assigned, Coercion, Draws, EXPORT, INTEGER, Indexed, NAMEREF, Slot, Store, Value, entry_bytes,
     strip_key_quotes,
 };
 
@@ -788,6 +788,47 @@ impl<'a> Writer<'a> {
             arith::Error::Readonly { name, subscript } => Fault::Readonly { name, subscript },
             error => Fault::Arith(error),
         })
+    }
+
+    /// Evaluate `text` when all of it can land. None leaves the session
+    /// as it was, for the host to evaluate it and report what it finds.
+    pub fn clean_arith(&mut self, text: &[u8]) -> Option<i64> {
+        let mut draws = Draws::default();
+        let outcome = self
+            .store
+            .arith(&mut draws, text, None, self.nounset, false);
+        let value = outcome.value.ok()?;
+        let open = |write: &arith::Write| {
+            let target = self.store.target(&write.name);
+            !self.store.hidden(&target) && !self.store.is_readonly(&target, false)
+        };
+        let bytes = outcome
+            .writes
+            .iter()
+            .map(|write| write.name.len() + write.value.len())
+            .sum();
+        if !outcome.writes.iter().all(open) || !self.fits(0, bytes) {
+            return None;
+        }
+        for write in outcome.writes {
+            self.land_element(&write.name, write.key, write.value.into_bytes())
+                .ok()?;
+        }
+        self.settle(&mut draws).ok()?;
+        Some(value)
+    }
+
+    /// Store a plain scalar when nothing can refuse it. None leaves the
+    /// session as it was, for the host to assign and report.
+    pub fn clean_scalar(&mut self, name: &str, value: &[u8]) -> Option<()> {
+        let plain = self
+            .store
+            .record(name)
+            .is_none_or(|var| var.attrs & !EXPORT == 0);
+        if !plain {
+            return None;
+        }
+        matches!(self.element(name, None, value, false), Ok(Element::Landed)).then_some(())
     }
 
     /// Evaluate `text` as an `-i` write would, landing what it assigns: a

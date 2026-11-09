@@ -673,7 +673,7 @@ export type Ask =
     ]
   | readonly ['process', Shell, ShellTreeNode]
   | readonly ['subscript', Shell, string]
-  | readonly ['run', Shell, number, boolean]
+  | readonly ['run', Shell, number, boolean, number, number | null, boolean]
   | readonly ['pause', Shell]
 
 /** A C-style `for` expression: its nodes and the node whose start ends its text. */
@@ -702,6 +702,7 @@ export interface ShellFrame {
   readonly line: number
   readonly bashPid: number
   readonly voice: string
+  readonly errTrap: boolean
 }
 
 const shells = new FinalizationRegistry<number>((handle) => {
@@ -820,6 +821,7 @@ export class Shell {
       frame.line,
       frame.bashPid,
       frame.voice,
+      frame.errTrap,
     ]
   }
 
@@ -1102,6 +1104,14 @@ export class Shell {
     return new ShellTask(handle, step, null)
   }
 
+  private static statementItems(
+    lists: readonly (readonly (readonly [ShellTreeNode, number])[] | null)[],
+  ): Item {
+    return lists.map((list) =>
+      list === null ? null : list.map(([node, line]) => [node.index, line]),
+    )
+  }
+
   /** Run `if`: each branch the indexes of its test's list and its body's. */
   runIf(branches: readonly (readonly [number, number])[], otherwise: number): ShellTask {
     const [handle, step] = this.call(
@@ -1113,23 +1123,53 @@ export class Shell {
   }
 
   /** Run `while` or `until` over its two lists. */
-  runWhile(test: number, body: number, until: boolean): ShellTask {
-    const [handle, step] = this.call('run_while', test, body, until) as readonly [number, Item]
-    return new ShellTask(handle, step, null)
+  runWhile(
+    test: number,
+    body: number,
+    until: boolean,
+    statements: readonly (readonly (readonly [ShellTreeNode, number])[] | null)[],
+  ): ShellTask {
+    const tree = statements.flatMap((list) => list ?? [])[0]?.[0].tree ?? null
+    const [handle, step] = this.call(
+      'run_while',
+      test,
+      body,
+      until,
+      tree?.handle ?? null,
+      Shell.statementItems(statements),
+    ) as readonly [number, Item]
+    return new ShellTask(handle, step, tree)
   }
 
   /** Run `for` over words already expanded. */
-  runFor(variable: string, values: readonly string[], body: number): ShellTask {
-    const [handle, step] = this.call('run_for', variable, [...values], body) as readonly [
-      number,
-      Item,
-    ]
-    return new ShellTask(handle, step, null)
+  runFor(
+    variable: string,
+    values: readonly string[],
+    body: number,
+    statements: readonly (readonly (readonly [ShellTreeNode, number])[] | null)[],
+  ): ShellTask {
+    const tree = statements.flatMap((list) => list ?? [])[0]?.[0].tree ?? null
+    const [handle, step] = this.call(
+      'run_for',
+      variable,
+      [...values],
+      body,
+      tree?.handle ?? null,
+      Shell.statementItems(statements),
+    ) as readonly [number, Item]
+    return new ShellTask(handle, step, tree)
   }
 
   /** Run a C-style `for`: init, condition and update, null when empty. */
-  runCFor(slots: readonly (ShellSlot | null)[], body: number): ShellTask {
-    const tree = slots.flatMap((held) => held?.[0] ?? [])[0]?.tree ?? null
+  runCFor(
+    slots: readonly (ShellSlot | null)[],
+    body: number,
+    statements: readonly (readonly (readonly [ShellTreeNode, number])[] | null)[],
+  ): ShellTask {
+    const tree =
+      slots.flatMap((held) => held?.[0] ?? [])[0]?.tree ??
+      statements.flatMap((list) => list ?? [])[0]?.[0].tree ??
+      null
     const [handle, step] = this.call(
       'run_cfor',
       tree?.handle ?? null,
@@ -1137,6 +1177,7 @@ export class Shell {
         held === null ? null : [held[0].map((node) => node.index), held[1]?.index ?? null],
       ),
       body,
+      Shell.statementItems(statements),
     ) as readonly [number, Item]
     return new ShellTask(handle, step, tree)
   }
@@ -1379,7 +1420,15 @@ export class ShellTask {
       case 'subscript':
         return ['subscript', Shell.adopt(asked[1] as number), asked[2] as string]
       case 'run':
-        return ['run', Shell.adopt(asked[1] as number), asked[2] as number, asked[3] as boolean]
+        return [
+          'run',
+          Shell.adopt(asked[1] as number),
+          asked[2] as number,
+          asked[3] as boolean,
+          asked[4] as number,
+          (asked[5] ?? null) as number | null,
+          asked[6] as boolean,
+        ]
       default:
         return ['pause', Shell.adopt(asked[1] as number)]
     }

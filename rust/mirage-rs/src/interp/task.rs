@@ -16,7 +16,7 @@ use std::task::{Context, Poll, Waker};
 
 use super::Diagnostic;
 use super::builtin::{Unset, Unsetting, run_let, run_unset};
-use super::control::{Construct, Control, Ran, Runs, run_construct};
+use super::control::{Construct, Control, ListRun, Ran, Runs, run_construct};
 use super::declare::{Declaration, Declared, Marking, run_declaration, run_marking};
 use super::expand::{Expander, Field, Host, Substitution};
 use super::shell::Shell;
@@ -45,11 +45,7 @@ pub enum Ask {
     /// Run the statements of list `list`, `test` when its status decides
     /// a branch; `shell` is the construct's own, handed back with the
     /// answer.
-    Run {
-        shell: Shell,
-        list: usize,
-        test: bool,
-    },
+    Run { shell: Shell, run: ListRun },
     /// A long piece of work has run a while; the host lets others run, or
     /// stops the operation, before it goes on. `view` is the session as the
     /// work has left it so far, which whatever the host runs meanwhile reads
@@ -191,17 +187,10 @@ impl Host for Line {
 }
 
 impl Runs for Line {
-    async fn run(&mut self, shell: &mut Shell, list: usize, test: bool) -> Result<Ran, Fault> {
+    async fn run(&mut self, shell: &mut Shell, run: ListRun) -> Result<Ran, Fault> {
         let stand_in = Shell::new(shell.vars.fork());
         let lent = std::mem::replace(shell, stand_in);
-        match self
-            .ask(Ask::Run {
-                shell: lent,
-                list,
-                test,
-            })
-            .await
-        {
+        match self.ask(Ask::Run { shell: lent, run }).await {
             Answer::Ran { shell: back, ran } => {
                 *shell = *back;
                 Ok(ran)
@@ -369,13 +358,25 @@ pub fn expand(shell: Shell, tree: Arc<Tree>, node: usize, mode: Mode) -> Task<En
 }
 
 /// Run a compound command, the host running each list it picks.
-pub fn control(shell: Shell, tree: Arc<Tree>, construct: Construct) -> Task<Ended<Expanded>> {
+pub fn control(
+    shell: Shell,
+    tree: Arc<Tree>,
+    construct: Construct,
+    statements: Vec<Option<Vec<(usize, usize)>>>,
+) -> Task<Ended<Expanded>> {
     Task::new(move |mut line| async move {
         let mut shell = shell;
         let mut diagnostics = Vec::new();
-        let result = run_construct(&mut shell, &mut line, &tree, &mut diagnostics, construct)
-            .await
-            .map(Expanded::Control);
+        let result = run_construct(
+            &mut shell,
+            &mut line,
+            &tree,
+            &mut diagnostics,
+            construct,
+            statements,
+        )
+        .await
+        .map(Expanded::Control);
         Ended {
             shell,
             result,

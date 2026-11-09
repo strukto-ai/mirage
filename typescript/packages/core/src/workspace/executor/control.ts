@@ -375,9 +375,17 @@ class ConstructHost extends ExpandHost {
     this.bound = fd0Binding(context.session)
   }
 
-  override async run(index: number, test: boolean): Promise<[number, string, number, boolean]> {
+  override async run(
+    index: number,
+    test: boolean,
+    start: number,
+    pending: number | null,
+    framed: boolean,
+  ): Promise<[number, string, number, boolean]> {
     const session = this.session
-    const statements = this.lists[index] ?? []
+    if (pending !== null) recordStatus(session, pending)
+    const statements =
+      start > 0 ? (this.lists[index] ?? []).slice(start) : (this.lists[index] ?? [])
     try {
       const [stdout, io, ran] = test
         ? await ignoringErrexit(session, () => this.body(statements, this.bound))
@@ -389,9 +397,11 @@ class ConstructHost extends ExpandHost {
           ? new IOResult({ stderr: io.stderr, exitCode: this.mergedIo.exitCode })
           : io,
       )
-      // The list changed the session; the shell reads it as it goes on.
-      frame(session, this.callStack)
-      return [io.exitCode, '', 0, session.errexitExiting && !test]
+      // The list changed the session; a construct that reads it reads it as
+      // it goes on.
+      if (framed) frame(session, this.callStack)
+      const leaving = session.errexitExiting && !test
+      return [io.exitCode, '', 0, leaving || session.shellOptions.noexec === true]
     } catch (sig) {
       if (sig instanceof LoopSignal) {
         keep(this.allStdout, sig.stdout)
@@ -420,9 +430,10 @@ async function runConstruct(
   callStack: CallStack | null,
   word: TSNodeLike | null = null,
   wholeTests = false,
+  framed = true,
 ): Promise<ConstructHost> {
   const session = context.session
-  frame(session, callStack)
+  if (framed) frame(session, callStack)
   const host = new ConstructHost(body, lists, context, executeFn, callStack, word, wholeTests)
   let outcome: Item
   try {
@@ -431,7 +442,15 @@ async function runConstruct(
     if (!isUnwinding(sig)) throw sig
     throw await carried(sig, chainStreams(host.allStdout), host.mergedIo)
   }
-  const [said, failed, tag, levels] = outcome as readonly [string, boolean, string, number]
+  const [said, failed, tag, levels, pending, status] = outcome as readonly [
+    string,
+    boolean,
+    string,
+    number,
+    number | null | undefined,
+    number | null | undefined,
+  ]
+  if (pending !== null && pending !== undefined) recordStatus(session, pending)
   if (host.left !== null) {
     throw await carried(host.left, chainStreams(host.allStdout), host.mergedIo)
   }
@@ -442,6 +461,7 @@ async function runConstruct(
     signal.levels = levels
     throw signal
   }
+  if (status !== null && status !== undefined) host.mergedIo.exitCode = status
   if (failed) {
     const stderr = said !== '' ? encodeText(said) : null
     host.mergedIo = await host.mergedIo.merge(new IOResult({ exitCode: 1, stderr }))
@@ -483,6 +503,7 @@ export async function handleIf(
     callStack,
     null,
     true,
+    false,
   )
   return finished(host, '')
 }
@@ -499,7 +520,7 @@ export async function handleFor(
 ): Promise<RedirectResult> {
   const words = values.map((value) => wordText(value))
   const host = await runConstruct(
-    (shell) => shell.runFor(variable, words, 0),
+    (shell) => shell.runFor(variable, words, 0, statements(context.session, [body])),
     run,
     [body],
     context,
@@ -520,7 +541,7 @@ export async function handleWhile(
   until = false,
 ): Promise<RedirectResult> {
   const host = await runConstruct(
-    (shell) => shell.runWhile(0, 1, until),
+    (shell) => shell.runWhile(0, 1, until, statements(context.session, [test, body])),
     run,
     [test, body],
     context,
@@ -532,6 +553,21 @@ export async function handleWhile(
 
 function nodes(parts: readonly TSNodeLike[]): ShellTreeNode[] {
   return parts.map(shellNode).filter((node): node is ShellTreeNode => node !== null)
+}
+
+/** Each list's statements as the shell reads them, each with its line. */
+function statements(
+  session: SessionState,
+  lists: readonly (readonly TSNodeLike[])[],
+): ((readonly [ShellTreeNode, number])[] | null)[] {
+  return lists.map((list) => {
+    const parsed = nodes(list)
+    if (parsed.length !== list.length) return null
+    return parsed.map((node, at) => {
+      const statement = list[at]
+      return [node, statement === undefined ? 0 : session.lineOf(statement)] as const
+    })
+  })
 }
 
 /**
@@ -558,7 +594,7 @@ export async function handleCfor(
   const slots = exprs.map(slot)
   const word = exprs.find((expr) => expr.length > 0)?.[0] ?? null
   const host = await runConstruct(
-    (shell) => shell.runCFor(slots, 0),
+    (shell) => shell.runCFor(slots, 0, statements(context.session, [body])),
     run,
     [body],
     context,

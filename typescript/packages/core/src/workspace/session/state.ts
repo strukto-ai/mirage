@@ -65,6 +65,7 @@ export function frame(session: SessionState, callStack: CallStack | null = null)
     line: session.lineNumber,
     bashPid: session.bashPid,
     voice: sessionVoice(session),
+    errTrap: session.errTrap !== null && session.errTrap !== '',
   })
 }
 

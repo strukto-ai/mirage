@@ -438,9 +438,20 @@ class _ConstructHost(ExpandHost):
         # so an `exec < f` in one reaches the rest.
         self.bound = fd0_binding(context.session)
 
-    async def run(self, index: int, test: bool) -> tuple[int, str, int, bool]:
+    async def run(
+        self,
+        index: int,
+        test: bool,
+        start: int,
+        pending: int | None,
+        framed: bool,
+    ) -> tuple[int, str, int, bool]:
         session = self.session
+        if pending is not None:
+            record_status(session, pending)
         statements = self.lists[index]
+        if start:
+            statements = statements[start:]
         try:
             if test:
                 with ignoring_errexit(session):
@@ -471,9 +482,17 @@ class _ConstructHost(ExpandHost):
         _keep(self.all_stdout, stdout)
         self.merged_io = await self.merged_io.merge(kept)
         status = io.exit_code
-        # The list changed the session; the shell reads it as it goes on.
-        frame(session, self.call_stack)
-        return status, "", 0, session.errexit_exiting and not test
+        # The list changed the session; a construct that reads it reads
+        # it as it goes on.
+        if framed:
+            frame(session, self.call_stack)
+        leaving = session.errexit_exiting and not test
+        return (
+            status,
+            "",
+            0,
+            leaving or bool(session.shell_options.get("noexec")),
+        )
 
 
 async def _run_construct(
@@ -485,6 +504,7 @@ async def _run_construct(
     call_stack: CallStack | None,
     word: TSNodeLike | None = None,
     whole_tests: bool = False,
+    framed: bool = True,
 ) -> _ConstructHost:
     """Run a compound command on the session's shell, which picks each
     list and hands it here to run.
@@ -499,23 +519,27 @@ async def _run_construct(
         word (TSNodeLike | None): a word of the construct, for the nodes
             its expansions name.
         whole_tests (bool): a test's whole result joins the construct's.
+        framed (bool): the shell reads the session as the construct goes.
 
     Returns:
         The host holding what the lists wrote.
     """
     session = context.session
-    frame(session, call_stack)
+    if framed:
+        frame(session, call_stack)
     host = _ConstructHost(
         body, lists, context, execute_fn, call_stack, word, whole_tests
     )
     try:
-        said, failed, tag, levels = await drive(
+        said, failed, tag, levels, pending, status = await drive(
             start(session.vars.shell), host, context.frame.diagnostics
         )
     except UNWINDING as sig:
         raise await carried(
             sig, _chain_streams(host.all_stdout), host.merged_io
         )
+    if pending is not None:
+        record_status(session, pending)
     stdout = _chain_streams(host.all_stdout)
     if host.left is not None:
         raise await carried(host.left, stdout, host.merged_io)
@@ -528,6 +552,8 @@ async def _run_construct(
             levels,
         )
         raise signal
+    if status is not None:
+        host.merged_io.exit_code = status
     if failed:
         host.merged_io = await host.merged_io.merge(
             IOResult(exit_code=1, stderr=encode_text(said) or None)
@@ -593,6 +619,7 @@ async def handle_if(
         execute_fn,
         call_stack,
         whole_tests=True,
+        framed=False,
     )
     return _finished(host, "")
 
@@ -620,7 +647,9 @@ async def handle_for(
     """
     words = [word_text(value) for value in values]
     host = await _run_construct(
-        lambda shell: shell.run_for(variable, words, 0),
+        lambda shell: shell.run_for(
+            variable, words, 0, _statements(context.session, [body])
+        ),
         run,
         [body],
         context,
@@ -651,7 +680,9 @@ async def handle_while(
         until (bool): stop when the condition holds.
     """
     host = await _run_construct(
-        lambda shell: shell.run_while(0, 1, until),
+        lambda shell: shell.run_while(
+            0, 1, until, _statements(context.session, [test, body])
+        ),
         run,
         [test, body],
         context,
@@ -668,6 +699,30 @@ def _nodes(parts: list[TSNodeLike]) -> list[ShellNode]:
         parts (list[TSNodeLike]): the words.
     """
     return [node for node in map(shell_node, parts) if node is not None]
+
+
+def _statements(
+    session: SessionState, lists: list[list[TSNodeLike]]
+) -> list[list[tuple[ShellNode, int]] | None]:
+    """Each list's statements as the shell reads them, each with its
+    line, None for a list holding a node it did not parse.
+
+    Args:
+        session (SessionState): the session, which numbers the lines.
+        lists (list[list[TSNodeLike]]): the construct's lists.
+    """
+    parsed: list[list[tuple[ShellNode, int]] | None] = []
+    for statements in lists:
+        nodes = _nodes(statements)
+        parsed.append(
+            [
+                (node, session.line_of(statement))
+                for node, statement in zip(nodes, statements)
+            ]
+            if len(nodes) == len(statements)
+            else None
+        )
+    return parsed
 
 
 def _slot(exprs: list[TSNodeLike]) -> tuple[list[ShellNode], Any] | None:
@@ -705,7 +760,9 @@ async def handle_cfor(
     slots = [_slot(expr) for expr in exprs]
     word = next((expr[0] for expr in exprs if expr), None)
     host = await _run_construct(
-        lambda shell: shell.run_cfor(slots, 0),
+        lambda shell: shell.run_cfor(
+            slots, 0, _statements(context.session, [body])
+        ),
         run,
         [body],
         context,

@@ -10,6 +10,10 @@ use crate::arith;
 use crate::shell::Tree;
 use crate::vars::Value;
 
+/// The lists run here between two the host runs, which checks for a cancel
+/// and lets others run.
+const QUICK_TURNS: u32 = 64;
+
 /// How a list of statements the host ran left.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Unwound {
@@ -106,6 +110,11 @@ pub struct Control {
     pub said: Vec<u8>,
     pub failed: bool,
     pub unwound: Unwound,
+    /// What the statements run here last left in `$?`, for the host to
+    /// record.
+    pub pending: Option<i32>,
+    /// The construct's status, when a list run here set it last.
+    pub status: Option<i32>,
 }
 
 impl Control {
@@ -120,20 +129,134 @@ impl Control {
         Self {
             said,
             failed: true,
-            unwound: Unwound::None,
+            ..Self::default()
         }
     }
 }
 
+/// A list the host is asked to run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ListRun {
+    pub list: usize,
+    /// Its status decides a branch.
+    pub test: bool,
+    /// The first statement to run, those before it having run here.
+    pub start: usize,
+    /// What the statements run here left in `$?`, for the host to record.
+    pub pending: Option<i32>,
+    /// The construct reads the session, so the host frames the shell again.
+    pub framed: bool,
+}
+
 /// What a construct asks of its host: to run one list on the shell.
 pub trait Runs {
-    /// Run list `list`, `test` when its status decides a branch.
-    fn run(
-        &mut self,
-        shell: &mut Shell,
-        list: usize,
-        test: bool,
-    ) -> impl Future<Output = Result<Ran, Fault>>;
+    fn run(&mut self, shell: &mut Shell, run: ListRun) -> impl Future<Output = Result<Ran, Fault>>;
+}
+
+/// A statement that runs inside the loop: it touches no stream, no mount
+/// and no state of the host's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Quick {
+    Arith {
+        node: usize,
+        line: usize,
+    },
+    Assign {
+        name: String,
+        value: Option<usize>,
+        line: usize,
+    },
+}
+
+/// Whether a node expands with nothing happening but reads.
+fn calm(tree: &Tree, node: usize) -> bool {
+    match tree.kind(node) {
+        "command_substitution" | "process_substitution" => return false,
+        "expansion" if tree.named_children(node).count() != 1 || tree.children(node).len() != 3 => {
+            return false;
+        }
+        _ => {}
+    }
+    tree.children(node).all(|child| calm(tree, child))
+}
+
+/// Whether an assignment's value is one of the words that expand quietly.
+fn plain_word(tree: &Tree, node: usize) -> bool {
+    let reading = match tree.kind(node) {
+        "arithmetic_expansion" => tree.children(node).all(|child| !writes(tree, child)),
+        "word" | "number" | "raw_string" | "string" | "simple_expansion" | "expansion"
+        | "concatenation" => tree
+            .named_children(node)
+            .all(|child| plain_word(tree, child)),
+        "string_content" | "variable_name" | "special_variable_name" => true,
+        _ => false,
+    };
+    reading && calm(tree, node)
+}
+
+/// Whether an arithmetic node assigns.
+fn writes(tree: &Tree, node: usize) -> bool {
+    matches!(
+        tree.kind(node),
+        "=" | "+="
+            | "-="
+            | "*="
+            | "/="
+            | "%="
+            | "**="
+            | "<<="
+            | ">>="
+            | "&="
+            | "^="
+            | "|="
+            | "++"
+            | "--"
+    ) || tree.children(node).any(|child| writes(tree, child))
+}
+
+fn quick_statement(tree: &Tree, node: usize, line: usize) -> Option<Quick> {
+    let parent = tree.nodes[node].parent;
+    let backgrounded = parent != u32::MAX
+        && tree.children(parent as usize).contains(&(node + 1))
+        && tree.kind(node + 1) == "&";
+    if backgrounded {
+        return None;
+    }
+    let children: Vec<usize> = tree.children(node).collect();
+    match tree.kind(node) {
+        "compound_statement" if tree.kind(*children.first()?) == "((" && calm(tree, node) => {
+            Some(Quick::Arith { node, line })
+        }
+        "variable_assignment" => {
+            let [name, operator, rest @ ..] = children.as_slice() else {
+                return None;
+            };
+            let spelled = std::str::from_utf8(tree.text(*name)).ok()?;
+            let value = rest.first().copied();
+            let plain = tree.kind(*name) == "variable_name"
+                && tree.kind(*operator) == "="
+                && rest.len() < 2
+                && spelled != "OPTIND"
+                && spelled != "PIPESTATUS"
+                && value.is_none_or(|value| plain_word(tree, value));
+            plain.then(|| Quick::Assign {
+                name: spelled.to_owned(),
+                value,
+                line,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// A list's statements when all of them can run inside the loop.
+fn quick_list(tree: &Tree, nodes: &[(usize, usize)]) -> Option<Vec<Quick>> {
+    let statements = nodes
+        .iter()
+        .filter(|&&(node, _)| tree.kind(node) != "comment")
+        .map(|&(node, line)| quick_statement(tree, node, line))
+        .collect::<Option<Vec<_>>>()?;
+    (!statements.is_empty()).then_some(statements)
 }
 
 /// Where a loop goes after a list: on, out, or up past the loop.
@@ -159,6 +282,11 @@ struct Walk<'a, H> {
     host: &'a mut H,
     tree: &'a Tree,
     diagnostics: &'a mut Vec<Diagnostic>,
+    quick: &'a [Option<Vec<Quick>>],
+    framed: bool,
+    turns: u32,
+    pending: Option<i32>,
+    status: Option<i32>,
 }
 
 impl<H: Host + Runs> Walk<'_, H> {
@@ -166,8 +294,79 @@ impl<H: Host + Runs> Walk<'_, H> {
         self.shell.option("noexec")
     }
 
+    /// Whether a statement may run inside the loop: nothing watches it, and
+    /// nothing it does can refuse once its expansion went through.
+    fn plain(&self) -> bool {
+        const WATCHING: [&str; 5] = ["xtrace", "verbose", "errexit", "nounset", "noexec"];
+        !self.shell.err_trap && !WATCHING.iter().any(|option| self.shell.option(option))
+    }
+
+    /// Run a statement here. None leaves the shell as it was, for the host
+    /// to run it and report what it finds.
+    async fn quick(&mut self, statement: &Quick) -> Option<i32> {
+        match statement {
+            Quick::Arith { node, line } => {
+                self.shell.vars.set_line(*line);
+                let text = self.expander().arith(*node).await.ok()?;
+                let value =
+                    Writer::of(self.shell, Some(&mut *self.diagnostics)).clean_arith(&text)?;
+                Some(i32::from(value == 0))
+            }
+            Quick::Assign { name, value, line } => {
+                self.shell.vars.set_line(*line);
+                let value = match value {
+                    Some(node) => self.expander().assignment(*node).await.ok()?,
+                    None => Vec::new(),
+                };
+                Writer::of(self.shell, Some(&mut *self.diagnostics)).clean_scalar(name, &value)?;
+                self.shell.vars.seed("_", Value::Scalar(Vec::new()));
+                Some(0)
+            }
+        }
+    }
+
     async fn list(&mut self, list: usize, test: bool) -> Result<Ran, Fault> {
-        self.host.run(self.shell, list, test).await
+        let quick = self.quick;
+        let mut start = 0;
+        if let Some(statements) = quick.get(list).and_then(Option::as_ref)
+            && self.plain()
+        {
+            self.turns = self.turns.wrapping_add(1);
+            if self.turns % QUICK_TURNS != 0 {
+                let mut status = 0;
+                for statement in statements {
+                    let Some(ended) = self.quick(statement).await else {
+                        break;
+                    };
+                    status = ended;
+                    start += 1;
+                    self.shell.record_status(status);
+                    self.pending = Some(status);
+                }
+                if start == statements.len() {
+                    if !test {
+                        self.status = Some(status);
+                    }
+                    return Ok(Ran {
+                        status,
+                        unwound: Unwound::None,
+                        exiting: false,
+                    });
+                }
+            }
+        }
+        let run = ListRun {
+            list,
+            test,
+            start,
+            pending: self.pending.take(),
+            framed: self.framed,
+        };
+        let ran = self.host.run(self.shell, run).await?;
+        if !test {
+            self.status = None;
+        }
+        Ok(ran)
     }
 
     fn expander(&mut self) -> Expander<'_, H> {
@@ -397,14 +596,29 @@ pub async fn run_construct<H: Host + Runs>(
     tree: &Tree,
     diagnostics: &mut Vec<Diagnostic>,
     construct: Construct,
+    statements: Vec<Option<Vec<(usize, usize)>>>,
 ) -> Result<Control, Fault> {
+    let quick: Vec<Option<Vec<Quick>>> = statements
+        .iter()
+        .map(|nodes| nodes.as_deref().and_then(|nodes| quick_list(tree, nodes)))
+        .collect();
+    let framed = match construct {
+        Construct::If { .. } => false,
+        Construct::While { .. } => quick.iter().any(Option::is_some),
+        _ => true,
+    };
     let mut walk = Walk {
         shell,
         host,
         tree,
         diagnostics,
+        quick: &quick,
+        framed,
+        turns: 0,
+        pending: None,
+        status: None,
     };
-    match construct {
+    let control = match construct {
         Construct::If {
             branches,
             otherwise,
@@ -420,7 +634,12 @@ pub async fn run_construct<H: Host + Runs>(
             done => done,
         },
         Construct::Case { word, arms } => walk.case(word, arms).await,
-    }
+    }?;
+    Ok(Control {
+        pending: walk.pending,
+        status: walk.status,
+        ..control
+    })
 }
 
 #[cfg(test)]
@@ -437,6 +656,7 @@ mod tests {
     struct Script {
         answers: VecDeque<Ran>,
         ran: Vec<(usize, bool)>,
+        starts: Vec<usize>,
     }
 
     impl Host for Script {
@@ -461,8 +681,9 @@ mod tests {
     }
 
     impl Runs for Script {
-        async fn run(&mut self, _shell: &mut Shell, list: usize, test: bool) -> Result<Ran, Fault> {
-            self.ran.push((list, test));
+        async fn run(&mut self, _shell: &mut Shell, run: ListRun) -> Result<Ran, Fault> {
+            self.ran.push((run.list, run.test));
+            self.starts.push(run.start);
             Ok(self.answers.pop_front().unwrap_or(ran(0)))
         }
     }
@@ -495,6 +716,7 @@ mod tests {
         let mut host = Script {
             answers: answers.into(),
             ran: Vec::new(),
+            starts: Vec::new(),
         };
         let tree = crate::shell::parse(b"");
         let mut diagnostics = Vec::new();
@@ -504,11 +726,46 @@ mod tests {
                 &mut host,
                 &tree,
                 &mut diagnostics,
-                construct
+                construct,
+                Vec::new(),
             ));
             futures_now(done).unwrap()
         };
         (control, host.ran)
+    }
+
+    /// Run a construct over the statements a line parses to, each list its
+    /// range of them, and answer what the host saw.
+    fn drive_line(
+        shell: &mut Shell,
+        line: &[u8],
+        lists: &[(usize, usize)],
+        construct: Construct,
+    ) -> (Control, Vec<usize>) {
+        let tree = crate::shell::parse(line);
+        let statements: Vec<usize> = tree.named_children(0).collect();
+        let lists = lists
+            .iter()
+            .map(|&(from, to)| Some(statements[from..to].iter().map(|&node| (node, 1)).collect()))
+            .collect();
+        let mut host = Script {
+            answers: VecDeque::new(),
+            ran: Vec::new(),
+            starts: Vec::new(),
+        };
+        let mut diagnostics = Vec::new();
+        let control = {
+            let done = std::pin::pin!(run_construct(
+                shell,
+                &mut host,
+                &tree,
+                &mut diagnostics,
+                construct,
+                lists,
+            ));
+            futures_now(done).unwrap()
+        };
+        (control, host.starts)
     }
 
     fn futures_now<T>(future: std::pin::Pin<&mut impl Future<Output = T>>) -> T {
@@ -628,5 +885,76 @@ mod tests {
         };
         let (_, order) = drive(&mut shell(), vec![stopping], construct);
         assert_eq!(order.len(), 1);
+    }
+
+    #[test]
+    fn a_loop_of_arithmetic_runs_inside_it() {
+        let mut shell = shell();
+        let construct = Construct::While {
+            test: 0,
+            body: 1,
+            until: false,
+        };
+        let (control, starts) = drive_line(
+            &mut shell,
+            b"((i<3)); ((i++))",
+            &[(0, 1), (1, 2)],
+            construct,
+        );
+        assert!(starts.is_empty());
+        assert_eq!(shell.vars.scalar("i"), Some(&b"3"[..]));
+        assert_eq!((control.pending, control.status), (Some(1), Some(0)));
+    }
+
+    #[test]
+    fn a_statement_that_cannot_run_here_goes_to_the_host_once() {
+        let mut shell = shell();
+        let construct = Construct::For {
+            variable: "v".to_owned(),
+            values: vec![b"1".to_vec()],
+            body: 0,
+        };
+        let (_, starts) = drive_line(&mut shell, b"((x++)); ((1/0))", &[(0, 2)], construct);
+        assert_eq!(starts, vec![1]);
+        assert_eq!(shell.vars.scalar("x"), Some(&b"1"[..]));
+    }
+
+    #[test]
+    fn a_traced_shell_runs_every_list_on_the_host() {
+        let mut shell = shell();
+        shell.options.insert("xtrace".to_owned(), true);
+        let construct = Construct::For {
+            variable: "v".to_owned(),
+            values: vec![b"1".to_vec()],
+            body: 0,
+        };
+        let (_, starts) = drive_line(&mut shell, b"((x++))", &[(0, 1)], construct);
+        assert_eq!(starts, vec![0]);
+        assert_eq!(shell.vars.scalar("x"), None);
+    }
+
+    #[test]
+    fn only_what_expands_quietly_is_quick() {
+        let quick = |line: &[u8]| {
+            let tree = crate::shell::parse(line);
+            let nodes: Vec<(usize, usize)> = tree.named_children(0).map(|node| (node, 1)).collect();
+            quick_list(&tree, &nodes).is_some()
+        };
+        assert!(quick(b"((i++)); x=$i; y=\"$a-b\"; z=$((i+1)); w=${v}"));
+        for line in [
+            &b"x=$(date)"[..],
+            b"((i+=$(date)))",
+            b"x=${y:-z}",
+            b"z=$((i++))",
+            b"PIPESTATUS=1",
+            b"x+=1",
+            b"a[0]=1",
+            b"x=(1 2)",
+            b"OPTIND=1",
+            b"echo",
+            b"x=1 &",
+        ] {
+            assert!(!quick(line), "{}", String::from_utf8_lossy(line));
+        }
     }
 }

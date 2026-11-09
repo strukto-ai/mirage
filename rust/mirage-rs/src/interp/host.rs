@@ -140,6 +140,8 @@ fn control_out(control: &Control) -> Item {
         Item::Bool(control.failed),
         Item::text(tag),
         Item::int(levels),
+        Item::opt(control.pending, Item::int),
+        Item::opt(control.status, Item::int),
     ])
 }
 

@@ -52,10 +52,19 @@ export interface TaskHost {
   subscript(text: string): Promise<string>
   /**
    * Run the list a compound command picked, `test` when it is a test, on the
-   * shell the task moved here: its status, how it left, the levels of a
-   * `break` or `continue`, and whether `set -e` is ending the shell.
+   * shell the task moved here, from statement `start`, those before it
+   * having run on the shell and left `pending` in `$?`; `framed` when the
+   * construct reads the session, so the shell is framed again after. Answers
+   * its status, how it left, the levels of a `break` or `continue`, and
+   * whether `set -e` is ending the shell.
    */
-  run(index: number, test: boolean): Promise<[number, string, number, boolean]>
+  run(
+    index: number,
+    test: boolean,
+    start: number,
+    pending: number | null,
+    framed: boolean,
+  ): Promise<[number, string, number, boolean]>
 }
 
 function permissionDenied(name: string): PolicyDenied {
@@ -165,7 +174,7 @@ export async function drive(
           break
         }
         case 'run': {
-          const ran = await host.run(ask[2], ask[3])
+          const ran = await host.run(ask[2], ask[3], ask[4], ask[5], ask[6])
           answer = () => {
             task.answerRan(ask[1], ...ran)
           }

@@ -202,6 +202,7 @@ class Shell:
         line: int,
         bash_pid: int,
         voice: str,
+        err_trap: bool,
     ) -> None: ...
     def conversion_scalar(
         self, name: str
@@ -224,14 +225,22 @@ class Shell:
     def run_if(
         self, branches: Sequence[tuple[int, int]], otherwise: int
     ) -> ShellTask: ...
-    def run_while(self, test: int, body: int, until: bool) -> ShellTask: ...
+    def run_while(
+        self,
+        test: int,
+        body: int,
+        until: bool,
+        statements: list[list[tuple[ShellNode, int]] | None],
+    ) -> ShellTask: ...
     def run_for(
-        self, variable: str, values: Sequence[str], body: int
+        self, variable: str, values: Sequence[str], body: int,
+        statements: list[list[tuple[ShellNode, int]] | None],
     ) -> ShellTask: ...
     def run_cfor(
         self,
         slots: Sequence[tuple[list[ShellNode], ShellNode | None] | None],
         body: int,
+        statements: list[list[tuple[ShellNode, int]] | None],
     ) -> ShellTask: ...
     def run_case(
         self, word: str, arms: Sequence[tuple[list[ShellNode], int, str]]
