@@ -28,6 +28,8 @@ pub(crate) struct Host {
     pub(crate) directories: Vec<String>,
     /// The permission bits a `chmod` request set.
     pub(crate) modes: HashMap<String, u32>,
+    /// The modification times a `stat` request reports, in seconds.
+    pub(crate) mtimes: HashMap<String, i64>,
     /// Links by name and what each holds, which reads and writes follow.
     pub(crate) links: HashMap<String, String>,
     /// Standard input, and once a run ends what it left unread.
@@ -291,7 +293,7 @@ impl Host {
             "write" => (self.write(&request, data), Vec::new()),
             "stat" => {
                 let path = text(&request["path"]);
-                let kind = if self.directories.contains(&path) {
+                let mut kind = if self.directories.contains(&path) {
                     json!({"kind": "dir"})
                 } else if self.files.contains_key(&path) {
                     match self.modes.get(&path) {
@@ -301,6 +303,9 @@ impl Host {
                 } else {
                     json!({})
                 };
+                if let Some(mtime) = self.mtimes.get(&path) {
+                    kind["mtime"] = json!(mtime);
+                }
                 (kind, Vec::new())
             }
             "mkdir" => {
@@ -329,8 +334,12 @@ impl Host {
             }
             "readlink" => {
                 let path = normal(&text(&request["path"]));
+                if path.contains("denied/") {
+                    return (failure("EACCES", "Permission denied"), Vec::new());
+                }
                 if let Some(target) = self.links.get(&path) {
-                    return (json!({"target": target}), Vec::new());
+                    let mtime = self.mtimes.get(&path);
+                    return (json!({"target": target, "mtime": mtime}), Vec::new());
                 }
                 if self.files.contains_key(&path) || self.directories.contains(&path) {
                     return (json!({}), Vec::new());

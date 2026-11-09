@@ -56,6 +56,9 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-c", "--create", action="store_true"),
             Argument("-x", "--extract", action="store_true"),
             Argument("-t", "--list", action="store_true"),
+            Argument("-r", "--append", action="store_true"),
+            Argument("-u", "--update", action="store_true"),
+            Argument("--delete", action="store_true"),
             Argument("-z", "--gzip", action="store_true"),
             Argument("-j", "--bzip2", action="store_true"),
             Argument("-J", "--xz", action="store_true"),
@@ -63,13 +66,37 @@ SPECS: dict[str, CommandSpec] = {
             # -h archives what a symlink points at instead of the link.
             Argument("-h", "--dereference", action="store_true"),
             Argument("-O", "--to-stdout", action="store_true"),
+            Argument("-a", "--auto-compress", action="store_true"),
+            Argument("-k", "--keep-old-files", action="store_true"),
+            Argument("--overwrite", action="store_true"),
+            Argument("--skip-old-files", action="store_true"),
+            Argument("-p", "--preserve-permissions", action="store_true"),
+            Argument("-P", "--absolute-names", action="store_true"),
+            # Extraction stamps no time of its own, so -m has nothing to
+            # turn off.
+            Argument("-m", "--touch", action="store_true"),
+            Argument("--numeric-owner", action="store_true"),
+            Argument("--owner"),
+            Argument("--group"),
+            Argument("--mtime"),
+            Argument("--sort"),
+            Argument("--transform", action="append"),
+            Argument("-T", "--files-from", type="path", action="append"),
+            Argument("--null", action="store_true"),
+            Argument("-X", "--exclude-from", type="path", action="append"),
+            Argument("--exclude-vcs", action="store_true"),
+            # Each applies to the patterns typed after it.
+            Argument("--wildcards", action="store_true"),
+            Argument("--no-wildcards", action="store_true"),
+            Argument("--anchored", action="store_true"),
+            Argument("--no-anchored", action="store_true"),
             Argument("-f", "--file", type="path"),
             # Every occurrence is kept, in order: GNU chdirs at each
             # one and fails at the first it cannot enter, so the
             # planner has to see them all, not just the last.
             Argument("-C", "--directory", type="path", action="append"),
             Argument("--strip-components"),
-            Argument("--exclude"),
+            Argument("--exclude", action="append"),
             Argument("--one-file-system", action="store_true"),
             # Only -c reads the rest operands from the filesystem. Under -t
             # and -x each one is a member selector matched against names
@@ -81,7 +108,7 @@ SPECS: dict[str, CommandSpec] = {
                 type="path",
                 nargs="*",
                 metavar="",
-                text_when=("-x", "-t"),
+                text_when=("-x", "-t", "--delete"),
             ),
         ),
     ),
@@ -100,6 +127,22 @@ SPECS: dict[str, CommandSpec] = {
             # takes one per occurrence, since its spec has no variadic
             # option value and `-x a -x b` says the same thing.
             Argument("-x", action="append"),
+            # -i is -x's counterpart, one pattern per occurrence as -x is.
+            Argument("-i", action="append"),
+            Argument("-u", action="store_true"),
+            Argument("-f", action="store_true"),
+            Argument("-d", action="store_true"),
+            Argument("-m", action="store_true"),
+            Argument("-T", action="store_true"),
+            Argument("-v", action="store_true"),
+            # -l turns line ends to CRLF and -ll back to LF.
+            Argument("-l", action="count"),
+            Argument("-D", action="store_true"),
+            Argument("-b", type="path"),
+            Argument("-c", action="store_true"),
+            Argument("-z", action="store_true"),
+            Argument("-@", action="store_true"),
+            *(Argument(f"-{n}", action="store_true") for n in range(10)),
             PATHS_OPERAND,
         )
     ),
@@ -134,6 +177,17 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-s", action="store_true"),
             Argument("-m", action="store_true"),
             Argument("-h", action="store_true"),
+            Argument("-j", action="store_true"),
+            Argument("-u", action="store_true"),
+            Argument("-f", action="store_true"),
+            Argument("-z", action="store_true"),
+            Argument("-C", action="store_true"),
+            Argument("-a", action="count"),
+            Argument("-L", action="count"),
+            # Owners and UTF-8 names are not mirage's to restore or spell
+            # another way, so -X and -U change nothing.
+            Argument("-X", action="store_true"),
+            Argument("-U", action="count"),
             # The archive is the only path operand; everything after it is an
             # Info-ZIP member pattern matched against archive entry names,
             # never a filesystem path.

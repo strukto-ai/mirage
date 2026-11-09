@@ -305,8 +305,8 @@ LONG_SYNONYMS = {
 
 # The whole long-option table of a program whose getopt_long resolves an
 # abbreviation against more options than mirage declares for it, so a
-# partial spec cannot say whether a prefix is ambiguous: `tar --fil` is
-# `--file` or `--files-from`, the second one mirage never declared. Each
+# partial spec cannot say whether a prefix is ambiguous: `tar --lis` is
+# `--list` or `--listed-incremental`, the second one mirage never declared. Each
 # group is one option, its primary spelling first and its aliases after
 # it (argp's OPTION_ALIAS entries, which share the primary's key and so
 # never make a prefix of both ambiguous), in the order getopt_long reads

@@ -1,6 +1,6 @@
 //! tar's 512-byte header blocks: read as GNU tar 1.35 reads ustar, GNU and
 //! pax headers, and written as it writes one in its default GNU format,
-//! with mirage's fixed owner, stamp and modes.
+//! with the owner mirage records (none, uid 0, unless an option names one).
 
 use super::escaped;
 
@@ -42,6 +42,18 @@ impl Kind {
             other => Kind::Other(other),
         }
     }
+}
+
+/// What a header records of a member beyond its name, kind and size; a
+/// mode of none is the kind's default.
+#[derive(Default, Clone)]
+pub(super) struct Stamp {
+    pub(super) mode: Option<u32>,
+    pub(super) mtime: i64,
+    pub(super) uid: u64,
+    pub(super) gid: u64,
+    pub(super) uname: Vec<u8>,
+    pub(super) gname: Vec<u8>,
 }
 
 /// One member as its headers describe it.
@@ -334,26 +346,45 @@ fn seconds(value: &[u8]) -> Option<i64> {
     Some(seconds - i64::from(below))
 }
 
-/// The block GNU writes for one member, with mirage's owner (none, uid 0),
-/// stamp (the epoch) and modes.
-fn head(name: &[u8], flag: u8, mode: u32, size: u64, target: &[u8]) -> Vec<u8> {
+/// `value` as a field of `width` octal digits and its NUL or, where those
+/// cannot hold it, in base 256: two's complement with the top bit set.
+fn numeric(value: i64, width: usize) -> Vec<u8> {
+    if (0..1i64 << (3 * width)).contains(&value) {
+        return [format!("{value:0width$o}").as_bytes(), b"\0"].concat();
+    }
+    let mut field = vec![if value < 0 { 0xFF } else { 0 }; width + 1];
+    let bytes = value.to_be_bytes();
+    let kept = bytes.len().min(field.len());
+    let from = field.len() - kept;
+    field[from..].copy_from_slice(&bytes[bytes.len() - kept..]);
+    field[0] |= 0x80;
+    field
+}
+
+/// The block tar writes for one member.
+fn head(name: &[u8], flag: u8, mode: u32, size: u64, target: &[u8], stamp: &Stamp) -> Vec<u8> {
     let mut block = vec![0u8; BLOCK];
     let mut put = |at: usize, bytes: &[u8]| block[at..at + bytes.len()].copy_from_slice(bytes);
     put(0, &name[..name.len().min(FIELD)]);
-    put(100, format!("{mode:07o}\0").as_bytes());
-    put(108, b"0000000\0");
-    put(116, b"0000000\0");
+    put(
+        100,
+        format!("{:07o}\0", stamp.mode.unwrap_or(mode)).as_bytes(),
+    );
+    put(108, &numeric(stamp.uid as i64, 7));
+    put(116, &numeric(stamp.gid as i64, 7));
     if size < OCTAL_SIZE {
         put(124, format!("{size:011o}\0").as_bytes());
     } else {
         put(124, &[0x80, 0, 0, 0]);
         put(128, &size.to_be_bytes());
     }
-    put(136, b"00000000000\0");
+    put(136, &numeric(stamp.mtime, 11));
     put(148, b"        ");
     put(156, &[flag]);
     put(157, &target[..target.len().min(FIELD)]);
     put(257, GNU_MAGIC);
+    put(265, &stamp.uname[..stamp.uname.len().min(31)]);
+    put(297, &stamp.gname[..stamp.gname.len().min(31)]);
     let sum: u32 = block.iter().map(|&b| u32::from(b)).sum();
     block[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
     block
@@ -362,7 +393,8 @@ fn head(name: &[u8], flag: u8, mode: u32, size: u64, target: &[u8]) -> Vec<u8> {
 /// A GNU long-name record carrying `text`, which the next header's field
 /// cannot hold.
 fn long(flag: u8, text: &[u8]) -> Vec<u8> {
-    let mut out = head(LONG_LINK, flag, 0o644, text.len() as u64 + 1, b"");
+    let plain = Stamp::default();
+    let mut out = head(LONG_LINK, flag, 0o644, text.len() as u64 + 1, b"", &plain);
     out.extend_from_slice(text);
     out.resize(out.len() + padding(text.len() as u64 + 1) + 1, 0);
     out
@@ -370,7 +402,7 @@ fn long(flag: u8, text: &[u8]) -> Vec<u8> {
 
 /// The headers GNU writes for a member: a long link target's record, then a
 /// long name's, then its own.
-pub(super) fn encode(name: &[u8], kind: Kind, size: u64, target: &[u8]) -> Vec<u8> {
+pub(super) fn encode(name: &[u8], kind: Kind, size: u64, target: &[u8], stamp: &Stamp) -> Vec<u8> {
     let (flag, mode) = match kind {
         Kind::Dir => (b'5', 0o755),
         Kind::Link => (b'2', 0o777),
@@ -383,7 +415,7 @@ pub(super) fn encode(name: &[u8], kind: Kind, size: u64, target: &[u8]) -> Vec<u
     if name.len() > FIELD {
         out.extend(long(b'L', name));
     }
-    out.extend(head(name, flag, mode, size, target));
+    out.extend(head(name, flag, mode, size, target, stamp));
     out
 }
 
@@ -450,19 +482,25 @@ fn stamp(time: i64) -> String {
 /// GNU's `-tv` rows: the owner and size column widens to the widest it has
 /// shown, and stays that wide for the rest of the run.
 pub(super) struct Rows {
-    width: usize,
+    pub(super) width: usize,
+    /// --numeric-owner: ids, never names.
+    pub(super) numeric: bool,
 }
 
 impl Default for Rows {
     fn default() -> Rows {
-        Rows { width: 19 }
+        Rows {
+            width: 19,
+            numeric: false,
+        }
     }
 }
 
 impl Rows {
     pub(super) fn row(&mut self, member: &Member) -> Vec<u8> {
+        let numeric = self.numeric;
         let id = |name: &[u8], id: u64| {
-            if name.is_empty() {
+            if numeric || name.is_empty() {
                 id.to_string().into_bytes()
             } else {
                 name.to_vec()

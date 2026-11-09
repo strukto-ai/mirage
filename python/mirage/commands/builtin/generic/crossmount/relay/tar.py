@@ -70,6 +70,11 @@ async def run_tar(
     parsed = parse_flags(flag_kwargs)
     if isinstance(parsed, IOResult):
         return None, parsed
+
+    async def chmod(path: PathSpec, mode: int) -> None:
+        if vfs is not None:
+            await vfs.setattr(path, mode=mode)
+
     prim = transfer_primitives(dispatch)
     links = link_view(vfs)
     tree = (
@@ -82,7 +87,7 @@ async def run_tar(
             crossing=True,
         )
     )
-    operands = scopes if parsed.create and parsed.archive else []
+    operands = scopes if parsed.sources and parsed.archive else []
     return await tar(
         flat_scopes(operands),
         list(text_args),
@@ -102,4 +107,5 @@ async def run_tar(
         links=links,
         mounts=mount_view(vfs),
         relay=True,
+        chmod=chmod if vfs is not None else None,
     )

@@ -28,10 +28,10 @@
         "hf",
         "hf-prefix"
       ],
-      "command": "(mkdir -p /data/fcA_zy/d && printf 'alpha\\n' > /data/fcA_zy/d/a.txt && cd /data/fcA_zy && ln -s a.txt d/link.txt && zip -q -r -y s.zip d && unzip -Z s.zip d/link.txt | cut -c1-10 && unzip -p s.zip d/link.txt; echo)",
+      "command": "(mkdir -p /data/fcA_zy/d && printf 'alpha\\n' > /data/fcA_zy/d/a.txt && cd /data/fcA_zy && ln -s a.txt d/link.txt && zip -q -r -y s.zip d && unzip -Z s.zip d/link.txt | cut -c1-10 && unzip -p s.zip d/link.txt; echo); mkdir -p /data/fz6; touch /data/fz6/k; cd /data/fz6; echo tt > t; ln -s t l; touch -d 2001-02-03T04:05:06Z t; touch -h -d 2001-02-03T04:05:06Z l; zip -qy z.zip t l; zip -quy z.zip; echo rc=$?; touch -d 2005-01-01T00:00:00Z t; zip -qfy z.zip; echo rc=$?; unzip -Z z.zip l | cut -c1-10; rm l; ln -s k l; touch -h -d 2006-01-01T00:00:00Z l; zip -quy z.zip; echo rc=$?; unzip -Z z.zip l | cut -c1-10; unzip -p z.zip l; echo; rm l; echo real > l; touch -d 2007-01-01T00:00:00Z l; zip -quy z.zip; echo rc=$?; unzip -p z.zip l; cd /; rm -r /data/fz6",
       "expect": {
         "exit": 0,
-        "stdout": "lrwxrwxrwx\na.txt\n",
+        "stdout": "lrwxrwxrwx\na.txt\nrc=12\nrc=0\nlrwxrwxrwx\nrc=0\nlrwxrwxrwx\nk\nrc=0\nreal\n",
         "stderr": ""
       },
       "flags": [

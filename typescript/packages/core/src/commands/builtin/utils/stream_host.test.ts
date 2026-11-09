@@ -270,4 +270,39 @@ describe('StreamHost', () => {
     expect(run.reply).toEqual({ fatal: 'running a command requires a workspace' })
     await h.close()
   })
+
+  it('stats a time and reaches the mount for a mode or an rmdir', async () => {
+    const calls: string[] = []
+    const modes = new Map<string, number>()
+    const dispatch = async (
+      op: string,
+      p: PathSpec,
+      _args: readonly unknown[] = [],
+      kwargs: Record<string, unknown> = {},
+    ): Promise<[unknown, IOResult]> => {
+      await Promise.resolve()
+      calls.push(`${op} ${p.virtual}`)
+      if (op === 'stat') {
+        const modified = '2001-09-09T01:46:40+00:00'
+        return [new FileStat({ name: 'f', type: FileType.FILE, modified }), new IOResult()]
+      }
+      if (op === 'setattr') modes.set(p.virtual, kwargs.mode as number)
+      return [null, new IOResult()]
+    }
+    const ctx = {
+      stdin: null,
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+      vfs: new Files(dispatch, null, null, { ledger: false }),
+    } as unknown as Context
+    const h = new StreamHost([], () => parts(), ctx)
+    const stat = await h.serve({ op: 'stat', path: '/f' }, new Uint8Array())
+    expect(stat.reply).toEqual({ kind: 'file', mtime: 1_000_000_000 })
+    const chmod = await h.serve({ op: 'chmod', path: '/f', mode: 416 }, new Uint8Array())
+    expect(chmod.reply).toEqual({})
+    expect(modes.get('/f')).toBe(416)
+    expect((await h.serve({ op: 'rmdir', path: '/d' }, new Uint8Array())).reply).toEqual({})
+    expect(calls).toContain('rmdir /d')
+    await h.close()
+  })
 })

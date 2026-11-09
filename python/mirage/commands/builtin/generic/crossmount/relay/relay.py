@@ -160,7 +160,7 @@ async def run_relay(
     if cmd_name == Cmd.UNZIP:
         return await run_unzip(scopes, text_args, flag_kwargs, dispatch, cwd)
     if cmd_name == Cmd.ZIP:
-        return await run_zip(scopes, flag_kwargs, dispatch, vfs)
+        return await run_zip(scopes, flag_kwargs, dispatch, vfs, cwd, stdin)
     if cmd_name in DISPATCH_BUILDERS:
         return await run_dispatch(
             DISPATCH_BUILDERS[cmd_name],

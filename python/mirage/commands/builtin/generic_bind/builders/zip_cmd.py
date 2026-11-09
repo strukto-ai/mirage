@@ -52,6 +52,7 @@ async def zip_cmd(
         flags=parse_flags(ctx.flags),
         links=links_of(ctx),
         mounts=mount_view(ctx.vfs),
+        stdin=ctx.stdin,
     )
 
 

@@ -106,3 +106,60 @@ async def test_a_name_with_zip_added_reads_the_stored_archive():
     out = await result.materialize_stdout()
     await ws.close()
     assert (result.exit_code, out) == (0, b"hello\n")
+
+
+async def _shell(line: str) -> tuple[int, bytes, bytes]:
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        r = await ws.shell(
+            "cd /data && printf '1\\n' > a; mkdir d; "
+            "printf '1\\n' > d/a; printf '2\\n' > d/b; " + line
+        )
+        return (
+            r.exit_code,
+            await r.materialize_stdout(),
+            await r.materialize_stderr(),
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        pytest.param(
+            "zip -q z.zip d/a; unzip -qj z.zip -d o; ls o",
+            (0, b"a\n", b""),
+            id="junk_paths",
+        ),
+        pytest.param(
+            "mkdir U; echo 1 > U/F; zip -q z.zip U/F; unzip -qLL z.zip "
+            "-d o; ls o o/u",
+            (0, b"o:\nu\n\no/u:\nf\n", b""),
+            id="lower_names",
+        ),
+        pytest.param(
+            "zip -q z.zip d/a; unzip -qC z.zip D/A -d o; echo rc=$?; ca"
+            "t o/d/a",
+            (0, b"rc=0\n1\n", b""),
+            id="ignore_case",
+        ),
+        pytest.param(
+            "zip -q z.zip d/a; echo c | zip -zq z.zip; unzip -qz z.zip",
+            (0, b"c\n", b""),
+            id="comment",
+        ),
+        pytest.param(
+            "zip -q z.zip d/a; mkdir -p o/d; echo NEW > o/d/a; touch -d"
+            " 2030-01-01T00:00:00Z o/d/a; unzip -qu z.zip -d o; cat o/d"
+            "/a",
+            (0, b"NEW\n", b""),
+            id="update_keeps_newer",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_unzip_options_behave_as_pinned(
+    line: str, expected: tuple[int, bytes, bytes]
+) -> None:
+    assert await _shell(line) == expected

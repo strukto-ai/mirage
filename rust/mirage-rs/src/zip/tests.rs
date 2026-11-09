@@ -382,3 +382,266 @@ fn a_host_lists_names_whole_and_reads_picks_framed() {
         .concat();
     assert_eq!((status, out), (0, frames));
 }
+
+fn names_of(host: &mut Host, archive: &str) -> String {
+    unzip(host, archive, json!({"Z": true, "1": true})).1
+}
+
+fn at(spelled: &str, mtime: i64) -> Json {
+    let mut entry = file(spelled, 2);
+    entry["mtime"] = json!(mtime);
+    entry
+}
+
+const YEAR_2001: i64 = 1_000_000_000;
+
+#[test]
+fn a_delete_drops_the_members_its_patterns_match() {
+    let mut host = sample();
+    let config =
+        json!({"archive": "z.zip", "output": "z.zip", "delete": true, "patterns": ["a.txt"]});
+    let (status, _, err) = run(&mut host, "zip", config);
+    assert_eq!((status, err.as_str()), (0, ""));
+    assert_eq!(names_of(&mut host, "z.zip"), "d/\nd/b.txt\n");
+}
+
+#[test]
+fn a_freshen_replaces_only_what_the_archive_holds_older() {
+    let mut host = Host::with(&[("a.txt", "one\n"), ("b.txt", "two\n")], "");
+    assert_eq!(
+        zip(&mut host, "z.zip", json!([at("a.txt", YEAR_2001)])).0,
+        0
+    );
+    let stored = host.files["z.zip"].clone();
+    let config = |found: Json| json!({"archive": "z.zip", "output": "z.zip", "freshen": true, "found": found});
+    let same = json!([at("a.txt", YEAR_2001), at("b.txt", YEAR_2001)]);
+    assert_eq!(run(&mut host, "zip", config(same)).0, 12);
+    assert_eq!(host.files["z.zip"], stored);
+    host.files.insert("a.txt".into(), b"ONE\n".to_vec());
+    let newer = json!([at("a.txt", YEAR_2001 + 100)]);
+    assert_eq!(run(&mut host, "zip", config(newer)).0, 0);
+    let piped = unzip(&mut host, "z.zip", json!({"p": true, "members": ["a.txt"]}));
+    assert_eq!(piped.1, "ONE\n");
+}
+
+#[test]
+fn line_ends_change_for_text_and_stay_for_binary() {
+    let mut host = Host::with(&[("t.txt", "a\nb\n"), ("b.bin", "a\0\nb\n")], "");
+    let config = json!({
+        "archive": "z.zip",
+        "output": "z.zip",
+        "line_ends": "to_crlf",
+        "found": [file("t.txt", 2), file("b.bin", 3)],
+    });
+    assert_eq!(run(&mut host, "zip", config).0, 0);
+    let text = unzip(&mut host, "z.zip", json!({"p": true, "members": ["t.txt"]}));
+    assert_eq!(text.1, "a\r\nb\r\n");
+    let binary = unzip(&mut host, "z.zip", json!({"p": true, "members": ["b.bin"]}));
+    assert_eq!(binary.1, "a\0\nb\n");
+}
+
+#[test]
+fn an_extraction_can_junk_paths_and_lower_names() {
+    let mut host = sample();
+    assert_eq!(
+        unzip(&mut host, "z.zip", json!({"j": true, "base": "/out"})).0,
+        0
+    );
+    assert!(host.files.contains_key("/out/b.txt"));
+    assert!(!host.files.contains_key("/out/d/b.txt"));
+    let mut host = Host::with(&[("UP.TXT", "one\n")], "");
+    assert_eq!(zip(&mut host, "z.zip", json!([file("UP.TXT", 2)])).0, 0);
+    assert_eq!(
+        unzip(&mut host, "z.zip", json!({"L": 2, "base": "/out"})).0,
+        0
+    );
+    assert!(host.files.contains_key("/out/up.txt"));
+}
+
+#[test]
+fn an_update_extraction_keeps_a_newer_file_and_freshen_makes_none() {
+    let mut host = Host::with(&[("a.txt", "one\n"), ("b.txt", "two\n")], "");
+    let found = json!([at("a.txt", YEAR_2001), at("b.txt", YEAR_2001)]);
+    assert_eq!(zip(&mut host, "z.zip", found).0, 0);
+    host.files.insert("/out/a.txt".into(), b"KEPT\n".to_vec());
+    host.mtimes.insert("/out/a.txt".into(), YEAR_2001 + 100);
+    assert_eq!(
+        unzip(&mut host, "z.zip", json!({"u": true, "base": "/out"})).0,
+        0
+    );
+    assert_eq!(host.files["/out/a.txt"], b"KEPT\n");
+    assert_eq!(host.files["/out/b.txt"], b"two\n");
+    host.files.remove("/out/b.txt");
+    assert_eq!(
+        unzip(&mut host, "z.zip", json!({"f": true, "base": "/out"})).0,
+        0
+    );
+    assert!(!host.files.contains_key("/out/b.txt"));
+}
+
+#[test]
+fn a_delete_spares_what_exclude_and_include_keep_out() {
+    let mut host = sample();
+    let config = json!({
+        "archive": "z.zip",
+        "output": "z.zip",
+        "delete": true,
+        "patterns": ["*"],
+        "exclude": ["a.txt"],
+    });
+    assert_eq!(run(&mut host, "zip", config).0, 0);
+    assert_eq!(names_of(&mut host, "z.zip"), "a.txt\n");
+    let mut host = sample();
+    let config = json!({
+        "archive": "z.zip",
+        "output": "z.zip",
+        "delete": true,
+        "patterns": ["*"],
+        "include": ["a.txt"],
+    });
+    assert_eq!(run(&mut host, "zip", config).0, 0);
+    assert_eq!(names_of(&mut host, "z.zip"), "d/\nd/b.txt\n");
+}
+
+#[test]
+fn a_refresh_with_no_file_named_looks_at_what_the_archive_holds() {
+    let mut host = Host::with(&[("a.txt", "one\n"), ("b.txt", "two\n")], "");
+    let found = json!([at("a.txt", YEAR_2001), at("b.txt", YEAR_2001)]);
+    assert_eq!(zip(&mut host, "z.zip", found).0, 0);
+    let refresh =
+        json!({"archive": "z.zip", "output": "z.zip", "update": true, "refresh_all": true});
+    assert_eq!(run(&mut host, "zip", refresh.clone()).0, 12);
+    host.files.insert("a.txt".into(), b"NEW\n".to_vec());
+    host.mtimes.insert("a.txt".into(), YEAR_2001 + 100);
+    host.mtimes.insert("b.txt".into(), YEAR_2001);
+    assert_eq!(run(&mut host, "zip", refresh).0, 0);
+    let piped = unzip(&mut host, "z.zip", json!({"p": true, "members": ["a.txt"]}));
+    assert_eq!(piped.1, "NEW\n");
+}
+
+#[test]
+fn a_test_finds_damage_before_anything_changes() {
+    let mut host = sample();
+    let good = json!({"archive": "z.zip", "output": "z.zip", "test": true});
+    let (status, out, _) = run(&mut host, "zip", good.clone());
+    assert_eq!((status, out.as_str()), (0, "test of z.zip OK\n"));
+    let damaged = host.files["z.zip"].len() / 3;
+    host.files.get_mut("z.zip").expect("archive")[damaged] ^= 0xFF;
+    let before = host.files["z.zip"].clone();
+    let (status, out, err) = run(&mut host, "zip", good);
+    assert_eq!(status, 8);
+    assert!(out.ends_with("test of z.zip FAILED\n"), "{out}");
+    assert!(err.contains("original files unmodified"), "{err}");
+    assert_eq!(host.files["z.zip"], before);
+}
+
+#[test]
+fn a_move_removes_the_name_found_and_says_what_it_could_not() {
+    let mut host = Host::with(&[("link", "t\n"), ("target", "t\n")], "");
+    let mut entry = file("link", 2);
+    entry["path"] = json!("target");
+    entry["source"] = json!("link");
+    let config =
+        json!({"archive": "z.zip", "output": "z.zip", "move_files": true, "found": [entry]});
+    assert_eq!(run(&mut host, "zip", config).0, 0);
+    assert!(!host.files.contains_key("link"));
+    assert!(host.files.contains_key("target"));
+    let mut entry = file("target", 2);
+    entry["source"] = json!("gone");
+    let config =
+        json!({"archive": "y.zip", "output": "y.zip", "move_files": true, "found": [entry]});
+    let (status, _, err) = run(&mut host, "zip", config);
+    assert_eq!(
+        (status, err.as_str()),
+        (0, "\tzip warning: error deleting target\n")
+    );
+}
+
+#[test]
+fn a_comment_past_its_length_field_is_cut_to_fit() {
+    let mut host = sample();
+    let config = json!({
+        "archive": "z.zip",
+        "output": "z.zip",
+        "comment_archive": true,
+        "stdin_lines": ["x".repeat(70_000)],
+    });
+    assert_eq!(run(&mut host, "zip", config).0, 0);
+    let shown = unzip(&mut host, "z.zip", json!({"z": true})).1;
+    assert_eq!(
+        shown.len()
+            - "Archive:  z.zip
+"
+            .len(),
+        0xFFFF + 1
+    );
+}
+
+#[test]
+fn a_freshen_makes_no_directories() {
+    let mut host = sample();
+    assert_eq!(
+        unzip(&mut host, "z.zip", json!({"f": true, "base": "/out"})).0,
+        0
+    );
+    assert!(!host.directories.iter().any(|dir| dir.starts_with("/out/d")));
+    assert!(!host.files.contains_key("/out/d/b.txt"));
+}
+
+#[test]
+fn a_nul_anywhere_marks_a_member_binary() {
+    let body = format!("{}\0tail\n", "line\n".repeat(1000));
+    let mut host = Host::with(&[("t", body.as_str())], "");
+    assert_eq!(zip(&mut host, "z.zip", json!([file("t", 2)])).0, 0);
+    let listing = unzip(&mut host, "z.zip", json!({"Z": true})).1;
+    assert!(listing.contains(" b- "), "{listing}");
+}
+
+#[test]
+fn a_refresh_under_y_leaves_a_link_the_rules_refuse() {
+    let mut host = Host::with(&[("denied/link", "t\n")], "");
+    host.links.insert("denied/link".into(), "target".into());
+    let link =
+        json!({"spelled": "denied/link", "kind": "link", "target": "old", "mtime": YEAR_2001});
+    assert_eq!(zip(&mut host, "z.zip", json!([link])).0, 0);
+    host.mtimes.insert("denied/link".into(), YEAR_2001 + 100);
+    let refresh = json!({
+        "archive": "z.zip",
+        "output": "z.zip",
+        "update": true,
+        "refresh_all": true,
+        "store_links": true,
+    });
+    assert_eq!(run(&mut host, "zip", refresh).0, 12);
+}
+
+#[test]
+fn a_refresh_under_y_weighs_what_stands_at_the_name() {
+    let mut host = Host::with(&[("target", "t\n"), ("other", "o\n")], "");
+    host.links.insert("link".into(), "target".into());
+    let link = json!({"spelled": "link", "kind": "link", "target": "target", "mtime": YEAR_2001});
+    assert_eq!(zip(&mut host, "z.zip", json!([link])).0, 0);
+    let refresh = json!({
+        "archive": "z.zip",
+        "output": "z.zip",
+        "update": true,
+        "refresh_all": true,
+        "store_links": true,
+    });
+    host.mtimes.insert("link".into(), YEAR_2001);
+    host.mtimes.insert("target".into(), YEAR_2001 + 100);
+    assert_eq!(run(&mut host, "zip", refresh.clone()).0, 12);
+
+    host.links.insert("link".into(), "other".into());
+    host.mtimes.insert("link".into(), YEAR_2001 + 100);
+    assert_eq!(run(&mut host, "zip", refresh.clone()).0, 0);
+    let piped = unzip(&mut host, "z.zip", json!({"p": true, "members": ["link"]}));
+    assert_eq!(piped.1, "other");
+
+    host.links.remove("link");
+    host.files.insert("link".into(), b"real\n".to_vec());
+    host.mtimes.insert("link".into(), YEAR_2001 + 200);
+    assert_eq!(run(&mut host, "zip", refresh).0, 0);
+    let piped = unzip(&mut host, "z.zip", json!({"p": true, "members": ["link"]}));
+    assert_eq!(piped.1, "real\n");
+}

@@ -56,7 +56,8 @@ export async function runTar(
         )
   const parsed = parseFlags(flagKwargs)
   if (parsed instanceof IOResult) return [null, parsed]
-  const created = parsed.archive !== null && parsed.create ? scopes : []
+  const created =
+    parsed.archive !== null && (parsed.create || parsed.append || parsed.update) ? scopes : []
   const result = await tarGeneric(
     parsed,
     flatScopes(created),

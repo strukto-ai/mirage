@@ -416,6 +416,8 @@ pub(crate) struct Reply {
     pub(crate) kind: Option<String>,
     /// The permission bits a stat found, where the host keeps them.
     pub(crate) mode: Option<u32>,
+    /// The modification time a stat found, where the host keeps one.
+    pub(crate) mtime: Option<i64>,
     /// What a link a readlink found holds; none for a name that is no
     /// link.
     pub(crate) target: Option<String>,

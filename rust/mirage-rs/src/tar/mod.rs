@@ -12,8 +12,15 @@ mod options;
 mod read;
 #[cfg(test)]
 mod tests;
+mod transform;
+mod update;
+
+use std::sync::Mutex;
 
 use serde::Deserialize;
+
+use self::options::{Overwrites, Owner};
+use self::transform::{Scope, Transforms};
 
 use crate::request::{Opening, Reply, Request, failed, failure_text};
 use crate::task::Host;
@@ -29,6 +36,16 @@ const READ: u64 = 256 * 1024;
 /// How much output gathers before it goes to the host.
 const WINDOW: usize = 256 * 1024;
 
+/// One `--exclude` or `-X` pattern and how it matches.
+#[derive(Deserialize, Clone, Default)]
+#[serde(default, deny_unknown_fields)]
+struct Exclusion {
+    #[serde(deserialize_with = "crate::latin1")]
+    pattern: Vec<u8>,
+    anchored: bool,
+    wildcards: bool,
+}
+
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 enum Mode {
@@ -36,6 +53,9 @@ enum Mode {
     Create,
     List,
     Extract,
+    Append,
+    Update,
+    Delete,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +127,9 @@ struct Entry {
     spelled: Vec<u8>,
     #[serde(deserialize_with = "crate::saturating_u64_opt")]
     size: Option<u64>,
+    /// Its modification time and permission bits, when the walk read them.
+    mtime: Option<i64>,
+    mode: Option<u32>,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -148,6 +171,32 @@ struct Config {
     /// The last --strip-components, read.
     #[serde(skip)]
     strip: usize,
+    #[serde(skip)]
+    overwrites: Overwrites,
+    #[serde(skip)]
+    owner: Option<Owner>,
+    #[serde(skip)]
+    group: Option<Owner>,
+    #[serde(skip)]
+    transforms: Mutex<Transforms>,
+    /// -P: names are stored and used as they are.
+    absolute: bool,
+    /// -p: an extracted file takes its member's permission bits.
+    preserve: bool,
+    /// --numeric-owner: ids in a listing, none but ids in a new header.
+    numeric: bool,
+    /// --mtime: the time every new member records.
+    mtime: Option<i64>,
+    /// What a listing or an extraction leaves out.
+    exclusions: Vec<Exclusion>,
+    /// --wildcards or --no-wildcards, when typed.
+    wildcards: Option<bool>,
+    /// --no-anchored: a selector may start after any slash.
+    unanchored: bool,
+    /// The run stops before it writes a member, its archive left empty.
+    abandon: bool,
+    /// The program `-a` would run and mirage does not have.
+    unavailable: Option<String>,
     to_stdout: bool,
     /// Where extraction lands.
     #[serde(deserialize_with = "crate::latin1")]
@@ -166,14 +215,32 @@ struct Config {
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let mut config: Config = parse_config(config)?;
     if let Some(typed) = &config.typed {
-        config.strip = options::strip(typed)?;
+        let read = options::read(typed)?;
+        config.strip = read.strip;
+        config.overwrites = read.overwrites;
+        config.owner = read.owner;
+        config.group = read.group;
+        config.transforms = Mutex::new(read.transforms);
     }
     Ok(task::spawn(|host| async move {
         match config.mode {
             Mode::Create => create::run(&host, &config).await,
             Mode::List | Mode::Extract => read::run(&host, &config).await,
+            Mode::Append | Mode::Update | Mode::Delete => update::run(&host, &config).await,
         }
     }))
+}
+
+impl Config {
+    /// `name` as `--transform` leaves it.
+    fn transformed(&self, name: &[u8], scope: Scope) -> Vec<u8> {
+        let mut transforms = self.transforms.lock().expect("one run at a time");
+        if transforms.is_empty() {
+            name.to_vec()
+        } else {
+            transforms.apply(name, scope)
+        }
+    }
 }
 
 /// Lines as a diagnostic block, each ended by a newline.

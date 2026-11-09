@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../../io/types.ts'
-import type { PathSpec } from '../../../../../types.ts'
+import { PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { relayWalkOf } from '../../../generic_bind/archive_io.ts'
 import { dispatchedReadTree } from '../../../generic_bind/files.ts'
 import { zipGeneric } from '../../zip_cmd.ts'
 import { crossOpts, flatScopes, statOp, streamOp } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
+import type { ByteSource } from '../../../../../io/types.ts'
 import { Files } from '../../../../../workspace/files.ts'
 import { linkLocation, linkView, mountView, owedNames } from '../../../utils/links.ts'
 
@@ -37,6 +38,10 @@ export async function runZip(
   dispatch: DispatchFn,
   // The symlinks and mount boundaries the scan merges into each walk.
   vfs?: Files,
+  // The directory a name -@ reads resolves against.
+  cwd = '/',
+  // What -@, -c and -z read.
+  stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
   const links = linkView(vfs)
   const tree =
@@ -52,6 +57,8 @@ export async function runZip(
     flatScopes(scopes),
     {
       ...crossOpts(flagKwargs),
+      cwd: PathSpec.fromStrPath(cwd),
+      stdin,
       vfs: vfs ?? new Files(dispatch, null, null, { ledger: false }).servedBy(null),
     },
     {

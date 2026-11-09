@@ -13,8 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat, PathSpec } from '../../../../types.ts'
-import { specOf } from '../../../spec/builtins.ts'
-import { FlagView } from '../../../spec/flag_view.ts'
 import { fileStreamOp, statOp } from '../../generic/crossmount/utils.ts'
 import { facts, parseFlags, tarGeneric } from '../../generic/tar/tar.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -32,11 +30,11 @@ const tar: CommandFn = async (_accessor, paths, texts, ctx) => {
   const dispatch = dispatchOf(ctx)
   if (dispatch === undefined) throw new TypeError('tar: no workspace files')
   const walk = walkOf(files, dispatch, 'tar')
-  if (!new FlagView(ctx.flags, specOf('tar')).asBool('create')) {
+  if (!parsed.create && !parsed.append && !parsed.update) {
     // -t reads and -x writes wherever cwd or -C says, which need not
     // be this mount, so both run on dispatch-relayed calls and each
-    // path routes to the mount that owns it. Only -c stays on the
-    // accessor: its planner walks this mount's tree.
+    // path routes to the mount that owns it. Only -c, -r and -u stay on
+    // the accessor: their planner walks this mount's tree.
     return tarGeneric(
       parsed,
       resolved,

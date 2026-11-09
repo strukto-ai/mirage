@@ -235,8 +235,11 @@ class _PatchFiles:
         """
         path = str(request["path"])
         if request["op"] == "write":
-            await self.write_bytes(self._spec(path, change=True), data)
-            return Served({})
+            return Served(
+                await self._change(
+                    lambda spec: self.write_bytes(spec, data), path
+                )
+            )
         if request["op"] == "stat":
             return Served(await self._kind(path))
         if request["op"] in self.changes:
@@ -274,6 +277,19 @@ class PatchFlags:
     forward: bool = False
     directories: tuple[str, ...] = ()
     dry_run: bool = False
+    backup: bool = False
+    suffix: str | None = None
+    prefix: str | None = None
+    version: str | None = None
+    output: str | None = None
+    reject: str | None = None
+    silent: bool = False
+    force: bool = False
+    batch: bool = False
+    whitespace: bool = False
+    fuzz: str | None = None
+    remove_empty: bool = False
+    verbose: bool = False
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> PatchFlags | IOResult:
@@ -288,9 +304,16 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> PatchFlags | IOResult:
     fl = FlagView(flags, spec=SPECS["patch"])
     input_flag = fl.raw("i")
     strip = fl.as_text("p")
+    fuzz = fl.as_text("fuzz")
+    version = fl.as_text("version_control")
     try:
         open_stream(
-            "patch", {"strip": None if strip is None else byte_view(strip)}
+            "patch",
+            {
+                "strip": None if strip is None else byte_view(strip),
+                "fuzz": None if fuzz is None else byte_view(fuzz),
+                "version": None if version is None else byte_view(version),
+            },
         )
     except StreamRefusal as refusal:
         return refused(refusal)
@@ -301,6 +324,19 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> PatchFlags | IOResult:
         forward=fl.as_bool("N"),
         directories=tuple(fl.as_list("directory")),
         dry_run=fl.as_bool("dry_run"),
+        backup=fl.as_bool("backup"),
+        suffix=fl.as_text("suffix"),
+        prefix=fl.as_text("prefix"),
+        version=version,
+        output=fl.as_text("output"),
+        reject=fl.as_text("reject_file"),
+        silent=fl.as_bool("silent"),
+        force=fl.as_bool("force"),
+        batch=fl.as_bool("batch"),
+        whitespace=fl.as_bool("ignore_whitespace"),
+        fuzz=fuzz,
+        remove_empty=fl.as_bool("remove_empty_files"),
+        verbose=fl.as_bool("verbose"),
     )
 
 
@@ -370,6 +406,10 @@ def _moved(spec: PathSpec, cwd: str, root: str) -> PathSpec:
     )
 
 
+def _view(text: str | None) -> str | None:
+    return None if text is None else byte_view(text)
+
+
 async def patch_generic(
     paths: list[PathSpec],
     texts: list[str],
@@ -423,6 +463,19 @@ async def patch_generic(
             "reverse": parsed.reverse,
             "forward": parsed.forward,
             "dry_run": parsed.dry_run,
+            "backup": parsed.backup,
+            "suffix": _view(parsed.suffix),
+            "prefix": _view(parsed.prefix),
+            "version": _view(parsed.version),
+            "output": _view(parsed.output),
+            "reject": _view(parsed.reject),
+            "silent": parsed.silent,
+            "force": parsed.force,
+            "batch": parsed.batch,
+            "whitespace": parsed.whitespace,
+            "fuzz": _view(parsed.fuzz),
+            "remove_empty": parsed.remove_empty,
+            "verbose": parsed.verbose,
             "file": (
                 None
                 if orig is None

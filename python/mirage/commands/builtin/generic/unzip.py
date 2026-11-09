@@ -41,6 +41,11 @@ LETTERS = {
     "h": "h",
     "o": "o",
     "n": "n",
+    "j": "j",
+    "u": "u",
+    "f": "f",
+    "z": "z",
+    "C": "C",
 }
 
 
@@ -50,6 +55,8 @@ class UnzipFlags:
     quiet: int = 0
     dest: PathSpec | str | None = None
     excludes: tuple[str, ...] = ()
+    text_mode: int = 0
+    lower: int = 0
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> UnzipFlags:
@@ -63,6 +70,8 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UnzipFlags:
         quiet=min(fl.as_int("q", 0), 2),
         dest=dest if isinstance(dest, (PathSpec, str)) else None,
         excludes=tuple(fl.as_list("x")),
+        text_mode=min(fl.as_int("a", 0), 2),
+        lower=min(fl.as_int("L", 0), 2),
     )
 
 
@@ -165,6 +174,8 @@ async def unzip_generic(
         "excludes": [byte_view(pattern) for pattern in excludes],
         "base": byte_view(extract_dest(dest, ctx.cwd).rstrip("/")),
         "q": parsed.quiet,
+        "a": parsed.text_mode,
+        "L": parsed.lower,
         **letters,
     }
     if dest is not None:

@@ -6,7 +6,7 @@
       "targets": [
         "ram-commands"
       ],
-      "command": "mkdir -p /scratch/wk/sealed/deep /scratch/wk/open /scratch/locked && echo s > /scratch/wk/sealed/s && echo d > /scratch/wk/sealed/deep/d && echo o > /scratch/wk/open/o && echo y > /scratch/locked/y",
+      "command": "mkdir -p /scratch/wk/sealed/deep /scratch/wk/open /scratch/locked && echo s > /scratch/wk/sealed/s && echo d > /scratch/wk/sealed/deep/d && echo o > /scratch/wk/open/o && echo y > /scratch/locked/y && ln -s secret /scratch/locked/zl && touch -h -d 2030-01-01T00:00:00Z /scratch/locked/zl",
       "expect": {
         "exit": 0,
         "stdout": "",
@@ -133,10 +133,10 @@
         "ram-commands"
       ],
       "session": "frozen",
-      "command": "tar -tf /scratch/wk.tar",
+      "command": "tar -tf /scratch/wk.tar; mkdir -p /scratch/fz; cd /scratch/fz; ln -s old zl; touch -h -d 2001-02-03T04:05:06Z zl; zip -qy z.zip zl; cd /scratch/locked; zip -quy /scratch/fz/z.zip; echo rc=$?; cd /; rm -r /scratch/fz",
       "expect": {
         "exit": 0,
-        "stdout": "scratch/wk/\nscratch/wk/open/\nscratch/wk/open/o\nscratch/wk/sealed/\n",
+        "stdout": "scratch/wk/\nscratch/wk/open/\nscratch/wk/open/o\nscratch/wk/sealed/\nrc=12\n",
         "stderr": ""
       }
     },

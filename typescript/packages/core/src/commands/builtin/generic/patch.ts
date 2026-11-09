@@ -185,8 +185,7 @@ class PatchFiles {
   async serve(request: Readonly<Record<string, util.JSONType>>, data: Uint8Array): Promise<Served> {
     const path = typeof request.path === 'string' ? request.path : ''
     if (request.op === 'write') {
-      await this.write(this.spec(path, true), data)
-      return { reply: {} }
+      return { reply: await this.change((spec) => this.write(spec, data), path) }
     }
     if (request.op === 'stat') return { reply: await this.kind(path) }
     if (request.op === 'mkdir' || request.op === 'unlink' || request.op === 'rmdir') {
@@ -221,6 +220,23 @@ interface PatchFlags {
   readonly forward: boolean
   readonly directories: string[]
   readonly dryRun: boolean
+  readonly backup: boolean
+  readonly suffix: string | null
+  readonly prefix: string | null
+  readonly version: string | null
+  readonly output: string | null
+  readonly reject: string | null
+  readonly silent: boolean
+  readonly force: boolean
+  readonly batch: boolean
+  readonly whitespace: boolean
+  readonly fuzz: string | null
+  readonly removeEmpty: boolean
+  readonly verbose: boolean
+}
+
+function view(text: string | null): string | null {
+  return text === null ? null : byteView(text)
 }
 
 // patch's options, -p refused by the patch engine before any file: the flags,
@@ -229,8 +245,14 @@ function parseFlags(bag: Record<string, FlagValue>): PatchFlags | IOResult {
   const fl = new FlagView(bag, specOf('patch'))
   const input = fl.raw('i')
   const strip = fl.asText('p') ?? null
+  const fuzz = fl.asText('fuzz') ?? null
+  const version = fl.asText('version_control') ?? null
   try {
-    openStreamSync('patch', { strip: strip === null ? null : byteView(strip) }).close()
+    openStreamSync('patch', {
+      strip: view(strip),
+      fuzz: view(fuzz),
+      version: view(version),
+    }).close()
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
     return refused(err)
@@ -242,6 +264,19 @@ function parseFlags(bag: Record<string, FlagValue>): PatchFlags | IOResult {
     forward: fl.asBool('N'),
     directories: fl.asList('directory'),
     dryRun: fl.asBool('dry_run'),
+    backup: fl.asBool('backup'),
+    suffix: fl.asText('suffix') ?? null,
+    prefix: fl.asText('prefix') ?? null,
+    version,
+    output: fl.asText('output') ?? null,
+    reject: fl.asText('reject_file') ?? null,
+    silent: fl.asBool('silent'),
+    force: fl.asBool('force'),
+    batch: fl.asBool('batch'),
+    whitespace: fl.asBool('ignore_whitespace'),
+    fuzz,
+    removeEmpty: fl.asBool('remove_empty_files'),
+    verbose: fl.asBool('verbose'),
   }
 }
 
@@ -349,6 +384,19 @@ export async function patchGeneric(
     reverse: parsed.reverse,
     forward: parsed.forward,
     dry_run: parsed.dryRun,
+    backup: parsed.backup,
+    suffix: view(parsed.suffix),
+    prefix: view(parsed.prefix),
+    version: view(parsed.version),
+    output: view(parsed.output),
+    reject: view(parsed.reject),
+    silent: parsed.silent,
+    force: parsed.force,
+    batch: parsed.batch,
+    whitespace: parsed.whitespace,
+    fuzz: view(parsed.fuzz),
+    remove_empty: parsed.removeEmpty,
+    verbose: parsed.verbose,
     file: orig === null ? null : byteView(orig.rawPath),
   })
   try {
