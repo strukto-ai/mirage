@@ -19,6 +19,7 @@ from typing import Any, ClassVar
 
 from mirage.commands.config import Context
 from mirage.context.session_context import current_caller
+from mirage.execution.job.constants import HANGUP_EXIT_CODE
 from mirage.execution.machine.types import MachineProcess
 from mirage.execution.types import MachineId, MachinePid
 from mirage.io.types import ByteSource
@@ -210,6 +211,17 @@ class MachineHandle:
                 )
             await asyncio.shield(self.stop(tag, signum or 15))
             raise
+        except ConnectionError as exc:
+            if type(exc) is not ConnectionError:
+                raise
+            logger.debug("%s: connection lost", self.id, exc_info=True)
+            if runner is not None:
+                runner.program_signaled(HANGUP_EXIT_CODE - 128)
+            done = RunResult(
+                stdout=b"",
+                stderr=f"mirage: {self.id}: connection lost\n".encode(),
+                exit_code=HANGUP_EXIT_CODE,
+            )
         finally:
             self._executing -= 1
         if self._mounts is None:

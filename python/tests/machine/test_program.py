@@ -138,6 +138,21 @@ async def test_run_cli_streams_input_and_output_and_maps_a_signal():
     )
 
 
+# A client to a machine that ends on a signal took the connection with it,
+# so how the program in the box ended is unknown; its own exit is the
+# program's.
+@pytest.mark.asyncio
+async def test_a_connection_client_ended_by_a_signal_is_a_lost_connection():
+    with pytest.raises(ConnectionError):
+        await run_program(
+            "sh", None, ["-c", "kill -KILL $$"], None, connection=True
+        )
+    ran = await run_program(
+        "sh", None, ["-c", "exit 3"], None, connection=True
+    )
+    assert ran.exit_code == 3
+
+
 # stderr goes to its own callback as it arrives, as stdout goes to output.
 @pytest.mark.asyncio
 async def test_run_cli_streams_stderr_to_its_callback():

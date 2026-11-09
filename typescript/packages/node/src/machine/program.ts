@@ -277,6 +277,9 @@ export async function runProgram(
     // and exits on its own terms (`docker exec` answers a TERM with 0 and
     // leaves the program running).
     direct?: boolean
+    // The child is the client a machine is reached through, so its own end
+    // on a signal is the connection's.
+    connection?: boolean
   } = {},
 ): Promise<RunResult> {
   const { signal, children } = options
@@ -388,6 +391,11 @@ export async function runProgram(
       if (options.direct === true && stopSignal(runner) !== null && child.exitCode !== null)
         runner?.programExited(child.exitCode)
       throw makeAbortError(signal)
+    }
+    if (options.connection === true && child.signalCode !== null) {
+      throw Object.assign(new Error(`${executable} ended on ${child.signalCode}`), {
+        name: 'ConnectionError',
+      })
     }
     if (options.direct === true && child.signalCode !== null)
       runner?.programSignaled(constants.signals[child.signalCode])

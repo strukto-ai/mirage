@@ -14,6 +14,7 @@
 
 import type { Context } from '../commands/config.ts'
 import { currentCaller } from '../context/session_context.ts'
+import { HANGUP_EXIT_CODE } from '../execution/job/constants.ts'
 import type { MachineProcess } from '../execution/machine/types.ts'
 import { MachineId, type MachinePid } from '../execution/types.ts'
 import type { ByteSource } from '../io/types.ts'
@@ -50,6 +51,8 @@ import {
 } from './constants.ts'
 import { isPipeTransport } from './mixin.ts'
 import { MachineMounts } from './mounts.ts'
+
+export const logger: { debug?: (message: string) => void } = {}
 
 /**
  * One machine a workspace runs programs on, reached through its provider:
@@ -194,9 +197,18 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         ctx.signal,
       )
     } catch (error) {
-      if (ctx.signal?.aborted === true)
+      if (ctx.signal?.aborted === true) {
         await this.stop(tag, runner?.signal ?? runner?.interrupted ?? 15)
-      throw error
+        throw error
+      }
+      if (!(error instanceof Error) || error.name !== 'ConnectionError') throw error
+      logger.debug?.(`${String(this.id)}: connection lost: ${String(error)}`)
+      runner?.programSignaled(HANGUP_EXIT_CODE - 128)
+      done = {
+        stdout: new Uint8Array(),
+        stderr: new TextEncoder().encode(`mirage: ${String(this.id)}: connection lost\n`),
+        exitCode: HANGUP_EXIT_CODE,
+      }
     } finally {
       this.runs -= 1
     }

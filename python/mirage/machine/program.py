@@ -113,6 +113,7 @@ async def run_program(
     output: OutputFn | None = None,
     errors: OutputFn | None = None,
     direct: bool = False,
+    connection: bool = False,
 ) -> RunResult:
     """One process run to its end: its output and its exit status.
 
@@ -147,9 +148,12 @@ async def run_program(
         direct (bool): the child is the program itself, not a client
             that runs it elsewhere and exits on its own terms (``docker
             exec`` answers a TERM with 0 and leaves the program running).
+        connection (bool): the child is the client a machine is reached
+            through, so its own end on a signal is the connection's.
 
     Raises:
         RuntimeError: the executable is missing and ``hint`` names it.
+        ConnectionError: a ``connection`` child ended on a signal.
     """
     loop = asyncio.get_running_loop()
     runner = current_caller().process
@@ -253,6 +257,8 @@ async def run_program(
         if children is not None:
             children.pop(process, None)
     code = process.returncode if process.returncode is not None else 1
+    if connection and code < 0:
+        raise ConnectionError(f"{executable} ended on signal {-code}")
     if direct and runner is not None and code < 0:
         runner.program_signaled(-code)
     return RunResult(

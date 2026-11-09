@@ -188,6 +188,17 @@ describe('runProgram', () => {
     expect(await pwd()).toBe('')
   })
 
+  // A client to a machine that ends on a signal took the connection with
+  // it, so how the program in the box ended is unknown; its own exit is the
+  // program's.
+  it('treats a connection client ended by a signal as a lost connection', async () => {
+    await expect(
+      runProgram('sh', null, ['-c', 'kill -KILL $$'], null, { connection: true }),
+    ).rejects.toMatchObject({ name: 'ConnectionError' })
+    const ran = await runProgram('sh', null, ['-c', 'exit 3'], null, { connection: true })
+    expect(ran.exitCode).toBe(3)
+  })
+
   // A kill that names TERM reaches the program as TERM, so its handler
   // runs, and the runner's status is bash's 143 for a child TERM ended.
   it('lets the child handle the TERM a kill sent its runner', async () => {

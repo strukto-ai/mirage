@@ -291,6 +291,60 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
     ]
 
 
+class DroppedBox(RecordingMachine):
+    error: type[Exception] = ConnectionError
+
+    async def exec_line(
+        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+    ) -> RunResult:
+        result = await super().exec_line(line, stdin, env, cwd)
+        if line.startswith("train"):
+            raise self.error("closed by remote host")
+        return result
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_connection_ends_the_line_as_hung_up():
+    box = DroppedBox(captures=("train",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        io = await ws.shell("train")
+        assert io.exit_code == 129
+        assert await materialize(io.stderr) == (
+            f"mirage: {box.id}: connection lost\n".encode()
+        )
+    finally:
+        await ws.close()
+
+
+# Only a transport's own ConnectionError means the connection went; an OS
+# error of that family from elsewhere in the run stays the error it is.
+@pytest.mark.asyncio
+async def test_another_connection_family_error_is_not_a_lost_connection():
+    box = DroppedBox(captures=("train",))
+    box.error = ConnectionResetError
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        io = await ws.shell("train")
+        assert io.exit_code != 129
+        assert b"connection lost" not in await materialize(io.stderr)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_job_whose_connection_dropped_is_reported_hung_up():
+    box = DroppedBox(captures=("train",))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, **on(box))
+    try:
+        await ws.shell("train &")
+        io = await ws.shell("wait %1")
+        assert io.exit_code == 129
+        assert b"Hangup" in await materialize(io.stderr)
+    finally:
+        await ws.close()
+
+
 # A run in the box carries the id of the process it runs as, which a
 # workspace that outlives this one stops it by.
 @pytest.mark.asyncio

@@ -81,6 +81,24 @@ class RecordingMachine extends MachineHandle {
   }
 }
 
+// A box whose connection drops while it runs `train`.
+class DroppedBox extends RecordingMachine {
+  errorName = 'ConnectionError'
+
+  override async execLine(
+    line: string,
+    stdin: Uint8Array | null,
+    env: Record<string, string>,
+    cwd: string,
+  ): Promise<RunResult> {
+    const result = await super.execLine(line, stdin, env, cwd)
+    if (line.startsWith('train')) {
+      throw Object.assign(new Error('closed by remote host'), { name: this.errorName })
+    }
+    return result
+  }
+}
+
 function sandboxWorkspace(box: RecordingMachine): Workspace {
   return new Workspace(
     { '/data': new RAMVFS() },
@@ -339,6 +357,46 @@ describe('MachineHandle', () => {
     const runtime = machineRuntime(new RecordingMachine())
     expect(isLineExecutor(runtime)).toBe(true)
     expect(runtime).not.toBeInstanceOf(LanguageRuntime)
+  })
+
+  it('ends a line whose connection dropped as hung up', async () => {
+    const box = new DroppedBox({ captures: ['train'] })
+    const ws = sandboxWorkspace(box)
+    try {
+      const io = await ws.shell('train')
+      expect(io.exitCode).toBe(129)
+      expect(DEC.decode(io.stderr)).toBe(`mirage: ${String(box.id)}: connection lost\n`)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Only a transport's own ConnectionError means the connection went; an
+  // error of another name from elsewhere in the run stays the error it is.
+  it('leaves an error of another name alone', async () => {
+    const box = new DroppedBox({ captures: ['train'] })
+    box.errorName = 'Error'
+    const ws = sandboxWorkspace(box)
+    try {
+      const io = await ws.shell('train')
+      expect(io.exitCode).not.toBe(129)
+      expect(DEC.decode(io.stderr)).not.toContain('connection lost')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reports a job whose connection dropped as hung up', async () => {
+    const box = new DroppedBox({ captures: ['train'] })
+    const ws = sandboxWorkspace(box)
+    try {
+      await ws.shell('train &')
+      const io = await ws.shell('wait %1')
+      expect(io.exitCode).toBe(129)
+      expect(DEC.decode(io.stderr)).toContain('Hangup')
+    } finally {
+      await ws.close()
+    }
   })
 
   it('a line timeout answers 124', async () => {
