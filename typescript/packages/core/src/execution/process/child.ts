@@ -36,6 +36,10 @@ export class ChildProcess {
   poll(): number | null {
     return this.process.record.exit
   }
+  /** The signal the child was stopped with, null while none has. */
+  get signal(): number | null {
+    return this.process.signal
+  }
   /**
    * Stop the child with `signal`; its status is 128 plus it.
    *

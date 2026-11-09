@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import os
 from types import SimpleNamespace
 from typing import Any
 
@@ -58,11 +59,16 @@ def test_foreground_always_uses_the_stream_transport(
 ):
     client = _Client()
     calls = []
+    read_end, write_end = os.pipe()
     monkeypatch.setattr(shell, "make_client", lambda: client)
     monkeypatch.setattr(
         shell,
         "sys",
-        SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: not piped)),
+        SimpleNamespace(
+            stdin=SimpleNamespace(
+                isatty=lambda: not piped, fileno=lambda: read_end
+            )
+        ),
     )
 
     async def run(client_arg, path, payload, piped_arg, *, json_output):
@@ -85,6 +91,23 @@ def test_foreground_always_uses_the_stream_transport(
         )
     ]
     assert not client.calls
+    os.close(read_end)
+    os.close(write_end)
+
+
+def test_an_empty_file_or_the_null_device_is_no_input(tmp_path):
+    empty = tmp_path / "empty"
+    empty.write_bytes(b"")
+    full = tmp_path / "full"
+    full.write_bytes(b"x")
+    with open(empty, "rb") as a, open(full, "rb") as b, open(os.devnull) as c:
+        assert not shell._has_input(a.fileno())
+        assert shell._has_input(b.fileno())
+        assert not shell._has_input(c.fileno())
+    read_end, write_end = os.pipe()
+    assert shell._has_input(read_end)
+    os.close(read_end)
+    os.close(write_end)
 
 
 def test_a_line_may_name_its_machine(monkeypatch):
@@ -95,6 +118,11 @@ def test_a_line_may_name_its_machine(monkeypatch):
         return 0
 
     monkeypatch.setattr(shell, "make_client", _Client)
+    monkeypatch.setattr(
+        shell,
+        "sys",
+        SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: True)),
+    )
     monkeypatch.setattr(stream, "stream_shell", run)
     args = ["-w", "w", "-c", "train", "--machine", "gpu"]
     assert CliRunner().invoke(shell.app, args).exit_code == 0

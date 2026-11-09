@@ -15,14 +15,18 @@
 from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.cli.builtin.discord.delete import delete_verb
 from mirage.commands.cli.builtin.discord.edit import edit
+from mirage.commands.cli.builtin.discord.list_pins import list_pins
 from mirage.commands.cli.builtin.discord.members import members
+from mirage.commands.cli.builtin.discord.pin_message import pin_message
 from mirage.commands.cli.builtin.discord.poll import poll
 from mirage.commands.cli.builtin.discord.react import react
+from mirage.commands.cli.builtin.discord.reactions import reactions
 from mirage.commands.cli.builtin.discord.read import read
 from mirage.commands.cli.builtin.discord.search import search
 from mirage.commands.cli.builtin.discord.send import send
 from mirage.commands.cli.builtin.discord.server_info import server_info
 from mirage.commands.cli.builtin.discord.thread_create import thread_create
+from mirage.commands.cli.builtin.discord.unpin_message import unpin_message
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.discord.config import DiscordConfig
@@ -97,6 +101,35 @@ DISCORD = CLI(
                 ),
             ),
             CommandSpec(
+                name="reactions",
+                description="List the reactions on a message",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--message", required=True),
+                ),
+            ),
+            CommandSpec(
+                name="pin-message",
+                description="Pin a message to its channel",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--message", required=True),
+                ),
+            ),
+            CommandSpec(
+                name="unpin-message",
+                description="Remove a pin from a message",
+                arguments=(
+                    Argument("--channel", required=True),
+                    Argument("--message", required=True),
+                ),
+            ),
+            CommandSpec(
+                name="list-pins",
+                description="List a channel's pinned messages",
+                arguments=(Argument("--channel", required=True),),
+            ),
+            CommandSpec(
                 name="search",
                 description="Search a guild's messages by content",
                 arguments=(
@@ -162,6 +195,10 @@ DISCORD = CLI(
         "edit": CLIHandler(fn=edit, write=True),
         "delete": CLIHandler(fn=delete_verb, write=True),
         "react": CLIHandler(fn=react, write=True),
+        "reactions": CLIHandler(fn=reactions),
+        "pin-message": CLIHandler(fn=pin_message, write=True),
+        "unpin-message": CLIHandler(fn=unpin_message, write=True),
+        "list-pins": CLIHandler(fn=list_pins),
         "search": CLIHandler(fn=search),
         "thread-create": CLIHandler(fn=thread_create, write=True),
         "poll": CLIHandler(fn=poll, write=True),

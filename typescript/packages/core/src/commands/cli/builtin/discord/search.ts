@@ -14,7 +14,7 @@
 
 import { FlagView } from '../../../spec/flag_view.ts'
 import { searchGuild } from '../../../../core/discord/search.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { DiscordAccessor } from '../../../../accessor/discord.ts'
@@ -33,6 +33,5 @@ export async function search(
     fl.asStr('query') ?? '',
     fl.asStr('channel') ?? undefined,
   )
-  const out: ByteSource = compactJsonBytes(results)
-  return [out, new IOResult()]
+  return [compactJsonBytes(results), new IOResult()]
 }

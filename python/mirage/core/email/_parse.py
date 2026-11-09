@@ -15,6 +15,7 @@
 from email import policy
 from email.message import Message
 from email.parser import BytesParser
+from email.utils import getaddresses
 from typing import Any, cast
 
 
@@ -106,7 +107,9 @@ def _parse_address(raw: str) -> dict[str, str]:
 def _parse_address_list(raw: str) -> list[dict[str, str]]:
     if not raw:
         return []
-    return [_parse_address(a.strip()) for a in raw.split(",")]
+    return [
+        {"name": name, "email": email} for name, email in getaddresses([raw])
+    ]
 
 
 def parse_with_payloads(raw: bytes) -> list[dict[str, Any]]:

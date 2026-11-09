@@ -59,6 +59,7 @@ it('drops an IMAP client whose socket the server reset and connects afresh', asy
     maxMessages: 200,
     saveCopy: true,
     sentFolder: null,
+    trashFolder: null,
   })
   try {
     const first = await accessor.getImap()

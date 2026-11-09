@@ -15,7 +15,7 @@
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { appendText } from '../../../../../core/gdocs/write.ts'
 import type { GoogleApiAccessor } from '../../../../../accessor/google_api.ts'
-import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { compactJsonBytes } from '../../../../../core/render/json.ts'
@@ -26,13 +26,12 @@ export async function write(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const result = await appendText(
     accessor.tokenManager,
     fl.asStr('document') ?? '',
     fl.asStr('text') ?? '',
     fl.asStr('tab') ?? undefined,
   )
-  const out: ByteSource = compactJsonBytes(result)
-  return [out, new IOResult()]
+  return [compactJsonBytes(result), new IOResult()]
 }

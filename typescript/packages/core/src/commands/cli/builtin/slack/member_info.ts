@@ -14,7 +14,7 @@
 
 import { FlagView } from '../../../spec/flag_view.ts'
 import { getUserProfile } from '../../../../core/slack/users.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { SlackAccessor } from '../../../../accessor/slack.ts'
@@ -28,6 +28,5 @@ export async function memberInfo(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
   const user = await getUserProfile(accessor, fl.asStr('user') ?? '')
-  const out: ByteSource = compactJsonBytes(user)
-  return [out, new IOResult()]
+  return [compactJsonBytes(user), new IOResult()]
 }

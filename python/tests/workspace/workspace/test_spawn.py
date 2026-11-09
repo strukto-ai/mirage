@@ -45,18 +45,18 @@ async def test_spawn_drains_pipes_and_isolates_session_state():
 
 
 @pytest.mark.asyncio
-async def test_profile_process_views_and_revocation():
+async def test_profile_session_processes_and_revocation():
     ws = Workspace({}, runtimes=[])
     try:
         a = ws.create_session("a")
         ws.create_session("b")
         child = ws.spawn(SpawnRequest(("sleep", "30")), "a")
         child.stdin.close()
-        view = ws._process_view(a)
-        assert [i.pid for i in view.list()] == [child.pid]
-        assert ws.process_table.view("b").list() == ()
+        view = ws._session_processes(a)
+        assert view.probe(child.pid)
+        assert not ws.process_table.for_session("b").probe(child.pid)
         await ws.set_session_profile("a", {"processes": {"max": 1}})
-        assert view.list() == ()
+        assert not view.probe(child.pid)
         assert view.spawn is not None
         with pytest.raises(PermissionError):
             view.spawn(SpawnRequest(("true",)))

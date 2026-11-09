@@ -426,6 +426,6 @@ async def test_a_uid_that_would_end_the_line_is_refused_before_connecting(
 ):
     get_imap = AsyncMock()
     monkeypatch.setattr(accessor, "get_imap", get_imap)
-    with pytest.raises(ValueError, match="line break or NUL"):
+    with pytest.raises(ValueError, match="Invalid message UID"):
         await fetch(accessor, f"1{bad}X1 EXPUNGE")
     get_imap.assert_not_awaited()

@@ -22,7 +22,7 @@ import {
   unknownOptionError,
   usageHint,
 } from '../../../../commands/spec/usage.ts'
-import type { RedirectResult } from '../../../../context/session_context.ts'
+import { whilePaused, type RedirectResult } from '../../../../context/session_context.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -207,6 +207,7 @@ export async function handleSleep(args: string[], signal?: AbortSignal): Promise
     ]
   }
   await sleep(total * 1000, signal)
+  await (whilePaused() ?? undefined)
   return [null, new IOResult(), new ExecutionNode({ command: 'sleep', exitCode: 0 })]
 }
 

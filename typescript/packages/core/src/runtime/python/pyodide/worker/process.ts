@@ -3,6 +3,8 @@ import type { RuntimeFiles } from '../../../files.ts'
 import { resolvePath } from '../../../../utils/path.ts'
 import { classify } from '../../../../errors/index.ts'
 import type { Context } from '../../../../commands/config.ts'
+import { currentCaller } from '../../../../context/session_context.ts'
+import { SIGKILL, SIGSTOP } from '../../../../shell/constants.ts'
 import { PipeClosed } from '../../../../shell/errors.ts'
 import { PathSpec } from '../../../../types.ts'
 import { decodeBase64, encodeBase64 } from '../../../../utils/base64.ts'
@@ -72,7 +74,6 @@ class GuestChild {
   readonly inherited = { stdout: [] as Uint8Array[], stderr: [] as Uint8Array[] }
   readonly background: Promise<void>[] = []
   communication: Promise<unknown> | null = null
-  killed = 0
   constructor(
     readonly child: ChildProcess,
     readonly request: Request,
@@ -107,7 +108,8 @@ class GuestChild {
   }
   code(): number | null {
     const code = this.child.poll()
-    return code === null ? null : this.killed ? -this.killed : code
+    const signal = this.child.signal
+    return code === null ? null : signal !== null ? -signal : code
   }
   communicate(data?: string): Promise<unknown> {
     if (this.communication === null) {
@@ -126,6 +128,7 @@ export class GuestProcessTable {
   private readonly children = new Map<number, GuestChild>()
   private closed = false
   private readonly owned = new Set<ChildProcess>()
+  private readonly own = currentCaller().process?.record.id.pid ?? -1
   /**
    * @param ctx the run's context, whose processes the guest's children join.
    * @param files the run's file adapter, which finds a program to spawn.
@@ -154,11 +157,12 @@ export class GuestProcessTable {
         inherited_stderr: encoded(inherited.stderr),
       })
     } catch (error) {
+      const said = (error as { code?: unknown }).code
       const code =
         error instanceof PipeClosed
           ? 'EPIPE'
-          : (error as { code?: unknown }).code === 'EAGAIN'
-            ? 'EAGAIN'
+          : said === 'EAGAIN' || said === 'ESRCH'
+            ? said
             : classify(error)
       return JSON.stringify({
         error: error instanceof Error ? error.message : String(error),
@@ -233,8 +237,15 @@ export class GuestProcessTable {
       this.children.set(child.pid, entry)
       return { pid: child.pid, returncode: entry.code() }
     }
+    if (request.op === 'kill' && request.pid === this.own && request.signal === SIGSTOP) {
+      await this.ctx.processes?.signal(this.own, SIGSTOP)
+      return {}
+    }
     const entry = this.children.get(request.pid ?? -1)
-    if (entry === undefined) throw new Error('unknown subprocess handle')
+    if (entry === undefined)
+      throw Object.assign(new Error('unknown subprocess handle'), {
+        code: request.op === 'kill' ? 'ESRCH' : undefined,
+      })
     const { child } = entry
     switch (request.op) {
       case 'release':
@@ -244,10 +255,8 @@ export class GuestProcessTable {
       case 'poll':
         return { returncode: entry.code() }
       case 'kill':
-        if (child.poll() === null) {
-          entry.killed = request.signal === 15 ? 15 : 9
-          child.terminate(entry.killed)
-        }
+        if (child.poll() === null)
+          await this.ctx.processes?.signal(child.pid, request.signal ?? SIGKILL)
         return { returncode: entry.code() }
       case 'close':
         if (request.stream === undefined) child.stdin.close()

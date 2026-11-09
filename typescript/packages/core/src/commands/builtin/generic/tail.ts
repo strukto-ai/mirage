@@ -29,7 +29,7 @@ import {
   type StatFn,
 } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import type { ProcessView } from '../../../execution/process/view.ts'
+import type { SessionProcesses } from '../../../execution/process/session.ts'
 import { enoent, fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { shellQuote } from '../../../utils/quote.ts'
@@ -516,7 +516,7 @@ async function* follow(
     n: number,
     interval: number,
   ) => Promise<AsyncIterable<Uint8Array> | null>,
-  processes?: ProcessView,
+  processes?: SessionProcesses,
 ): AsyncGenerator<Uint8Array> {
   const writer = flags.pid === 0 ? null : flags.pid
   const positions = new Map<number, number>()
@@ -711,7 +711,7 @@ async function* follow(
 
 // Whether --pid's process still runs, as kill(pid, 0) answers: one the
 // session cannot see is gone, and one it sees but may not signal still runs.
-function writerRuns(processes: ProcessView | undefined, pid: number): boolean {
+function writerRuns(processes: SessionProcesses | undefined, pid: number): boolean {
   if (processes === undefined) return false
   try {
     return processes.probe(pid)

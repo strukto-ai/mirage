@@ -32,6 +32,7 @@ from mirage.workspace.lookup.types import WrapperOptions
 UNSUPPORTED_BUILTINS = frozenset(
     {
         "bg",
+        "fg",
         "complete",
         "compgen",
         "ulimit",
@@ -94,7 +95,7 @@ KEYWORDS = frozenset(
 )
 
 # ShellBuiltin subset handled through the job table in the executor.
-JOB_BUILTINS = frozenset({"wait", "fg", "kill", "jobs", "disown", "ps"})
+JOB_BUILTINS = frozenset({"wait", "kill", "jobs", "disown", "ps"})
 
 SHELL_NAMES = frozenset(str(b) for b in ShellBuiltin) | UNSUPPORTED_BUILTINS
 

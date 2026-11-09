@@ -24,6 +24,7 @@ from mirage.commands.cli.refusal import (
     ARGPARSE_EXIT,
     CLAP_EXIT,
     clap_missing_operands,
+    clap_stray_operand,
     directory_refusal,
     leaf_refusal,
 )
@@ -39,7 +40,7 @@ from mirage.commands.spec.types import (
     UsageStyle,
 )
 from mirage.errors.types import FsCondition
-from mirage.execution.process.view import ProcessView
+from mirage.execution.process.session import SessionProcesses
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
@@ -292,7 +293,7 @@ class CLIContext:
     entries: list[Runtime[Any]] | None = None
     vfs: Files | None = None
     session: SessionView | None = None
-    processes: ProcessView | None = None
+    processes: SessionProcesses | None = None
     routing: RouteDecision[RuntimeIdentity] | None = None
     settle: Callable[[Runtime[Any]], Awaitable[None]] | None = None
     ids: IdSource = field(default_factory=SystemIdSource)
@@ -520,6 +521,13 @@ async def walk_leaf(
         )
 
     refusal = option_error(prog, parsed)
+    stray = (
+        clap_stray_operand(prog, parse_spec, list(parsed.texts), result.argv)
+        if style is UsageStyle.CLAP
+        else None
+    )
+    if stray is not None:
+        refusal = (stray, CLAP_EXIT)
     msg: bytes | None = None
     shown: bytes | None = None
     code = 0
@@ -533,7 +541,7 @@ async def walk_leaf(
         code = COBRA_EXIT
     elif refusal is not None:
         msg, code, shown = leaf_refusal(
-            style, refusal[0], parsed, " ".join(result.path), leaf
+            style, refusal[0], parsed, " ".join(result.path), leaf, prog
         )
     elif parsed.missing_required_operands and style is UsageStyle.CLAP:
         msg = clap_missing_operands(
@@ -767,7 +775,7 @@ async def _run_cli(
             prog,
             Producer(command=prog, declared=binding.limit),
             cli_voice(prog),
-            drop=drop_caches if binding.write else None,
+            drop=drop_caches if binding.writes(walked.argv) else None,
             vfs=ctx.vfs,
         )
 

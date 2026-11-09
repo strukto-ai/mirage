@@ -18,6 +18,12 @@ import type { Program, RunResult, BridgeDispatchFn } from '../../../types.ts'
 import type { PyodideConfig } from '../config.ts'
 import type { MirageMutation } from '../fs/journal.ts'
 
+/** The numbers a program sees for itself and its parent. */
+export interface ProgramIds {
+  pid: number | null
+  ppid: number | null
+}
+
 export type ReadOperation = 'stat' | 'readdir' | 'readlink'
 /** A call on a core handle the worker's stream holds (`SyncVFS`). */
 export type HandleOperation = 'open' | 'pread' | 'pwrite' | 'fstat' | 'ftruncate' | 'close'
@@ -57,6 +63,8 @@ export interface ExecuteRequest {
   cwd: string
   env: Record<string, string>
   flags: Readonly<Record<string, FlagValue>>
+  // The numbers the program sees for itself and its parent.
+  ids: ProgramIds
   timeoutSeconds?: number
   interruptBuffer?: SharedArrayBuffer
   /** The page URL the service worker bridges file calls at, where no memory is shared. */

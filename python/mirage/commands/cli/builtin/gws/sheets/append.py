@@ -28,12 +28,11 @@ async def append(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     result = await append_values(
         accessor.token_manager,
         fl.as_str("spreadsheet") or "",
         fl.as_str("range", "A1"),
         values_json_from_flags(fl),
     )
-    out = compact_json_bytes(result)
-    return out, IOResult()
+    return compact_json_bytes(result), IOResult()

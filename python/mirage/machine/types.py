@@ -25,6 +25,18 @@ MountType: TypeAlias = Literal["ssh", "fuse", "both"]
 
 
 @dataclass(frozen=True, slots=True)
+class RunStatus:
+    """What a run has reported on its machine (``RUN_WRAPPER``): its
+    program's pid and start in clock ticks, None until it starts, and
+    its exit status, None until it exits.
+    """
+
+    pid: int | None
+    started: float | None
+    exit_code: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class MachinePipe:
     """A command a machine runs with its stdin and stdout held open.
 

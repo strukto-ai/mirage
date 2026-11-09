@@ -44,7 +44,8 @@ import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { pickString } from '../../../../utils/records.ts'
-import { firstText, resolveIssue } from './util.ts'
+import { resolveIssue } from './util.ts'
+import { firstText } from '../../operand.ts'
 
 function requireTeam(fl: FlagView): string {
   const team = fl.asStr('team')
@@ -110,7 +111,7 @@ export async function issueList(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
+  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags, ctx.spec)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const issues = await listTeamIssues(accessor.transport, teamId)
   return [jsonBytes(issues.map((issue) => normalizeIssue(issue))), new IOResult()]
@@ -133,7 +134,7 @@ export async function projectList(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
+  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags, ctx.spec)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const projects = await listTeamProjects(accessor.transport, teamId)
   const payload = []
@@ -161,7 +162,7 @@ export async function projectGet(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
+  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags, ctx.spec)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const projectId = firstText(texts, 'project id')
   const projects = await listTeamProjects(accessor.transport, teamId)
@@ -193,7 +194,7 @@ export async function cycleList(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
+  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags, ctx.spec)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const cycles = await listTeamCycles(accessor.transport, teamId)
   return [jsonBytes(cycles.map((cycle) => normalizeCycle(cycle, teamId))), new IOResult()]
@@ -205,7 +206,7 @@ export async function cycleCurrent(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
+  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags, ctx.spec)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const cycles = await listTeamCycles(accessor.transport, teamId)
   let current: Record<string, unknown> | undefined
@@ -228,7 +229,7 @@ export async function cycleGet(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
+  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags, ctx.spec)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const cycleId = firstText(texts, 'cycle id')
   const cycles = await listTeamCycles(accessor.transport, teamId)
@@ -244,7 +245,7 @@ export async function labelList(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
+  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags, ctx.spec)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const labels = await listTeamLabels(accessor.transport, teamId)
   return [jsonBytes(labels.map((label) => normalizeLabel(label))), new IOResult()]
@@ -295,7 +296,7 @@ export async function documentList(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
+  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags, ctx.spec)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const documents = await listTeamDocuments(accessor.transport, teamId)
   return [jsonBytes(documents.map((document) => normalizeDocument(document))), new IOResult()]
@@ -307,7 +308,7 @@ export async function documentGet(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
+  const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags, ctx.spec)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const documentId = firstText(texts, 'document id')
   const documents = await listTeamDocuments(accessor.transport, teamId)
@@ -323,7 +324,7 @@ export async function search(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const flagQuery = fl.asStr('query')
   const query = flagQuery !== undefined && flagQuery !== '' ? flagQuery : (texts[0] ?? null)
   if (query === null || query === '') throw new Error('a search query is required')

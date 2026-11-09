@@ -51,8 +51,10 @@ class MachineProcess:
     is the Mirage process the run is, ``pid`` and ``ppid`` its own and
     its parent's pid on the machine, ``started`` when it started (clock
     ticks after boot on a machine, epoch seconds on the host), which
-    tells it apart from a later process given the same pid, and ``args``
-    its arguments, space separated.
+    tells it apart from a later process given the same pid, ``args``
+    its arguments, space separated, ``state`` the letter ``ps`` shows for
+    it, and ``program`` the pid of the program its run reported, None
+    while it has reported none.
     """
 
     tag: str
@@ -60,3 +62,5 @@ class MachineProcess:
     ppid: int
     started: float
     args: str
+    state: str = "R"
+    program: int | None = None

@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { tmpdir } from 'node:os'
+import { devNull, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Writable } from 'node:stream'
 import { Command } from 'commander'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatExplanation, registerShellCommand } from './shell.ts'
+import { formatExplanation, hasInput, registerShellCommand } from './shell.ts'
 
 const tty = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
 const exitCode = process.exitCode
@@ -34,6 +34,27 @@ afterEach(() => {
 })
 
 describe('mirage shell', () => {
+  it('reads an empty file or the null device as no input', () => {
+    const home = mkdtempSync(join(tmpdir(), 'mirage-shell-input-'))
+    try {
+      const open = (path: string): boolean => {
+        const fd = openSync(path, 'r')
+        try {
+          return hasInput(fd)
+        } finally {
+          closeSync(fd)
+        }
+      }
+      writeFileSync(join(home, 'empty'), '')
+      writeFileSync(join(home, 'full'), 'x')
+      expect(open(join(home, 'empty'))).toBe(false)
+      expect(open(join(home, 'full'))).toBe(true)
+      expect(open(devNull)).toBe(false)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it.each([false, true])(
     'uses the same foreground stream transport (json=%s)',
     async (jsonOutput) => {

@@ -421,9 +421,25 @@ clock. `time.monotonic()` and `time.perf_counter()` measure elapsed time.
     | API or behavior | Limitation |
     | --- | --- |
     | `subprocess.run()`, `subprocess.Popen()` | Runs commands inside Mirage. Pending file writes are saved before the command starts. |
-    | `Popen.send_signal()`, `terminate()`, `kill()` | Takes only `SIGTERM` and `SIGKILL`. The command stops with that signal, as `kill` stops a job, so a program it runs gets `SIGTERM` before it is killed. |
+    | `Popen.send_signal()`, `terminate()`, `kill()` | Sends the signal as `kill` does. A command that ends on it reports a negative `returncode`. |
   </Accordion>
 </AccordionGroup>
+
+### Processes and signals
+
+| API | Support |
+| --- | --- |
+| `os.getpid()`, `os.getppid()` | ✓ |
+| `os.kill()`, `signal.raise_signal()` | ✓ |
+| `signal.signal()` | ✓ |
+
+<Accordion title="Limitations" id="signal-limitations">
+  | API or behavior | Limitation |
+  | --- | --- |
+  | `os.getpid()`, `os.getppid()` | Return the numbers `ps` and `$!` show. |
+  | `os.kill()` | Reaches the program itself and the commands it started. Any other pid raises `ProcessLookupError`. |
+  | `signal.signal()` | A handler runs when `kill` sends the signal. A program inside a file operation runs it when the operation ends. |
+</Accordion>
 
 ### `socket`
 

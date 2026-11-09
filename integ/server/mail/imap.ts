@@ -37,7 +37,9 @@ import {
 // `+ ` continuation, and a fake that answered neither hung the connection.
 // UIDPLUS is what makes APPEND report the UID it assigned, which the seeder
 // needs to know what it just wrote.
-const CAPABILITIES = 'IMAP4rev1 LITERAL+ UIDPLUS ENABLE ID NAMESPACE'
+// AUTH=PLAIN and SASL-IR are for the clients that refuse a bare LOGIN, real
+// himalaya among them.
+const CAPABILITIES = 'IMAP4rev1 LITERAL+ UIDPLUS ENABLE ID NAMESPACE AUTH=PLAIN SASL-IR'
 
 // The flags a mailbox advertises. \Recent is advertised but never set: this
 // fake has no session-scoped arrival state and every consumer reads \Seen.
@@ -57,6 +59,8 @@ interface Session {
   // Set once the current command's literal has been read, so a line arriving
   // while a literal is outstanding is data rather than a command.
   pending: { need: number; chunks: Buffer[]; line: string } | null
+  // The tag of an AUTHENTICATE waiting for its credentials line.
+  saslTag: string | null
 }
 
 function write(session: Session, line: string): void {
@@ -146,6 +150,7 @@ export function startImapServer(
       mailbox: '',
       readOnly: false,
       pending: null,
+      saslTag: null,
     }
     write(session, `* OK [CAPABILITY ${CAPABILITIES}] mirage mail fake ready`)
     let buffer = Buffer.alloc(0)
@@ -240,6 +245,12 @@ async function handle(
   line: string,
   literal: Buffer | null,
 ): Promise<void> {
+  if (session.saslTag !== null) {
+    const tag = session.saslTag
+    session.saslTag = null
+    await authenticate(runtime, session, tag, line.trim())
+    return
+  }
   const cmd = parseCommand(line, literal)
   if (cmd === null) {
     write(session, '* BAD missing command')
@@ -294,6 +305,17 @@ async function dispatch(
   }
   if (name === 'LOGIN') {
     await login(runtime, session, tag, args)
+    return
+  }
+  if (name === 'AUTHENTICATE') {
+    // A client without SASL-IR sends the credentials on the next line, after
+    // the continuation.
+    if (args[1] === undefined) {
+      session.saslTag = tag
+      write(session, '+ ')
+      return
+    }
+    await authenticate(runtime, session, tag, args[1])
     return
   }
   if (session.state === 'unauth') {
@@ -388,6 +410,16 @@ async function dispatch(
   write(session, `${tag} BAD unsupported command ${name}`)
 }
 
+async function authenticate(
+  runtime: Runtime<C>,
+  session: Session,
+  tag: string,
+  blob: string,
+): Promise<void> {
+  const [, user, pass] = Buffer.from(blob, 'base64').toString('utf8').split('\0')
+  await login(runtime, session, tag, [user ?? '', pass ?? ''])
+}
+
 // The whole point of this fake, in one function. The USERNAME is the tenant and
 // the PASSWORD is the run, so two runs log in at ONE address as ONE account and
 // get two mailboxes. That works only because the password is harness-side on
@@ -450,7 +482,15 @@ function quoted(name: string): string {
 }
 
 async function list(runtime: Runtime<C>, session: Session, tag: string): Promise<void> {
+  const parents = new Set<string>()
   for (const box of await mailboxesOf(db(runtime, session), session.tenant)) {
+    // A parent that exists only as a path holds no mail, so hierarchical
+    // servers list it \\Noselect.
+    const parent = box.name.includes('/') ? box.name.slice(0, box.name.lastIndexOf('/')) : null
+    if (parent !== null && !parents.has(parent)) {
+      parents.add(parent)
+      write(session, `* LIST (\\Noselect \\HasChildren) "/" ${quoted(parent)}`)
+    }
     write(session, `* LIST (\\HasNoChildren) "/" ${quoted(box.name)}`)
   }
   write(session, `${tag} OK LIST completed`)
@@ -579,19 +619,84 @@ async function search(
   write(session, `${tag} OK SEARCH completed`)
 }
 
-// The FETCH items every consumer here asks for, and no more. There is no
-// ENVELOPE and no BODYSTRUCTURE on purpose: all three clients fetch the whole
-// message and parse the MIME themselves, so implementing the structured forms
-// would be inventing a second, unexercised rendering of the same bytes. The
-// header block alone (BODY[HEADER]) names a search hit's file without the
-// body.
+// The FETCH items every consumer here asks for, and no more. Mirage's clients
+// fetch the whole message and parse the MIME themselves; ENVELOPE and
+// BODYSTRUCTURE are what real himalaya lists with. The header block alone
+// (BODY[HEADER]) names a search hit's file without the body.
 function fetchItem(item: string, msg: SearchMsg): string | null {
   const key = item.toUpperCase()
   if (key === 'UID') return `UID ${String(msg.uid)}`
   if (key === 'FLAGS') return `FLAGS (${msg.flags.join(' ')})`
   if (key === 'INTERNALDATE') return `INTERNALDATE "${internalDateOf(msg.internalDate)}"`
   if (key === 'RFC822.SIZE') return `RFC822.SIZE ${String(msg.source.length)}`
+  if (key === 'ENVELOPE') return `ENVELOPE ${envelopeOf(msg.source)}`
+  if (key === 'BODYSTRUCTURE') return `BODYSTRUCTURE ${structureOf(msg.source)}`
   return null
+}
+
+function nstring(value: string | null): string {
+  return value === null ? 'NIL' : quoted(value)
+}
+
+function headerField(head: string, name: string): string | null {
+  for (const line of head.split('\r\n')) {
+    const at = line.indexOf(':')
+    if (at > 0 && line.slice(0, at).toLowerCase() === name) return line.slice(at + 1).trim()
+  }
+  return null
+}
+
+function addressList(value: string | null): string {
+  if (value === null || value === '') return 'NIL'
+  const entries = value.split(',').map((raw) => {
+    const trimmed = raw.trim()
+    const open = trimmed.lastIndexOf('<')
+    const email = open < 0 ? trimmed : trimmed.slice(open + 1, trimmed.lastIndexOf('>'))
+    const name = open < 0 ? '' : trimmed.slice(0, open).trim().replace(/^"|"$/g, '')
+    const [mailbox, host] = email.split('@')
+    return `(${nstring(name === '' ? null : name)} NIL ${nstring(mailbox ?? '')} ${nstring(host ?? '')})`
+  })
+  return `(${entries.join('')})`
+}
+
+function envelopeOf(source: Buffer): string {
+  const end = source.indexOf('\r\n\r\n')
+  const head = source
+    .subarray(0, end < 0 ? source.length : end)
+    .toString('latin1')
+    .replace(/\r\n[ \t]+/g, ' ')
+  const field = (name: string): string | null => headerField(head, name)
+  const from = addressList(field('from'))
+  const sender = field('sender') === null ? from : addressList(field('sender'))
+  const replyTo = field('reply-to') === null ? from : addressList(field('reply-to'))
+  return `(${[
+    nstring(field('date')),
+    nstring(field('subject')),
+    from,
+    sender,
+    replyTo,
+    addressList(field('to')),
+    addressList(field('cc')),
+    addressList(field('bcc')),
+    nstring(field('in-reply-to')),
+    nstring(field('message-id')),
+  ].join(' ')})`
+}
+
+function structureOf(source: Buffer): string {
+  const leaf = (disposition: string | null, name: string | null): string => {
+    const parameters =
+      disposition === null
+        ? 'NIL'
+        : `(${quoted(disposition)} (${quoted('filename')} ${nstring(name)}))`
+    return `(${quoted('text')} ${quoted('plain')} (${quoted('charset')} ${quoted('utf-8')}) NIL NIL ${quoted('base64')} 4 1 NIL ${parameters} NIL NIL)`
+  }
+  const named = [
+    ...source.toString('latin1').matchAll(/Content-Disposition: (\w+); filename="([^"]*)"/g),
+  ]
+  if (named.length === 0) return leaf(null, null)
+  const parts = named.map((match) => leaf(match[1] ?? '', match[2] ?? ''))
+  return `(${leaf(null, null)}${parts.join('')} ${quoted('mixed')} (${quoted('boundary')} ${quoted('integ-mime-boundary')}) NIL NIL NIL)`
 }
 
 const BODY_ITEM = /^(BODY(?:\.PEEK)?\[\]|RFC822(?:\.TEXT)?)$/i
@@ -720,24 +825,35 @@ async function copy(
   const set = args[0] ?? ''
   const target = canonicalName(args[1] ?? '')
   await queue.enqueue(session.run, async () => {
-    if ((await mailboxOf(db(runtime, session), session.tenant, target)) === null) {
+    const box = await mailboxOf(db(runtime, session), session.tenant, target)
+    if (box === null) {
       write(session, `${tag} NO [TRYCREATE] no such mailbox`)
       return
     }
     const rows = await loaded(runtime, session)
     const top = highest(rows, uidMode)
+    const sources: number[] = []
+    const copies: number[] = []
     for (const msg of rows) {
       if (!inSet(set, uidMode ? msg.uid : msg.seq, top)) continue
-      await appendMessage(
-        db(runtime, session),
-        session.tenant,
-        target,
-        msg.source,
-        msg.flags,
-        msg.internalDate,
+      sources.push(msg.uid)
+      copies.push(
+        await appendMessage(
+          db(runtime, session),
+          session.tenant,
+          target,
+          msg.source,
+          msg.flags,
+          msg.internalDate,
+        ),
       )
     }
-    write(session, `${tag} OK COPY completed`)
+    // RFC 4315's report of what was copied, which is how a client counts them.
+    const copied =
+      sources.length === 0
+        ? ''
+        : `[COPYUID ${String(box.uidValidity)} ${sources.join(',')} ${copies.join(',')}] `
+    write(session, `${tag} OK ${copied}COPY completed`)
   })
 }
 

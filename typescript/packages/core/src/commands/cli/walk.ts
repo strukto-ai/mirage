@@ -14,7 +14,13 @@
 import { flagOccurrences } from '../spec/flag_view.ts'
 import { HELP_OPTION, FLOAT_VALUE, INT_VALUE, NEGATIVE_NUMBER } from '../spec/constants.ts'
 import { compileSpec, type CompiledSpec, expandLong } from '../spec/compile.ts'
-import { argparseHelp, clapGroupRefusal, clapUnexpectedArgument, renderHelp } from '../spec/help.ts'
+import {
+  argparseHelp,
+  clapGroupRefusal,
+  clapUnexpectedArgument,
+  renderHelp,
+  usageLine,
+} from '../spec/help.ts'
 import { CommandSpec, type CommandSpecInit, UsageStyle, Argument } from '../spec/types.ts'
 import { PathSpec } from '../../types.ts'
 
@@ -371,7 +377,24 @@ function usageError(
 }
 
 /** git's unknown-command refusal, with the group path in the noun. */
-function unknownVerb(head: string, name: string, word: string): WalkResult {
+function unknownVerb(
+  head: string,
+  name: string,
+  word: string,
+  node: CommandSpec,
+  style: UsageStyle,
+): WalkResult {
+  if (style === UsageStyle.CLAP) {
+    let usage = usageLine(name, node, subcommandRows(node), style)
+    if (!name.includes(' ')) usage = usage.replace('<COMMAND>', '[COMMAND]')
+    return new WalkResult({
+      output: encodeText(
+        `error: unrecognized subcommand '${word}'\n\n${usage}\n\nFor more information, try '--help'.\n`,
+      ),
+      stream: 'stderr',
+      exitCode: CLAP_EXIT,
+    })
+  }
   return new WalkResult({
     output: encodeText(`${head}: '${word}' is not a ${name} command. See '${name} --help'.\n`),
     stream: 'stderr',
@@ -848,7 +871,7 @@ export function walk(
             exitCode: COBRA_EXIT,
           })
         }
-        return unknownVerb(head, name, token)
+        return unknownVerb(head, name, token, node, style)
       }
       node = child
       path = [...path, child.name]
@@ -860,10 +883,15 @@ export function walk(
     if (descended) continue
     const refused = finishNode(name, node, cs, flags, cwd, style, bases, env, deferEnv)
     if (refused !== null) return refused
+    const clapGroup = style === UsageStyle.CLAP && path.length > 0
     return new WalkResult({
       output: encodeText(nodeHelp(name, node, style)),
-      stream: 'stdout',
-      exitCode: style === UsageStyle.COBRA ? 0 : 1,
+      stream: clapGroup ? 'stderr' : 'stdout',
+      exitCode: clapGroup
+        ? CLAP_EXIT
+        : style === UsageStyle.COBRA || style === UsageStyle.CLAP
+          ? 0
+          : 1,
     })
   }
 }

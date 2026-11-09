@@ -604,6 +604,180 @@ async def make_link(
         )
 
 
+async def _walk_refusal(
+    links: NamespaceReader,
+    dispatch: DispatchFn,
+    cwd: str,
+    plan: LinkPlan,
+    flags: LnFlags,
+) -> str | None:
+    """The line refusing a link its paths cannot reach, None for one they
+    can.
+
+    Args:
+        links (NamespaceReader): the link table as the session sees it.
+        dispatch (DispatchFn): op dispatcher.
+        cwd (str): session working directory.
+        plan (LinkPlan): the link to make.
+        flags (LnFlags): the parsed flags.
+    """
+    typed = plan.link_typed
+    target_typed = word_text(plan.source)
+    # A `.` or `..` resolves against the directory in front of it, which
+    # has to be there. A symlink's target is stored as typed and never
+    # walked; a hard link's is the file it names.
+    walker = partial(dispatch_stat, dispatch)
+    # What the walk answers before any op, in GNU's order: symlink(2)
+    # refuses an empty target ahead of the name, and then GNU names the
+    # target alongside; a hard link's source is reached first; the name
+    # last, as the call that makes it would meet it.
+    if flags.symbolic and target_typed == "":
+        return (
+            f"ln: failed to create symbolic link '{typed}' -> '': "
+            f"{posix_phrase(FsCondition.ENOENT)}\n"
+        )
+    if not flags.symbolic:
+        why = _walk_verdict(links, plan.source, cwd, flags.logical)
+        if why is not None:
+            return (
+                f"ln: failed to access '{target_typed}': {posix_phrase(why)}\n"
+            )
+    why = _walk_verdict(links, typed, cwd)
+    if why is not None:
+        return _refused(flags, typed, target_typed, why)
+    if not flags.symbolic:
+        try:
+            unwalked = await dot_refusal(
+                walker,
+                PathSpec.from_str_path(plan.source, cwd=cwd),
+                links.follow,
+            )
+        except PermissionError as exc:
+            unwalked = exc
+        if unwalked is not None:
+            return (
+                f"ln: failed to access '{target_typed}': "
+                f"{fs_strerror(unwalked)}\n"
+            )
+    # -f and -b look at the name before making it, so a plain file
+    # behind its slash is ENOTDIR there and EEXIST only to symlink(2).
+    replaces = flags.force or flags.backup not in (None, "none")
+    unwalked = await dot_refusal(
+        walker,
+        PathSpec.from_str_path(typed, cwd=cwd),
+        links.follow,
+        creates=not replaces,
+    )
+    if unwalked is not None:
+        why = classify(unwalked) or FsCondition.ENOENT
+        return _refused(flags, typed, target_typed, why)
+    return None
+
+
+async def _slash_refusal(
+    links: NamespaceReader,
+    dispatch: DispatchFn,
+    plan: LinkPlan,
+    flags: LnFlags,
+    kind: str,
+) -> str | None:
+    """The line refusing a link name typed with a trailing slash, None
+    when nothing here settles it.
+
+    Args:
+        links (NamespaceReader): the link table as the session sees it.
+        dispatch (DispatchFn): op dispatcher.
+        plan (LinkPlan): the link to make.
+        flags (LnFlags): the parsed flags.
+        kind (str): what the diagnostic calls the link.
+    """
+    typed = plan.link_typed
+    target_typed = word_text(plan.source)
+    backs = flags.backup not in (None, "none")
+    # A link name typed with a slash asks for a directory the link
+    # can never be, and GNU settles it before -f or -b touch
+    # anything there: those two lstat the name first, and `reg/`
+    # over a file (or a link to one) is ENOTDIR, `failed to access`,
+    # with the file kept and nothing renamed aside. Without them
+    # symlink(2) and link(2) answer `missing/` with ENOENT and
+    # anything standing behind the slash with EEXIST, so GNU creates
+    # nothing where the normalized name would have made a link
+    # called `missing`. A directory there took the link inside it in
+    # plan_links, so only a non-directory and the absent name are
+    # settled here, and a plain file without a flag falls to the
+    # dispatcher's "File exists" below.
+    linked = links.is_link(plan.link_abs)
+    behind = (
+        await link_target_stat(links, dispatch, plan.link_abs)
+        if linked
+        else await path_stat(dispatch, plan.link_abs)
+    )
+    if (
+        behind is not None
+        and behind.type is not FileType.DIRECTORY
+        and (flags.force or backs)
+    ):
+        return _refused(flags, typed, target_typed, FsCondition.ENOTDIR)
+    if not linked and behind is None:
+        missed = await miss_condition(dispatch, plan.link_abs)
+        return _refused(flags, typed, target_typed, missed)
+    if linked and (behind is None or behind.type is not FileType.DIRECTORY):
+        return f"ln: failed to create {kind} '{typed}': File exists\n"
+    return None
+
+
+async def _create_link(
+    dispatch: DispatchFn,
+    link_spec: PathSpec,
+    link_target: str | None,
+    data: bytes | None,
+    flags: LnFlags,
+    typed: str,
+    target_typed: str,
+) -> str | None:
+    """Make the link, and answer the line refusing it, None when made.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        link_spec (PathSpec): the link's name.
+        link_target (str | None): the symlink's target, None for a copy.
+        data (bytes | None): a copy's bytes.
+        flags (LnFlags): the parsed flags.
+        typed (str): the name as typed.
+        target_typed (str): the target as typed.
+    """
+    kind = "symbolic link" if flags.symbolic else "hard link"
+    try:
+        if link_target is not None:
+            await dispatch("symlink", link_spec, target=link_target)
+        else:
+            await dispatch("write", link_spec, data=data)
+    except (FileNotFoundError, NotADirectoryError, DotWalkLoop) as exc:
+        # The dispatcher refuses a name its parent cannot hold (symlink(2)'s
+        # ENOENT, ENOTDIR and ELOOP), and a store's write refuses the
+        # same way.
+        why = classify(exc) or FsCondition.ENOENT
+        return _refused(flags, typed, target_typed, why)
+    except FileExistsError:
+        # The dispatcher owns the existence rule (it is the only layer that
+        # can see both the node table and the backend); ln owns the
+        # wording.
+        return f"ln: failed to create {kind} '{typed}': File exists\n"
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        # A parent the name cannot sit under. GNU names a hard link's
+        # target alongside for these errnos, a symlink's never.
+        arrow = "" if flags.symbolic else f" => '{target_typed}'"
+        return (
+            f"ln: failed to create {kind} '{typed}'{arrow}: "
+            f"{fs_strerror(exc)}\n"
+        )
+    except PermissionError as exc:
+        # A read-only region or a policy deny, which ln voices as its
+        # own per-operand line, as GNU does for EROFS.
+        return f"ln: failed to create {kind} '{typed}': {fs_strerror(exc)}\n"
+    return None
+
+
 async def _attempt_link(
     links: NamespaceReader,
     dispatch: DispatchFn,
@@ -638,58 +812,9 @@ async def _attempt_link(
     target_typed = word_text(plan.source)
     link_target: str | None = None
     data: bytes | None = None
-    # A `.` or `..` resolves against the directory in front of it, which
-    # has to be there. A symlink's target is stored as typed and never
-    # walked; a hard link's is the file it names.
-    walker = partial(dispatch_stat, dispatch)
-    # What the walk answers before any op, in GNU's order: symlink(2)
-    # refuses an empty target ahead of the name, and then GNU names the
-    # target alongside; a hard link's source is reached first; the name
-    # last, as the call that makes it would meet it.
-    if flags.symbolic and target_typed == "":
-        errors.append(
-            f"ln: failed to create symbolic link '{typed}' -> '': "
-            f"{posix_phrase(FsCondition.ENOENT)}\n"
-        )
-        return
-    if not flags.symbolic:
-        why = _walk_verdict(links, plan.source, cwd, flags.logical)
-        if why is not None:
-            errors.append(
-                f"ln: failed to access '{target_typed}': {posix_phrase(why)}\n"
-            )
-            return
-    why = _walk_verdict(links, typed, cwd)
-    if why is not None:
-        errors.append(_refused(flags, typed, target_typed, why))
-        return
-    if not flags.symbolic:
-        try:
-            unwalked = await dot_refusal(
-                walker,
-                PathSpec.from_str_path(plan.source, cwd=cwd),
-                links.follow,
-            )
-        except PermissionError as exc:
-            unwalked = exc
-        if unwalked is not None:
-            errors.append(
-                f"ln: failed to access '{target_typed}': "
-                f"{fs_strerror(unwalked)}\n"
-            )
-            return
-    # -f and -b look at the name before making it, so a plain file
-    # behind its slash is ENOTDIR there and EEXIST only to symlink(2).
-    replaces = flags.force or flags.backup not in (None, "none")
-    unwalked = await dot_refusal(
-        walker,
-        PathSpec.from_str_path(typed, cwd=cwd),
-        links.follow,
-        creates=not replaces,
-    )
-    if unwalked is not None:
-        why = classify(unwalked) or FsCondition.ENOENT
-        errors.append(_refused(flags, typed, target_typed, why))
+    refusal = await _walk_refusal(links, dispatch, cwd, plan, flags)
+    if refusal is not None:
+        errors.append(refusal)
         return
     if flags.symbolic:
         link_target = target_typed
@@ -725,43 +850,9 @@ async def _attempt_link(
     link_spec = PathSpec.from_str_path(plan.link_abs)
     backs = flags.backup not in (None, "none")
     if typed.endswith("/"):
-        # A link name typed with a slash asks for a directory the link
-        # can never be, and GNU settles it before -f or -b touch
-        # anything there: those two lstat the name first, and `reg/`
-        # over a file (or a link to one) is ENOTDIR, `failed to access`,
-        # with the file kept and nothing renamed aside. Without them
-        # symlink(2) and link(2) answer `missing/` with ENOENT and
-        # anything standing behind the slash with EEXIST, so GNU creates
-        # nothing where the normalized name would have made a link
-        # called `missing`. A directory there took the link inside it in
-        # plan_links, so only a non-directory and the absent name are
-        # settled here, and a plain file without a flag falls to the
-        # dispatcher's "File exists" below.
-        linked = links.is_link(plan.link_abs)
-        behind = (
-            await link_target_stat(links, dispatch, plan.link_abs)
-            if linked
-            else await path_stat(dispatch, plan.link_abs)
-        )
-        if (
-            behind is not None
-            and behind.type is not FileType.DIRECTORY
-            and (flags.force or backs)
-        ):
-            errors.append(
-                _refused(flags, typed, target_typed, FsCondition.ENOTDIR)
-            )
-            return
-        if not linked and behind is None:
-            missed = await miss_condition(dispatch, plan.link_abs)
-            errors.append(_refused(flags, typed, target_typed, missed))
-            return
-        if linked and (
-            behind is None or behind.type is not FileType.DIRECTORY
-        ):
-            errors.append(
-                f"ln: failed to create {kind} '{typed}': File exists\n"
-            )
+        refusal = await _slash_refusal(links, dispatch, plan, flags, kind)
+        if refusal is not None:
+            errors.append(refusal)
             return
     # A name typed as `.` or `..` removes nothing, so -f meets the
     # directory there rather than GNU's same-name check.
@@ -864,39 +955,11 @@ async def _attempt_link(
         if why is not None:
             errors.append(_refused(flags, typed, target_typed, why))
             return
-    try:
-        if link_target is not None:
-            await dispatch("symlink", link_spec, target=link_target)
-        else:
-            await dispatch("write", link_spec, data=data)
-    except (FileNotFoundError, NotADirectoryError, DotWalkLoop) as exc:
-        # The dispatcher refuses a name its parent cannot hold (symlink(2)'s
-        # ENOENT, ENOTDIR and ELOOP), and a store's write refuses the
-        # same way.
-        why = classify(exc) or FsCondition.ENOENT
-        errors.append(_refused(flags, typed, target_typed, why))
-        return
-    except FileExistsError:
-        # The dispatcher owns the existence rule (it is the only layer that
-        # can see both the node table and the backend); ln owns the
-        # wording.
-        errors.append(f"ln: failed to create {kind} '{typed}': File exists\n")
-        return
-    except (FileNotFoundError, NotADirectoryError) as exc:
-        # A parent the name cannot sit under. GNU names a hard link's
-        # target alongside for these errnos, a symlink's never.
-        arrow = "" if flags.symbolic else f" => '{target_typed}'"
-        errors.append(
-            f"ln: failed to create {kind} '{typed}'{arrow}: "
-            f"{fs_strerror(exc)}\n"
-        )
-        return
-    except PermissionError as exc:
-        # A read-only region or a policy deny, which ln voices as its
-        # own per-operand line, as GNU does for EROFS.
-        errors.append(
-            f"ln: failed to create {kind} '{typed}': {fs_strerror(exc)}\n"
-        )
+    refusal = await _create_link(
+        dispatch, link_spec, link_target, data, flags, typed, target_typed
+    )
+    if refusal is not None:
+        errors.append(refusal)
         return
     if flags.verbose:
         # A symlink reports the target it stored (relative under -r); a

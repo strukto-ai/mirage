@@ -31,5 +31,4 @@ async def unpin_message(
     result = await unpin_message_core(
         accessor, fl.as_str("channel") or "", fl.as_str("ts") or ""
     )
-    out = compact_json_bytes(result)
-    return out, IOResult()
+    return compact_json_bytes(result), IOResult()

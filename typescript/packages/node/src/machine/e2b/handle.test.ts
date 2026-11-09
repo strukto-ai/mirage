@@ -31,7 +31,11 @@ import type { RunResult } from '@struktoai/mirage-core/runtime/types'
 import {
   MOUNT_GUARD,
   PROCESS,
+  RUN_WRAPPER,
   encodeOutput,
+  isRun,
+  runArgv,
+  runStatusPath,
   stopLine,
   wrapLine,
 } from '@struktoai/mirage-core/machine/constants'
@@ -85,7 +89,9 @@ function execArgv(
 function lineOf(command: string): string {
   const at = command.lastIndexOf("'-c' ")
   const quoted =
-    at < 0 ? command.slice(command.lastIndexOf(" '") + 1) : command.slice(at + "'-c' ".length)
+    at < 0 || command.startsWith(`'${RUN_WRAPPER.slice(0, 5)}`, at + "'-c' ".length)
+      ? command.slice(command.lastIndexOf(" '") + 1)
+      : command.slice(at + "'-c' ".length)
   return quoted.slice(1, -1).replaceAll(`'\\''`, "'")
 }
 
@@ -94,6 +100,8 @@ class FakeHandle {
   disconnected = false
   killed = false
   inputError: Error | null = null
+  onStdout: ((text: string) => unknown) | undefined = undefined
+  onStderr: ((text: string) => unknown) | undefined = undefined
   private readonly received = deferred<undefined>()
   private readonly closed = deferred<undefined>()
   private readonly sent = deferred<undefined>()
@@ -130,6 +138,8 @@ class FakeHandle {
       return { stdout: hex(), stderr: '', exitCode: 0 }
     }
     if (!this.eof) await this.closed.promise
+    await this.onStdout?.(hex())
+    await this.onStderr?.(b64('warn'))
     return { stdout: hex(), stderr: b64('warn'), exitCode: 0 }
   }
   kill(): Promise<boolean> {
@@ -146,11 +156,22 @@ class FakeCommands {
   calls: [string, boolean][] = []
   handles: FakeHandle[] = []
   inputError: Error | null = null
-  run(command: string, opts: { background: boolean; stdin: boolean; timeoutMs?: number }) {
+  run(
+    command: string,
+    opts: {
+      background: boolean
+      stdin: boolean
+      timeoutMs?: number
+      onStdout?: (text: string) => unknown
+      onStderr?: (text: string) => unknown
+    },
+  ) {
     expect([opts.background, opts.timeoutMs]).toEqual([true, 0])
     this.calls.push([command, opts.stdin])
     const handle = new FakeHandle(lineOf(command), !opts.stdin)
     handle.inputError = this.inputError
+    handle.onStdout = opts.onStdout
+    handle.onStderr = opts.onStderr
     this.handles.push(handle)
     return Promise.resolve(handle)
   }
@@ -303,7 +324,11 @@ describe('E2BMachine', () => {
     expect(FakeMachine.last.commands.calls).toEqual([
       [
         encodeOutput(
-          wrapLine(['/bin/sh', '-c', 'wc -l | cat'], { E: '1', [PROCESS]: 'runid' }, '/workspace'),
+          wrapLine(
+            runArgv('runid', runStatusPath('runid'), [], ['/bin/sh', '-c', 'wc -l | cat']),
+            { E: '1' },
+            '/workspace',
+          ),
         ),
         data !== null,
       ],
@@ -601,7 +626,7 @@ describe('E2B cancellation and validation', () => {
       }
       await vi.waitFor(() => {
         expect(FakeMachine.last.commands.handles[0]).toMatchObject({
-          killed: true,
+          killed: kind === 'caller',
           disconnected: true,
         })
       })
@@ -618,7 +643,8 @@ class MountingE2BMachine extends FakedE2BMachine {
   readonly lines: string[] = []
 
   protected override execArgv(argv: readonly string[]): Promise<RunResult> {
-    const run = argv[2] === MOUNT_GUARD ? argv.slice(argv.indexOf('--', 5) + 1) : argv
+    const inner = isRun(argv) ? argv.slice(7) : argv
+    const run = inner[2] === MOUNT_GUARD ? inner.slice(inner.indexOf('--', 5) + 1) : inner
     return this.execLine(run[0] === '/bin/sh' ? (run[2] ?? '') : run.join(' '))
   }
 

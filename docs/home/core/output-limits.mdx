@@ -84,7 +84,8 @@ A line has one time limit: the `@line` entry's `timeout_seconds`, on the
 workspace or a profile (the profile's over the workspace's). It bounds the whole
 top-level line, loops, pipelines and the lines it runs (`sh -c`, `eval`,
 `xargs`) included, and is 600 seconds unless an entry sets it; `0` or `None`
-lifts it. A line past it exits 124 with `line: timed out after Ns`.
+lifts it. A line past it exits 124 with `line: timed out after Ns`. A program it
+runs gets `TERM` and a second to finish, then `KILL`, as with `timeout -k`.
 
 A background job (`cmd &`) runs under the same limit, counted from its own
 start. The line that started it can end or time out and leave it running; past

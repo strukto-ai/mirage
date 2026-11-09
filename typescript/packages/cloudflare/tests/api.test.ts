@@ -632,9 +632,13 @@ describe('the server API in workerd', () => {
     expect(created.status).toBe(201)
     const refused = async (command: string): Promise<string> => {
       const answer = await call('POST', '/v1/workspaces/sockets/shell', { command })
-      const { exit_code, stderr } = answer.json as { exit_code: number; stderr: string }
+      const { exit_code, stdout, stderr } = answer.json as {
+        exit_code: number
+        stdout: string
+        stderr: string
+      }
       expect(exit_code).not.toBe(0)
-      return stderr
+      return `${stdout}${stderr}`
     }
     expect(await refused('ls /pg/public/tables')).toContain('Permission denied')
     expect(await refused('ls /mail')).toContain('Permission denied')

@@ -19,6 +19,14 @@ KILLED_EXIT_CODE = 137
 # with the status the kill recorded.
 STOP_WAIT_SECONDS = 10.0
 
+# How many ended jobs' statuses a session keeps for a later `wait` of
+# their pid, as bash keeps those of its last children.
+SAVED_STATUSES = 1024
+
+# How long ago a lone job must have ended for a bare ``wait`` to find it
+# already over, rather than racing the job it has just started.
+JUST_ENDED_SECONDS = 0.02
+
 # How long a job's owner waits before watching its console again after a
 # read of it failed.
 WATCH_RETRY_SECONDS = 1.0

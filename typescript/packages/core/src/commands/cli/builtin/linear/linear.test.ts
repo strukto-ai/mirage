@@ -88,6 +88,7 @@ describe('linear tree', () => {
       'set-project',
       'relation',
       'add-label',
+      'remove-label',
     ])
     expect(cliSpecFor('linear')).toBe(LINEAR)
   })
@@ -101,6 +102,7 @@ describe('linear tree', () => {
       'set-priority',
       'set-project',
       'add-label',
+      'remove-label',
     ]) {
       expect(LINEAR.handlers[['issue', verb].join(' ')]?.write).toBe(true)
     }

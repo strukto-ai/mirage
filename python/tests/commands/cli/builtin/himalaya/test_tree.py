@@ -46,14 +46,21 @@ def test_tree_shape_matches_the_himalaya_vocabulary():
     assert HIMALAYA.spec.name == "himalaya"
     assert HIMALAYA.config_model is EmailConfig
     assert [g.name for g in HIMALAYA.spec.subcommands] == [
+        "mailbox",
+        "flag",
+        "attachment",
         "envelope",
         "message",
     ]
     assert [v.name for v in leaf("envelope").subcommands] == ["list", "search"]
     assert [v.name for v in leaf("message").subcommands] == [
+        "copy",
+        "move",
+        "delete",
         "read",
         "compose",
         "send",
+        "add",
         "reply",
         "forward",
     ]
@@ -69,7 +76,7 @@ def test_upstream_aliases_resolve():
 def test_the_mailbox_is_a_flag_and_the_message_id_is_an_operand():
     for verb in ("read", "reply", "forward"):
         node = leaf("message", verb)
-        assert compile_spec(node).rest is not None
+        assert [o.names for o in compile_spec(node).positional] == [("ID",)]
         mailbox = next(
             o for o in compile_spec(node).options if "--mailbox" in o.names
         )
@@ -119,9 +126,9 @@ async def test_installed_tree_composes_mime_without_sending():
 async def test_the_write_alias_reaches_compose(monkeypatch):
     sent = {}
 
-    async def fake_deliver(accessor, raw, save=None):
+    async def fake_deliver(accessor, raw, save=None, no_save=False):
         sent["raw"] = raw
-        return BytesParser(policy=default_policy).parsebytes(raw), ""
+        return BytesParser(policy=default_policy).parsebytes(raw), False
 
     monkeypatch.setattr(util_module, "deliver", fake_deliver)
     ws = Workspace({})
@@ -135,40 +142,47 @@ async def test_the_write_alias_reaches_compose(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_missing_message_id_exits_1_with_the_leaf_message():
+async def test_a_missing_message_id_is_refused_the_way_clap_refuses_it():
     ws = Workspace({})
     ws.register_cli("himalaya", HIMALAYA, CONFIG)
     io = await ws.shell("himalaya message read")
-    assert io.exit_code == 1
-    err = await materialize(io.stderr)
-    assert b"message id is required" in err
-    await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_an_upstream_verb_mirage_lacks_fails_loud():
-    ws = Workspace({})
-    ws.register_cli("himalaya", HIMALAYA, CONFIG)
-    io = await ws.shell("himalaya message move 7 --to Archive")
-    assert io.exit_code == 1
+    assert io.exit_code == 2
     err = await materialize(io.stderr)
     assert err == (
-        b"himalaya: 'move' is not a himalaya message command. "
-        b"See 'himalaya message --help'.\n"
+        b"error: the following required arguments were not provided:\n"
+        b"  <ID>\n\nUsage: himalaya message read <ID>\n\n"
+        b"For more information, try '--help'.\n"
     )
     await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_unknown_verb_uses_git_wording():
+async def test_a_stray_operand_of_a_dash_dash_only_slot_is_refused():
+    ws = Workspace({})
+    ws.register_cli("himalaya", HIMALAYA, CONFIG)
+    io = await ws.shell("himalaya message add 7")
+    assert io.exit_code == 2
+    err = await materialize(io.stderr)
+    assert err == (
+        b"error: unexpected argument '7' found\n\n"
+        b"Usage: himalaya message add [OPTIONS] --mailbox <NAME> "
+        b"[-- <MESSAGE>...]\n\n"
+        b"For more information, try '--help'.\n"
+    )
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_verb_is_refused_the_way_clap_refuses_it():
     ws = Workspace({})
     ws.register_cli("himalaya", HIMALAYA, CONFIG)
     io = await ws.shell("himalaya bogus")
-    assert io.exit_code == 1
+    assert io.exit_code == 2
     err = await materialize(io.stderr)
     assert err == (
-        b"himalaya: 'bogus' is not a himalaya command. "
-        b"See 'himalaya --help'.\n"
+        b"error: unrecognized subcommand 'bogus'\n\n"
+        b"Usage: himalaya [OPTIONS] [COMMAND]\n\n"
+        b"For more information, try '--help'.\n"
     )
     await ws.close()
 
@@ -229,10 +243,12 @@ def mailbox(monkeypatch):
         file(folder or "Sent", raw)
         return folder or "Sent"
 
-    async def deliver(accessor, raw, save=None):
+    async def deliver(accessor, raw, save=None, no_save=False):
         if save is not None:
             file(save, raw)
-        return BytesParser(policy=default_policy).parsebytes(raw), ""
+        return BytesParser(policy=default_policy).parsebytes(
+            raw
+        ), save is not None
 
     monkeypatch.setattr(readdir_module, "list_folders", list_folders)
     monkeypatch.setattr(readdir_module, "list_message_uids", list_uids)

@@ -18,7 +18,16 @@ import { runWithLineAbort } from './abort.ts'
 import { recordStatus } from './executor/statement.ts'
 import { SessionState } from './session/session.ts'
 import { newStatusWriter } from './abort.ts'
-import { currentCaller, lineSignal, runWithCaller } from '../context/session_context.ts'
+import {
+  callerSignal,
+  currentCaller,
+  lineSignal,
+  runWithCaller,
+  runWithEvaluation,
+} from '../context/session_context.ts'
+import { EvaluationContext } from './evaluation.ts'
+import { MountMode } from '../types.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 // The browser-runtime branch under node's test runner: the mock forces
@@ -143,6 +152,49 @@ describe('a per-call line on the fallback storage', () => {
       expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
     } finally {
       release()
+      await ws.close()
+    }
+  })
+})
+
+describe('a job on the fallback storage', () => {
+  it('leaves an expansion its own line to answer to', async () => {
+    // The job is newest and shares the shell's id, so only the evaluation
+    // an expansion names tells whose signal it is.
+    const line = new SessionState({ sessionId: 's', cwd: '/' })
+    const job = new SessionState({ sessionId: 's', cwd: '/' })
+    const lineAbort = new AbortController()
+    const jobAbort = new AbortController()
+    const evaluation = new EvaluationContext(line)
+    const jobEvaluation = new EvaluationContext(job)
+    jobEvaluation.frame.abortSignal = jobAbort.signal
+    await runWithLineAbort(lineAbort.signal, [line], newStatusWriter(), () =>
+      runWithEvaluation(evaluation, () =>
+        runWithLineAbort(jobAbort.signal, [job], newStatusWriter(), () =>
+          runWithEvaluation(jobEvaluation, () => {
+            expect(callerSignal()).toBeUndefined()
+            expect(callerSignal(evaluation)).toBe(lineAbort.signal)
+            expect(callerSignal(jobEvaluation)).toBe(jobAbort.signal)
+            return Promise.resolve()
+          }),
+        ),
+      ),
+    )
+  })
+
+  it('is killed alone while its EXIT action runs', async () => {
+    // The killed job's frames are the newest while the line expands its next
+    // words; read as the line's own, its signal would end the line.
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const io = await ws.shell(
+        "{ trap 'echo ready > /data/r; sleep 30; echo late > /data/l' EXIT; true; } & v=$!; " +
+          'while ! test -e /data/r; do sleep .01; done; kill $v; wait $v 2>/dev/null; ' +
+          'test -e /data/l; echo present:$?',
+      )
+      expect(io.exitCode).toBe(0)
+      expect(new TextDecoder().decode(io.stdout)).toBe('present:1\n')
+    } finally {
       await ws.close()
     }
   })

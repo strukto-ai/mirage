@@ -30,5 +30,4 @@ async def server_info(
     fl = FlagView(ctx.flags, ctx.spec)
     guild = fl.as_str("guild") or ""
     result = await discord_get(accessor, f"/guilds/{guild}")
-    out = compact_json_bytes(result)
-    return out, IOResult()
+    return compact_json_bytes(result), IOResult()

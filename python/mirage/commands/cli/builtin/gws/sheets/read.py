@@ -25,7 +25,7 @@ async def read(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     result = await accessor.sheets.read_values(
         fl.as_str("spreadsheet") or "",
         fl.as_str("range") or "",

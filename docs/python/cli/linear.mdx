@@ -46,6 +46,7 @@ This list is generated from Mirage's registered command tree.
 | `linear issue relation list` | List incoming and outgoing relations |
 | `linear issue relation delete` | Delete an issue relation |
 | `linear issue add-label` | Add a label to an issue |
+| `linear issue remove-label` | Remove a label from an issue |
 | `linear project list` | List a team's projects |
 | `linear project get` | Get one project by ID |
 | `linear cycle list` | List a team's cycles |
@@ -91,6 +92,7 @@ linear issue transition ENG-42 --state-name "In Review"
 linear issue set-priority ENG-42 --priority 2
 linear issue set-project ENG-42 --project-name "Search"
 linear issue add-label ENG-42 --label-name bug
+linear issue remove-label ENG-42 --label-name bug
 echo 'Ready for review' | linear comment add ENG-42
 linear comment update --comment COMMENT_ID --body "Reviewed"
 ```

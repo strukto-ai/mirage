@@ -15,7 +15,7 @@
 import asyncio
 import inspect
 import logging
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TypeVar
 
 from mirage.errors.types import CommandTimeoutError
@@ -34,6 +34,7 @@ async def run_with_timeout(
     seconds: float | None,
     name: str,
     start: float | None = None,
+    reached: Callable[[], None] | None = None,
 ) -> T:
     """Wrap a coroutine with a deadline, mapping overrun to a timeout error.
 
@@ -46,12 +47,13 @@ async def run_with_timeout(
         name (str): command/op name for the timeout message.
         start (float | None): the loop time the budget began, when work
             before this call already spent part of it; None for now.
+        reached (Callable[[], None] | None): told as the deadline passes,
+            before what runs is cancelled.
     """
     if not seconds or seconds <= 0:
         return await coro
-    if start is not None and asyncio.get_running_loop().time() >= (
-        start + seconds
-    ):
+    loop = asyncio.get_running_loop()
+    if start is not None and loop.time() >= start + seconds:
         # Spent before the call: a deadline already past fires only at
         # the call's first suspension, which a quick call never reaches.
         if inspect.iscoroutine(coro):
@@ -62,6 +64,13 @@ async def run_with_timeout(
         if start is None
         else asyncio.timeout_at(start + seconds)
     )
+    timer = (
+        None
+        if reached is None
+        else loop.call_at(
+            (loop.time() if start is None else start) + seconds, reached
+        )
+    )
     try:
         async with deadline:
             return await coro
@@ -69,6 +78,9 @@ async def run_with_timeout(
         if not deadline.expired():
             raise
         raise CommandTimeoutError(name or "?", seconds) from exc
+    finally:
+        if timer is not None:
+            timer.cancel()
 
 
 def _build_notice(limit: Limit) -> bytes:

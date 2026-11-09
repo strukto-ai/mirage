@@ -68,6 +68,7 @@ pub const RANDOM: &str = "RANDOM";
 pub const LINENO: &str = "LINENO";
 pub const BASHPID: &str = "BASHPID";
 pub const BASH_LINENO: &str = "BASH_LINENO";
+pub const PIPESTATUS: &str = "PIPESTATUS";
 /// The stored attribute letters, in print order.
 pub fn letters(attrs: u8) -> String {
     LETTERS
@@ -224,6 +225,14 @@ impl Store {
         self.pipe_status.push(status);
     }
 
+    /// A scalar written to `PIPESTATUS` before any statement finished: it
+    /// stays an ordinary variable, which no later statement updates.
+    pub fn keep_pipe_status(&mut self) {
+        if self.pipe_status.is_empty() && !self.plain.iter().any(|name| name == PIPESTATUS) {
+            self.plain.push(PIPESTATUS.to_owned());
+        }
+    }
+
     /// How the shell leads a diagnostic of its own: the name of what it is
     /// reading and the running command's line (`bash: line 3: `).
     pub fn voice(&self) -> &[u8] {
@@ -261,7 +270,7 @@ impl Store {
     pub fn special(&self, name: &str) -> Option<Indexed> {
         let name = self.target(name);
         let array = match (name.as_str(), &self.function_names) {
-            ("PIPESTATUS", _) => Indexed::dense(
+            ("PIPESTATUS", _) if !self.plain.contains(&name) => Indexed::dense(
                 self.pipe_status
                     .iter()
                     .map(|status| status.to_string().into_bytes()),

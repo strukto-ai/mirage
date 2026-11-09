@@ -30,13 +30,13 @@ vi.mock('@struktoai/mirage-core/commands/cli/builtin/himalaya/smtp', () => ({
 const RAW = new TextEncoder().encode('From: me@x\r\nTo: a@b.com\r\nSubject: Hi\r\n\r\nyo')
 
 const GMAIL = [
-  { pathAsListed: 'INBOX', specialUse: undefined },
-  { pathAsListed: '[Gmail]/Sent Mail', specialUse: '\\Sent' },
-  { pathAsListed: '[Gmail]/Trash', specialUse: '\\Trash' },
+  { pathAsListed: 'INBOX', flags: new Set<string>() },
+  { pathAsListed: '[Gmail]/Sent Mail', flags: new Set(['\\Sent']) },
+  { pathAsListed: '[Gmail]/Trash', flags: new Set(['\\Trash']) },
 ]
 const PLAIN = [
-  { pathAsListed: 'INBOX', specialUse: undefined },
-  { pathAsListed: 'Archive', specialUse: undefined },
+  { pathAsListed: 'INBOX', flags: new Set<string>() },
+  { pathAsListed: 'Archive', flags: new Set<string>() },
 ]
 
 const listMock = vi.fn()
@@ -55,6 +55,7 @@ function config(overrides: Partial<EmailConfig> = {}): EmailConfig {
     maxMessages: 200,
     saveCopy: true,
     sentFolder: null,
+    trashFolder: null,
     ...overrides,
   }
 }
@@ -109,51 +110,40 @@ describe('saveSentCopy', () => {
 
 describe('deliver', () => {
   it('sends, then saves', async () => {
-    const { parsed, warning } = await deliver(account(), RAW)
+    await expect(deliver(account(), RAW)).resolves.toBe(true)
     expect(sendRawMock).toHaveBeenCalledWith(expect.anything(), RAW)
-    expect(parsed.subject).toBe('Hi')
-    expect(warning).toBe('')
     expect(appendMock).toHaveBeenCalledOnce()
   })
 
   it('sends and touches no mailbox when saveCopy is off', async () => {
-    const { warning } = await deliver(account({ saveCopy: false }), RAW)
+    await expect(deliver(account({ saveCopy: false }), RAW)).resolves.toBe(false)
     expect(sendRawMock).toHaveBeenCalledOnce()
-    expect(warning).toBe('')
     expect(appendMock).not.toHaveBeenCalled()
   })
 
-  it('warns rather than raising when the copy fails', async () => {
-    // The message is already on the wire, so a failed copy must not
-    // become a failed send: a non-zero exit invites a retry that would
-    // send it a second time.
+  it('fails the command when the copy fails, saying the message left', async () => {
     appendMock.mockRejectedValue(new Error('Sent: over quota'))
-    const { parsed, warning } = await deliver(account(), RAW)
-    expect(parsed.subject).toBe('Hi')
-    expect(warning).toBe('himalaya: sent copy not saved: Sent: over quota\n')
+    await expect(deliver(account(), RAW)).rejects.toMatchObject({
+      message: 'Message sent, but saving a copy to Sent failed',
+      sources: ['Sent: over quota'],
+    })
+    expect(sendRawMock).toHaveBeenCalledOnce()
   })
 
   it('files into the mailbox --save names, over the account default', async () => {
     listMock.mockResolvedValue(GMAIL)
-    const { warning } = await deliver(account(), RAW, 'Drafts')
-    expect(warning).toBe('')
+    await expect(deliver(account(), RAW, 'Drafts')).resolves.toBe(true)
     expect(appendMock).toHaveBeenCalledWith('Drafts', Buffer.from(RAW), ['\\Seen'])
     expect(listMock).not.toHaveBeenCalled()
   })
 
   it('honours --save even when saveCopy is off', async () => {
-    // --save is the user asking on this one line, so the account-level
-    // switch does not veto it.
-    const { warning } = await deliver(account({ saveCopy: false }), RAW, 'Drafts')
-    expect(warning).toBe('')
+    await expect(deliver(account({ saveCopy: false }), RAW, 'Drafts')).resolves.toBe(true)
     expect(appendMock).toHaveBeenCalledOnce()
   })
 
-  it('warns when the account cannot be reached at all', async () => {
-    vi.spyOn(EmailAccessor.prototype, 'getImap').mockRejectedValue(
-      new Error('IMAP login failed for u on h'),
-    )
-    const { warning } = await deliver(account(), RAW)
-    expect(warning).toBe('himalaya: sent copy not saved: IMAP login failed for u on h\n')
+  it('honours --no-save over the account default', async () => {
+    await expect(deliver(account(), RAW, null, true)).resolves.toBe(false)
+    expect(appendMock).not.toHaveBeenCalled()
   })
 })

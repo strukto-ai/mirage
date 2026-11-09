@@ -2637,7 +2637,7 @@
           "expect": {
             "value": {
               "exit_code": 0,
-              "stdout": "[1]\n",
+              "stdout": "[1]+\n",
               "stderr": ""
             }
           }
@@ -2652,7 +2652,7 @@
           "expect": {
             "value": {
               "exit_code": 0,
-              "stdout": "[2]\n",
+              "stdout": "[2]+\n",
               "stderr": ""
             }
           },
@@ -2696,7 +2696,7 @@
           "expect": {
             "value": {
               "exit_code": 0,
-              "stdout": "[1]\n",
+              "stdout": "[1]+\n",
               "stderr": ""
             }
           },

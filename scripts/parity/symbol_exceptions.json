@@ -1,5 +1,5 @@
 {
- "baseline": 1642,
+ "baseline": 1638,
  "modules": {
   "server/app": {
    "python_only": {
@@ -120,7 +120,8 @@
     "Deadline": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit.",
     "deadlines": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit.",
     "runWithDeadline": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit.",
-    "boundDeadline": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit."
+    "boundDeadline": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit.",
+    "settledWithin": "Python waits with asyncio.wait and its timeout; a Promise has no such wait."
    }
   },
   "commands/builtin/generic/diff": {
@@ -1004,9 +1005,77 @@
     "runtimeUnavailable": "A TypeScript engine (Pyodide, Monty, QuickJS) can find it cannot run only when a run starts, and says so with its own error, which the interpreter and a script CLI both answer with 127; a Python entry that cannot run fails to build and is left out of the world, so no run raises it."
    }
   },
+  "commands/cli/builtin/himalaya/builder": {
+   "typescript_only": {
+    "MailAddress": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "bytesToBase64": "A byte or formatting helper Python's standard library already provides.",
+    "hexPair": "A byte or formatting helper Python's standard library already provides.",
+    "pushAll": "A byte or formatting helper Python's standard library already provides.",
+    "randomHex": "A byte or formatting helper Python's standard library already provides."
+   }
+  },
+  "commands/cli/builtin/himalaya/envelopes": {
+   "typescript_only": {
+    "EnvelopeAddress": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "EnvelopeDocument": "A TypeScript shape for dynamic data; Python reads the same values as dicts."
+   }
+  },
+  "commands/cli/builtin/himalaya/query": {
+   "python_only": {
+    "DATE_FORMATS": "strptime takes format strings; TypeScript parses the same four date forms by pattern."
+   },
+   "typescript_only": {
+    "Parsed": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "SortKind": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "validDate": "Date normalizes an impossible day where strptime refuses it, so TypeScript checks the round trip."
+   }
+  },
+  "commands/cli/builtin/himalaya/read": {
+   "typescript_only": {
+    "DateFields": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MailAddress": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "pad": "A byte or formatting helper Python's standard library already provides."
+   }
+  },
+  "commands/cli/builtin/himalaya/util": {
+   "typescript_only": {
+    "MISSING_UID": "fetchRawMessage throws for a missing UID here and returns empty bytes in Python.",
+    "MailAddress": "A TypeScript shape for dynamic data; Python reads the same values as dicts."
+   }
+  },
+  "commands/cli/refusal": {
+   "typescript_only": {
+    "ClapRefusalFacts": "A TypeScript shape for dynamic data; Python reads the same values as dicts."
+   }
+  },
+  "core/email/mime": {
+   "typescript_only": {
+    "Attribute": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "BASE64_CHARS": "A byte or formatting helper Python's standard library already provides.",
+    "ContentFields": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MailAddress": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MimeBody": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MimeHeader": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MimeHeaderName": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MimePart": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "MimeValue": "A TypeScript shape for dynamic data; Python reads the same values as dicts.",
+    "base64Decode": "A byte or formatting helper Python's standard library already provides.",
+    "concat": "A byte or formatting helper Python's standard library already provides.",
+    "hexValue": "A byte or formatting helper Python's standard library already provides.",
+    "isAlpha": "A byte or formatting helper Python's standard library already provides.",
+    "isHex": "A byte or formatting helper Python's standard library already provides.",
+    "newState": "A dataclass carries these defaults in Python.",
+    "partAt": "A Python list index raises on its own when a part is missing.",
+    "popState": "A Python list pop raises on its own when the stack is empty."
+   }
+  },
   "core/email/client": {
    "python_only": {
-    "_text_lines": "Reads the text lines of an IMAPResponse from mirage's own Python IMAP client (accessor/imap); node's imapflow hands back parsed messages, so its client has no lines to read."
+    "_text_lines": "Reads the text lines of an IMAPResponse from mirage's own Python IMAP client (accessor/imap); node's imapflow hands back parsed messages, so its client has no lines to read.",
+    "_server_text": "aioimaplib hands back the raw response lines; imapflow has already parsed them onto the error."
+   },
+   "typescript_only": {
+    "NO_SUCH_MAILBOX": "imapflow reports a failed COPY as false without the server's text, so TypeScript words the refusal itself."
    }
   },
   "commands/spec/parser": {
@@ -1636,6 +1705,24 @@
     "ghModule": "gh's Wasm module, which the TypeScript host loads on first use; Python's native module has gh built in.",
     "openGhStream": "gh's Wasm module, which the TypeScript host loads on first use; Python's native module has gh built in.",
     "pairs": "Octokit takes params and headers as plain objects; Python's dict() builds them inline."
+   }
+  },
+  "execution/process/types": {
+   "typescript_only": {
+    "isProgram": "Python's Process is a dataclass with this as a property; TypeScript's is an interface over plain records, so it is a function.",
+    "shownMachine": "Python's Process is a dataclass with this as a property; TypeScript's is an interface over plain records, so it is a function.",
+    "shownPid": "Python's Process is a dataclass with this as a property; TypeScript's is an interface over plain records, so it is a function."
+   }
+  },
+  "execution/process/handle": {
+   "typescript_only": {
+    "PauseGate": "Python holds a paused process on an asyncio.Future; a Promise has no resolve of its own, so TypeScript pairs them.",
+    "newPauseGate": "Python holds a paused process on an asyncio.Future; a Promise has no resolve of its own, so TypeScript pairs them."
+   }
+  },
+  "execution/process/constants": {
+   "typescript_only": {
+    "NEVER_TAKEN": "Only Pyodide programs take signals through their runner (onSignal), and Pyodide runs on the TypeScript host alone."
    }
   }
  }

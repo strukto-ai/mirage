@@ -94,13 +94,13 @@ impl<H: Host> Expander<'_, H> {
     /// What a word's tilde prefix names: `~` and `~/rest` the home
     /// directory (`HOME=/` makes `~/x` `//x`), `~+` `$PWD`, `~-` `$OLDPWD`;
     /// None for any other prefix, a user name (no user database) or a
-    /// variable that is unset.
+    /// `$PWD` or `$OLDPWD` that is unset.
     pub fn tilde_prefix(&self, text: &[u8]) -> Option<Vec<u8>> {
         let rest = text.strip_prefix(b"~")?;
         let slash = rest.iter().position(|b| *b == b'/').unwrap_or(rest.len());
         let (prefix, tail) = rest.split_at(slash);
         let base = match prefix {
-            b"" => self.shell.home()?,
+            b"" => self.shell.home(),
             b"+" => self.shell.vars.scalar("PWD")?,
             b"-" => self.shell.vars.scalar("OLDPWD")?,
             _ => return None,

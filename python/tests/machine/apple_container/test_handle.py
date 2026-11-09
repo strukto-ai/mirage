@@ -23,7 +23,11 @@ from mirage import MountMode, Policy, Workspace
 from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.machine.apple_container import AppleContainerMachine
-from mirage.machine.constants import EXEC_PRELUDE, PROCESS
+from mirage.machine.constants import (
+    EXEC_PRELUDE,
+    run_argv,
+    run_status_path,
+)
 from mirage.machine.registry import build_machine
 from mirage.policy import Route
 from mirage.runtime.machine import MachineRuntime
@@ -245,15 +249,13 @@ async def test_process_preserves_argv_and_probes_the_container_once(
             "/",
             "-e",
             "E=request",
-            "-e",
-            f"{PROCESS}=run",
             "box",
             "/bin/sh",
             "-c",
             EXEC_PRELUDE,
             "sh",
             "/work",
-            *argv,
+            *run_argv("run", run_status_path("run"), (), argv),
         ],
         b"input",
     )
@@ -308,8 +310,8 @@ async def test_a_route_gives_each_session_a_container_of_its_own():
             assert (await handle.shell("uname")).exit_code == 0
     finally:
         await ws.close()
-    assert boxes["agent_a"].exec_targets() == ["box-agent_a"] * 2
-    assert boxes["agent_b"].exec_targets() == ["box-agent_b"]
+    assert boxes["agent_a"].exec_targets() == ["box-agent_a"] * 3
+    assert boxes["agent_b"].exec_targets() == ["box-agent_b"] * 2
     assert boxes["agent_a"].inspected() == ["box-agent_a"]
 
 

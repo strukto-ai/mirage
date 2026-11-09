@@ -38,7 +38,7 @@ from mirage.context import (
 )
 from mirage.errors.fs import no_mount
 from mirage.errors.types import NoMountError
-from mirage.execution.process.view import ProcessView
+from mirage.execution.process.session import SessionProcesses
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_BODY_BYTES, MemoryBudget
 from mirage.io.network import (
@@ -151,7 +151,9 @@ class MountRegistry:
         # Scopes the redis index stores this registry builds; the
         # workspace sets it.
         self.workspace_id: str | None = None
-        self.process_view: Callable[[SessionState], ProcessView] | None = None
+        self.session_processes: (
+            Callable[[SessionState], SessionProcesses] | None
+        ) = None
         # Fetches the managed names a tree a mount serves reads, once the
         # executor has picked that mount; the workspace sets it.
         self.fill_env: (
@@ -940,7 +942,7 @@ class MountRegistry:
                 result = walk(cmd_name, tree.spec, argv, cwd, defer_env=True)
                 if result.leaf is None:
                     continue
-                writes = tree.handlers[" ".join(result.path)].write
+                writes = tree.handlers[" ".join(result.path)].writes(argv)
                 if result.path:
                     named_trees.add(mount)
             else:

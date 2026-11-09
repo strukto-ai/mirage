@@ -31,8 +31,10 @@ import {
   PROCESS,
   FAKETIME_PROBE_SECONDS,
   faketimeProbe,
+  isRun,
   NOT_RUNNING_STATUS,
   MACHINE_STOP_WAIT_SECONDS,
+  runTag,
   stopLine,
 } from './constants.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
@@ -56,7 +58,8 @@ const DEC = new TextDecoder()
 
 // The argv a sandbox runs, as the line the fakes answer.
 function lineOf(argv: readonly string[]): string {
-  return argv[0] === '/bin/sh' && argv[1] === '-c' ? (argv[2] ?? '') : shellJoin(argv)
+  const run = isRun(argv) ? argv.slice(7) : argv
+  return run[0] === '/bin/sh' && run[1] === '-c' ? (run[2] ?? '') : shellJoin(run)
 }
 
 class RecordingMachine extends MachineHandle {
@@ -91,7 +94,8 @@ class RecordingMachine extends MachineHandle {
     env: Record<string, string>,
     cwd: string,
   ): Promise<RunResult> {
-    return this.execLine(lineOf(argv), stdin === null ? null : await materialize(stdin), env, cwd)
+    const given = isRun(argv) ? { ...env, [PROCESS]: runTag(argv) } : env
+    return this.execLine(lineOf(argv), stdin === null ? null : await materialize(stdin), given, cwd)
   }
 }
 
@@ -405,17 +409,17 @@ describe('MachineHandle', () => {
     ])
   })
 
-  it('lists a job whose connection dropped as killed', async () => {
+  it('lists a job whose connection dropped as hung up', async () => {
     const box = new DroppedBox({ captures: ['train'] })
     const ws = sandboxWorkspace(box)
     try {
       await ws.shell('train &')
-      let rows = 'running'
-      while (rows.includes('running')) {
+      let rows = 'Running'
+      while (rows.includes('Running')) {
         await new Promise((resolve) => setTimeout(resolve, 10))
         rows = DEC.decode((await ws.shell('jobs')).stdout)
       }
-      expect(rows.endsWith('[1] killed train\n')).toBe(true)
+      expect(rows.endsWith('[1]+  Hangup                  train\n')).toBe(true)
     } finally {
       await ws.close()
     }
@@ -746,6 +750,7 @@ class JobBox extends RecordingMachine {
   readonly removed: string[] = []
   readonly startEnvs: Record<string, string>[] = []
   startCode = 0
+  startSaid = ''
   startGate: Promise<void> | null = null
 
   constructor(
@@ -782,7 +787,7 @@ class JobBox extends RecordingMachine {
             { once: true },
           )
         })
-      return { stdout: new Uint8Array(), stderr: null, exitCode: this.startCode }
+      return { stdout: ENC.encode(this.startSaid), stderr: null, exitCode: this.startCode }
     }
     if (script === JOB_VIEW) {
       this.viewed.push(argv.slice(4, 7))
@@ -1290,6 +1295,17 @@ it('stops the tag of a start that failed', async () => {
   const [, , , runner] = await jobRun(box)
   expect(box.execs.at(-1)?.[0]).toBe(stopLine(runner.record.id.toString(), 15))
   expect(box.removed).toEqual([box.started[0]?.[0]])
+})
+
+// `$!` names a detached job's program by the pid its start printed.
+it.each([
+  ['4242 9000\n', { pid: 4242, started: 9000, exited: null }],
+  ['', null],
+])('gives a detached job the program pid its start printed (%j)', async (said, pid) => {
+  const box = new JobBox([[[], ['\0mirage-job 0\n'], 0]])
+  box.startSaid = said
+  const [done, , , runner] = await jobRun(box)
+  expect([done?.exitCode, runner.record.machinePid]).toEqual([0, pid])
 })
 
 // A box that cannot detach a job, with no folder of the user's own or no

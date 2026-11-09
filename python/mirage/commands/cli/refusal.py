@@ -30,7 +30,12 @@ from mirage.commands.spec.compile import (
     option_spellings,
     positional_required,
 )
-from mirage.commands.spec.help import operand_slot, option_metavar
+from mirage.commands.spec.help import (
+    clap_unexpected_argument,
+    operand_slot,
+    option_metavar,
+    usage_line,
+)
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
@@ -42,6 +47,7 @@ if TYPE_CHECKING:
 
 ARGPARSE_EXIT = 2
 LONG_PREFIX = "--"
+END_OF_OPTIONS = "--"
 NEGATION = "--no-"
 HELP_SWITCH = "-h"
 
@@ -256,12 +262,119 @@ def clap_missing_operands(
     )
 
 
+def clap_stray_operand(
+    prog: str, spec: CommandSpec, typed: Sequence[str], argv: Sequence[str]
+) -> bytes | None:
+    """clap's refusal of an operand a `-- `-only slot was typed without.
+
+    Args:
+        prog (str): the full display path of the leaf.
+        spec (CommandSpec): the leaf's grammar.
+        typed (Sequence[str]): the operands the line carried.
+        argv (Sequence[str]): the words after the head, as typed.
+    """
+    rest = compile_spec(spec).rest
+    if rest is None or rest.nargs != "REMAINDER" or not typed:
+        return None
+    if END_OF_OPTIONS in argv:
+        return None
+    usage = usage_line(prog, spec, [], UsageStyle.CLAP)
+    return encode_text(
+        f"{clap_unexpected_argument(typed[0])}\n\n{usage}\n\n"
+        "For more information, try '--help'.\n"
+    )
+
+
+def clap_leaf_refusal(
+    prog: str, spec: CommandSpec, parsed: "ParsedCommand | ParsedArgs"
+) -> bytes | None:
+    """clap's refusal for a leaf's option error, None when not one of them.
+
+    Pinned against himalaya 2.2.1: a bad value names the option with its
+    placeholder and says no usage line, an unknown option prints the
+    leaf's usage line, and a missing required option echoes what the
+    line supplied the way a missing operand does.
+
+    Args:
+        prog (str): the full display path of the leaf.
+        spec (CommandSpec): the leaf's grammar.
+        parsed (ParsedCommand): the parse result.
+    """
+    footer = "\n\nFor more information, try '--help'.\n"
+    compiled = compile_spec(spec)
+    by_dest = {argument_dest(opt): opt for opt in compiled.options}
+
+    def shown(spelling: str) -> str:
+        word = spelling if spelling.startswith("-") else f"-{spelling}"
+        dest = compiled.dest.get(word, word)
+        opt = by_dest.get(dest)
+        return word if opt is None else f"{dest} <{option_metavar(opt)}>"
+
+    usage = usage_line(prog, spec, [], UsageStyle.CLAP)
+    for kind in parsed.option_error_kinds:
+        if kind == "needs_value" and parsed.needs_value_options:
+            dest = parsed.needs_value_options[0]
+            return encode_text(
+                f"error: a value is required for '{shown(dest)}' "
+                f"but none was supplied{footer}"
+            )
+        if kind in ("invalid", "unexpected_value") and parsed.invalid_options:
+            token = parsed.invalid_options[0]
+            word = token if token.startswith("-") else f"-{token}"
+            tip = (
+                f"\n\n  tip: to pass '{word}' as a value, use '-- {word}'"
+                if compiled.rest is not None
+                and compiled.rest.nargs == "REMAINDER"
+                else ""
+            )
+            return encode_text(
+                f"{clap_unexpected_argument(word)}{tip}\n\n{usage}{footer}"
+            )
+        if kind == "int" and parsed.invalid_int_options:
+            dest, value = parsed.invalid_int_options[0]
+            return encode_text(
+                f"error: invalid value '{value}' for '{shown(dest)}': "
+                f"invalid digit found in string{footer}"
+            )
+        if kind == "value" and parsed.invalid_value_options:
+            dest, value, _ = parsed.invalid_value_options[0]
+            opt = by_dest[dest]
+            allowed = ", ".join(opt.choices)
+            return encode_text(
+                f"error: invalid value '{value}' for '{shown(dest)}'\n"
+                f"  [possible values: {allowed}]{footer}"
+            )
+    if parsed.missing_required_options:
+        wanted = [shown(dest) for dest in parsed.missing_required_options]
+        missing = "\n".join(f"  {one}" for one in wanted)
+        operands: list[str] = []
+        for operand in compiled.positional:
+            operands.append(operand_slot(operand))
+        rest = compiled.rest
+        if rest is not None:
+            typed = bool(parsed.texts or parsed.paths)
+            operands.append(
+                operand_slot(rest, ellipsis=True)
+                .replace("[", "<")
+                .replace("]", ">")
+                if typed
+                else operand_slot(rest, ellipsis=True)
+            )
+        bits = " ".join([prog, *wanted, *operands])
+        return encode_text(
+            "error: the following required arguments were not provided:\n"
+            f"{missing}\n\nUsage: {bits}{footer}"
+        )
+    return None
+
+
 def leaf_refusal(
     style: UsageStyle,
     argparse_message: bytes,
     parsed: "ParsedCommand | ParsedArgs",
     path: str,
     spec: CommandSpec,
+    prog: str = "",
 ) -> tuple[bytes, int, bytes | None]:
     """The message and exit code a leaf answers a bad option with.
 
@@ -288,13 +401,17 @@ def leaf_refusal(
         path (str): the leaf's path under its head word, for git's
             synopsis.
         spec (CommandSpec): the leaf's grammar, for git's option rows.
+        prog (str): the leaf's display path, for clap's usage line.
 
     Returns:
         The stderr, the exit code and the stdout, None when the refusal
         writes nothing there.
     """
     if style is UsageStyle.CLAP:
-        return argparse_message, CLAP_EXIT, None
+        if argparse_message.startswith(b"error:"):
+            return argparse_message, CLAP_EXIT, None
+        worded = clap_leaf_refusal(prog, spec, parsed)
+        return worded or argparse_message, CLAP_EXIT, None
     if style is not UsageStyle.GIT:
         return argparse_message, ARGPARSE_EXIT, None
     kinds = parsed.option_error_kinds

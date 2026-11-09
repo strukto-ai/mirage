@@ -20,7 +20,7 @@ import { join } from 'node:path'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { buildMachine } from '@struktoai/mirage-core/machine/registry'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { EXEC_PRELUDE, PROCESS } from '@struktoai/mirage-core/machine/constants'
+import { EXEC_PRELUDE, runArgv, runStatusPath } from '@struktoai/mirage-core/machine/constants'
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { isLineExecutor, isProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
@@ -313,15 +313,13 @@ it('preserves argv through execute and shares the shell connection', async () =>
       '/',
       '-e',
       'E=request',
-      '-e',
-      `${PROCESS}=runid`,
       'box',
       '/bin/sh',
       '-c',
       EXEC_PRELUDE,
       'sh',
       '/work',
-      ...argv,
+      ...runArgv('runid', runStatusPath('runid'), [], argv),
     ],
     stdin,
   ])
@@ -382,7 +380,7 @@ it('gives each session a container of its own through a route', async () => {
   } finally {
     await ws.close()
   }
-  expect(boxes.agent_a.execTargets()).toEqual(['box-agent_a', 'box-agent_a'])
-  expect(boxes.agent_b.execTargets()).toEqual(['box-agent_b'])
+  expect(boxes.agent_a.execTargets()).toEqual(['box-agent_a', 'box-agent_a', 'box-agent_a'])
+  expect(boxes.agent_b.execTargets()).toEqual(['box-agent_b', 'box-agent_b'])
   expect(boxes.agent_a.inspected()).toEqual(['box-agent_a'])
 })

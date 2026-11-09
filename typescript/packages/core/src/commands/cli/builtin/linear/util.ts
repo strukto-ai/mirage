@@ -21,7 +21,10 @@ import {
   listTeamProjects,
 } from '../../../../core/linear/client.ts'
 import type { LinearConfig } from '../../../../core/linear/config.ts'
+import { getIssue } from '../../../../core/linear/client.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
+import type { FlagView } from '../../../spec/flag_view.ts'
+import { firstText } from '../../operand.ts'
 import { enoent } from '../../../../errors/fs.ts'
 
 const ISSUE_KEY_RE = /^[A-Za-z][A-Za-z0-9]*-\d+$/
@@ -38,12 +41,6 @@ export function linearAccessor(config: unknown): LinearAccessor {
   return new LinearAccessor(transport, {
     ...(cfg.teamIds !== undefined ? { teamIds: cfg.teamIds } : {}),
   })
-}
-
-export function firstText(texts: readonly string[], label: string): string {
-  const value = texts[0]
-  if (value === undefined || value === '') throw new Error(`${label} is required`)
-  return value
 }
 
 export async function resolveIssue(accessor: LinearAccessor, token: string): Promise<string> {
@@ -104,6 +101,31 @@ export async function resolveProjectId(
     if (project.name === projectName && typeof project.id === 'string') return project.id
   }
   throw enoent(projectName)
+}
+
+/** Resolve what add-label and remove-label act on. */
+export async function issueLabels(
+  accessor: LinearAccessor,
+  texts: readonly string[],
+  fl: FlagView,
+): Promise<{ issueId: string; existing: string[]; labelId: string }> {
+  const issueId = await resolveIssue(accessor, firstText(texts, 'issue key'))
+  const issue = await getIssue(accessor.transport, issueId)
+  const team = issue.team
+  const rawTeamId =
+    team !== null && typeof team === 'object' ? (team as Record<string, unknown>).id : undefined
+  const teamId = typeof rawTeamId === 'string' ? rawTeamId : ''
+  const labelId = await resolveLabelId(accessor, teamId, fl.asStr('label'), fl.asStr('label_name'))
+  const labels = issue.labels
+  const nodes =
+    labels !== null && typeof labels === 'object'
+      ? ((labels as Record<string, unknown>).nodes as Record<string, unknown>[] | undefined)
+      : undefined
+  const existing: string[] = []
+  for (const node of nodes ?? []) {
+    if (typeof node.id === 'string') existing.push(node.id)
+  }
+  return { issueId, existing, labelId }
 }
 
 export async function textOrStdin(

@@ -37,8 +37,8 @@ async def test_jobs_lists_id_status_and_command():
     pending = await submit_pending(table, command="bar")
     await table.wait(done.id)
     out, _, _ = await handle_jobs(table, ["jobs"])
-    assert b"[1] completed foo" in out
-    assert b"[2] running bar" in out
+    assert b"[1]-  Done                    foo\n" in out
+    assert b"[2]+  Running                 bar &\n" in out
     await table.kill(pending.id)
 
 

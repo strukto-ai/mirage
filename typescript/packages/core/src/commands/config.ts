@@ -15,7 +15,7 @@
 import type { Accessor } from '../accessor/base.ts'
 import { IOResult, type ByteSource, type CommandOutput } from '../io/types.ts'
 import type { EntryGate } from '../policy/types.ts'
-import type { ProcessView } from '../execution/process/view.ts'
+import type { SessionProcesses } from '../execution/process/session.ts'
 import type { DiffComputer } from '../rs/diff_types.ts'
 import type { FindExpr } from '../rs/find.ts'
 import type { CommandRuntime, ShellFn } from '../runtime/types.ts'
@@ -71,7 +71,7 @@ export interface Context {
   /** The live session, with policy applied to writes; `env` stays the snapshot. */
   session?: SessionView
   /** The session's processes. */
-  processes?: ProcessView
+  processes?: SessionProcesses
   /** Run a nested line in the calling session, as `sh -c` would (awk's pipes and `system()`). */
   shell?: ShellFn
   admission?: EntryGate | null

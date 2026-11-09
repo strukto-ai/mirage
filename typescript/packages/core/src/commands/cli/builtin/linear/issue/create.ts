@@ -28,7 +28,7 @@ export async function create(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const team = await resolveTeam(accessor.transport, fl.asStr('team') ?? '')
   let description: string | null = null
   if (fl.asStr('description') !== undefined || ctx.stdin !== null) {

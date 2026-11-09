@@ -27,6 +27,7 @@ from mirage.execution.job.types import JobState
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.constants import FIRST_PID
 from mirage.execution.process.table import ProcessTable
+from mirage.execution.process.types import Process
 from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import LineId, MachineId
 from mirage.io import IOResult
@@ -99,6 +100,10 @@ async def _submit_gated(table: JobTable, gate: asyncio.Event) -> JobHandle:
     job = await table.submit(command="deaf", run=_run_forever, cwd="/")
     job.console = JobConsole(store=_GatedStore(gate))
     return job
+
+
+def _seen(table: JobTable) -> tuple[Process, ...]:
+    return table.processes.visible("a", ProcessPermissions())
 
 
 @pytest.mark.asyncio
@@ -367,6 +372,7 @@ async def test_close_session_stops_and_forgets_its_jobs():
     assert table.get(1, "a") is None
     assert table.list_jobs("b") == [b1]
     # A session reusing the id starts from one and inherits nothing.
+    assert table.saved_statuses("a", a2.pid) == {}
     assert (await _submit(table, "a")).id == 1
     await table.kill_all()
     assert a2.signal is not None
@@ -408,17 +414,16 @@ async def test_disowned_job_keeps_process_identity_until_runner_really_exits():
     await entered.wait()
     process = job.process
     assert process is not None
-    view = table.processes.view("a")
     assert await table.disown(job.id, "a")
     assert table.list_jobs("a") == []
-    assert [i.pid for i in view.list()] == [process.record.pid]
+    assert [i.pid for i in _seen(table)] == [process.record.pid]
     await table.kill_all()
     assert job.signal is not None
-    assert [i.state for i in view.list()] == ["stopping"]
+    assert [i.state for i in _seen(table)] == ["stopping"]
     release.set()
     result = await process.join()
     assert result.exit == 0
-    assert view.list() == ()
+    assert _seen(table) == ()
 
 
 @pytest.mark.asyncio
@@ -1404,15 +1409,18 @@ async def test_a_remote_signal_reads_the_grants_after_the_store(monkeypatch):
 
     await _until(listed)
     every = ProcessPermissions(list="workspace", kill="workspace")
-    view = b.processes.view("t", lambda: every)
+    revoked: list[bool] = []
     listing = store.processes
 
+    def granted() -> ProcessPermissions | None:
+        return None if revoked else every
+
     async def revoking() -> dict[str, dict[str, RecordFields]]:
-        b.processes.revoke_session("t")
+        revoked.append(True)
         return await listing()
 
     monkeypatch.setattr(store, "processes", revoking)
-    assert not await b.signal_remote(job.pid, 15, "t", view.permissions)
+    assert not await b.signal_remote(job.pid, 15, "t", granted)
     assert await store.take_stops(a.daemon) == []
     assert job.state == JobState.RUNNING
     await a.close()
@@ -2300,13 +2308,13 @@ async def test_what_waits_for_a_job_s_ending_runs_once_it_is_recorded():
     try:
         job = await table.submit("train", run, "/", simple=True)
         assert (await table.wait(job.id)).exit_code == 3
-        await _until(lambda: _seen(seen))
+        await _until(lambda: _any(seen))
         assert seen == [JobState.EXITED.value]
     finally:
         await table.close()
 
 
-async def _seen(seen: list) -> bool:
+async def _any(seen: list) -> bool:
     return bool(seen)
 
 
@@ -2368,7 +2376,7 @@ async def test_a_job_that_runs_attached_after_all_is_not_recorded_detached():
             "train", run, "/", simple=True, detachable=True
         )
 
-        await _until(lambda: _seen(told[1:]))
+        await _until(lambda: _any(told[1:]))
         fields = await store.load(job.session_id)
         assert told == [_WHERE, None]
         assert fields["jobs"][str(job.id)]["detached"] is None

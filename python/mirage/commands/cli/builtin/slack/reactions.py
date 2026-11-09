@@ -31,5 +31,4 @@ async def reactions(
     message = await get_reactions(
         accessor, fl.as_str("channel") or "", fl.as_str("ts") or ""
     )
-    out = compact_json_bytes(message)
-    return out, IOResult()
+    return compact_json_bytes(message), IOResult()

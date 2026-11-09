@@ -29,6 +29,7 @@ import { Recorder } from '../../shell/descriptors.ts'
 import { ArithError, ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../execution/job/index.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
+import { traceLine } from '../../shell/xtrace.ts'
 import type { Item, Shell, ShellSlot, ShellTask, ShellTreeNode } from '../../rs/shell.ts'
 import { shellNode } from '../../shell/parse/program.ts'
 import type { PathSpec } from '../../types.ts'
@@ -36,6 +37,7 @@ import { wordText } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { ExpandHost } from '../expand/node.ts'
+import { diagnosticStderr } from '../node/diagnostics.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { frame, sessionView, visibleEnv } from '../session/state.ts'
@@ -60,6 +62,7 @@ import { errTrapArmed, runErrTrap, runReturnTrap } from './traps.ts'
 export type BodyRun = (
   nodes: readonly TSNodeLike[],
   bound?: ReturnType<typeof fd0Binding>,
+  leading?: Uint8Array,
 ) => Promise<RedirectResult>
 
 export class LoopSignal extends Error {
@@ -102,11 +105,14 @@ export async function executeBody(
   executeFn: ExecuteStringFn | null = null,
   sink: JobConsole | null = null,
   bound: ReturnType<typeof fd0Binding> = fd0Binding(context.session),
+  leading: Uint8Array = new Uint8Array(),
 ): Promise<RedirectResult> {
   const session = context.session
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: '', exitCode: 0 })
+  if (leading.byteLength > 0)
+    mergedIo = await land([[Channel.STDERR, leading, false]], sink, allStdout, mergedIo)
   for (const cmd of body) {
     if (cmd.type === NT.COMMENT) continue
     const armed = errTrapArmed(session)
@@ -352,6 +358,13 @@ function collectLoopResult(
  * What a compound command asks of the shell: to run the lists of statements
  * it picks, here, keeping what they wrote. Mirrors Python's _ConstructHost.
  */
+/** Take what a construct's own expansions and trace have said. */
+function takeSaid(context: EvaluationContext): Uint8Array {
+  const said = diagnosticStderr(null, context)
+  context.frame.diagnostics.length = 0
+  return said
+}
+
 class ConstructHost extends ExpandHost {
   readonly allStdout: (ByteSource | null)[] = []
   mergedIo = new IOResult()
@@ -360,7 +373,7 @@ class ConstructHost extends ExpandHost {
   left: Unwinding | null = null
   // Each test and body reads the fd 0 the construct started with, so an
   // `exec < f` in one reaches the rest.
-  private readonly bound: ReturnType<typeof fd0Binding>
+  readonly bound: ReturnType<typeof fd0Binding>
 
   constructor(
     private readonly body: BodyRun,
@@ -381,15 +394,18 @@ class ConstructHost extends ExpandHost {
     start: number,
     pending: number | null,
     framed: boolean,
+    said: readonly (string | Uint8Array)[],
   ): Promise<[number, string, number, boolean]> {
     const session = this.session
     if (pending !== null) recordStatus(session, pending)
     const statements =
       start > 0 ? (this.lists[index] ?? []).slice(start) : (this.lists[index] ?? [])
+    this.context.frame.diagnostics.push(...said)
+    const leading = takeSaid(this.context)
     try {
       const [stdout, io, ran] = test
-        ? await ignoringErrexit(session, () => this.body(statements, this.bound))
-        : await this.body(statements, this.bound)
+        ? await ignoringErrexit(session, () => this.body(statements, this.bound, leading))
+        : await this.body(statements, this.bound, leading)
       if (!test) this.lastExec = ran
       keep(this.allStdout, stdout)
       this.mergedIo = await this.mergedIo.merge(
@@ -452,6 +468,13 @@ async function runConstruct(
     number | null | undefined,
   ]
   if (pending !== null && pending !== undefined) recordStatus(session, pending)
+  const leading = takeSaid(context)
+  if (leading.byteLength > 0) {
+    const [, last] = await body([], host.bound, leading)
+    host.mergedIo = await host.mergedIo.merge(
+      new IOResult({ stderr: last.stderr, exitCode: host.mergedIo.exitCode }),
+    )
+  }
   if (host.left !== null) {
     throw await carried(host.left, chainStreams(host.allStdout), host.mergedIo)
   }
@@ -514,6 +537,7 @@ export async function handleFor(
   run: BodyRun,
   variable: string,
   values: readonly (string | PathSpec)[],
+  head: string,
   body: readonly TSNodeLike[],
   context: EvaluationContext,
   executeFn: ExecuteFn,
@@ -521,7 +545,7 @@ export async function handleFor(
 ): Promise<RedirectResult> {
   const words = values.map((value) => wordText(value))
   const host = await runConstruct(
-    (shell) => shell.runFor(variable, words, 0, statements(context.session, [body])),
+    (shell) => shell.runFor(variable, words, head, 0, statements(context.session, [body])),
     run,
     [body],
     context,
@@ -682,6 +706,7 @@ export async function handleSelect(
   run: BodyRun,
   variable: string,
   values: readonly (string | PathSpec)[],
+  head: string,
   body: readonly TSNodeLike[],
   context: EvaluationContext,
   stdin: ByteSource | null = null,
@@ -696,12 +721,22 @@ export async function handleSelect(
   const bound = fd0Binding(session)
   const words = values.map((v) => wordText(v))
   let showMenu = words.length > 0
+  const traced = session.shellOptions.xtrace === true ? traceLine(head) : new Uint8Array()
+  mergedIo = await land(
+    [[Channel.STDERR, concat([traced, takeSaid(context)]), false]],
+    sink ?? null,
+    allStdout,
+    mergedIo,
+  )
   while (words.length > 0 && session.shellOptions.noexec !== true) {
     const env = visibleEnv(session)
     const menu = showMenu ? selectMenu(words, env.COLUMNS ?? '') : ''
     const prompt = menu + (env.PS3 ?? '#? ')
-    mergedIo = await mergedIo.merge(
-      new IOResult({ stderr: prompt !== '' ? encodeText(prompt) : null }),
+    mergedIo = await land(
+      [[Channel.STDERR, encodeText(prompt), false]],
+      sink ?? null,
+      allStdout,
+      mergedIo,
     )
     const reply = lines !== null ? await readReply(lines, signal) : null
     // A failed choice read (end of input, a readonly REPLY) ends the prompt
@@ -740,7 +775,8 @@ export async function handleSelect(
       mergedIo = await mergedIo.merge(io)
       if (session.errexitExiting) break
     } catch (sig) {
-      if (!(sig instanceof LoopSignal)) throw sig
+      if (!isUnwinding(sig)) throw sig
+      if (!(sig instanceof LoopSignal)) throw await carried(sig, chainStreams(allStdout), mergedIo)
       mergedIo = await absorbed(sig, allStdout, mergedIo)
       if (sig instanceof BreakSignal) break
     }

@@ -472,6 +472,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let construct = Construct::For {
                 variable: args.string()?,
                 values: words(args.list()?)?,
+                head: args.bytes()?,
                 body: size(args.int()?)?,
             };
             let tree = maybe_tree(args)?;
@@ -933,6 +934,7 @@ fn ask_out(engine: &mut Engine, ask: Ask) -> Item {
             Item::int(run.start),
             Item::opt(run.pending, Item::int),
             Item::Bool(run.framed),
+            host::diagnostics_out(&run.said),
         ]),
         Ask::Pause { view } => Item::list([
             Item::text("pause"),

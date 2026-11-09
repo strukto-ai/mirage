@@ -31,5 +31,4 @@ async def pin_message(
     result = await pin_message_core(
         accessor, fl.as_str("channel") or "", fl.as_str("ts") or ""
     )
-    out = compact_json_bytes(result)
-    return out, IOResult()
+    return compact_json_bytes(result), IOResult()

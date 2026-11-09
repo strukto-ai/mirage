@@ -184,7 +184,7 @@ export class SystemIdSource implements IdSource {
   }
 }
 
-const SYSTEM_IDS = new SystemIdSource()
+export const SYSTEM_IDS = new SystemIdSource()
 
 function cryptoU32(): number {
   return globalThis.crypto.getRandomValues(new Uint32Array(1))[0] ?? 0

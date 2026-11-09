@@ -31,7 +31,7 @@ async def triage(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     query = fl.as_str("query", "is:unread")
     max_results = fl.as_int("max", 20)
     summaries = []
@@ -51,5 +51,4 @@ async def triage(
                 "snippet": raw.get("snippet", ""),
             }
         )
-    out = compact_json_bytes(summaries)
-    return out, IOResult()
+    return compact_json_bytes(summaries), IOResult()

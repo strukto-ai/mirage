@@ -27,7 +27,7 @@ export async function resolve(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   let databaseId: string
   try {
     databaseId = firstText(texts, 'database id')

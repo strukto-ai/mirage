@@ -20,6 +20,13 @@ const verb: CLIVerbFn = () => null
 const configModel = (input: Record<string, unknown>) => input
 
 describe('CLI registration', () => {
+  it('lets a flag make a read-only leaf write', () => {
+    const handler = new CLIHandler({ writeWhen: ['--seen'] })
+    expect(handler.writes(['7'])).toBe(false)
+    expect(handler.writes(['7', '--seen'])).toBe(true)
+    expect(new CLIHandler({ write: true }).writes([])).toBe(true)
+  })
+
   it('freezes registrations and copies their handler mappings', () => {
     const handlers: Record<string, CLIHandler> = { '': new CLIHandler({ fn: verb }) }
     const cli = new CLI({ spec: new CommandSpec({ name: 'tool' }), handlers })

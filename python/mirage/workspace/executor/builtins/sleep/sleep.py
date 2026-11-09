@@ -25,6 +25,7 @@ from mirage.commands.spec.usage import (
     unknown_option_error,
     usage_hint,
 )
+from mirage.context import while_paused
 from mirage.io import IOResult
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource
@@ -243,6 +244,7 @@ async def handle_sleep(
             ExecutionNode(command="sleep", exit_code=1),
         )
     await cancellable_sleep(total, cancel)
+    await while_paused()
     return None, IOResult(), ExecutionNode(command="sleep", exit_code=0)
 
 

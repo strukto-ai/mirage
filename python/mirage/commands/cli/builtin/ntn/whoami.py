@@ -80,7 +80,7 @@ async def whoami(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     me = await get_self(notion_transport(accessor, ctx))
     if fl.as_bool("json"):
         return pretty_json(me), IOResult()

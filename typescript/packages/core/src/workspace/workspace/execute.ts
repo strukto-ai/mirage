@@ -33,6 +33,7 @@ import {
   FORK_FAILED,
   FORK_FAILED_STATUS,
   INTERRUPTED_STATUS,
+  PPID,
   SHELL_IGNORED_SIGNALS,
 } from '../../shell/constants.ts'
 import type { ProcessHandle } from '../../execution/process/handle.ts'
@@ -48,6 +49,7 @@ import { JobOutput, Terminal } from '../../shell/console/index.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import {
   currentCaller,
+  expireCaller,
   getCurrentSessionFor,
   runWithCaller,
   runWithRefusalSink,
@@ -130,7 +132,7 @@ import { commandName, forkForCall } from './utils.ts'
 import { encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { runWithSystemClock } from '../../utils/clock.ts'
 import { runWithEnvLimit } from '../session/budget.ts'
-import { deciding, visibleEnv } from '../session/state.ts'
+import { deciding, envIsReadonly, seedParent, visibleEnv } from '../session/state.ts'
 
 /**
  * Everything `executeLine` needs from the workspace, passed explicitly
@@ -428,6 +430,7 @@ async function runLine(
         },
         started: (line) => {
           targetSession.processId = targetSession.shellPid = line.record.id.pid
+          if (!envIsReadonly(targetSession, PPID)) seedParent(targetSession, 0)
         },
         ignores: SHELL_IGNORED_SIGNALS,
         pid: targetSession.shellPid,
@@ -818,19 +821,18 @@ async function openHistory(
 }
 
 /** Settle what a line's passes and gates claimed, however it ended. Mirrors Python's _settle_grants. */
-function settleGrants(
+async function settleGrants(
   env: ExecuteEnv,
   sessionId: string,
   handed: HandOff,
   held: boolean,
   killed?: AbortSignal,
-): Promise<void> | null {
+): Promise<void> {
   if (held) env.registry.decisions.release(sessionId, handed)
   // A nested evaluation's claims are the outer line's to keep for the
   // next evaluation from the same node and to spend at its own end.
   else if (handed.parent !== null) env.registry.decisions.handUp(sessionId, handed)
-  else return runCancellable(env.registry.decisions.revoke(sessionId, handed), killed)
-  return null
+  else await runCancellable(env.registry.decisions.revoke(sessionId, handed), killed)
 }
 
 /** Record how a line ended, on its history or as one result. */
@@ -1628,6 +1630,7 @@ async function runParsedLine(
         deadline === null ? 0 : deadline.seconds - (performance.now() - deadline.start) / 1000
       if (deadline !== null && left <= 0) deadline.expiry.abort()
       const expire = (): void => {
+        expireCaller()
         deadline?.expiry.abort()
       }
       const timed = deadline !== null && left > 0
@@ -1742,10 +1745,7 @@ async function runParsedLine(
       return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
     }
   } finally {
-    // Only a revocation waits: a kill reaching a job's line in a browser
-    // depends on the line ending without another turn.
-    const revoking = settleGrants(env, effectiveSession.sessionId, handed, held, killed)
-    if (revoking !== null) await revoking
+    await settleGrants(env, effectiveSession.sessionId, handed, held, killed)
   }
   const [[materialized, io], opRecords] = execResult
   const callerError =

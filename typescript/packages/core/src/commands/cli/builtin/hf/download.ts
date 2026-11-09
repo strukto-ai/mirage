@@ -41,6 +41,7 @@ import {
 import { fetchTree, filterRepoPaths, repoFiles } from '../../../../core/hf_hub/tree.ts'
 import type { TreeEntry } from '../../../../core/hf_hub/tree_entry.ts'
 import { repoTypeOf, requireOperands, textOut } from './accessor.ts'
+import { ensureDir } from '../../operand.ts'
 
 // huggingface_hub 1.16.4's answer to a download pool under one worker.
 const MAX_WORKERS_REFUSAL = 'Invalid value. max_workers must be greater than 0'
@@ -63,40 +64,6 @@ export function selected(
     return files.filter((path) => wanted.has(path))
   }
   return filterRepoPaths(files, include, exclude)
-}
-
-/**
- * Create a directory and every missing directory above it.
- *
- * Written out rather than delegated to `mkdir -p` because the parents flag is
- * a per-backend capability: the ops factory only wires `parents: true` for
- * backends that declare it, so a plain `mkdir` of `a/b` fails on the rest.
- */
-export async function ensureDir(vfs: Files, path: PathSpec): Promise<void> {
-  const missing: PathSpec[] = []
-  let current = path
-  while (current.virtual !== '/') {
-    try {
-      await vfs.stat(current)
-      break
-    } catch (err) {
-      if (!isMissingPath(err)) throw err
-      missing.push(current)
-      current = current.parent
-    }
-  }
-  for (const target of missing.reverse()) {
-    try {
-      await vfs.mkdir(target)
-    } catch (err) {
-      // A parallel download fans out over files that share parents, so two
-      // workers can read the same parent as missing and then both create
-      // it. EEXIST here says the directory is present, which is what the
-      // caller asked for; rethrowing would fail the whole Promise.all over
-      // a race that already succeeded.
-      if ((err as { code?: unknown }).code !== 'EEXIST') throw err
-    }
-  }
 }
 
 /** Fetch one file and store it under the workspace directory. */
@@ -332,7 +299,7 @@ export async function downloadCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   requireOperands(texts, ['repo_id'])
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const localDir = fl.asPath('local_dir')
   const cacheWord = cacheRoot(ctx.env ?? {})
   const cacheDir =

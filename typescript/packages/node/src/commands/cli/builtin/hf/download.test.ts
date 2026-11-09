@@ -20,7 +20,8 @@ import { HfAccountAccessor } from '@struktoai/mirage-core/accessor/hf_hub'
 import type * as ClientModule from '@struktoai/mirage-core/core/hf_hub/client'
 import { parseEntry } from '@struktoai/mirage-core/core/hf_hub/tree'
 import type * as TreeModule from '@struktoai/mirage-core/core/hf_hub/tree'
-import { downloadCmd, ensureDir } from '@struktoai/mirage-core/commands/cli/builtin/hf/download'
+import { downloadCmd } from '@struktoai/mirage-core/commands/cli/builtin/hf/download'
+import { ensureDir } from '@struktoai/mirage-core/commands/cli/operand'
 
 const hubBytesMock = vi.hoisted(() => vi.fn())
 const fetchTreeMock = vi.hoisted(() => vi.fn())

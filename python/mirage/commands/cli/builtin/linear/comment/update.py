@@ -29,7 +29,7 @@ async def update(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     body = await text_or_stdin(
         fl.as_str("body"), ctx.stdin, "comment body is required"
     )

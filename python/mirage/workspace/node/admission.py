@@ -457,10 +457,9 @@ def _writes(
                 session.cwd,
                 env_snapshot(session),
             )
-            if (
-                result.leaf is not None
-                and candidate_tree.handlers[" ".join(result.path)].write
-            ):
+            if result.leaf is not None and candidate_tree.handlers[
+                " ".join(result.path)
+            ].writes(args):
                 return True
         return False
     runs = runs_as(name, registry)
@@ -519,10 +518,9 @@ def _writes(
                 session.cwd,
                 env_snapshot(session),
             )
-            if (
-                result.leaf is not None
-                and candidate_tree.handlers[" ".join(result.path)].write
-            ):
+            if result.leaf is not None and candidate_tree.handlers[
+                " ".join(result.path)
+            ].writes(args):
                 return True
         elif any(
             mount.may_write(runs, extension, facts.writes)

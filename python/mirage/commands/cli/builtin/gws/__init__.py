@@ -44,9 +44,9 @@ def google_api_accessor(config: GoogleConfig) -> GoogleApiAccessor:
 # The gws program tree, mirroring the official Google Workspace CLI:
 # one passthrough leaf per Discovery method (`gws drive files list`,
 # speaking --params/--json like the raw API) plus hand-written helper
-# verbs directly under their service (`gws gmail send`). The old mount
-# registrations spelled the helpers `+send`; the tree does not need the
-# marker. Install with a GoogleConfig; two installs are two accounts.
+# verbs directly under their service (`gws gmail send`), each also answering
+# to upstream's own `+send` spelling. Install with a GoogleConfig; two
+# installs are two accounts.
 GWS = CLI(
     spec=CommandSpec(
         name="gws",
@@ -64,6 +64,7 @@ GWS = CLI(
                 + (
                     CommandSpec(
                         name="read",
+                        aliases=("+read",),
                         description="Read a cell range",
                         arguments=(
                             Argument("--spreadsheet", required=True),
@@ -82,6 +83,7 @@ GWS = CLI(
                     ),
                     CommandSpec(
                         name="append",
+                        aliases=("+append",),
                         description="Append rows after a range",
                         arguments=(
                             Argument("--spreadsheet", required=True),
@@ -99,6 +101,7 @@ GWS = CLI(
                 + (
                     CommandSpec(
                         name="write",
+                        aliases=("+write",),
                         description="Append text to a document",
                         arguments=(
                             Argument("--document", required=True),
@@ -135,6 +138,7 @@ GWS = CLI(
                 + (
                     CommandSpec(
                         name="send",
+                        aliases=("+send",),
                         description="Send a new email via Gmail",
                         arguments=(
                             Argument("--to", required=True),
@@ -144,12 +148,14 @@ GWS = CLI(
                     ),
                     CommandSpec(
                         name="read",
+                        aliases=("+read",),
                         description="Fetch one Gmail message as processed JSON "
                         "(same shape as cat <path>.gmail.json)",
                         arguments=(Argument("--id", required=True),),
                     ),
                     CommandSpec(
                         name="reply",
+                        aliases=("+reply",),
                         description=(
                             "Reply to the sender of a Gmail message "
                             "(excludes CC)"
@@ -161,6 +167,7 @@ GWS = CLI(
                     ),
                     CommandSpec(
                         name="reply-all",
+                        aliases=("+reply-all",),
                         description="Reply to a Gmail message including all "
                         "recipients (To+CC)",
                         arguments=(
@@ -170,6 +177,7 @@ GWS = CLI(
                     ),
                     CommandSpec(
                         name="forward",
+                        aliases=("+forward",),
                         description="Forward a Gmail message to a new recipient",
                         arguments=(
                             Argument("--message-id", required=True),
@@ -178,6 +186,7 @@ GWS = CLI(
                     ),
                     CommandSpec(
                         name="triage",
+                        aliases=("+triage",),
                         description="List message summaries (id, from, subject, "
                         "date, snippet) for a Gmail search query",
                         arguments=(

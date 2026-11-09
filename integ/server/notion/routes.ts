@@ -49,6 +49,7 @@ import {
   updateBlockRoute,
 } from './writes.ts'
 import { apiError } from './wire.ts'
+import { completeUpload, createUpload, getUpload, listUploads, sendUpload } from './uploads.ts'
 
 // Every route is behind the token check, so it is applied once here rather
 // than as a first line in every handler. The kit's tenant fallback is
@@ -102,6 +103,8 @@ export function notionRoutes(): KitRoute<C>[] {
     get('/v1/blocks/:id/children', blockChildren),
     get('/v1/blocks/:id', retrieveBlock),
     get('/v1/comments', listCommentsRoute),
+    get('/v1/file_uploads', listUploads),
+    get('/v1/file_uploads/:id', getUpload),
     // A query is a POST that reads. It carries its filter in a body, which is
     // why it cannot be a GET, but it must not join the write queue either: the
     // kit already makes a read WAIT for pending writes without queueing behind
@@ -121,6 +124,9 @@ export function notionRoutes(): KitRoute<C>[] {
     write('PATCH', '/v1/blocks/:id', updateBlockRoute),
     write('DELETE', '/v1/blocks/:id', deleteBlockRoute),
     write('POST', '/v1/comments', createCommentRoute),
+    write('POST', '/v1/file_uploads', createUpload),
+    write('POST', '/v1/file_uploads/:id/send', sendUpload),
+    write('POST', '/v1/file_uploads/:id/complete', completeUpload),
     ...catchAll(),
   ]
 }

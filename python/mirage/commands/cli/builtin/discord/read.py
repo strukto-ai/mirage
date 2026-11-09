@@ -33,5 +33,4 @@ async def read(
         fl.as_str("channel") or "",
         fl.as_int("limit", 20),
     )
-    out = compact_json_bytes(messages)
-    return out, IOResult()
+    return compact_json_bytes(messages), IOResult()

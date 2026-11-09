@@ -13,13 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from email.parser import BytesParser
-from email.policy import default as default_policy
 
 import pytest
 
 from mirage.accessor.email import EmailAccessor
-from mirage.commands.cli.builtin.himalaya import send
+from mirage.commands.cli.builtin.himalaya import add, send
 from mirage.commands.config import Context
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
@@ -32,15 +30,19 @@ RAW = b"From: me@example.com\nTo: a@b.com\nSubject: Hi\n\nyo"
 
 @pytest.fixture
 def sent(monkeypatch):
-    seen: dict = {}
+    seen: dict = {"saved": False}
 
-    async def fake_deliver(accessor, raw, save=None):
+    async def fake_deliver(accessor, raw, save=None, no_save=False):
         seen["raw"] = raw
         seen["save"] = save
-        message = BytesParser(policy=default_policy).parsebytes(raw)
-        return message, seen.get("warning", "")
+        seen["no_save"] = no_save
+        return None, seen["saved"]
 
-    monkeypatch.setitem(send.__globals__, "deliver", fake_deliver)
+    monkeypatch.setitem(
+        send.__globals__["finish_message"].__globals__,
+        "deliver",
+        fake_deliver,
+    )
     return seen
 
 
@@ -49,54 +51,53 @@ async def test_send_reads_the_message_from_stdin(sent):
     out, io = await send(EMAIL, [], [], Context(stdin=RAW))
     assert io.exit_code == 0
     assert sent["raw"] == RAW
+    assert await materialize(out) == b"Message successfully sent\n"
+
+
+@pytest.mark.asyncio
+async def test_json_reports_a_saved_copy(sent):
+    sent["saved"] = True
+    out, _ = await send(
+        EMAIL, [], [], Context(stdin=RAW, flags={"json": True, "save": "Sent"})
+    )
     assert json.loads(await materialize(out)) == {
-        "status": "sent",
-        "to": "a@b.com",
-        "subject": "Hi",
+        "message": "Message successfully saved and sent"
     }
+    assert sent["save"] == "Sent"
 
 
 @pytest.mark.asyncio
-async def test_send_takes_an_inline_message_with_escaped_newlines(sent):
-    await send(EMAIL, [], ["From:", "me@x", "\\n\\n", "body"], Context())
-    assert sent["raw"] == b"From: me@x \n\n body"
-
-
-@pytest.mark.asyncio
-async def test_inline_message_wins_over_stdin(sent):
-    await send(EMAIL, [], ["From:", "me@x"], Context(stdin=RAW))
-    assert sent["raw"] == b"From: me@x"
+async def test_an_inline_message_turns_escapes_into_line_breaks(sent):
+    await send(
+        EMAIL,
+        [],
+        ["From: a@b\\nTo: c@d\\n\\nbody"],
+        Context(argv=("--", "From: a@b\\nTo: c@d\\n\\nbody")),
+    )
+    assert sent["raw"] == b"From: a@b\r\nTo: c@d\r\n\r\nbody"
 
 
 @pytest.mark.asyncio
 async def test_an_empty_message_is_refused_before_smtp(sent):
-    with pytest.raises(ValueError, match="no message provided"):
-        await send(EMAIL, [], [], Context(stdin=b"   \n "))
+    with pytest.raises(ValueError, match="Message is empty"):
+        await send(EMAIL, [], [], Context(stdin=b"  \n"))
     assert "raw" not in sent
 
 
 @pytest.mark.asyncio
-async def test_a_clean_send_writes_nothing_to_stderr(sent):
-    _, io = await send(EMAIL, [], [], Context(stdin=RAW))
-    assert io.stderr is None
+async def test_add_reports_the_new_id(monkeypatch):
+    seen: dict = {}
 
+    async def fake_append(accessor, raw, folder, flags):
+        seen["args"] = (raw, folder, flags)
+        return "9"
 
-@pytest.mark.asyncio
-async def test_an_unsaved_copy_reaches_stderr_without_failing_the_verb(sent):
-    sent["warning"] = "himalaya: sent copy not saved: Sent: NO\n"
-    out, io = await send(EMAIL, [], [], Context(stdin=RAW))
-    assert io.exit_code == 0
-    assert await materialize(io.stderr) == sent["warning"].encode()
-    assert json.loads(await materialize(out))["status"] == "sent"
-
-
-@pytest.mark.asyncio
-async def test_save_names_the_mailbox_for_the_copy(sent):
-    await send(EMAIL, [], [], Context(stdin=RAW, flags={"save": "Drafts"}))
-    assert sent["save"] == "Drafts"
-
-
-@pytest.mark.asyncio
-async def test_without_save_the_account_resolves_its_own_mailbox(sent):
-    await send(EMAIL, [], [], Context(stdin=RAW))
-    assert sent["save"] is None
+    monkeypatch.setitem(add.__globals__, "append_message", fake_append)
+    out, _ = await add(
+        EMAIL,
+        [],
+        [],
+        Context(stdin=RAW, flags={"mailbox": "Archive", "flag": ["flagged"]}),
+    )
+    assert await materialize(out) == b"Message 9 successfully added"
+    assert seen["args"] == (RAW, "Archive", "\\Flagged")

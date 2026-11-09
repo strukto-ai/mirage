@@ -9,7 +9,7 @@
       "command": "discord --help | head -n 1",
       "expect": {
         "exit": 0,
-        "stdout": "usage: discord [-h] {send,read,edit,delete,react,search,thread-create,poll,members,server-info} ...\n",
+        "stdout": "usage: discord [-h] {send,read,edit,delete,react,reactions,pin-message,unpin-message,list-pins,search,thread-create,poll,members,server-info} ...\n",
         "stderr": ""
       }
     },
@@ -288,6 +288,17 @@
       "expect": {
         "exit": 0,
         "stdout": "same\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_reactions_and_pins",
+      "seq": 9940005,
+      "targets": ["cli-discord"],
+      "command": "C=200000000000000001; M=1510934682009600000; discord react --channel $C --message $M --emoji fire >/dev/null; discord reactions --channel $C --message $M | jq -c 'map([.emoji.name, .count, .me])'; discord pin-message --channel $C --message $M; echo; discord list-pins --channel $C | jq -r '.[].message.id'; discord unpin-message --channel $C --message $M; echo; discord list-pins --channel $C | jq length; discord pin-message --channel $C --message 999 2>/dev/null; echo exit=$?; discord reactions --channel $C --message 999 2>/dev/null; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\":+1:\",1,true],[\"fire\",1,true]]\n{\"ok\":true}\n1510934682009600000\n{\"ok\":true}\n0\nexit=1\nexit=1\n",
         "stderr": ""
       }
     }

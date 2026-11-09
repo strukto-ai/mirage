@@ -48,9 +48,9 @@ def patched(monkeypatch):
         seen["args"] = (folder, uid)
         return ORIGINAL
 
-    async def fake_deliver(accessor, raw, save=None):
+    async def fake_deliver(accessor, raw, save=None, no_save=False):
         seen["raw"] = raw
-        return BytesParser(policy=default_policy).parsebytes(raw), ""
+        return BytesParser(policy=default_policy).parsebytes(raw), False
 
     async def fake_close(self):
         seen["closed"] = True
@@ -77,7 +77,7 @@ async def test_forward_quotes_the_source_and_prefixes_fwd(patched):
     assert message["To"] == "carol@example.com"
     assert message["References"] == "<m0@example.com> <m1@example.com>"
     assert message["In-Reply-To"] is None
-    assert message.get_content() == "> the numbers\r\n"
+    assert message.get_content() == "> the numbers"
 
 
 @pytest.mark.asyncio
@@ -89,7 +89,7 @@ async def test_forward_carries_the_users_own_note_above_the_quote(patched):
         Context(flags={"to": "carol@example.com", "body": "see below"}),
     )
     message = parse(await materialize(out))
-    assert message.get_content() == "see below\r\n\r\n> the numbers\r\n"
+    assert message.get_content() == "see below\r\n\r\n> the numbers"
 
 
 @pytest.mark.asyncio
@@ -98,26 +98,17 @@ async def test_send_flag_pushes_through_smtp_and_reports_json(patched):
         EMAIL,
         [],
         ["7"],
-        Context(flags={"to": "carol@example.com", "send": True}),
+        Context(flags={"to": "carol@example.com", "send": True, "json": True}),
     )
     assert io.exit_code == 0
     assert b"Fwd: Quarterly numbers" in patched["raw"]
     assert json.loads(await materialize(out)) == {
-        "status": "sent",
-        "to": "carol@example.com",
-        "subject": "Fwd: Quarterly numbers",
+        "message": "Message successfully sent"
     }
 
 
 @pytest.mark.asyncio
-async def test_forward_needs_a_recipient(patched):
-    with pytest.raises(ValueError, match="no recipient"):
-        await forward(EMAIL, [], ["7"], Context())
-
-
-@pytest.mark.asyncio
-async def test_forward_without_an_id_is_a_usage_error(patched):
-    with pytest.raises(ValueError, match="message id is required"):
-        await forward(
-            EMAIL, [], [], Context(flags={"to": "carol@example.com"})
-        )
+async def test_forward_without_a_recipient_still_builds(patched):
+    out, io = await forward(EMAIL, [], ["7"], Context())
+    assert io.exit_code == 0
+    assert b"Fwd: Quarterly numbers" in await materialize(out)

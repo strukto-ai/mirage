@@ -37,6 +37,9 @@ const ALLOWED: Record<string, string> = {
     "the line pass's preview of a command's own prefix, on a fork of the " +
     'walked session that only policies read and nothing runs in; the run ' +
     "seeds it again through `executeCommand`'s checked loop",
+  'workspace/session/state.ts::seedParent':
+    "the shell's own bookkeeping for the one fixed name PPID as a shell " +
+    'starts, not a name the agent chose',
   'workspace/session/shell_dirs.ts::changeDir':
     "the shell's own bookkeeping for the two fixed names PWD and " +
     'OLDPWD as part of a cd the router already authorized, not a name ' +

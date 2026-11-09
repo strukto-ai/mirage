@@ -34,5 +34,4 @@ async def react(
         fl.as_str("message") or "",
         fl.as_str("emoji") or "",
     )
-    out = compact_json_bytes({"ok": True})
-    return out, IOResult()
+    return compact_json_bytes({"ok": True}), IOResult()

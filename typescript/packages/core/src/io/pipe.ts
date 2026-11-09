@@ -26,6 +26,7 @@ export class BytePipe {
   constructor(
     private readonly capacity = CAPACITY,
     private readonly polled = false,
+    private readonly gate: (() => Promise<void> | null) | null = null,
   ) {
     if (!Number.isSafeInteger(capacity) || capacity < CHUNK_SIZE)
       throw new Error('pipe capacity must be an integer from 16384 to 9007199254740991')
@@ -35,6 +36,7 @@ export class BytePipe {
   private ended = false
   private readerClosed = false
   private reading = false
+  private waiting = false
   private delivered = 0
   private accepted = 0
   private failure: Error | undefined
@@ -74,6 +76,8 @@ export class BytePipe {
 
   /** Accept bytes in bounded chunks, waiting for available capacity. */
   async write(data: Uint8Array, signal?: AbortSignal): Promise<void> {
+    const held = this.gate?.() ?? null
+    if (held !== null) await held
     for (let start = 0; start < data.byteLength; start += CHUNK_SIZE) {
       signal?.throwIfAborted()
       const length = Math.min(CHUNK_SIZE, data.byteLength - start)
@@ -145,7 +149,19 @@ export class BytePipe {
    * than once per chunk. Chunks side by side in one buffer (a sealed write)
    * pass as one view of it; others are copied together.
    */
-  async *stream(joined = false): AsyncGenerator<Uint8Array> {
+  stream(joined = false): AsyncGenerator<Uint8Array> {
+    const reader = this.read(joined)
+    const abandon = reader.return.bind(reader)
+    // A read still waiting for bytes ends now: the generator would finish
+    // only when the next chunk came, which may be never.
+    reader.return = (value) => {
+      if (this.waiting) this.closeReader()
+      return abandon(value)
+    }
+    return reader
+  }
+
+  private async *read(joined: boolean): AsyncGenerator<Uint8Array> {
     if (this.reading) throw new Error('byte pipe already has a reader')
     this.reading = true
     this.notify()
@@ -155,6 +171,8 @@ export class BytePipe {
         if (taken.length > 0) {
           for (const chunk of taken) this.bytes -= chunk.byteLength
           this.notify()
+          const held = this.gate?.() ?? null
+          if (held !== null) await held
           yield this.merged(taken)
           this.accepted += taken.length
           this.notify()
@@ -162,7 +180,9 @@ export class BytePipe {
           if (this.failure !== undefined) throw this.failure
           return
         } else {
+          this.waiting = true
           await this.changed()
+          this.waiting = false
         }
       }
     } finally {

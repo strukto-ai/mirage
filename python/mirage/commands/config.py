@@ -25,7 +25,7 @@ from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.constants import OWN_OPTION_LOOP
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
-from mirage.execution.process.view import ProcessView
+from mirage.execution.process.session import SessionProcesses
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.rs.diff_types import DiffComputer
@@ -67,7 +67,7 @@ class Context:
             session: reads, writes, links, and where the mounts are.
         session (SessionView | None): The live session, with policy
             applied to writes; ``env`` stays the snapshot.
-        processes (ProcessView | None): The session's processes.
+        processes (SessionProcesses | None): The session's processes.
         shell (ShellFn | None): Run a nested line in the calling
             session, as ``sh -c`` would (awk's pipes and ``system()``).
         diff (DiffComputer | None): The workspace's shared diff computation service.
@@ -91,7 +91,7 @@ class Context:
     spec: CommandSpec | None = None
     vfs: Files | None = None
     session: SessionView | None = None
-    processes: ProcessView | None = None
+    processes: SessionProcesses | None = None
     shell: ShellFn | None = None
     runtime: CommandRuntime | None = None
     machine: str | None = None

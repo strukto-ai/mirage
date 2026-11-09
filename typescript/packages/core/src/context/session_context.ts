@@ -216,6 +216,26 @@ export function currentCaller(): Caller {
 }
 
 /**
+ * Wait while a `kill -STOP` holds the process making this call, which is how
+ * one Mirage runs itself pauses: at its next wait. A runtime that cannot
+ * tell which task is calling (`asyncContextIsolatesTasks`) never holds one.
+ * Null when nothing holds it, so a call that goes on costs its caller no
+ * turn of the event loop. Mirrors Python's `while_paused`.
+ *
+ * @param caller who makes it; the current one when absent.
+ */
+export function whilePaused(caller?: Caller): Promise<void> | null {
+  if (!asyncContextIsolatesTasks) return null
+  const process = (caller ?? currentCaller()).process
+  return process?.paused === true ? process.resumed() : null
+}
+
+/** Tell the process making this call its deadline is past (`ProcessHandle.expire`). */
+export function expireCaller(): void {
+  currentCaller().process?.expire()
+}
+
+/**
  * Every caller live in this context, oldest first: on an isolating
  * runtime the bound one alone, on the fallback storage every
  * concurrently bound one.
@@ -403,14 +423,43 @@ export function lineSignal(session: SessionState): AbortSignal | undefined {
 /**
  * The signal the current call answers to: its evaluation frame's and its
  * line's, which withdraw a pipe read or copy that waits; Python cancels the
- * awaiting task instead. None in a landing (`runLanding`).
+ * awaiting task instead. None in a landing (`runLanding`). Without task
+ * isolation the newest frame can be a job's, whose fork keeps its shell's
+ * session id, and a line must not read as its own the signal of a job it just
+ * killed; there it is the signals `evaluation` names, when the caller knows
+ * which it is, else the one signal every live evaluation and line of that
+ * shell answers to.
  */
-export function callerSignal(): AbortSignal | undefined {
+export function callerSignal(evaluation?: EvaluationContext): AbortSignal | undefined {
   if (inLanding()) return undefined
-  const session = getCurrentSession()
+  const session = evaluation?.session ?? getCurrentSession()
+  if (asyncContextIsolatesTasks || session === null) {
+    return mergeSignals(
+      getCurrentEvaluation()?.frame.abortSignal,
+      session === null ? undefined : lineSignal(session),
+    )
+  }
+  const sameShell = (other: SessionState): boolean => other.sessionId === session.sessionId
+  const frames = new Set(
+    liveCallers().flatMap((caller) =>
+      caller.evaluation !== null && sameShell(caller.evaluation.session)
+        ? [caller.evaluation.frame.abortSignal ?? undefined]
+        : [],
+    ),
+  )
+  const lines = new Set(
+    lineFrames()
+      .filter((frame) => frame.sessions.some(sameShell))
+      .map((frame) => frame.stop ?? frame.signal),
+  )
+  const line = evaluation === undefined ? undefined : lineSignal(evaluation.session)
   return mergeSignals(
-    getCurrentEvaluation()?.frame.abortSignal,
-    session === null ? undefined : lineSignal(session),
+    evaluation !== undefined
+      ? evaluation.frame.abortSignal
+      : frames.size === 1
+        ? [...frames][0]
+        : undefined,
+    line ?? (lines.size === 1 ? [...lines][0] : undefined),
   )
 }
 

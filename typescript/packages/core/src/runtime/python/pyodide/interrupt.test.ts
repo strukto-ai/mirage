@@ -13,7 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it, vi } from 'vitest'
-import { createPyodideInterrupter } from './interrupt.ts'
+import {
+  clearSignals,
+  createPyodideInterrupter,
+  guestSignals,
+  INTERRUPT_BYTES,
+  sendSignal,
+  signalled,
+} from './interrupt.ts'
 import { requestSync } from '../../wasm/transport.ts'
 
 it('reasserts consumed deadline and abort signals until the run disarms', async () => {
@@ -49,4 +56,16 @@ it('cancels a VFS wait after Pyodide has consumed the interrupt cell', () => {
   expect(() => requestSync(() => undefined, { op: 'stat', path: '/data/hang' }, cells)).toThrow(
     'interrupted',
   )
+})
+
+it('keeps signals above 32 apart from those below', () => {
+  const cells = new Int32Array(new SharedArrayBuffer(INTERRUPT_BYTES))
+  sendSignal(cells, 42)
+  sendSignal(cells, 10)
+  expect(signalled(cells)).toBe(true)
+  const guest = guestSignals(cells)
+  expect([guest.take(), guest.take(), guest.take()]).toEqual([10, 42, 0])
+  sendSignal(cells, 64)
+  clearSignals(cells)
+  expect(signalled(cells)).toBe(false)
 })

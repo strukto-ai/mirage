@@ -30,11 +30,106 @@ import { isNode } from './loader.ts'
  * which the watchdog re-checks at the deadline so a countdown
  * cancelled just as it fires cannot poison the next run. Cell [3]
  * records an abort from the host before the worker has armed a run.
+ * Cells [4] and [7] hold the signals sent to the program and not yet
+ * taken, a bit each, 1 to 32 and 33 to 64, [5] is 1 while a `kill -STOP`
+ * holds it, and [6] names the signal that ended it. A signal reaches a
+ * guest by the carrier: written
+ * to the interrupt cell, it runs the handler the guest harness installs
+ * for it, which takes what was sent.
  *
  * Environments without SharedArrayBuffer or workers (a browser page
  * that is not cross-origin isolated) get null: runs stay unbounded
  * there, exactly the pre-interrupt behavior.
  */
+
+/** The size of the shared cells above. */
+export const INTERRUPT_BYTES = 32
+/** The signal number the interrupt cell carries sent signals under. */
+const SIGNAL_CARRIER = 64
+const PENDING = 4
+const HELD = 5
+const ENDED = 6
+const PENDING_HIGH = 7
+const CELL_BITS = 32
+
+/** What the guest harness calls about the signals sent to its program. */
+export interface GuestSignals {
+  /** Wait out a `kill -STOP`. */
+  hold(): void
+  /** The next signal sent and not yet taken, 0 for none. */
+  take(): number
+  /** Note the signal that is ending the program. */
+  ended(signal: number): void
+  /** Whether the program is being stopped outright. */
+  halted(): boolean
+}
+
+/**
+ * The guest's side of the cells, for the worker; a run in process has none
+ * and nothing can reach it while it runs.
+ *
+ * @param cells the shared cells, if any.
+ */
+export function guestSignals(cells: Int32Array | undefined): GuestSignals {
+  if (cells === undefined)
+    return { hold: () => undefined, take: () => 0, ended: () => undefined, halted: () => false }
+  return {
+    hold: () => {
+      while (Atomics.load(cells, HELD) === 1 && Atomics.load(cells, 1) === 0)
+        Atomics.wait(cells, HELD, 1, 100)
+    },
+    take: () => {
+      for (const [cell, below] of [
+        [PENDING, 0],
+        [PENDING_HIGH, CELL_BITS],
+      ] as const) {
+        const pending = Atomics.load(cells, cell)
+        if (pending === 0) continue
+        const bit = 32 - Math.clz32(pending & -pending)
+        Atomics.and(cells, cell, ~(1 << (bit - 1)))
+        return below + bit
+      }
+      return 0
+    },
+    ended: (signal) => {
+      Atomics.store(cells, ENDED, signal)
+    },
+    halted: () => Atomics.load(cells, 1) !== 0,
+  }
+}
+
+/** Whether the cells have something for the guest to act on. */
+export function signalled(cells: Int32Array): boolean {
+  return (
+    Atomics.load(cells, PENDING) !== 0 ||
+    Atomics.load(cells, PENDING_HIGH) !== 0 ||
+    Atomics.load(cells, HELD) === 1
+  )
+}
+
+/** Clear the cells for a new run. */
+export function clearSignals(cells: Int32Array): void {
+  for (const cell of [PENDING, PENDING_HIGH, HELD, ENDED]) Atomics.store(cells, cell, 0)
+}
+
+/** Send the guest a signal, which its harness acts on. */
+export function sendSignal(cells: Int32Array, signal: number): void {
+  const high = signal > CELL_BITS
+  Atomics.or(cells, high ? PENDING_HIGH : PENDING, 1 << (signal - (high ? CELL_BITS : 0) - 1))
+  Atomics.store(cells, 0, SIGNAL_CARRIER)
+}
+
+/** Hold the guest, or let it go on. */
+export function holdGuest(cells: Int32Array, held: boolean): void {
+  Atomics.store(cells, HELD, held ? 1 : 0)
+  if (held) Atomics.store(cells, 0, SIGNAL_CARRIER)
+  else Atomics.notify(cells, HELD)
+}
+
+/** The signal that ended the guest, 0 for none. */
+export function endedOn(cells: Int32Array): number {
+  return Atomics.load(cells, ENDED)
+}
 
 export interface ArmedInterrupt {
   /**
@@ -159,7 +254,7 @@ export async function createPyodideInterrupter(
   if (typeof SharedArrayBuffer === 'undefined') return null
   const watchdog = isNode() ? await createNodeWatchdog() : await createBrowserWatchdog()
   if (watchdog === null) return null
-  const shared = buffer ?? new SharedArrayBuffer(16)
+  const shared = buffer ?? new SharedArrayBuffer(INTERRUPT_BYTES)
   const cells = new Int32Array(shared)
   let generation = 0
   return {
@@ -172,7 +267,7 @@ export async function createPyodideInterrupter(
       if (Atomics.load(cells, 3) === 1) {
         Atomics.store(cells, 1, 2)
         Atomics.store(cells, 0, 2)
-      }
+      } else if (signalled(cells)) Atomics.store(cells, 0, SIGNAL_CARRIER)
       watchdog.post({
         buffer: shared,
         delayMs: timeoutSeconds !== null && timeoutSeconds > 0 ? timeoutSeconds * 1000 : null,

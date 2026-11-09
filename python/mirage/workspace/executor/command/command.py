@@ -60,7 +60,6 @@ from mirage.types import Follow, PathSpec, Producer
 from mirage.view.types import FollowOperands, SessionView, StatPath
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.disown.disown import handle_disown
-from mirage.workspace.executor.builtins.fg.fg import handle_fg
 from mirage.workspace.executor.builtins.jobs.jobs import handle_jobs
 from mirage.workspace.executor.builtins.kill.kill import handle_kill
 from mirage.workspace.executor.builtins.links.links import operand_follow
@@ -135,7 +134,6 @@ from mirage.workspace.types import ExecuteLine, ExecutionNode
 # workspace user; lookup already narrowed the name.
 JOB_HANDLERS = {
     "wait": handle_wait,
-    "fg": handle_fg,
     "kill": handle_kill,
     "jobs": handle_jobs,
     "disown": handle_disown,
@@ -975,11 +973,9 @@ async def handle_command(
     # Job builtins
     if cmd_name in JOB_BUILTINS and job_table is not None:
         text_parts = [
-            p.virtual if isinstance(p, PathSpec) else p for p in parts
+            (p.raw_path or p.virtual) if isinstance(p, PathSpec) else p
+            for p in parts
         ]
-        if cmd_name == "fg":
-            # The one job builtin that writes before it blocks.
-            return await handle_fg(job_table, text_parts, session, view, sink)
         if cmd_name == "ps":
             return await handle_ps(job_table, text_parts, session, view)
         return await JOB_HANDLERS[cmd_name](
@@ -1026,8 +1022,8 @@ async def handle_command(
             ids=registry.ids,
             vfs=files,
             session=view,
-            processes=registry.process_view(session)
-            if registry.process_view is not None
+            processes=registry.session_processes(session)
+            if registry.session_processes is not None
             else None,
         )
 

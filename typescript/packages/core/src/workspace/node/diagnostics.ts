@@ -21,10 +21,11 @@ import type { EvaluationContext } from '../evaluation.ts'
 
 /** The stderr a statement's expansions left, in the order they spoke: a
  * text diagnostic in bash's words, prefixed with the builtin the statement
- * names when bash names one, and bytes (a substitution's own stderr)
- * verbatim. Mirrors Python's diagnostic_stderr. */
-export function diagnosticStderr(node: TSNodeLike, context: EvaluationContext): Uint8Array {
-  const head = getText(node).trimStart().split(/\s+/, 1)[0] ?? ''
+ * names when bash names one (a null `node` is a compound command, which
+ * names none), and bytes (a substitution's own stderr) verbatim. Mirrors
+ * Python's diagnostic_stderr. */
+export function diagnosticStderr(node: TSNodeLike | null, context: EvaluationContext): Uint8Array {
+  const head = node === null ? '' : (getText(node).trimStart().split(/\s+/, 1)[0] ?? '')
   const builtin = ['export', 'declare', 'local', 'readonly', 'read', 'printf', 'let'].includes(head)
     ? head
     : ''

@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mirage.concurrency.limiter import owned_task
+from mirage.context.session_context import current_caller
 from mirage.io.memory import memory_room
 from mirage.io.types import materialize
 from mirage.runtime.python.execution import main_filename
@@ -329,6 +330,7 @@ class MontyExecution:
                 # report exit 124 and leave the worker spinning forever,
                 # and pool teardown would block on it uninterruptibly.
                 worker_pid = session.worker_pid
+                let_go = hold_worker(worker_pid)
                 try:
                     await session.feed_run(
                         program.code,
@@ -346,6 +348,8 @@ class MontyExecution:
                     # waiting on a print its sink holds: release it first.
                     await prints.stop()
                     raise
+                finally:
+                    let_go()
         except pydantic_monty.MontySyntaxError as exc:
             return 1, (exc.display(format="traceback") + "\n").encode()
         except pydantic_monty.MontyRuntimeError as exc:
@@ -395,6 +399,31 @@ def _kill_worker(pid: int | None) -> None:
     except ProcessLookupError:
         # Already gone: the turn finished between the cancel and here.
         logger.debug("monty worker %s already exited", pid)
+
+
+def hold_worker(pid: int | None) -> Callable[[], None]:
+    """Stop a monty worker for as long as a ``kill -STOP`` holds the
+    process running it, which holds a program between its calls too.
+
+    Args:
+        pid (int | None): the worker process id, None when the pool
+            had not attached one yet.
+
+    Returns:
+        Callable[[], None]: what lets the worker go.
+    """
+
+    def hold(held: bool) -> None:
+        assert pid is not None
+        try:
+            os.kill(pid, signal.SIGSTOP if held else signal.SIGCONT)
+        except ProcessLookupError:
+            logger.debug("monty worker %s already exited", pid)
+
+    process = current_caller().process
+    if pid is None or process is None:
+        return lambda: None
+    return process.on_hold(hold)
 
 
 class _Prints:

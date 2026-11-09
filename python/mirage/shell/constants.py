@@ -97,6 +97,7 @@ BASH_LINENO = "BASH_LINENO"
 RANDOM = "RANDOM"
 LINENO = "LINENO"
 BASHPID = "BASHPID"
+PPID = "PPID"
 
 # Node types whose failure never triggers `set -e` by shape alone.
 # Lists are NOT exempt: bash exits when the command after the final
@@ -336,7 +337,6 @@ BUILTIN_GROUP: Mapping[ShellBuiltin, BuiltinGroup] = {
     ShellBuiltin.MAN: BuiltinGroup.MANUALS_AND_HISTORY,
     ShellBuiltin.HISTORY: BuiltinGroup.MANUALS_AND_HISTORY,
     ShellBuiltin.WAIT: BuiltinGroup.JOB_CONTROL,
-    ShellBuiltin.FG: BuiltinGroup.JOB_CONTROL,
     ShellBuiltin.KILL: BuiltinGroup.JOB_CONTROL,
     ShellBuiltin.JOBS: BuiltinGroup.JOB_CONTROL,
     ShellBuiltin.DISOWN: BuiltinGroup.JOB_CONTROL,
@@ -439,6 +439,7 @@ SIGTERM = 15
 SIGKILL = 9
 SIGCHLD = 17
 SIGSTOP = 19
+SIGCONT = 18
 
 # Signals whose default action leaves a process running.
 CONTINUE_SIGNALS = frozenset({0, SIGCHLD, 18, 23, 28})

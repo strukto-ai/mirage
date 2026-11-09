@@ -77,10 +77,11 @@ async def test_cd_slash_and_pwd():
 
 
 @pytest.mark.asyncio
-async def test_cd_tilde_unset_home_errors():
+async def test_cd_tilde_unset_home_goes_to_root():
     ws = _make_ws()
-    r = await ws.shell("cd /ram/subdir && cd ~")
-    assert r.exit_code != 0
+    r = await ws.shell("cd /ram/subdir && cd ~ && pwd")
+    assert r.exit_code == 0
+    assert await r.stdout_str() == "/\n"
 
 
 @pytest.mark.asyncio

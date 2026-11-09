@@ -16,6 +16,7 @@ import { concat } from '../../../../utils/bytes.ts'
 import { NotionAccessor } from '../../../../accessor/notion.ts'
 import { HttpNotionTransport } from '../../../../core/notion/client.ts'
 import type { NotionConfig } from '../../../../core/notion/config.ts'
+import { valueText } from '../../../../core/render/json.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { FlagValue } from '../../../spec/types.ts'
@@ -86,6 +87,33 @@ export function prettyJson(value: unknown): ByteSource {
 }
 
 // What `ntn api` prints: one line, no spaces, same sorted keys.
+export const UPLOAD_COLUMNS = [
+  'id',
+  'filename',
+  'status',
+  'content_type',
+  'content_length',
+  'created_time',
+  'expiry_time',
+]
+
+/** One tab-separated line of a file upload, an absent value left empty. */
+export function uploadRow(upload: Record<string, unknown>, columns: readonly string[]): string {
+  return columns
+    .map((key) => (upload[key] === undefined || upload[key] === null ? '' : valueText(upload[key])))
+    .join('\t')
+}
+
+/**
+ * Render one file upload: the API's object, or its plain row. A line never
+ * reaches a terminal here, so the default is the row the real CLI prints to a
+ * pipe.
+ */
+export function uploadOutput(upload: Record<string, unknown>, asJson: boolean): Uint8Array {
+  if (asJson) return prettyJson(upload) as Uint8Array
+  return new TextEncoder().encode(`${uploadRow(upload, UPLOAD_COLUMNS)}\n`)
+}
+
 export function compactJson(value: unknown): ByteSource {
   return ENC.encode(`${JSON.stringify(sortDeep(value))}\n`)
 }

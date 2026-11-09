@@ -25,7 +25,7 @@ error, though the program saw it succeed.
 | `mounts.json`     | `mount_type` serves the session's view into the box                                                                     | docker, e2b, microsandbox                                       |
 
 The boxes are docker, ssh, e2b, smolvm, microsandbox and apple_container. CI runs docker
-and ssh in `integ-runtime` against containers it starts, and e2b in
+and ssh in `integ-runtime` against containers it starts, e2b in
 `integ-e2b` against E2B Embed, on the python host only (see the runtime
-README); smolvm, microsandbox and apple_container run where their
-host exists.
+README), and microsandbox in `integ-microsandbox` on a guest it creates;
+smolvm and apple_container run where their host exists.

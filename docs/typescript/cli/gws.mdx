@@ -42,13 +42,13 @@ This list is generated from Mirage's registered command tree.
 | `gws sheets spreadsheets get` | GET /spreadsheets/&#123;spreadsheetId&#125; (Google sheets API passthrough) |
 | `gws sheets spreadsheets create` | POST /spreadsheets (Google sheets API passthrough) |
 | `gws sheets spreadsheets batchUpdate` | POST /spreadsheets/&#123;spreadsheetId&#125;:batchUpdate (Google sheets API passthrough) |
-| `gws sheets read` | Read a cell range |
+| `gws sheets read` | Read a cell range. Aliases: `+read`. |
 | `gws sheets write` | Overwrite a range with 2D values |
-| `gws sheets append` | Append rows after a range |
+| `gws sheets append` | Append rows after a range. Aliases: `+append`. |
 | `gws docs documents get` | GET /documents/&#123;documentId&#125; (Google docs API passthrough) |
 | `gws docs documents create` | POST /documents (Google docs API passthrough) |
 | `gws docs documents batchUpdate` | POST /documents/&#123;documentId&#125;:batchUpdate (Google docs API passthrough) |
-| `gws docs write` | Append text to a document |
+| `gws docs write` | Append text to a document. Aliases: `+write`. |
 | `gws slides presentations get` | GET /presentations/&#123;presentationId&#125; (Google slides API passthrough) |
 | `gws slides presentations create` | POST /presentations (Google slides API passthrough) |
 | `gws slides presentations batchUpdate` | POST /presentations/&#123;presentationId&#125;:batchUpdate (Google slides API passthrough) |
@@ -77,12 +77,12 @@ This list is generated from Mirage's registered command tree.
 | `gws gmail users messages send` | POST /users/&#123;userId&#125;/messages/send (Google gmail API passthrough) |
 | `gws gmail users messages trash` | POST /users/&#123;userId&#125;/messages/&#123;id&#125;/trash (Google gmail API passthrough) |
 | `gws gmail users messages attachments get` | GET /users/&#123;userId&#125;/messages/&#123;messageId&#125;/attachments/&#123;id&#125; (Google gmail API passthrough) |
-| `gws gmail send` | Send a new email via Gmail |
-| `gws gmail read` | Fetch one Gmail message as processed JSON (same shape as cat &lt;path&gt;.gmail.json) |
-| `gws gmail reply` | Reply to the sender of a Gmail message (excludes CC) |
-| `gws gmail reply-all` | Reply to a Gmail message including all recipients (To+CC) |
-| `gws gmail forward` | Forward a Gmail message to a new recipient |
-| `gws gmail triage` | List message summaries (id, from, subject, date, snippet) for a Gmail search query |
+| `gws gmail send` | Send a new email via Gmail. Aliases: `+send`. |
+| `gws gmail read` | Fetch one Gmail message as processed JSON (same shape as cat &lt;path&gt;.gmail.json). Aliases: `+read`. |
+| `gws gmail reply` | Reply to the sender of a Gmail message (excludes CC). Aliases: `+reply`. |
+| `gws gmail reply-all` | Reply to a Gmail message including all recipients (To+CC). Aliases: `+reply-all`. |
+| `gws gmail forward` | Forward a Gmail message to a new recipient. Aliases: `+forward`. |
+| `gws gmail triage` | List message summaries (id, from, subject, date, snippet) for a Gmail search query. Aliases: `+triage`. |
 {/* END GENERATED CLI COMMANDS */}
 
 ## Call an API method
@@ -107,6 +107,7 @@ Google's Discovery documents.
 
 ```bash
 gws gmail triage --query 'is:unread' --max 10
+gws gmail +triage --query 'is:unread' --max 10
 gws gmail read --id MESSAGE_ID
 gws gmail send --to user@example.com --subject Hello --body 'Hi there'
 gws gmail reply --message-id MESSAGE_ID --body 'Thanks'

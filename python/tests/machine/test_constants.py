@@ -323,7 +323,7 @@ def test_a_sandbox_without_the_encoder_runs_nothing(tmp_path):
 @pytest.mark.parametrize(
     ("script", "digest"),
     [
-        (JOB_START, "86dbfd7d1b776142"),
+        (JOB_START, "0ef05838d35b5277"),
         (JOB_VIEW, "b1159bcdc7dbf586"),
         (JOB_REMOVE, "7cde63f731a3578a"),
         (SETSID_PROBE, "45361050d388f83b"),

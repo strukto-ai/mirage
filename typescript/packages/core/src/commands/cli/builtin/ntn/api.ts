@@ -149,7 +149,7 @@ export async function api(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const inline: Record<string, unknown> = {}
   const params: Record<string, unknown> = {}
   const headers: Record<string, string> = {}

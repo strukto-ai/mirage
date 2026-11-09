@@ -20,6 +20,9 @@ from mirage.commands.cli.builtin.ntn.auth.token import token
 from mirage.commands.cli.builtin.ntn.datasources.query import query
 from mirage.commands.cli.builtin.ntn.datasources.resolve import resolve
 from mirage.commands.cli.builtin.ntn.failure import guarded
+from mirage.commands.cli.builtin.ntn.files.create import files_create
+from mirage.commands.cli.builtin.ntn.files.get import files_get
+from mirage.commands.cli.builtin.ntn.files.list import files_list
 from mirage.commands.cli.builtin.ntn.pages.create import create
 from mirage.commands.cli.builtin.ntn.pages.edit import edit
 from mirage.commands.cli.builtin.ntn.pages.get import get
@@ -35,6 +38,7 @@ from mirage.core.notion.config import NotionConfig
 # shared ID slot.
 PAGE_ID = Argument("PAGE_ID")
 DATA_SOURCE_ID = Argument("ID_OR_URL")
+UPLOAD_ID = Argument("UPLOAD_ID")
 DATABASE_ID = Argument("ID")
 API_PATH = Argument("PATH", nargs="*")
 JSON_OUT = Argument(
@@ -160,6 +164,48 @@ NTN = CLI(
                 ),
             ),
             CommandSpec(
+                name="files",
+                description="Manage file uploads (beta)",
+                subcommands=(
+                    CommandSpec(
+                        name="create",
+                        description="Create a file upload from stdin or "
+                        "an external URL",
+                        arguments=(
+                            Argument(
+                                "--filename",
+                                help="Override the uploaded filename when "
+                                "reading file bytes from stdin",
+                            ),
+                            Argument(
+                                "--content-type",
+                                help="Override the uploaded MIME type",
+                            ),
+                            Argument(
+                                "--external-url",
+                                metavar="URL",
+                                help="Import a publicly accessible HTTPS "
+                                "file instead of reading bytes from stdin",
+                            ),
+                            JSON_OUT,
+                            PLAIN,
+                            NOTION_VERSION,
+                        ),
+                    ),
+                    CommandSpec(
+                        name="get",
+                        description="Retrieve a file upload by id",
+                        arguments=(UPLOAD_ID, JSON_OUT, PLAIN, NOTION_VERSION),
+                    ),
+                    CommandSpec(
+                        name="list",
+                        aliases=("ls",),
+                        description="List file uploads",
+                        arguments=(JSON_OUT, PLAIN, NOTION_VERSION),
+                    ),
+                ),
+            ),
+            CommandSpec(
                 name="pages",
                 description="Manage pages",
                 subcommands=(
@@ -226,6 +272,11 @@ NTN = CLI(
         "auth token": CLIHandler(fn=partial(guarded, token)),
         "datasources query": CLIHandler(fn=partial(guarded, query)),
         "datasources resolve": CLIHandler(fn=partial(guarded, resolve)),
+        "files create": CLIHandler(
+            fn=partial(guarded, files_create), write=True
+        ),
+        "files get": CLIHandler(fn=partial(guarded, files_get)),
+        "files list": CLIHandler(fn=partial(guarded, files_list)),
         "pages get": CLIHandler(fn=partial(guarded, get)),
         "pages create": CLIHandler(fn=partial(guarded, create), write=True),
         "pages edit": CLIHandler(fn=partial(guarded, edit), write=True),

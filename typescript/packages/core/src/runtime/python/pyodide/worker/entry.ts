@@ -21,6 +21,7 @@ import type { VFSEntry, VFSStat } from '../../../types.ts'
 import { PyodideRuntime } from '../runtime.ts'
 import type { FlushFailure, SyncVFS } from '../fs/types.ts'
 import { failureText, requestOverBridge, requestSync } from '../../../wasm/transport.ts'
+import { signalled } from '../interrupt.ts'
 import type { ExecuteRequest, VfsRequest, WorkerMessage } from './types.ts'
 
 const node = (globalThis as { process?: { versions?: { node?: string } } }).process?.versions?.node
@@ -33,11 +34,23 @@ const post = (message: WorkerMessage): void => {
   if (port !== null) port.postMessage(message)
   else browser.postMessage(message)
 }
+// The calls the guest harness makes itself, with the interpreter's lock held,
+// so a signal can run the guest's handler while one waits. A file call is the
+// C library's, which has let the lock go.
+const TAKES_SIGNALS: ReadonlySet<VfsRequest['op']> = new Set(['process', 'stdin', 'output'])
 let interrupt: Int32Array | undefined
 let bridge: string | undefined
 const call = (request: Omit<VfsRequest, 'kind' | 'buffer' | 'id'>): unknown =>
   bridge === undefined
-    ? requestSync(post, request, interrupt)
+    ? requestSync(post, request, interrupt, () => {
+        if (
+          interrupt !== undefined &&
+          TAKES_SIGNALS.has(request.op) &&
+          signalled(interrupt) &&
+          runtime?.takeSignals() === true
+        )
+          throw new Error('a signal handler ended the call')
+      })
     : requestOverBridge(post, request, bridge)
 console.warn = (...messages: unknown[]) => {
   post({ kind: 'notice', message: messages.map(String).join(' ') })
@@ -99,6 +112,7 @@ async function execute(request: ExecuteRequest): Promise<void> {
     // `Date.now`, runs at the workspace's system_time for the run. The
     // worker is this runtime's own and its interpreter runs one program
     // at a time.
+    runtime.ids = request.ids
     const hostNow = Date.now
     const offset = request.offset ?? 0
     if (offset !== 0) Date.now = () => hostNow() + offset * 1000

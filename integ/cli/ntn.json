@@ -1104,6 +1104,61 @@
         "stdout": "",
         "stderr": "error: Invalid JSON from --data\n"
       }
+    },
+    {
+      "id": "ntn_files_list_empty",
+      "seq": 9940125,
+      "targets": ["cli-ntn"],
+      "command": "ntn files list; ntn files ls --json | jq -c .",
+      "expect": {
+        "exit": 0,
+        "stdout": "[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_files_create_get_list",
+      "seq": 9940126,
+      "targets": ["cli-ntn"],
+      "command": "id=$(printf hello | ntn files create --filename a.txt --content-type text/plain --json | jq -r .id); ntn files get \"$id\" --json | jq -c '[.status, .filename, .content_type, .content_length]'; ntn files list --json | jq -c '.[0].filename'; ntn files list | cut -f2-5; ntn files list --plain | wc -l | tr -d ' '; ntn files get \"$id\" | cut -f2-5; ntn files get \"$id\" --plain | cut -f2-5; printf hello | ntn files create --filename b.txt --plain | cut -f2-5; ntn files get \"$id\" --json | jq -c keys",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"uploaded\",\"a.txt\",\"text/plain\",5]\n\"a.txt\"\na.txt\tuploaded\ttext/plain\t5\n1\na.txt\tuploaded\ttext/plain\t5\na.txt\tuploaded\ttext/plain\t5\nb.txt\tuploaded\ttext/plain\t5\n[\"archived\",\"complete_url\",\"content_length\",\"content_type\",\"created_time\",\"expiry_time\",\"filename\",\"id\",\"last_edited_time\",\"object\",\"status\",\"upload_url\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_files_create_from_url",
+      "seq": 9940127,
+      "targets": ["cli-ntn"],
+      "command": "ntn files create --external-url https://example.com/a/photo.png | cut -f2-5; ntn files create --external-url https://example.com/a/photo.png --json | jq -c '[.status, .filename, .content_type]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "photo.png\tuploaded\timage/png\t\n[\"uploaded\",\"photo.png\",\"image/png\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_files_create_empty_stdin",
+      "seq": 9940128,
+      "targets": ["cli-ntn"],
+      "command": "printf '' | ntn files create; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=5\n",
+        "stderr": "error: No file bytes were received on stdin.\n  hint: Redirect a file, for example: `ntn files create < file.png`.\n"
+      }
+    },
+    {
+      "id": "ntn_files_get_missing",
+      "seq": 9940129,
+      "targets": ["cli-ntn"],
+      "command": "ntn files get 00000000-0000-4000-8000-000000000000; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=5\n",
+        "stderr": "error: Public API request failed (404 Not Found object_not_found): Could not find file upload with ID: 00000000-0000-4000-8000-000000000000. Make sure the relevant pages and databases are shared with your integration.\n"
+      }
     }
   ]
 }

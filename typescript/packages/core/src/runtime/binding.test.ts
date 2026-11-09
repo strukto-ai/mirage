@@ -287,7 +287,7 @@ it('command execution supplies its active workspace context', async () => {
   }
 })
 
-it('does not share process views by profile or follow reused session IDs', async () => {
+it('does not share session processes by profile or follow reused session IDs', async () => {
   const ws = new Workspace({}, { runtimes: [], profiles: { agent: {} } })
   try {
     ws.createSession('one', { profile: 'agent' })
@@ -308,12 +308,13 @@ it('does not share process views by profile or follow reused session IDs', async
         return 0
       },
     })
-    expect(one.list()).toEqual([process.record])
-    expect(two.list()).toEqual([])
+    const pid = process.record.id.pid
+    expect(one.probe(pid)).toBe(true)
+    expect(two.probe(pid)).toBe(false)
     await ws.closeSession('one')
     ws.createSession('one', { profile: 'agent' })
-    expect(one.list()).toEqual([])
-    expect(required(ws.runtimeContext('one').ctx.processes).list()).toEqual([])
+    expect(one.probe(pid)).toBe(false)
+    expect(required(ws.runtimeContext('one').ctx.processes).probe(pid)).toBe(false)
     release()
     await process.join()
   } finally {

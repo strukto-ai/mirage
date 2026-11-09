@@ -139,6 +139,7 @@ SHELL_SYNOPSES: dict[str, str] = {
     "[": "[ arg... ]",
     "[[ ... ]]": "[[ expression ]]",
     "alias": "alias [-p] [name[=value] ... ]",
+    "bg": "bg [job_spec ...]",
     "break": "break [n]",
     "builtin": "builtin [shell-builtin [arg ...]]",
     "case": "case WORD in [PATTERN [| PATTERN]...) COMMANDS ;;]... esac",

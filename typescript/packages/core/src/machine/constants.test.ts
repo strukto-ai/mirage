@@ -318,7 +318,7 @@ describe('ENCODE_OUTPUT', () => {
 // Python's constants test pins the same digests.
 describe('job scripts', () => {
   it.each([
-    ['start', JOB_START, '86dbfd7d1b776142'],
+    ['start', JOB_START, '0ef05838d35b5277'],
     ['view', JOB_VIEW, 'b1159bcdc7dbf586'],
     ['remove', JOB_REMOVE, '7cde63f731a3578a'],
     ['probe', SETSID_PROBE, '45361050d388f83b'],

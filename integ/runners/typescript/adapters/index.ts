@@ -851,6 +851,7 @@ async function openEmail(target: Target): Promise<Open> {
     username: EMAIL_USERNAME,
     password,
     use_ssl: false,
+    trash_folder: 'Trash',
   }
   const alpha = { ...integ, username: EMAIL_USERNAME_ALPHA }
   const beta = { ...integ, username: EMAIL_USERNAME_BETA }

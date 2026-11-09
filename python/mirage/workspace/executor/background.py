@@ -52,6 +52,7 @@ from mirage.io.async_line_iterator import SharedInput, hold_inputs
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource
+from mirage.machine.constants import RUN_START_WAIT_SECONDS
 from mirage.policy.builtin.output_cap import LINE_NAME
 from mirage.policy.decisions import Decisions, is_pending
 from mirage.policy.types import HandOff
@@ -74,7 +75,12 @@ from mirage.shell.constants import (
     TIMEOUT_STATUS,
 )
 from mirage.shell.errors import ExitSignal, ReturnSignal
-from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
+from mirage.shell.helpers import (
+    get_pipeline_stages,
+    get_redirects,
+    get_text,
+    is_backgrounded,
+)
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.names import command_invocations
 from mirage.shell.parse.program import retain_programs
@@ -256,7 +262,18 @@ def _job_streams(
 
 
 def one_program(left: TSNodeLike, session: SessionState) -> bool:
-    """Whether a job is one program, as bash runs ``cmd &`` as the program
+    """Whether a job is one program (``program_word``).
+
+    Args:
+        left (TSNodeLike): the job's command.
+        session (SessionState): the session the job is forked from.
+    """
+    return program_word(left, session) is not None
+
+
+def program_word(left: TSNodeLike, session: SessionState) -> str | None:
+    """The word naming the program a job is, None when it is not one, as
+    bash runs ``cmd &`` as the program
     itself: a simple command whose word names neither a function nor a
     shell builtin a runtime cannot take (``eval``, ``source``), either of
     which keeps a shell between the job and the program, and which the
@@ -272,25 +289,43 @@ def one_program(left: TSNodeLike, session: SessionState) -> bool:
         session (SessionState): the session the job is forked from.
     """
     if not simple_command(left):
-        return False
+        return None
     invocations = command_invocations(left)
     if len(invocations) != 1:
-        return False
+        return None
     head, args = invocations[0]
     words = [head, *args]
     while words and words[0] in ("exec", "command"):
         wrapper, words = words[0], words[1:]
         while words and words[0] is not None and words[0].startswith("-"):
             if wrapper == "command" and set(words[0]) & {"v", "V"}:
-                return False
+                return None
             words = words[2:] if words[0] == "-a" else words[1:]
     head = words[0] if words else None
-    return (
-        head is not None
-        and "\\" not in head
-        and (head not in SHELL_NAMES or head in CAPTURABLE_BUILTINS)
-        and head not in session.functions
-    )
+    if (
+        head is None
+        or "\\" in head
+        or (head in SHELL_NAMES and head not in CAPTURABLE_BUILTINS)
+        or head in session.functions
+    ):
+        return None
+    return head
+
+
+def _on_a_machine(left: TSNodeLike, context: EvaluationContext) -> bool:
+    """Whether a job is one program a runtime past the workspace runs,
+    which has a pid of its own there.
+
+    Args:
+        left (TSNodeLike): the job's command.
+        context (EvaluationContext): the line's evaluation.
+    """
+    head = program_word(left, context.session)
+    routing = context.frame.routing
+    if head is None or routing is None:
+        return False
+    runtime = routing.bindings.get(head, routing.fallback)
+    return getattr(runtime, "reach", "workspace") != "workspace"
 
 
 def _forked(node: TSNodeLike | None, session: SessionState) -> bool:
@@ -374,7 +409,7 @@ def report_jobs(
             continue
         report = signal_report(
             shell_voice(),
-            [(job.pid, job.exit_code, ended, job.command)],
+            [(job.shown_pid, job.exit_code, ended, job.command)],
             False,
         )
         if report:
@@ -512,6 +547,38 @@ async def run_program(
     return stdout, io, ran
 
 
+def _job_left(
+    sig: ExitSignal | ReturnSignal,
+    left: TSNodeLike,
+    call_stack: CallStack | None,
+    command: str,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """What a job answers when ``exit`` or ``return`` ends it. A job is
+    its own shell: exit ends the job only, a simple command the top shell
+    forked with the status that shell would exit with (``: ${U?} &`` is
+    127, ``{ : ${U?}; } &`` and ``( : ${U?} & )`` are 1).
+
+    Args:
+        sig (ExitSignal | ReturnSignal): what ended it.
+        left (TSNodeLike): the job's command.
+        call_stack (CallStack | None): the shell's call stack.
+        command (str): the job's text, for the node.
+    """
+    status = sig.exit_code
+    if isinstance(sig, ExitSignal) and (
+        not simple_command(left)
+        or sig.sourced
+        or (call_stack is not None and call_stack.subshell)
+    ):
+        status = sig.contained_code
+    stdout = (sig.stdout or b"") if isinstance(sig, ExitSignal) else sig.stdout
+    return (
+        stdout,
+        IOResult(exit_code=status, stderr=sig.stderr or None),
+        ExecutionNode(command=command, stderr=sig.stderr, exit_code=status),
+    )
+
+
 async def handle_background(
     execute_node: Callable[
         ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
@@ -593,6 +660,7 @@ async def handle_background(
     # (`run_program`). A builtin or a function its shell runs (`f &`) ends
     # with that program on INT, as bash's shell does of an INT its child
     # died of.
+    piped = command is not None and command.type == NT.PIPELINE
     one_command = command is not None and command.type == NT.COMMAND
     ends = one_command and not forks(command, session)
     in_place = (one_command and not ends) or (
@@ -601,6 +669,8 @@ async def handle_background(
 
     async def _run_bg(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         child_evaluation.frame.shell = None if in_place else job.process
+        if job.process is not None:
+            job.process.pipeline = piped
         # Background jobs don't receive stdin, matching real shell
         # behavior where bg processes get /dev/null. This prevents
         # race conditions when stdin is an async iterator.
@@ -669,34 +739,9 @@ async def handle_background(
                     ends_shell=True,
                     jobs=job_table.child(),
                 )
-            except ExitSignal as sig:
-                # A background job is its own shell: exit ends the job
-                # only, a simple command the top shell forked with the
-                # status that shell would exit with (`: ${U?} &` is 127,
-                # `{ : ${U?}; } &` and `( : ${U?} & )` are 1).
-                stdout = sig.stdout or b""
-                status = (
-                    sig.exit_code
-                    if simple_command(left)
-                    and not sig.sourced
-                    and not (call_stack is not None and call_stack.subshell)
-                    else sig.contained_code
-                )
-                io = IOResult(exit_code=status, stderr=sig.stderr or None)
-                exec_node = ExecutionNode(
-                    command=cmd_str_inner,
-                    stderr=sig.stderr,
-                    exit_code=status,
-                )
-            except ReturnSignal as sig:
-                stdout = sig.stdout
-                io = IOResult(
-                    exit_code=sig.exit_code, stderr=sig.stderr or None
-                )
-                exec_node = ExecutionNode(
-                    command=cmd_str_inner,
-                    stderr=sig.stderr,
-                    exit_code=sig.exit_code,
+            except (ExitSignal, ReturnSignal) as sig:
+                stdout, io, exec_node = _job_left(
+                    sig, left, call_stack, cmd_str_inner
                 )
             # Drain inside the rebind: pumping the stream can still run
             # ops that read the ambient session.
@@ -728,6 +773,9 @@ async def handle_background(
                     child_evaluation.frame.line_timeout,
                     LINE_NAME,
                     launched[0],
+                    reached=(
+                        None if job.process is None else job.process.expire
+                    ),
                 )
             except CommandTimeoutError as exc:
                 msg = encode_text(str(exc) + "\n")
@@ -805,7 +853,18 @@ async def handle_background(
         job.process.task.add_done_callback(release_job)
         job.process.task.add_done_callback(drop_unrun_holds)
         bg_session.process_id = job.process.record.pid
-    session.last_bg_job_id = job.pid
+    # `$!` is the program's own pid, once it has started and has one, and
+    # a pipeline's the last stage's.
+    if job.process is not None and (piped or _on_a_machine(left, context)):
+        await job.process.placed(RUN_START_WAIT_SECONDS)
+    if (
+        job.process is not None
+        and job.process.stages
+        and command is not None
+        and _on_a_machine(get_pipeline_stages(command).commands[-1], context)
+    ):
+        await job.process.stages[-1].placed(RUN_START_WAIT_SECONDS)
+    session.last_bg_job_id = job.last_pid
     waits = session.job_waits
     if waits is not None and waits.reaches(
         output, _job_streams(left, session)

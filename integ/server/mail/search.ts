@@ -18,7 +18,7 @@
 // key-at-a-time matcher answers `NOT SUBJECT "x"` by ignoring the NOT. Three
 // families and three operators is the whole grammar here.
 //
-// What is deliberately absent: `KEYWORD`, `LARGER`/`SMALLER`, `MSGNO` ranges
+// What is deliberately absent: `LARGER`/`SMALLER`, `MSGNO` ranges
 // beyond the plain forms, and the modified-UTF-7 mailbox encoding. No consumer
 // in this repo emits any of them, and a key this fake does not know is an
 // ERROR rather than a silent match-everything -- a SEARCH that quietly widens
@@ -228,6 +228,10 @@ class Parser {
     }
     const flag = own(FLAG_KEYS, key)
     if (flag !== undefined) return flag
+    if (key === 'KEYWORD') {
+      const keyword = this.take()
+      return (msg) => has(msg, keyword)
+    }
     const text = own(TEXT_KEYS, key)
     if (text !== undefined) {
       const want = this.take()

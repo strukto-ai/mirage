@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, Callable, Literal
@@ -21,9 +21,9 @@ from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.cli.mcp.types import MCPSource
-from mirage.commands.spec.compile import compile_spec
+from mirage.commands.spec.compile import argument_dest, compile_spec
 from mirage.commands.spec.flag_view import FlagBag
-from mirage.commands.spec.types import CommandSpec, FlagValue
+from mirage.commands.spec.types import Argument, CommandSpec, FlagValue
 from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, PathSpec
 
@@ -41,12 +41,23 @@ class CLIHandler:
             texts, ctx)``, the same ``Context`` a command gets; None only
             for a script installation.
         write (bool): whether invoking the command may mutate state.
+        write_when (tuple[str, ...]): option spellings that make a leaf
+            otherwise read-only a writer on the line that carries them.
         limit (Limit | None): default execution and output limits.
     """
 
     fn: Callable[..., Any] | None = None
     write: bool = False
     limit: Limit | None = None
+    write_when: tuple[str, ...] = ()
+
+    def writes(self, argv: Sequence[str]) -> bool:
+        """Whether this invocation may mutate state.
+
+        Args:
+            argv (Sequence[str]): the words after the head, as typed.
+        """
+        return self.write or any(word in self.write_when for word in argv)
 
 
 @dataclass(frozen=True)
@@ -118,7 +129,7 @@ def _validate_cli(cli: CLI) -> None:
         raise ValueError(
             f"cli {name!r}: runtime names the entry that runs script; it takes script"
         )
-    leaves = _validate_tree(cli.spec, (), frozenset())
+    leaves = _validate_tree(cli.spec, (), {})
     missing = leaves - cli.handlers.keys()
     extra = cli.handlers.keys() - leaves
     if missing:
@@ -136,14 +147,19 @@ def _validate_cli(cli: CLI) -> None:
 
 
 def _validate_tree(
-    node: CommandSpec, path: tuple[str, ...], ancestors: frozenset[str]
+    node: CommandSpec,
+    path: tuple[str, ...],
+    ancestors: Mapping[str, Argument | None],
 ) -> set[str]:
     """Validate a command tree and return its canonical leaf paths.
 
     Args:
         node (CommandSpec): root or child grammar.
         path (tuple[str, ...]): canonical path below the root.
-        ancestors (frozenset[str]): destinations already supplied by parents.
+        ancestors (Mapping[str, Argument | None]): destinations already
+            supplied by parents, each with the option that declares it.
+            A node may repeat its parent's very object, which is how a
+            program's global option stays legal at every level.
     """
     if not node.name or any(ch.isspace() for ch in node.name):
         raise ValueError(
@@ -155,11 +171,13 @@ def _validate_tree(
                 f"cli {node.name!r}: alias {alias!r} must be a single non-empty word"
             )
     compiled = compile_spec(node)
-    own = frozenset(compiled.dest.values())
-    for dest in own & ancestors:
-        raise ValueError(
-            f"option {dest!r} collides with subcommand {' '.join(path)!r}"
-        )
+    options = {argument_dest(option): option for option in compiled.options}
+    own = {dest: options.get(dest) for dest in compiled.dest.values()}
+    for dest in own.keys() & ancestors.keys():
+        if own[dest] is None or own[dest] is not ancestors[dest]:
+            raise ValueError(
+                f"option {dest!r} collides with subcommand {' '.join(path)!r}"
+            )
     if not node.subcommands:
         return {" ".join(path)}
     if compiled.positional or compiled.rest is not None:
@@ -176,7 +194,7 @@ def _validate_tree(
                 )
             seen.add(word)
         leaves.update(
-            _validate_tree(child, (*path, child.name), ancestors | own)
+            _validate_tree(child, (*path, child.name), {**ancestors, **own})
         )
     return leaves
 

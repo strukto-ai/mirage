@@ -205,7 +205,7 @@ async def run_gws_method(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     params = _parse_json_flag(fl.as_str("params") or "", "--params")
     body = _parse_json_flag(fl.as_str("json") or "", "--json")
     if method.needs_body and not body:

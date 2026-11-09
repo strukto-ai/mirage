@@ -433,7 +433,7 @@ function writes(
   const tree = registry.clis.get(name)?.cli ?? null
   if (tree !== null) {
     const result = walk(name, tree.spec, [...args], session.cwd, envSnapshot(session))
-    return result.leaf !== null && tree.handlers[result.path.join(' ')]?.write === true
+    return result.leaf !== null && tree.handlers[result.path.join(' ')]?.writes(args) === true
   }
   const candidates = registry.invocationCandidates(
     name,
@@ -447,7 +447,7 @@ function writes(
       const cli = mount.cliFor(name)
       if (cli === null) return mount.mayWrite(name)
       const result = walk(name, cli.spec, args, session.cwd, envSnapshot(session))
-      return result.leaf !== null && cli.handlers[result.path.join(' ')]?.write === true
+      return result.leaf !== null && cli.handlers[result.path.join(' ')]?.writes(args) === true
     })
   }
   const runs = runsAs(name, registry)
@@ -500,7 +500,7 @@ function writes(
     const cli = mount.cliFor(runs)
     if (cli !== null) {
       const result = walk(runs, cli.spec, args, session.cwd, envSnapshot(session))
-      return result.leaf !== null && cli.handlers[result.path.join(' ')]?.write === true
+      return result.leaf !== null && cli.handlers[result.path.join(' ')]?.writes(args) === true
     }
     return [...extensions].some((extension) => mount.mayWrite(runs, extension, facts.writes))
   })

@@ -15,7 +15,7 @@
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { extractHeader, getMessageRaw, listMessages } from '../../../../../core/gmail/messages.ts'
 import type { GoogleApiAccessor } from '../../../../../accessor/google_api.ts'
-import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { compactJsonBytes } from '../../../../../core/render/json.ts'
@@ -26,7 +26,7 @@ export async function triage(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const query = fl.asStr('query', 'is:unread')
   const maxResults = fl.asInt('max', 20)
   const stubs = await listMessages(accessor.tokenManager, { query, maxResults })
@@ -50,6 +50,5 @@ export async function triage(
       snippet: raw.snippet ?? '',
     })
   }
-  const out: ByteSource = compactJsonBytes(summaries)
-  return [out, new IOResult()]
+  return [compactJsonBytes(summaries), new IOResult()]
 }

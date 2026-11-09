@@ -283,6 +283,7 @@ def test_apropos_searches_names_and_summaries_ignoring_case():
     assert io.exit_code == 0
     lines = out.decode().splitlines()
     assert [line.split()[0] for line in lines] == [
+        "bg",
         "disown",
         "fg",
         "jobs",

@@ -15,7 +15,7 @@
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { replyAllMessage } from '../../../../../core/gmail/send.ts'
 import type { GoogleApiAccessor } from '../../../../../accessor/google_api.ts'
-import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { compactJsonBytes } from '../../../../../core/render/json.ts'
@@ -26,12 +26,11 @@ export async function replyAll(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const result = await replyAllMessage(
     accessor.tokenManager,
     fl.asStr('message_id') ?? '',
     fl.asStr('body') ?? '',
   )
-  const out: ByteSource = compactJsonBytes(result)
-  return [out, new IOResult()]
+  return [compactJsonBytes(result), new IOResult()]
 }

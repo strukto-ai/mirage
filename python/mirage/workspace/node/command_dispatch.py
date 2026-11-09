@@ -1402,11 +1402,14 @@ async def _route_argv(
     # ── unsupported bash builtins ──────────────
     # Constructs the parser accepts but the executor cannot honor.
     # Returning a clear error lets LLMs detect a capability gap instead
-    # of treating it as a missing binary or a silent no-op; `bg` says
-    # what bash -c says, which has no job control either.
+    # of treating it as a missing binary or a silent no-op; `bg` and `fg`
+    # say what bash -c says, which has no job control either.
     if name in UNSUPPORTED_BUILTINS:
-        code = 1 if name == "bg" else 2
-        why = "no job control" if name == "bg" else "not supported"
+        helped = flag_help(name) if argv.args[:1] == ("--help",) else None
+        if helped is not None:
+            return helped
+        code = 1 if name in ("bg", "fg") else 2
+        why = "no job control" if name in ("bg", "fg") else "not supported"
         err = encode_text(f"{shell_voice()}{name}: {why}\n")
         return (
             None,

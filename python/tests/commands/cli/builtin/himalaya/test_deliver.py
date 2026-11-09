@@ -24,6 +24,7 @@ from mirage.commands.cli.builtin.himalaya.deliver import (
     resolve_sent_folder,
     save_sent_copy,
 )
+from mirage.commands.cli.builtin.himalaya.printer import ChainedError
 from mirage.core.email.config import EmailConfig
 
 RAW = b"From: me@example.com\r\nTo: a@b.com\r\nSubject: Hi\r\n\r\nyo"
@@ -136,50 +137,30 @@ async def test_a_refused_append_names_the_mailbox(imap):
 
 @pytest.mark.asyncio
 async def test_deliver_sends_then_saves(imap, smtp):
-    message, warning = await deliver(account(), RAW)
+    message, saved = await deliver(account(), RAW)
     assert smtp["raw"] == RAW
     assert message["Subject"] == "Hi"
-    assert warning == ""
+    assert saved is True
     imap["client"].append.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_save_copy_off_sends_and_touches_no_mailbox(imap, smtp):
-    _, warning = await deliver(account(save_copy=False), RAW)
+    _, saved = await deliver(account(save_copy=False), RAW)
     assert smtp["raw"] == RAW
-    assert warning == ""
+    assert saved is False
     assert "client" not in imap
 
 
 @pytest.mark.asyncio
-async def test_a_failed_copy_warns_but_the_send_still_counts(imap, smtp):
+async def test_a_failed_copy_fails_the_command_after_the_send(imap, smtp):
     imap["append_result"] = "NO"
-    message, warning = await deliver(account(), RAW)
-    # The message is already on the wire, so the copy's failure is
-    # reported rather than raised: a non-zero exit invites a retry that
-    # would send it a second time.
+    with pytest.raises(
+        ChainedError, match="Message sent, but saving a copy to Sent failed"
+    ) as caught:
+        await deliver(account(), RAW)
     assert smtp["raw"] == RAW
-    assert message["Subject"] == "Hi"
-    assert warning.startswith("himalaya: sent copy not saved: Sent:")
-    assert warning.endswith("\n")
-
-
-@pytest.mark.asyncio
-async def test_a_broken_connection_warns_rather_than_raising(
-    monkeypatch, smtp
-):
-    async def fake_get_imap(self):
-        raise ConnectionError("IMAP login failed for u on h")
-
-    async def fake_close(self):
-        return None
-
-    monkeypatch.setattr(EmailAccessor, "get_imap", fake_get_imap)
-    monkeypatch.setattr(EmailAccessor, "close", fake_close)
-    _, warning = await deliver(account(), RAW)
-    assert warning == (
-        "himalaya: sent copy not saved: IMAP login failed for u on h\n"
-    )
+    assert "TRYCREATE" in caught.value.sources[0]
 
 
 @pytest.mark.asyncio
@@ -195,8 +176,8 @@ async def test_save_names_the_mailbox_and_skips_resolution(imap):
 @pytest.mark.asyncio
 async def test_save_beats_the_accounts_own_sent_mailbox(imap, smtp):
     imap["lines"] = GMAIL_LINES
-    _, warning = await deliver(account(), RAW, "Drafts")
-    assert warning == ""
+    _, saved = await deliver(account(), RAW, "Drafts")
+    assert saved is True
     imap["client"].append.assert_awaited_once_with(
         RAW, mailbox='"Drafts"', flags="\\Seen"
     )
@@ -206,6 +187,6 @@ async def test_save_beats_the_accounts_own_sent_mailbox(imap, smtp):
 async def test_save_files_a_copy_even_with_save_copy_off(imap, smtp):
     # --save is the user asking on this one line, so the account-level
     # switch does not veto it.
-    _, warning = await deliver(account(save_copy=False), RAW, "Drafts")
-    assert warning == ""
+    _, saved = await deliver(account(save_copy=False), RAW, "Drafts")
+    assert saved is True
     imap["client"].append.assert_awaited_once()

@@ -236,7 +236,7 @@ describe('workspace: job table cleanup', () => {
     // `kill %1` joins the job, so the killed status is already settled
     // when `jobs` lists it. After the listing, popCompleted removes it.
     const io = await ws.shell('sleep 10 & kill %1; jobs')
-    expect(stdoutStr(io)).toContain('killed')
+    expect(stdoutStr(io)).toContain('Terminated')
     const io2 = await ws.shell('jobs')
     expect(stdoutStr(io2)).toBe('')
     await ws.close()

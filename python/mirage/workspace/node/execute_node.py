@@ -81,6 +81,7 @@ from mirage.shell.helpers import (
     with_own_redirects,
 )
 from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
+from mirage.shell.printer import case_head, loop_head
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import (
     PipelineStages,
@@ -89,6 +90,7 @@ from mirage.shell.types import (
     TSNodeLike,
 )
 from mirage.shell.voice import shell_voice
+from mirage.shell.xtrace import trace_line
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.background import (
@@ -1196,6 +1198,8 @@ async def _run_arith(
     session = context.session
     text = get_text(node)
     expr = await expand_arith(node, context, execute_fn, cs)
+    if session.shell_options.get("xtrace"):
+        context.frame.diagnostics.append(trace_line(f"(( {expr} ))"))
     try:
         value = await session_arith(session, expr, cs)
     except PolicyDenied as exc:
@@ -1262,19 +1266,21 @@ async def _run_for(
                 links=namespace.session_links(session),
                 options=glob_options(session),
             )
+    head = loop_head(node)
     with cs.loop():
         if kind == NodeKind.SELECT:
             return await handle_select(
                 run_body,
                 var,
                 classified,
+                head,
                 body,
                 context,
                 stdin,
                 sink=sink,
             )
         return await handle_for(
-            run_body, var, classified, body, context, execute_fn, cs
+            run_body, var, classified, head, body, context, execute_fn, cs
         )
 
 
@@ -1711,6 +1717,8 @@ async def _execute_node(
             )
 
     if kind == NodeKind.CASE:
+        if session.shell_options.get("xtrace"):
+            context.frame.diagnostics.append(trace_line(case_head(node)))
         word_node = get_case_word(node)
         word = await expand_node(word_node, context, execute_fn, cs)
         return await handle_case(

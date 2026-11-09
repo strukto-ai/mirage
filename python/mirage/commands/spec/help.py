@@ -164,6 +164,12 @@ def usage_line(
     bits = [name]
     if compiled.options:
         bits.append("[OPTIONS]" if clap else "[flags]")
+    if clap:
+        bits += [
+            f"{argument_dest(opt)} <{option_metavar(opt)}>"
+            for opt in compiled.options
+            if opt.required
+        ]
     if subcommands:
         bits.append("<COMMAND>" if clap else "<command> [<args>]")
     for operand in compiled.positional:
@@ -172,7 +178,9 @@ def usage_line(
         else:
             bits.append(_slot(operand))
     if compiled.rest is not None:
-        if clap:
+        if clap and compiled.rest.nargs == "REMAINDER":
+            bits.append(f"[-- <{compiled.rest.names[0]}>...]")
+        elif clap:
             bits.append(operand_slot(compiled.rest, ellipsis=True))
         else:
             bits.append(f"[{_slot(compiled.rest)}...]")

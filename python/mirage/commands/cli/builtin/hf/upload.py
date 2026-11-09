@@ -119,6 +119,61 @@ def in_repo_base(value: str) -> str:
     return normalized.strip("/")
 
 
+async def source_files(
+    ctx: Context, source: PathSpec, named: bool
+) -> tuple[list[Addition], bool]:
+    """Collect the upload's files, refusing a source that does not exist.
+
+    Args:
+        ctx (Context): the invocation's context, whose files are read.
+        source (PathSpec): the resolved source file or directory.
+        named (bool): whether the line named LOCAL_PATH itself.
+    """
+    try:
+        return await collect(ctx, source)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise UsageError(
+            f"{shell_quote(source.raw_path)}: {fs_strerror(exc)}"
+            if named
+            else f"'{source.raw_path}' is not a local file or folder. "
+            "Please set local_path explicitly."
+        ) from None
+
+
+def placed(
+    collected: list[Addition],
+    from_dir: bool,
+    base: str,
+    include: list[str],
+    exclude: list[str],
+) -> list[Addition]:
+    """Give each collected file its path in the repository.
+
+    Folder contents spread under path_in_repo; a single file lands at it.
+    Upstream applies filters only to folders.
+
+    Args:
+        collected (list[Addition]): files relative to the source.
+        from_dir (bool): whether the source was a directory.
+        base (str): the normalized path_in_repo.
+        include (list[str]): the line's --include globs.
+        exclude (list[str]): the line's --exclude globs.
+    """
+    if not from_dir:
+        return [
+            Addition(path=base or row.path, data=row.data) for row in collected
+        ]
+    return [
+        Addition(
+            path=posixpath.join(base, row.path) if base else row.path,
+            data=row.data,
+        )
+        for row in keep(
+            collected, include, [*exclude, *DEFAULT_IGNORE_PATTERNS]
+        )
+    ]
+
+
 async def upload_cmd(
     accessor: HfAccountAccessor,
     paths: list[PathSpec],
@@ -128,7 +183,7 @@ async def upload_cmd(
     """Upload a workspace file or folder to a repository, as one commit."""
     require_operands(texts, ["repo_id"])
     require_token(accessor, "upload")
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     if ctx.vfs is None:
         raise UsageError("hf upload needs a workspace to read from")
     repo_id = texts[0]
@@ -154,37 +209,14 @@ async def upload_cmd(
         if patterns:
             refuse_variadic(operands, flag, patterns)
     in_repo = texts[1] if len(texts) > 1 else ""
-    try:
-        collected, from_dir = await collect(ctx, source)
-    except (FileNotFoundError, NotADirectoryError) as exc:
-        raise UsageError(
-            f"{shell_quote(source.raw_path)}: {fs_strerror(exc)}"
-            if paths
-            else f"'{source.raw_path}' is not a local file or folder. "
-            "Please set local_path explicitly."
-        ) from None
+    collected, from_dir = await source_files(ctx, source, bool(paths))
     base = in_repo_base(in_repo)
-    warnings = ""
-    # Folder contents spread under path_in_repo; a single file lands at it.
-    # Upstream applies filters only to folders and warns for single files.
-    if from_dir:
-        rows = keep(collected, include, [*exclude, *DEFAULT_IGNORE_PATTERNS])
-        additions = [
-            Addition(
-                path=posixpath.join(base, row.path) if base else row.path,
-                data=row.data,
-            )
-            for row in rows
-        ]
-    else:
-        warnings = "".join(
-            f"Ignoring {flag} since a single file is uploaded.\n"
-            for flag, patterns in pattern_flags
-            if patterns
-        )
-        additions = [
-            Addition(path=base or row.path, data=row.data) for row in collected
-        ]
+    additions = placed(collected, from_dir, base, include, exclude)
+    warnings = "".join(
+        f"Ignoring {flag} since a single file is uploaded.\n"
+        for flag, patterns in pattern_flags
+        if patterns and not from_dir
+    )
     repo_type = repo_type_of(fl)
     # Upstream creates the repository if it is missing and ignores
     # --private when it already exists, so the flag picks the visibility

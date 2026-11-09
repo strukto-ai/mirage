@@ -257,7 +257,9 @@ export async function runOnMount(
       ),
       env: envSnapshot(session),
       session: sessionView(session, context.frame.diagnostics),
-      ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
+      ...(registry.sessionProcesses === undefined
+        ? {}
+        : { processes: registry.sessionProcesses(session) }),
       runtime: {
         execAllowed: registry.isExecAllowed(access),
         execPathAllowed: (virtual: string) => registry.execAllowedAt(virtual, access),

@@ -91,6 +91,8 @@ pub enum Construct {
     For {
         variable: String,
         values: Vec<Vec<u8>>,
+        /// The first line as `set -x` prints it each turn.
+        head: Vec<u8>,
         body: usize,
     },
     CFor {
@@ -135,7 +137,7 @@ impl Control {
 }
 
 /// A list the host is asked to run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListRun {
     pub list: usize,
     /// Its status decides a branch.
@@ -146,6 +148,9 @@ pub struct ListRun {
     pub pending: Option<i32>,
     /// The construct reads the session, so the host frames the shell again.
     pub framed: bool,
+    /// What the construct said since the last list, which goes out before
+    /// it: its expansions' stderr and the lines of `set -x`.
+    pub said: Vec<Diagnostic>,
 }
 
 /// What a construct asks of its host: to run one list on the shell.
@@ -275,6 +280,14 @@ impl<H: Host + Runs> Walk<'_, H> {
         self.shell.option("noexec")
     }
 
+    /// A line of `set -x`, said in its place among the rest.
+    fn trace(&mut self, line: &[u8]) {
+        if self.shell.option("xtrace") {
+            self.diagnostics
+                .push(Diagnostic::Bytes([b"+ ", line, b"\n"].concat()));
+        }
+    }
+
     /// Whether a statement may run inside the loop: nothing watches it, and
     /// nothing it does can refuse once its expansion went through.
     fn plain(&self) -> bool {
@@ -345,6 +358,7 @@ impl<H: Host + Runs> Walk<'_, H> {
             start,
             pending: self.pending.take(),
             framed: self.framed,
+            said: std::mem::take(self.diagnostics),
         };
         let ran = self.host.run(self.shell, run).await?;
         if !test {
@@ -409,10 +423,14 @@ impl<H: Host + Runs> Walk<'_, H> {
         &mut self,
         variable: &str,
         values: Vec<Vec<u8>>,
+        head: &[u8],
         body: usize,
     ) -> Result<Control, Fault> {
         let voice = self.shell.vars.voice().to_vec();
         if self.shell.vars.is_readonly(variable, true) {
+            if !values.is_empty() {
+                self.trace(head);
+            }
             let line = voiced(&voice, &format!("{variable}: readonly variable\n"));
             return Ok(Control::refused(line));
         }
@@ -420,6 +438,7 @@ impl<H: Host + Runs> Walk<'_, H> {
             if self.noexec() {
                 break;
             }
+            self.trace(head);
             let landed = Writer::of(self.shell, Some(&mut *self.diagnostics)).set(
                 variable,
                 Value::Scalar(value),
@@ -472,9 +491,11 @@ impl<H: Host + Runs> Walk<'_, H> {
 
     async fn slot(&mut self, slot: &Option<Slot>, default: i64) -> Result<i64, Fault> {
         let Some(slot) = slot else {
+            self.trace(b"(( 1 ))");
             return Ok(default);
         };
         let text = self.slot_text(slot).await?;
+        self.trace(&[b"(( ", text.as_slice(), b" ))"].concat());
         Writer::of(self.shell, Some(&mut *self.diagnostics)).arith(&text, false)
     }
 
@@ -611,8 +632,9 @@ pub async fn run_construct<H: Host + Runs>(
         Construct::For {
             variable,
             values,
+            head,
             body,
-        } => walk.each(&variable, values, body).await,
+        } => walk.each(&variable, values, &head, body).await,
         Construct::CFor { slots, body } => match walk.counted(&slots, body).await {
             Err(fault) => walk.slot_refusal(fault),
             done => done,
@@ -628,6 +650,7 @@ pub async fn run_construct<H: Host + Runs>(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::sync::Arc;
 
@@ -636,11 +659,17 @@ mod tests {
     use super::*;
     use crate::vars::Store;
 
+    thread_local! {
+        /// What the last line driven said with its lists.
+        static TRACED: RefCell<Vec<Diagnostic>> = const { RefCell::new(Vec::new()) };
+    }
+
     /// A host that answers each list from a script and records the order.
     struct Script {
         answers: VecDeque<Ran>,
         ran: Vec<(usize, bool)>,
         starts: Vec<usize>,
+        said: Vec<Diagnostic>,
     }
 
     impl Host for Script {
@@ -668,6 +697,7 @@ mod tests {
         async fn run(&mut self, _shell: &mut Shell, run: ListRun) -> Result<Ran, Fault> {
             self.ran.push((run.list, run.test));
             self.starts.push(run.start);
+            self.said.extend(run.said);
             Ok(self.answers.pop_front().unwrap_or(ran(0)))
         }
     }
@@ -701,6 +731,7 @@ mod tests {
             answers: answers.into(),
             ran: Vec::new(),
             starts: Vec::new(),
+            said: Vec::new(),
         };
         let tree = crate::shell::parse(b"");
         let mut diagnostics = Vec::new();
@@ -736,6 +767,7 @@ mod tests {
             answers: VecDeque::new(),
             ran: Vec::new(),
             starts: Vec::new(),
+            said: Vec::new(),
         };
         let mut diagnostics = Vec::new();
         let control = {
@@ -749,6 +781,7 @@ mod tests {
             ));
             futures_now(done).unwrap()
         };
+        TRACED.with(|traced| traced.replace(host.said));
         (control, host.starts)
     }
 
@@ -829,6 +862,7 @@ mod tests {
     fn for_sets_its_variable_each_turn_and_keeps_the_last() {
         let mut shell = shell();
         let construct = Construct::For {
+            head: Vec::new(),
             variable: "x".into(),
             values: vec![b"a".to_vec(), b"b".to_vec()],
             body: 0,
@@ -846,6 +880,7 @@ mod tests {
             .mark("x", Some(crate::vars::READONLY), true, true)
             .unwrap();
         let construct = Construct::For {
+            head: Vec::new(),
             variable: "x".into(),
             values: vec![b"a".to_vec()],
             body: 0,
@@ -859,6 +894,7 @@ mod tests {
     #[test]
     fn exiting_stops_a_loop_after_its_body() {
         let construct = Construct::For {
+            head: Vec::new(),
             variable: "x".into(),
             values: vec![b"a".to_vec(), b"b".to_vec()],
             body: 0,
@@ -895,6 +931,7 @@ mod tests {
         let mut shell = shell();
         let construct = Construct::For {
             variable: "v".to_owned(),
+            head: Vec::new(),
             values: vec![b"1".to_vec()],
             body: 0,
         };
@@ -908,6 +945,7 @@ mod tests {
         let mut shell = shell();
         let construct = Construct::For {
             variable: "v".to_owned(),
+            head: Vec::new(),
             values: vec![b"1".to_vec()],
             body: 0,
         };
@@ -922,6 +960,7 @@ mod tests {
         let mut shell = shell();
         let construct = Construct::For {
             variable: "v".to_owned(),
+            head: Vec::new(),
             values: vec![b"1".to_vec()],
             body: 0,
         };
@@ -937,12 +976,15 @@ mod tests {
         shell.options.insert("xtrace".to_owned(), true);
         let construct = Construct::For {
             variable: "v".to_owned(),
-            values: vec![b"1".to_vec()],
+            head: b"for v in 1".to_vec(),
+            values: vec![b"1".to_vec(), b"2".to_vec()],
             body: 0,
         };
         let (_, starts) = drive_line(&mut shell, b"((x++))", &[(0, 1)], construct);
-        assert_eq!(starts, vec![0]);
+        assert_eq!(starts, vec![0, 0]);
         assert_eq!(shell.vars.scalar("x"), None);
+        let line = Diagnostic::Bytes(b"+ for v in 1\n".to_vec());
+        assert_eq!(TRACED.with(RefCell::take), vec![line.clone(), line]);
     }
 
     #[test]

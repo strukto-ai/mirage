@@ -252,6 +252,8 @@ export interface RestCall {
    * real CLI does (probed on the wire against ntn 0.21.9).
    */
   headers?: Record<string, string>
+  /** A multipart body, sent in place of JSON with its own content type. */
+  form?: FormData
 }
 
 function restCallFor(name: string, args: Record<string, unknown>): RestCall {
@@ -341,11 +343,15 @@ export class HttpNotionTransport implements NotionTransport {
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         'Notion-Version': this.apiVersion,
-        'Content-Type': 'application/json',
+        ...(call.form === undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(call.headers ?? {}),
       },
       params,
-      ...(withBody ? { json: call.body ?? {} } : {}),
+      ...(call.form !== undefined
+        ? { body: call.form }
+        : withBody
+          ? { json: call.body ?? {} }
+          : {}),
       errorOf: errorOf,
       retry: RATE_LIMIT_RETRY,
     })

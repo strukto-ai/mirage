@@ -56,7 +56,7 @@ async def create(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     markdown = await content_or_stdin(fl.as_str("content"), ctx.stdin)
     body: dict[str, JsonValue] = {"markdown": markdown}
     # The parent really is optional upstream: omitted, the request goes
