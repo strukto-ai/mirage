@@ -76,6 +76,7 @@ export class ProcessHandle {
   private completion!: Promise<Process>
   // Resolved once `$!` can name it: its program's pid is known, or it ended.
   private readonly isPlaced = newPauseGate()
+  private readonly stopRequested = newPauseGate()
   // It runs a pipeline (`cmd | cmd &`), whose stages are the job.
   pipeline = false
   stages: readonly ProcessHandle[] = []
@@ -300,10 +301,6 @@ export class ProcessHandle {
    */
   expire(): void {
     this.expired = SIGTERM
-    this.releasePause()
-  }
-
-  private releasePause(): void {
     const pid = this.current.id.pid
     const held = this.pauses.get(pid)
     this.pauses.delete(pid)
@@ -311,9 +308,17 @@ export class ProcessHandle {
     this.tellHeld()
   }
 
-  /** Wait out a `kill -STOP` of this process or one above it. */
+  /**
+   * Wait out a `kill -STOP` of this process or one above it, or until it is
+   * told to stop, which a promise has no other way to hear.
+   */
   async resumed(): Promise<void> {
-    for (let held = this.heldBy(); held !== null; held = this.heldBy()) await held.promise
+    for (
+      let held = this.heldBy();
+      held !== null && this.current.state === 'running';
+      held = this.heldBy()
+    )
+      await Promise.race([held.promise, this.stopRequested.promise])
   }
 
   /**
@@ -403,7 +408,6 @@ export class ProcessHandle {
    */
   terminate(signal = 9, children = true): boolean {
     if (this.ignores.has(signal)) return false
-    this.releasePause()
     if (this.current.state === 'exited') {
       if (children) this.cancelChildren(signal)
       return false
@@ -426,6 +430,7 @@ export class ProcessHandle {
       throw error
     }
     this.tell()
+    this.stopRequested.resolve()
     return true
   }
 

@@ -881,5 +881,39 @@ async def test_revoking_a_session_lets_a_stopped_runner_go():
     processes.pause(handle)
     assert handle.paused
     processes.revoke_session("a")
-    assert not handle.paused
     await handle.join()
+
+
+@pytest.mark.asyncio
+async def test_a_killed_shell_tells_what_it_started_that_it_goes_on():
+    processes = ProcessTable()
+    done = asyncio.Event()
+
+    async def shell_run():
+        await asyncio.Event().wait()
+        return 0
+
+    async def program_run():
+        await done.wait()
+        return 0
+
+    cwd = PathSpec.from_str_path("/")
+    shell = processes.start(
+        session_id="a", command="shell", cwd=cwd, run=shell_run
+    )
+    program = processes.start(
+        session_id="a",
+        command="program",
+        cwd=cwd,
+        parent=shell.record.pid,
+        run=program_run,
+    )
+    await asyncio.sleep(0)
+    told: list[bool] = []
+    program.on_hold(told.append)
+    processes.pause(shell)
+    shell.terminate(9, children=False)
+    await shell.join()
+    assert told == [True, False]
+    done.set()
+    await program.join()

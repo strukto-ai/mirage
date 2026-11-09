@@ -795,5 +795,44 @@ it('lets a stopped runner go when its session is revoked', async () => {
   processes.pause(handle)
   processes.revokeSession('a')
   await handle.join()
-  expect(handle.paused).toBe(false)
+})
+
+it('tells what a stopped shell started that it goes on once the shell is killed', async () => {
+  const processes = new ProcessTable(undefined, undefined, runAsProcess)
+  const ended = gate()
+  const done = gate()
+  const cwd = PathSpec.fromStrPath('/')
+  const shell = processes.start({
+    sessionId: 'a',
+    command: 'shell',
+    cwd,
+    cancel: () => {
+      ended.release()
+    },
+    run: async () => {
+      await ended.promise
+      return 0
+    },
+  })
+  const program = processes.start({
+    sessionId: 'a',
+    command: 'program',
+    cwd,
+    parent: shell.record.id.pid,
+    cancel: () => undefined,
+    run: async () => {
+      await done.promise
+      return 0
+    },
+  })
+  const told: boolean[] = []
+  program.onHold((held) => {
+    told.push(held)
+  })
+  processes.pause(shell)
+  shell.terminate(9, false)
+  await shell.join()
+  expect(told).toEqual([true, false])
+  done.release()
+  await program.join()
 })

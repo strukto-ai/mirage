@@ -306,9 +306,6 @@ class ProcessHandle:
         it. The runner's own status stays the deadline's.
         """
         self._expired = SIGTERM
-        self._release_pause()
-
-    def _release_pause(self) -> None:
         held = self.pauses.pop(self.record.pid, None)
         if held is not None:
             held.set_result(None)
@@ -437,7 +434,6 @@ class ProcessHandle:
         """
         if signal in self.ignores:
             return False
-        self._release_pause()
         with self._lock:
             exited = self._record.state == ProcessState.EXITED
             stopped = self._record.state == ProcessState.RUNNING
