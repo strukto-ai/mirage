@@ -135,11 +135,28 @@ counts as a write.
 ## On a server
 
 The [server](/python/access/server) takes `cli: mcp` entries in a
-workspace's create body.
-[`PUT /v1/workspaces/{id}/clis/{name}`](/api/operations/workspaces/install-an-mcp-cli)
-installs one on a live workspace, and
-[`DELETE`](/api/operations/workspaces/remove-an-mcp-cli) removes it. `${VAR}` is
-expanded only in files; over HTTP, send the token or a pointer.
+workspace's create body. `${VAR}` is expanded only in files; over HTTP, send
+the token or a pointer.
+
+[`mirage cli`](/home/access/cli#saved-connections) saves a server's URL and
+token under a name, as a CLI of type `mcp`:
+
+```bash
+mirage cli create issues --type mcp --set url=https://mcp.example.com/mcp --set auth.type=bearer --secret auth.token
+```
+
+A create body or a template points at the saved fields:
+
+```yaml
+clis:
+  issues:
+    cli: mcp
+    config:
+      url: {from: strukto, ref: issues, key: url}
+      auth:
+        type: {from: strukto, ref: issues, key: auth.type}
+        token: {from: strukto, ref: issues, key: auth.token}
+```
 
 ## Snapshots
 

@@ -134,54 +134,6 @@
       "remove": true
     },
     {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/clis/{name}\"].put",
-      "update": {
-        "x-mint": {
-          "content": "<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `404` | The workspace, session, job or file does not exist |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
-        }
-      }
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/clis/{name}\"].put.responses[\"401\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/clis/{name}\"].put.responses[\"404\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/clis/{name}\"].put.responses[\"422\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/clis/{name}\"].put.responses[\"429\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/clis/{name}\"].delete",
-      "update": {
-        "x-mint": {
-          "content": "<Accordion title=\"Errors\">\n\n| Status | Meaning |\n| --- | --- |\n| `401` | The token is missing or wrong |\n| `404` | The workspace, session, job or file does not exist |\n| `422` | Validation Error |\n| `429` | Past a rate limit, or a new session past max_sessions |\n\nSee [error examples and recovery steps](/api/errors). The [complete OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) includes every response schema.\n\n</Accordion>"
-        }
-      }
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/clis/{name}\"].delete.responses[\"401\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/clis/{name}\"].delete.responses[\"404\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/clis/{name}\"].delete.responses[\"422\"]",
-      "remove": true
-    },
-    {
-      "target": "$.paths[\"/v1/workspaces/{workspace_id}/clis/{name}\"].delete.responses[\"429\"]",
-      "remove": true
-    },
-    {
       "target": "$.paths[\"/v1/workspaces/{workspace_id}/kill\"].post",
       "update": {
         "x-mint": {

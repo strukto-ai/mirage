@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { configToWorkspaceArgs, WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
-import type { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
@@ -138,10 +137,6 @@ export interface ServerHost {
   ): Promise<BaseVFS>
   /** The config schema of each VFS this host builds, by name: a saved VFS's fields. */
   readonly vfsSchemas: Readonly<Record<string, ConfigSchemaLoader>>
-  buildCliEntries(
-    clis: Readonly<Record<string, unknown>>,
-    sources?: Readonly<Record<string, ResolvedSource>>,
-  ): Promise<Record<string, [string | CLI, Record<string, unknown> | null]>>
   loadProfile(profile: SessionProfile): SessionProfile
   /**
    * A fresh handle on the store workspaces keep their state in, or on the

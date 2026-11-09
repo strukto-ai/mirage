@@ -27,11 +27,8 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from mirage import Workspace, WorkspaceRunner
-from mirage.commands.cli import mcp
-from mirage.commands.cli.mcp.constants import NAME as MCP_CLI
 from mirage.concurrency.limiter import run_blocking
 from mirage.config import (
-    CLIBlock,
     WorkspaceConfig,
     _load_profile_policy,
     build_mcp_clis,
@@ -45,7 +42,6 @@ from mirage.policy.profile import SessionProfile
 from mirage.resources.errors import ResourceError
 from mirage.resources.refs import secret_refs
 from mirage.secrets.errors import SecretsError
-from mirage.secrets.sources import resolve_config_secrets, resolve_sources_for
 from mirage.server.clone import (
     build_override_mounts,
     clone_workspace_with_override,
@@ -903,80 +899,6 @@ async def set_profile(
         await entry.runner.call(define())
     except (OSError, ValueError, PolicyError, SecretsError) as exc:
         raise HTTPException(422, str(exc)) from exc
-    return {"name": name}
-
-
-@router.put("/{workspace_id}/clis/{name}")
-async def set_cli(
-    workspace_id: str, name: str, block: CLIBlock, request: Request
-) -> dict[str, str]:
-    """Install an MCP server as a CLI on the live workspace.
-
-    The body is one ``clis:`` entry, ``cli: mcp`` with its config, as a
-    config file states it. Its pointers resolve and its tools are listed
-    under the workspace's network. A name already installed answers 409.
-
-    Args:
-        workspace_id (str): the workspace.
-        name (str): the head word.
-        block (CLIBlock): the entry.
-        request (Request): the HTTP request, for the app's registry.
-    """
-    entry = require_entry(request, workspace_id)
-    ws = entry.runner.ws
-    written = await request.json()
-    await _admit(request, {"clis": {name: written}})
-
-    async def install() -> bool:
-        if block.cli != MCP_CLI:
-            raise ValueError("only a cli: mcp entry installs over HTTP")
-        if name in ws.clis():
-            return False
-        ws.registry.clis.check_name(name)
-        sources = await resolve_sources_for(
-            ws.declared_sources, [block.config]
-        )
-        config = await resolve_config_secrets(
-            block.config, sources, f"clis.{name}.config"
-        )
-        cli = await mcp.mcp_cli(config)
-        if name in ws.clis():
-            return False
-        ws.register_cli(name, cli, config)
-        return True
-
-    rule = request.app.state.registry.rule_for(ws.network)
-    try:
-        installed = await entry.runner.call(run_with_network(rule, install()))
-    except (OSError, ValueError, PolicyError, SecretsError) as exc:
-        raise HTTPException(422, str(exc)) from exc
-    if not installed:
-        raise HTTPException(409, f"CLI name {name!r} is already installed")
-    return {"name": name}
-
-
-@router.delete("/{workspace_id}/clis/{name}")
-async def delete_cli(
-    workspace_id: str, name: str, request: Request
-) -> dict[str, str]:
-    """Remove an MCP CLI from the live workspace.
-
-    Args:
-        workspace_id (str): the workspace.
-        name (str): the head word.
-        request (Request): the HTTP request, for the app's registry.
-    """
-    entry = require_entry(request, workspace_id)
-    ws = entry.runner.ws
-    current = ws.clis().get(name)
-    if current is None:
-        raise HTTPException(404, f"no CLI named {name!r}")
-    if current.cli.mcp is None:
-        raise HTTPException(422, f"CLI {name!r} is not an MCP server")
-    try:
-        await entry.runner.call(ws.unregister_cli(name))
-    except KeyError as exc:
-        raise HTTPException(404, f"no CLI named {name!r}") from exc
     return {"name": name}
 
 
