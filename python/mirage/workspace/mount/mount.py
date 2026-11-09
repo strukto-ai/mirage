@@ -2083,10 +2083,12 @@ class MountEntry:
             probed = manager.probed_stat(scope)
             if probed is not None:
                 return probed
+        asked: list[str] = []
         listed: list[str] = []
         fetched: dict[str, FileStat | None] = {key: None}
 
         async def warm() -> list[str]:
+            asked.append(key)
             names = await self._listed(self._folder(scope), index, fetched)
             listed.append(key)
             return names
@@ -2109,9 +2111,9 @@ class MountEntry:
             return await self._beyond(scope, index)
         if not await self._unproven(index, key):
             # A stored listing this lookup missed in may since have been
-            # replaced by one running beside it; a listing it fetched
+            # replaced by one running beside it; a listing it asked for
             # itself stands.
-            if listed:
+            if asked:
                 return None
             return await entry_at(index, key, warm) or fetched.get(key)
         if self._asks_by_path:

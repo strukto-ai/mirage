@@ -1282,9 +1282,11 @@ export class MountEntry {
       const probed = this.cacheManager.probedStat(scope)
       if (probed !== null) return probed
     }
+    const asked: string[] = []
     const listed: string[] = []
     const fetched = new Map<string, FileStat | null>([[key, null]])
     const warm = async (): Promise<string[]> => {
+      asked.push(key)
       const names = await this.listed(this.folder(scope), index, fetched)
       listed.push(key)
       return names
@@ -1303,8 +1305,8 @@ export class MountEntry {
     if (await beyondWindow(index, key)) return this.beyond(scope, index)
     if (!(await this.unproven(index, key))) {
       // A stored listing this lookup missed in may since have been replaced
-      // by one running beside it; a listing it fetched itself stands.
-      if (listed.length > 0) return null
+      // by one running beside it; a listing it asked for itself stands.
+      if (asked.length > 0) return null
       return (await entryAt(index, key, warm)) ?? fetched.get(key) ?? null
     }
     if (this.asksByPath) return this.beyond(scope, index)
