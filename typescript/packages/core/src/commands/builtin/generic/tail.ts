@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isStdin, operandHeader, showsHeaders } from '../utils/stream.ts'
+import { isStdin, operandHeader, rangedStream, showsHeaders } from '../utils/stream.ts'
 import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -246,20 +246,6 @@ async function* polledWindow(
   yield await materialize(data as ByteSource)
 }
 
-async function* tailRange(
-  read: ReadStreamFn<[PathSpec, number, number | null]>,
-  path: PathSpec,
-  offset: number,
-  end: number,
-): AsyncGenerator<Uint8Array> {
-  // A range-capable backend may return bytes, so bound the request too.
-  while (offset < end) {
-    const size = Math.min(1 << 20, end - offset)
-    yield* chunks(read(path, offset, size))
-    offset += size
-  }
-}
-
 async function* tailFile(
   path: PathSpec,
   read: ReadStreamFn,
@@ -286,7 +272,7 @@ async function* tailFile(
         if (box !== undefined) box.end = size
         if (counts.byteCount !== null) {
           const offset = Math.max(0, size - Math.abs(counts.byteCount))
-          yield* tailRange(readRange, path, offset, size)
+          yield* rangedStream(readRange, path, offset, size)
           return
         }
         if (n === 0) return
@@ -324,7 +310,7 @@ async function* tailFile(
             if (selected !== null || start === 0) {
               const offset = selected ?? 0
               yield* chunks(data.subarray(offset))
-              yield* tailRange(readRange, path, end, size)
+              yield* rangedStream(readRange, path, end, size)
               return
             }
             end = start

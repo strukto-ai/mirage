@@ -33,17 +33,14 @@ import { dispatchStat, virtualFlags, virtualKey } from '../utils/paths.ts'
  * pull, which can come after that command ended, so under the command's
  * caller, as a `fresh` mount trusts only the listings that command made. A
  * directory fails with EISDIR, as a POSIX read does, before a keyed store
- * reads it as nothing. `ahead` is what the read awaits first (`readAhead`).
- * Mirrors Python's caller_stream. */
+ * reads it as nothing. Mirrors Python's caller_stream. */
 export async function* callerStream(
   dispatch: DispatchFn,
   caller: Caller,
   path: PathSpec,
-  ahead?: (path: PathSpec) => Promise<void>,
 ): AsyncIterable<Uint8Array> {
   const data = await runWithCaller(caller, async () => {
     if ((await dispatchStat(dispatch)(path)).type === FileType.DIRECTORY) throw eisdir(path)
-    await ahead?.(path)
     return (await dispatch('read', path, [], { stream: true }))[0] as ByteSource
   })
   yield* chunks(data)

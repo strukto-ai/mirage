@@ -82,7 +82,8 @@ AWK_USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
 # The word an `-exec` argument that stands for the match is spelled as.
 EXEC_PLACEHOLDER = "{}"
 
-# How many per-mount runs of one cross-mount line are in flight at once.
+# How many of one command's operands are in flight at once: the per-mount
+# runs of a cross-mount line, or the stats a command takes before it reads.
 OPERAND_CONCURRENCY = 4
 
 # Where mktemp creates a name when neither -p nor TMPDIR says.

@@ -18,11 +18,18 @@ from contextlib import aclosing
 from mirage.commands.builtin.utils.constants import STDIN_HEADER_NAME
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.cooperative import chunks
 from mirage.io.stream import OutputStream, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, materialize
 from mirage.rs.stream import OpenStream, close_stream, stream_output_chunks
 from mirage.shell.bytes import encode_text
-from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
+from mirage.types import (
+    FileStat,
+    FileType,
+    PathSpec,
+    PolymorphicReadFn,
+    ReadStreamFn,
+)
 
 
 async def read_stdin_async(stdin: ByteSource | None) -> bytes | None:
@@ -162,6 +169,28 @@ def stdin_stat(
         return await stat(path)
 
     return probe
+
+
+async def ranged_stream(
+    read: ReadStreamFn, path: PathSpec, offset: int, end: int
+) -> AsyncGenerator[bytes, None]:
+    """A file's bytes from ``offset`` to ``end``, read a window of at most
+    1 MiB at a time: a range-capable backend may answer a window whole.
+
+    Args:
+        read (ReadStreamFn): ``read(path, offset=, size=)``.
+        path (PathSpec): the file.
+        offset (int): the first byte.
+        end (int): the byte past the last.
+    """
+    while offset < end:
+        size = min(1 << 20, end - offset)
+        async with aclosing(
+            chunks(read(path, offset=offset, size=size))
+        ) as source:
+            async for part in source:
+                yield part
+        offset += size
 
 
 def stream_output(stream: OpenStream, source: ByteSource) -> OutputStream:

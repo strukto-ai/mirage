@@ -1004,9 +1004,12 @@ export class Dispatcher {
       kwargs = own
     if (name === 'stat' && fresh !== undefined) kwargs = own
     if (name === 'read_many') {
-      const { paths } = (kwargs ?? {}) as { paths?: PathSpec[] }
-      await this.readMany([path, ...(paths ?? [])], issuer, caller)
-      return [null, new IOResult()]
+      const { paths, stats } = (kwargs ?? {}) as {
+        paths?: PathSpec[]
+        stats?: Map<string, FileStat>
+      }
+      const kept = await this.readMany([path, ...(paths ?? [])], issuer, caller, stats ?? new Map())
+      return [kept, new IOResult()]
     }
     const { scopes, ...searched } = (kwargs ?? {}) as { scopes?: PathSpec[] }
     if (name === 'search' && scopes !== undefined) {
@@ -1537,7 +1540,9 @@ export class Dispatcher {
 
   /**
    * Keep the small files `typed` names in the read cache, for the reads a
-   * command is about to make of them; nothing is answered. Each read that
+   * command is about to make of them; the answer is whether any of them is on
+   * a mount this keeps reads for, so a caller warms no more of a run that is
+   * not. Each read that
    * follows still meets every check of its own and is served what this kept,
    * so nothing is fetched where a check could refuse that read before its
    * backend is asked: nothing in a dry run or while a coded preVfs policy
@@ -1547,22 +1552,25 @@ export class Dispatcher {
    * that keeps no reads or holds its data locally (read as fast when asked)
    * is passed over. A store that reads a batch
    * (`readMany`) is asked once for the rest of its files; any other is asked
-   * for each file its listing sizes within READ_AHEAD_BYTES. A failure is
-   * logged and dropped: the read that follows meets it itself. Mirrors
-   * Python's Dispatcher._read_many.
+   * for each file its listing, or the stat the caller made of it (`stats`, by
+   * path), sizes within READ_AHEAD_BYTES. A failure is logged and dropped:
+   * the read that follows meets it itself. Mirrors Python's
+   * Dispatcher._read_many.
    */
   private async readMany(
     typed: readonly PathSpec[],
     issuer: symbol | undefined,
     caller: Caller | undefined,
-  ): Promise<void> {
+    stats: ReadonlyMap<string, FileStat>,
+  ): Promise<boolean> {
     if (this.explaining() !== null || (await this.policies.wantsFor('preVfs', this.sessionId()))) {
-      return
+      return false
     }
     await this.prepare()
     const gate = this.caller?.ruleGate ?? null
     const batches = new Map<string, [MountEntry, CacheManager, PathSpec[]]>()
     for (const path of typed) {
+      if (this.namespace.tryMountFor(path.virtual)?.vfs.local === true) continue
       let call: Call
       try {
         call = await this.walk('read', path, [], {}, null, undefined, issuer, caller)
@@ -1587,6 +1595,7 @@ export class Dispatcher {
       batch[2].push(call.path)
       batches.set(mount.prefix, batch)
     }
+    if (batches.size === 0) return false
     const warm = async (): Promise<void> => {
       for (const [mount, manager, paths] of batches.values()) {
         await mount.ensureReady()
@@ -1595,7 +1604,7 @@ export class Dispatcher {
         const wanted: PathSpec[] = []
         for (const p of paths) {
           if (
-            fitsReadAhead(entries.get(p.virtual) ?? null, batched) &&
+            fitsReadAhead(entries.get(p.virtual) ?? stats.get(p.virtual) ?? null, batched) &&
             !(await manager.isCached(p))
           ) {
             wanted.push(p)
@@ -1644,6 +1653,7 @@ export class Dispatcher {
       if (activeRecords() === undefined) await runWithRecording(warm, null, this.namespace.clock)
       else await warm()
     })
+    return true
   }
 
   /**

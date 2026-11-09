@@ -34,6 +34,12 @@ pub(crate) struct Host {
     pub(crate) stdin: Vec<u8>,
     stdin_fd: Option<u64>,
     inputs: HashMap<u64, (Vec<u8>, Option<Fault>)>,
+    /// What a range opened past and the file's length, for its first reply.
+    ranges: HashMap<u64, (usize, usize)>,
+    /// The bytes every read sent.
+    pub(crate) sent: usize,
+    /// The most one read sends; none sends three.
+    pub(crate) chunk: Option<usize>,
     spools: HashMap<u64, Vec<u8>>,
     writers: HashMap<String, Writer>,
     pub(crate) out: Vec<u8>,
@@ -130,6 +136,15 @@ impl Host {
     }
 
     fn read(&mut self, fd: u64, request: &Json) -> (Json, Vec<u8>) {
+        let (mut reply, data) = self.read_input(fd, request);
+        if let Some(opened) = self.ranges.remove(&fd) {
+            reply["skipped"] = json!(opened.0);
+            reply["size"] = json!(opened.1);
+        }
+        (reply, data)
+    }
+
+    fn read_input(&mut self, fd: u64, request: &Json) -> (Json, Vec<u8>) {
         let path = request["path"].as_str();
         if let Some(spool) = request["spool"].as_u64() {
             let skip = request["skip"].as_u64().unwrap_or(0) as usize;
@@ -155,6 +170,19 @@ impl Host {
             };
             let fault = self.faults.get(path).cloned();
             match (source, &fault) {
+                // A range opens past `skip`, at most `size` bytes, saying
+                // how far it skipped and the file's length.
+                (Some(source), _)
+                    if request["skip"].is_u64() && !matches!(path, "-" | "/dev/stdin") =>
+                {
+                    let length = source.len();
+                    let start = (request["skip"].as_u64().unwrap_or(0) as usize).min(length);
+                    let end = request["size"]
+                        .as_u64()
+                        .map_or(length, |size| (start + size as usize).min(length));
+                    self.ranges.insert(fd, (start, length));
+                    self.inputs.insert(fd, (source[start..end].to_vec(), fault));
+                }
                 (Some(source), _) => {
                     self.inputs.insert(fd, (source, fault));
                 }
@@ -180,12 +208,13 @@ impl Host {
             self.inputs.remove(&fd);
             return (json!({"end": true}), Vec::new());
         }
-        let mut take = input.len().min(3);
+        let mut take = input.len().min(self.chunk.unwrap_or(3));
         if let Some(fault) = fault.as_mut() {
             take = take.min(fault.after);
             fault.after -= take;
         }
         let chunk: Vec<u8> = input.drain(..take).collect();
+        self.sent += chunk.len();
         // A gathered read's last bytes come with the end, as hosts send them.
         if input.is_empty() && fault.is_none() && request["least"].is_u64() {
             self.inputs.remove(&fd);

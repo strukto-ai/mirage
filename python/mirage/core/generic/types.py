@@ -245,8 +245,7 @@ class Mtime:
     here. The node also orders prunes: a ``-prune`` after it fires only
     for a directory the test holds for, and one before it fires
     regardless, as GNU orders them. A prune reached past an undecided
-    test is recorded as pending (``PendingPrune``) for the caller to
-    settle once it has statted the directory.
+    test still counts, the most a walk without that time can say.
     """
 
     lo: float | None
@@ -255,33 +254,10 @@ class Mtime:
 
 
 @dataclass(frozen=True, slots=True)
-class PendingPrune:
-    """A directory whose ``-prune`` decision waited on time tests the
-    walk could not decide: a prune reached past one, or every prune
-    skipped on the strength of one (``-mtime 1 -o -prune``).
-
-    The entry is kept whole: whether the prune stands is settled by
-    evaluating the expression again with the directory's mtime, since a
-    failing test may send GNU down another arm that prunes anyway
-    (``( -mtime 1 -o -type d ) -prune``).
-    """
-
-    entry: FindEntry
-
-
-@dataclass(frozen=True, slots=True)
 class Prune:
-    """``-prune``: true, and a directory it reaches loses its contents.
-
-    The node keeps the ledger of pruned directory keys, which the walk
-    reads before it enters a directory. ``bind_tree`` hands every start
-    point a fresh ledger. A prune reached past a time test the entry
-    could not answer lands in ``pending`` and counts as pruned, the most
-    a walk without that time can say.
-    """
-
-    pruned: list[str] = field(default_factory=list)
-    pending: list[PendingPrune] = field(default_factory=list)
+    """``-prune``: true, and a directory it reaches loses its contents,
+    which the walk reads off the entry's evaluation (``Effects``) before
+    it enters the directory."""
 
 
 PredNode = (
@@ -312,8 +288,8 @@ PredNode = (
 @dataclass(slots=True)
 class Effects:
     """What evaluating an expression on one entry did besides answer:
-    whether an action was reached, whether a prune node recorded the
-    entry (firm or pending), whether a ``-quit`` ended the evaluation,
+    whether an action was reached, whether a ``-prune`` was reached on
+    a directory, whether a ``-quit`` ended the evaluation,
     and the time tests the entry carried no mtime for on the path that
     decided the answer so far; a branch whose outcome they could not
     have changed drops them again.

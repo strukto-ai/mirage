@@ -50,7 +50,11 @@ pub(crate) enum WriteMode {
 /// program reads (where `-` and `/dev/stdin` are standard input), a file
 /// a script names, which no spelling of standard input stands for, or a
 /// spool the run filled, past its first `skip` bytes; a window, `size`
-/// bytes of a spool, comes whole in one reply and leaves nothing open.
+/// bytes of a spool, comes whole in one reply and leaves nothing open. A
+/// range, `Range(operand, skip, size)`, opens an operand past its first
+/// `skip` bytes, at most `size` of them, where the host knows the file's
+/// length, which its first reply says (`skipped`, `size`); otherwise the
+/// host reads the operand from its start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Opening {
     Operand(usize),
@@ -59,6 +63,7 @@ pub(crate) enum Opening {
     File,
     Spool { fd: u32, skip: u64 },
     Window { fd: u32, skip: u64, size: u64 },
+    Range(usize, u64, Option<u64>),
 }
 
 /// What the host is asked to do, in the order the run asks.
@@ -190,6 +195,14 @@ fn opening(put: &mut impl FnMut(&str, Json), path: &[u8], opening: Opening) {
         Opening::Operand(operand) => {
             put("path", latin1(path));
             put("operand", operand.into());
+        }
+        Opening::Range(operand, skip, size) => {
+            put("path", latin1(path));
+            put("operand", operand.into());
+            put("skip", skip.into());
+            if let Some(size) = size {
+                put("size", size.into());
+            }
         }
         Opening::AsOperand => {
             put("path", latin1(path));
@@ -391,8 +404,11 @@ pub(crate) struct Reply {
     /// Why the host refused outright, which ends the run.
     pub(crate) fatal: Option<String>,
     pub(crate) status: Option<f64>,
-    /// A filled spool's length.
+    /// A filled spool's length, or the length of the file a range opened.
     pub(crate) size: u64,
+    /// How far into its file a range opened; none when the host read it
+    /// from its start.
+    pub(crate) skipped: Option<u64>,
     /// What a stat found: `dir` or `file`; none when nothing stands there.
     pub(crate) kind: Option<String>,
     /// The permission bits a stat found, where the host keeps them.

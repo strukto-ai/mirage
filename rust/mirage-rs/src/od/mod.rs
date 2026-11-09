@@ -21,6 +21,10 @@ use self::format::{Format, Kind, Layout};
 const HINT: &str = "Try 'od --help' for more information.";
 /// The input one `drain` dumps.
 const WINDOW: usize = 16 * 1024;
+/// The least skip a file opens past rather than reads through: a shorter
+/// one costs less to read than the host's round trips to measure the file
+/// and fetch the range a window at a time.
+const SEEK: u64 = 1 << 20;
 /// The most text the lines over one block may take. GNU writes a line of
 /// any width; mirage writes each line whole, so a width past this is
 /// refused as too large.
@@ -622,6 +626,14 @@ impl Od {
             let Some((name, opening)) = self.files.pop_front() else {
                 return self.end();
             };
+            // A file the skip reaches into opens past it where the host can,
+            // as far as -N reads.
+            let opening = match opening {
+                Opening::Operand(operand) if self.stage == Stage::Skip && self.skip >= SEEK => {
+                    Opening::Range(operand, self.skip, self.left)
+                }
+                opening => opening,
+            };
             self.input = Some(Input {
                 fd: self.io.fd(),
                 open: Some((name.clone(), opening)),
@@ -742,6 +754,7 @@ impl Stream for Od {
             return Ok(());
         }
         self.opened = true;
+        self.skip -= reply.skipped.unwrap_or(0).min(self.skip);
         if !reply.end {
             self.input = Some(input);
             let spent = if self.stage == Stage::Skip {

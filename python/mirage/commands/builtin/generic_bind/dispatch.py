@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 
 from mirage.accessor.base import NOOPAccessor
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
@@ -45,7 +45,6 @@ async def caller_stream(
     dispatch: DispatchFn,
     caller: Caller,
     path: PathSpec,
-    ahead: Callable[[PathSpec], Awaitable[None]] | None = None,
 ) -> AsyncIterator[bytes]:
     """A streamed read that opens as the command that asked for it.
 
@@ -58,15 +57,11 @@ async def caller_stream(
         dispatch (DispatchFn): policy-checked operation dispatcher.
         caller (Caller): the asking command's caller.
         path (PathSpec): the file.
-        ahead (Callable[[PathSpec], Awaitable[None]] | None): what the
-            read awaits first (``read_ahead``).
     """
     token = bind_caller(caller)
     try:
         if (await dispatch_stat(dispatch, path)).type == FileType.DIRECTORY:
             raise eisdir(path)
-        if ahead is not None:
-            await ahead(path)
         data, _ = await dispatch("read", path, stream=True)
     finally:
         reset_caller(token)

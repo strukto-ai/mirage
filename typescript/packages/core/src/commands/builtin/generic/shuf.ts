@@ -181,6 +181,8 @@ class ShufHost {
     if (store === undefined) throw new Error('shuf: missing spool')
     if (request.op === 'read')
       return { reply: {}, data: await store.read(Number(request.offset), Number(request.size)) }
+    if (request.op === 'gather')
+      return { reply: {}, data: await store.gather(request.windows as [number, number][]) }
     if (request.op === 'swap') {
       const left = Number(request.left) * 16
       const right = Number(request.right) * 16

@@ -97,12 +97,9 @@ impl Compare {
     /// and `-i` have changed them, then by their bytes when the hashes tie.
     fn random(&self, a: &[u8], b: &[u8], mods: &Mods) -> Ordering {
         if mods.fold || mods.dictionary || mods.ignore_nonprinting {
-            let a: Vec<u8> = translated(a, mods).collect();
-            let b: Vec<u8> = translated(b, mods).collect();
-            return self
-                .hashed(&a)
-                .cmp(&self.hashed(&b))
-                .then_with(|| a.cmp(&b));
+            return translated_pair(a, b, mods, |a, b| {
+                self.hashed(a).cmp(&self.hashed(b)).then_with(|| a.cmp(b))
+            });
         }
         self.hashed(a).cmp(&self.hashed(b)).then_with(|| a.cmp(b))
     }
@@ -243,13 +240,33 @@ fn translated<'a>(field: &'a [u8], mods: &'a Mods) -> impl Iterator<Item = u8> +
         })
 }
 
+/// `f` over two keys as `translated` leaves them, held on the stack while
+/// they are short, so a comparison allocates nothing.
+fn translated_pair<R>(a: &[u8], b: &[u8], mods: &Mods, f: impl FnOnce(&[u8], &[u8]) -> R) -> R {
+    const SHORT: usize = 256;
+    if a.len() > SHORT || b.len() > SHORT {
+        let a: Vec<u8> = translated(a, mods).collect();
+        let b: Vec<u8> = translated(b, mods).collect();
+        return f(&a, &b);
+    }
+    let (mut x, mut y) = ([0u8; SHORT], [0u8; SHORT]);
+    let fill = |key: &[u8], into: &mut [u8; SHORT]| {
+        let mut len = 0;
+        for byte in translated(key, mods) {
+            into[len] = byte;
+            len += 1;
+        }
+        len
+    };
+    let (n, m) = (fill(a, &mut x), fill(b, &mut y));
+    f(&x[..n], &y[..m])
+}
+
 fn compare_keys(a: &[u8], b: &[u8], mods: &Mods) -> Ordering {
     let translates = mods.fold || mods.dictionary || mods.ignore_nonprinting;
     // -V reads the key as -d, -i and -f leave it.
     if mods.version && translates {
-        let a: Vec<u8> = translated(a, mods).collect();
-        let b: Vec<u8> = translated(b, mods).collect();
-        return version_cmp(&a, &b);
+        return translated_pair(a, b, mods, version_cmp);
     }
     if mods.month {
         return month(a).cmp(&month(b));

@@ -18,6 +18,7 @@ from mirage.commands.builtin.utils.operands import (
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
     operand_header,
+    ranged_stream,
     resolve_source,
     shows_headers,
     stdin_stat,
@@ -434,20 +435,6 @@ async def _whole(read: Callable[..., Any], path: PathSpec) -> bytes:
     return b"".join([chunk async for chunk in _counted(read(path), [0])])
 
 
-async def _tail_range(
-    read: ReadStreamFn, path: PathSpec, offset: int, end: int
-) -> AsyncGenerator[bytes, None]:
-    # A range-capable backend may return bytes, so bound the request too.
-    while offset < end:
-        size = min(1 << 20, end - offset)
-        async with aclosing(
-            chunks(read(path, offset=offset, size=size))
-        ) as source:
-            async for part in source:
-                yield part
-        offset += size
-
-
 async def _tail_file(
     path: PathSpec,
     *,
@@ -499,7 +486,7 @@ async def _tail_file(
                     if offset == size:
                         return
                     async with aclosing(
-                        _tail_range(read_range, path, offset, size)
+                        ranged_stream(read_range, path, offset, size)
                     ) as source:
                         async for part in source:
                             yield part
@@ -544,7 +531,7 @@ async def _tail_file(
                                 yield part
                             if end < size:
                                 async with aclosing(
-                                    _tail_range(read_range, path, end, size)
+                                    ranged_stream(read_range, path, end, size)
                                 ) as source:
                                     async for part in source:
                                         yield part

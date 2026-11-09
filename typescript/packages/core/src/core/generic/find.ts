@@ -24,16 +24,14 @@ import { followedStat } from '../../view/namespace_view.ts'
 import type { LinkView } from '../../view/types.ts'
 import {
   bindTree,
-  keep,
+  verdict,
   argsToTree,
   primeRegexes,
   printfKind,
-  prunedKeys,
   quitFired,
   treeHas,
   treeHasAction,
   treeHasEmpty,
-  treeHasPrune,
   treeHasTime,
   treeReadsLink,
   treeReadsStat,
@@ -61,7 +59,7 @@ export interface FindOptions {
 }
 
 export interface WalkFindDeps {
-  readdir: (spec: PathSpec) => Promise<string[]>
+  readdir: (spec: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>
   stat: (spec: PathSpec) => Promise<FileStat>
   // The table's stat and readdir see the namespace's links, so a link is an
   // entry like any other, kind `l`. Under -L (`follow`, the links it follows)
@@ -88,9 +86,9 @@ export interface WalkFindDeps {
   // -xdev's test of a directory's virtual path: one it fails is an entry
   // still, and -empty still reads it, but the walk does not descend.
   enters?: (virtual: string) => boolean
-  // The walk's own listing of a directory, where the caller bounds it;
-  // absent lists with `readdir`, which -empty still reads.
-  listing?: (spec: PathSpec) => Promise<string[]>
+  // The walk's own listing of a directory through the readdir it is handed,
+  // where the caller bounds it; absent lists with `readdir`.
+  listing?: (readdir: WalkFindDeps['readdir'], spec: PathSpec) => Promise<string[]>
   // The namespace's links whether or not the walk follows them, which
   // -xtype reads past.
   links?: LinkView | null
@@ -137,7 +135,12 @@ async function statEntry(deps: WalkFindDeps, path: string): Promise<FileStat | n
   }
 }
 
-async function isEmptyEntry(deps: WalkFindDeps, path: string, isDir: boolean): Promise<boolean> {
+async function isEmptyEntry(
+  deps: WalkFindDeps,
+  path: string,
+  isDir: boolean,
+  known: FileStat | null,
+): Promise<boolean> {
   if (isDir) {
     const spec = new PathSpec({
       virtual: path,
@@ -156,7 +159,7 @@ async function isEmptyEntry(deps: WalkFindDeps, path: string, isDir: boolean): P
       throw err
     }
   }
-  const st = await statEntry(deps, path)
+  const st = known ?? (await statEntry(deps, path))
   return st !== null && st.type === FileType.FILE && st.size === 0
 }
 
@@ -176,8 +179,17 @@ export async function* walkFind(
   options: FindOptions = {},
 ): AsyncGenerator<string> {
   const links = found.follow
+  // The last directory read and its names: -empty and the walk each read a
+  // directory, and whichever comes second takes what the first read.
+  let held: [string, string[]] | null = null
   const deps: WalkFindDeps = {
     ...found,
+    readdir: async (spec, nofollow, limit) => {
+      if (held !== null && held[0] === spec.virtual) return held[1]
+      const names = await found.readdir(spec, nofollow, limit)
+      held = [spec.virtual, names]
+      return names
+    },
     stat: (spec) => followedStat((p: PathSpec) => found.stat(p), links, spec),
   }
   // GNU lists the search root itself at depth 0 (even for the mount
@@ -185,7 +197,6 @@ export async function* walkFind(
   // the root's own basename.
   const rootPath = path.virtual !== '/' ? rstripSlash(path.virtual) : '/'
   const tree = bindTree(argsToTree(options), '', path.virtual, path.rawPath)
-  const prunes = treeHasPrune(tree)
   const quits = treeHas(tree, ['quit'])
   const regexes = treeHas(tree, ['regex'])
   const needEmpty = treeHasEmpty(tree)
@@ -199,6 +210,9 @@ export async function* walkFind(
   // Set once a -quit is reached; the walk judges nothing after it.
   let quit = false
   const quitted = (): boolean => quit
+  // The directory a -prune keeps the walk out of: the one just judged, which
+  // the walk enters next if at all.
+  let pruned: string | null = null
   const judge = async (
     p: string,
     kind: PrintfKind,
@@ -206,7 +220,7 @@ export async function* walkFind(
     known: FileStat | null,
   ): Promise<boolean> => {
     const isDir = kind === 'd'
-    const isEmpty = needEmpty ? await isEmptyEntry(deps, p, isDir) : null
+    const isEmpty = needEmpty ? await isEmptyEntry(deps, p, isDir, known) : null
     // With a time test in the tree the stat comes first, so the entry answers
     // the test itself; the stat that -size alone needs waits for the entries
     // the tree kept.
@@ -235,7 +249,8 @@ export async function* walkFind(
       target,
     }
     const judged = needMtime && mtime === null ? failing : tree
-    const kept = keep(entry, judged, options.minDepth, acts)
+    const [kept, prunes] = verdict(entry, judged, options.minDepth, acts)
+    if (prunes) pruned = p
     if (quits && quitFired(judged)) {
       quit = true
       found.stopped?.push(p)
@@ -243,7 +258,7 @@ export async function* walkFind(
     }
     if (!kept) return false
     if (needSize && !isDir && st === null) {
-      st = await statEntry(deps, p)
+      st = known ?? (await statEntry(deps, p))
       if (st === null) return false
     }
     if (needSize && !sized(options, isDir ? DIR_SIZE : (st?.size ?? 0))) return false
@@ -254,13 +269,15 @@ export async function* walkFind(
     if (
       (options.maxDepth != null && depth >= options.maxDepth) ||
       (deps.enters !== undefined && !deps.enters(p)) ||
-      (prunes && prunedKeys(tree).includes(p))
+      p === pruned
     )
       return []
     const spec = new PathSpec({ virtual: p, directory: p, resolved: false, vfsPath: stripSlash(p) })
     let children: string[]
     try {
-      children = await (deps.listing ?? deps.readdir)(spec)
+      children = await (deps.listing === undefined
+        ? deps.readdir(spec)
+        : deps.listing(deps.readdir, spec))
     } catch (err) {
       if (isEnoent(err)) {
         // Only vanished dirs are skipped; API errors (rate limit, auth)
@@ -331,11 +348,8 @@ export async function* walkFind(
     // that populated it). The one in-band proof is a trailing slash on a cold
     // listing: no backend renders a file with one.
     const trimmed = child.endsWith('/') ? rstripSlash(child) : child
-    let kind: PrintfKind = 'd'
-    if (!child.endsWith('/')) {
-      const s = await statEntry(deps, trimmed)
-      kind = s === null ? 'f' : printfKind(s)
-    }
+    const found = child.endsWith('/') ? null : await statEntry(deps, trimmed)
+    const kind: PrintfKind = child.endsWith('/') ? 'd' : found === null ? 'f' : printfKind(found)
     let inner = frame.chain
     if (kind === 'd' && links != null) {
       // Under -L a directory is the one it resolves to, and one already open
@@ -350,10 +364,10 @@ export async function* walkFind(
     }
     const depth = frame.depth + 1
     const first = options.depthFirst !== true || kind !== 'd'
-    if (first && (await judge(trimmed, kind, depth, null))) yield trimmed
+    if (first && (await judge(trimmed, kind, depth, found))) yield trimmed
     if (kind === 'd' && !quitted()) {
       const left = (await entries(trimmed, depth)).reverse()
-      frames.push({ path: trimmed, depth, chain: inner, left, judged: true, known: null })
+      frames.push({ path: trimmed, depth, chain: inner, left, judged: true, known: found })
     }
   }
 }

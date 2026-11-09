@@ -508,8 +508,14 @@ async def _on_github(
 
 
 def _read(hub: FakeGitHub) -> list[str]:
+    # A file is read by its blob, or in a batch the read-ahead sends.
     names = {blob_sha(data): path for path, data in REPO.items()}
-    return sorted(names[sha] for route, sha in hub.log if route == "blob")
+    return sorted(
+        names[sha]
+        for route, raw in hub.log
+        if route in ("blob", "graphql")
+        for sha in raw.split(",")
+    )
 
 
 @pytest.mark.asyncio
@@ -589,7 +595,8 @@ async def test_a_ref_off_the_default_branch_stops_at_the_cap(monkeypatch):
     got, hub = await _on_github(line, monkeypatch, pinned=True, limit=4)
     assert got == await _run(_ram(), line, 4)
     assert got[1:] == (b"grep: /gh: " + STOPPED_AT_4, 2)
-    assert len(_read(hub)) == 4
+    # The walk reads four; the read-ahead warmed the file after them.
+    assert len(_read(hub)) == 5
 
 
 @pytest.mark.asyncio

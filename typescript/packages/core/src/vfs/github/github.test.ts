@@ -189,12 +189,14 @@ async function onGithub(
   return [await run(vfs, line, walkLimit), hub]
 }
 
+// A file is read by its blob, or in a batch the read-ahead sends.
 async function read(hub: FakeGitHub): Promise<string[]> {
   const names = new Map<string, string>()
   for (const [path, data] of Object.entries(REPO)) names.set(await blobSha(data), path)
   return hub.log
-    .filter(([route]) => route === 'blob')
-    .map(([, sha]) => names.get(sha) ?? sha)
+    .filter(([route]) => route === 'blob' || route === 'graphql')
+    .flatMap(([, raw]) => raw.split(','))
+    .map((sha) => names.get(sha) ?? sha)
     .sort()
 }
 
@@ -264,7 +266,8 @@ describe('grep and rg over code search', () => {
     const [got, hub] = await onGithub(line, new FakeGitHub(REPO), true, 4)
     expect(got).toEqual(await run(ram(), line, 4))
     expect(got.slice(1)).toEqual([`grep: /gh: ${STOPPED_AT_4}`, 2])
-    expect(await read(hub)).toHaveLength(4)
+    // The walk reads four; the read-ahead warmed the file after them.
+    expect(await read(hub)).toHaveLength(5)
   })
 
   it('does not search a scope cheaper to read', async () => {

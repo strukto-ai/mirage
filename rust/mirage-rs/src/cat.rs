@@ -53,7 +53,8 @@ impl Cat {
                     || (self.config.number_nonblank && byte != b'\n')
                 {
                     self.line = self.line.saturating_add(1);
-                    out.extend_from_slice(format!("{:6}\t", self.line).as_bytes());
+                    crate::integer::decimal(self.line, false, 6, out);
+                    out.push(b'\t');
                 }
             }
             if byte == b'\n' {

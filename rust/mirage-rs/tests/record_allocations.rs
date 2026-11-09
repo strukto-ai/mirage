@@ -426,20 +426,28 @@ fn shuffle_plan_memory() {
                 spools.remove(&id);
                 Vec::new()
             }
-            "read" => {
-                let offset = request["offset"].as_u64().unwrap() as usize;
-                let size = request["size"].as_u64().unwrap() as usize;
+            "read" | "gather" => {
+                let windows = match request["windows"].as_array() {
+                    Some(windows) => windows.iter().map(|w| (&w[0], &w[1])).collect(),
+                    None => vec![(&request["offset"], &request["size"])],
+                };
                 let stored = spools.get(&id).unwrap();
-                if stored.is_empty() {
-                    let mut data = vec![b'x'; size];
-                    let first = record - 1 - offset % record;
-                    for at in (first..size).step_by(record) {
-                        data[at] = b'\n';
+                let mut data = Vec::new();
+                for (offset, size) in windows {
+                    let offset = offset.as_u64().unwrap() as usize;
+                    let size = size.as_u64().unwrap() as usize;
+                    if stored.is_empty() {
+                        let start = data.len();
+                        data.resize(start + size, b'x');
+                        let first = record - 1 - offset % record;
+                        for at in (first..size).step_by(record) {
+                            data[start + at] = b'\n';
+                        }
+                    } else {
+                        data.extend_from_slice(&stored[offset..offset + size]);
                     }
-                    data
-                } else {
-                    stored[offset..offset + size].to_vec()
                 }
+                data
             }
             _ => unreachable!(),
         };

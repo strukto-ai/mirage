@@ -268,6 +268,36 @@ async def test_a_glob_read_warms_the_operands_after_it():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,reads,batches",
+    [
+        (
+            "grep -rc x /r/d",
+            ["00", "01"],
+            [
+                ["02"],
+                ["03", "04"],
+                ["05", "06", "07", "08"],
+                ["09", "10", "11"],
+            ],
+        ),
+        ("grep -rc --include='f0[05]' x /r/d", ["00", "05"], []),
+    ],
+    ids=["reads-all", "filtered"],
+)
+async def test_a_walk_warms_ahead_only_while_it_reads_what_it_lists(
+    line, reads, batches
+):
+    vfs = BatchedRAM()
+    vfs._store.dirs.add("/d")
+    vfs._store.files.update({f"/d/f{i:02}": b"x\n" for i in range(12)})
+    with Workspace({"/r/": vfs}) as ws:
+        await (await ws.shell(line)).stdout_str()
+    assert vfs.reads == [f"/r/d/f{n}" for n in reads]
+    assert vfs.batches == [[f"/r/d/f{n}" for n in b] for b in batches]
+
+
+@pytest.mark.asyncio
 async def test_custom_reading_keeps_its_bytes_instead_of_raw_size_and_ranges():
     backend = Backend(stored={"/f": b"raw"})
     ctx = _ctx(backend, _row(calls=frozenset({"read_range"})))

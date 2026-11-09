@@ -520,7 +520,7 @@ async def find_walk_generic(
                     root=start.stat,
                     loops=loops,
                     enters=stays if home is not None else None,
-                    listing=partial(budget.listing, readdir),
+                    listing=budget.listing,
                     links=links,
                     stopped=stopped,
                 )

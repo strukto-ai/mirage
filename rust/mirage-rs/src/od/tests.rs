@@ -35,6 +35,22 @@ fn operands_read_as_one_input_across_chunks() {
 }
 
 #[test]
+fn a_long_skip_opens_past_the_files_it_passes() {
+    let (a, b) = ("0".repeat(1_200_000), "1".repeat(1_200_000));
+    let mut host = Host::with(&[("a", &a), ("b", &b)], "");
+    let mut stream = od(
+        json!([["c", true], ["j", "2300000"], ["N", "4"]]),
+        &["a", "b"],
+    );
+    assert_eq!(host.drive(stream.as_mut()), 0);
+    assert_eq!(
+        String::from_utf8_lossy(&host.out),
+        "10614140   1   1   1   1\n10614144\n"
+    );
+    assert_eq!(host.sent, 4);
+}
+
+#[test]
 fn a_chunk_is_dumped_a_window_at_a_time() {
     let mut stream = od(json!([["c", true], ["output_duplicates", true]]), &[]);
     let mut data = Vec::new();
