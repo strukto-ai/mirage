@@ -1175,7 +1175,7 @@ impl ShellTask {
                 run.start,
                 run.pending,
                 run.framed,
-                text_of(py, &run.traced)?,
+                py_of(py, &host::diagnostics_out(&run.said))?,
             )
                 .into_pyobject(py)?
                 .into_any(),

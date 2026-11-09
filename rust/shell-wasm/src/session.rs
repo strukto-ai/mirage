@@ -934,7 +934,7 @@ fn ask_out(engine: &mut Engine, ask: Ask) -> Item {
             Item::int(run.start),
             Item::opt(run.pending, Item::int),
             Item::Bool(run.framed),
-            Item::text(run.traced),
+            host::diagnostics_out(&run.said),
         ]),
         Ask::Pause { view } => Item::list([
             Item::text("pause"),

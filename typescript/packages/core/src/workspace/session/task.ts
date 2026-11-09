@@ -25,6 +25,7 @@ import {
   ReadonlyVariableError,
   UnboundVariable,
 } from '../../shell/errors.ts'
+import type { EvaluationContext } from '../evaluation.ts'
 import type { SessionState } from './session.ts'
 
 /**
@@ -33,6 +34,7 @@ import type { SessionState } from './session.ts'
  */
 export interface TaskHost {
   readonly session: SessionState
+  readonly context: EvaluationContext
   /**
    * Run a command substitution's body in the child `shell`, a copy of the
    * task's; `span` is the body's span within the node, for a backtick region
@@ -54,8 +56,8 @@ export interface TaskHost {
    * Run the list a compound command picked, `test` when it is a test, on the
    * shell the task moved here, from statement `start`, those before it
    * having run on the shell and left `pending` in `$?`; `framed` when the
-   * construct reads the session, so the shell is framed again after; `traced`
-   * the lines `set -x` printed since the last list, which go out first.
+   * construct reads the session, so the shell is framed again after; `said`
+   * what the construct said since the last list, which goes out first.
    * Answers its status, how it left, the levels of a `break` or `continue`,
    * and whether `set -e` is ending the shell.
    */
@@ -65,7 +67,7 @@ export interface TaskHost {
     start: number,
     pending: number | null,
     framed: boolean,
-    traced: string,
+    said: readonly (string | Uint8Array)[],
   ): Promise<[number, string, number, boolean]>
 }
 
@@ -183,7 +185,7 @@ export async function drive(
           break
         }
         default:
-          budget ??= new YieldBudget(callerSignal())
+          budget ??= new YieldBudget(callerSignal(host.context))
           await budget.run()
           answer = () => {
             task.answerResumed()
@@ -218,7 +220,7 @@ export async function drive(
   const fields = [...(result[1] as readonly Item[])]
   try {
     while (task.more()) {
-      budget ??= new YieldBudget(callerSignal())
+      budget ??= new YieldBudget(callerSignal(host.context))
       await budget.run()
       fields.push(...task.slice())
     }

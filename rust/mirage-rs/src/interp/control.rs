@@ -117,8 +117,6 @@ pub struct Control {
     pub pending: Option<i32>,
     /// The construct's status, when a list run here set it last.
     pub status: Option<i32>,
-    /// What `set -x` printed since the last list.
-    pub traced: Vec<u8>,
 }
 
 impl Control {
@@ -150,8 +148,9 @@ pub struct ListRun {
     pub pending: Option<i32>,
     /// The construct reads the session, so the host frames the shell again.
     pub framed: bool,
-    /// What `set -x` printed since the last list, which goes out before it.
-    pub traced: Vec<u8>,
+    /// What the construct said since the last list, which goes out before
+    /// it: its expansions' stderr and the lines of `set -x`.
+    pub said: Vec<Diagnostic>,
 }
 
 /// What a construct asks of its host: to run one list on the shell.
@@ -274,7 +273,6 @@ struct Walk<'a, H> {
     turns: u32,
     pending: Option<i32>,
     status: Option<i32>,
-    traced: Vec<u8>,
 }
 
 impl<H: Host + Runs> Walk<'_, H> {
@@ -282,12 +280,11 @@ impl<H: Host + Runs> Walk<'_, H> {
         self.shell.option("noexec")
     }
 
-    /// A line of `set -x`, for the host to write in its place.
+    /// A line of `set -x`, said in its place among the rest.
     fn trace(&mut self, line: &[u8]) {
         if self.shell.option("xtrace") {
-            self.traced.extend_from_slice(b"+ ");
-            self.traced.extend_from_slice(line);
-            self.traced.push(b'\n');
+            self.diagnostics
+                .push(Diagnostic::Bytes([b"+ ", line, b"\n"].concat()));
         }
     }
 
@@ -361,7 +358,7 @@ impl<H: Host + Runs> Walk<'_, H> {
             start,
             pending: self.pending.take(),
             framed: self.framed,
-            traced: std::mem::take(&mut self.traced),
+            said: std::mem::take(self.diagnostics),
         };
         let ran = self.host.run(self.shell, run).await?;
         if !test {
@@ -625,7 +622,6 @@ pub async fn run_construct<H: Host + Runs>(
         turns: 0,
         pending: None,
         status: None,
-        traced: Vec::new(),
     };
     let control = match construct {
         Construct::If {
@@ -648,13 +644,13 @@ pub async fn run_construct<H: Host + Runs>(
     Ok(Control {
         pending: walk.pending,
         status: walk.status,
-        traced: walk.traced,
         ..control
     })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::sync::Arc;
 
@@ -663,12 +659,17 @@ mod tests {
     use super::*;
     use crate::vars::Store;
 
+    thread_local! {
+        /// What the last line driven said with its lists.
+        static TRACED: RefCell<Vec<Diagnostic>> = const { RefCell::new(Vec::new()) };
+    }
+
     /// A host that answers each list from a script and records the order.
     struct Script {
         answers: VecDeque<Ran>,
         ran: Vec<(usize, bool)>,
         starts: Vec<usize>,
-        traced: Vec<u8>,
+        said: Vec<Diagnostic>,
     }
 
     impl Host for Script {
@@ -696,7 +697,7 @@ mod tests {
         async fn run(&mut self, _shell: &mut Shell, run: ListRun) -> Result<Ran, Fault> {
             self.ran.push((run.list, run.test));
             self.starts.push(run.start);
-            self.traced.extend(run.traced);
+            self.said.extend(run.said);
             Ok(self.answers.pop_front().unwrap_or(ran(0)))
         }
     }
@@ -730,7 +731,7 @@ mod tests {
             answers: answers.into(),
             ran: Vec::new(),
             starts: Vec::new(),
-            traced: Vec::new(),
+            said: Vec::new(),
         };
         let tree = crate::shell::parse(b"");
         let mut diagnostics = Vec::new();
@@ -766,7 +767,7 @@ mod tests {
             answers: VecDeque::new(),
             ran: Vec::new(),
             starts: Vec::new(),
-            traced: Vec::new(),
+            said: Vec::new(),
         };
         let mut diagnostics = Vec::new();
         let control = {
@@ -780,10 +781,7 @@ mod tests {
             ));
             futures_now(done).unwrap()
         };
-        let control = Control {
-            traced: [host.traced, control.traced].concat(),
-            ..control
-        };
+        TRACED.with(|traced| traced.replace(host.said));
         (control, host.starts)
     }
 
@@ -982,10 +980,11 @@ mod tests {
             values: vec![b"1".to_vec(), b"2".to_vec()],
             body: 0,
         };
-        let (control, starts) = drive_line(&mut shell, b"((x++))", &[(0, 1)], construct);
+        let (_, starts) = drive_line(&mut shell, b"((x++))", &[(0, 1)], construct);
         assert_eq!(starts, vec![0, 0]);
         assert_eq!(shell.vars.scalar("x"), None);
-        assert_eq!(control.traced, b"+ for v in 1\n+ for v in 1\n");
+        let line = Diagnostic::Bytes(b"+ for v in 1\n".to_vec());
+        assert_eq!(TRACED.with(RefCell::take), vec![line.clone(), line]);
     }
 
     #[test]

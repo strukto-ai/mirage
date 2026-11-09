@@ -697,7 +697,7 @@ describe('hidden vars across the shell tier', () => {
     const home = await ws.shell('echo "[$HOME]"', { sessionId: 'agent' })
     expect(stdoutStr(home)).toBe('[]\n')
     const tilde = await ws.shell('echo ~', { sessionId: 'agent' })
-    expect(stdoutStr(tilde)).toBe('~\n')
+    expect(stdoutStr(tilde)).toBe('/\n')
     const cd = await ws.shell('cd', { sessionId: 'agent' })
     expect(cd.exitCode).toBe(1)
   })

@@ -358,6 +358,13 @@ function collectLoopResult(
  * What a compound command asks of the shell: to run the lists of statements
  * it picks, here, keeping what they wrote. Mirrors Python's _ConstructHost.
  */
+/** Take what a construct's own expansions and trace have said. */
+function takeSaid(context: EvaluationContext): Uint8Array {
+  const said = diagnosticStderr(null, context)
+  context.frame.diagnostics.length = 0
+  return said
+}
+
 class ConstructHost extends ExpandHost {
   readonly allStdout: (ByteSource | null)[] = []
   mergedIo = new IOResult()
@@ -381,29 +388,20 @@ class ConstructHost extends ExpandHost {
     this.bound = fd0Binding(context.session)
   }
 
-  /**
-   * What goes out before the next list: what the construct's own words said,
-   * then what `set -x` printed since the last list.
-   */
-  leading(traced: string): Uint8Array {
-    const said = diagnosticStderr(null, this.context)
-    this.context.frame.diagnostics.length = 0
-    return concat([said, encodeText(traced)])
-  }
-
   override async run(
     index: number,
     test: boolean,
     start: number,
     pending: number | null,
     framed: boolean,
-    traced: string,
+    said: readonly (string | Uint8Array)[],
   ): Promise<[number, string, number, boolean]> {
     const session = this.session
     if (pending !== null) recordStatus(session, pending)
     const statements =
       start > 0 ? (this.lists[index] ?? []).slice(start) : (this.lists[index] ?? [])
-    const leading = this.leading(traced)
+    this.context.frame.diagnostics.push(...said)
+    const leading = takeSaid(this.context)
     try {
       const [stdout, io, ran] = test
         ? await ignoringErrexit(session, () => this.body(statements, this.bound, leading))
@@ -461,18 +459,18 @@ async function runConstruct(
     if (!isUnwinding(sig)) throw sig
     throw await carried(sig, chainStreams(host.allStdout), host.mergedIo)
   }
-  const [said, failed, tag, levels, pending, status, traced] = outcome as readonly [
+  const [said, failed, tag, levels, pending, status] = outcome as readonly [
     string,
     boolean,
     string,
     number,
     number | null | undefined,
     number | null | undefined,
-    string,
   ]
   if (pending !== null && pending !== undefined) recordStatus(session, pending)
-  if (traced !== '') {
-    const [, last] = await body([], host.bound, host.leading(traced))
+  const leading = takeSaid(context)
+  if (leading.byteLength > 0) {
+    const [, last] = await body([], host.bound, leading)
     host.mergedIo = await host.mergedIo.merge(
       new IOResult({ stderr: last.stderr, exitCode: host.mergedIo.exitCode }),
     )
@@ -723,13 +721,13 @@ export async function handleSelect(
   const bound = fd0Binding(session)
   const words = values.map((v) => wordText(v))
   let showMenu = words.length > 0
-  if (session.shellOptions.xtrace === true)
-    mergedIo = await land(
-      [[Channel.STDERR, traceLine(head), false]],
-      sink ?? null,
-      allStdout,
-      mergedIo,
-    )
+  const traced = session.shellOptions.xtrace === true ? traceLine(head) : new Uint8Array()
+  mergedIo = await land(
+    [[Channel.STDERR, concat([traced, takeSaid(context)]), false]],
+    sink ?? null,
+    allStdout,
+    mergedIo,
+  )
   while (words.length > 0 && session.shellOptions.noexec !== true) {
     const env = visibleEnv(session)
     const menu = showMenu ? selectMenu(words, env.COLUMNS ?? '') : ''

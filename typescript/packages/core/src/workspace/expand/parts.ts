@@ -41,7 +41,7 @@ export async function expandWords(
   const result: string[] = []
   // Each word expands in one step; the line yields between words, so a
   // cancel or its deadline lands before the last.
-  const budget = new YieldBudget(callerSignal())
+  const budget = new YieldBudget(callerSignal(context))
   for (const part of parts) {
     const fields = await expand(part, 'fields', context, executeFn, callStack)
     for (const field of fields as readonly string[]) result.push(field)
@@ -69,7 +69,7 @@ export async function expandAndClassify(
   const expanded = await expandWords(words, context, executeFn, callStack)
   // One word can expand to a million (`a=($x)`), so classifying them
   // yields too.
-  const budget = new YieldBudget(callerSignal())
+  const budget = new YieldBudget(callerSignal(context))
   const access = sessionAccess(context.session)
   const classified: (string | PathSpec)[] = []
   for (const word of expanded) {

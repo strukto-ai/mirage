@@ -81,10 +81,11 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
     await ws.close()
   })
 
-  it('cd ~ with $HOME unset → error', async () => {
+  it('cd ~ with $HOME unset goes to the root', async () => {
     const ws = makeWs()
-    const io = await ws.shell('cd /ram/subdir && cd ~')
-    expect(io.exitCode).not.toBe(0)
+    const io = await ws.shell('cd /ram/subdir && cd ~ && pwd')
+    expect(io.exitCode).toBe(0)
+    expect(new TextDecoder().decode(io.stdout)).toBe('/\n')
     await ws.close()
   })
 

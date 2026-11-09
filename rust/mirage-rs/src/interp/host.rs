@@ -142,7 +142,6 @@ fn control_out(control: &Control) -> Item {
         Item::int(levels),
         Item::opt(control.pending, Item::int),
         Item::opt(control.status, Item::int),
-        Item::text(&control.traced),
     ])
 }
 

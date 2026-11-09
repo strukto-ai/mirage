@@ -128,7 +128,7 @@ export class ExpandHost implements TaskHost {
     _start: number,
     _pending: number | null,
     _framed: boolean,
-    _traced: string,
+    _said: readonly (string | Uint8Array)[],
   ): Promise<[number, string, number, boolean]> {
     return Promise.reject(new Error(`no list ${String(index)} to run (test: ${String(test)})`))
   }

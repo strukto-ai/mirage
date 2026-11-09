@@ -407,6 +407,18 @@ def _collect_loop_result(
     return _chain_streams(all_stdout), merged_io, exec_node
 
 
+def _take_said(context: EvaluationContext) -> bytes:
+    """Take what a construct's own expansions and trace have said, to go
+    out before what it runs next.
+
+    Args:
+        context (EvaluationContext): the evaluation holding it.
+    """
+    said = diagnostic_stderr(None, context)
+    context.frame.diagnostics.clear()
+    return said
+
+
 class _ConstructHost(ExpandHost):
     """What a compound command asks of the shell: to run the lists of
     statements it picks, here, keeping what they wrote.
@@ -446,17 +458,6 @@ class _ConstructHost(ExpandHost):
         # so an `exec < f` in one reaches the rest.
         self.bound = fd0_binding(context.session)
 
-    def leading(self, traced: str) -> bytes:
-        """What goes out before the next list: what the construct's own
-        words said, then what ``set -x`` printed since the last list.
-
-        Args:
-            traced (str): the lines the shell traced.
-        """
-        said = diagnostic_stderr(None, self.context)
-        self.context.frame.diagnostics.clear()
-        return said + encode_text(traced)
-
     async def run(
         self,
         index: int,
@@ -464,7 +465,7 @@ class _ConstructHost(ExpandHost):
         start: int,
         pending: int | None,
         framed: bool,
-        traced: str,
+        said: list[str | bytes],
     ) -> tuple[int, str, int, bool]:
         session = self.session
         if pending is not None:
@@ -472,7 +473,8 @@ class _ConstructHost(ExpandHost):
         statements = self.lists[index]
         if start:
             statements = statements[start:]
-        leading = self.leading(traced)
+        self.context.frame.diagnostics.extend(said)
+        leading = _take_said(self.context)
         try:
             if test:
                 with ignoring_errexit(session):
@@ -554,7 +556,7 @@ async def _run_construct(
         body, lists, context, execute_fn, call_stack, word, whole_tests
     )
     try:
-        said, failed, tag, levels, pending, status, traced = await drive(
+        said, failed, tag, levels, pending, status = await drive(
             start(session.vars.shell), host, context.frame.diagnostics
         )
     except UNWINDING as sig:
@@ -563,10 +565,9 @@ async def _run_construct(
         )
     if pending is not None:
         record_status(session, pending)
-    if traced:
-        _, last, _ = await body(
-            [], bound=host.bound, leading=host.leading(traced)
-        )
+    leading = _take_said(context)
+    if leading:
+        _, last, _ = await body([], bound=host.bound, leading=leading)
         host.merged_io = await host.merged_io.merge(
             IOResult(stderr=last.stderr, exit_code=host.merged_io.exit_code)
         )
@@ -912,13 +913,13 @@ async def handle_select(
     bound = fd0_binding(session)
     words = [word_text(v) for v in values]
     show_menu = bool(words)
-    if session.shell_options.get("xtrace"):
-        merged_io = await land(
-            [(Channel.STDERR, trace_line(head), False)],
-            sink,
-            all_stdout,
-            merged_io,
-        )
+    traced = trace_line(head) if session.shell_options.get("xtrace") else b""
+    merged_io = await land(
+        [(Channel.STDERR, traced + _take_said(context), False)],
+        sink,
+        all_stdout,
+        merged_io,
+    )
     while words and not session.shell_options.get("noexec"):
         env = visible_env(session)
         menu = _select_menu(words, env.get("COLUMNS", "")) if show_menu else ""

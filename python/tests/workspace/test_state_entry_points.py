@@ -906,7 +906,7 @@ def test_hidden_home_reads_as_unset_everywhere():
 
     home_out, tilde_out, cd = asyncio.run(run())
     assert home_out == "[]\n"
-    assert tilde_out == "~\n"
+    assert tilde_out == "/\n"
     assert cd.exit_code == 1
 
 
