@@ -682,7 +682,7 @@ async def list_workspaces(request: Request) -> list[WorkspaceBrief]:
             continue
         kept = await _kept(request, wid)
         if kept is not None:
-            briefs.append(make_stopped_brief(wid, *kept))
+            briefs.append(make_stopped_brief(wid, kept[1]))
     return briefs
 
 

@@ -67,16 +67,8 @@ async def _build_internals(ws: Workspace) -> WorkspaceInternals:
 
 
 def make_brief(entry: WorkspaceEntry) -> WorkspaceBrief:
-    ws = entry.runner.ws
-    user_mounts = _user_mounts(ws)
-    workspace_mode = user_mounts[0].mode.value if user_mounts else "read"
     return WorkspaceBrief(
-        id=entry.id,
-        status="running",
-        mode=workspace_mode,
-        mount_count=len(user_mounts),
-        session_count=len(ws.list_sessions()),
-        created_at=entry.created_at,
+        id=entry.id, status="running", created_at=entry.created_at
     )
 
 
@@ -173,27 +165,15 @@ def _mode_of(value: JsonValue, fallback: str) -> str:
         return value.lower()
 
 
-def make_stopped_brief(
-    workspace_id: str,
-    config: dict[str, JsonValue] | None,
-    created_at: float,
-) -> WorkspaceBrief:
+def make_stopped_brief(workspace_id: str, created_at: float) -> WorkspaceBrief:
     """A stopped workspace's brief.
 
     Args:
         workspace_id (str): the workspace.
-        config (dict[str, JsonValue] | None): the config it starts from,
-            None when it kept none.
         created_at (float): when it was first created.
     """
-    mounts = _config_mounts(config)
     return WorkspaceBrief(
-        id=workspace_id,
-        status="stopped",
-        mode=mounts[0].mode if mounts else "read",
-        mount_count=len(mounts),
-        session_count=0,
-        created_at=created_at,
+        id=workspace_id, status="stopped", created_at=created_at
     )
 
 

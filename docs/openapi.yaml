@@ -174,15 +174,9 @@ paths:
               example:
                 - id: demo
                   status: running
-                  mode: write
-                  mount_count: 1
-                  session_count: 1
                   created_at: 1794009600
                 - id: notes
                   status: stopped
-                  mode: read
-                  mount_count: 1
-                  session_count: 0
                   created_at: 1793923200
         '401':
           $ref: '#/components/responses/401'
@@ -192,7 +186,7 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-      description: List workspaces available to the authenticated account.
+      description: Running workspaces first, then stopped ones, which keep only their config and state until a start.
   /v1/workspaces/{workspace_id}:
     get:
       summary: Get workspace
@@ -7363,15 +7357,6 @@ components:
           title: Status
           description: running while the server holds the workspace in memory; stopped while
             it keeps only its config and state, until a start.
-        mode:
-          type: string
-          title: Mode
-        mount_count:
-          type: integer
-          title: Mount Count
-        session_count:
-          type: integer
-          title: Session Count
         created_at:
           type: number
           title: Created At
@@ -7383,9 +7368,6 @@ components:
       required:
         - id
         - status
-        - mode
-        - mount_count
-        - session_count
         - created_at
       title: WorkspaceBrief
     WorkspaceConfig:

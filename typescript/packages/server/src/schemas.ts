@@ -30,9 +30,6 @@ type WorkspaceStatus = 'running' | 'stopped'
 export interface WorkspaceBrief {
   id: string
   status: WorkspaceStatus
-  mode: string
-  mount_count: number
-  session_count: number
   created_at: number
 }
 

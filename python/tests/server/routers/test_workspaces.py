@@ -141,8 +141,8 @@ async def test_create_list_get_delete_round_trip():
         assert r.status_code == 200
         briefs = r.json()
         assert len(briefs) == 1
+        assert briefs[0].keys() == {"id", "status", "created_at"}
         assert briefs[0]["id"] == wid
-        assert briefs[0]["mount_count"] == 1
 
         r = await client.get(f"/v1/workspaces/{wid}")
         assert r.status_code == 200
@@ -1755,10 +1755,10 @@ async def test_a_stopped_workspace_is_listed_shown_and_deleted(tmp_path):
             assert r.status_code == 201, r.text
         await client.post("/v1/workspaces/off/stop")
         listed = (await client.get("/v1/workspaces")).json()
-        assert [
-            (w["id"], w["status"], w["mount_count"], w["session_count"])
-            for w in listed
-        ] == [("on", "running", 1, 1), ("off", "stopped", 1, 0)]
+        assert [(w["id"], w["status"]) for w in listed] == [
+            ("on", "running"),
+            ("off", "stopped"),
+        ]
         assert listed[1]["created_at"] > 0
         got = (await client.get("/v1/workspaces/off")).json()
         assert got["status"] == "stopped"

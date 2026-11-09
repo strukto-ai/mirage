@@ -21,16 +21,15 @@ import { WorkspaceRegistry } from './registry.ts'
 import { describeVfs, makeBrief, makeDetail } from './summary.ts'
 
 describe('summary', () => {
-  it('makeBrief reports prefix count + workspace mode', () => {
+  it('makeBrief reports id, status and creation time only', () => {
     const r = new WorkspaceRegistry()
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     const entry = r.add(ws, 'ws-x')
-    const brief = makeBrief(entry)
-    expect(brief.id).toBe('ws-x')
-    expect(brief.mode).toBe('write')
-    // /data/ plus the empty root anchor the workspace adds at / (no user /
-    // mount). /dev and the history view are auto-prefixes and filtered out.
-    expect(brief.mount_count).toBe(2)
+    expect(makeBrief(entry)).toEqual({
+      id: 'ws-x',
+      status: 'running',
+      created_at: entry.createdAt,
+    })
   })
 
   it('makeDetail emits mounts + sessions', async () => {

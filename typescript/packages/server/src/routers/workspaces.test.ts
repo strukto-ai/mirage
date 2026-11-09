@@ -1562,9 +1562,9 @@ describe('workspace cancel, kill, stop and start', () => {
       const listed = (await app.inject({ method: 'GET', url: '/v1/workspaces' })).json<
         { id: string; status: string; created_at: number }[]
       >()
-      expect(listed).toMatchObject([
-        { id: 'on', status: 'running', mode: 'write', mount_count: 1, session_count: 1 },
-        { id: 'off', status: 'stopped', mode: 'write', mount_count: 1, session_count: 0 },
+      expect(listed.map((w) => [w.id, w.status])).toEqual([
+        ['on', 'running'],
+        ['off', 'stopped'],
       ])
       expect(listed[1]?.created_at).toBeGreaterThan(0)
       const got = await app.inject({ method: 'GET', url: '/v1/workspaces/off' })

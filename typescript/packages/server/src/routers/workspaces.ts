@@ -632,7 +632,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
     for (const id of await deps.registry.stoppedIds(req.account)) {
       if (listed.has(id)) continue
       const k = await kept(deps, id, req.account)
-      if (k !== null) idle.push(makeStoppedBrief(id, k.config, k.createdAt))
+      if (k !== null) idle.push(makeStoppedBrief(id, k.createdAt))
     }
     return [...running, ...idle]
   })

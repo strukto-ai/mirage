@@ -66,16 +66,7 @@ async function buildInternals(ws: Workspace): Promise<WorkspaceInternals> {
 }
 
 export function makeBrief(entry: WorkspaceEntry): WorkspaceBrief {
-  const ws = entry.runner.ws
-  const mounts = userMounts(ws)
-  return {
-    id: entry.id,
-    status: 'running',
-    mode: mounts[0]?.mode ?? 'read',
-    mount_count: mounts.length,
-    session_count: ws.listSessions().length,
-    created_at: entry.createdAt,
-  }
+  return { id: entry.id, status: 'running', created_at: entry.createdAt }
 }
 
 export async function makeDetail(entry: WorkspaceEntry, verbose = false): Promise<WorkspaceDetail> {
@@ -143,24 +134,11 @@ function modeOf(value: JsonValue | undefined, fallback: string): string {
 }
 
 /**
- * A stopped workspace's brief, from the config it starts from (null when
- * it kept none) and when it was first created. Mirrors Python's
- * `make_stopped_brief`.
+ * A stopped workspace's brief, from when it was first created. Mirrors
+ * Python's `make_stopped_brief`.
  */
-export function makeStoppedBrief(
-  id: string,
-  config: Record<string, JsonValue> | null,
-  createdAt: number,
-): WorkspaceBrief {
-  const mounts = configMounts(config)
-  return {
-    id,
-    status: 'stopped',
-    mode: mounts[0]?.mode ?? 'read',
-    mount_count: mounts.length,
-    session_count: 0,
-    created_at: createdAt,
-  }
+export function makeStoppedBrief(id: string, createdAt: number): WorkspaceBrief {
+  return { id, status: 'stopped', created_at: createdAt }
 }
 
 /** A stopped workspace's detail, as `makeStoppedBrief`. Mirrors Python's `make_stopped_detail`. */

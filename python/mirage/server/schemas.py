@@ -52,9 +52,6 @@ WorkspaceStatus = Literal["running", "stopped"]
 class WorkspaceBrief(BaseModel):
     id: str
     status: WorkspaceStatus
-    mode: str
-    mount_count: int
-    session_count: int
     created_at: float
 
 
