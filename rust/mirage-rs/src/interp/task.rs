@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use super::Diagnostic;
+use super::builtin::{Unset, Unsetting, run_let, run_unset};
 use super::declare::{Declaration, Declared, Marking, run_declaration, run_marking};
 use super::expand::{Expander, Field, Host, Substitution};
 use super::shell::Shell;
@@ -276,6 +277,7 @@ pub enum Expanded {
     Text(Vec<u8>),
     Runs(Vec<(Vec<u8>, bool)>),
     Declared(Declared),
+    Unset(Unset),
 }
 
 /// An operation's end: the shell it ran on, its result, and what it left
@@ -361,6 +363,37 @@ pub fn mark_names(shell: Shell, marking: Marking, functions: bool) -> Task<Ended
     })
 }
 
+/// Run `let` on its words.
+pub fn let_words(shell: Shell, words: Vec<Vec<u8>>, deciding: bool) -> Task<Ended<Expanded>> {
+    Task::new(move |_line| async move {
+        let mut shell = shell;
+        let mut diagnostics = Vec::new();
+        let result =
+            run_let(&mut shell, &mut diagnostics, &words, deciding).map(Expanded::Declared);
+        Ended {
+            shell,
+            result,
+            diagnostics,
+        }
+    })
+}
+
+/// Run `unset` on one operand.
+pub fn unset_word(shell: Shell, unsetting: Unsetting) -> Task<Ended<Expanded>> {
+    Task::new(move |mut line| async move {
+        let mut shell = shell;
+        let mut diagnostics = Vec::new();
+        let result = run_unset(&mut shell, &mut line, &mut diagnostics, &unsetting)
+            .await
+            .map(Expanded::Unset);
+        Ended {
+            shell,
+            result,
+            diagnostics,
+        }
+    })
+}
+
 /// A session write the line asks for.
 pub enum Write {
     Set {
@@ -391,6 +424,7 @@ pub enum Write {
     Arith {
         text: Vec<u8>,
         expand: bool,
+        deciding: bool,
     },
     /// A value evaluated as an `-i` write coerces it (`declare -ni r=M`),
     /// `added` an integer `+=`'s text; the result is its value.
@@ -468,7 +502,14 @@ pub fn write(
             follow_ref,
         } => writer.mark(&name, attr, on, follow_ref).map(|()| 0),
         Write::Index { subscript } => writer.subscript_index(&subscript),
-        Write::Arith { text, expand } => writer.arith(&text, expand),
+        Write::Arith {
+            text,
+            expand,
+            deciding,
+        } => {
+            writer.deciding = deciding;
+            writer.arith(&text, expand)
+        }
         Write::IsSet {
             reference,
             expanded,
@@ -542,6 +583,7 @@ mod tests {
             Write::Arith {
                 text: b"y = 6 * 7".to_vec(),
                 expand: false,
+                deciding: false,
             },
             true,
         );

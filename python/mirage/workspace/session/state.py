@@ -327,7 +327,7 @@ async def session_arith(
     """
     return run_write(
         session,
-        lambda shell: shell.arith(text, expand=expand),
+        lambda shell: shell.arith(text, expand=expand, deciding=deciding()),
         call_stack=call_stack,
     )
 
@@ -445,6 +445,7 @@ async def push_words(
         ReadonlyVariableError: the name is readonly.
         PolicyDenied: the name is hidden.
     """
+    _refuse_deciding(name)
     _element_write(session, lambda shell: shell.push(name, words))
 
 
@@ -535,6 +536,7 @@ async def assign_element(
         ArithError: the name carries ``-i`` and the text does not
             evaluate.
     """
+    _refuse_deciding(name)
     return _element_write(
         session,
         lambda shell: shell.element(

@@ -342,6 +342,21 @@ class RedactReads(Policy):
         return None
 
 
+class DecideLines(Policy):
+    """Run shell lines while deciding a read of one path."""
+
+    def __init__(self, ws: Workspace, path: str, lines: list[str]) -> None:
+        self.ws = ws
+        self.path = path
+        self.lines = lines
+
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
+        if ctx.call.name == "read" and ctx.path.virtual == self.path:
+            for line in self.lines:
+                await self.ws.shell(line)
+        return None
+
+
 class ReadControl(Policy):
     """Change the current file policy through a guest-readable control file."""
 
@@ -964,6 +979,8 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     ws = Workspace(mounts, mode=MountMode.EXEC, **kwargs)
     if "read_control" in world:
         ws.policies.add(ReadControl(ws, world["read_control"]))
+    if "decide_lines" in world:
+        ws.policies.add(DecideLines(ws, **world["decide_lines"]))
     if "clis" in world:
         _install_clis(ws, world["clis"])
     for name in world.get("builtin_clis", []):

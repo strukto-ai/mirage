@@ -261,7 +261,7 @@ export async function sessionArith(
   callStack: CallStack | null = null,
   expand = false,
 ): Promise<bigint> {
-  return runWrite(session, (shell) => shell.arith(text, expand), null, callStack)
+  return runWrite(session, (shell) => shell.arith(text, expand, deciding()), null, callStack)
 }
 
 /**
@@ -353,6 +353,7 @@ export async function pushWords(
   name: string,
   words: readonly string[],
 ): Promise<void> {
+  refuseDeciding(name)
   elementWrite(session, (shell) => shell.push(name, words))
 }
 
@@ -405,6 +406,7 @@ export async function assignElement(
   append = false,
   diagnostics: (string | Uint8Array)[] | null = null,
 ): Promise<(typeof ELEMENT_STATUS)[number]> {
+  refuseDeciding(name)
   const warns = diagnostics !== null
   return elementWrite(
     session,

@@ -12,41 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { PolicyDenied } from '../../../../policy/errors.ts'
-import { ArithError, ReadonlyVariableError } from '../../../../shell/errors.ts'
-import type { SessionState } from '../../../session/session.ts'
-import { sessionArith } from '../../../session/state.ts'
-import { fail, readonlyRefusal, refusal, result } from '../shared.ts'
+import { deciding } from '../../../session/state.ts'
+import { declared } from '../declare/declare.ts'
 import type { BuiltinCall } from '../types.ts'
 
-/**
- * `(( ))` as a builtin: every operand is one expression, the writes land
- * in order, and the status is 1 when the last expression evaluated to 0.
- * No operand is `expression expected`, exit 1; a malformed one aborts
- * the builtin at that word. A write to a readonly name stops it the same
- * way, after the writes the expression made before it (`let 'X=5, R=3'`
- * leaves X at 5); one inside a subscript ends the shell.
- */
-export async function handleLet(args: string[], session: SessionState): Promise<RedirectResult> {
-  if (args.length === 0) return fail('let', `${shellVoice()}let: expression expected\n`)
-  let value = 0n
-  for (const expr of args) {
-    try {
-      value = await sessionArith(session, expr, null, true)
-    } catch (err) {
-      if (err instanceof PolicyDenied) return refusal('let', err)
-      if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
-      if (err.inSubscript) throw err.signal()
-      if (err instanceof ReadonlyVariableError) return readonlyRefusal('let', err.varName)
-      return fail('let', `${shellVoice()}let: ${err.message}\n`)
-    }
-  }
-  return result('let', { exitCode: value !== 0n ? 0 : 1 })
-}
-
-/** The `let` arm. */
-export async function letBuiltin(call: BuiltinCall): Promise<RedirectResult> {
-  return handleLet([...call.argv.args], call.context.session)
+/** The `let` arm: `(( ))` as a builtin, each word one expression. */
+export function letBuiltin(call: BuiltinCall): Promise<RedirectResult> {
+  const words = [...call.argv.args]
+  return declared(
+    'let',
+    (shell) => shell.letWords(words, deciding()),
+    call.context,
+    call.executeFn,
+    call.callStack,
+  )
 }

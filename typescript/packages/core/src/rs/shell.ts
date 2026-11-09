@@ -374,6 +374,21 @@ export class ShellTreeNode implements ShellNode {
   }
 }
 
+/** Split one `read` line into at most `slots` fields on `ifs`, 0 for every field. */
+export function readFields(text: string, ifs: string, slots: number, raw: boolean): string[] {
+  return texts(engine('shell', 'read_fields', [text, ifs, slots, raw]))
+}
+
+/** A line as `read` takes it, backslashes processed unless `raw`. */
+export function readText(text: string, raw: boolean): string {
+  return engine('shell', 'read_text', [text, raw]) as string
+}
+
+/** The characters `piece` leaves once backslashes are processed, and whether a backslash ends it. */
+export function readCounted(piece: string, escaped: boolean): readonly [number, boolean] {
+  return engine('shell', 'read_counted', [piece, escaped]) as readonly [number, boolean]
+}
+
 /**
  * Parse a shell program with mirage's own bash parser: tree-sitter-bash's
  * node kinds, fields and spans, bash's reading where that grammar misreads
@@ -1074,6 +1089,31 @@ export class Shell {
     return new ShellTask(handle, step, null)
   }
 
+  /** Run `let`: each word one expression. */
+  letWords(words: readonly string[], deciding: boolean): ShellTask {
+    const [handle, step] = this.call('let_words', [...words], deciding) as readonly [number, Item]
+    return new ShellTask(handle, step, null)
+  }
+
+  /** Run `unset` on one operand: `fn` when it names a function, `frozen` when that one is readonly. */
+  unsetWord(
+    letters: string,
+    word: string,
+    fn: boolean,
+    frozen: boolean,
+    deciding: boolean,
+  ): ShellTask {
+    const [handle, step] = this.call(
+      'unset_word',
+      letters,
+      word,
+      fn,
+      frozen,
+      deciding,
+    ) as readonly [number, Item]
+    return new ShellTask(handle, step, null)
+  }
+
   /**
    * Run `export` or `readonly` on variables, `attr` the letter it marks. With
    * `functions`, only store the literals of a `-f` line.
@@ -1189,8 +1229,8 @@ export class Shell {
    * Evaluate an arithmetic command or `let` operand, its writes landed;
    * `expand` for a `let` operand, whose subscripts expand first.
    */
-  arith(text: string, expand = false): Outcome {
-    return this.write('arith', text, expand)
+  arith(text: string, expand = false, deciding = false): Outcome {
+    return this.write('arith', text, expand, deciding)
   }
 
   /** Evaluate a value as an `-i` write coerces it; `added` is an integer `+=`'s text. */

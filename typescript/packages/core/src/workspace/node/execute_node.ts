@@ -102,7 +102,7 @@ import {
 } from '../executor/statement.ts'
 import { endShell } from '../executor/traps.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
-import { expandArith, expandNode, expandSubscript } from '../expand/node.ts'
+import { expandArith, expandNode } from '../expand/node.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import { expandPattern } from '../expand/pattern.ts'
 import { expandRedirect } from '../expand/redirects.ts'
@@ -110,7 +110,7 @@ import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { sessionEntry, type SessionState } from '../session/session.ts'
-import { bindLastWord, positionalParams, sessionArith, sessionView } from '../session/state.ts'
+import { bindLastWord, positionalParams, sessionArith } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { type Admitted, admitTest } from './admission.ts'
 import { executeAssignment } from './assignment.ts'
@@ -1634,12 +1634,7 @@ async function executeNodeBody(
 
   if (kind === NodeKind.UNSET) {
     const args = getUnsetArgs(node)
-    const unset = await handleUnset(
-      args,
-      session,
-      sessionView(session, context.frame.diagnostics),
-      (text) => expandSubscript(text, context, executeFn, callStack),
-    )
+    const unset = await handleUnset(args, context, executeFn, callStack)
     bindLastWord(session, ['unset', ...args])
     return unset
   }

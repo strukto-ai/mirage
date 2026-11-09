@@ -11,9 +11,3 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-from mirage.workspace.executor.builtins.let.let import handle_let
-
-__all__ = [
-    "handle_let",
-]

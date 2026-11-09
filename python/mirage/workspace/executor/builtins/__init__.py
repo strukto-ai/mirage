@@ -46,7 +46,6 @@ if TYPE_CHECKING:
     from mirage.workspace.executor.builtins.exec import handle_exec_command
     from mirage.workspace.executor.builtins.getopts import handle_getopts
     from mirage.workspace.executor.builtins.history import handle_history
-    from mirage.workspace.executor.builtins.let import handle_let
     from mirage.workspace.executor.builtins.links import (
         accepts_line,
         handle_ln,
@@ -113,7 +112,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.workspace.executor.builtins.exec": ("handle_exec_command",),
     "mirage.workspace.executor.builtins.getopts": ("handle_getopts",),
     "mirage.workspace.executor.builtins.history": ("handle_history",),
-    "mirage.workspace.executor.builtins.let": ("handle_let",),
     "mirage.workspace.executor.builtins.lookup": (
         "handle_type",
         "handle_which",
@@ -188,7 +186,6 @@ __all__ = [
     "handle_exec_command",
     "handle_declare_functions",
     "handle_history",
-    "handle_let",
     "handle_ln",
     "handle_readlink",
     "accepts_line",

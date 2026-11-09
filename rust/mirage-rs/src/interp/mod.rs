@@ -2,6 +2,7 @@
 //! variables and asks its host for what lies outside them.
 
 pub mod brace;
+pub mod builtin;
 pub mod codec;
 pub mod declare;
 pub mod escapes;

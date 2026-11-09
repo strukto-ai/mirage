@@ -139,7 +139,7 @@ from mirage.workspace.expand import (
     expand_redirect,
 )
 from mirage.workspace.expand.globs import glob_options, resolve_globs
-from mirage.workspace.expand.node import expand_arith, expand_subscript
+from mirage.workspace.expand.node import expand_arith
 from mirage.workspace.expand.pattern import expand_pattern
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.mount import MountRegistry
@@ -164,7 +164,6 @@ from mirage.workspace.session.state import (
     bind_last_word,
     positional_params,
     session_arith,
-    session_view,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -1822,20 +1821,7 @@ async def _execute_node(
 
     if kind == NodeKind.UNSET:
         args = get_unset_args(node)
-        unset = await handle_unset(
-            args,
-            session,
-            session_view(
-                session,
-                diagnostics=context.frame.diagnostics,
-            ),
-            partial(
-                expand_subscript,
-                context=context,
-                execute_fn=execute_fn,
-                call_stack=cs,
-            ),
-        )
+        unset = await handle_unset(args, context, execute_fn, cs)
         bind_last_word(session, ["unset", *args])
         return unset
 
