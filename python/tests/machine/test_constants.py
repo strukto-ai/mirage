@@ -324,7 +324,7 @@ def test_a_sandbox_without_the_encoder_runs_nothing(tmp_path):
     ("script", "digest"),
     [
         (JOB_START, "2afed504ed9b7356"),
-        (JOB_VIEW, "c9fae34d6d048244"),
+        (JOB_VIEW, "a21ff87cd2a93055"),
         (JOB_REMOVE, "7cde63f731a3578a"),
         (SETSID_PROBE, "16bda6f7218e7026"),
     ],
@@ -365,7 +365,7 @@ def _pids(folder):
 # the offsets it is given, then the end mark with the exit code.
 @DETACHES
 def test_a_detached_job_is_viewed_to_its_exit_code(tmp_path):
-    folder, tag = tmp_path / "w1:9-ab", f"t{uuid.uuid4().hex}:9"
+    folder, tag = tmp_path / "jobs" / "w1:9-ab", f"t{uuid.uuid4().hex}:9"
     started = _start(
         folder,
         tag,
@@ -385,7 +385,7 @@ def test_a_detached_job_is_viewed_to_its_exit_code(tmp_path):
 
 @DETACHES
 def test_only_the_detached_program_carries_the_tag(tmp_path):
-    folder, tag = tmp_path / "job", f"t{uuid.uuid4().hex}:9"
+    folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
     assert _start(folder, tag, "sleep", "30").returncode == 0
     program, wrapper, _ = _pids(folder)
     try:
@@ -402,7 +402,7 @@ def test_only_the_detached_program_carries_the_tag(tmp_path):
 # to write the code the signal left.
 @DETACHES
 def test_a_group_stop_leaves_the_exit_code_written(tmp_path):
-    folder, tag = tmp_path / "job", f"t{uuid.uuid4().hex}:9"
+    folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
     assert (
         _start(folder, tag, "sh", "-c", "sleep 30 & sleep 30").returncode == 0
     )
@@ -414,7 +414,7 @@ def test_a_group_stop_leaves_the_exit_code_written(tmp_path):
 # lost; one that never launched ends with the shell's own words.
 @DETACHES
 def test_a_lost_or_unlaunched_job_ends_as_such(tmp_path):
-    folder, tag = tmp_path / "job", f"t{uuid.uuid4().hex}:9"
+    folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
     assert _start(folder, tag, "sleep", "30").returncode == 0
     program, wrapper, _ = _pids(folder)
     os.kill(wrapper, 9)
@@ -422,7 +422,7 @@ def test_a_lost_or_unlaunched_job_ends_as_such(tmp_path):
     time.sleep(0.3)
     assert _view(folder).stderr == b"\0mirage-job lost\n"
     assert _view(tmp_path / "none").stderr == b"\0mirage-job lost\n"
-    missing = tmp_path / "missing"
+    missing = tmp_path / "jobs" / "missing"
     assert _start(missing, tag, "no-such-program").returncode == 0
     viewed = _view(missing)
     assert b"no-such-program: not found" in viewed.stderr
@@ -452,7 +452,7 @@ def test_a_job_folder_is_the_users_alone(tmp_path):
 # viewed before the end mark.
 @DETACHES
 def test_a_job_ends_once_what_it_started_stopped(tmp_path):
-    folder, tag = tmp_path / "job", f"t{uuid.uuid4().hex}:9"
+    folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
     program = "(sleep 1; echo late) & echo early; exit 7"
     assert _start(folder, tag, "sh", "-c", program).returncode == 0
     viewed = _view(folder)
@@ -472,3 +472,16 @@ def test_a_job_folder_s_parents_are_made_private(tmp_path):
     )
     assert jobs.stat().st_mode & 0o777 == 0o700
     assert tmp_path.stat().st_mode & 0o777 == 0o700
+
+
+# A child that closed its output does not hold the job open, as it would
+# not hold an attached run: only one still holding ``out`` or ``err`` does.
+@DETACHES
+def test_a_child_that_closed_its_output_does_not_hold_the_job(tmp_path):
+    folder, tag = tmp_path / "jobs" / "job", f"t{uuid.uuid4().hex}:9"
+    program = "sleep 30 </dev/null >/dev/null 2>&1 & exit 7"
+    assert _start(folder, tag, "sh", "-c", program).returncode == 0
+    began = time.monotonic()
+    assert _view(folder).stderr == b"\0mirage-job 7\n"
+    assert time.monotonic() - began < 5
+    subprocess.run(["/bin/sh", "-c", stop_line(tag, 9)])

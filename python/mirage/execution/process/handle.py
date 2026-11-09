@@ -89,7 +89,9 @@ class ProcessHandle:
         # the daemon that adopts it once this one lost the lease.
         self.detached = False
         self.released = False
-        self.on_detach: Callable[[RecordFields], Awaitable[None]] | None = None
+        self.on_detach: (
+            Callable[[RecordFields | None], Awaitable[None]] | None
+        ) = None
         # The tag its detached program carries in the box, when not its own
         # id: an adopted job's process may run under another pid.
         self.tag: str | None = None

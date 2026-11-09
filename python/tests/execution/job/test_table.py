@@ -2284,3 +2284,34 @@ async def test_the_lease_holder_never_stops_a_program_it_adopted():
         await holder.kill_all()
         await holder.close()
         await old.kill_all()
+
+
+# A job whose program ends up attached after all has its record cleared,
+# so no daemon awaits an adoption that never comes.
+@pytest.mark.asyncio
+async def test_a_job_that_runs_attached_after_all_is_not_recorded_detached():
+    store = RAMExecutionStore(lease_seconds=30.0)
+    table = JobTable(store, ProcessTable())
+    told: list = []
+
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
+        assert job.process is not None and job.process.on_detach is not None
+        await job.process.on_detach(_WHERE)
+        told.append(job.detached)
+        await job.process.on_detach(None)
+        told.append(job.detached)
+        await asyncio.Event().wait()
+        return IOResult(), ExecutionNode()
+
+    try:
+        job = await table.submit(
+            "train", run, "/", simple=True, detachable=True
+        )
+
+        await _until(lambda: _seen(told[1:]))
+        fields = await store.load(job.session_id)
+        assert told == [_WHERE, None]
+        assert fields["jobs"][str(job.id)]["detached"] is None
+    finally:
+        await table.kill_all()
+        await table.close()

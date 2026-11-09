@@ -443,7 +443,7 @@ class JobTable:
                 return KILLED_EXIT_CODE
             return await self._execute(job, run)
 
-        async def detached(where: RecordFields) -> None:
+        async def detached(where: RecordFields | None) -> None:
             if job is not None:
                 await self._mark_detached(job, where)
 
@@ -563,7 +563,7 @@ class JobTable:
         self._keep_checking()
 
     async def _mark_detached(
-        self, job: JobHandle, where: RecordFields
+        self, job: JobHandle, where: RecordFields | None
     ) -> None:
         """Record in a job's entry where its program runs detached, so a
         daemon that outlives this one adopts it, and publish its process
@@ -571,7 +571,8 @@ class JobTable:
 
         Args:
             job (JobHandle): the job.
-            where (RecordFields): its machine, folder, tag and runtime.
+            where (RecordFields | None): its machine, folder, tag and
+                runtime; None once it runs attached after all.
 
         Raises:
             RuntimeError: the entry could not be written, so no daemon

@@ -486,6 +486,8 @@ class MachineHandle:
                     )
                     self._detached.pop(tag, None)
                     await self._remove(folder)
+                    if runner is not None:
+                        await _untell_detached(runner, self.id)
                     return await self._exec_argv(
                         argv, None, {**env, PROCESS: tag}, cwd, output, errors
                     )
@@ -872,6 +874,23 @@ async def _tell_detached(
         logger.debug("%s: detached job not recorded", machine, exc_info=True)
         return False
     return True
+
+
+async def _untell_detached(runner: ProcessHandle, machine: MachineId) -> None:
+    """Tell the job a run is that its program runs attached after all, so
+    no daemon awaits an adoption that never comes; a failed telling is
+    logged, and an adopter finds no folder and ends the job as lost.
+
+    Args:
+        runner (ProcessHandle): the job's process.
+        machine (MachineId): the machine it runs on.
+    """
+    if runner.on_detach is None:
+        return
+    try:
+        await runner.on_detach(None)
+    except Exception:
+        logger.debug("%s: detached job not unrecorded", machine, exc_info=True)
 
 
 def _unmarked(held: bytearray) -> int:

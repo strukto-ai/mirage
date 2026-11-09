@@ -454,6 +454,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         logger.debug?.(`${this.id.toString()}: job not detached: ${String(started.stderr)}`)
         this.detached.delete(tag)
         await this.removeJob(folder)
+        if (runner !== null) await untellDetached(runner, this.id)
         return await this.execArgv(
           argv,
           null,
@@ -822,6 +823,21 @@ async function tellDetached(
     return false
   }
   return true
+}
+
+/**
+ * Tell the job a run is that its program runs attached after all, so no
+ * daemon awaits an adoption that never comes; a failed telling is logged,
+ * and an adopter finds no folder and ends the job as lost. Mirrors Python's
+ * `_untell_detached`.
+ */
+async function untellDetached(runner: ProcessHandle, machine: MachineId): Promise<void> {
+  if (runner.onDetach === null) return
+  try {
+    await runner.onDetach(null)
+  } catch (error) {
+    logger.debug?.(`${machine.toString()}: detached job not unrecorded: ${String(error)}`)
+  }
 }
 
 /**

@@ -50,7 +50,7 @@ export class ProcessHandle {
    */
   detached = false
   released = false
-  onDetach: ((where: RecordFields) => Promise<void>) | null = null
+  onDetach: ((where: RecordFields | null) => Promise<void>) | null = null
   /**
    * The tag its detached program carries in the box, when not its own id:
    * an adopted job's process may run under another pid.

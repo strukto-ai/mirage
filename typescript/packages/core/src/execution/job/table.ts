@@ -577,11 +577,12 @@ export class JobTable {
   /**
    * Record in a job's entry where its program runs detached, so a daemon
    * that outlives this one adopts it, and publish its process as detached,
-   * so no other daemon stops it; throws when the entry could not be
+   * so no other daemon stops it, or, given null, that it runs attached after
+   * all; throws when the entry could not be
    * written, so no daemon would find the job. Mirrors Python's
    * `JobTable._mark_detached`.
    */
-  private async markDetached(job: JobHandle, where: RecordFields): Promise<void> {
+  private async markDetached(job: JobHandle, where: RecordFields | null): Promise<void> {
     for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
       const fields = await this.store.load(job.sessionId)
       const jobs = { ...((fields?.jobs ?? {}) as Record<string, ListEntry>) }

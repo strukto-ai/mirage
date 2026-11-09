@@ -474,11 +474,11 @@ JOB_START = (
 # Views a detached job: $1 the folder, $2 and $3 the bytes of ``out`` and
 # ``err`` already delivered. It prints the rest as it is written, each
 # read exactly up to the size measured first, and ends with ``JOB_MARK``:
-# the exit code once ``exit`` holds one and no live process is left in the
-# program's group, as an attached run ends once what it started stops
-# writing; ``JOB_LOST`` once the folder or a wrapper that wrote none is
-# gone. A start the connection dropped gets as long to write ``pid`` as
-# ``JOB_START`` waits for it.
+# the exit code once ``exit`` holds one and no process left in the
+# program's group holds ``out`` or ``err`` open, as an attached run ends
+# once every writer closed its output; ``JOB_LOST`` once the folder or a
+# wrapper that wrote none is gone. A start the connection dropped gets as
+# long to write ``pid`` as ``JOB_START`` waits for it.
 JOB_VIEW = (
     f"PATH={TOOLS_PATH}; d=$1; o=$2; e=$3; "
     f"q() {{ printf '\\000{JOB_MARK[1:]}%s\\n' \"$1\" >&2; exit 0; }}; "
@@ -490,7 +490,9 @@ JOB_VIEW = (
     'set -- ${x##*)}; [ "$1" != Z ] && [ "${20}" = "$v" ]; }; '
     "k() { for y in /proc/[0-9]*; do x=; "
     'read -r x 2>/dev/null <"$y/stat" || continue; set -- ${x##*)}; '
-    '[ "$3" = "$r" ] && [ "$1" != Z ] && return 0; done; return 1; }; '
+    '[ "$3" = "$r" ] && [ "$1" != Z ] || continue; '
+    'for z in "$y"/fd/*; do case $(readlink "$z" 2>/dev/null) in '
+    '"$d/out" | "$d/err") return 0 ;; esac; done; done; return 1; }; '
     'p() { n=$(wc -c 2>/dev/null <"$d/$1") || n=$2; n=$((n)); '
     '[ "$n" -gt "$2" ] || { n=$2; return 0; }; '
     'tail -c +$(($2 + 1)) "$d/$1" | head -c $((n - $2)); }; '

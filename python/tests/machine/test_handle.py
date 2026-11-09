@@ -1115,8 +1115,17 @@ async def test_a_chunk_whose_delivery_failed_is_viewed_again(no_view_wait):
 async def test_a_job_the_box_cannot_detach_runs_attached():
     box = JobBox()
     box.start_code = JOB_REFUSED_STATUS
-    done, _, _, runner = await _job_run(box)
+    told: list = []
+
+    async def record(where) -> None:
+        told.append(where)
+
+    def started(runner) -> None:
+        runner.on_detach = record
+
+    done, _, _, runner = await _job_run(box, started=started)
     assert (done.exit_code, box.viewed) == (0, [])
+    assert [where is None for where in told] == [False, True]
     assert box.removed == [box.started[0][0]]
     assert box.execs[-1][0] == "train"
     assert box.exec_envs[-1][PROCESS] == str(runner.record.id)

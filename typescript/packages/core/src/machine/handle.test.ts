@@ -1238,8 +1238,17 @@ it('views again a chunk whose delivery failed', async () => {
 it('runs attached a job the box cannot detach', async () => {
   const box = new JobBox()
   box.startCode = JOB_REFUSED_STATUS
-  const [done, , , runner] = await jobRun(box)
+  const told: unknown[] = []
+  const [done, , , runner] = await jobRun(box, {
+    started: (runner) => {
+      runner.onDetach = (where) => {
+        told.push(where)
+        return Promise.resolve()
+      }
+    },
+  })
   expect([done?.exitCode, box.viewed]).toEqual([0, []])
+  expect(told.map((where) => where === null)).toEqual([false, true])
   expect(box.removed).toEqual([box.started[0]?.[0]])
   expect(box.execs.at(-1)?.[0]).toBe('train')
   expect(box.execs.at(-1)?.[2][PROCESS]).toBe(runner.record.id.toString())

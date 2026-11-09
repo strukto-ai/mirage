@@ -319,7 +319,7 @@ describe('ENCODE_OUTPUT', () => {
 describe('job scripts', () => {
   it.each([
     ['start', JOB_START, '2afed504ed9b7356'],
-    ['view', JOB_VIEW, 'c9fae34d6d048244'],
+    ['view', JOB_VIEW, 'a21ff87cd2a93055'],
     ['remove', JOB_REMOVE, '7cde63f731a3578a'],
     ['probe', SETSID_PROBE, '16bda6f7218e7026'],
   ])('%s matches Python', (_, script, digest) => {
@@ -349,7 +349,7 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
   const fresh = (): string => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-job-'))
     folders.push(dir)
-    return join(dir, 'job')
+    return join(dir, 'jobs', 'job')
   }
   const tag = (): string => `t${crypto.randomUUID().replaceAll('-', '')}:9`
   afterEach(() => {
@@ -414,11 +414,24 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
   // Folders the user made writable by others before are made the user's alone
   // again before the job writes there.
   it('makes the folders above it private', () => {
-    const jobs = join(fresh(), '..', 'jobs')
+    const jobs = join(fresh(), '..', '..', 'open')
     mkdirSync(jobs)
     chmodSync(jobs, 0o777)
     expect(startJob(join(jobs, 'job'), tag(), 'true').status).toBe(0)
     expect(statSync(jobs).mode & 0o777).toBe(0o700)
+  })
+
+  // A child that closed its output does not hold the job open, as it would
+  // not hold an attached run: only one still holding `out` or `err` does.
+  it('is not held by a child that closed its output', () => {
+    const folder = fresh()
+    const named = tag()
+    const program = 'sleep 30 </dev/null >/dev/null 2>&1 & exit 7'
+    expect(startJob(folder, named, 'sh', '-c', program).status).toBe(0)
+    const began = Date.now()
+    expect(viewJob(folder).stderr.toString()).toBe('\0mirage-job 7\n')
+    expect(Date.now() - began).toBeLessThan(5000)
+    spawnSync('/bin/sh', ['-c', stopLine(named, 9)])
   })
 
   it('ends lost when its wrapper or folder went', () => {

@@ -2547,6 +2547,40 @@ describe('detached jobs a daemon left', () => {
     }
   })
 
+  // A job whose program ends up attached after all has its record cleared, so
+  // no daemon awaits an adoption that never comes.
+  it('are not recorded detached once they run attached after all', async () => {
+    const store = new RAMExecutionStore(30)
+    const table = new JobTable(store, new ProcessTable())
+    const told: unknown[] = []
+    const run: JobRunner = async (job) => {
+      await job.process?.onDetach?.(WHERE)
+      told.push(job.detached)
+      await job.process?.onDetach?.(null)
+      told.push(job.detached)
+      return new Promise(() => undefined)
+    }
+    try {
+      const job = await table.submit({
+        command: 'train',
+        run,
+        abort: new AbortController(),
+        cwd: '/',
+        simple: true,
+        detachable: true,
+      })
+      await until(() => Promise.resolve(told.length === 2))
+      const fields = await store.load(job.sessionId)
+      expect(told).toEqual([WHERE, null])
+      expect(((fields?.jobs ?? {}) as Record<string, RecordFields>)[String(job.id)]?.detached).toBe(
+        null,
+      )
+    } finally {
+      await table.killAll()
+      await table.close()
+    }
+  })
+
   // A daemon that lost the lease releases a detached job: it stops viewing,
   // writes no ending, and lists it as the daemon that adopts it does.
   it('are released by a daemon that lost the lease', async () => {
