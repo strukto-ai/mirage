@@ -296,7 +296,8 @@ def _nice_inner(args: Sequence[Word]) -> list[InnerLine]:
 
 
 def _wrapper_inner(head: str, args: Sequence[Word]) -> list[InnerLine]:
-    """``stdbuf`` and ``setsid`` run what stands after their own options.
+    """``nohup``, ``stdbuf``, ``setsid`` and ``ionice`` run what stands
+    after their own options.
 
     Args:
         head (str): the wrapper.
@@ -316,8 +317,8 @@ def _time_inner(args: Sequence[Word]) -> list[InnerLine]:
 
 
 def _argv_inner(args: Sequence[Word]) -> list[InnerLine]:
-    """``nohup`` and ``builtin`` run the remaining words verbatim,
-    after an optional leading ``--``.
+    """``builtin`` runs the remaining words verbatim, after an optional
+    leading ``--``.
 
     Args:
         args (Sequence[Word]): the words after the wrapper command.
@@ -379,7 +380,7 @@ def inner_lines(head: str, args: Sequence[Word]) -> list[InnerLine]:
         return _shell_inner(args)
     if head == "command":
         return _command_inner(args)
-    if head in ("builtin", "nohup"):
+    if head == "builtin":
         return _argv_inner(args)
     if head == "exec":
         return _exec_inner(args)
@@ -395,7 +396,7 @@ def inner_lines(head: str, args: Sequence[Word]) -> list[InnerLine]:
         return _find_inner(args)
     if head == "nice":
         return _nice_inner(args)
-    if head in ("stdbuf", "setsid"):
+    if head in ("nohup", "stdbuf", "setsid", "ionice"):
         return _wrapper_inner(head, args)
     if head == "time":
         return _time_inner(args)
