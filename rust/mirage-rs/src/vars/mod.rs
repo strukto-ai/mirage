@@ -213,6 +213,17 @@ impl Store {
         self.voice = voice;
     }
 
+    /// The line a statement run inside a loop stands on, `$LINENO`.
+    pub fn set_line(&mut self, line: usize) {
+        self.line = line;
+    }
+
+    /// A finished statement's status as `PIPESTATUS`.
+    pub fn stamp_pipe_status(&mut self, status: i32) {
+        self.pipe_status.clear();
+        self.pipe_status.push(status);
+    }
+
     /// How the shell leads a diagnostic of its own: the name of what it is
     /// reading and the running command's line (`bash: line 3: `).
     pub fn voice(&self) -> &[u8] {

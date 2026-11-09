@@ -72,6 +72,8 @@ export const STDIN_DASH_COMMANDS: ReadonlySet<string> = new Set([
   'awk',
   'b2sum',
   'base64',
+  'bunzip2',
+  'bzip2',
   'cat',
   'cmp',
   'comm',
@@ -103,8 +105,10 @@ export const STDIN_DASH_COMMANDS: ReadonlySet<string> = new Set([
   'tail',
   'unexpand',
   'uniq',
+  'unxz',
   'wc',
   'xxd',
+  'xz',
   'zcat',
 ])
 
@@ -507,6 +511,8 @@ export const TAR_LONG_OPTIONS: readonly (readonly string[])[] = [
 ]
 export const LONG_OPTION_TABLES: Readonly<Record<string, readonly (readonly string[])[]>> = {
   ...GNU_LONG_OPTIONS,
+  dir: GNU_LONG_OPTIONS.ls ?? [],
+  vdir: GNU_LONG_OPTIONS.ls ?? [],
   tar: TAR_LONG_OPTIONS,
 }
 
@@ -754,13 +760,29 @@ export const FLOAT_VALUE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
 // exits 1.
 // Commands whose `Try '--help'` hint line is prefixed with the command
 // name (GNU diffutils style: `diff: Try 'diff --help' ...`).
-export const USAGE_HINT_PREFIX: ReadonlySet<string> = new Set(['diff', 'cmp', 'patch'])
+export const USAGE_HINT_PREFIX: ReadonlySet<string> = new Set([
+  'diff',
+  'cmp',
+  'patch',
+  'xz',
+  'unxz',
+])
 
 // Commands that print their usage page where the rest print the
 // `Try '--help'` line: sed follows every option error, and a missing
 // script, with its usage. The page is mirage's own, rendered from the
 // spec.
-export const USAGE_PAGE: ReadonlySet<string> = new Set(['sed'])
+export const USAGE_PAGE: ReadonlySet<string> = new Set(['sed', 'bzip2', 'bunzip2'])
+
+// The programs zcmp and zdiff run, whose refusal of an option they do not know
+// is theirs, not the wrapper's.
+export const COMPARE_PROGRAMS: Readonly<Record<string, string>> = Object.freeze({
+  zcmp: 'cmp',
+  zdiff: 'diff',
+})
+
+// The two programs that say `Bad flag` with their usage page.
+export const BZIP2_FAMILY: ReadonlySet<string> = new Set(['bzip2', 'bunzip2'])
 
 // An old-style cluster letter left without its argument exits 2, not
 // USAGE_EXIT's 64: tar reads the cluster itself and raises its own fatal
@@ -778,6 +800,11 @@ export const OPERAND_EXIT: Readonly<Record<string, number>> = Object.freeze({
 })
 
 export const USAGE_EXIT: Readonly<Record<string, number>> = Object.freeze({
+  dir: 2,
+  vdir: 2,
+  tty: 2,
+  zcmp: 2,
+  zdiff: 2,
   grep: 2,
   egrep: 2,
   fgrep: 2,

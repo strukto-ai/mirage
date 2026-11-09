@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "dir_and_vdir_list",
+      "seq": 16200015,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_d/s && touch /data/ez_d/a '/data/ez_d/b c'; dir /data/ez_d; dir -1 /data/ez_d; dir -l /data/ez_d | wc -l; vdir /data/ez_d | wc -l; vdir -1 /data/ez_d; vdir -C /data/ez_d; dir -N /data/ez_d; QUOTING_STYLE=literal dir /data/ez_d; dir --quoting-style=c /data/ez_d; dir /data/ez_d/nosuch; echo rc=$?; vdir /data/ez_d/nosuch; echo rc=$?; dir --bogus; echo rc=$?; vdir --bogus; echo rc=$?; dir -Z --sort=bad /data/ez_d; echo rc=$?; vdir --format=bad /data/ez_d; echo rc=$?; rm -r /data/ez_d",
+      "expect": {
+        "exit": 0,
+        "stdout": "a  b\\ c  s\na\nb\\ c\ns\n4\n4\na\nb\\ c\ns\na  b\\ c  s\na  b c\ts\na  b c\ts\n\"a\"  \"b c\"  \"s\"\nrc=2\nrc=2\nrc=2\nrc=2\nrc=1\nrc=1\n",
+        "stderr": "dir: cannot access '/data/ez_d/nosuch': No such file or directory\nvdir: cannot access '/data/ez_d/nosuch': No such file or directory\ndir: unrecognized option '--bogus'\nTry 'dir --help' for more information.\nvdir: unrecognized option '--bogus'\nTry 'vdir --help' for more information.\ndir: invalid argument 'bad' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\nTry 'dir --help' for more information.\nvdir: invalid argument 'bad' for '--format'\nValid arguments are:\n  - 'verbose', 'long'\n  - 'commas'\n  - 'horizontal', 'across'\n  - 'vertical'\n  - 'single-column'\nTry 'vdir --help' for more information.\n"
+      }
+    }
+  ]
+}

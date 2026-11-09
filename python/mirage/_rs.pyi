@@ -124,6 +124,9 @@ class ShellTask:
     ) -> None: ...
     def answer_path(self, path: Text) -> None: ...
     def answer_subscript(self, text: Text | None, shell: Shell) -> None: ...
+    def answer_ran(
+        self, shell: Shell, status: int, tag: str, levels: int, exiting: bool
+    ) -> None: ...
     def answer_resumed(self) -> None: ...
     def answer_failed(self) -> None: ...
     def finish(self) -> Outcome: ...
@@ -199,6 +202,7 @@ class Shell:
         line: int,
         bash_pid: int,
         voice: str,
+        err_trap: bool,
     ) -> None: ...
     def conversion_scalar(
         self, name: str
@@ -217,16 +221,40 @@ class Shell:
         operands: Sequence[str | tuple[str, bool, list[str]]],
         temporaries: list[str],
         subscripts: bool,
-        deciding: bool,
     ) -> ShellTask: ...
-    def let_words(self, words: Sequence[str], deciding: bool) -> ShellTask: ...
+    def run_if(
+        self, branches: Sequence[tuple[int, int]], otherwise: int
+    ) -> ShellTask: ...
+    def run_while(
+        self,
+        test: int,
+        body: int,
+        until: bool,
+        statements: list[list[tuple[ShellNode, int]] | None],
+    ) -> ShellTask: ...
+    def run_for(
+        self,
+        variable: str,
+        values: Sequence[str],
+        body: int,
+        statements: list[list[tuple[ShellNode, int]] | None],
+    ) -> ShellTask: ...
+    def run_cfor(
+        self,
+        slots: Sequence[tuple[list[ShellNode], ShellNode | None] | None],
+        body: int,
+        statements: list[list[tuple[ShellNode, int]] | None],
+    ) -> ShellTask: ...
+    def run_case(
+        self, word: str, arms: Sequence[tuple[list[ShellNode], int, str]]
+    ) -> ShellTask: ...
+    def let_words(self, words: Sequence[str]) -> ShellTask: ...
     def unset_word(
         self,
         letters: str,
         word: str,
         function: bool,
         frozen: bool,
-        deciding: bool,
     ) -> ShellTask: ...
     @staticmethod
     def read_fields(
@@ -245,7 +273,6 @@ class Shell:
         operands: Sequence[str | tuple[str, bool, list[str]]],
         temporaries: list[str],
         functions: bool,
-        deciding: bool,
     ) -> ShellTask: ...
     def set(
         self,
@@ -289,6 +316,6 @@ class Shell:
         every: bool = False,
     ) -> Outcome: ...
     def arith(
-        self, text: Text, *, expand: bool = False, deciding: bool = False
+        self, text: Text, *, expand: bool = False
     ) -> tuple[Any, list[str | bytes]]: ...
     def integer(self, text: Text, added: Text | None = None) -> Outcome: ...

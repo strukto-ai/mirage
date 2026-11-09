@@ -932,6 +932,11 @@ export class SessionState {
     return this.lineRow + row + 1
   }
 
+  /** The line `$LINENO` reads while a node of the running parse runs. */
+  lineOf(node: TSNodeLike): number {
+    return this.lineRow + this.countedLine(node) + 1
+  }
+
   /**
    * The line of the running parse's text a node is numbered by (`lineRow`), or
    * ends on (`end`), as its lines count it: as typed, or as bash prints a body

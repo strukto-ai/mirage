@@ -82,3 +82,21 @@ export interface WrapperOptions {
   /** Its stderr for a program it cannot run, `{}` the program's name. */
   readonly missing: string
 }
+
+/** What a wrapper with no program for Mirage to run comes to. Mirrors
+ * Python's `WrapperAnswer`. */
+export class WrapperAnswer {
+  readonly exitCode: number
+  readonly stdout: string
+  readonly stderr: string
+  readonly runsFrom: number | null
+
+  constructor(
+    init: { exitCode?: number; stdout?: string; stderr?: string; runsFrom?: number | null } = {},
+  ) {
+    this.exitCode = init.exitCode ?? 0
+    this.stdout = init.stdout ?? ''
+    this.stderr = init.stderr ?? ''
+    this.runsFrom = init.runsFrom ?? null
+  }
+}

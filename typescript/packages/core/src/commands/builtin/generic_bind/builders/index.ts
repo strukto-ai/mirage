@@ -21,6 +21,7 @@ import * as cat from './cat.ts'
 import * as cmp from './cmp.ts'
 import * as column from './column.ts'
 import * as comm from './comm.ts'
+import * as compressors from './compressors.ts'
 import * as cp from './cp.ts'
 import * as csplit from './csplit.ts'
 import * as cut from './cut.ts'
@@ -84,6 +85,7 @@ import * as unzip from './unzip.ts'
 import * as wc from './wc.ts'
 import * as xxd from './xxd.ts'
 import * as zcat from './zcat.ts'
+import * as zcompare from './zcompare.ts'
 import * as zgrep from './zgrep.ts'
 import * as zipCmd from './zip_cmd.ts'
 
@@ -116,6 +118,8 @@ export const BUILDERS: readonly GenericCommand[] = [
   jq.BUILDER,
   look.BUILDER,
   ls.BUILDER,
+  ls.DIR_BUILDER,
+  ls.VDIR_BUILDER,
   md5.BUILDER,
   md5sum.BUILDER,
   mkdir.BUILDER,
@@ -159,6 +163,8 @@ export const BUILDERS: readonly GenericCommand[] = [
   wc.BUILDER,
   xxd.BUILDER,
   zcat.BUILDER,
+  ...compressors.BUILDERS,
+  ...zcompare.BUILDERS,
   zgrep.BUILDER,
   zipCmd.BUILDER,
 ]

@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "tty_reports_no_terminal",
+      "seq": 16200001,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "tty; echo rc=$?; tty -s; echo rc=$?; tty x; echo rc=$?; tty --bogus; echo rc=$?; tty --silent x; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "not a tty\nrc=1\nrc=1\nrc=2\nrc=2\nrc=2\n",
+        "stderr": "tty: extra operand 'x'\nTry 'tty --help' for more information.\ntty: unrecognized option '--bogus'\nTry 'tty --help' for more information.\ntty: extra operand 'x'\nTry 'tty --help' for more information.\n"
+      }
+    }
+  ]
+}

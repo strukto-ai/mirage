@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_zcmp_reads_both_mounts",
+      "seq": 16200106,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "printf 'a\\n' | gzip > /data/xm_ez_zcmp.gz; printf 'a\\n' | gzip > /data2/xm_ez_zcmp.gz; zcmp /data/xm_ez_zcmp.gz /data2/xm_ez_zcmp.gz; rm /data/xm_ez_zcmp.gz /data2/xm_ez_zcmp.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

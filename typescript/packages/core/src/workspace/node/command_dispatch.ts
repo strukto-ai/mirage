@@ -102,7 +102,8 @@ import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { expandAssignment } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { mirageProgramAt, routedConsumer, wrapperRefusal } from '../lookup/lookup.ts'
+import { RUNNERS } from '../lookup/constants.ts'
+import { mirageProgramAt, routedConsumer, wrapperAnswer, wrapperRefusal } from '../lookup/lookup.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
@@ -163,7 +164,21 @@ function ownedWord(line: string, name: string, owners: readonly ReadonlySet<stri
   return false
 }
 
-export async function executeCommand(
+/**
+ * Run a command whose head word is an alias, null when it is not. Mirrors
+ * Python's _run_alias.
+ *
+ * bash rewrites the head word of a simple command before any other
+ * expansion, textually, and reads the result as a fresh line: an alias
+ * holding a pipe is a pipe. Only an unquoted plain word qualifies, and
+ * `aliasValue` applies the rest of bash's rules (expand_aliases, the
+ * same-line mark, the guards on inserted text). The rewritten line
+ * runs through the same executor with the same call stack, so `$1`
+ * inside a function still means the function's argument. A line run as a
+ * program (`exec`, `env`, `find -exec`) is an argv, which no alias
+ * rewrites.
+ */
+async function runAlias(
   recurse: (
     n: TSNodeLike,
     s: EvaluationContext,
@@ -171,43 +186,17 @@ export async function executeCommand(
     cs: CallStack | null,
     opts?: ExecuteNodeOpts,
   ) => Promise<RedirectResult>,
-  dispatch: DispatchFn,
   registry: MountRegistry,
-  namespace: Namespace,
-  executeFn: ExecuteFn,
   node: TSNodeLike,
+  nonPrefixParts: readonly TSNodeLike[],
   context: EvaluationContext,
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
-  jobTable: JobTable | null,
-  signal?: AbortSignal,
-  // The line's parse scope; only alias expansion needs it, and each
-  // expansion parses in a fork released when it ends. Absent means an
-  // alias is stored and printed but never expanded.
-  parser?: ParseScope,
-  // The agent the line is attributed to, which an approval request names.
-  // The line's hand-off, which its gate claims on and runs on.
-  handed?: HandOff,
-  // Where a command that runs statements of its own (a function body, a
-  // nested shell) writes them as they finish.
-  sink?: JobConsole,
-  // Filled with the words the command expanded to, so the caller knows what
-  // the head ran as.
-  expanded?: ExpandedWords,
-): Promise<RedirectResult> {
+  parser: ParseScope | undefined,
+  handed: HandOff | undefined,
+  sink: JobConsole | undefined,
+): Promise<RedirectResult | null> {
   const session = context.session
-  const name = getCommandName(node)
-  const [assignmentNodes, nonPrefixParts] = splitEnvPrefix(getParts(node))
-
-  // bash rewrites the head word of a simple command before any other
-  // expansion, textually, and reads the result as a fresh line: an alias
-  // holding a pipe is a pipe. Only an unquoted plain word qualifies, and
-  // `aliasValue` applies the rest of bash's rules (expand_aliases, the
-  // same-line mark, the guards on inserted text). The rewritten line
-  // runs through the same executor with the same call stack, so `$1`
-  // inside a function still means the function's argument. A line run as a
-  // program (`exec`, `env`, `find -exec`) is an argv, which no alias
-  // rewrites.
   const headNode = nonPrefixParts[0]
   if (
     parser !== undefined &&
@@ -283,6 +272,233 @@ export async function executeCommand(
       }
     }
   }
+  return null
+}
+
+/** Run a program that lives above the mounts, null for any other. Mirrors Python's _run_namespace_program. */
+async function runNamespaceProgram(
+  name: string,
+  namespace: Namespace,
+  made: DispatchFn,
+  registry: MountRegistry,
+  session: SessionState,
+  operands: (string | PathSpec)[],
+  stdin: ByteSource | null,
+): Promise<RedirectResult | null> {
+  // Symlinks are namespace-backed: not bash builtins, not mount commands.
+  // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
+  // which falls through to the mount command.
+  if (name === 'ln') {
+    return await handleLn(namespace, made, session, operands)
+  }
+  if (name === 'readlink') {
+    return await handleReadlink(namespace, made, session, operands)
+  }
+
+  // Extended attributes: the dispatcher's node table and the backend's own
+  // facts; they read -h themselves.
+  if (name === 'getfattr') {
+    return await handleGetfattr(namespace, made, session, operands)
+  }
+  if (name === 'setfattr') {
+    return await handleSetfattr(made, session, operands, stdin)
+  }
+
+  // Metadata commands (namespace-routed: resolve-then-setattr with
+  // overlay fallback; they run their own link follow).
+  if (name === 'chmod') {
+    return handleChmod(namespace, made, session, operands)
+  }
+  if (name === 'chown') {
+    return handleChown(namespace, made, session, operands)
+  }
+  if (name === 'chgrp') {
+    return handleChgrp(namespace, made, session, operands)
+  }
+  if (name === 'touch') {
+    return handleTouch(namespace, made, session, operands)
+  }
+
+  // Capacity (registry-routed: enumerates mounts, reports per-mount capacity;
+  // never fabricates numbers).
+  if (name === 'df') {
+    return handleDf(registry, session, made, operands)
+  }
+  if (name === 'mount') {
+    return handleMount(registry, session, operands)
+  }
+  return null
+}
+
+/** Act on the link operands `rm`, `unlink` and `mv` name: the operands left, the refused links' lines, and the answer when no operand is left for the command. Mirrors Python's _strip_links. */
+async function stripLinks(
+  name: string,
+  argv: Argv,
+  given: (string | PathSpec)[],
+  dispatch: DispatchFn,
+  namespace: Namespace,
+  session: SessionState,
+): Promise<[(string | PathSpec)[], string[], RedirectResult | null]> {
+  let operands = given
+  let linkErrors: string[] = []
+  try {
+    // Both remove the link entry itself, which no backend can see;
+    // unlink(1) is rm(1) restricted to one non-directory. Gated on the
+    // line being one the command layer accepts, because this removal
+    // happens before that layer parses and it cannot be taken back
+    // (GNU refuses `rm --bogus dlink` and `unlink dlink other` with
+    // the link still there).
+    if (
+      (name === 'rm' || name === 'unlink') &&
+      acceptsLine(name, argv.args, operands, session.cwd)
+    ) {
+      const [rest, handled, stripErrors] = await stripLinkOperands(
+        name,
+        dispatch,
+        namespace.sessionLinks(session),
+        operands,
+        argv.args,
+        session.cwd,
+      )
+      operands = rest
+      linkErrors = stripErrors
+      if (handled > 0 && !rest.some((a) => a instanceof PathSpec)) {
+        if (linkErrors.length === 0) {
+          return [
+            operands,
+            linkErrors,
+            [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })],
+          ]
+        }
+        const err = encodeText(linkErrors.join(''))
+        return [
+          operands,
+          linkErrors,
+          [
+            null,
+            new IOResult({ exitCode: 1, stderr: err }),
+            new ExecutionNode({ command: name, exitCode: 1, stderr: err }),
+          ],
+        ]
+      }
+    } else if (name === 'mv') {
+      const prepared = await prepareMv(
+        namespace.sessionLinks(session),
+        dispatch,
+        operands,
+        argv.args,
+        session.cwd,
+      )
+      operands = prepared.items
+      if (prepared.early !== null) return [operands, linkErrors, prepared.early]
+    }
+  } catch (err) {
+    if (err instanceof CycleError) {
+      const errBytes = encodeText(`${name}: ${err.path}: Too many levels of symbolic links\n`)
+      return [
+        operands,
+        linkErrors,
+        [
+          null,
+          new IOResult({ exitCode: 1, stderr: errBytes }),
+          new ExecutionNode({ command: name, exitCode: 1, stderr: errBytes }),
+        ],
+      ]
+    }
+    throw err
+  }
+  return [operands, linkErrors, null]
+}
+
+/**
+ * Drop the node meta of what `rm` removed. Mirrors Python's _purge_removed.
+ *
+ * A removed path takes its node meta (overlay attrs) with it; a
+ * removed dir purges everything underneath. Glob operands reach
+ * here unexpanded (backend wrappers expand them), so the node
+ * table matches the pattern itself. A name the session cannot see
+ * was never removed: rm met it as absent (-f silenced that), so its
+ * node stays.
+ */
+async function purgeRemoved(
+  namespace: Namespace,
+  operands: readonly (string | PathSpec)[],
+  unseen: { kept: Map<string, Set<string>>; hidden: Set<string> },
+): Promise<void> {
+  for (const item of operands) {
+    if (!(item instanceof PathSpec)) continue
+    // The walk refused it, so rm removed nothing there (-f only
+    // silenced the refusal), and the empty name's `virtual` is the
+    // working directory: purging under it dropped every link the
+    // directory held.
+    if (item.walkError !== null) continue
+    // A trailing slash asked for the directory, and rm refused (or -f
+    // silenced the refusal). Nothing was removed, so nothing may be
+    // purged: dropping the node here deleted the very link the slash
+    // protects (GNU keeps it through `rm -rf dlink/`).
+    if (item.rawPath.endsWith('/')) continue
+    if (item.pattern !== null) {
+      // A quoted metacharacter is a literal here too, so the node
+      // table is matched with the same pattern the backend resolved
+      // with.
+      const pattern = globPattern(item.virtual)
+      await namespace.unlinkGlob(pattern, unseen.kept.get(pattern))
+    } else if (!unseen.hidden.has(item.virtual)) {
+      await namespace.unlink(item.virtual)
+      await namespace.purgeUnder(item.virtual)
+    }
+  }
+}
+
+export async function executeCommand(
+  recurse: (
+    n: TSNodeLike,
+    s: EvaluationContext,
+    i: ByteSource | null,
+    cs: CallStack | null,
+    opts?: ExecuteNodeOpts,
+  ) => Promise<RedirectResult>,
+  dispatch: DispatchFn,
+  registry: MountRegistry,
+  namespace: Namespace,
+  executeFn: ExecuteFn,
+  node: TSNodeLike,
+  context: EvaluationContext,
+  stdinIn: ByteSource | null,
+  callStack: CallStack | null,
+  jobTable: JobTable | null,
+  signal?: AbortSignal,
+  // The line's parse scope; only alias expansion needs it, and each
+  // expansion parses in a fork released when it ends. Absent means an
+  // alias is stored and printed but never expanded.
+  parser?: ParseScope,
+  // The agent the line is attributed to, which an approval request names.
+  // The line's hand-off, which its gate claims on and runs on.
+  handed?: HandOff,
+  // Where a command that runs statements of its own (a function body, a
+  // nested shell) writes them as they finish.
+  sink?: JobConsole,
+  // Filled with the words the command expanded to, so the caller knows what
+  // the head ran as.
+  expanded?: ExpandedWords,
+): Promise<RedirectResult> {
+  const session = context.session
+  const name = getCommandName(node)
+  const [assignmentNodes, nonPrefixParts] = splitEnvPrefix(getParts(node))
+
+  const aliased = await runAlias(
+    recurse,
+    registry,
+    node,
+    nonPrefixParts,
+    context,
+    stdinIn,
+    callStack,
+    parser,
+    handed,
+    sink,
+  )
+  if (aliased !== null) return aliased
 
   const prefixAssignments: [string, string][] = []
   // A readonly name before a command is refused before its value expands,
@@ -1088,6 +1304,28 @@ async function routeArgv(
     return runExternal(argv, stdin, session, registry, routing, signal, sink)
   }
 
+  if (consumer === Consumer.UNKNOWN && RUNNERS.has(name)) {
+    const answer = wrapperAnswer(name, argv.args, session, registry)
+    if (answer.runsFrom !== null) {
+      return runProgram(
+        executeFn,
+        name,
+        shellJoin(argv.args.slice(answer.runsFrom)),
+        session,
+        stdin,
+      )
+    }
+    const err = encodeText(answer.stderr)
+    return [
+      answer.stdout === '' ? null : encodeText(answer.stdout),
+      new IOResult({
+        exitCode: answer.exitCode,
+        ...(err.byteLength > 0 ? { stderr: err } : {}),
+      }),
+      new ExecutionNode({ command: name, exitCode: answer.exitCode, stderr: err }),
+    ]
+  }
+
   // `--help` as a builtin's first word: bash answers it with the builtin's
   // help and status 2 before the builtin reads its options, the job
   // builtins included. A program run (`find -exec printf --help`) is the
@@ -1149,108 +1387,33 @@ async function routeArgv(
   // reaches what `chmod -R` walks into, not only its operands.
   const made = madeByCommand(dispatch, admission)
 
-  // Symlinks are namespace-backed: not bash builtins, not mount commands.
-  // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
-  // which falls through to the mount command.
-  if (name === 'ln') {
-    return await handleLn(namespace, made, session, operands)
-  }
-  if (name === 'readlink') {
-    return await handleReadlink(namespace, made, session, operands)
-  }
-
-  // Extended attributes: the dispatcher's node table and the backend's own
-  // facts; they read -h themselves.
-  if (name === 'getfattr') {
-    return await handleGetfattr(namespace, made, session, operands)
-  }
-  if (name === 'setfattr') {
-    return await handleSetfattr(made, session, operands, stdin)
-  }
-
-  // Metadata commands (namespace-routed: resolve-then-setattr with
-  // overlay fallback; they run their own link follow).
-  if (name === 'chmod') {
-    return handleChmod(namespace, made, session, operands)
-  }
-  if (name === 'chown') {
-    return handleChown(namespace, made, session, operands)
-  }
-  if (name === 'chgrp') {
-    return handleChgrp(namespace, made, session, operands)
-  }
-  if (name === 'touch') {
-    return handleTouch(namespace, made, session, operands)
-  }
-
-  // Capacity (registry-routed: enumerates mounts, reports per-mount capacity;
-  // never fabricates numbers).
-  if (name === 'df') {
-    return handleDf(registry, session, made, operands)
-  }
-  if (name === 'mount') {
-    return handleMount(registry, session, operands)
-  }
+  const program = await runNamespaceProgram(
+    name,
+    namespace,
+    made,
+    registry,
+    session,
+    operands,
+    stdin,
+  )
+  if (program !== null) return program
 
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on
   // the link entry itself (lstat semantics).
   let linkErrors: string[] = []
   let dispatchArgv = argv
   if (namespace.nodes.size > 0) {
-    try {
-      // Both remove the link entry itself, which no backend can see;
-      // unlink(1) is rm(1) restricted to one non-directory. Gated on the
-      // line being one the command layer accepts, because this removal
-      // happens before that layer parses and it cannot be taken back
-      // (GNU refuses `rm --bogus dlink` and `unlink dlink other` with
-      // the link still there).
-      if (
-        (name === 'rm' || name === 'unlink') &&
-        acceptsLine(name, argv.args, operands, session.cwd)
-      ) {
-        const [rest, handled, stripErrors] = await stripLinkOperands(
-          name,
-          dispatch,
-          namespace.sessionLinks(session),
-          operands,
-          argv.args,
-          session.cwd,
-        )
-        operands = rest
-        linkErrors = stripErrors
-        if (handled > 0 && !rest.some((a) => a instanceof PathSpec)) {
-          if (linkErrors.length === 0) {
-            return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
-          }
-          const err = encodeText(linkErrors.join(''))
-          return [
-            null,
-            new IOResult({ exitCode: 1, stderr: err }),
-            new ExecutionNode({ command: name, exitCode: 1, stderr: err }),
-          ]
-        }
-      } else if (name === 'mv') {
-        const prepared = await prepareMv(
-          namespace.sessionLinks(session),
-          dispatch,
-          operands,
-          argv.args,
-          session.cwd,
-        )
-        operands = prepared.items
-        if (prepared.early !== null) return prepared.early
-      }
-    } catch (err) {
-      if (err instanceof CycleError) {
-        const errBytes = encodeText(`${name}: ${err.path}: Too many levels of symbolic links\n`)
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: errBytes }),
-          new ExecutionNode({ command: name, exitCode: 1, stderr: errBytes }),
-        ]
-      }
-      throw err
-    }
+    const [rest, errors, early] = await stripLinks(
+      name,
+      argv,
+      operands,
+      dispatch,
+      namespace,
+      session,
+    )
+    if (early !== null) return early
+    operands = rest
+    linkErrors = errors
     dispatchArgv = argv.withOperands(operands)
   }
 
@@ -1285,35 +1448,7 @@ async function routeArgv(
 
   if (io.exitCode === 0 && namespace.nodes.size > 0) {
     if (name === 'rm') {
-      // A removed path takes its node meta (overlay attrs) with it; a
-      // removed dir purges everything underneath. Glob operands reach
-      // here unexpanded (backend wrappers expand them), so the node
-      // table matches the pattern itself. A name the session cannot see
-      // was never removed: rm met it as absent (-f silenced that), so its
-      // node stays.
-      for (const item of operands) {
-        if (!(item instanceof PathSpec)) continue
-        // The walk refused it, so rm removed nothing there (-f only
-        // silenced the refusal), and the empty name's `virtual` is the
-        // working directory: purging under it dropped every link the
-        // directory held.
-        if (item.walkError !== null) continue
-        // A trailing slash asked for the directory, and rm refused (or -f
-        // silenced the refusal). Nothing was removed, so nothing may be
-        // purged: dropping the node here deleted the very link the slash
-        // protects (GNU keeps it through `rm -rf dlink/`).
-        if (item.rawPath.endsWith('/')) continue
-        if (item.pattern !== null) {
-          // A quoted metacharacter is a literal here too, so the node
-          // table is matched with the same pattern the backend resolved
-          // with.
-          const pattern = globPattern(item.virtual)
-          await namespace.unlinkGlob(pattern, unseen.kept.get(pattern))
-        } else if (!unseen.hidden.has(item.virtual)) {
-          await namespace.unlink(item.virtual)
-          await namespace.purgeUnder(item.virtual)
-        }
-      }
+      await purgeRemoved(namespace, operands, unseen)
     }
   }
   if (linkErrors.length > 0) {

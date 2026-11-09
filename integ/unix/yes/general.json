@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "yes_repeats_until_the_reader_stops",
+      "seq": 16200009,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "yes | head -2; yes a b | head -2; yes -- -x | head -1; yes --bogus | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "y\ny\na b\na b\n-x\n",
+        "stderr": "yes: unrecognized option '--bogus'\nTry 'yes --help' for more information.\n"
+      }
+    }
+  ]
+}

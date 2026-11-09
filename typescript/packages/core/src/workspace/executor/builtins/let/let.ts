@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { deciding } from '../../../session/state.ts'
 import { declared } from '../declare/declare.ts'
 import type { BuiltinCall } from '../types.ts'
 
@@ -22,7 +21,7 @@ export function letBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   const words = [...call.argv.args]
   return declared(
     'let',
-    (shell) => shell.letWords(words, deciding()),
+    (shell) => shell.letWords(words),
     call.context,
     call.executeFn,
     call.callStack,

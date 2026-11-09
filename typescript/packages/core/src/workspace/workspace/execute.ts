@@ -130,7 +130,7 @@ import { commandName, forkForCall } from './utils.ts'
 import { encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { runWithSystemClock } from '../../utils/clock.ts'
 import { runWithEnvLimit } from '../session/budget.ts'
-import { visibleEnv } from '../session/state.ts'
+import { deciding, visibleEnv } from '../session/state.ts'
 
 /**
  * Everything `executeLine` needs from the workspace, passed explicitly
@@ -306,6 +306,18 @@ interface LineFrame {
 }
 
 /**
+ * A subshell of `source` as it is now, beside its lines: nothing it changes
+ * reaches them but what its jobs write. Mirrors Python's _beside.
+ */
+function beside(env: ExecuteEnv, source: SessionState): SessionState {
+  const session = source.fork()
+  session.processId = null
+  session.jobTable = env.jobTable.child()
+  session.jobOutput = new JobOutput(source.tty.jobs)
+  return session
+}
+
+/**
  * Order of gates: hydrate stores, drain any queued drift check, resolve
  * the session, parse, syntax gate, policy, then the strategies (whole-line
  * runtime or command tree). Failures fold into the line's result via
@@ -341,12 +353,11 @@ async function runLine(
     options.session ??
     (inPlace ? ambient : env.sessions.get(options.sessionId ?? env.sessions.defaultId))
   if (options.session === undefined && inPlace && ambient.vars.shell.closed) {
-    const source = env.sessions.get(ambient.sessionId)
-    targetSession = source.fork()
-    targetSession.processId = null
-    targetSession.jobTable = env.jobTable.child()
-    targetSession.jobOutput = new JobOutput(source.tty.jobs)
+    targetSession = beside(env, env.sessions.get(ambient.sessionId))
   }
+  // A policy deciding reads the session and changes nothing, so a line it
+  // runs ends with the copy it ran on.
+  if (options.session === undefined && deciding()) targetSession = beside(env, targetSession)
   frame.session = targetSession
   // Whole-invocation policies must approve the result before bytes escape.
   if (await env.registry.policies.wantsFor('postExecute', targetSession.sessionId)) {
@@ -770,6 +781,73 @@ function recurse(
 }
 
 /**
+ * Record a line as it starts. A line bash's reader reads as several commands
+ * records each as it reaches it; any other is recorded as it starts, how it
+ * ended following it, as is one a postExecute policy sees whole before any of
+ * its output escapes. Mirrors Python's _open_history.
+ */
+async function openHistory(
+  env: ExecuteEnv,
+  command: string,
+  root: TSNodeLike,
+  session: SessionState,
+  sessionId: string,
+  options: ExecuteOptions,
+  typed: boolean,
+  lineSignal: AbortSignal | undefined,
+): Promise<LineHistory | null> {
+  const history =
+    typed && !(await env.registry.policies.wantsFor('postExecute', sessionId))
+      ? LineHistory.open(
+          env.observer,
+          command,
+          root,
+          sessionId,
+          session,
+          options.lineHandle?.id.value,
+          options.sink,
+        )
+      : null
+  if (history === null) {
+    await runCancellable(
+      env.observer.logCommand(command, sessionId, session.cwd, options.lineHandle?.id.value),
+      lineSignal,
+    )
+  }
+  return history
+}
+
+/** Settle what a line's passes and gates claimed, however it ended. Mirrors Python's _settle_grants. */
+function settleGrants(
+  env: ExecuteEnv,
+  sessionId: string,
+  handed: HandOff,
+  held: boolean,
+  killed?: AbortSignal,
+): Promise<void> | null {
+  if (held) env.registry.decisions.release(sessionId, handed)
+  // A nested evaluation's claims are the outer line's to keep for the
+  // next evaluation from the same node and to spend at its own end.
+  else if (handed.parent !== null) env.registry.decisions.handUp(sessionId, handed)
+  else return runCancellable(env.registry.decisions.revoke(sessionId, handed), killed)
+  return null
+}
+
+/** Record how a line ended, on its history or as one result. */
+function endRecord(
+  env: ExecuteEnv,
+  io: IOResult,
+  history: LineHistory | null,
+  session: SessionState,
+  sessionId: string,
+  options: ExecuteOptions,
+): Promise<void> {
+  return history !== null
+    ? history.end(io, [])
+    : env.observer.logResult(io, [], sessionId, session.cwd, options.lineHandle?.id.value)
+}
+
+/**
  * Run a line on the session it acquired, after admission is published.
  * Both paths of `runLine`, inside the managed process or not, end here.
  */
@@ -852,35 +930,18 @@ async function runPreparedLine(
             argv === undefined
               ? parser.parse(command, aliases, effectiveSession.shopts.extglob ?? false)
               : literalTree(argv)
-          // A line bash's reader reads as several commands records each as
-          // it reaches it; any other is recorded as it starts, how it ended
-          // following it, as is one a postExecute policy sees whole before
-          // any of its output escapes.
-          const history =
-            recorded &&
-            argv === undefined &&
-            !(await env.registry.policies.wantsFor('postExecute', targetSession.sessionId))
-              ? LineHistory.open(
-                  env.observer,
-                  command,
-                  root as unknown as TSNodeLike,
-                  targetSession.sessionId,
-                  effectiveSession,
-                  options.lineHandle?.id.value,
-                  options.sink,
-                )
-              : null
-          if (recorded && history === null) {
-            await runCancellable(
-              env.observer.logCommand(
+          const history = recorded
+            ? await openHistory(
+                env,
                 command,
+                root as unknown as TSNodeLike,
+                effectiveSession,
                 targetSession.sessionId,
-                effectiveSession.cwd,
-                options.lineHandle?.id.value,
-              ),
-              lineSignal,
-            )
-          }
+                options,
+                argv === undefined,
+                lineSignal,
+              )
+            : null
           // Syntax gates before policy, mirroring bash: an unparsable line exits 2
           // and the policy is never consulted about it. A refusal on a later
           // line leaves the lines before it to run first (`refusedRow`), as
@@ -952,9 +1013,7 @@ async function runPreparedLine(
           // A line placement refuses ends here, so what admission claimed
           // for it is swept as the line's end sweeps it.
           const sweep = async (): Promise<void> => {
-            if (handed.parent !== null)
-              env.registry.decisions.handUp(effectiveSession.sessionId, handed)
-            else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
+            await settleGrants(env, effectiveSession.sessionId, handed, false)
           }
           let placed: RouteDecision<Runtime> | Deny | Pending
           try {
@@ -983,16 +1042,14 @@ async function runPreparedLine(
             if (err instanceof RouteError) {
               if (recorded) {
                 const failed = failureResult(err)
-                const io = new IOResult({ exitCode: failed.exitCode, stderr: failed.stderr })
-                await (history !== null
-                  ? history.end(io, [])
-                  : env.observer.logResult(
-                      io,
-                      [],
-                      targetSession.sessionId,
-                      effectiveSession.cwd,
-                      options.lineHandle?.id.value,
-                    ))
+                await endRecord(
+                  env,
+                  new IOResult({ exitCode: failed.exitCode, stderr: failed.stderr }),
+                  history,
+                  effectiveSession,
+                  targetSession.sessionId,
+                  options,
+                )
               }
               throw err
             }
@@ -1102,15 +1159,7 @@ async function runPreparedLine(
               exitCode: answered.exitCode,
             })
             await runCancellable(
-              history !== null
-                ? history.end(io, [])
-                : env.observer.logResult(
-                    io,
-                    [],
-                    targetSession.sessionId,
-                    effectiveSession.cwd,
-                    options.lineHandle?.id.value,
-                  ),
+              endRecord(env, io, history, effectiveSession, targetSession.sessionId, options),
               lineSignal,
             )
           }
@@ -1693,16 +1742,10 @@ async function runParsedLine(
       return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
     }
   } finally {
-    if (held) env.registry.decisions.release(effectiveSession.sessionId, handed)
-    // A nested evaluation's claims are the outer line's to keep for the
-    // next evaluation from the same node and to spend at its own end.
-    else if (handed.parent !== null)
-      env.registry.decisions.handUp(effectiveSession.sessionId, handed)
-    else
-      await runCancellable(
-        env.registry.decisions.revoke(effectiveSession.sessionId, handed),
-        killed,
-      )
+    // Only a revocation waits: a kill reaching a job's line in a browser
+    // depends on the line ending without another turn.
+    const revoking = settleGrants(env, effectiveSession.sessionId, handed, held, killed)
+    if (revoking !== null) await revoking
   }
   const [[materialized, io], opRecords] = execResult
   const callerError =

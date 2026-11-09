@@ -14,7 +14,7 @@
 
 from mirage.workspace.executor.builtins.declare.declare import declared
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session.state import deciding, prefix_temporaries
+from mirage.workspace.session.state import prefix_temporaries
 
 
 async def local_builtin(call: BuiltinCall) -> Result:
@@ -29,9 +29,7 @@ async def local_builtin(call: BuiltinCall) -> Result:
     temporaries = prefix_temporaries(call.context.session)
     return await declared(
         "local",
-        lambda shell: shell.declare(
-            "local", "", "", args, temporaries, False, deciding()
-        ),
+        lambda shell: shell.declare("local", "", "", args, temporaries, False),
         call.context,
         call.execute_fn,
         call.call_stack,

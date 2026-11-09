@@ -70,6 +70,8 @@ export const EXEC_WRAPPERS: ReadonlyMap<string, readonly [string, string]> = new
   ['fgrep', ['grep', '-F']],
   ['zegrep', ['zgrep', '-E']],
   ['zfgrep', ['zgrep', '-F']],
+  ['rgrep', ['grep', '-r']],
+  ['uncompress', ['gzip', '-d']],
 ])
 
 // Interpreter names select runtime adapters; session builtins stay in Mirage.
@@ -152,8 +154,8 @@ export const SLASH_KEEPS_LAST: ReadonlySet<string> = new Set([
 // Commands that decide the last component for themselves, so the router
 // resolves only the prefix for them. chmod/chown/chgrp read -h off their
 // own line (GNU `chgrp -h ops link` writes the link, not its target),
-// touch reads -h the same way, ln is creating the name in its second
-// operand, readlink's whole subject is the link it was handed, and
+// touch reads -h the same way, ln and link are creating the name in their
+// second operand, readlink's whole subject is the link it was handed, and
 // mkdir is naming something that must not exist yet -- resolving its
 // last component would make `mkdir -p dangle` create the link's missing
 // target where GNU answers "File exists". getfattr and setfattr read -h
@@ -168,6 +170,7 @@ const SELF_RESOLVING: ReadonlySet<string> = new Set([
   'chgrp',
   'touch',
   'ln',
+  'link',
   'readlink',
   'mkdir',
   'getfattr',
@@ -342,6 +345,37 @@ export const PROGRAM_WRAPPERS: ReadonlyMap<string, WrapperOptions> = new Map([
 
 const SIZE = /^\s*\+?(\d*)(?:([kKMGTPEZYRQ])(B|iB)?)?$/
 
+// The wrappers that answer for themselves with no program left to run: `nice`
+// alone prints the niceness, the rest refuse the line.
+export const RUNNERS: ReadonlySet<string> = new Set(['nice', 'nohup', 'setsid', 'stdbuf'])
+export const LOWEST_PRIORITY = 19
+export const DEFAULT_NICENESS = 10
+
+/** The niceness change a `nice` line asks for, null when it asks for none:
+ * the last one typed, in any of its spellings. Mirrors Python's
+ * `nice_adjustment`. */
+export function niceAdjustment(words: readonly string[]): number | null {
+  let found: number | null = null
+  let i = 0
+  while (i < words.length) {
+    const word = words[i] ?? ''
+    i += 1
+    if (word === '--') break
+    let given: string | null = null
+    if (word.startsWith('--adjustment=')) given = word.slice('--adjustment='.length)
+    else if (word.length > 2 && '--adjustment'.startsWith(word)) {
+      given = words[i] ?? ''
+      i += 1
+    } else if (word === '-n') {
+      given = words[i] ?? ''
+      i += 1
+    } else if (word.startsWith('-n')) given = word.slice(2)
+    else if (/^\d+$/.test(word.slice(1))) given = word.slice(1)
+    if (given !== null) found = Number.parseInt(given, 10)
+  }
+  return found
+}
+
 /**
  * Where the program a wrapper runs stands in its words, and the stderr its
  * first bad option or value gets; null for either when there is none. An
@@ -385,7 +419,9 @@ export function readWrapper(
       if (grammar.values.includes(known)) {
         let given = cut < 0 ? '' : word.slice(cut + 1)
         if (cut < 0) {
-          if (i === words.length) return [null, null]
+          if (i === words.length) {
+            return [null, error ?? `${name}: option '${known}' requires an argument\n${usage}`]
+          }
           given = words[i] ?? ''
           i += 1
         }
@@ -405,7 +441,9 @@ export function readWrapper(
       }
       let given = word.slice(j + 1)
       if (given === '') {
-        if (i === words.length) return [null, null]
+        if (i === words.length) {
+          return [null, error ?? `${name}: option requires an argument -- '${letter}'\n${usage}`]
+        }
         given = words[i] ?? ''
         i += 1
       }
@@ -414,7 +452,7 @@ export function readWrapper(
       break
     }
   }
-  if (i === words.length) return [null, null]
+  if (i === words.length) return [null, error]
   if (name === 'stdbuf' && !moded)
     error ??= `stdbuf: you must specify a buffering mode option\n${usage}`
   return [i, error]

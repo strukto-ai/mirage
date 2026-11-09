@@ -25,7 +25,6 @@ from mirage.workspace.executor.builtins.shared import (
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.expand.node import run_on_shell
 from mirage.workspace.expand.types import ExecuteFn
-from mirage.workspace.session.state import deciding
 
 
 async def _unset_word(
@@ -55,7 +54,6 @@ async def _unset_word(
             word,
             word in session.functions,
             word in session.readonly_functions,
-            deciding(),
         ),
         context,
         execute_fn,

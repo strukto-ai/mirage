@@ -68,6 +68,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-B', '--ignore-blank-lines'], { action: 'store_true' }),
       new Argument(['-I', '--ignore-matching-lines'], { action: 'append' }),
       new Argument('--strip-trailing-cr', { action: 'store_true' }),
+      new Argument('--speed-large-files', { action: 'store_true' }),
+      new Argument('--horizon-lines', { action: 'append' }),
       new Argument(['-a', '--text'], { action: 'store_true' }),
       // The output styles; two different ones are refused.
       new Argument('--normal', { action: 'store_true' }),
@@ -173,3 +175,8 @@ export const SPECS: Record<string, CommandSpec> = {
     ],
   }),
 }
+
+const CMP = SPECS.cmp
+const DIFF = SPECS.diff
+if (CMP !== undefined) SPECS.zcmp = CMP
+if (DIFF !== undefined) SPECS.zdiff = DIFF

@@ -367,11 +367,6 @@
     "untilInputCloses": "Node waits on Writable close events with removable listeners; Python cancels the feeding asyncio task when process.wait completes."
    }
   },
-  "workspace/workspace/workspace": {
-   "typescript_only": {
-    "refuseWrite": "Without async task isolation (the browser fallback) a hook cannot run as a policy deciding, so its session view refuses writes by hand; Python's contextvars always isolate tasks."
-   }
-  },
   "cli/api": {
    "python_only": {
     "api_cmd": "Typer commands are module functions; commander registers the same command inline in registerApiCommand."
@@ -1512,6 +1507,7 @@
   },
   "workspace/workspace/execute": {
    "python_only": {
+    "_run_limited": "Python wraps the line's tree in its clock, egress, memory, timeout and env limits as nested contexts; TypeScript carries them on the line's stop and frame.",
     "_run_as_shell": "Python runs the line as its session's process in a module function given what it needs; TypeScript's runAsShell is a closure inside runLine over the line's options, frame and argv."
    }
   },

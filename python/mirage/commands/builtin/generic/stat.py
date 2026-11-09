@@ -22,7 +22,11 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import missing_operand_error
+from mirage.commands.spec.usage import (
+    missing_operand_error,
+    word_refusal_error,
+)
+from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
@@ -952,6 +956,9 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
 __all__ = ["facts", "stat"]
 
 
+CACHED_WORDS = ("default", "never", "always")
+
+
 @dataclass(frozen=True, slots=True)
 class StatFlags:
     format: str | None = None
@@ -982,6 +989,13 @@ async def stat_generic(
     ctx: Context,
     stat_fn: StatFn,
 ) -> tuple[ByteSource | None, IOResult]:
+    cached = FlagView(ctx.flags, spec=SPECS["stat"]).as_str("cached")
+    if cached is not None:
+        match = match_word(cached, CACHED_WORDS)
+        if not isinstance(match, WordMatch):
+            raise word_refusal_error(
+                "stat", "--cached", cached, CACHED_WORDS, None, match.kind
+            )
     parsed = parse_flags(ctx.flags)
     statfs = (
         partial(_dispatched_statfs, ctx.vfs.dispatch)

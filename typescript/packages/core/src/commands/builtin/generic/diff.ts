@@ -158,6 +158,13 @@ export function parseFlags(bag: Record<string, FlagValue>, utf8 = false): DiffFl
       exitCode: 2,
       stderr: ENC.encode(`diff: conflicting output style options\n${HINT}`),
     })
+  for (const value of fl.asList('horizon_lines')) {
+    if (!/^[0-9]+$/.test(value))
+      return new IOResult({
+        exitCode: 2,
+        stderr: ENC.encode(`diff: invalid horizon length '${value}'\n${HINT}`),
+      })
+  }
   const labels = fl.asList('label')
   if (labels.length > 2)
     return new IOResult({ exitCode: 2, stderr: ENC.encode('diff: too many file label options\n') })

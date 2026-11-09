@@ -11,6 +11,7 @@ use std::sync::Arc;
 use mirage_rs::arith;
 use mirage_rs::interp::builtin::{self, Unsetting};
 use mirage_rs::interp::codec::{Args, Item, one};
+use mirage_rs::interp::control::{Arm, Construct, Ran, Slot};
 use mirage_rs::interp::declare::{Declaration, Marking, Operand};
 use mirage_rs::interp::expand::Substitution;
 use mirage_rs::interp::host::{self, Held};
@@ -301,6 +302,80 @@ fn letter(item: Option<Item>) -> Result<Option<u8>, String> {
 }
 
 /// One operation on a shell, the handle its first argument.
+/// The items of a list argument, read in order.
+fn spread(item: Item) -> Result<Args, String> {
+    one(item, Args::list).map(Args::new)
+}
+
+fn sizes(items: Vec<Item>) -> Result<Vec<usize>, String> {
+    items
+        .into_iter()
+        .map(|item| one(item, |arg| size(arg.int()?)))
+        .collect()
+}
+
+fn spread_list(item: Item) -> Result<Vec<Item>, String> {
+    one(item, Args::list)
+}
+
+fn maybe_tree(args: &mut Args) -> Result<Option<u32>, String> {
+    args.maybe()?
+        .map(|item| one(item, Args::handle))
+        .transpose()
+}
+
+/// One expression of a C-style `for`: its nodes and the node after them.
+fn slot_in(item: Item) -> Result<Option<Slot>, String> {
+    if matches!(item, Item::Nil) {
+        return Ok(None);
+    }
+    let mut slot = spread(item)?;
+    Ok(Some(Slot {
+        parts: sizes(slot.list()?)?,
+        closer: optional_size(slot.maybe()?)?,
+    }))
+}
+
+/// Start a compound command on the shell, over the tree its nodes are in.
+fn start_control(
+    engine: &mut Engine,
+    handle: u32,
+    tree: Option<u32>,
+    construct: Construct,
+    statements: StatementLists,
+) -> Reply {
+    let tree = match tree {
+        Some(tree) => shell_tree(tree).ok_or_else(|| format!("no tree {tree}"))?,
+        None => Arc::new(mirage_rs::shell::parse(b"")),
+    };
+    engine.start(handle, |inner| {
+        task::control(inner, tree, construct, statements)
+    })
+}
+
+type StatementLists = Vec<Option<Vec<(usize, usize)>>>;
+
+/// Each list's statements by node, nil for one that was not parsed.
+fn statements_in(items: Vec<Item>) -> Result<StatementLists, String> {
+    items
+        .into_iter()
+        .map(|item| {
+            if matches!(item, Item::Nil) {
+                Ok(None)
+            } else {
+                spread_list(item)?
+                    .into_iter()
+                    .map(|pair| {
+                        let mut pair = spread(pair)?;
+                        Ok((size(pair.int()?)?, size(pair.int()?)?))
+                    })
+                    .collect::<Result<Vec<_>, String>>()
+                    .map(Some)
+            }
+        })
+        .collect()
+}
+
 fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
     if op == "read_fields" {
         let text = args.bytes()?;
@@ -364,14 +439,95 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 operands: operands_in(args.list()?)?,
                 temporaries: strings(args.list()?)?,
                 subscripts: args.flag()?,
-                deciding: args.flag()?,
             };
             return engine.start(handle, |inner| task::declare(inner, declaration));
         }
+        "run_if" => {
+            let branches = args
+                .list()?
+                .into_iter()
+                .map(|item| {
+                    let mut pair = spread(item)?;
+                    Ok((size(pair.int()?)?, size(pair.int()?)?))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let otherwise = size(args.int()?)?;
+            let construct = Construct::If {
+                branches,
+                otherwise,
+            };
+            return start_control(engine, handle, None, construct, Vec::new());
+        }
+        "run_while" => {
+            let construct = Construct::While {
+                test: size(args.int()?)?,
+                body: size(args.int()?)?,
+                until: args.flag()?,
+            };
+            let tree = maybe_tree(args)?;
+            let statements = statements_in(args.list()?)?;
+            return start_control(engine, handle, tree, construct, statements);
+        }
+        "run_for" => {
+            let construct = Construct::For {
+                variable: args.string()?,
+                values: words(args.list()?)?,
+                body: size(args.int()?)?,
+            };
+            let tree = maybe_tree(args)?;
+            let statements = statements_in(args.list()?)?;
+            return start_control(engine, handle, tree, construct, statements);
+        }
+        "run_cfor" => {
+            let tree = args
+                .maybe()?
+                .map(|item| one(item, Args::handle))
+                .transpose()?;
+            let mut slots = args.list()?.into_iter().map(slot_in);
+            let slots = [
+                slots.next().transpose()?.flatten(),
+                slots.next().transpose()?.flatten(),
+                slots.next().transpose()?.flatten(),
+            ];
+            let body = size(args.int()?)?;
+            let statements = statements_in(args.list()?)?;
+            return start_control(
+                engine,
+                handle,
+                tree,
+                Construct::CFor { slots, body },
+                statements,
+            );
+        }
+        "run_case" => {
+            let tree = args
+                .maybe()?
+                .map(|item| one(item, Args::handle))
+                .transpose()?;
+            let word = args.bytes()?;
+            let arms = args
+                .list()?
+                .into_iter()
+                .map(|item| {
+                    let mut arm = spread(item)?;
+                    Ok(Arm {
+                        patterns: sizes(arm.list()?)?,
+                        body: size(arm.int()?)?,
+                        fall: arm.string()?.parse()?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            return start_control(
+                engine,
+                handle,
+                tree,
+                Construct::Case { word, arms },
+                Vec::new(),
+            );
+        }
         "let_words" => {
             let words = words(args.list()?)?;
-            let deciding = args.flag()?;
-            return engine.start(handle, |inner| task::let_words(inner, words, deciding));
+            return engine.start(handle, |inner| task::let_words(inner, words));
         }
         "unset_word" => {
             let unsetting = Unsetting {
@@ -379,7 +535,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 word: args.bytes()?,
                 function: args.flag()?,
                 frozen: args.flag()?,
-                deciding: args.flag()?,
             };
             return engine.start(handle, |inner| task::unset_word(inner, unsetting));
         }
@@ -391,7 +546,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let operands = operands_in(args.list()?)?;
             let temporaries = strings(args.list()?)?;
             let functions = args.flag()?;
-            let deciding = args.flag()?;
             let marking = Marking {
                 cmd,
                 attr,
@@ -399,7 +553,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 flags,
                 operands,
                 temporaries,
-                deciding,
             };
             return engine.start(handle, |inner| task::mark_names(inner, marking, functions));
         }
@@ -504,12 +657,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "arith" => {
             let text = args.bytes()?;
             let expand = args.flag()?;
-            let deciding = args.flag()?;
-            let write = Write::Arith {
-                text,
-                expand,
-                deciding,
-            };
+            let write = Write::Arith { text, expand };
             return engine.write(handle, write, true);
         }
         "integer" => {
@@ -736,6 +884,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 line: size(args.int()?)?,
                 bash_pid: id(args.int()?)?,
                 voice: args.bytes()?,
+                err_trap: args.flag()?,
             };
             shell.shell_mut()?.apply(frame);
             Item::Nil
@@ -775,6 +924,15 @@ fn ask_out(engine: &mut Engine, ask: Ask) -> Item {
             Item::text("subscript"),
             Item::int(engine.adopt(shell)),
             Item::text(text),
+        ]),
+        Ask::Run { shell, run } => Item::list([
+            Item::text("run"),
+            Item::int(engine.adopt(shell)),
+            Item::int(run.list),
+            Item::Bool(run.test),
+            Item::int(run.start),
+            Item::opt(run.pending, Item::int),
+            Item::Bool(run.framed),
         ]),
         Ask::Pause { view } => Item::list([
             Item::text("pause"),
@@ -822,6 +980,24 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             Answer::Subscripted {
                 shell: Box::new(inner),
                 text,
+            }
+        }
+        "answer_ran" => {
+            let lent = args.handle()?;
+            let mut shell = engine
+                .shells
+                .remove(&lent)
+                .ok_or_else(|| format!("no shell {lent}"))?;
+            let inner = shell.0.take().ok_or_else(running)?;
+            let status = status(args.int()?)?;
+            let unwound = host::unwound_in(&args.string()?, id(args.int()?)?)?;
+            Answer::Ran {
+                shell: Box::new(inner),
+                ran: Ran {
+                    status,
+                    unwound,
+                    exiting: args.flag()?,
+                },
             }
         }
         "answer_resumed" => Answer::Resumed,

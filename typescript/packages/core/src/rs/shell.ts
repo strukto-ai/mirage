@@ -673,7 +673,11 @@ export type Ask =
     ]
   | readonly ['process', Shell, ShellTreeNode]
   | readonly ['subscript', Shell, string]
+  | readonly ['run', Shell, number, boolean, number, number | null, boolean]
   | readonly ['pause', Shell]
+
+/** A C-style `for` expression: its nodes and the node whose start ends its text. */
+export type ShellSlot = readonly [readonly ShellTreeNode[], ShellTreeNode | null]
 
 /** How an operation ended: `['ok', value]` or a fault, and its diagnostics. */
 export type Outcome = readonly [readonly Item[], (string | Uint8Array)[]]
@@ -698,6 +702,7 @@ export interface ShellFrame {
   readonly line: number
   readonly bashPid: number
   readonly voice: string
+  readonly errTrap: boolean
 }
 
 const shells = new FinalizationRegistry<number>((handle) => {
@@ -776,6 +781,17 @@ export class Shell {
     return answer
   }
 
+  /** Send a frame still waiting for the next call, as a task takes this shell back. */
+  flush(): void {
+    const framed = this.framed
+    if (framed === null) return
+    this.framed = null
+    const items = this.frameItems(framed)
+    this.sent = null
+    engine('shell', 'frame', [this.handle, ...items])
+    this.sent = { positional: framed.positional, calls: framed.calls }
+  }
+
   /**
    * A frame as the engine takes it, positional parameters it holds already
    * left out: the host replaces an array rather than change it.
@@ -805,6 +821,7 @@ export class Shell {
       frame.line,
       frame.bashPid,
       frame.voice,
+      frame.errTrap,
     ]
   }
 
@@ -1074,7 +1091,6 @@ export class Shell {
     operands: readonly DeclarationItem[],
     temporaries: readonly string[],
     subscripts: boolean,
-    deciding: boolean,
   ): ShellTask {
     const [handle, step] = this.call(
       'declare',
@@ -1084,33 +1100,115 @@ export class Shell {
       operands.map(operandItem),
       [...temporaries],
       subscripts,
-      deciding,
     ) as readonly [number, Item]
     return new ShellTask(handle, step, null)
   }
 
+  private static statementItems(
+    lists: readonly (readonly (readonly [ShellTreeNode, number])[] | null)[],
+  ): Item {
+    return lists.map((list) =>
+      list === null ? null : list.map(([node, line]) => [node.index, line]),
+    )
+  }
+
+  /** Run `if`: each branch the indexes of its test's list and its body's. */
+  runIf(branches: readonly (readonly [number, number])[], otherwise: number): ShellTask {
+    const [handle, step] = this.call(
+      'run_if',
+      branches.map(([test, body]) => [test, body]),
+      otherwise,
+    ) as readonly [number, Item]
+    return new ShellTask(handle, step, null)
+  }
+
+  /** Run `while` or `until` over its two lists. */
+  runWhile(
+    test: number,
+    body: number,
+    until: boolean,
+    statements: readonly (readonly (readonly [ShellTreeNode, number])[] | null)[],
+  ): ShellTask {
+    const tree = statements.flatMap((list) => list ?? [])[0]?.[0].tree ?? null
+    const [handle, step] = this.call(
+      'run_while',
+      test,
+      body,
+      until,
+      tree?.handle ?? null,
+      Shell.statementItems(statements),
+    ) as readonly [number, Item]
+    return new ShellTask(handle, step, tree)
+  }
+
+  /** Run `for` over words already expanded. */
+  runFor(
+    variable: string,
+    values: readonly string[],
+    body: number,
+    statements: readonly (readonly (readonly [ShellTreeNode, number])[] | null)[],
+  ): ShellTask {
+    const tree = statements.flatMap((list) => list ?? [])[0]?.[0].tree ?? null
+    const [handle, step] = this.call(
+      'run_for',
+      variable,
+      [...values],
+      body,
+      tree?.handle ?? null,
+      Shell.statementItems(statements),
+    ) as readonly [number, Item]
+    return new ShellTask(handle, step, tree)
+  }
+
+  /** Run a C-style `for`: init, condition and update, null when empty. */
+  runCFor(
+    slots: readonly (ShellSlot | null)[],
+    body: number,
+    statements: readonly (readonly (readonly [ShellTreeNode, number])[] | null)[],
+  ): ShellTask {
+    const tree =
+      slots.flatMap((held) => held?.[0] ?? [])[0]?.tree ??
+      statements.flatMap((list) => list ?? [])[0]?.[0].tree ??
+      null
+    const [handle, step] = this.call(
+      'run_cfor',
+      tree?.handle ?? null,
+      slots.map((held) =>
+        held === null ? null : [held[0].map((node) => node.index), held[1]?.index ?? null],
+      ),
+      body,
+      Shell.statementItems(statements),
+    ) as readonly [number, Item]
+    return new ShellTask(handle, step, tree)
+  }
+
+  /** Run `case`: each arm its patterns, its body's list and its terminator. */
+  runCase(
+    word: string,
+    arms: readonly (readonly [readonly ShellTreeNode[], number, string])[],
+  ): ShellTask {
+    const tree = arms.flatMap(([patterns]) => patterns)[0]?.tree ?? null
+    const [handle, step] = this.call(
+      'run_case',
+      tree?.handle ?? null,
+      word,
+      arms.map(([patterns, body, fall]) => [patterns.map((node) => node.index), body, fall]),
+    ) as readonly [number, Item]
+    return new ShellTask(handle, step, tree)
+  }
+
   /** Run `let`: each word one expression. */
-  letWords(words: readonly string[], deciding: boolean): ShellTask {
-    const [handle, step] = this.call('let_words', [...words], deciding) as readonly [number, Item]
+  letWords(words: readonly string[]): ShellTask {
+    const [handle, step] = this.call('let_words', [...words]) as readonly [number, Item]
     return new ShellTask(handle, step, null)
   }
 
   /** Run `unset` on one operand: `fn` when it names a function, `frozen` when that one is readonly. */
-  unsetWord(
-    letters: string,
-    word: string,
-    fn: boolean,
-    frozen: boolean,
-    deciding: boolean,
-  ): ShellTask {
-    const [handle, step] = this.call(
-      'unset_word',
-      letters,
-      word,
-      fn,
-      frozen,
-      deciding,
-    ) as readonly [number, Item]
+  unsetWord(letters: string, word: string, fn: boolean, frozen: boolean): ShellTask {
+    const [handle, step] = this.call('unset_word', letters, word, fn, frozen) as readonly [
+      number,
+      Item,
+    ]
     return new ShellTask(handle, step, null)
   }
 
@@ -1126,7 +1224,6 @@ export class Shell {
     operands: readonly DeclarationItem[],
     temporaries: readonly string[],
     functions: boolean,
-    deciding: boolean,
   ): ShellTask {
     const [handle, step] = this.call(
       'mark_names',
@@ -1137,7 +1234,6 @@ export class Shell {
       operands.map(operandItem),
       [...temporaries],
       functions,
-      deciding,
     ) as readonly [number, Item]
     return new ShellTask(handle, step, null)
   }
@@ -1229,8 +1325,8 @@ export class Shell {
    * Evaluate an arithmetic command or `let` operand, its writes landed;
    * `expand` for a `let` operand, whose subscripts expand first.
    */
-  arith(text: string, expand = false, deciding = false): Outcome {
-    return this.write('arith', text, expand, deciding)
+  arith(text: string, expand = false): Outcome {
+    return this.write('arith', text, expand)
   }
 
   /** Evaluate a value as an `-i` write coerces it; `added` is an integer `+=`'s text. */
@@ -1323,6 +1419,16 @@ export class ShellTask {
         return ['process', Shell.adopt(asked[1] as number), this.node(asked[2] ?? null)]
       case 'subscript':
         return ['subscript', Shell.adopt(asked[1] as number), asked[2] as string]
+      case 'run':
+        return [
+          'run',
+          Shell.adopt(asked[1] as number),
+          asked[2] as number,
+          asked[3] as boolean,
+          asked[4] as number,
+          (asked[5] ?? null) as number | null,
+          asked[6] as boolean,
+        ]
       default:
         return ['pause', Shell.adopt(asked[1] as number)]
     }
@@ -1349,6 +1455,14 @@ export class ShellTask {
     const handle = shell.handle
     shell.forget()
     this.land(this.call('answer_subscript', text, handle))
+  }
+
+  /** What a list did, and the shell the task moved, which goes back to it. */
+  answerRan(shell: Shell, status: number, tag: string, levels: number, exiting: boolean): void {
+    const handle = shell.handle
+    shell.flush()
+    shell.forget()
+    this.land(this.call('answer_ran', handle, status, tag, levels, exiting))
   }
 
   /** The host has let others run; the operation goes on. */

@@ -28,55 +28,25 @@ function makeWs(): Workspace {
 }
 
 describe('executeDeclaration', () => {
-  it.each([
-    ['export A=1', 'A'],
-    ['export B', 'B'],
-    ['readonly C=1', 'C'],
-    ['declare D=1', 'D'],
-    ['declare -x E', 'E'],
-    ['declare -a F=(a b)', 'F'],
-    ['declare -a G', 'G'],
-  ])('refuses a deciding policy writing with %s', async (line, name) => {
-    const ws = makeWs()
-    const io = await runExplaining(DryRun.DECIDING, () => ws.shell(line))
-    expect(stderrStr(io)).toBe(`${name}: permission denied\n`)
-    expect(io.exitCode).toBe(1)
-    expect((await ws.shell(`declare -p ${name}`)).exitCode).toBe(1)
-  })
-
-  it.each([
-    ['Y=1', 'Y: permission denied\n'],
-    ['let Y=1', 'Y: permission denied\n'],
-    ['((Y=1))', 'bash: line 1: Y: permission denied\n'],
-  ])('refuses a deciding policy assigning with %s', async (line, said) => {
-    const ws = makeWs()
-    const io = await runExplaining(DryRun.DECIDING, () => ws.shell(line))
-    expect(stderrStr(io)).toBe(said)
-    expect(io.exitCode).toBe(1)
-    expect((await ws.shell('declare -p Y')).exitCode).toBe(1)
-  })
-
-  it('refuses a deciding policy unsetting', async () => {
+  it('changes only its copy on a deciding line', async () => {
     const ws = makeWs()
     await ws.shell('HELD=1; A=(x y); kept() { :; }')
     const io = await runExplaining(DryRun.DECIDING, () =>
-      ws.shell("unset HELD 'A[0]'; unset -f kept"),
+      ws.shell(
+        "export E=1; readonly R=1; declare D=1; Y=1; let L=1; ((F=1)); unset HELD 'A[0]'; " +
+          'unset -f kept; eval \'V=1\'; echo "$E$R$D$Y$L$F${G:=1}$V${HELD-h}"; declare -F kept',
+      ),
     )
-    expect(stderrStr(io)).toBe(
-      'HELD: permission denied\nA: permission denied\nkept: permission denied\n',
-    )
+    expect(stdoutStr(io)).toBe('11111111h\n')
+    expect(stderrStr(io)).toBe('')
     expect(io.exitCode).toBe(1)
-    expect(stdoutStr(await ws.shell('echo "$HELD ${A[0]}"; declare -F kept'))).toBe('1 x\nkept\n')
-  })
-
-  it('refuses a deciding policy a local and lets it list', async () => {
-    const ws = makeWs()
-    await ws.shell('HELD=1')
-    const io = await runExplaining(DryRun.DECIDING, () =>
-      ws.shell('f() { local L=1; echo "in=$L"; }; f; declare -p HELD'),
-    )
-    expect(stdoutStr(io)).toBe('in=\ndeclare -- HELD="1"\n')
-    expect(stderrStr(io)).toBe('L: permission denied\n')
+    expect(
+      stdoutStr(
+        await ws.shell(
+          'echo "${E-e}${R-r}${D-d}${Y-y}${L-l}${F-f}${G-g}${V-v}$HELD ${A[0]}"; declare -F kept',
+        ),
+      ),
+    ).toBe('erdylfgv1 x\nkept\n')
   })
 
   it('refuses an unknown option letter before any operand', async () => {

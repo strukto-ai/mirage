@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { facts, lsGeneric, parseFlags } from '../../generic/ls.ts'
+import { facts, lsGeneric, parseProgramFlags } from '../../generic/ls.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { treeWalk } from '../../utils/tree.ts'
@@ -21,25 +21,39 @@ import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
 
-const ls: CommandFn = async (_accessor, paths, _texts, ctx) => {
-  const fl = new FlagView(ctx.flags, specOf('ls'))
-  const flags = parseFlags(fl, ctx.env)
-  const files = commandFiles(ctx, paths)
-  const resolved = await resolveOrEmpty(files, paths)
-  // Only -R reads whole subtrees; a plain listing reads one level.
-  const recursive = fl.asBool('recursive')
-  const [readdir, stat] = treeWalk<string[], FileStat>(
-    files.readTree,
-    files.readdir,
-    files.stat,
-    recursive && files.answers('read_tree'),
-    files.signal,
-  )
-  return lsGeneric(resolved, ctx, readdir, stat, undefined, flags)
-}
+const listing =
+  (program: string): CommandFn =>
+  async (_accessor, paths, _texts, ctx) => {
+    const fl = new FlagView(ctx.flags, specOf('ls'))
+    const flags = parseProgramFlags(fl, ctx.env ?? {}, program)
+    const files = commandFiles(ctx, paths)
+    const resolved = await resolveOrEmpty(files, paths)
+    // Only -R reads whole subtrees; a plain listing reads one level.
+    const recursive = fl.asBool('recursive')
+    const [readdir, stat] = treeWalk<string[], FileStat>(
+      files.readTree,
+      files.readdir,
+      files.stat,
+      recursive && files.answers('read_tree'),
+      files.signal,
+    )
+    return lsGeneric(resolved, ctx, readdir, stat, undefined, flags, program)
+  }
 
 export const BUILDER: GenericCommand = {
   name: 'ls',
   facts: facts,
-  fn: ls,
+  fn: listing('ls'),
+}
+
+export const DIR_BUILDER: GenericCommand = {
+  name: 'dir',
+  facts: (fl, operands) => facts(fl, operands, 'dir'),
+  fn: listing('dir'),
+}
+
+export const VDIR_BUILDER: GenericCommand = {
+  name: 'vdir',
+  facts: (fl, operands) => facts(fl, operands, 'vdir'),
+  fn: listing('vdir'),
 }

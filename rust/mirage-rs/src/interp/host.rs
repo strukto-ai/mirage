@@ -3,6 +3,7 @@
 //! spelled once for both hosts.
 
 use super::codec::Item;
+use super::control::{Control, Unwound};
 use super::declare::Declared;
 use super::expand::{Field, marked};
 use super::shell::Shell;
@@ -109,6 +110,41 @@ pub fn record_out(var: &Var) -> Item {
     ])
 }
 
+/// How a list ran, or a construct ended, as a tag and its levels.
+fn unwound_out(unwound: Unwound) -> (&'static str, u32) {
+    match unwound {
+        Unwound::None => ("", 0),
+        Unwound::Break(levels) => ("break", levels),
+        Unwound::Continue(levels) => ("continue", levels),
+        Unwound::Stop => ("stop", 0),
+    }
+}
+
+/// A list's way out, from its tag and levels as a host names them.
+pub fn unwound_in(tag: &str, levels: u32) -> Result<Unwound, String> {
+    Ok(match tag {
+        "" => Unwound::None,
+        "break" => Unwound::Break(levels),
+        "continue" => Unwound::Continue(levels),
+        "stop" => Unwound::Stop,
+        other => return Err(format!("no way out {other}")),
+    })
+}
+
+/// What a construct came to: the line refusing it, its failure, and the
+/// tag and levels of what goes on unwinding.
+fn control_out(control: &Control) -> Item {
+    let (tag, levels) = unwound_out(control.unwound);
+    Item::tuple([
+        Item::text(&control.said),
+        Item::Bool(control.failed),
+        Item::text(tag),
+        Item::int(levels),
+        Item::opt(control.pending, Item::int),
+        Item::opt(control.status, Item::int),
+    ])
+}
+
 /// An arithmetic error, tagged.
 pub fn arith_error(error: &arith::Error) -> Item {
     match error {
@@ -183,6 +219,7 @@ pub fn expanded_out(expanded: &Expanded) -> Item {
         Expanded::Fields(fields) => fields_out(fields),
         Expanded::Text(text) => Item::text(text),
         Expanded::Declared(declared) => Item::tuple(declared_out(declared)),
+        Expanded::Control(control) => control_out(control),
         Expanded::Unset(unset) => {
             let [pieces, status] = declared_out(&unset.said);
             Item::tuple([

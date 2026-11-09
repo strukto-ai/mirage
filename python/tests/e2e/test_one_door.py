@@ -118,6 +118,8 @@ ROWS: dict[str, str] = {
     "awk": "awk '{print $1}' /t/a.txt",
     "basename": "basename /t/dir/c.txt",
     "bc": "bc /t/nums.txt",
+    "bunzip2": "bzip2 -k /t/b.txt && bunzip2 -f /t/b.txt.bz2",
+    "bzip2": "bzip2 -k /t/a.txt",
     "cat": "cat /t/a.txt /t/link.txt",
     "cmp": "cmp /t/a.txt /t/a.txt",
     "column": "column -t -s, /t/left.csv",
@@ -126,6 +128,7 @@ ROWS: dict[str, str] = {
     "csplit": "csplit -f /t/piece /t/a.txt 2",
     "cut": "cut -c1-3 /t/a.txt",
     "diff": "diff /t/a.txt /t/a.txt",
+    "dir": "dir -laR /t",
     "dirname": "dirname /t/dir/c.txt",
     "du": "du -a /t/dir",
     "file": "file /t/a.txt /t/data.json /t/dir",
@@ -138,6 +141,7 @@ ROWS: dict[str, str] = {
     "iconv": "iconv -f utf-8 -t ascii /t/a.txt",
     "join": "join -t, /t/left.csv /t/right.csv",
     "jq": "jq .k /t/data.json",
+    "link": "link /t/a.txt /t/hard.txt",
     "look": "look ban /t/sorted.txt",
     "ls": "ls -laR /t",
     "mkdir": "mkdir -p /t/new/deep",
@@ -147,6 +151,7 @@ ROWS: dict[str, str] = {
     "od": "od -c /t/a.txt",
     "paste": "paste /t/a.txt /t/b.txt",
     "patch": "patch /t/a.txt /t/a.patch",
+    "pathchk": "pathchk /t/a.txt",
     "readlink": "readlink /t/link.txt",
     "realpath": "realpath /t/link.txt",
     "rg": "rg -n beta /t",
@@ -157,6 +162,7 @@ ROWS: dict[str, str] = {
     "sort": "sort -o /t/out.txt /t/nums.txt",
     "split": "split -l 1 /t/a.txt /t/part.",
     "stat": "stat /t/a.txt /t/dir",
+    "sync": "sync /t/a.txt",
     "tail": "tail -n 1 /t/a.txt",
     "tar": "tar -cf /t/x.tar -C /t dir && tar -tf /t/x.tar"
     " && mkdir /t/out && tar -xf /t/x.tar -C /t/out",
@@ -167,17 +173,33 @@ ROWS: dict[str, str] = {
     "truncate": "truncate -s 2 /t/a.txt",
     "tsort": "tsort /t/deps.txt",
     "unlink": "unlink /t/b.txt",
+    "unxz": "xz -k /t/b.txt && unxz -f /t/b.txt.xz",
     "unzip": "zip -r /t/x.zip /t/dir && unzip -o -d /t/unzipped /t/x.zip",
+    "vdir": "vdir -aR /t",
+    "xz": "xz -k /t/a.txt",
     "zcat": "gzip -k /t/a.txt && zcat /t/a.txt.gz",
+    "zcmp": "gzip -k /t/a.txt && zcmp /t/a.txt.gz",
+    "zdiff": "gzip -k /t/a.txt && zdiff /t/a.txt.gz",
     "zgrep": "gzip -k /t/a.txt && zgrep beta /t/a.txt.gz",
     "zip": "zip -r /t/x.zip /t/dir",
     "python3": "python3 -c 'print(open(\"/t/a.txt\").read())'",
 }
 # Answered above the VFS: by string, by the namespace's links, by the index.
-ABOVE = {"basename", "dirname", "readlink", "realpath", "stat"}
+ABOVE = {
+    "basename",
+    "dirname",
+    "pathchk",
+    "readlink",
+    "realpath",
+    "stat",
+    "sync",
+}
 SKIP = {
     "reaches the network": "curl wget",
-    "reads no file": "date expr getconf hostname id seq uname",
+    "reads no file": (
+        "arch colrm date envsubst expr getconf groups hostid hostname id "
+        "logname nproc seq tty uname users who yes"
+    ),
     "the same command as python3": "python",
     "a runtime the Python host does not ship": "js node",
 }

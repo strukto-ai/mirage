@@ -15,6 +15,7 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
+import { matchWord } from '../../spec/word_choice.ts'
 import { atOffsets, operandStat } from '../utils/operands.ts'
 import { IOResult } from '../../../io/types.ts'
 import {
@@ -50,7 +51,7 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import { fullIsoTime, lsModeString } from '../utils/formatting.ts'
 import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
 import { formatRecords } from '../utils/output.ts'
-import { missingOperandError } from '../../spec/usage.ts'
+import { missingOperandError, wordRefusalError } from '../../spec/usage.ts'
 import { byteChar, encodeText } from '../../../shell/bytes.ts'
 import { linksOf, mountsOf, dispatchOf } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
@@ -663,11 +664,19 @@ function parseFlags(bag: Record<string, FlagValue>): StatFlags {
   }
 }
 
+const CACHED_WORDS = ['default', 'never', 'always']
+
 export async function statGeneric(
   paths: PathSpec[],
   ctx: Context,
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
+  const cached = new FlagView(ctx.flags, specOf('stat')).asStr('cached')
+  if (cached !== undefined) {
+    const match = matchWord(cached, CACHED_WORDS)
+    if (!match.matched)
+      throw wordRefusalError('stat', '--cached', cached, CACHED_WORDS, undefined, match.kind)
+  }
   const parsed = parseFlags(ctx.flags)
   if (paths.length === 0) throw missingOperandError('stat', null)
   const fmt = parsed.format ?? (parsed.terse ? (parsed.fileSystem ? TERSE_FS : TERSE) : null)

@@ -79,3 +79,4 @@ FALLBACK_TMPDIR = "/tmp"
 
 # The one name every host answers with; hostname and uname -n print it.
 HOSTNAME = "mirage"
+MACHINE = "x86_64"

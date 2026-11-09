@@ -96,3 +96,21 @@ class WrapperOptions:
     stops: tuple[str, ...]
     status: int
     missing: str
+
+
+@dataclass(frozen=True, slots=True)
+class WrapperAnswer:
+    """What a wrapper with no program for Mirage to run comes to.
+
+    Args:
+        exit_code (int): its status.
+        stdout (str): what it prints.
+        stderr (str): what it reports.
+        runs_from (int | None): where the words it runs start, which
+            then go through the shell.
+    """
+
+    exit_code: int = 0
+    stdout: str = ""
+    stderr: str = ""
+    runs_from: int | None = None

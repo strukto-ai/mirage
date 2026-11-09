@@ -16,6 +16,7 @@ from mirage.commands.spec.constants import (
     PATH2_OPERAND,
     PATHS_OPERAND,
     TEXT_OPERAND,
+    TEXTS_OPERAND,
 )
 from mirage.commands.spec.types import Argument, CommandSpec
 
@@ -194,5 +195,9 @@ SPECS: dict[str, CommandSpec] = {
             ),
             PATHS_OPERAND,
         )
+    ),
+    "colrm": CommandSpec(
+        description="Remove columns from a file read on standard input.",
+        arguments=(TEXTS_OPERAND,),
     ),
 }

@@ -12,7 +12,7 @@ use super::{Diagnostic, Signal};
 use crate::arith::{self, plain_decimal};
 use crate::integer::parse_decimal;
 use crate::vars::{
-    Assigned, Coercion, Draws, INTEGER, Indexed, NAMEREF, Slot, Store, Value, entry_bytes,
+    Assigned, Coercion, Draws, EXPORT, INTEGER, Indexed, NAMEREF, Slot, Store, Value, entry_bytes,
     strip_key_quotes,
 };
 
@@ -104,9 +104,6 @@ pub struct Writer<'a> {
     /// functions, aliases, positional parameters.
     pub limit: Option<usize>,
     pub outside: usize,
-    /// A policy is deciding: it may read the session but not change it, so
-    /// every write refuses as one to a hidden name.
-    pub deciding: bool,
 }
 
 impl<'a> Writer<'a> {
@@ -120,7 +117,6 @@ impl<'a> Writer<'a> {
             outside: shell.outside,
             store: &mut shell.vars,
             diagnostics,
-            deciding: false,
         }
     }
 
@@ -134,7 +130,7 @@ impl<'a> Writer<'a> {
     }
 
     fn visible(&self, name: &str) -> Result<(), Fault> {
-        if self.deciding || self.store.hidden(name) {
+        if self.store.hidden(name) {
             return Err(Fault::Hidden(name.to_owned()));
         }
         Ok(())
@@ -428,9 +424,6 @@ impl<'a> Writer<'a> {
         every: bool,
     ) -> Result<Element, Fault> {
         let name = self.store.target(name);
-        if self.deciding {
-            return Err(Fault::Hidden(name));
-        }
         if self.store.hidden(&name) {
             return Ok(Element::Landed);
         }
@@ -690,7 +683,7 @@ impl<'a> Writer<'a> {
         append: bool,
     ) -> Result<Element, Fault> {
         let name = self.store.target(name);
-        if self.deciding || self.store.hidden(&name) {
+        if self.store.hidden(&name) {
             return Ok(Element::Hidden);
         }
         // An existing scalar becomes element 0, even when empty: bash
@@ -776,7 +769,7 @@ impl<'a> Writer<'a> {
         let value = outcome.value;
         let mut landed = Ok(());
         for write in outcome.writes {
-            if self.deciding || self.store.hidden(&self.store.target(&write.name)) {
+            if self.store.hidden(&self.store.target(&write.name)) {
                 landed = Err(Fault::Hidden(write.name));
                 break;
             }
@@ -795,6 +788,47 @@ impl<'a> Writer<'a> {
             arith::Error::Readonly { name, subscript } => Fault::Readonly { name, subscript },
             error => Fault::Arith(error),
         })
+    }
+
+    /// Evaluate `text` when all of it can land. None leaves the session
+    /// as it was, for the host to evaluate it and report what it finds.
+    pub fn clean_arith(&mut self, text: &[u8]) -> Option<i64> {
+        let mut draws = Draws::default();
+        let outcome = self
+            .store
+            .arith(&mut draws, text, None, self.nounset, false);
+        let value = outcome.value.ok()?;
+        let open = |write: &arith::Write| {
+            let target = self.store.target(&write.name);
+            !self.store.hidden(&target) && !self.store.is_readonly(&target, false)
+        };
+        let bytes = outcome
+            .writes
+            .iter()
+            .map(|write| write.name.len() + write.value.len())
+            .sum();
+        if !outcome.writes.iter().all(open) || !self.fits(0, bytes) {
+            return None;
+        }
+        for write in outcome.writes {
+            self.land_element(&write.name, write.key, write.value.into_bytes())
+                .ok()?;
+        }
+        self.settle(&mut draws).ok()?;
+        Some(value)
+    }
+
+    /// Store a plain scalar when nothing can refuse it. None leaves the
+    /// session as it was, for the host to assign and report.
+    pub fn clean_scalar(&mut self, name: &str, value: &[u8]) -> Option<()> {
+        let plain = self
+            .store
+            .record(name)
+            .is_none_or(|var| var.attrs & !EXPORT == 0);
+        if !plain {
+            return None;
+        }
+        matches!(self.element(name, None, value, false), Ok(Element::Landed)).then_some(())
     }
 
     /// Evaluate `text` as an `-i` write would, landing what it assigns: a
@@ -826,7 +860,6 @@ mod tests {
             diagnostics: None,
             limit: None,
             outside: 0,
-            deciding: false,
         }
     }
 

@@ -8,10 +8,10 @@
         "disk",
         "redis"
       ],
-      "command": "mkdir -p /data/aging/old/x /data/aging/new/y && touch /data/aging/old/x/f /data/aging/new/y/g /data/aging/old/o.txt && touch -d 2000-01-01 /data/aging/old",
+      "command": "mkdir -p /data/aging/old/x /data/aging/new/y && touch /data/aging/old/x/f /data/aging/new/y/g /data/aging/old/o.txt && touch -d 2000-01-01 /data/aging/old; find /data -maxdepth 0 -noleaf -warn -nowarn -ignore_readdir_race -noignore_readdir_race",
       "expect": {
         "exit": 0,
-        "stdout": "",
+        "stdout": "/data\n",
         "stderr": ""
       }
     },

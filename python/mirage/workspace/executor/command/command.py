@@ -41,6 +41,7 @@ from mirage.commands.spec.builtins import is_builtin_grammar, registered_spec
 from mirage.commands.spec.constants import STANDARD_AFTER_SCAN
 from mirage.commands.spec.flag_view import spread_operands
 from mirage.commands.spec.standard import standard_request
+from mirage.commands.spec.types import CommandSpec
 from mirage.context import current_caller
 from mirage.context.session_context import session_access
 from mirage.execution.job import JobTable
@@ -782,6 +783,153 @@ async def _run_single_mount(
     return stdout, io, await exec_node(cmd_str, io, paths)
 
 
+async def _standard_answer(
+    cmd_name: str,
+    cmd_str: str,
+    cmd_spec: CommandSpec | None,
+    standard_out: bytes,
+    parts: list[str | PathSpec],
+    session: SessionState,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Answer ``--help`` or ``--version``, unless a scanned option's value
+    refuses the line first.
+
+    Args:
+        cmd_name (str): the command.
+        cmd_str (str): the line, for the node.
+        cmd_spec (CommandSpec | None): the spec that answers it.
+        standard_out (bytes): the page.
+        parts (list[str | PathSpec]): the classified words.
+        session (SessionState): the session.
+    """
+    if cmd_name in STANDARD_AFTER_SCAN and is_builtin_grammar(
+        cmd_name, cmd_spec
+    ):
+        refused = value_refusal(
+            cmd_name,
+            parse_flags(
+                parts[1:],
+                registered_spec(cmd_name, SPECS[cmd_name]),
+                cmd_name,
+                session.cwd,
+            ).flag_kwargs,
+        )
+        if refused is not None:
+            return (None, refused, await exec_node(cmd_str, refused, []))
+    return (
+        standard_out,
+        IOResult(),
+        ExecutionNode(command=cmd_str, exit_code=0),
+    )
+
+
+def _routed_scopes(
+    cmd_name: str,
+    cmd_mount: MountEntry | None,
+    raw_argv: list[str],
+    parts: list[str | PathSpec],
+    path_scopes: list[PathSpec],
+    prepared: ParsedCommand | None,
+    session: SessionState,
+) -> tuple[list[PathSpec], list[PathSpec]]:
+    """The paths that route a line, and the path-valued flags among them.
+
+    Path-valued flags (e.g. shuf --output=/dst/out) own a mount just like
+    positional operands, so they join routing and mount validation instead
+    of being dropped whenever a positional path is also present. The empty
+    name joins onto the working directory in `virtual` but names no path
+    there, so it routes nowhere: the line runs where its other operands
+    (or the cwd) put it, and that run's op guards refuse it. A line is not
+    cross-mount because one of its words is empty. A prepared program line
+    already holds its positional operands.
+
+    Args:
+        cmd_name (str): the command.
+        cmd_mount (MountEntry | None): the mount that holds its spec.
+        raw_argv (list[str]): its words.
+        parts (list[str | PathSpec]): its classified words.
+        path_scopes (list[PathSpec]): its path words.
+        prepared (ParsedCommand | None): a parsed program line.
+        session (SessionState): the session.
+    """
+    if option_loop_exits(
+        cmd_name,
+        cmd_mount.spec_for(cmd_name) if cmd_mount else None,
+        raw_argv,
+        session.cwd,
+    ):
+        return [], []
+    routed = routable_scopes(
+        cmd_name,
+        path_scopes
+        if prepared is not None
+        else routed_operands(
+            cmd_name, raw_argv, session.cwd, parts[1:], path_scopes
+        ),
+    )
+    flag_scopes = path_flag_scopes(cmd_name, raw_argv, session.cwd)
+    return [
+        s
+        for s in merge_scopes(routed, flag_scopes)
+        if s.walk_error != "ENOENT"
+    ], flag_scopes
+
+
+def _spanning(
+    cmd_name: str,
+    cmd_str: str,
+    registry: MountRegistry,
+    routing_scopes: list[PathSpec],
+    borrowed_mount: MountEntry | None,
+    own_spec: CommandSpec | None,
+    parts: list[str | PathSpec],
+    session: SessionState,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode] | None:
+    """Refuse a line whose paths span mounts its command cannot.
+
+    Path-flag targets count: a command bound to one mount cannot write its
+    output through another. A borrowed line runs on its predicted mount, so
+    every path its own spec reads, operand or option value, must lie there
+    too, or its handler reads another mount's path through its own.
+
+    Args:
+        cmd_name (str): the command.
+        cmd_str (str): the line, for the node.
+        registry (MountRegistry): the mounts.
+        routing_scopes (list[PathSpec]): the paths that route it.
+        borrowed_mount (MountEntry | None): a borrowed line's own mount.
+        own_spec (CommandSpec | None): that mount's spec.
+        parts (list[str | PathSpec]): the classified words.
+        session (SessionState): the session.
+    """
+    span_scopes = routing_scopes
+    mount_prefixes = set()
+    if borrowed_mount is not None:
+        own = parse_flags(parts[1:], own_spec, cmd_name, session.cwd)
+        span_scopes = list(own.paths)
+        for value in own.flag_kwargs.values():
+            items = value if isinstance(value, list) else [value]
+            span_scopes += [i for i in items if isinstance(i, PathSpec)]
+        mount_prefixes.add(borrowed_mount.prefix)
+    for s in span_scopes:
+        m = registry.try_mount_for(s.virtual)
+        # a scope outside any mount contributes nothing here
+        if m is not None:
+            mount_prefixes.add(m.prefix)
+    if len(mount_prefixes) <= 1:
+        return None
+    prefixes_str = ", ".join(sorted(mount_prefixes))
+    span_err = (
+        f"{cmd_name}: paths span multiple mounts "
+        f"({prefixes_str}), cross-mount not supported\n"
+    )
+    return (
+        None,
+        IOResult(exit_code=1, stderr=encode_text(span_err)),
+        ExecutionNode(command=cmd_str, exit_code=1),
+    )
+
+
 async def handle_command(
     execute_node: ExecuteNodeFn,
     dispatch: DispatchFn,
@@ -1032,27 +1180,9 @@ async def handle_command(
     cmd_mount = own_mount or registry.mount_for_command(cmd_name)
     cmd_spec = cmd_mount.spec_for(cmd_name) if cmd_mount else None
     standard_out = standard_request(cmd_name, cmd_spec, raw_argv)
-    if (
-        standard_out is not None
-        and cmd_name in STANDARD_AFTER_SCAN
-        and is_builtin_grammar(cmd_name, cmd_spec)
-    ):
-        refused = value_refusal(
-            cmd_name,
-            parse_flags(
-                parts[1:],
-                registered_spec(cmd_name, SPECS[cmd_name]),
-                cmd_name,
-                session.cwd,
-            ).flag_kwargs,
-        )
-        if refused is not None:
-            return (None, refused, await exec_node(cmd_str, refused, []))
     if standard_out is not None:
-        return (
-            standard_out,
-            IOResult(),
-            ExecutionNode(command=cmd_str, exit_code=0),
+        return await _standard_answer(
+            cmd_name, cmd_str, cmd_spec, standard_out, parts, session
         )
 
     prepared: ParsedCommand | None = None
@@ -1093,36 +1223,19 @@ async def handle_command(
             )
             path_scopes = prepared.paths
 
-    # Path-valued flags (e.g. shuf --output=/dst/out) own a mount just like
-    # positional operands, so they join routing and mount validation instead
-    # of being dropped whenever a positional path is also present.
-    # The empty name joins onto the working directory in `virtual` but
-    # names no path there, so it routes nowhere: the line runs where its
-    # other operands (or the cwd) put it, and that run's op guards refuse
-    # it. A line is not cross-mount because one of its words is empty.
-    # A prepared program line already holds its positional operands.
-    routing_scopes: list[PathSpec] = operands if borrowed else []
-    flag_scopes: list[PathSpec] = []
-    if not borrowed and not option_loop_exits(
-        cmd_name,
-        cmd_mount.spec_for(cmd_name) if cmd_mount else None,
-        raw_argv,
-        session.cwd,
-    ):
-        routed = routable_scopes(
+    routing_scopes, flag_scopes = (
+        (operands, [])
+        if borrowed
+        else _routed_scopes(
             cmd_name,
-            path_scopes
-            if prepared is not None
-            else routed_operands(
-                cmd_name, raw_argv, session.cwd, parts[1:], path_scopes
-            ),
+            cmd_mount,
+            raw_argv,
+            parts,
+            path_scopes,
+            prepared,
+            session,
         )
-        flag_scopes = path_flag_scopes(cmd_name, raw_argv, session.cwd)
-        routing_scopes = [
-            s
-            for s in merge_scopes(routed, flag_scopes)
-            if s.walk_error != "ENOENT"
-        ]
+    )
 
     find_expr: FindExpr | None = None
     if not borrowed and cmd_name == "find":
@@ -1168,39 +1281,18 @@ async def handle_command(
             stdin,
         )
 
-    # Reject unsupported cross-mount commands. Path-flag targets count: a
-    # command bound to one mount cannot write its output through another.
-    # A borrowed line runs on its predicted mount, so every path its own
-    # spec reads, operand or option value, must lie there too, or its
-    # handler reads another mount's path through its own.
-    span_scopes = routing_scopes
-    mount_prefixes = set()
-    if borrowed and own_mount is not None:
-        own = parse_flags(parts[1:], own_spec, cmd_name, session.cwd)
-        span_scopes = list(own.paths)
-        for value in own.flag_kwargs.values():
-            items = value if isinstance(value, list) else [value]
-            span_scopes += [i for i in items if isinstance(i, PathSpec)]
-        mount_prefixes.add(own_mount.prefix)
-    for s in span_scopes:
-        m = registry.try_mount_for(s.virtual)
-        # a scope outside any mount contributes nothing here
-        if m is not None:
-            mount_prefixes.add(m.prefix)
-    if len(mount_prefixes) > 1:
-        prefixes_str = ", ".join(sorted(mount_prefixes))
-        span_err = (
-            f"{cmd_name}: paths span multiple mounts "
-            f"({prefixes_str}), cross-mount not supported\n"
-        )
-        return (
-            None,
-            IOResult(
-                exit_code=1,
-                stderr=encode_text(span_err),
-            ),
-            ExecutionNode(command=cmd_str, exit_code=1),
-        )
+    spanning = _spanning(
+        cmd_name,
+        cmd_str,
+        registry,
+        routing_scopes,
+        own_mount if borrowed else None,
+        own_spec,
+        parts,
+        session,
+    )
+    if spanning is not None:
+        return spanning
 
     try:
         mount = await registry.resolve_mount(

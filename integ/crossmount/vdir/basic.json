@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_vdir_reads_both_mounts",
+      "seq": 16200103,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/xm_ez_vdir /data2/xm_ez_vdir; touch /data/xm_ez_vdir/x /data2/xm_ez_vdir/y; vdir -1 /data/xm_ez_vdir /data2/xm_ez_vdir; rm -r /data/xm_ez_vdir /data2/xm_ez_vdir",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/xm_ez_vdir:\nx\n\n/data2/xm_ez_vdir:\ny\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

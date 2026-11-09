@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "hostid_is_fixed",
+      "seq": 16200004,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "hostid; hostid x; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000\nrc=1\n",
+        "stderr": "hostid: extra operand 'x'\nTry 'hostid --help' for more information.\n"
+      }
+    }
+  ]
+}

@@ -19,7 +19,6 @@ import { FUNCNAME } from '../../../../shell/constants.ts'
 import type { EvaluationContext } from '../../../evaluation.ts'
 import { runOnShell } from '../../../expand/node.ts'
 import type { ExecuteFn } from '../../../expand/types.ts'
-import { deciding } from '../../../session/state.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { flagHelp } from '../help/help.ts'
 import { builtinUsage, fail, written } from '../shared.ts'
@@ -44,7 +43,6 @@ async function unsetWord(
         word,
         word in session.functions,
         session.readonlyFunctions.has(word),
-        deciding(),
       ),
     context,
     executeFn,

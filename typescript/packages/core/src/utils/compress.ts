@@ -171,6 +171,24 @@ export function gunzipStream(
   return codecStream(source, { operation: 'decode', format: 'gzip', test, passthrough }, onFacts)
 }
 
+/** Compress with `xz` or `bzip2`; a level of -1 is the format's default. */
+export function encodeStream(
+  source: AsyncIterable<Uint8Array>,
+  codec: string,
+  level: number,
+): AsyncGenerator<Uint8Array, void> {
+  return codecStream(source, { operation: 'encode', format: codec, level })
+}
+
+/** Decompress `xz` or `bzip2`; `test` only checks the input. */
+export function decodeStream(
+  source: AsyncIterable<Uint8Array>,
+  codec: string,
+  test = false,
+): AsyncGenerator<Uint8Array, void> {
+  return codecStream(source, { operation: 'decode', format: codec, test })
+}
+
 /** An input's facts read the way `gzip -l` reads them: checked whole, as
  * `-t` checks it, with nothing written. Throws `GzipDataError` when the
  * input does not decode. */

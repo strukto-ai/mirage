@@ -50,7 +50,9 @@ export function classify(
   if (sessionEntry(session.aliases, name) !== undefined && aliasesOn(session)) return NameKind.ALIAS
   if (KEYWORDS.has(name)) return NameKind.KEYWORD
   const consumer = lookup(name, session, registry)
-  if (consumer === Consumer.UNKNOWN) return null
+  if (consumer === Consumer.UNKNOWN) {
+    return program(name, session, registry) === null ? null : NameKind.FILE
+  }
   const nameKind = kind(consumer, name)
   if (nameKind === NameKind.FILE && program(name, session, registry) === null) return null
   return nameKind

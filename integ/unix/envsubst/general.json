@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "envsubst_fills_names",
+      "seq": 16200010,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf 'hello ${X} $$ $1 ${1} ${FOO:-x} \\\\$X $NOPE!\\n' | X=val envsubst; printf 'a $X $Y\\n' | X=1 Y=2 envsubst '$Y'; printf 'a $X\\n' | X=1 envsubst ''; envsubst -v 'a $X ${Y} $X'; envsubst -v; echo rc=$?; envsubst a b; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello val $$ $1 ${1} ${FOO:-x} \\val !\na $X 2\na $X\nX\nY\nX\nrc=1\nrc=1\n",
+        "stderr": "envsubst: missing arguments\nenvsubst: too many arguments\n"
+      }
+    }
+  ]
+}

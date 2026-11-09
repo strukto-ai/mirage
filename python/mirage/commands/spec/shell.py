@@ -20,7 +20,11 @@ from mirage.commands.spec.compile import (
     expand_long,
     option_spellings,
 )
-from mirage.commands.spec.constants import HELP_OPTION, VERSION_OPTION
+from mirage.commands.spec.constants import (
+    HELP_OPTION,
+    REMAINDER_OPERAND,
+    VERSION_OPTION,
+)
 from mirage.commands.spec.types import Argument, CommandSpec
 
 _DECLARE_OPTIONS = (
@@ -1265,6 +1269,35 @@ SHELL_SPECS: dict[str, CommandSpec] = {
                 metavar="var",
                 help="store in VAR the ID whose status is returned",
             ),
+        ),
+    ),
+    "nice": CommandSpec(
+        description="Run a command at another scheduling priority.",
+        arguments=(
+            Argument("-n", "--adjustment", numeric_shorthand=True),
+            REMAINDER_OPERAND,
+        ),
+    ),
+    "nohup": CommandSpec(
+        description="Run a command that outlives its terminal.",
+        arguments=(REMAINDER_OPERAND,),
+    ),
+    "setsid": CommandSpec(
+        description="Run a command in a session of its own.",
+        arguments=(
+            Argument("-c", "--ctty", action="store_true"),
+            Argument("-f", "--fork", action="store_true"),
+            Argument("-w", "--wait", action="store_true"),
+            REMAINDER_OPERAND,
+        ),
+    ),
+    "stdbuf": CommandSpec(
+        description="Run a command with other standard stream buffering.",
+        arguments=(
+            Argument("-i", "--input"),
+            Argument("-o", "--output"),
+            Argument("-e", "--error"),
+            REMAINDER_OPERAND,
         ),
     ),
     "while": CommandSpec(

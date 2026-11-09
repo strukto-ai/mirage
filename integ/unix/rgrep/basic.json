@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "rgrep_and_uncompress_are_their_programs",
+      "seq": 16200014,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_w/s && echo needle > /data/ez_w/s/f; rgrep needle /data/ez_w; rgrep needle /data/ez_w/nosuch; echo rc=$?; gzip /data/ez_w/s/f; uncompress /data/ez_w/s/f.gz; cat /data/ez_w/s/f; uncompress /data/ez_w/nosuch.gz; echo rc=$?; rm -r /data/ez_w",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/ez_w/s/f:needle\nrc=2\nneedle\nrc=1\n",
+        "stderr": "grep: /data/ez_w/nosuch: No such file or directory\ngzip: /data/ez_w/nosuch.gz: No such file or directory\n"
+      }
+    }
+  ]
+}

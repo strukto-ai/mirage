@@ -13,45 +13,58 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from functools import partial
+
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.ls import facts, ls_generic, ls_options
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.tree import tree_walk
-from mirage.commands.config import Context
+from mirage.commands.config import CommandFn, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def ls(
-    accessor: Accessor,
-    paths: list[PathSpec],
-    texts: list[str],
-    ctx: Context,
-) -> tuple[ByteSource | None, IOResult]:
-    options = ls_options(ctx.flags, ctx.env)
-    files = command_files(ctx, paths)
-    if not paths:
-        paths = [
-            PathSpec(
-                virtual=ctx.cwd.virtual,
-                directory=ctx.cwd.virtual,
-                resolved=False,
-                vfs_path=ctx.cwd.vfs_path,
-            )
-        ]
-    resolved = await files.resolve_glob(paths)
-    # Only -R reads whole subtrees; a plain listing reads one level.
-    readdir, stat = tree_walk(
-        files.read_tree,
-        files.readdir,
-        files.stat,
-        FlagView(ctx.flags, spec=SPECS["ls"]).as_bool("recursive")
-        and files.answers("read_tree"),
-    )
-    return await ls_generic(resolved, list(texts), ctx, readdir, stat, options)
+def _listing(program: str) -> CommandFn:
+    async def listing(
+        accessor: Accessor,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+    ) -> tuple[ByteSource | None, IOResult]:
+        options = ls_options(ctx.flags, ctx.env, program)
+        files = command_files(ctx, paths)
+        if not paths:
+            paths = [
+                PathSpec(
+                    virtual=ctx.cwd.virtual,
+                    directory=ctx.cwd.virtual,
+                    resolved=False,
+                    vfs_path=ctx.cwd.vfs_path,
+                )
+            ]
+        resolved = await files.resolve_glob(paths)
+        # Only -R reads whole subtrees; a plain listing reads one level.
+        readdir, stat = tree_walk(
+            files.read_tree,
+            files.readdir,
+            files.stat,
+            FlagView(ctx.flags, spec=SPECS["ls"]).as_bool("recursive")
+            and files.answers("read_tree"),
+        )
+        return await ls_generic(
+            resolved, list(texts), ctx, readdir, stat, options, program
+        )
+
+    return listing
 
 
-BUILDER = GenericCommand("ls", ls, facts=facts)
+BUILDER = GenericCommand("ls", _listing("ls"), facts=facts)
+DIR_BUILDER = GenericCommand(
+    "dir", _listing("dir"), facts=partial(facts, program="dir")
+)
+VDIR_BUILDER = GenericCommand(
+    "vdir", _listing("vdir"), facts=partial(facts, program="vdir")
+)

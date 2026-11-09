@@ -122,6 +122,16 @@ export class ExpandHost implements TaskHost {
     return expandSubscript(text, this.context, this.executeFn, this.callStack)
   }
 
+  run(
+    index: number,
+    test: boolean,
+    _start: number,
+    _pending: number | null,
+    _framed: boolean,
+  ): Promise<[number, string, number, boolean]> {
+    return Promise.reject(new Error(`no list ${String(index)} to run (test: ${String(test)})`))
+  }
+
   async process(shell: Shell, node: ShellTreeNode): Promise<string> {
     const context = this.context
     const named = this.node(node)

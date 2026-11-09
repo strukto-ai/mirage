@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "bzip2_refuses_a_bad_flag",
+      "seq": 16200024,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "bzip2 --bogus 2>&1 | head -1; bunzip2 -Z 2>&1 | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "bzip2: Bad flag `--bogus'\nbunzip2: Bad flag `-Z'\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -67,6 +67,9 @@ impl<H: Host> Expander<'_, H> {
             .shell
             .vars
             .arith(&mut draws, text, None, nounset, false);
+        if self.shell.attempting && (outcome.value.is_err() || !outcome.writes.is_empty()) {
+            return Err(Fault::Host("an expansion the host has to run"));
+        }
         let value = outcome.value;
         for write in outcome.writes {
             let (name, key) = (write.name.clone(), write.key.clone());

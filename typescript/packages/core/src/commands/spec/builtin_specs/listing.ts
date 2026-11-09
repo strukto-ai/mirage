@@ -160,6 +160,11 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-delete', { action: 'store_true' }),
       new Argument('-depth', { action: 'store_true' }),
       new Argument('-xdev', { action: 'store_true' }),
+      new Argument('-noleaf', { action: 'store_true' }),
+      new Argument('-warn', { action: 'store_true' }),
+      new Argument('-nowarn', { action: 'store_true' }),
+      new Argument('-ignore_readdir_race', { action: 'store_true' }),
+      new Argument('-noignore_readdir_race', { action: 'store_true' }),
       new Argument('-mount', { action: 'store_true' }),
       new Argument('-prune', { action: 'store_true' }),
       new Argument('-ls', { action: 'store_true' }),
@@ -257,6 +262,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-f', '--file-system'], { action: 'store_true' }),
       new Argument(['-L', '--dereference'], { action: 'store_true' }),
       new Argument(['-t', '--terse'], { action: 'store_true' }),
+      new Argument('--cached'),
       PATHS_OPERAND,
     ],
   }),
@@ -290,4 +296,10 @@ export const SPECS: Record<string, CommandSpec> = {
       PATHS_OPERAND,
     ],
   }),
+}
+
+const LS = SPECS.ls
+if (LS !== undefined) {
+  SPECS.dir = LS
+  SPECS.vdir = LS
 }

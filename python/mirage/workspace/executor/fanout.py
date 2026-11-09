@@ -59,7 +59,7 @@ _TRAVERSAL_CMDS = frozenset({"find", "du"})
 # The walks the fan-out composes over nested mounts: find and du from each
 # mount's rows, ls and the searches from each mount's own part. tree walks
 # them through the dispatcher's listings.
-_COMPOSED = _TRAVERSAL_CMDS | {"ls", "grep", "rg"}
+_COMPOSED = _TRAVERSAL_CMDS | {"ls", "dir", "vdir", "grep", "rg"}
 
 
 async def _own_part(

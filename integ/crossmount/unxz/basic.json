@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_unxz_reads_both_mounts",
+      "seq": 16200109,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "printf 'a\\n' > /data/xm_ez_unxz; printf 'b\\n' > /data2/xm_ez_unxz; xz /data/xm_ez_unxz /data2/xm_ez_unxz; unxz /data/xm_ez_unxz.xz /data2/xm_ez_unxz.xz; cat /data/xm_ez_unxz /data2/xm_ez_unxz; rm /data/xm_ez_unxz /data2/xm_ez_unxz",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

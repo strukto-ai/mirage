@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "case a in a) echo one;;& a) echo two;;& b) echo three;; esac",
+      "command": "case a in a) echo one;;& a) echo two;;& b) echo three;; esac; ( LC_ALL=C; case é in *) LC_ALL=C.UTF-8 ;;& ?) echo hit;; esac )",
       "expect": {
         "exit": 0,
-        "stdout": "one\ntwo\n",
+        "stdout": "one\ntwo\nhit\n",
         "stderr": ""
       }
     },

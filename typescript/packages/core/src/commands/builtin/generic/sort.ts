@@ -206,6 +206,16 @@ export function parseFlags(
   paths: readonly PathSpec[],
 ): SortFlags | IOResult {
   const fl = new FlagView(bag, specOf('sort'))
+  for (const batch of fl.asList('batch_size')) {
+    if (!/^[0-9]+$/.test(batch)) return refusal(`sort: invalid --batch-size argument '${batch}'`)
+    if (Number(batch) < MIN_BATCH_SIZE)
+      return refusal(
+        `sort: invalid --batch-size argument '${batch}'\n` +
+          `sort: minimum --batch-size argument is '${String(MIN_BATCH_SIZE)}'`,
+      )
+  }
+  if (new Set(fl.asList('compress_program')).size > 1)
+    return refusal('sort: multiple compress programs specified')
   let values: Record<string, JsonValue>
   try {
     values = scan('sort', typedOptions(fl, paths))
@@ -354,6 +364,7 @@ function label(path: PathSpec | null): string {
 // length plus 64, and spooled; MERGE_FAN_IN runs merge into one at a time,
 // so a sort of any size holds one run and one chunk per merged input.
 export const SORT_RUN_BYTES = 8 * 1024 * 1024
+const MIN_BATCH_SIZE = 2
 const MERGE_FAN_IN = 16
 
 // A k-way merge of sorted spools, each read as the merge asks; the runs
