@@ -100,6 +100,7 @@ class KernelMounts:
             # registered path so mountpoints does not misreport it.
             self._managers.pop(key, None)
             self._mountpoints.pop(key, None)
+            self._backends.pop(key, None)
             raise
         if mountpoint is None:
             self._register(key, resolved)

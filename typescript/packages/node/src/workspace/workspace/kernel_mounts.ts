@@ -91,6 +91,7 @@ export class KernelMounts {
       // so mountpoints does not misreport it as live.
       this.managers.delete(key)
       this.mountpointsMap.delete(key)
+      this.backendsMap.delete(key)
       throw err
     }
   }

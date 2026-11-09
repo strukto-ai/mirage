@@ -65,6 +65,21 @@ def test_register_colliding_path_raises(monkeypatch):
             ws.add_fuse_mount("/b/", "/tmp/same")
 
 
+def test_a_failed_replacement_forgets_the_backend(monkeypatch):
+    _fake_mount(monkeypatch)
+    with _ws() as ws:
+        ws.add_fuse_mount("/a/", "/tmp/mp-a")
+
+        def refuse(*_args, **_kwargs):
+            raise RuntimeError("no fuse")
+
+        monkeypatch.setattr("mirage.workspace.fuse.mount_background", refuse)
+        with pytest.raises(RuntimeError, match="no fuse"):
+            ws.add_fuse_mount("/a/", "/tmp/mp-a2")
+        assert ws.fuse_mountpoints == {}
+        assert ws.kernel_backends == {}
+
+
 def test_deregister_removes_entry(monkeypatch):
     _fake_mount(monkeypatch)
     with _ws() as ws:

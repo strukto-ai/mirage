@@ -196,4 +196,28 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
 
     await ws.close()
   })
+
+  it('forgets the backend when a replacement fails while the old mount unmounts', async () => {
+    let release = (): void => undefined
+    mocks.mount.mockResolvedValueOnce({
+      mountpoint: '/tmp/mp-a',
+      ownsMountpoint: false,
+      unmount: () =>
+        new Promise<void>((done) => {
+          release = done
+        }),
+    })
+    const ws = new Workspace({ '/a': new RAMVFS() })
+    await ws.addFuseMount('/a', '/tmp/mp-a')
+
+    const removing = ws.removeFuseMount('/a')
+    mocks.mount.mockRejectedValueOnce(new Error('no fuse'))
+    await expect(ws.addFuseMount('/a', '/tmp/mp-a2')).rejects.toThrow('no fuse')
+    release()
+    await removing
+    expect(ws.fuseMountpoints).toEqual({})
+    expect(ws.kernelBackends).toEqual({})
+
+    await ws.close()
+  })
 })
