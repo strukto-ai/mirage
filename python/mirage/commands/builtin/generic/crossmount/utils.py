@@ -45,7 +45,6 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.context.session_context import current_caller, with_caller
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import eisdir
 from mirage.errors.render import fs_error_line
 from mirage.io import IOResult
 from mirage.io.cooperative import chunks as byte_chunks
@@ -58,14 +57,15 @@ from mirage.io.stream import (
 from mirage.io.types import ByteSource, PathRecord
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
-from mirage.types import FileType, PathSpec, PrimitiveCopy
+from mirage.types import PathSpec, PrimitiveCopy
 from mirage.view.types import LinkView
 
 
 def file_stream_op(
     dispatch: DispatchFn,
 ) -> Callable[[PathSpec], AsyncIterator[bytes]]:
-    """A directory-aware streamed reader over the dispatcher.
+    """A streamed reader over the dispatcher, whose read refuses a
+    directory with EISDIR itself.
 
     Mirrors ``fileStreamOp``.
 
@@ -74,9 +74,6 @@ def file_stream_op(
     """
 
     async def stream(path: PathSpec) -> AsyncIterator[bytes]:
-        info = await dispatched_call(dispatch, "stat", path)
-        if info.type is FileType.DIRECTORY:
-            raise eisdir(path.virtual)
         source = ensure_stream(
             await dispatched_call(dispatch, "read", path, stream=True)
         )

@@ -48,7 +48,7 @@ async function main(): Promise<void> {
       'The quick brown fox jumps over the lazy dog. ' +
       'The quick brown fox jumps over the lazy dog.\n',
   )
-  await fs.promises.writeFile('/data/words.txt', 'apple\nant\nbanana\nberry\ncherry\n')
+  await fs.promises.writeFile('/data/words.txt', 'ant\napple\nbanana\nberry\ncherry\n')
   await fs.promises.writeFile('/data/join_a.txt', '1 alpha\n2 beta\n3 gamma\n')
   await fs.promises.writeFile('/data/join_b.txt', '1 red\n2 green\n3 blue\n')
   await fs.promises.writeFile('/data/deps.txt', 'a b\nb c\nc d\n')

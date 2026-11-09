@@ -22,6 +22,7 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import read_versioned
+from mirage.cache.index.config import ListResult
 from mirage.cache.types import (
     ABSENT_WRITE,
     ANY_WRITE,
@@ -32,6 +33,7 @@ from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import Context, command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Argument
+from mirage.errors.fs import enoent
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import MemoryBudget, run_with_memory
@@ -824,3 +826,51 @@ async def test_a_whole_read_built_fresh_must_fit_in_what_is_left():
     assert await run_with_memory(budget, stored.call("read", "/r/f")) == (
         b"x" * 16
     )
+
+
+_LISTED = FileStat(name="a", size=1, type=FileType.FILE)
+
+
+class _Drive(BaseVFS):
+    """Reads what a listing named."""
+
+    name = "drive"
+
+    async def read(
+        self,
+        path: PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+        entry: FileStat | None = None,
+    ) -> ByteSource:
+        if entry is None:
+            raise enoent(path)
+        return b"x"
+
+    async def readdir(
+        self, path: PathSpec, limit: int | None = None
+    ) -> list[FileStat]:
+        return [_LISTED]
+
+    async def write(self, path: PathSpec, data: ByteSource) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_finds_a_file_a_listing_landing_beside_it_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mount = MountEntry("/d/", _Drive())
+    await mount.index.set_dir("/d/w", [])
+    list_dir = mount.index.list_dir
+    landed: list[bool] = []
+
+    async def racing(vfs_path: str, child: str | None = None) -> ListResult:
+        stale = await list_dir(vfs_path, child)
+        if not landed:
+            landed.append(True)
+            await mount.index.set_dir("/d/w", [("a", _LISTED)])
+        return stale
+
+    monkeypatch.setattr(mount.index, "list_dir", racing)
+    assert await mount.call("read", "/d/w/a") == b"x"

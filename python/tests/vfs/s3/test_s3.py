@@ -12,9 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.core.s3.client import _client_kwargs
+from mirage.types import PathSpec
 from mirage.vfs.s3 import S3VFS, S3Config
 from tests.fixtures.mount_commands import mount_commands
+
+
+@pytest.mark.asyncio
+async def test_a_read_of_the_mount_root_is_a_directory():
+    root = PathSpec(virtual="/s3", directory="/s3", vfs_path="")
+    with pytest.raises(IsADirectoryError):
+        await S3VFS(S3Config(bucket="b")).read(root)
 
 
 def test_s3_client_kwargs_route_through_proxy():

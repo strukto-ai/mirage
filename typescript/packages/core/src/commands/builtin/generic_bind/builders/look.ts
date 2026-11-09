@@ -14,30 +14,15 @@
 
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
-import { commandFiles, resolveOrEmpty } from '../files.ts'
+import { commandFiles, fileSize, resolveOrEmpty } from '../files.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { JsonValue } from '../../../../types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
 import { refused } from '../../../../rs/scan.ts'
-import { openStreamSync, runStream } from '../../../../rs/stream.ts'
+import { openStreamSync } from '../../../../rs/stream.ts'
 import { byteView } from '../../../../shell/bytes.ts'
-import { reportedStream } from '../../utils/operands.ts'
-
-/** The lines that start with the prefix; one makes the exit 0. Mirrors
- * Python's _matched. */
-async function* matched(
-  source: ByteSource,
-  config: Readonly<Record<string, JsonValue>>,
-  io: IOResult,
-  signal?: AbortSignal,
-): AsyncIterable<Uint8Array> {
-  for await (const chunk of runStream('look', config, source, signal)) {
-    io.exitCode = 0
-    yield chunk
-  }
-}
+import { StreamHost, hostedStream } from '../../utils/stream_host.ts'
 
 const look: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
@@ -57,11 +42,10 @@ const look: CommandFn = async (_accessor, paths, texts, ctx) => {
     if (!(err instanceof StreamRefusal)) throw err
     return [null, refused(err)]
   }
-  const io = new IOResult({ exitCode: 1 })
-  const path = resolved[0]
-  const source = path === undefined ? (ctx.stdin ?? new Uint8Array()) : files.read(path)
-  const output = matched(source, config, io, ctx.signal)
-  return [path === undefined ? output : reportedStream(output, io, path, 'look'), io]
+  const sized = files.answers('read_range') ? fileSize(files, ctx, true) : undefined
+  const host = new StreamHost(resolved, files.read, ctx, false, 'look', undefined, false, sized)
+  const io = new IOResult()
+  return [hostedStream('look', config, host, io, ctx.signal), io]
 }
 
 export const BUILDER: GenericCommand = {

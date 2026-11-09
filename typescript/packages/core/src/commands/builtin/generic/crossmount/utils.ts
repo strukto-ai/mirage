@@ -22,11 +22,11 @@ import type { LinkView } from '../../../../view/types.ts'
 import { virtualKey } from '../../utils/paths.ts'
 import { ROOT_CWD } from '../../../constants.ts'
 import { OPERAND_CONCURRENCY } from '../../constants.ts'
-import { eisdir, isFsError } from '../../../../errors/fs.ts'
+import { isFsError } from '../../../../errors/fs.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
 import { IOResult, materialize, type ByteSource, type PathRecord } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { type FileStat, FileType } from '../../../../types.ts'
+import type { FileStat } from '../../../../types.ts'
 import type { Context } from '../../../config.ts'
 import type { DispatchFn, OperandRun, RunSingle } from './types.ts'
 import type { FlagValue } from '../../../spec/types.ts'
@@ -164,11 +164,10 @@ export function readdirOp(
   }
 }
 
-/** A directory-aware streamed reader. Mirrors Python's `file_stream_op`. */
+/** A streamed reader over the dispatcher, whose read refuses a directory with
+ * EISDIR itself. Mirrors Python's `file_stream_op`. */
 export function fileStreamOp(dispatch: DispatchFn): (p: PathSpec) => AsyncIterable<Uint8Array> {
-  const stat = statOp(dispatch)
   async function* stream(path: PathSpec): AsyncIterable<Uint8Array> {
-    if ((await stat(path)).type === FileType.DIRECTORY) throw eisdir(path)
     const [data] = await dispatch('read', path, [], { stream: true })
     yield* ensureStream(data as ByteSource)
   }

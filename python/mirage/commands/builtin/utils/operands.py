@@ -23,6 +23,8 @@ from collections.abc import (
 from dataclasses import replace
 from functools import partial
 
+from mirage.commands.builtin.constants import OPERAND_CONCURRENCY
+from mirage.concurrency.limiter import bounded_map
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import eisdir
 from mirage.errors.render import fs_error_line
@@ -185,17 +187,37 @@ async def split_in_order(
         cmd_name (str): Command name for the stderr prefix.
     """
     order: list[PathSpec | bytes] = []
-    for p in paths:
-        try:
-            st = await stat(p)
-        except FS_ERRORS as exc:
-            order.append(encode_text(fs_error_line(cmd_name, p, exc)))
+    for p, st in zip(paths, await _statted(paths, stat)):
+        if isinstance(st, Exception):
+            order.append(encode_text(fs_error_line(cmd_name, p, st)))
             continue
         if getattr(st, "type", None) == FileType.DIRECTORY:
             order.append(encode_text(fs_error_line(cmd_name, p, eisdir(p))))
             continue
         order.append(p)
     return order
+
+
+async def _statted(
+    paths: list[PathSpec], stat: StatFn
+) -> list[FileStat | Exception]:
+    """Each operand's stat in operand order, ``OPERAND_CONCURRENCY`` at
+    once, so a store's round trips overlap: a filesystem failure stands
+    in its place, its traceback dropped so no frame cycle outlives it,
+    and any other propagates.
+
+    Args:
+        paths (list[PathSpec]): the operands.
+        stat (StatFn): Bound stat called as ``stat(path)``.
+    """
+
+    async def one(path: PathSpec) -> FileStat | Exception:
+        try:
+            return await stat(path)
+        except FS_ERRORS as exc:
+            return exc.with_traceback(None)
+
+    return await bounded_map(paths, one, OPERAND_CONCURRENCY)
 
 
 async def in_order(
@@ -288,12 +310,10 @@ async def split_opened(
     """
     order: list[PathSpec | bytes] = []
     unread: dict[str, bytes] = {}
-    for p in paths:
-        try:
-            st = await stat(p)
-        except FS_ERRORS as exc:
-            line = encode_text(fs_error_line(cmd_name, p, exc))
-            if not isinstance(exc, READ_FAILURES):
+    for p, st in zip(paths, await _statted(paths, stat)):
+        if isinstance(st, Exception):
+            line = encode_text(fs_error_line(cmd_name, p, st))
+            if not isinstance(st, READ_FAILURES):
                 order.append(line)
                 continue
             unread[p.raw_path] = line

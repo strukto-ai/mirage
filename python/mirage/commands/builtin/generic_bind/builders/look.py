@@ -12,39 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Mapping
-from contextlib import aclosing
-
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
+    file_size,
     resolve_or_empty,
 )
-from mirage.commands.builtin.utils.operands import (
-    normalized_read,
-    reported_stream,
+from mirage.commands.builtin.utils.stream_host import (
+    StreamHost,
+    hosted_stream,
 )
-from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused
-from mirage.rs.stream import open_stream, run_stream
+from mirage.rs.stream import open_stream
 from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue, PathSpec
-
-
-async def _matched(
-    source: ByteSource, config: Mapping[str, JsonValue], io: IOResult
-) -> AsyncIterator[bytes]:
-    """The lines that start with the prefix; one makes the exit 0."""
-    async with aclosing(run_stream("look", config, source)) as output:
-        async for chunk in output:
-            io.exit_code = 0
-            yield chunk
 
 
 async def look(
@@ -68,12 +55,22 @@ async def look(
         open_stream("look", config)
     except StreamRefusal as refusal:
         return None, refused(refusal)
-    io = IOResult(exit_code=1)
-    if not resolved:
-        return _matched(resolve_source(ctx.stdin), config, io), io
-    source = normalized_read(files.read)(resolved[0])
-    output = _matched(source, config, io)
-    return reported_stream(output, io, resolved[0], "look"), io
+    host = StreamHost(
+        resolved,
+        files.read,
+        ctx.stdin,
+        None,
+        ctx.cwd,
+        dash=False,
+        command="look",
+        sized=(
+            file_size(files, ctx, opened=True)
+            if files.answers("read_range")
+            else None
+        ),
+    )
+    io = IOResult()
+    return hosted_stream("look", config, host, io), io
 
 
 BUILDER = GenericCommand("look", look, read=True)

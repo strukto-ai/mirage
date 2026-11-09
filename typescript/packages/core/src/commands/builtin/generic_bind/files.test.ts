@@ -301,6 +301,26 @@ it('warms the operands after a glob read', async () => {
   expect(vfs.batches).toEqual([warmed.slice(0, 8), warmed.slice(8)])
 })
 
+it.each([
+  [
+    'grep -rc x /r/d',
+    ['00', '01'],
+    [['02'], ['03', '04'], ['05', '06', '07', '08'], ['09', '10', '11']],
+  ],
+  ["grep -rc --include='f0[05]' x /r/d", ['00', '05'], []],
+])('warms ahead of a walk only while it reads what it lists: %s', async (line, reads, batches) => {
+  const vfs = new BatchedRAM()
+  vfs.store.dirs.add('/d')
+  for (let i = 0; i < 12; i++) {
+    vfs.store.files.set(`/d/f${String(i).padStart(2, '0')}`, ENC.encode('x\n'))
+  }
+  const ws = new Workspace({ '/r': vfs })
+  open.push(ws)
+  await ws.shell(line)
+  expect(vfs.reads).toEqual(reads.map((n) => `/r/d/f${n}`))
+  expect(vfs.batches).toEqual(batches.map((b) => b.map((n) => `/r/d/f${n}`)))
+})
+
 // A RAM mount noting each folder its tree read is asked for. Twin of
 // Python's TreeRAM.
 class TreeRAM extends RAMVFS {

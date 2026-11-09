@@ -32,7 +32,6 @@ from mirage.core.generic.types import (
     Or,
     Owner,
     Path,
-    PendingPrune,
     Perm,
     PredNode,
     Prune,
@@ -110,10 +109,7 @@ def bind_tree(
     ``-path`` matches the row as printed, but backend find ops evaluate
     entries by mount-relative key; stamping the prefix and the operand's
     spelling onto the tree keeps the evaluation site prefix-free
-    (#396). Every ``Prune`` comes back with an empty ledger, so what one
-    start point pruned never drops rows from the next (``find
-    a/skip/inner a -path a/skip -prune -o -print`` lists the first
-    operand in full, as GNU does).
+    (#396).
 
     Args:
         node (PredNode): Predicate tree to rewrite.
@@ -125,8 +121,6 @@ def bind_tree(
         return replace(node, prefix=prefix, root=root, raw=raw)
     if isinstance(node, Regex):
         return replace(node, prefix=prefix, root=root, raw=raw, hits={})
-    if isinstance(node, Prune):
-        return Prune()
     if isinstance(node, Quit):
         return Quit()
     if isinstance(node, Not):
@@ -329,16 +323,12 @@ def evaluate(node: PredNode, entry: FindEntry, effects: Effects) -> bool:
         # Only a directory has contents to skip; a file key that is also
         # a directory prefix (an object store allows both) must not
         # drop what sits under the directory.
-        if entry.kind == "d" and effects.deferred:
-            node.pending.append(PendingPrune(entry))
-        elif entry.kind == "d":
-            node.pruned.append(entry.key)
         effects.pruned = effects.pruned or entry.kind == "d"
         return True
     if isinstance(node, Mtime):
         # An entry the walk fetched no time for passes here and meets
         # the expression's flat window afterwards; the test is recorded
-        # so a -prune reached past it is only pending.
+        # so a -prune skipped on its strength still counts.
         stamp = _stamp(entry, node.field)
         if stamp is None:
             effects.deferred.append(node)
@@ -476,39 +466,12 @@ def without_prune(node: PredNode) -> PredNode:
     return node
 
 
-def pruned_keys(node: PredNode) -> list[str]:
-    """Every directory key the tree's ``-prune`` nodes reached, pending
-    ones included.
-
-    Args:
-        node (PredNode): the predicate tree, after evaluation.
-    """
-    if isinstance(node, Prune):
-        return [*node.pruned, *(p.entry.key for p in node.pending)]
-    if isinstance(node, Not):
-        return pruned_keys(node.kid)
-    if isinstance(node, (And, Or)):
-        return [key for kid in node.kids for key in pruned_keys(kid)]
-    return []
-
-
-def _prune_nodes(node: PredNode) -> list[Prune]:
-    if isinstance(node, Prune):
-        return [node]
-    if isinstance(node, Not):
-        return _prune_nodes(node.kid)
-    if isinstance(node, (And, Or)):
-        return [p for kid in node.kids for p in _prune_nodes(kid)]
-    return []
-
-
 def time_tests_failing(node: PredNode) -> PredNode:
-    """The tree with every time test false, sharing the prune ledgers.
+    """The tree with every time test false.
 
     An entry that reports no mtime once asked passes no time test, the
     way the flat window admits no such row, so it matches and reaches
-    the prunes it would with every test false. The ``Prune`` nodes are
-    the original objects, so what this copy records lands on the tree.
+    the prunes it would with every test false.
 
     Args:
         node (PredNode): the predicate tree.
@@ -534,20 +497,25 @@ def tree_has_empty(node: PredNode) -> bool:
     return False
 
 
-def keep(
+def verdict(
     entry: FindEntry,
     tree: PredNode,
     min_depth: int | None,
     acts: bool | None = None,
-) -> bool:
-    """Whether ``find`` reports the entry.
+) -> tuple[bool, bool]:
+    """Whether ``find`` reports the entry, and whether a walk stays out of
+    it.
 
     With no action in the tree the rows are the entries the whole
     expression holds for, GNU's implicit ``-print``. With one, they are
     the entries an action reached: ``-path ./skip -prune -o -type f
     -print`` holds for ``./skip`` but never prints it. ``-mindepth``
     applies neither tests nor actions above its level, so a shallow
-    directory is not pruned either.
+    directory is not pruned either. A directory is pruned when the
+    evaluation reached a ``-prune``, or passed every one on the strength
+    of a time test it carried no time for (``-mtime 1 -o -prune``),
+    since that time may send it into one: the most a walk without it
+    can say.
 
     Args:
         entry (FindEntry): the entry under test.
@@ -557,19 +525,32 @@ def keep(
             that works it out once for every entry; None works it out.
     """
     if min_depth is not None and entry.depth < min_depth:
-        return False
+        return False, False
     effects = Effects()
     matched = evaluate(tree, entry, effects)
-    if entry.kind == "d" and effects.deferred and not effects.pruned:
-        # The answer passed every -prune on the strength of an undecided
-        # test, and the directory's mtime may send it into one
-        # (`-mtime 1 -o -prune`), so it waits with the prunes it might
-        # reach, on the first of them.
-        for prune in _prune_nodes(tree)[:1]:
-            prune.pending.append(PendingPrune(entry))
+    pruned = effects.pruned or (
+        entry.kind == "d" and bool(effects.deferred) and tree_has_prune(tree)
+    )
     if acts is None:
         acts = tree_has_action(tree)
-    return effects.acted if acts else matched
+    return (effects.acted if acts else matched), pruned
+
+
+def keep(
+    entry: FindEntry,
+    tree: PredNode,
+    min_depth: int | None,
+    acts: bool | None = None,
+) -> bool:
+    """Whether ``find`` reports the entry (``verdict``).
+
+    Args:
+        entry (FindEntry): the entry under test.
+        tree (PredNode): the predicate tree.
+        min_depth (int | None): ``-mindepth``.
+        acts (bool | None): whether the tree holds an action.
+    """
+    return verdict(entry, tree, min_depth, acts)[0]
 
 
 def emit_start_path(

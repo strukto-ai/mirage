@@ -395,7 +395,7 @@ function node(raw: Obj, binding: Binding, top = true): PredNode {
     case 'true':
       return { op: 'true' }
     case 'prune':
-      return { op: 'prune', pruned: [], pending: [] }
+      return { op: 'prune' }
     case 'quit':
       return { op: 'quit', fired: [] }
     case 'not':

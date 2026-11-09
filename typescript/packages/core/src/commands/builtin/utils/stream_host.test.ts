@@ -227,6 +227,41 @@ describe('StreamHost', () => {
     expect((await h.serve({ op: 'readlink', path: '/f' }, new Uint8Array())).reply).toEqual({})
   })
 
+  it('opens a file a skip passes whole', async () => {
+    const asked: [string, number | undefined, number | null | undefined][] = []
+    async function* stream(
+      p: PathSpec,
+      offset?: number,
+      size?: number | null,
+    ): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      asked.push([p.virtual, offset, size])
+      if (p.virtual === '/locked') throw Object.assign(new Error(p.virtual), { code: 'EACCES' })
+      yield ENC.encode('x')
+    }
+    const ctx = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') } as unknown as Context
+    const h = new StreamHost(
+      [spec('/a'), spec('/locked')],
+      stream,
+      ctx,
+      true,
+      'od',
+      () => true,
+      false,
+      () => Promise.resolve(1024),
+    )
+    const none = new Uint8Array()
+    const whole = await h.serve({ op: 'read', fd: 1, path: '/a', operand: 1, skip: 1 << 20 }, none)
+    expect(whole.reply).toEqual({ skipped: 1024, size: 1024, end: true })
+    expect(asked).toEqual([['/a', 0, 1]])
+    const locked = await h.serve(
+      { op: 'read', fd: 2, path: '/locked', operand: 2, skip: 1 << 20 },
+      none,
+    )
+    expect(locked.reply.errno).toBe('EACCES')
+    expect(locked.reply).not.toHaveProperty('skipped')
+  })
+
   it('refuses what needs a workspace outside one', async () => {
     const h = host({})
     const write = await h.serve({ op: 'write', path: 'out', append: false }, ENC.encode('x'))

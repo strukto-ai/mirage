@@ -14,6 +14,7 @@
 
 import errno
 import logging
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -2318,9 +2319,9 @@ async def walk(
     if info.type != FileType.DIRECTORY:
         return [(root, info.type)]
     entries = [(root, FileType.DIRECTORY)]
-    queue = [root]
+    queue = deque([root])
     while queue:
-        directory = queue.pop(0)
+        directory = queue.popleft()
         try:
             children = await readdir(directory)
         except PermissionError as exc:

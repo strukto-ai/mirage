@@ -35,9 +35,10 @@ import { readRange as s3ReadRange, readStream as s3Stream } from '../../core/s3/
 import { truncate as s3Truncate } from '../../core/s3/truncate.ts'
 import { unlink as s3Unlink } from '../../core/s3/unlink.ts'
 import { replace as s3Replace, write as s3Write } from '../../core/s3/write.ts'
-import { exdev } from '../../errors/fs.ts'
+import { eisdir, exdev } from '../../errors/fs.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { BaseVFS } from '../base.ts'
 import type { S3Config } from './config.ts'
 import type { Handed } from '../types.ts'
@@ -113,6 +114,8 @@ export class S3VFS extends BaseVFS<S3Accessor> {
     offset = 0,
     size: number | null = null,
   ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    // The root names no object: a GET of the bare bucket answers its listing.
+    if (stripSlash(path.mountPath) === '') throw eisdir(path)
     if (offset === 0 && size === null) return s3Stream(this.accessor, path)
     return s3ReadRange(this.accessor, path, offset, size)
   }

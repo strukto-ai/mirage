@@ -16,8 +16,9 @@ const built = new URL('../dist/generated/', import.meta.url)
 
 // Build one crate's module and write the files its `#mirage-*-wasm` import
 // names. The streams module stays at opt-level 2 to fit the browser's limit;
-// the shell module, a fraction of it, takes the profile's 3.
-function embed(crate, name, optLevel) {
+// the shell module, a fraction of it, takes the profile's 3. `small` names the
+// crates built for size instead, the codecs and parsers no hot loop waits on.
+function embed(crate, name, optLevel, small = []) {
   let messages
   try {
     messages = execFileSync(
@@ -30,6 +31,7 @@ function embed(crate, name, optLevel) {
         '--target',
         target,
         '--message-format=json-render-diagnostics',
+        ...small.flatMap((name) => ['--config', `profile.release.package."${name}".opt-level="s"`]),
         '--',
         '-C',
         `opt-level=${optLevel}`,
@@ -93,5 +95,15 @@ function embed(crate, name, optLevel) {
   )
 }
 
-embed('mirage-rs-wasm', 'mirage_rs', 2)
+embed('mirage-rs-wasm', 'mirage_rs', 2, [
+  'lzma-rust2',
+  'libbz2-rs-sys',
+  'bzip2',
+  'regex-syntax',
+  'fancy-regex',
+  'num-bigint',
+  'num-integer',
+  'num-traits',
+  'encoding_rs',
+])
 embed('mirage-shell-wasm', 'mirage_shell', 3)

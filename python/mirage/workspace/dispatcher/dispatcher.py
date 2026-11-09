@@ -1389,8 +1389,12 @@ class Dispatcher:
             else caller.rule_gate
         )
         if name == "read_many":
-            await self._read_many([path, *kwargs.pop("paths", ())], caller)
-            return None, IOResult()
+            kept = await self._read_many(
+                [path, *kwargs.pop("paths", ())],
+                caller,
+                kwargs.pop("stats", {}),
+            )
+            return kept, IOResult()
         scopes = kwargs.pop("scopes", ()) if name == "search" else ()
         if scopes:
             hits = await self._search_together(
@@ -1734,9 +1738,16 @@ class Dispatcher:
             ]
         return await boundary.complete(mark, calls[0].path, False, result)
 
-    async def _read_many(self, typed: list[PathSpec], caller: Caller) -> None:
+    async def _read_many(
+        self,
+        typed: list[PathSpec],
+        caller: Caller,
+        stats: Mapping[str, FileStat],
+    ) -> bool:
         """Keep the small files ``typed`` names in the read cache, for the
-        reads a command is about to make of them; nothing is answered.
+        reads a command is about to make of them; the answer is whether
+        any of them is on a mount this keeps reads for, so a caller warms
+        no more of a run that is not.
 
         Each read that follows still meets every check of its own and is
         served what this kept, so nothing is fetched where a check could
@@ -1748,13 +1759,15 @@ class Dispatcher:
         that keeps no reads or holds its data locally (read as fast when
         asked) is passed over. A store that reads a batch
         (``read_many``) is asked once for the rest of its files; any
-        other is asked for each file its listing sizes within
-        ``READ_AHEAD_BYTES``. A failure is logged and dropped: the read
-        that follows meets it itself.
+        other is asked for each file its listing, or the stat the caller
+        made of it, sizes within ``READ_AHEAD_BYTES``. A failure is logged
+        and dropped: the read that follows meets it itself.
 
         Args:
             typed (list[PathSpec]): the files, as the caller named them.
             caller (Caller): who makes the reads.
+            stats (Mapping[str, FileStat]): the caller's stats of them, by
+                path.
         """
         if (
             caller.explaining is not None
@@ -1763,13 +1776,16 @@ class Dispatcher:
                 _session_id(caller),
             )
         ):
-            return
+            return False
         await self._prepare(caller)
         gate = caller.rule_gate
         batches: dict[
             str, tuple[MountEntry, CacheManager, list[PathSpec]]
         ] = {}
         for path in typed:
+            here = self._namespace.try_mount_for(path.virtual)
+            if here is not None and here.vfs.local:
+                continue
             try:
                 call = await self._walk("read", path, {}, None, None, caller)
                 self._follow(call)
@@ -1796,6 +1812,8 @@ class Dispatcher:
             batches.setdefault(mount.prefix, (mount, manager, []))[2].append(
                 call.path
             )
+        if not batches:
+            return False
         scope = RecordingScope(
             active=active_recorder() is None,
             clock=self._namespace.registry.clock,
@@ -1811,7 +1829,9 @@ class Dispatcher:
                 wanted = [
                     p
                     for p in paths
-                    if _fits_read_ahead(entries.get(p.virtual), batched)
+                    if _fits_read_ahead(
+                        entries.get(p.virtual) or stats.get(p.virtual), batched
+                    )
                     and not await manager.is_cached(p)
                 ]
                 if not wanted:
@@ -1859,6 +1879,7 @@ class Dispatcher:
         finally:
             reset_caller(token)
             scope.close()
+        return True
 
     async def _prepare(self, caller: Caller) -> None:
         """Load the namespace and run what a snapshot restore left owed.

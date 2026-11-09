@@ -89,7 +89,7 @@ export function findWalk(
           links,
           stopped: quit,
           loops,
-          listing: (p) => budget.listing(readdir, p),
+          listing: (read, p) => budget.listing(read, p),
           root: start,
         },
         options,

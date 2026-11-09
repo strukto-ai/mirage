@@ -15,6 +15,7 @@
 import asyncio
 import functools
 import logging
+from collections import OrderedDict, deque
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -25,7 +26,7 @@ from collections.abc import (
 )
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 from mirage.commands.builtin.generic_bind.dispatch import caller_stream
@@ -48,7 +49,7 @@ from mirage.errors.fs import eacces, eisdir, enoent
 from mirage.errors.types import DotWalkError
 from mirage.io.cooperative import chunks
 from mirage.io.stream import close_quietly, ensure_stream
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, IOResult
 from mirage.observe.context import revision_for
 from mirage.runtime.types import DispatchFn
 from mirage.types import (
@@ -210,77 +211,230 @@ def with_reading(ctx: Context, reading: Reading) -> Iterator[Context]:
 # shortcut, where no mount sits below the subtree.
 _CROSSING_CALLS = frozenset({"write", "pwrite", "unlink", "mkdir", "truncate"})
 
-# How many operands a whole read warms ahead of itself (``read_ahead``).
+# How many files a whole read warms ahead of itself (``ReadAhead``).
 READ_AHEAD = 8
 
+# How many of a command's latest listings its reads are matched against.
+LISTINGS = 16
 
-def read_ahead(
-    dispatch: DispatchFn, paths: Sequence[PathSpec]
-) -> tuple[
-    Callable[[PathSpec], Awaitable[None]], Callable[[list[PathSpec]], None]
-]:
-    """What a command's whole read of an operand awaits first, and what
-    learns the operands its globs resolve to.
 
-    A command reads its operands in turn, each whole once the one before
-    is done. On a whole read of one, the next ``READ_AHEAD`` go to the
+@dataclass(slots=True)
+class _Run:
+    """Files a command reads in turn: its operands, or the files of one
+    directory as a listing or subtree answer named them. ``sent`` is
+    where the next batch starts and ``last`` where the latest read was."""
+
+    names: list[str]
+    sent: int = 0
+    last: int | None = None
+    order: dict[str, int] | None = None
+    warming: dict[str, asyncio.Future[bool]] = field(default_factory=dict)
+
+    def at(self, virtual: str) -> int | None:
+        if self.order is None:
+            self.order = {name: i for i, name in enumerate(self.names)}
+        return self.order.get(virtual)
+
+
+@dataclass(slots=True)
+class _Tree:
+    """A subtree answer and, once a read lands below it, its files
+    grouped by directory, each keyed by its path below ``root``."""
+
+    root: str
+    rows: Mapping[str, FileStat]
+    groups: dict[str, list[str]] | None = None
+
+
+class ReadAhead:
+    """What a command's whole reads warm ahead of themselves.
+
+    A command reads files in turn: its operands, each whole once the one
+    before is done, or the files a walk lists, a directory at a time. On
+    a whole read of one, the files after it in its run go to the
     dispatcher as one ``read_many``, which keeps the small files among
     them in the read cache (one request where the store reads a batch),
-    and the batch after goes once half of that one is read. A read whose
-    file is still being warmed waits for it, so it is served warm instead
-    of fetching the file again. No bytes are held here: a write in
-    between drops the cached copy as it drops any. A path that is not an
-    operand warms nothing.
+    and the batch after goes once half of that one is read. Operands warm
+    ``READ_AHEAD`` at a time. A walk warms as it shows it reads what it
+    lists: one file once it reads two in a row, twice as many each time
+    a read lands on a warmed file, up to ``READ_AHEAD``, and none once
+    it passes over files it warmed, so a walk that reads few of the
+    files it lists (a name filter) fetches few it never reads; the pace
+    carries into the next directory. A read whose file is still being
+    warmed waits for it, so it is served warm instead of fetching the
+    file again. No bytes are held here: a write in between drops the
+    cached copy as it drops any. A path in neither the operands nor the
+    latest ``LISTINGS`` listings and subtree answers warms nothing.
+
+    It sits in the command's dispatcher (``dispatch``), which every
+    whole read, listing and subtree read of the command goes through.
 
     Args:
         dispatch (DispatchFn): the command's dispatcher.
         paths (Sequence[PathSpec]): its operands as typed; the names
             each glob resolves to follow them in the order resolved.
     """
-    operands: list[PathSpec] = []
-    order: dict[str, int] = {}
-    warming: dict[str, asyncio.Future[None]] = {}
-    sent = 1
 
-    def noted(found: list[PathSpec]) -> None:
+    def __init__(self, dispatch: DispatchFn, paths: Sequence[PathSpec]):
+        self.inner = dispatch
+        self.operands = _Run([], sent=1, order={})
+        self.specs: dict[str, PathSpec] = {}
+        self.stats: dict[str, FileStat] = {}
+        self.runs: OrderedDict[str, _Run] = OrderedDict()
+        self.trees: deque[_Tree] = deque(maxlen=LISTINGS)
+        self.width = 0
+        self.kept = True
+        self.noted(list(paths))
+
+    def noted(self, found: list[PathSpec]) -> None:
+        """Learn the operands a glob resolved to, in order.
+
+        Args:
+            found (list[PathSpec]): the operands.
+        """
+        run = self.operands
         for path in found:
-            if path.pattern is None and path.virtual not in order:
-                order[path.virtual] = len(operands)
-                operands.append(path)
+            if path.pattern is None and path.virtual not in self.specs:
+                self.specs[path.virtual] = path
+                cast(dict[str, int], run.order)[path.virtual] = len(run.names)
+                run.names.append(path.virtual)
 
-    async def warmed(path: PathSpec) -> None:
-        nonlocal sent
-        at = order.get(path.virtual)
-        if at is None:
+    async def dispatch(
+        self, name: str, path: PathSpec, /, **options: Any
+    ) -> tuple[Any, IOResult]:
+        """The command's dispatcher: a whole read first warms what follows
+        it, and a listing or subtree read is learned as the order the
+        command's walk reads its files in.
+
+        Args:
+            name (str): the op.
+            path (PathSpec): the path it names.
+            **options: the op's own arguments, its report among them.
+        """
+        if (
+            name == "read"
+            and not options.get("offset")
+            and options.get("size") is None
+            and not options.get("warm")
+        ):
+            await self._warmed(path)
+        result, io = await self.inner(name, path, **options)
+        folder = path.virtual.rstrip("/") or "/"
+        if name == "stat" and path.virtual in self.specs:
+            if isinstance(result, FileStat):
+                self.stats[path.virtual] = result
+        elif name == "readdir" and isinstance(result, list):
+            files = [n for n in result if not n.endswith("/")]
+            self._keep(folder, _Run(files))
+        elif name == "read_tree" and isinstance(result, Mapping):
+            self.trees.append(_Tree(folder, result))
+        return result, io
+
+    async def _warmed(self, path: PathSpec) -> None:
+        """Warm what follows ``path`` in its run, then wait for ``path``
+        itself while a batch is fetching it; a batch whose mount keeps no
+        reads (one holding its data locally) ends the command's warming."""
+        run = self._run(path.virtual)
+        at = None if run is None else run.at(path.virtual)
+        if run is None or at is None:
             return
-        start = max(sent, at + 1)
-        if start < len(operands) and start <= at + READ_AHEAD // 2:
-            batch = operands[start : start + READ_AHEAD]
-            sent = start + len(batch)
-            task = asyncio.ensure_future(_warm(dispatch, batch))
-            for p in batch:
-                warming[p.virtual] = task
-        pending = warming.get(path.virtual)
-        if pending is not None:
-            await asyncio.shield(pending)
+        pending = run.warming.pop(path.virtual, None)
+        width = (
+            READ_AHEAD
+            if run is self.operands
+            else self._paced(run, at, pending is not None)
+        )
+        start = max(run.sent, at + 1)
+        if (
+            self.kept
+            and width
+            and start < len(run.names)
+            and start - at <= max(1, width // 2)
+        ):
+            batch = run.names[start : start + width]
+            run.sent = start + len(batch)
+            specs = [
+                self.specs.get(n) or PathSpec.from_str_path(n) for n in batch
+            ]
+            stats = {n: self.stats[n] for n in batch if n in self.stats}
+            task = asyncio.ensure_future(_warm(self.inner, specs, stats))
+            for name in batch:
+                run.warming[name] = task
+        if pending is not None and not await asyncio.shield(pending):
+            self.kept = False
 
-    noted(list(paths))
-    return warmed, noted
+    def _paced(self, run: _Run, at: int, hit: bool) -> int:
+        """How many files a walk's read at ``at`` warms: twice the pace on
+        a warmed file, none past warmed files it passed over, one once
+        two reads in a row are neighbours, else the pace it had."""
+        last, run.last = run.last, at
+        passed = [n for n in run.warming if cast(int, run.at(n)) < at]
+        for name in passed:
+            del run.warming[name]
+        if hit:
+            self.width = min(READ_AHEAD, max(1, self.width) * 2)
+        elif passed:
+            self.width = 0
+        elif last is not None and at == last + 1:
+            self.width = max(1, self.width)
+        return self.width
+
+    def _keep(self, folder: str, run: _Run) -> _Run:
+        self.runs[folder] = run
+        self.runs.move_to_end(folder)
+        if len(self.runs) > LISTINGS:
+            self.runs.popitem(last=False)
+        return run
+
+    def _run(self, virtual: str) -> _Run | None:
+        """The run a path is read in: the operands, its directory's
+        listing, or that directory's files as a subtree answer holds
+        them."""
+        if virtual in self.specs:
+            return self.operands
+        folder = virtual.rpartition("/")[0] or "/"
+        run = self.runs.get(folder)
+        if run is not None:
+            self.runs.move_to_end(folder)
+            return run
+        for tree in reversed(self.trees):
+            base = tree.root.rstrip("/") + "/"
+            if folder != tree.root and not folder.startswith(base):
+                continue
+            if tree.groups is None:
+                tree.groups = {}
+                for key, row in tree.rows.items():
+                    if row.type is not FileType.DIRECTORY:
+                        above = key.rpartition("/")[0]
+                        tree.groups.setdefault(above, []).append(key)
+            rel = "" if folder == tree.root else folder[len(base) :]
+            below = sorted(tree.groups.get(rel, []))
+            return self._keep(folder, _Run([base + key for key in below]))
+        return None
 
 
-async def _warm(dispatch: DispatchFn, paths: list[PathSpec]) -> None:
-    """Ask the dispatcher to keep ``paths`` in the read cache.
+async def _warm(
+    dispatch: DispatchFn, paths: list[PathSpec], stats: dict[str, FileStat]
+) -> bool:
+    """Ask the dispatcher to keep ``paths`` in the read cache, and answer
+    whether their mount keeps reads at all.
 
     A failure is logged and dropped: each read that follows meets it.
 
     Args:
         dispatch (DispatchFn): the command's dispatcher.
         paths (list[PathSpec]): the files, at least one.
+        stats (dict[str, FileStat]): the stats the command made of them,
+            which size a file no listing holds.
     """
     try:
-        await dispatch("read_many", paths[0], paths=paths[1:])
+        kept, _ = await dispatch(
+            "read_many", paths[0], paths=paths[1:], stats=stats
+        )
     except Exception as exc:
         logger.debug("read-ahead from %s failed: %s", paths[0], exc)
+        return True
+    return kept is not False
 
 
 async def dispatched_call(
@@ -375,7 +529,6 @@ def dispatched_read_tree(
 async def _dispatched_stream(
     dispatch: DispatchFn,
     path: PathSpec,
-    ahead: Callable[[PathSpec], Awaitable[None]] | None = None,
     offset: int = 0,
     size: int | None = None,
 ) -> AsyncIterator[bytes]:
@@ -386,13 +539,9 @@ async def _dispatched_stream(
     Args:
         dispatch (DispatchFn): the command's dispatcher.
         path (PathSpec): the file.
-        ahead (Callable[[PathSpec], Awaitable[None]] | None): what the
-            read awaits first (``read_ahead``).
         offset (int): first byte of the window.
         size (int | None): window length, None for the rest.
     """
-    if ahead is not None:
-        await ahead(path)
     data, _ = await dispatch(
         "read", path, stream=True, filetype=None, offset=offset, size=size
     )
@@ -650,7 +799,7 @@ def command_files(
     a read of a directory and a write to a slash-terminated name and
     fills a stat's unknown size from the read cache. A command on one
     mount reads the stored bytes (``filetype=None``), its whole reads
-    warmed ahead of themselves (``read_ahead``), and, as the factory
+    warmed ahead of themselves (``ReadAhead``), and, as the factory
     hands it on (``with_reading``), each operand's read cut into pieces.
     A run across mounts (``crosses_mounts``) reads each operand as the
     command that asked for it, through the path's renderer, after a stat
@@ -668,7 +817,8 @@ def command_files(
     if vfs is None:
         name = ctx.spec.name if ctx.spec is not None else ""
         raise TypeError(f"{name}: no workspace files")
-    dispatch = vfs.dispatch
+    ahead = ReadAhead(vfs.dispatch, paths)
+    dispatch = ahead.dispatch
     crossing = crosses_mounts(ctx)
     reading = None if crossing else _READINGS.get()
     # What the mount can do is the serving mount's to say: an option can
@@ -677,7 +827,6 @@ def command_files(
     home = mount_root(ctx)
     anchor = home + "/"
     mounts = mounts_of(ctx)
-    ahead, noted = read_ahead(dispatch, paths)
 
     async def call(name: str, path: PathSpec, /, **kwargs: Any) -> Any:
         return await dispatched_call(dispatch, name, path, **kwargs)
@@ -700,7 +849,7 @@ def command_files(
             return cast(list[str], entries)
 
         def crossing_stream(path: PathSpec) -> AsyncIterator[bytes]:
-            return caller_stream(dispatch, current_caller(), path, ahead)
+            return caller_stream(dispatch, current_caller(), path)
 
         raw_stat = crossing_stat
         raw_readdir = crossing_readdir
@@ -725,7 +874,7 @@ def command_files(
                 own = replaced(ctx, path)
                 if own is not None:
                     return own
-            return _dispatched_stream(dispatch, path, ahead)
+            return _dispatched_stream(dispatch, path)
 
         raw_stat = stat_at
         raw_readdir = readdir_at
@@ -904,7 +1053,7 @@ def command_files(
             links.target_stat if links is not None else None,
             access,
             follow_of(ctx),
-            noted,
+            ahead.noted,
         ),
         answers=answers,
     )

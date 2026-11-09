@@ -167,6 +167,24 @@ export class ByteSpool {
     return this.locked(() => this.readNow(offset, size))
   }
 
+  /**
+   * Several windows' bytes, joined, read together past the cache: scattered
+   * windows would each refill it.
+   */
+  async gather(windows: readonly (readonly [number, number])[]): Promise<Uint8Array> {
+    return this.locked(async () => {
+      this.usable()
+      await this.flush()
+      const store = this.store
+      const parts = await Promise.all(
+        windows.map(([offset, size]) =>
+          store === null ? this.readNow(offset, size) : store.read(offset, size),
+        ),
+      )
+      return concat(parts)
+    })
+  }
+
   private async readNow(offset: number, size: number): Promise<Uint8Array> {
     this.usable()
     if (this.store !== null) {

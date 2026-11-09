@@ -13,13 +13,23 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from contextlib import aclosing
 from functools import partial
 
 from mirage.commands.builtin.generic_bind.dispatch import caller_stream
 from mirage.commands.builtin.utils.links import link_location
-from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
+from mirage.commands.builtin.utils.stream import (
+    is_stdin,
+    ranged_stream,
+    resolve_source,
+)
 from mirage.commands.quote import quote_text
 from mirage.context.session_context import current_caller
 from mirage.errors.classify import classify
@@ -101,6 +111,9 @@ class StreamHost:
             standing in for a rename does not cross.
         unbuffered (bool): The stream read no further into standard input
             than it used, so what it hands back the next command reads.
+        sized (Callable[[PathSpec], Awaitable[int | None]] | None): An
+            operand's length where a read may open past the bytes it
+            skips (``file_size``); None opens every input at its start.
     """
 
     def __init__(
@@ -117,6 +130,7 @@ class StreamHost:
         links: LinkView | None = None,
         mounts: MountView | None = None,
         unbuffered: bool = False,
+        sized: Callable[[PathSpec], Awaitable[int | None]] | None = None,
     ) -> None:
         self.operands = operands
         self.dash = dash
@@ -132,6 +146,8 @@ class StreamHost:
         self.links = links
         self.mounts = mounts
         self.unbuffered = unbuffered
+        self.sized = sized
+        self.lengths: dict[str, int | None] = {}
         self.caller = current_caller()
         self.inputs: dict[int, AsyncIterator[bytes]] = {}
         self.named: dict[int, PathSpec] = {}
@@ -326,6 +342,51 @@ class StreamHost:
             request.get("as_operand") is True,
         )
 
+    async def _start(
+        self, fd: int, request: Mapping[str, JsonValue]
+    ) -> tuple[dict[str, JsonValue], AsyncIterator[bytes] | None]:
+        """Open an input for a read. A range (``skip``, at most ``size``
+        bytes) opens an operand past the bytes it skips where its length
+        is known, and the reply says how far (``skipped``) and that length
+        (``size``); any other input opens at its start."""
+        path, skip, operand = (
+            request.get(k) for k in ("path", "skip", "operand")
+        )
+        sized = self.sized
+        if (
+            sized is None
+            or not isinstance(path, str)
+            or not isinstance(skip, int)
+            or not isinstance(operand, int)
+        ):
+            return {}, self._open(fd, request)
+        named = self._operand(text_view(path), operand)
+        if (
+            named is None
+            or is_stdin(named, self.dash)
+            or (self.local is not None and not self.local(named))
+        ):
+            return {}, self._open(fd, request)
+        if self.command:
+            self.named[fd] = named
+        if named.virtual not in self.lengths:
+            self.lengths[named.virtual] = await sized(named)
+        length = self.lengths[named.virtual]
+        if length is None:
+            return {}, self._open(fd, request)
+        start = min(skip, length)
+        size = request.get("size")
+        end = min(length, start + size) if isinstance(size, int) else length
+        opened: dict[str, JsonValue] = {"skipped": start, "size": length}
+        if start >= end:
+            # A skip past the whole file still opens it: one that refuses
+            # fails here, and its bytes are not skipped.
+            if start > 0:
+                await drain(ranged_stream(self.stream, named, 0, 1))
+            self.named.pop(fd, None)
+            return opened, None
+        return opened, ranged_stream(self.stream, named, start, end)
+
     def _failed(self, fd: int, exc: Exception) -> Served:
         """A failed input's reply, or raise what is not the file's own: the
         failure's words, and the line the command words for an operand."""
@@ -361,12 +422,16 @@ class StreamHost:
                 {}, await held.read(offset, min(size, held.size - offset))
             )
         source = self.inputs.get(fd)
+        opened: dict[str, JsonValue] = {}
         if source is None:
-            source = self._open(fd, request)
+            try:
+                opened, source = await self._start(fd, request)
+            except Exception as exc:
+                return self._failed(fd, exc)
             if source is not None:
                 self.inputs[fd] = source
         if source is None:
-            return Served({"end": True})
+            return Served({**opened, "end": True})
         least = request.get("least")
         ended = False
         try:
@@ -388,8 +453,8 @@ class StreamHost:
         if chunk is None or ended:
             del self.inputs[fd]
             self.named.pop(fd, None)
-            return Served({"end": True}, bytes(chunk or b""))
-        return Served({}, bytes(chunk))
+            return Served({**opened, "end": True}, bytes(chunk or b""))
+        return Served(opened, bytes(chunk))
 
     async def _replace(
         self, path: PathSpec, atomic: bool, source: ByteSource

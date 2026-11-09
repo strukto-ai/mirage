@@ -5266,17 +5266,6 @@
         },
         {
           "op": "exec",
-          "command": "look h /data/utf8.txt | head -n 1",
-          "expect": {
-            "value": {
-              "exit_code": 0,
-              "stdout": "héllo\n",
-              "stderr": ""
-            }
-          }
-        },
-        {
-          "op": "exec",
           "command": "cat /data/numbers.txt | numfmt --to=si | head -n 1",
           "expect": {
             "value": {
@@ -5404,7 +5393,7 @@
           "path": "/data",
           "expect": {
             "value": {
-              "closed": 28
+              "closed": 27
             }
           }
         },

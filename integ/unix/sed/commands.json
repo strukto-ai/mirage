@@ -1270,6 +1270,41 @@
         "debug",
         "n"
       ]
+    },
+    {
+      "id": "sed_D_loop_reads_and_changes_what_it_left",
+      "seq": 40000001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\nc\\nd\\n' | sed -n ':a;$!{N;ba};:b;/^c/s/c/C/;P;D'; echo '|'; printf 'a\\nb\\nc\\n' | sed -n ':a;$!{N;ba};h;x;G;l;x;P;D'; echo '|'; printf 'x1\\nx2\\nx3\\n' | sed ':a;$!{N;ba};y/x/y/;=;P;D'; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nC\nd\n|\na\\nb\\nc\\na\\nb\\nc$\na\nb\\nc\\nb\\nc$\nb\nc\\nc$\nc\n|\n3\ny1\n3\ny2\n3\ny3\nrc=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

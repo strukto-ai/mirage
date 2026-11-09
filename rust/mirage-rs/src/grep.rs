@@ -516,11 +516,7 @@ impl Grep {
         }
         let mut written = 0;
         if hit {
-            let first = input
-                .before
-                .iter()
-                .find(|held| held.number > input.last_printed)
-                .map_or(number, |held| held.number);
+            let first = input.before.front().map_or(number, |held| held.number);
             if let Some(separator) = &config.separator {
                 let gap = input.last_printed != 0 && first > input.last_printed + 1;
                 if gap || (input.last_printed == 0 && input.after_output) {
@@ -528,16 +524,16 @@ impl Grep {
                     written += 1;
                 }
             }
+            let mut before = std::mem::take(&mut input.before);
             if !config.only_matching {
-                let before = std::mem::take(&mut input.before);
-                let printed = input.last_printed;
-                for held in before.iter().filter(|held| held.number > printed) {
+                for held in &before {
                     let line = Some((held.number, false, held.offset));
                     Self::emit(config, input, stderr, out, &held.text, line);
                     written += 1;
                 }
-                input.before = before;
             }
+            before.clear();
+            input.before = before;
             input.last_printed = number;
             input.after_until = number.saturating_add(config.after);
             if !config.only_matching {
@@ -622,8 +618,11 @@ impl Grep {
         }
     }
 
+    /// Hold a line for a later hit's leading context; a printed line is
+    /// never context again, so the held lines are always the unprinted
+    /// ones and a hit prints them all.
     fn hold(config: &Config, input: &mut Input, number: u64, offset: u64, text: &[u8]) {
-        if config.before == 0 {
+        if config.before == 0 || number <= input.last_printed {
             return;
         }
         let mut held = if input.before.len() >= config.before {

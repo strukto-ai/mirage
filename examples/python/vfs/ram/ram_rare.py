@@ -53,7 +53,7 @@ async def main() -> None:
         b"The quick brown fox jumps over the lazy dog. "
         b"The quick brown fox jumps over the lazy dog.\n",
     )
-    seed("/words.txt", b"apple\nant\nbanana\nberry\ncherry\n")
+    seed("/words.txt", b"ant\napple\nbanana\nberry\ncherry\n")
     seed("/join_a.txt", b"1 alpha\n2 beta\n3 gamma\n")
     seed("/join_b.txt", b"1 red\n2 green\n3 blue\n")
     seed("/deps.txt", b"a b\nb c\nc d\n")

@@ -163,6 +163,11 @@ enum Request {
     Read {
         offset: u64,
         size: usize,
+    },
+    /// Several windows of one spool, the index's or the records', joined
+    /// in one reply.
+    Gather {
+        windows: Vec<(u64, u64)>,
         index: bool,
     },
     Words(usize),
@@ -193,6 +198,8 @@ struct Shuf {
     random: VecDeque<u64>,
     drawing: Draws,
     seen: HashSet<u64>,
+    /// The index rows of the records picked next, in the order they print.
+    rows: VecDeque<(u64, u64)>,
     emitted: u64,
     selected: Option<(u64, u64)>,
     bucket: Option<usize>,
@@ -247,6 +254,7 @@ fn create(config: Config) -> Shuf {
         random: VecDeque::new(),
         drawing: Draws::default(),
         seen: HashSet::new(),
+        rows: VecDeque::new(),
         emitted: 0,
         selected: None,
         bucket: None,
@@ -271,6 +279,53 @@ impl Shuf {
             self.ask(Request::Words(words));
         }
     }
+    /// Ask for the index rows of the next picks, a gather's worth: drawn
+    /// ones under `randomized`, else the next in order.
+    fn gather_rows(&mut self, randomized: bool) -> Result<(), StreamError> {
+        let left = self.config.need - self.emitted;
+        let count = (WORK as u64 / 16).min(left) as usize;
+        let mut windows = Vec::with_capacity(count);
+        for at in self.emitted..self.emitted + count as u64 {
+            let pick = if randomized {
+                match self.random.pop_front() {
+                    Some(pick) if pick < self.config.available => pick,
+                    Some(_) => return Err(StreamError::new("shuf: random draw out of range")),
+                    None => break,
+                }
+            } else if !self.order.is_empty() {
+                self.order[at as usize]
+            } else {
+                at
+            };
+            windows.push((pick * 16, 16));
+        }
+        self.ask(Request::Gather {
+            windows,
+            index: true,
+        });
+        Ok(())
+    }
+
+    /// Ask for the records of the rows read, as many as `room` holds with
+    /// their separators; a row past a record's limit stays for later.
+    fn gather_records(&mut self, room: u64) {
+        let mut windows = Vec::new();
+        let mut size = 0;
+        while let Some(&(start, end)) = self.rows.front() {
+            let len = end - start;
+            if len >= WORK as u64 || size + len + 1 > room {
+                break;
+            }
+            size += len + 1;
+            windows.push((start, len));
+            self.rows.pop_front();
+        }
+        self.ask(Request::Gather {
+            windows,
+            index: false,
+        });
+    }
+
     fn indexed(&self) -> bool {
         self.config.mode == Mode::Indexed
             || self.config.mode == Mode::Draw && self.config.size > MEMORY
@@ -317,7 +372,6 @@ impl Shuf {
                         self.ask(Request::Read {
                             offset: self.offset,
                             size: (self.config.size - self.offset).min(WORK as u64) as usize,
-                            index: false,
                         });
                     } else {
                         self.phase = if self.config.mode == Mode::Scatter {
@@ -406,11 +460,7 @@ impl Shuf {
                         if offset < end {
                             let len = (end - offset).min((output_end - out.len()) as u64) as usize;
                             if self.indexed() {
-                                self.ask(Request::Read {
-                                    offset,
-                                    size: len,
-                                    index: false,
-                                });
+                                self.ask(Request::Read { offset, size: len });
                             } else {
                                 out.extend_from_slice(
                                     &self.data[offset as usize..offset as usize + len],
@@ -424,6 +474,19 @@ impl Shuf {
                         }
                         continue;
                     }
+                    if let Some(&(start, end)) = self.rows.front() {
+                        // A record too long for one output goes alone, a
+                        // piece at a time; the rest go a reply's worth at once.
+                        if end - start >= WORK as u64 {
+                            self.rows.pop_front();
+                            self.selected = Some((start, end));
+                        } else if end - start < (output_end - out.len()) as u64 {
+                            self.gather_records((output_end - out.len()) as u64);
+                        } else {
+                            break;
+                        }
+                        continue;
+                    }
                     if self.emitted >= self.config.need || self.config.available == 0 {
                         self.phase = Phase::Done;
                         continue;
@@ -433,6 +496,10 @@ impl Shuf {
                     }
                     let randomized = self.config.repeat
                         || self.config.mode == Mode::Range && !self.config.ordered();
+                    if self.indexed() && !(randomized && self.random.is_empty()) {
+                        self.gather_rows(randomized)?;
+                        continue;
+                    }
                     let pick = if randomized {
                         let Some(pick) = self.random.pop_front() else {
                             let left = (self.config.need - self.emitted).min(DRAWS as u64);
@@ -455,12 +522,6 @@ impl Shuf {
                         crate::integer::decimal(self.config.low + pick, false, 0, out);
                         out.push(self.config.separator);
                         self.emitted += 1;
-                    } else if self.indexed() {
-                        self.ask(Request::Read {
-                            offset: pick * 16,
-                            size: 16,
-                            index: true,
-                        });
                     } else {
                         let (start, end) = self.spans[pick as usize];
                         self.selected = Some((u64::from(start), u64::from(end)));
@@ -570,11 +631,10 @@ impl Stream for Shuf {
         let request = self.request.as_ref()?;
         self.taken = true;
         let header = match *request {
-            Request::Read {
-                offset,
-                size,
-                index,
-            } => json!({"op":"read", "offset":offset, "size":size, "index":index}),
+            Request::Read { offset, size } => json!({"op":"read", "offset":offset, "size":size}),
+            Request::Gather { ref windows, index } => {
+                json!({"op":"gather", "windows":windows, "index":index})
+            }
             Request::Words(count) => json!({"op":"words", "count":count}),
             Request::Swap { left, right } => json!({"op":"swap", "left":left, "right":right}),
             Request::Write(bucket) => {
@@ -600,24 +660,34 @@ impl Stream for Shuf {
                 self.drawing.take(data, count)?;
                 self.make_draws();
             }
-            Request::Read {
-                offset,
-                size,
-                index,
-            } => {
+            Request::Gather { windows, index } => {
+                if data.len() as u64 != windows.iter().map(|&(_, size)| size).sum::<u64>() {
+                    return Err(StreamError::new("shuf: unexpected end of spool"));
+                }
+                if !index {
+                    let mut at = 0;
+                    for (_, size) in windows {
+                        out.extend_from_slice(&data[at..at + size as usize]);
+                        out.push(self.config.separator);
+                        at += size as usize;
+                        self.emitted += 1;
+                    }
+                    return Ok(());
+                }
+                for row in data.chunks_exact(16) {
+                    let start = u64::from_le_bytes(row[..8].try_into().unwrap());
+                    let len = u64::from_le_bytes(row[8..].try_into().unwrap());
+                    let end = start
+                        .checked_add(len)
+                        .ok_or_else(|| StreamError::new("shuf: invalid index"))?;
+                    self.rows.push_back((start, end));
+                }
+            }
+            Request::Read { offset, size } => {
                 if data.len() != size {
                     return Err(StreamError::new("shuf: unexpected end of spool"));
                 }
-                if index {
-                    let start = u64::from_le_bytes(data[..8].try_into().unwrap());
-                    let len = u64::from_le_bytes(data[8..].try_into().unwrap());
-                    self.selected = Some((
-                        start,
-                        start
-                            .checked_add(len)
-                            .ok_or_else(|| StreamError::new("shuf: invalid index"))?,
-                    ));
-                } else if matches!(self.phase, Phase::Emit) {
+                if matches!(self.phase, Phase::Emit) {
                     out.extend_from_slice(data);
                     let (_, end) = self.selected.unwrap();
                     self.selected = Some((offset + size as u64, end));
@@ -907,7 +977,7 @@ impl Stream for Plan {
             serde_json::from_slice(&self.active.as_mut()?.request(data)?)
                 .expect("shuf request is JSON");
         let spool = match header["op"].as_str()? {
-            "read" => Some(if header["index"] == true {
+            "read" | "gather" => Some(if header["index"] == true {
                 self.index.unwrap()
             } else {
                 self.task.unwrap().spool
@@ -987,7 +1057,7 @@ mod tests {
             assert!(payload.len() <= WORK);
             let request: serde_json::Value = serde_json::from_slice(&header).unwrap();
             let response = match request["op"].as_str().unwrap() {
-                "read" => {
+                "read" | "gather" => {
                     let source = if let Some(id) = request["spool"].as_u64() {
                         spools.get(&id).unwrap().as_slice()
                     } else if request["index"] == true {
@@ -995,9 +1065,21 @@ mod tests {
                     } else {
                         data
                     };
-                    let offset = request["offset"].as_u64().unwrap() as usize;
-                    let size = request["size"].as_u64().unwrap() as usize;
-                    source[offset..offset + size].to_vec()
+                    let windows = match request["windows"].as_array() {
+                        Some(windows) => windows
+                            .iter()
+                            .map(|w| (w[0].clone(), w[1].clone()))
+                            .collect(),
+                        None => vec![(request["offset"].clone(), request["size"].clone())],
+                    };
+                    let mut read = Vec::new();
+                    for (offset, size) in windows {
+                        let offset = offset.as_u64().unwrap() as usize;
+                        read.extend_from_slice(
+                            &source[offset..offset + size.as_u64().unwrap() as usize],
+                        );
+                    }
+                    read
                 }
                 "words" => vec![0; request["count"].as_u64().unwrap() as usize * 4],
                 "swap" => {

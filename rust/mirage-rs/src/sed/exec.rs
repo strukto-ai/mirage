@@ -72,6 +72,51 @@ macro_rules! wait {
     };
 }
 
+/// The pattern space: its bytes past `start`. `D` moves `start` on, and
+/// the lines before it go at once when they are half of what is held, so
+/// a run of `D` over one long space costs what it deletes.
+#[derive(Default)]
+struct Space {
+    bytes: Vec<u8>,
+    start: usize,
+}
+
+impl Space {
+    /// The bytes to change, the deleted lines dropped first.
+    fn vec(&mut self) -> &mut Vec<u8> {
+        self.bytes.drain(..self.start);
+        self.start = 0;
+        &mut self.bytes
+    }
+
+    /// Delete the first `count` bytes.
+    fn cut(&mut self, count: usize) {
+        self.start += count;
+        if self.start * 2 >= self.bytes.len() {
+            self.vec();
+        }
+    }
+
+    /// The storage, for reuse, whatever it holds.
+    fn into_storage(self) -> Vec<u8> {
+        self.bytes
+    }
+}
+
+impl From<Vec<u8>> for Space {
+    fn from(bytes: Vec<u8>) -> Space {
+        Space { bytes, start: 0 }
+    }
+}
+
+impl std::ops::Deref for Space {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.bytes[self.start..]
+    }
+}
+
 /// What the append queue holds: text, or an `r` file by its place.
 enum Append {
     Text(Vec<u8>),
@@ -206,7 +251,7 @@ pub(super) struct Machine {
     /// Whether a `w` file failed: `write_err` is handed on as stderr, so it
     /// cannot say so once the run is over.
     write_failed: bool,
-    ps: Vec<u8>,
+    ps: Space,
     newline: bool,
     hold: Vec<u8>,
     hold_newline: bool,
@@ -618,7 +663,7 @@ impl Machine {
             defer,
             write_err: Vec::new(),
             write_failed: false,
-            ps: Vec::new(),
+            ps: Space::default(),
             newline: true,
             hold: Vec::new(),
             hold_newline: true,
@@ -809,9 +854,9 @@ impl Machine {
                     Poll::Pending => {}
                     Poll::Ready(None) => self.end_of_input(),
                     Poll::Ready(Some((text, newline))) => {
-                        let old = std::mem::replace(&mut self.ps, text);
+                        let old = std::mem::replace(&mut self.ps, text.into());
                         if let Some(reader) = &mut self.feed.reader {
-                            reader.recycle(old);
+                            reader.recycle(old.into_storage());
                         }
                         self.newline = newline;
                         (self.pc, self.stage, self.applied) = (0, 0, false);
@@ -1552,9 +1597,9 @@ impl Machine {
     #[cold]
     fn trace_space(&mut self, hold: bool) {
         let (label, space) = if hold {
-            (b"HOLD:    ".as_slice(), &self.hold)
+            (b"HOLD:    ".as_slice(), self.hold.as_slice())
         } else {
-            (b"PATTERN: ".as_slice(), &self.ps)
+            (b"PATTERN: ".as_slice(), &*self.ps)
         };
         self.out.extend_from_slice(label);
         debug::escape(&mut self.out, space, false);
@@ -1709,7 +1754,7 @@ impl Machine {
                 }
                 if let Poll::Ready(Some(result)) = rewritten {
                     let (print, wfile) = (subst.print, subst.wfile);
-                    let mut old = std::mem::replace(&mut self.ps, result);
+                    let mut old = std::mem::replace(&mut self.ps, result.into()).into_storage();
                     old.clear();
                     if old.capacity() <= 64 * 1024 {
                         self.rewrite.out = old;
@@ -1738,7 +1783,7 @@ impl Machine {
                 // The cycle restarts without reading, and the appends wait
                 // for the line it ends on.
                 Some(cut) => {
-                    self.ps.drain(..=cut);
+                    self.ps.cut(cut + 1);
                     self.boundary();
                     self.pc = 0;
                     if debug {
@@ -1891,7 +1936,8 @@ impl Machine {
                 written?;
             }
             b'h' => {
-                self.hold.clone_from(&self.ps);
+                self.hold.clear();
+                self.hold.extend_from_slice(&self.ps);
                 self.hold_newline = self.newline;
             }
             b'H' => {
@@ -1901,24 +1947,25 @@ impl Machine {
                 self.hold_newline = self.newline;
             }
             b'g' => {
-                self.ps.clone_from(&self.hold);
+                self.ps.vec().clone_from(&self.hold);
                 self.newline = self.hold_newline;
             }
             b'G' => {
                 room(self.ps.len(), 1 + self.hold.len())?;
-                self.ps.push(self.opts.delimiter);
-                self.ps.extend_from_slice(&self.hold);
+                let ps = self.ps.vec();
+                ps.push(self.opts.delimiter);
+                ps.extend_from_slice(&self.hold);
                 self.newline = self.hold_newline;
             }
             b'x' => {
-                std::mem::swap(&mut self.ps, &mut self.hold);
+                std::mem::swap(self.ps.vec(), &mut self.hold);
                 std::mem::swap(&mut self.newline, &mut self.hold_newline);
             }
             b'y' => {
                 let table = self.commands[pc].translit.as_ref().expect("y has a table");
-                translate(table, &mut self.ps, self.opts.utf8)?;
+                translate(table, self.ps.vec(), self.opts.utf8)?;
             }
-            b'z' => self.ps.clear(),
+            b'z' => self.ps.vec().clear(),
             b'F' => {
                 // The input opened last, which a look-ahead may have moved
                 // past the line's own.
@@ -1963,12 +2010,13 @@ impl Machine {
         };
         if append {
             room(self.ps.len(), 1 + text.len())?;
-            self.ps.push(self.opts.delimiter);
-            self.ps.extend_from_slice(&text);
+            let ps = self.ps.vec();
+            ps.push(self.opts.delimiter);
+            ps.extend_from_slice(&text);
         } else {
-            let old = std::mem::replace(&mut self.ps, text);
+            let old = std::mem::replace(&mut self.ps, text.into());
             if let Some(reader) = &mut self.feed.reader {
-                reader.recycle(old);
+                reader.recycle(old.into_storage());
             }
         }
         self.newline = newline;
