@@ -111,7 +111,7 @@ from mirage.workspace.session import (
 )
 from mirage.workspace.session.budget import run_with_env_limit
 from mirage.workspace.session.manager import SessionManager
-from mirage.workspace.session.state import visible_env
+from mirage.workspace.session.state import deciding, visible_env
 from mirage.workspace.snapshot import ContentDriftError
 from mirage.workspace.snapshot.drift import DriftQueue
 from mirage.workspace.types import StatusWriter
@@ -518,6 +518,23 @@ async def _preflight(ws: ExecuteEnv) -> None:
         await ws.drift.drain(ws.registry.try_mount_for)
 
 
+def _beside(ws: ExecuteEnv, source: SessionState) -> SessionState:
+    """A subshell of ``source`` as it is now, beside its lines: nothing
+    it changes reaches them but what its jobs write, which goes on to
+    the session's terminal.
+
+    Args:
+        ws (ExecuteEnv): the workspace running the line.
+        source (SessionState): the session it copies.
+    """
+    session = source.fork()
+    session.process_id = None
+    session.job_table = ws.job_table.child()
+    session.tty = source.tty
+    session.job_output = JobOutput(source.tty.jobs)
+    return session
+
+
 async def execute_line(
     ws: ExecuteEnv,
     command: str,
@@ -587,12 +604,7 @@ async def execute_line(
         session = ambient
         session_id = ambient.session_id
         if ambient.vars.shell.closed:
-            source = ws.sessions.get(session_id)
-            session = source.fork()
-            session.process_id = None
-            session.job_table = ws.job_table.child()
-            session.tty = source.tty
-            session.job_output = JobOutput(source.tty.jobs)
+            session = _beside(ws, ws.sessions.get(session_id))
     else:
         if session_id is None:
             session_id = ws.sessions.default_id
@@ -602,6 +614,10 @@ async def execute_line(
         # reached the terminal while it ran, a job's output from before
         # it first.
         tty = session.tty
+    # A policy deciding reads the session and changes nothing, so a line
+    # it runs ends with the copy it ran on.
+    if handed is None and deciding():
+        session = _beside(ws, session)
     line_handle = line_handle or LineHandle(
         new_line_id(ws.registry.ids),
         session_id,

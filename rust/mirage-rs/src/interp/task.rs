@@ -364,12 +364,11 @@ pub fn mark_names(shell: Shell, marking: Marking, functions: bool) -> Task<Ended
 }
 
 /// Run `let` on its words.
-pub fn let_words(shell: Shell, words: Vec<Vec<u8>>, deciding: bool) -> Task<Ended<Expanded>> {
+pub fn let_words(shell: Shell, words: Vec<Vec<u8>>) -> Task<Ended<Expanded>> {
     Task::new(move |_line| async move {
         let mut shell = shell;
         let mut diagnostics = Vec::new();
-        let result =
-            run_let(&mut shell, &mut diagnostics, &words, deciding).map(Expanded::Declared);
+        let result = run_let(&mut shell, &mut diagnostics, &words).map(Expanded::Declared);
         Ended {
             shell,
             result,
@@ -424,7 +423,6 @@ pub enum Write {
     Arith {
         text: Vec<u8>,
         expand: bool,
-        deciding: bool,
     },
     /// A value evaluated as an `-i` write coerces it (`declare -ni r=M`),
     /// `added` an integer `+=`'s text; the result is its value.
@@ -502,14 +500,7 @@ pub fn write(
             follow_ref,
         } => writer.mark(&name, attr, on, follow_ref).map(|()| 0),
         Write::Index { subscript } => writer.subscript_index(&subscript),
-        Write::Arith {
-            text,
-            expand,
-            deciding,
-        } => {
-            writer.deciding = deciding;
-            writer.arith(&text, expand)
-        }
+        Write::Arith { text, expand } => writer.arith(&text, expand),
         Write::IsSet {
             reference,
             expanded,
@@ -583,7 +574,6 @@ mod tests {
             Write::Arith {
                 text: b"y = 6 * 7".to_vec(),
                 expand: false,
-                deciding: false,
             },
             true,
         );

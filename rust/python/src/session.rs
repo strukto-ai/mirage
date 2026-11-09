@@ -655,7 +655,6 @@ impl Shell {
         operands: Vec<Bound<'_, PyAny>>,
         temporaries: Vec<String>,
         subscripts: bool,
-        deciding: bool,
     ) -> PyResult<ShellTask> {
         let declaration = Declaration {
             cmd,
@@ -664,7 +663,6 @@ impl Shell {
             operands: operands_in(&operands)?,
             temporaries,
             subscripts,
-            deciding,
         };
         ShellTask::start(slf, no_tree(), |inner| task::declare(inner, declaration))
     }
@@ -681,7 +679,6 @@ impl Shell {
         operands: Vec<Bound<'_, PyAny>>,
         temporaries: Vec<String>,
         functions: bool,
-        deciding: bool,
     ) -> PyResult<ShellTask> {
         let marking = Marking {
             cmd,
@@ -690,7 +687,6 @@ impl Shell {
             flags: flags.as_bytes().to_vec(),
             operands: operands_in(&operands)?,
             temporaries,
-            deciding,
         };
         ShellTask::start(slf, no_tree(), |inner| {
             task::mark_names(inner, marking, functions)
@@ -848,38 +844,17 @@ impl Shell {
     }
 
     /// Evaluate an arithmetic command or a test's integer operand, its
-    /// writes landed; `expand` when its subscripts expand first, and
-    /// `deciding` when a policy is deciding, so a write refuses.
-    #[pyo3(signature = (text, *, expand = false, deciding = false))]
-    fn arith(
-        &mut self,
-        py: Python<'_>,
-        text: Bound<'_, PyAny>,
-        expand: bool,
-        deciding: bool,
-    ) -> PyResult<Outcome> {
+    /// writes landed; `expand` when its subscripts expand first.
+    #[pyo3(signature = (text, *, expand = false))]
+    fn arith(&mut self, py: Python<'_>, text: Bound<'_, PyAny>, expand: bool) -> PyResult<Outcome> {
         let text = bytes_of(&text)?;
-        self.write(
-            py,
-            Write::Arith {
-                text,
-                expand,
-                deciding,
-            },
-            true,
-        )
+        self.write(py, Write::Arith { text, expand }, true)
     }
 
     /// Run `let`: each word one expression.
-    fn let_words(
-        slf: &Bound<'_, Self>,
-        words: Vec<Bound<'_, PyAny>>,
-        deciding: bool,
-    ) -> PyResult<ShellTask> {
+    fn let_words(slf: &Bound<'_, Self>, words: Vec<Bound<'_, PyAny>>) -> PyResult<ShellTask> {
         let words = words.iter().map(bytes_of).collect::<PyResult<Vec<_>>>()?;
-        ShellTask::start(slf, no_tree(), |inner| {
-            task::let_words(inner, words, deciding)
-        })
+        ShellTask::start(slf, no_tree(), |inner| task::let_words(inner, words))
     }
 
     /// Run `unset` on one operand: `function` when it names a function
@@ -890,14 +865,12 @@ impl Shell {
         word: Bound<'_, PyAny>,
         function: bool,
         frozen: bool,
-        deciding: bool,
     ) -> PyResult<ShellTask> {
         let unsetting = Unsetting {
             letters: letters.as_bytes().to_vec(),
             word: bytes_of(&word)?,
             function,
             frozen,
-            deciding,
         };
         ShellTask::start(slf, no_tree(), |inner| task::unset_word(inner, unsetting))
     }

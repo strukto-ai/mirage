@@ -38,7 +38,7 @@ import {
   sessionCaller,
   sessionVisibility,
 } from '../../context/session_context.ts'
-import { eacces, enoent } from '../../errors/fs.ts'
+import { enoent } from '../../errors/fs.ts'
 import type { EventRuntime } from '../../events/base.ts'
 import { newLineId } from '../../execution/context.ts'
 import { LineTable } from '../../execution/line/table.ts'
@@ -208,11 +208,6 @@ import { forkForCall } from './utils.ts'
 
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
-
-// A method's session write where the deciding mark cannot reach it.
-function refuseWrite(name: string): Promise<void> {
-  return Promise.reject(eacces(name))
-}
 
 export class Workspace {
   readonly io: IOConfig
@@ -562,7 +557,7 @@ export class Workspace {
         kept = {
           session,
           policies: this.policies,
-          view: Object.freeze(sessionView(session)),
+          view: Object.freeze(sessionView(session, undefined, true)),
         }
       const view = kept.view
       // A method decides: its files say so on each op's own caller, so its
@@ -570,15 +565,7 @@ export class Workspace {
       const vfs = withCaller(this.vfs.forSession(session.sessionId), {
         explaining: DryRun.DECIDING,
       })
-      const called = policyCaller(session, this.policies.account)
-      if (asyncContextIsolatesTasks) return { session: view, vfs, caller: called }
-      // Without task isolation the mark cannot reach a session write through
-      // the async context, so there its session refuses every write.
-      return {
-        session: { ...view, set: refuseWrite, unset: refuseWrite, mark: refuseWrite },
-        vfs,
-        caller: called,
-      }
+      return { session: view, vfs, caller: policyCaller(session, this.policies.account) }
     }
     // Installed CLIs, fully separate from mounts: a spec name resolves
     // against the named registry and every entry installs through the

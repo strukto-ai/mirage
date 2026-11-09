@@ -217,16 +217,14 @@ class Shell:
         operands: Sequence[str | tuple[str, bool, list[str]]],
         temporaries: list[str],
         subscripts: bool,
-        deciding: bool,
     ) -> ShellTask: ...
-    def let_words(self, words: Sequence[str], deciding: bool) -> ShellTask: ...
+    def let_words(self, words: Sequence[str]) -> ShellTask: ...
     def unset_word(
         self,
         letters: str,
         word: str,
         function: bool,
         frozen: bool,
-        deciding: bool,
     ) -> ShellTask: ...
     @staticmethod
     def read_fields(
@@ -245,7 +243,6 @@ class Shell:
         operands: Sequence[str | tuple[str, bool, list[str]]],
         temporaries: list[str],
         functions: bool,
-        deciding: bool,
     ) -> ShellTask: ...
     def set(
         self,
@@ -289,6 +286,6 @@ class Shell:
         every: bool = False,
     ) -> Outcome: ...
     def arith(
-        self, text: Text, *, expand: bool = False, deciding: bool = False
+        self, text: Text, *, expand: bool = False
     ) -> tuple[Any, list[str | bytes]]: ...
     def integer(self, text: Text, added: Text | None = None) -> Outcome: ...

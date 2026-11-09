@@ -364,14 +364,12 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 operands: operands_in(args.list()?)?,
                 temporaries: strings(args.list()?)?,
                 subscripts: args.flag()?,
-                deciding: args.flag()?,
             };
             return engine.start(handle, |inner| task::declare(inner, declaration));
         }
         "let_words" => {
             let words = words(args.list()?)?;
-            let deciding = args.flag()?;
-            return engine.start(handle, |inner| task::let_words(inner, words, deciding));
+            return engine.start(handle, |inner| task::let_words(inner, words));
         }
         "unset_word" => {
             let unsetting = Unsetting {
@@ -379,7 +377,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 word: args.bytes()?,
                 function: args.flag()?,
                 frozen: args.flag()?,
-                deciding: args.flag()?,
             };
             return engine.start(handle, |inner| task::unset_word(inner, unsetting));
         }
@@ -391,7 +388,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let operands = operands_in(args.list()?)?;
             let temporaries = strings(args.list()?)?;
             let functions = args.flag()?;
-            let deciding = args.flag()?;
             let marking = Marking {
                 cmd,
                 attr,
@@ -399,7 +395,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 flags,
                 operands,
                 temporaries,
-                deciding,
             };
             return engine.start(handle, |inner| task::mark_names(inner, marking, functions));
         }
@@ -504,12 +499,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "arith" => {
             let text = args.bytes()?;
             let expand = args.flag()?;
-            let deciding = args.flag()?;
-            let write = Write::Arith {
-                text,
-                expand,
-                deciding,
-            };
+            let write = Write::Arith { text, expand };
             return engine.write(handle, write, true);
         }
         "integer" => {

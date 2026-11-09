@@ -33,7 +33,7 @@ import { expandNode } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { deciding, prefixTemporaries } from '../session/state.ts'
+import { prefixTemporaries } from '../session/state.ts'
 import type { ExpandedWords } from './types.ts'
 import { expandArrayItems } from './assignment.ts'
 
@@ -217,7 +217,6 @@ export async function executeDeclaration(
         operands,
         temporaries,
         true,
-        deciding(),
       ),
     context,
     executeFn,

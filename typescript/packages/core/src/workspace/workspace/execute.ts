@@ -130,7 +130,7 @@ import { commandName, forkForCall } from './utils.ts'
 import { encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { runWithSystemClock } from '../../utils/clock.ts'
 import { runWithEnvLimit } from '../session/budget.ts'
-import { visibleEnv } from '../session/state.ts'
+import { deciding, visibleEnv } from '../session/state.ts'
 
 /**
  * Everything `executeLine` needs from the workspace, passed explicitly
@@ -306,6 +306,18 @@ interface LineFrame {
 }
 
 /**
+ * A subshell of `source` as it is now, beside its lines: nothing it changes
+ * reaches them but what its jobs write. Mirrors Python's _beside.
+ */
+function beside(env: ExecuteEnv, source: SessionState): SessionState {
+  const session = source.fork()
+  session.processId = null
+  session.jobTable = env.jobTable.child()
+  session.jobOutput = new JobOutput(source.tty.jobs)
+  return session
+}
+
+/**
  * Order of gates: hydrate stores, drain any queued drift check, resolve
  * the session, parse, syntax gate, policy, then the strategies (whole-line
  * runtime or command tree). Failures fold into the line's result via
@@ -341,12 +353,11 @@ async function runLine(
     options.session ??
     (inPlace ? ambient : env.sessions.get(options.sessionId ?? env.sessions.defaultId))
   if (options.session === undefined && inPlace && ambient.vars.shell.closed) {
-    const source = env.sessions.get(ambient.sessionId)
-    targetSession = source.fork()
-    targetSession.processId = null
-    targetSession.jobTable = env.jobTable.child()
-    targetSession.jobOutput = new JobOutput(source.tty.jobs)
+    targetSession = beside(env, env.sessions.get(ambient.sessionId))
   }
+  // A policy deciding reads the session and changes nothing, so a line it
+  // runs ends with the copy it ran on.
+  if (options.session === undefined && deciding()) targetSession = beside(env, targetSession)
   frame.session = targetSession
   // Whole-invocation policies must approve the result before bytes escape.
   if (await env.registry.policies.wantsFor('postExecute', targetSession.sessionId)) {

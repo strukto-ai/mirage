@@ -15,8 +15,6 @@ pub struct Unsetting {
     pub function: bool,
     /// The word names a readonly function.
     pub frozen: bool,
-    /// A policy is deciding: a write refuses.
-    pub deciding: bool,
 }
 
 /// What an `unset` of one operand came to, and what is left for the host.
@@ -27,17 +25,6 @@ pub struct Unset {
     pub remove_function: bool,
     /// The name it dropped, when the host keeps state about that name too.
     pub tracked: Option<String>,
-}
-
-fn writer<'a>(
-    shell: &'a mut Shell,
-    diagnostics: &'a mut Vec<Diagnostic>,
-    deciding: bool,
-) -> Writer<'a> {
-    Writer {
-        deciding,
-        ..Writer::of(shell, Some(diagnostics))
-    }
 }
 
 /// `unset`'s refusal of `name`, in bash's words.
@@ -55,8 +42,8 @@ fn holds_value(shell: &Shell, name: &str) -> bool {
             .is_some_and(|var| var.value.is_some())
 }
 
-/// Take the word's function away, unless it is readonly or a policy is
-/// deciding, either of which answers with the line that refuses it.
+/// Take the word's function away, unless it is readonly, which answers
+/// with the line that refuses it.
 fn drop_function(voice: &[u8], unsetting: &Unsetting, out: &mut Unset) -> Option<Vec<u8>> {
     if unsetting.frozen {
         return Some(refusal(
@@ -64,9 +51,6 @@ fn drop_function(voice: &[u8], unsetting: &Unsetting, out: &mut Unset) -> Option
             &unsetting.word,
             "cannot unset: readonly function",
         ));
-    }
-    if unsetting.deciding {
-        return Some(denied(&text(&unsetting.word)));
     }
     out.remove_function = true;
     None
@@ -84,7 +68,6 @@ async fn unset_word<H: Host>(
     out: &mut Unset,
 ) -> Result<Option<Vec<u8>>, Fault> {
     let voice = shell.vars.voice().to_vec();
-    let deciding = unsetting.deciding;
     let letters = &unsetting.letters;
     let word = &unsetting.word;
     let mode = b"fnv".iter().copied().find(|m| letters.contains(m));
@@ -106,7 +89,7 @@ async fn unset_word<H: Host>(
         if name == BASH_LINENO {
             return Ok(Some(refusal(&voice, word, "cannot unset")));
         }
-        return match writer(shell, diagnostics, deciding).unset(&name, false) {
+        return match Writer::of(shell, Some(&mut *diagnostics)).unset(&name, false) {
             Err(Fault::Hidden(hidden)) => Ok(Some(denied(&hidden))),
             other => other.map(|()| None),
         };
@@ -135,10 +118,11 @@ async fn unset_word<H: Host>(
             subscript_of(shell, host, subscript)
                 .await
                 .and_then(|expanded| {
-                    writer(shell, diagnostics, deciding).unset_element(&base, &expanded, every)
+                    Writer::of(shell, Some(&mut *diagnostics))
+                        .unset_element(&base, &expanded, every)
                 })
         }
-        None => writer(shell, diagnostics, deciding)
+        None => Writer::of(shell, Some(&mut *diagnostics))
             .unset(&name, true)
             .map(|()| Element::Landed),
     };
@@ -197,7 +181,6 @@ pub fn run_let(
     shell: &mut Shell,
     diagnostics: &mut Vec<Diagnostic>,
     words: &[Vec<u8>],
-    deciding: bool,
 ) -> Result<Declared, Fault> {
     let voice = shell.vars.voice().to_vec();
     if words.is_empty() {
@@ -208,7 +191,7 @@ pub fn run_let(
     }
     let mut value = 0;
     for word in words {
-        match writer(shell, diagnostics, deciding).arith(word, true) {
+        match Writer::of(shell, Some(&mut *diagnostics)).arith(word, true) {
             Ok(result) => value = result,
             Err(Fault::Hidden(name)) => return Ok(Declared::failed(denied(&name), 1)),
             Err(Fault::Readonly {
@@ -391,7 +374,6 @@ mod tests {
             word: word.to_vec(),
             function: false,
             frozen: false,
-            deciding: false,
         }
     }
 
@@ -466,57 +448,15 @@ mod tests {
     }
 
     #[test]
-    fn a_deciding_policy_cannot_unset() {
-        let mut shell = shell();
-        shell.vars.seed("X", Value::Scalar(b"1".to_vec()));
-        for word in [&b"X"[..], b"X[0]"] {
-            let words = Unsetting {
-                deciding: true,
-                ..unsetting(b"", word)
-            };
-            let done = unset(&mut shell, &words).unwrap();
-            assert_eq!(lines(&done.said), vec!["X: permission denied\n"]);
-        }
-        assert_eq!(shell.vars.scalar("X"), Some(&b"1"[..]));
-        let function = Unsetting {
-            deciding: true,
-            function: true,
-            ..unsetting(b"f", b"g")
-        };
-        let done = unset(&mut shell, &function).unwrap();
-        assert!(!done.remove_function);
-        assert_eq!(lines(&done.said), vec!["g: permission denied\n"]);
-    }
-
-    #[test]
     fn let_answers_for_its_last_word() {
         let mut shell = shell();
         let mut said = Vec::new();
-        let done = run_let(
-            &mut shell,
-            &mut said,
-            &[b"a=1".to_vec(), b"b=0".to_vec()],
-            false,
-        );
+        let done = run_let(&mut shell, &mut said, &[b"a=1".to_vec(), b"b=0".to_vec()]);
         assert_eq!(done.unwrap().status, 1);
-        let done = run_let(
-            &mut shell,
-            &mut said,
-            &[b"b=0".to_vec(), b"a=1".to_vec()],
-            false,
-        );
+        let done = run_let(&mut shell, &mut said, &[b"b=0".to_vec(), b"a=1".to_vec()]);
         assert_eq!(done.unwrap().status, 0);
-        let done = run_let(&mut shell, &mut said, &[], false).unwrap();
+        let done = run_let(&mut shell, &mut said, &[]).unwrap();
         assert_eq!(lines(&done), vec!["bash: let: expression expected\n"]);
-    }
-
-    #[test]
-    fn a_deciding_policy_cannot_let() {
-        let mut shell = shell();
-        let mut said = Vec::new();
-        let done = run_let(&mut shell, &mut said, &[b"a=1".to_vec()], true).unwrap();
-        assert_eq!(lines(&done), vec!["a: permission denied\n"]);
-        assert_eq!(shell.vars.scalar("a"), None);
     }
 
     #[test]

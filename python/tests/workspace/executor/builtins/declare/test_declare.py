@@ -48,7 +48,6 @@ async def test_a_failed_subscript_gives_the_shell_back(
                 ["KEPT=local", "LANDED=1", "a[$(x)]=v"],
                 [],
                 True,
-                False,
             ),
             EvaluationContext(session),
             stopping,

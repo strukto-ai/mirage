@@ -654,7 +654,7 @@ class Workspace:
                 kept = (
                     session,
                     self.policies,
-                    session_view(session),
+                    session_view(session, read_only=True),
                 )
             return (
                 kept[2],
