@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
+import { once } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -443,6 +445,43 @@ describe('a foreground shell request', () => {
       expect(written.status).toBe(409)
       expect(((await records.next()).value as { status: string }).status).toBe('done')
       await records.next()
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('drops a held write whose caller hung up', async () => {
+    const app = buildApp()
+    try {
+      const base = await served(app, 'gone')
+      const capacity = app.registry.get('gone').runner.ws.io.bufferBytes
+      const res = await openStdin(base, 'gone', 'sleep 2; cat', new AbortController().signal)
+      const records = ndjson(res.body as ReadableStream<Uint8Array>)
+      const lineId = ((await records.next()).value as { line_id: string }).line_id
+      const path = `/v1/workspaces/gone/lines/${lineId}/stdin`
+      expect((await writeStdin(base + path, 'x'.repeat(capacity))).status).toBe(204)
+      const socket = connect(Number(new URL(base).port), '127.0.0.1')
+      await once(socket, 'connect')
+      socket.write(
+        `POST ${path} HTTP/1.1\r\nHost: 127.0.0.1\r\n` +
+          'Content-Type: application/octet-stream\r\nContent-Length: 4\r\n\r\nlate',
+      )
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      socket.destroy()
+      let seen = ''
+      while (seen.length < capacity) {
+        const record = (await records.next()).value as { data: string }
+        seen += Buffer.from(record.data, 'base64').toString()
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect((await fetch(base + path, { method: 'DELETE' })).status).toBe(204)
+      for (;;) {
+        const record = (await records.next()).value as { status?: string; data: string }
+        if (record.status !== undefined) break
+        seen += Buffer.from(record.data, 'base64').toString()
+      }
+      await records.next()
+      expect(seen).toBe('x'.repeat(capacity))
     } finally {
       await app.close()
     }

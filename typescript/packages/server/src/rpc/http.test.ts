@@ -60,20 +60,33 @@ describe('the RPC endpoint', () => {
   it('takes open stdin writes on other requests', async () => {
     const base = await daemon()
     const url = `${base}/v1/workspaces/${await workspace(base)}/rpc`
-    const running = post(url, request(7, 'shell', { command: 'cat', open_stdin: true }))
+    const abort = new AbortController()
+    const running = fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request(7, 'shell', { command: 'cat', open_stdin: true })),
+      signal: abort.signal,
+    })
     const data = Buffer.from('one\n').toString('base64')
-    let written: { error?: unknown; result?: unknown } = { error: {} }
-    while (written.error !== undefined) {
-      written = (await (await post(url, request(8, 'stdin/write', { id: 7, data }))).json()) as {
-        error?: unknown
+    try {
+      let written: { error?: { code: number }; result?: unknown } = {}
+      for (let attempt = 0; attempt < 500; attempt++) {
+        const reply = await post(url, request(8, 'stdin/write', { id: 7, data }))
+        written = (await reply.json()) as typeof written
+        if (written.error?.code !== -32004) break
+        await new Promise((resolve) => setTimeout(resolve, 10))
       }
+      expect(written.result).toBeNull()
+      const closed = (await (await post(url, request(9, 'stdin/close', { id: 7 }))).json()) as {
+        result: unknown
+      }
+      expect(closed.result).toBeNull()
+      const answer = (await (await running).json()) as { result: { stdout: string } }
+      expect(answer.result.stdout).toBe('one\n')
+    } finally {
+      abort.abort()
+      await running.catch(() => undefined)
     }
-    const closed = (await (await post(url, request(9, 'stdin/close', { id: 7 }))).json()) as {
-      result: unknown
-    }
-    expect(closed.result).toBeNull()
-    const answer = (await (await running).json()) as { result: { stdout: string } }
-    expect(answer.result.stdout).toBe('one\n')
   })
 
   it('answers a request and a batch', async () => {

@@ -193,14 +193,22 @@ async def test_open_stdin_takes_writes_on_other_requests(tmp_path):
             )
         )
         data = base64.b64encode(b"one\n").decode()
-        written = {"error": {}}
-        while "error" in written:
-            reply = await http.post(
-                url, json=request(8, "stdin/write", {"id": 7, "data": data})
+        written: dict = {}
+        try:
+            for _ in range(500):
+                reply = await http.post(
+                    url,
+                    json=request(8, "stdin/write", {"id": 7, "data": data}),
+                )
+                written = reply.json()
+                if written.get("error", {}).get("code") != -32004:
+                    break
+                await asyncio.sleep(0.01)
+            assert written["result"] is None
+            closed = await http.post(
+                url, json=request(9, "stdin/close", {"id": 7})
             )
-            written = reply.json()
-        closed = await http.post(
-            url, json=request(9, "stdin/close", {"id": 7})
-        )
-        assert closed.json()["result"] is None
-        assert (await running).json()["result"]["stdout"] == "one\n"
+            assert closed.json()["result"] is None
+            assert (await running).json()["result"]["stdout"] == "one\n"
+        finally:
+            running.cancel()

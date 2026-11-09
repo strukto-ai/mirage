@@ -811,3 +811,40 @@ async def test_stdin_routes_name_a_running_line_with_open_stdin():
             assert (await client.post(route, content=b"x")).status_code == 409
             elsewhere = f"/v1/workspaces/{other}/lines/{line_id}/stdin"
             assert (await client.delete(elsewhere)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_caller_that_hangs_up_drops_its_held_write():
+    app = build_app(idle_grace_seconds=10.0)
+    async with _served(app) as client:
+        wid = await _create_workspace(client)
+        capacity = app.state.registry.get(wid).runner.ws.io.buffer_bytes
+        async with _open_stdin(client, wid, "sleep 2; cat") as reply:
+            lines = reply.aiter_lines()
+            line_id = (await _record(lines))["line_id"]
+            route = f"/v1/workspaces/{wid}/lines/{line_id}/stdin"
+            filled = await client.post(route, content=b"x" * capacity)
+            assert filled.status_code == 204, filled.text
+            _, writer = await asyncio.open_connection(
+                "127.0.0.1", client.base_url.port
+            )
+            writer.write(
+                f"POST {route} HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                "Content-Type: application/octet-stream\r\n"
+                "Content-Length: 4\r\n\r\nlate".encode()
+            )
+            await writer.drain()
+            await asyncio.sleep(0.2)
+            writer.close()
+            await writer.wait_closed()
+            seen = b""
+            while len(seen) < capacity:
+                record = await _record(lines)
+                seen += base64.b64decode(record["data"])
+            await asyncio.sleep(0.2)
+            assert (await client.delete(route)).status_code == 204
+            record = await _record(lines)
+            while "status" not in record:
+                seen += base64.b64decode(record["data"])
+                record = await _record(lines)
+            assert seen == b"x" * capacity

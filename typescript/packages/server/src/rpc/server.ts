@@ -155,10 +155,10 @@ export class MirageRpcServer {
           methods: this.methods,
         }),
       shell: (params, signal, id) => this.shell(params, signal, id),
-      'stdin/write': async (params) => {
+      'stdin/write': async (params, signal) => {
         const pipe = this.stdinOf(params)
         try {
-          await pipe.write(bytes(params, 'data'))
+          await pipe.write(bytes(params, 'data'), signal)
         } catch (err) {
           if (err instanceof PipeClosed) throw new RpcError(RPC_INVALID_PARAMS, 'stdin is closed')
           throw err

@@ -255,3 +255,36 @@ async def test_open_stdin_refuses_stdin_and_explain():
         rpc, "shell", {"command": "cat", "open_stdin": True, "explain": True}
     )
     assert explained["error"]["code"] == -32602
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_stdin_write_stops_waiting():
+    rpc = server()
+    running = asyncio.create_task(
+        rpc.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "shell",
+                "params": {"command": "sleep 0.2; cat", "open_stdin": True},
+            }
+        )
+    )
+    await asyncio.sleep(0)
+    write = asyncio.create_task(
+        rpc.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 8,
+                "method": "stdin/write",
+                "params": {"id": 7, "data": b64("x" * (1024 * 1024))},
+            }
+        )
+    )
+    await asyncio.sleep(0.05)
+    assert not write.done()
+    write.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await write
+    await call(rpc, "stdin/close", {"id": 7})
+    await asyncio.wait_for(running, 5)

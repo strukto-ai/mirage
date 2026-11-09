@@ -65,6 +65,31 @@ describe('MirageRpcServer', () => {
     expect((gone.error as { code: number }).code).toBe(-32004)
   })
 
+  it('stops a stdin/write whose request is cancelled', async () => {
+    const rpc = server()
+    const running = rpc.handle({
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'shell',
+      params: { command: 'sleep 0.2; cat', open_stdin: true },
+    })
+    const stop = new AbortController()
+    const write = rpc.handle(
+      {
+        jsonrpc: '2.0',
+        id: 8,
+        method: 'stdin/write',
+        params: { id: 7, data: b64('x'.repeat(1024 * 1024)) },
+      },
+      stop.signal,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    stop.abort()
+    expect(((await write)?.error as { code: number }).code).toBe(-32800)
+    await call(rpc, 'stdin/close', { id: 7 })
+    await running
+  })
+
   it('open_stdin refuses stdin and explain', async () => {
     const rpc = server()
     const both = await call(rpc, 'shell', { command: 'cat', open_stdin: true, stdin: b64('x') })

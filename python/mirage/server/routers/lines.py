@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
@@ -133,14 +135,37 @@ async def write_stdin(
 ) -> Response:
     """Send the body to a running line's open stdin. It answers once the
     bytes are buffered, so a line that stops reading holds its writer
-    back. Runs on the workspace's own loop, where the line reads."""
+    back; a caller that hangs up while held takes its bytes with it.
+    Runs on the workspace's own loop, where the line reads."""
     runner = require_entry(request, workspace_id).runner
     stdin = _open_stdin(request, workspace_id, line_id)
+    arrival = asyncio.ensure_future(request.receive())
     try:
-        async for chunk in request.stream():
-            await runner.call(stdin.write(chunk))
+        more = True
+        while more:
+            message = await arrival
+            if message["type"] == "http.disconnect":
+                return Response(status_code=499)
+            more = message.get("more_body", False)
+            arrival = asyncio.ensure_future(request.receive())
+            writing = asyncio.ensure_future(
+                runner.call(stdin.write(message.get("body", b"")))
+            )
+            await asyncio.wait(
+                {writing, arrival}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if (
+                not writing.done()
+                and arrival.result()["type"] == "http.disconnect"
+            ):
+                writing.cancel()
+                await asyncio.gather(writing, return_exceptions=True)
+                return Response(status_code=499)
+            await writing
     except PipeClosed as exc:
         raise HTTPException(status_code=409, detail=NOT_OPEN) from exc
+    finally:
+        arrival.cancel()
     return Response(status_code=204)
 
 
