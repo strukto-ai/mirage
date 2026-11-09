@@ -24,6 +24,8 @@ class Member:
             member-name strip: what a diagnostic about the member names
             (GNU reports ``/t/priv``, not ``t/priv``).
         size (int | None): rendered byte length, if known before reading.
+        mtime (int | None): modification time, where the backend keeps one.
+        mode (int | None): permission bits, where the backend keeps them.
     """
 
     name: str
@@ -32,6 +34,8 @@ class Member:
     target: str = ""
     spelled: str = ""
     size: int | None = None
+    mtime: int | None = None
+    mode: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

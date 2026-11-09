@@ -73,6 +73,21 @@ pub(super) struct Config {
     q: u8,
     o: bool,
     n: bool,
+    /// -j: every member lands by its last name alone.
+    j: bool,
+    /// -u: only what is new or newer. -f: only what is there and older.
+    u: bool,
+    f: bool,
+    /// -z: the archive's comment and nothing else.
+    z: bool,
+    /// -C: filespecs match without regard to case.
+    #[serde(rename = "C")]
+    ignore_case: bool,
+    /// -a: text members' CRLF to LF; twice, every member's.
+    a: u8,
+    /// -L: names from uppercase systems lowered; twice, every name.
+    #[serde(rename = "L")]
+    lower: u8,
     /// Entries by their places in the directory, a window at a time, each
     /// frame a tag (0 a window, 1 the entry decoded whole, 2 it did not)
     /// and its four-byte little-endian length: how a host reads an archive
@@ -147,11 +162,19 @@ fn select<'e>(
     entries: &'e [Entry],
     members: &[Vec<u8>],
     excludes: &[Vec<u8>],
+    ignore_case: bool,
 ) -> (Vec<&'e Entry>, Vec<u8>, bool) {
     let mut hit = vec![false; members.len()];
     let mut excluded = vec![false; excludes.len()];
-    let first =
-        |specs: &[Vec<u8>], name: &[u8]| specs.iter().position(|p| wildcard(p, name, false));
+    let first = |specs: &[Vec<u8>], name: &[u8]| {
+        specs.iter().position(|p| {
+            if ignore_case {
+                wildcard(&p.to_ascii_lowercase(), &name.to_ascii_lowercase(), false)
+            } else {
+                wildcard(p, name, false)
+            }
+        })
+    };
     let mut selected = Vec::new();
     for entry in entries {
         if !members.is_empty() {
@@ -418,6 +441,43 @@ impl Sink for File {
     }
 }
 
+/// A member's bytes through `-a`: CRLF to LF, a carriage return that ends a
+/// window held for the one after.
+struct Texted<'f> {
+    file: &'f mut File,
+    held_cr: bool,
+}
+
+impl Sink for Texted<'_> {
+    async fn take(&mut self, host: &Host, window: &[u8]) -> bool {
+        let mut out = Vec::with_capacity(window.len() + 1);
+        for &byte in window {
+            if std::mem::take(&mut self.held_cr) && byte != b'\n' {
+                out.push(b'\r');
+            }
+            if byte == b'\r' {
+                self.held_cr = true;
+            } else {
+                out.push(byte);
+            }
+        }
+        out.is_empty() || self.file.take(host, &out).await
+    }
+}
+
+/// A DOS date and time as seconds since the epoch.
+fn dos_epoch(date: u16, time: u16) -> i128 {
+    let (year, month, day) = (
+        1980 + i128::from(date >> 9),
+        i128::from((date >> 5) & 15),
+        i128::from(date & 31),
+    );
+    crate::calendar::days(year, month, day) * 86_400
+        + i128::from(time >> 11) * 3600
+        + i128::from((time >> 5) & 63) * 60
+        + i128::from((time & 31) * 2)
+}
+
 /// Say `text` on stdout or stderr.
 fn tell(host: &Host, stdout: bool, text: &[u8]) {
     if stdout {
@@ -450,6 +510,18 @@ async fn open(host: &Host, typed: &[u8]) -> Result<(Vec<u8>, u64), Option<Vec<u8
         }
     }
     Err(None)
+}
+
+impl Config {
+    /// A run that tests `archive` and says nothing unless it finds damage.
+    pub(super) fn testing(archive: &[u8]) -> Config {
+        Config {
+            archive: archive.to_vec(),
+            t: true,
+            q: 2,
+            ..Config::default()
+        }
+    }
 }
 
 pub(super) async fn run(host: Host, mut config: Config) -> i32 {
@@ -619,8 +691,21 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
     if directory.entries.is_empty() && !config.zipinfo {
         return empty(run, directory, warning);
     }
-    let (selected, cautions, unmatched) =
-        select(&directory.entries, &config.members, &config.excludes);
+    if config.z {
+        let mut out = Vec::new();
+        if config.q == 0 {
+            out.extend(say("Archive:  {}\n", &[&config.archive]));
+        }
+        listing::comment(&directory.comment, &mut out);
+        run.host.print(&out);
+        return 0;
+    }
+    let (selected, cautions, unmatched) = select(
+        &directory.entries,
+        &config.members,
+        &config.excludes,
+        config.ignore_case,
+    );
     let filtered = config.filtered();
     let nothing = if filtered && selected.is_empty() {
         NO_MATCH_EXIT
@@ -976,6 +1061,8 @@ async fn extract(
     let host = run.host;
     let config = &run.config;
     let quiet = config.q > 0;
+    let (junk, lower, update, freshen, text_mode) =
+        (config.j, config.lower, config.u, config.f, config.a);
     let mut state = Extract {
         base: config.base.clone(),
         typed: config.dest.clone().unwrap_or_default(),
@@ -1020,6 +1107,23 @@ async fn extract(
                 host.print(&say(SKIPPED_DOTDOT, &[name]));
             }
         }
+        if junk && entry.is_dir() {
+            continue;
+        }
+        let mapped = if junk {
+            let start = mapped
+                .iter()
+                .rposition(|&b| b == b'/')
+                .map_or(0, |at| at + 1);
+            mapped[start..].to_vec()
+        } else {
+            mapped
+        };
+        let mapped = if lower >= 2 || (lower == 1 && entry.host() == 0) {
+            mapped.to_ascii_lowercase()
+        } else {
+            mapped
+        };
         if mapped.is_empty() {
             if !name.ends_with(b"/") {
                 host.warn(b"mapname:  conversion of  failed\n");
@@ -1037,6 +1141,19 @@ async fn extract(
         } else {
             parent(&out_path).to_vec()
         };
+        if is_dir && freshen {
+            continue;
+        }
+        if !is_dir && (update || freshen) {
+            let stored = entry
+                .utc
+                .map_or_else(|| dos_epoch(entry.date, entry.time), i128::from);
+            match host.stat_time(&out_path).await {
+                None if freshen => continue,
+                Some((_, Some(held))) if stored <= i128::from(held) => continue,
+                _ => {}
+            }
+        }
         // A directory entry is the only record an empty directory leaves.
         let existed = is_dir && host.stat(&out_path).await.is_some();
         if !chain.is_empty() {
@@ -1070,7 +1187,21 @@ async fn extract(
         let mut file = File::new(target.clone());
         let warning = run.sized(entry);
         host.warn(&warning);
-        let verdict = run.decode(entry, &mut file).await;
+        let text_member = entry.internal & 1 != 0;
+        let convert = text_mode >= 2 || (text_mode == 1 && text_member);
+        let verdict = if convert {
+            let mut texted = Texted {
+                file: &mut file,
+                held_cr: false,
+            };
+            let verdict = run.decode(entry, &mut texted).await;
+            if texted.held_cr {
+                texted.file.take(host, b"\r").await;
+            }
+            verdict
+        } else {
+            run.decode(entry, &mut file).await
+        };
         if file.failed.is_none() {
             file.close(host).await;
         }
@@ -1097,7 +1228,12 @@ async fn extract(
                 12 => b" bunzipping",
                 _ => b"  inflating",
             };
-            host.print(&say("{}: {}  \n", &[verb, &padded(&shown, 22)]));
+            let tag: &[u8] = match (text_mode, text_member) {
+                (1, true) => b"[text]  ",
+                (1, false) => b"[binary]",
+                _ => b"",
+            };
+            host.print(&say("{}: {}  {}\n", &[verb, &padded(&shown, 22), tag]));
         }
         if !matches!(verdict, Decoded::Sound) {
             run.damaged(ERROR_EXIT);

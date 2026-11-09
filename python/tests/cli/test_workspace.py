@@ -340,17 +340,11 @@ def test_the_list_shows_each_workspace_status():
                 {
                     "id": "on",
                     "status": "running",
-                    "mode": "write",
-                    "mount_count": 1,
-                    "session_count": 1,
                     "created_at": 0,
                 },
                 {
                     "id": "off",
                     "status": "stopped",
-                    "mode": "read",
-                    "mount_count": 2,
-                    "session_count": 0,
                     "created_at": 0,
                 },
             ]

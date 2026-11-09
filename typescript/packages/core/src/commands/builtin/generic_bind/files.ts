@@ -18,12 +18,13 @@ import { ensureStream } from '../../../io/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { revisionFor } from '../../../observe/context.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { PathSpec } from '../../../types.ts'
-import { FileStat, FileType, type SetAttrFields } from '../../../types.ts'
+import { FileStat, FileType, PathSpec, type SetAttrFields } from '../../../types.ts'
 import { hasAborted, makeAbortError } from '../../../utils/abort.ts'
 import { makeResolveGlob, type ResolveGlobFn } from '../../../utils/glob_walk.ts'
 import { moveReveals } from '../../../utils/hidden.ts'
 import { CycleError } from '../../../utils/path.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 import type { MountView, SessionAccess } from '../../../view/types.ts'
 import type { Context } from '../../config.ts'
 import { guardInput } from '../utils/limit.ts'
@@ -166,65 +167,222 @@ const CROSSING_CALLS: ReadonlySet<string> = new Set([
   'truncate',
 ])
 
-// How many operands a whole read warms ahead of itself (`readAhead`).
+// How many files a whole read warms ahead of itself (`ReadAhead`).
 const READ_AHEAD = 8
 
-/**
- * What a command's whole read of an operand awaits first, and what learns the
- * operands its globs resolve to.
- *
- * A command reads its operands in turn, each whole once the one before is
- * done. On a whole read of one, the next READ_AHEAD go to the dispatcher as
- * one `read_many`, which keeps the small files among them in the read cache
- * (one request where the store reads a batch), and the batch after goes once
- * half of that one is read. A read whose file is still being warmed waits for
- * it, so it is served warm instead of fetching the file again. No bytes are
- * held here: a write in between drops the cached copy as it drops any. A
- * path that is not an operand warms nothing. Mirrors Python's `read_ahead`.
- */
-export function readAhead(
-  dispatch: DispatchFn,
-  paths: readonly PathSpec[],
-): [(path: PathSpec) => Promise<void>, (found: PathSpec[]) => void] {
-  const operands: PathSpec[] = []
-  const order = new Map<string, number>()
-  const warming = new Map<string, Promise<void>>()
-  let sent = 1
-  const noted = (found: readonly PathSpec[]): void => {
-    for (const path of found) {
-      if (path.pattern === null && !order.has(path.virtual)) {
-        order.set(path.virtual, operands.length)
-        operands.push(path)
-      }
-    }
+// How many of a command's latest listings its reads are matched against.
+const LISTINGS = 16
+
+// Files a command reads in turn: its operands, or the files of one directory
+// as a listing or subtree answer named them. `sent` is where the next batch
+// starts and `last` where the latest read was. Mirrors Python's `_Run`.
+class Run {
+  sent = 0
+  last: number | null = null
+  order: Map<string, number> | null = null
+  readonly warming = new Map<string, Promise<boolean>>()
+
+  constructor(readonly names: string[]) {}
+
+  at(virtual: string): number | undefined {
+    this.order ??= new Map(this.names.map((name, i) => [name, i]))
+    return this.order.get(virtual)
   }
-  const warmed = async (path: PathSpec): Promise<void> => {
-    const at = order.get(path.virtual)
-    if (at === undefined) return
-    const start = Math.max(sent, at + 1)
-    if (start < operands.length && start <= at + READ_AHEAD / 2) {
-      const batch = operands.slice(start, start + READ_AHEAD)
-      sent = start + batch.length
-      const task = warm(dispatch, batch)
-      for (const p of batch) warming.set(p.virtual, task)
-    }
-    await warming.get(path.virtual)
-  }
-  noted(paths)
-  return [warmed, noted]
+}
+
+// A subtree answer and, once a read lands below it, its files grouped by
+// directory, each keyed by its path below `root`. Mirrors Python's `_Tree`.
+interface Tree {
+  root: string
+  rows: Map<string, FileStat>
+  groups: Map<string, string[]> | null
 }
 
 /**
- * Ask the dispatcher to keep `paths` in the read cache. A failure is logged
- * and dropped: each read that follows meets it. Mirrors Python's `_warm`.
+ * What a command's whole reads warm ahead of themselves.
+ *
+ * A command reads files in turn: its operands, each whole once the one before
+ * is done, or the files a walk lists, a directory at a time. On a whole read
+ * of one, the files after it in its run go to the dispatcher as one
+ * `read_many`, which keeps the small files among them in the read cache (one
+ * request where the store reads a batch), and the batch after goes once half
+ * of that one is read. Operands warm READ_AHEAD at a time. A walk warms as it
+ * shows it reads what it lists: one file once it reads two in a row, twice as
+ * many each time a read lands on a warmed file, up to READ_AHEAD, and none
+ * once it passes over files it warmed, so a walk that reads few of the files
+ * it lists (a name filter) fetches few it never reads; the pace carries into
+ * the next directory. A read whose file is still being warmed waits for it,
+ * so it is served warm instead of fetching the file again. No bytes are held
+ * here: a write in between drops the cached copy as it drops any. A path in
+ * neither the operands nor the latest LISTINGS listings and subtree answers
+ * warms nothing.
+ *
+ * It sits in the command's dispatcher (`dispatch`), which every whole read,
+ * listing and subtree read of the command goes through. Mirrors Python's
+ * `ReadAhead`.
  */
-async function warm(dispatch: DispatchFn, paths: readonly PathSpec[]): Promise<void> {
+export class ReadAhead {
+  private readonly operands = new Run([])
+  private readonly specs = new Map<string, PathSpec>()
+  private readonly stats = new Map<string, FileStat>()
+  private readonly runs = new Map<string, Run>()
+  private readonly trees: Tree[] = []
+  private width = 0
+  private kept = true
+
+  constructor(
+    private readonly inner: DispatchFn,
+    paths: readonly PathSpec[],
+  ) {
+    this.operands.sent = 1
+    this.operands.order = new Map()
+    this.noted(paths)
+  }
+
+  /** Learn the operands a glob resolved to, in order. */
+  noted(found: readonly PathSpec[]): void {
+    const run = this.operands
+    for (const path of found) {
+      if (path.pattern === null && !this.specs.has(path.virtual)) {
+        this.specs.set(path.virtual, path)
+        run.order?.set(path.virtual, run.names.length)
+        run.names.push(path.virtual)
+      }
+    }
+  }
+
+  /**
+   * The command's dispatcher: a whole read first warms what follows it, and a
+   * listing or subtree read is learned as the order the command's walk reads
+   * its files in.
+   */
+  readonly dispatch: DispatchFn = async (name, path, args, kwargs, report) => {
+    const asked = (kwargs ?? {}) as { offset?: number; size?: number | null; warm?: boolean }
+    if (
+      name === 'read' &&
+      (asked.offset ?? 0) === 0 &&
+      (asked.size ?? null) === null &&
+      asked.warm !== true
+    ) {
+      await this.warmed(path)
+    }
+    const answer = await this.inner(name, path, args, kwargs, report)
+    const folder = rstripSlash(path.virtual) || '/'
+    if (name === 'stat' && this.specs.has(path.virtual) && answer[0] instanceof FileStat) {
+      this.stats.set(path.virtual, answer[0])
+    } else if (name === 'readdir' && Array.isArray(answer[0])) {
+      const files = (answer[0] as string[]).filter((n) => !n.endsWith('/'))
+      this.keep(folder, new Run(files))
+    } else if (name === 'read_tree' && answer[0] instanceof Map) {
+      this.trees.push({ root: folder, rows: answer[0] as Map<string, FileStat>, groups: null })
+      if (this.trees.length > LISTINGS) this.trees.shift()
+    }
+    return answer
+  }
+
+  // Warm what follows `path` in its run, then wait for `path` itself while a
+  // batch is fetching it; a batch whose mount keeps no reads (one holding its
+  // data locally) ends the command's warming.
+  private async warmed(path: PathSpec): Promise<void> {
+    const run = this.run(path.virtual)
+    const at = run?.at(path.virtual)
+    if (run === undefined || at === undefined) return
+    const pending = run.warming.get(path.virtual)
+    run.warming.delete(path.virtual)
+    const width = run === this.operands ? READ_AHEAD : this.paced(run, at, pending !== undefined)
+    const start = Math.max(run.sent, at + 1)
+    if (
+      this.kept &&
+      width > 0 &&
+      start < run.names.length &&
+      start - at <= Math.max(1, width >> 1)
+    ) {
+      const batch = run.names.slice(start, start + width)
+      run.sent = start + batch.length
+      const specs = batch.map((n) => this.specs.get(n) ?? PathSpec.fromStrPath(n))
+      const stats = new Map<string, FileStat>()
+      for (const name of batch) {
+        const known = this.stats.get(name)
+        if (known !== undefined) stats.set(name, known)
+      }
+      const task = warm(this.inner, specs, stats)
+      for (const name of batch) run.warming.set(name, task)
+    }
+    if (pending !== undefined && !(await pending)) this.kept = false
+  }
+
+  // How many files a walk's read at `at` warms: twice the pace on a warmed
+  // file, none past warmed files it passed over, one once two reads in a row
+  // are neighbours, else the pace it had.
+  private paced(run: Run, at: number, hit: boolean): number {
+    const last = run.last
+    run.last = at
+    const passed = [...run.warming.keys()].filter((n) => (run.at(n) ?? at) < at)
+    for (const name of passed) run.warming.delete(name)
+    if (hit) this.width = Math.min(READ_AHEAD, Math.max(1, this.width) * 2)
+    else if (passed.length > 0) this.width = 0
+    else if (last !== null && at === last + 1) this.width = Math.max(1, this.width)
+    return this.width
+  }
+
+  private keep(folder: string, run: Run): Run {
+    this.runs.delete(folder)
+    this.runs.set(folder, run)
+    if (this.runs.size > LISTINGS) {
+      const oldest = this.runs.keys().next().value
+      if (oldest !== undefined) this.runs.delete(oldest)
+    }
+    return run
+  }
+
+  // The run a path is read in: the operands, its directory's listing, or that
+  // directory's files as a subtree answer holds them.
+  private run(virtual: string): Run | undefined {
+    if (this.specs.has(virtual)) return this.operands
+    const cut = virtual.lastIndexOf('/')
+    const folder = cut > 0 ? virtual.slice(0, cut) : '/'
+    const listed = this.runs.get(folder)
+    if (listed !== undefined) return this.keep(folder, listed)
+    for (const tree of [...this.trees].reverse()) {
+      const base = `${rstripSlash(tree.root)}/`
+      if (folder !== tree.root && !folder.startsWith(base)) continue
+      if (tree.groups === null) {
+        tree.groups = new Map()
+        for (const [key, row] of tree.rows) {
+          if (row.type === FileType.DIRECTORY) continue
+          const above = key.slice(0, Math.max(0, key.lastIndexOf('/')))
+          const group = tree.groups.get(above)
+          if (group === undefined) tree.groups.set(above, [key])
+          else group.push(key)
+        }
+      }
+      const rel = folder === tree.root ? '' : folder.slice(base.length)
+      const below = [...(tree.groups.get(rel) ?? [])].sort(compareCodePoints)
+      return this.keep(folder, new Run(below.map((key) => base + key)))
+    }
+    return undefined
+  }
+}
+
+/**
+ * Ask the dispatcher to keep `paths` in the read cache, and answer whether
+ * their mount keeps reads at all; `stats` are the stats the command made of
+ * them, which size a file no listing holds. A failure is logged and dropped:
+ * each read that follows meets it. Mirrors Python's `_warm`.
+ */
+async function warm(
+  dispatch: DispatchFn,
+  paths: readonly PathSpec[],
+  stats: Map<string, FileStat>,
+): Promise<boolean> {
   const [first, ...rest] = paths
-  if (first === undefined) return
+  if (first === undefined) return true
   try {
-    await dispatch('read_many', first, [], { paths: rest })
+    const [kept] = await dispatch('read_many', first, [], { paths: rest, stats })
+    return kept !== false
   } catch (err) {
     console.debug(`read-ahead from ${first.virtual} failed: ${String(err)}`)
+    return true
   }
 }
 
@@ -300,11 +458,9 @@ export function dispatchedReadTree(
 async function* dispatchedStream(
   dispatch: DispatchFn,
   path: PathSpec,
-  ahead?: (path: PathSpec) => Promise<void>,
   offset = 0,
   size: number | null = null,
 ): AsyncIterable<Uint8Array> {
-  if (ahead !== undefined) await ahead(path)
   const [data] = await dispatch('read', path, [], { stream: true, filetype: null, offset, size })
   yield* ensureStream(data as ByteSource)
 }
@@ -492,7 +648,7 @@ export function refuseReveal(src: PathSpec, dst: PathSpec, access?: SessionAcces
  * of a directory and a write to a slash-terminated name and fills a stat's
  * unknown size from the read cache. A command on one mount reads the stored
  * bytes (`filetype: null`), its whole reads warmed ahead of themselves
- * (`readAhead`), and, as the factory hands it on (`withReading`), under the
+ * (`ReadAhead`), and, as the factory hands it on (`withReading`), under the
  * command tier's guards: no call started once the line's signal has fired,
  * each operand's read cut into pieces under its abort and deadline. A run
  * across mounts (`crossesMounts`) reads each operand as the
@@ -504,7 +660,8 @@ export function refuseReveal(src: PathSpec, dst: PathSpec, access?: SessionAcces
 export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): CommandFiles {
   const vfs = ctx.vfs
   if (vfs === undefined) throw new TypeError(`${ctx.spec?.name ?? ''}: no workspace files`)
-  const dispatch = vfs.dispatch
+  const ahead = new ReadAhead(vfs.dispatch, paths)
+  const dispatch = ahead.dispatch
   const crossing = crossesMounts(ctx)
   const reading = crossing ? undefined : READINGS.get(ctx)
   const signal = reading === undefined ? undefined : ctx.signal
@@ -514,7 +671,6 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
   const home = mountRoot(ctx)
   const anchor = `${home}/`
   const mounts = mountsOf(ctx)
-  const [ahead, noted] = readAhead(dispatch, paths)
   const call = (
     name: string,
     path: PathSpec,
@@ -531,7 +687,7 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
     rawStat = async (path) => (await dispatch('stat', path, [], { nofollow: true }))[0] as FileStat
     rawReaddir = async (path, _nofollow, limit) =>
       (await dispatch('readdir', path, [], limit === undefined ? {} : { limit }))[0] as string[]
-    rawStream = (path) => callerStream(dispatch, currentCaller(), path, ahead)
+    rawStream = (path) => callerStream(dispatch, currentCaller(), path)
   } else {
     rawStat = (path) => dispatchedStat(dispatch, path)
     rawReaddir = async (path, nofollow, limit) =>
@@ -542,8 +698,8 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
     const stream = reading?.stream ?? null
     rawStream =
       stream === null
-        ? (path) => dispatchedStream(dispatch, path, ahead)
-        : (path) => stream(ctx, path) ?? dispatchedStream(dispatch, path, ahead)
+        ? (path) => dispatchedStream(dispatch, path)
+        : (path) => stream(ctx, path) ?? dispatchedStream(dispatch, path)
   }
   const read = (
     path: PathSpec,
@@ -553,7 +709,7 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
     const source =
       offset === 0 && size === null
         ? rawStream(path)
-        : dispatchedStream(dispatch, path, undefined, offset, size)
+        : dispatchedStream(dispatch, path, offset, size)
     return reading === undefined ? source : guardInput(source, ctx, reading.split)
   }
   // A run across mounts runs in no mount's cache scope: it takes an operand's
@@ -650,7 +806,9 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
       links === undefined ? undefined : (virtual: string) => links.targetStat(virtual),
       access,
       followOf(ctx),
-      noted,
+      (found: PathSpec[]) => {
+        ahead.noted(found)
+      },
     ),
     answers: (name: string) =>
       name === 'read_range' && reading?.stream != null

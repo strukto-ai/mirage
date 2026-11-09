@@ -117,10 +117,10 @@
         "redis",
         "opfs"
       ],
-      "command": "(mkdir -p /data/fcA_q && cd /data/fcA_q && printf x > 'back\\slash' && tar -cvf a.tar 'back\\slash' && rm 'back\\slash' && tar -xvf a.tar && cat 'back\\slash'; rc=$?; cd / && rm -r /data/fcA_q; exit $rc)",
+      "command": "(mkdir -p /data/fcA_q && cd /data/fcA_q && printf x > 'back\\slash' && tar -cvf a.tar 'back\\slash' && rm 'back\\slash' && tar -xvf a.tar && cat 'back\\slash'; rc=$?; cd / && rm -r /data/fcA_q; exit $rc); mkdir -p /data/ft6/d/sub; cd /data/ft6; echo aa > d/a.txt; echo bb > d/sub/b.txt; echo cc > c.log; echo ee > e.log; touch -d 2001-02-03T04:05:06Z c.log e.log d/a.txt; tar -cf u.tar c.log d/a.txt; echo new > c.log; touch -d 2005-01-01T00:00:00Z c.log; tar -uf u.tar c.log d/a.txt e.log; tar -tvf u.tar | awk '{print $1, $4, $5, $6}'; tar -uvf u.tar c.log; echo rc=$?; touch -d 1999-01-01T00:00:00Z c.log; tar -uf u.tar c.log; tar -tf u.tar | wc -l; touch -d 2009-01-01T00:00:00Z c.log; tar -uf u.tar c.log; tar -tf u.tar | wc -l; tar -uf new2.tar c.log; tar -uf new2.tar c.log; tar -tf new2.tar; ln -s old lnk; touch -h -d 2001-01-01T00:00:00Z lnk; tar -cf l.tar lnk; rm lnk; ln -s new lnk; touch -h -d 2002-01-01T00:00:00Z lnk; tar -uf l.tar lnk; tar -tvf l.tar | awk '{print $1, $4, $6, $7, $8}'; rm lnk; ln -s third lnk; touch -h -d 2002-01-01T00:00:00Z lnk; tar -uf l.tar lnk; tar -tf l.tar | wc -l; rm lnk; echo data > kf; tar -cf k.tar kf; rm kf; ln -s gone kf; tar -xkf k.tar kf 2>&1; echo rc=$?; tar -xf k.tar --skip-old-files kf; echo rc=$?; test -e gone; echo rc=$?; rm kf; mkdir -p bundle-.. out/sub; echo hi > bundle-../victim; echo keep > out/victim; tar -cf t.tar bundle-../victim; tar -xf t.tar -C out/sub --transform='s/^bundle-//' 2>&1; echo rc=$?; cat out/sub/victim out/victim; cd /; rm -r /data/ft6",
       "expect": {
         "exit": 0,
-        "stdout": "back\\\\slash\nback\\\\slash\nx",
+        "stdout": "back\\\\slash\nback\\\\slash\nx-rw-r--r-- 2001-02-03 04:05 c.log\n-rw-r--r-- 2001-02-03 04:05 d/a.txt\n-rw-r--r-- 2005-01-01 00:00 c.log\n-rw-r--r-- 2001-02-03 04:05 e.log\nrc=0\n4\n5\nc.log\nlrwxrwxrwx 2001-01-01 lnk -> old\nlrwxrwxrwx 2002-01-01 lnk -> new\n2\ntar: kf: Cannot open: File exists\ntar: Exiting with failure status due to previous errors\nrc=2\nrc=0\nrc=1\ntar: Removing leading `../' from member names\nrc=0\nhi\nkeep\n",
         "stderr": ""
       },
       "flags": [

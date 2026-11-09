@@ -34,6 +34,7 @@ from mirage.commands.builtin.generic.crossmount.types import (
     RunSingle,
 )
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
+from mirage.commands.builtin.generic_bind.files import ReadAhead
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
 from mirage.rs.diff_types import DiffComputer
@@ -132,6 +133,10 @@ async def run_relay(
         )
     if cmd_name == Cmd.LS:
         return await run_ls(scopes, flag_kwargs, dispatch, vfs, session_view)
+    if cmd_name in (Cmd.CP, Cmd.MV, Cmd.TAR, Cmd.ZIP):
+        # Their walks read what they list, so each read warms the files
+        # after it, as on one mount.
+        dispatch = ReadAhead(dispatch, ()).dispatch
     if cmd_name == Cmd.CP:
         return await run_cp(
             scopes, flag_kwargs, dispatch, storage_key, vfs, cwd, stdin
@@ -155,7 +160,7 @@ async def run_relay(
     if cmd_name == Cmd.UNZIP:
         return await run_unzip(scopes, text_args, flag_kwargs, dispatch, cwd)
     if cmd_name == Cmd.ZIP:
-        return await run_zip(scopes, flag_kwargs, dispatch, vfs)
+        return await run_zip(scopes, flag_kwargs, dispatch, vfs, cwd, stdin)
     if cmd_name in DISPATCH_BUILDERS:
         return await run_dispatch(
             DISPATCH_BUILDERS[cmd_name],

@@ -46,7 +46,6 @@ from mirage.server.rpc.constants import (
     RPC_PARSE_ERROR,
 )
 from mirage.server.vfs_calls import VFS_CALLS, VfsCall
-from mirage.shell.errors import TooManyMatches
 from mirage.types import JsonValue
 from mirage.workspace.tools.tool_operations import MirageToolOperations
 from mirage.workspace.workspace import Workspace
@@ -123,12 +122,12 @@ class MirageRpcServer:
     """Serves one session of a workspace over JSON-RPC 2.0.
 
     The methods are the in-app Session API under the same names: ``shell``
-    is ``session.shell``, ``glob`` is ``session.glob``, ``vfs/<call>`` is
-    ``session.vfs.<call>``, and ``tools/<tool>`` runs one of the
-    session's agent tools, which ``tools/list`` and ``tools/call`` also
-    serve with MCP's schemas. ``shell`` and ``vfs/<call>`` take
-    ``explain: true`` to answer what the call would do instead of doing
-    it (``session.explain``). Bytes travel as base64.
+    is ``session.shell``, ``vfs/<call>`` is ``session.vfs.<call>``, and
+    ``tools/<tool>`` runs one of the session's agent tools, which
+    ``tools/list`` and ``tools/call`` also serve with MCP's schemas.
+    ``shell`` and ``vfs/<call>`` take ``explain: true`` to answer what the
+    call would do instead of doing it (``session.explain``). Bytes travel
+    as base64.
     ``$/cancelRequest`` cancels a running request. A ``shell`` with
     ``open_stdin: true`` reads what ``stdin/write`` sends it until
     ``stdin/close``, each naming that request's id as ``id``.
@@ -165,7 +164,6 @@ class MirageRpcServer:
             "shell": self._shell,
             "stdin/write": self._stdin_write,
             "stdin/close": self._stdin_close,
-            "glob": self._glob,
             **{
                 f"vfs/{call.name}": partial(self._vfs, call)
                 for call in VFS_CALLS
@@ -439,15 +437,6 @@ class MirageRpcServer:
                 await self._call_there(pipe.close_reader)
             except RuntimeError as exc:
                 logger.debug("the workspace stopped with its line: %s", exc)
-
-    async def _glob(self, params: Params) -> JsonValue:
-        try:
-            paths = await self.hop(
-                self._session.glob(_text(params, "pattern"))
-            )
-        except TooManyMatches as exc:
-            raise RpcError(RPC_INVALID_PARAMS, exc.reason) from exc
-        return list(paths)
 
     async def _vfs(self, call: VfsCall, params: Params) -> JsonValue:
         explain = _flag(params, "explain")

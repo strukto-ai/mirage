@@ -1,8 +1,13 @@
+from collections.abc import Sequence
+from dataclasses import dataclass
+
 from mirage.commands.builtin.generic.archive.types import Entry, MemberKind
 from mirage.commands.builtin.generic.archive.walk import (
     OTHER_FILESYSTEM,
     DirProbe,
     WalkFn,
+    link_time,
+    recorded_stamp,
     scan_operand,
 )
 from mirage.commands.builtin.generic.tar import constants
@@ -26,7 +31,22 @@ def _refusal(notices: list[str]) -> CreateResult:
     )
 
 
-def excluded(name: str, pattern: str) -> bool:
+@dataclass(frozen=True, slots=True)
+class Exclusion:
+    """One ``--exclude`` or ``-X`` pattern and how it was asked to match.
+
+    Args:
+        pattern (str): the pattern.
+        anchored (bool): only the whole name, not any suffix of it.
+        wildcards (bool): its ``*``, ``?`` and ``[`` are wildcards.
+    """
+
+    pattern: str
+    anchored: bool = False
+    wildcards: bool = True
+
+
+def excluded(name: str, rule: Exclusion) -> bool:
     """Whether GNU's ``--exclude`` pattern matches this member name.
 
     GNU's exclusion is unanchored: the pattern is tried against the whole
@@ -40,20 +60,28 @@ def excluded(name: str, pattern: str) -> bool:
 
     Args:
         name (str): the member name, with or without a trailing slash.
-        pattern (str): the raw ``--exclude`` value.
+        rule (Exclusion): the pattern and how it matches.
     """
+
+    def same(part: str) -> bool:
+        if rule.wildcards:
+            return fnmatch(part, rule.pattern)
+        return part == rule.pattern
+
     bare = name.rstrip("/")
-    if fnmatch(bare, pattern):
+    if same(bare):
         return True
+    if rule.anchored:
+        return False
     cut = bare.find("/")
     while cut != -1:
-        if fnmatch(bare[cut + 1 :], pattern):
+        if same(bare[cut + 1 :]):
             return True
         cut = bare.find("/", cut + 1)
     return False
 
 
-def pruned(names: list[str], pattern: str | None) -> list[str]:
+def pruned(names: list[str], rules: Sequence[Exclusion]) -> list[str]:
     """Drop excluded names and everything beneath an excluded directory.
 
     GNU does not walk into a directory it excluded, so ``--exclude sub``
@@ -62,16 +90,16 @@ def pruned(names: list[str], pattern: str | None) -> list[str]:
 
     Args:
         names (list[str]): member names in walk order.
-        pattern (str | None): the raw ``--exclude`` value, or None.
+        rules (Sequence[Exclusion]): the patterns, any of which excludes.
     """
-    if pattern is None:
+    if not rules:
         return names
     kept: list[str] = []
     cut_dirs: list[str] = []
     for name in names:
         if any(name.startswith(cut) for cut in cut_dirs):
             continue
-        if excluded(name, pattern):
+        if any(excluded(name, rule) for rule in rules):
             if name.endswith("/"):
                 cut_dirs.append(name)
             continue
@@ -141,7 +169,7 @@ def _announce_prefix(
     notices.append(removing_leading(prefix))
 
 
-def member_name(spelled: str, kind: MemberKind) -> str:
+def member_name(spelled: str, kind: MemberKind, absolute: bool = False) -> str:
     """The name tar records for a path spelled as the operand was typed.
 
     The traversal prefix is dropped (see `strip_prefix`) and a directory
@@ -152,8 +180,9 @@ def member_name(spelled: str, kind: MemberKind) -> str:
     Args:
         spelled (str): the path as the operand spelled it.
         kind (MemberKind): what the entry is.
+        absolute (bool): -P, the name is stored as it is spelled.
     """
-    name, _ = strip_prefix(spelled)
+    name = spelled if absolute else strip_prefix(spelled)[0]
     if kind == "dir":
         if not name:
             return "./"
@@ -206,7 +235,7 @@ async def plan_create(
     paths: list[PathSpec],
     *,
     archive: PathSpec,
-    exclude: str | None,
+    exclude: Sequence[Exclusion],
     dereference: bool,
     stat: StatFn,
     walk: WalkFn,
@@ -215,6 +244,10 @@ async def plan_create(
     links: LinkView | None = None,
     mounts: MountView | None = None,
     one_file_system: bool = False,
+    absolute: bool = False,
+    allow_empty: bool = False,
+    leading: Sequence[str] = (),
+    leading_status: int = 0,
 ) -> CreateResult:
     """Decide every member of a new archive, before writing any of it.
 
@@ -230,7 +263,8 @@ async def plan_create(
             re-based by any ``-C``.
         archive (PathSpec): the ``-f`` target, so it can be left out of
             itself.
-        exclude (str | None): the raw ``--exclude`` value.
+        exclude (Sequence[Exclusion]): the patterns that leave members
+            out.
         dereference (bool): ``-h``, archive what a symlink points at.
         stat (StatFn): backend stat, raising when nothing is there.
         walk (WalkFn): subtree listing, by find type.
@@ -242,16 +276,22 @@ async def plan_create(
         mounts (MountView | None): where the mount boundaries are.
         one_file_system (bool): --one-file-system, asked for, so a mount
             left out goes unreported, as in GNU.
+        absolute (bool): -P, names are stored as spelled and no prefix is
+            removed from them.
+        allow_empty (bool): an archive of no members is what was asked
+            for (-r, -u, or a -T list).
+        leading (Sequence[str]): what reading the -T lists already said.
+        leading_status (int): the status those lines came to.
     """
-    if not paths:
+    if not paths and not allow_empty:
         return _refusal([constants.EMPTY_ARCHIVE, constants.USAGE_HINT])
     directory_errors = await check_directories(directories or [], is_dir, stat)
     if directory_errors:
         return _refusal(directory_errors)
     members: list[Member] = []
-    notices: list[str] = []
+    notices: list[str] = list(leading)
     dropped: list[str] = []
-    exit_code = 0
+    exit_code = leading_status
     for path in paths:
         if path.walk_error is not None:
             # The walk refused the operand before tar ran (the empty
@@ -260,11 +300,14 @@ async def plan_create(
             # it cannot stat.
             if path.raw_path == "":
                 notices.append(constants.EMPTY_MEMBER)
-            _announce_prefix(
-                strip_prefix(path.raw_path.rstrip("/") or path.raw_path)[1],
-                dropped,
-                notices,
-            )
+            if not absolute:
+                _announce_prefix(
+                    strip_prefix(path.raw_path.rstrip("/") or path.raw_path)[
+                        1
+                    ],
+                    dropped,
+                    notices,
+                )
             notices.append(
                 cannot(path.raw_path, "stat", fs_strerror(walk_refusal(path)))
             )
@@ -291,15 +334,19 @@ async def plan_create(
         # operand's error. The operand's own spelling carries the prefix
         # even when nothing under it can be archived, which is why
         # `tar -cf a.tar sub/../missing` still announces `sub/../`.
-        _announce_prefix(strip_prefix(raw)[1], dropped, notices)
+        if not absolute:
+            _announce_prefix(strip_prefix(raw)[1], dropped, notices)
         # Each name is then stripped on its own, so one operand can owe
         # two notices: `tar -cf a.tar ..` drops `..` from the directory
         # and `../` from everything under it.
         named: list[tuple[str, str, Entry]] = []
         for entry in scan.entries:
             spelled = respell_one(entry.name_path, base, raw)
-            _announce_prefix(strip_prefix(spelled)[1], dropped, notices)
-            named.append((member_name(spelled, entry.kind), spelled, entry))
+            if not absolute:
+                _announce_prefix(strip_prefix(spelled)[1], dropped, notices)
+            named.append(
+                (member_name(spelled, entry.kind, absolute), spelled, entry)
+            )
         for problem in scan.problems:
             shown = respell_one(problem.path, base, raw)
             # A link followed onto another mount is a crossing too, which
@@ -320,7 +367,9 @@ async def plan_create(
         if scan.missing:
             continue
         for crossing in [] if one_file_system else scan.crossings:
-            shown = member_name(respell_one(crossing, base, raw), "dir")
+            shown = member_name(
+                respell_one(crossing, base, raw), "dir", absolute
+            )
             notices.append(f"tar: {shown}: {OTHER_FILESYSTEM}")
         keep = set(pruned([name for name, _, _ in named], exclude))
         for name, spelled, entry in named:
@@ -334,6 +383,9 @@ async def plan_create(
             ):
                 notices.append(f"tar: {name}: {constants.SELF_DUMP}")
                 continue
+            mtime, mode = await recorded_stamp(stat, read)
+            if entry.kind == "link":
+                mtime = link_time(links, entry.name_path)
             members.append(
                 Member(
                     name=name,
@@ -342,6 +394,8 @@ async def plan_create(
                     target=entry.target,
                     spelled=spelled,
                     size=entry.size,
+                    mtime=mtime,
+                    mode=mode,
                 )
             )
     return CreateResult(

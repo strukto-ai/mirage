@@ -13,13 +13,23 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from contextlib import aclosing
 from functools import partial
 
 from mirage.commands.builtin.generic_bind.dispatch import caller_stream
 from mirage.commands.builtin.utils.links import link_location
-from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
+from mirage.commands.builtin.utils.stream import (
+    is_stdin,
+    ranged_stream,
+    resolve_source,
+)
 from mirage.commands.quote import quote_text
 from mirage.context.session_context import current_caller
 from mirage.errors.classify import classify
@@ -46,6 +56,7 @@ from mirage.types import (
     PathSpec,
     ReadStreamFn,
 )
+from mirage.utils.dates import stat_epoch
 from mirage.utils.path import CycleError
 from mirage.view.types import LinkView, MountView
 
@@ -101,6 +112,9 @@ class StreamHost:
             standing in for a rename does not cross.
         unbuffered (bool): The stream read no further into standard input
             than it used, so what it hands back the next command reads.
+        sized (Callable[[PathSpec], Awaitable[int | None]] | None): An
+            operand's length where a read may open past the bytes it
+            skips (``file_size``); None opens every input at its start.
     """
 
     def __init__(
@@ -117,7 +131,10 @@ class StreamHost:
         links: LinkView | None = None,
         mounts: MountView | None = None,
         unbuffered: bool = False,
+        sized: Callable[[PathSpec], Awaitable[int | None]] | None = None,
+        chmod: Callable[[PathSpec, int], Awaitable[None]] | None = None,
     ) -> None:
+        self.chmod = chmod
         self.operands = operands
         self.dash = dash
         self.command = command
@@ -132,6 +149,8 @@ class StreamHost:
         self.links = links
         self.mounts = mounts
         self.unbuffered = unbuffered
+        self.sized = sized
+        self.lengths: dict[str, int | None] = {}
         self.caller = current_caller()
         self.inputs: dict[int, AsyncIterator[bytes]] = {}
         self.named: dict[int, PathSpec] = {}
@@ -258,8 +277,12 @@ class StreamHost:
             return Served({})
         if op == "write":
             return await self._write(request, data)
-        if op in ("unlink", "mkdir", "stat"):
+        if op in ("unlink", "mkdir", "stat", "rmdir"):
             return await self._path_op(op, str(request["path"]))
+        if op == "chmod":
+            return await self._chmod(
+                str(request["path"]), int(str(request["mode"]))
+            )
         if op == "readlink":
             return await self._readlink(str(request["path"]))
         if op in ("copy", "rename"):
@@ -326,6 +349,51 @@ class StreamHost:
             request.get("as_operand") is True,
         )
 
+    async def _start(
+        self, fd: int, request: Mapping[str, JsonValue]
+    ) -> tuple[dict[str, JsonValue], AsyncIterator[bytes] | None]:
+        """Open an input for a read. A range (``skip``, at most ``size``
+        bytes) opens an operand past the bytes it skips where its length
+        is known, and the reply says how far (``skipped``) and that length
+        (``size``); any other input opens at its start."""
+        path, skip, operand = (
+            request.get(k) for k in ("path", "skip", "operand")
+        )
+        sized = self.sized
+        if (
+            sized is None
+            or not isinstance(path, str)
+            or not isinstance(skip, int)
+            or not isinstance(operand, int)
+        ):
+            return {}, self._open(fd, request)
+        named = self._operand(text_view(path), operand)
+        if (
+            named is None
+            or is_stdin(named, self.dash)
+            or (self.local is not None and not self.local(named))
+        ):
+            return {}, self._open(fd, request)
+        if self.command:
+            self.named[fd] = named
+        if named.virtual not in self.lengths:
+            self.lengths[named.virtual] = await sized(named)
+        length = self.lengths[named.virtual]
+        if length is None:
+            return {}, self._open(fd, request)
+        start = min(skip, length)
+        size = request.get("size")
+        end = min(length, start + size) if isinstance(size, int) else length
+        opened: dict[str, JsonValue] = {"skipped": start, "size": length}
+        if start >= end:
+            # A skip past the whole file still opens it: one that refuses
+            # fails here, and its bytes are not skipped.
+            if start > 0:
+                await drain(ranged_stream(self.stream, named, 0, 1))
+            self.named.pop(fd, None)
+            return opened, None
+        return opened, ranged_stream(self.stream, named, start, end)
+
     def _failed(self, fd: int, exc: Exception) -> Served:
         """A failed input's reply, or raise what is not the file's own: the
         failure's words, and the line the command words for an operand."""
@@ -361,12 +429,16 @@ class StreamHost:
                 {}, await held.read(offset, min(size, held.size - offset))
             )
         source = self.inputs.get(fd)
+        opened: dict[str, JsonValue] = {}
         if source is None:
-            source = self._open(fd, request)
+            try:
+                opened, source = await self._start(fd, request)
+            except Exception as exc:
+                return self._failed(fd, exc)
             if source is not None:
                 self.inputs[fd] = source
         if source is None:
-            return Served({"end": True})
+            return Served({**opened, "end": True})
         least = request.get("least")
         ended = False
         try:
@@ -388,14 +460,25 @@ class StreamHost:
         if chunk is None or ended:
             del self.inputs[fd]
             self.named.pop(fd, None)
-            return Served({"end": True}, bytes(chunk or b""))
-        return Served({}, bytes(chunk))
+            return Served({**opened, "end": True}, bytes(chunk or b""))
+        return Served(opened, bytes(chunk))
 
     async def _replace(
         self, path: PathSpec, atomic: bool, source: ByteSource
     ) -> None:
         assert self.dispatch is not None
         await self.dispatch("write", path, data=source, atomic=atomic)
+
+    async def _chmod(self, name: str, mode: int) -> Served:
+        """Give a path a mode, through the workspace's attribute overlay."""
+        if self.chmod is None:
+            return Served({"fatal": "file output requires a workspace"})
+        path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
+        try:
+            await self.chmod(path, mode)
+        except WALK_ERRORS as exc:
+            return Served(_failure(exc))
+        return Served({})
 
     async def _path_op(self, op: str, name: str) -> Served:
         """Unlink, make (one level) or stat a path; a stat answers what
@@ -410,7 +493,8 @@ class StreamHost:
         if op != "stat" or found is None:
             return Served({})
         kind = "dir" if found.type == FileType.DIRECTORY else "file"
-        return Served({"kind": kind})
+        mtime = stat_epoch(found.modified)
+        return Served({"kind": kind, "mtime": mtime})
 
     def _where(self, path: PathSpec) -> str:
         """Where a name stands as lstat reaches it: every link above its
@@ -424,8 +508,8 @@ class StreamHost:
 
     async def _readlink(self, name: str) -> Served:
         """What a link holds, or that the name is no link; a name nothing
-        stands at answers why. The name itself is never followed, the
-        links above it are."""
+        stands at, or a link the rules refuse, answers why. The name itself
+        is never followed, the links above it are."""
         if self.dispatch is None:
             return Served({"fatal": "file output requires a workspace"})
         path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
@@ -433,8 +517,10 @@ class StreamHost:
             where = self._where(path)
             link = None if self.links is None else self.links.stat_at(where)
             target = None if link is None else link.extra.get(LINK_TARGET_KEY)
-            if isinstance(target, str):
-                return Served({"target": byte_view(target)})
+            if link is not None and isinstance(target, str):
+                await self.dispatch("readlink", path)
+                mtime = stat_epoch(link.modified)
+                return Served({"target": byte_view(target), "mtime": mtime})
             found, _ = await self.dispatch("stat", path)
             if found is None:
                 raise enoent(path)

@@ -12,119 +12,77 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy import PolicyDenied
-from mirage.shell.constants import BASH_LINENO, FUNCNAME
-from mirage.shell.errors import ArithError
+from mirage.shell.call_stack import CallStack
+from mirage.shell.constants import FUNCNAME
 from mirage.shell.voice import shell_voice
-from mirage.view.types import SessionView
-from mirage.workspace.executor.builtins.constants import TARGET_RE
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.help import flag_help
 from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
     fail,
-    finish,
-    identifier_line,
-    require_view,
-    subscript_expansion,
+    written,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.expand.types import SubscriptFn
-from mirage.workspace.session import SessionState
-from mirage.workspace.session.state import (
-    deref,
-    session_view,
-    unset_element,
-)
+from mirage.workspace.expand.node import run_on_shell
+from mirage.workspace.expand.types import ExecuteFn
+from mirage.workspace.session.state import deciding
 
 
-def _unset_variable(session: SessionState, name: str) -> None:
-    """Clear the getopts residue after a whole-variable unset.
-
-    The record itself is the view's to drop, scalar or array alike: it
-    keeps a hidden name, and inside a function it may put back a value
-    an enclosing scope saved.
-
-    Args:
-        session (SessionState): shell session state.
-        name (str): a bare variable name (no subscript).
-    """
-    if name == "OPTIND":
-        session._getopts_optind = None
-    if name == FUNCNAME:
-        session.function_names = None
-
-
-async def _unset_one(
-    session: SessionState,
-    base: str,
-    subscript: str,
-    every: bool = False,
-) -> str:
-    """Clear one array element, or a scalar addressed as ``base[0]``, as
-    one gated write, so a denial leaves the array untouched.
-
-    Clearing an element keeps the indices of the elements after it, as
-    bash does: it leaves a hole, which neither expands in ``${arr[@]}``
-    nor counts toward ``${#arr[@]}`` but keeps ``${arr[i]}`` addressing
-    the same values. A subscript on a scalar names element 0 only, and a
-    subscript on a name that holds nothing at all, or a hidden one, is a
-    silent no-op. A subscript that does not evaluate ends the line, in
-    bash's words: ``unset 'a[1/0]'`` aborts with ``1/0: division by 0``.
+async def _unset_word(
+    letters: str,
+    word: str,
+    context: EvaluationContext,
+    execute_fn: ExecuteFn,
+    call_stack: CallStack | None,
+) -> tuple[list[tuple[bool, bytes]], int]:
+    """Unset one operand on the shell, then what it named on the host,
+    before the next operand runs.
 
     Args:
-        session (SessionState): shell session state.
-        base (str): the variable name without the subscript.
-        subscript (str): the subscript text between the brackets.
-        every (bool): the subscript was typed as ``@`` or ``*``, which
-            names every element.
+        letters (str): the option letters.
+        word (str): the operand.
+        context (EvaluationContext): the evaluation's session and frame.
+        execute_fn (ExecuteFn): evaluator for a subscript's substitutions.
+        call_stack (CallStack | None): shell call stack.
 
     Returns:
-        str: ``"ok"``, ``"notarray"`` when a non-zero subscript was
-            applied to a scalar, or ``"subscript"`` for a negative
-            subscript outside an existing array.
-
-    Raises:
-        PolicyDenied: the subscript assigned a hidden name.
+        tuple[list[tuple[bool, bytes]], int]: what it said, and its status.
     """
-    try:
-        return await unset_element(session, base, subscript, every)
-    except ArithError as exc:
-        raise exc.signal(fatal=True) from exc
-
-
-def _readonly(name: str, kind: str) -> str:
-    """bash's refusal to unset a readonly variable or function.
-
-    Args:
-        name (str): the name the refusal reports.
-        kind (str): ``variable`` or ``function``.
-    """
-    return f"{shell_voice()}unset: {name}: cannot unset: readonly {kind}\n"
+    session = context.session
+    pieces, status, function, tracked = await run_on_shell(
+        lambda shell: shell.unset_word(
+            letters,
+            word,
+            word in session.functions,
+            word in session.readonly_functions,
+            deciding(),
+        ),
+        context,
+        execute_fn,
+        call_stack,
+    )
+    if function:
+        session.remove_function(word)
+    if tracked == "OPTIND":
+        session._getopts_optind = None
+    if tracked == FUNCNAME:
+        session.function_names = None
+    return pieces, status
 
 
 async def handle_unset(
     args: list[str],
-    session: SessionState,
-    state: SessionView | None = None,
-    subscripts: SubscriptFn | None = None,
+    context: EvaluationContext,
+    execute_fn: ExecuteFn,
+    call_stack: CallStack | None = None,
 ) -> Result:
-    """Unset shell variables, arrays, or functions, with bash's flags.
-
-    ``-v`` targets a variable only, and refuses a word that names none;
-    ``-f`` a function only, never with ``-v``; and a bare name a
-    variable if one exists or else a function. A ``name[idx]``
-    operand clears one element; the readonly guard resolves it to the
-    base name first, since that is what ``readonly`` records. ``-n``
-    unsets a name reference itself, where a bare name unsets what the
-    reference points at. A name it cannot unset is reported and the rest
-    still go, for status 1.
+    """Read ``unset``'s options and unset its operands in order.
 
     Args:
         args (list[str]): option words followed by names to unset.
-        session (SessionState): shell session state.
-        subscripts (SubscriptFn | None): expands an operand's subscript,
-            which bash expands as one typed in ``${a[...]}``; None keeps
-            it as typed.
+        context (EvaluationContext): the evaluation's session and frame.
+        execute_fn (ExecuteFn): evaluator for a subscript's substitutions.
+        call_stack (CallStack | None): shell call stack.
     """
     if args[:1] == ["--help"]:
         answered = flag_help("unset")
@@ -153,90 +111,15 @@ async def handle_unset(
             f"{shell_voice()}unset: cannot simultaneously unset a function"
             " and a variable\n",
         )
-    mode = next((m for m in "fnv" if m in letters), "auto")
-    errors: list[str] = []
-    for name in args[i:]:
-        view = require_view(state)
-        if "v" in letters and TARGET_RE.match(name) is None:
-            # Only a variable must be named as one: without -v bash falls
-            # back to the function table, which takes any name.
-            errors.append(identifier_line("unset", name) + "\n")
-            continue
-        if mode == "n":
-            # `unset -n` drops the reference itself rather than what it
-            # points at; on a name that is not a reference bash unsets
-            # the variable, and both are one ungated-by-target unset. A
-            # frozen reference refuses, writable target or not.
-            if view.is_readonly(name, False):
-                errors.append(_readonly(name, "variable"))
-                continue
-            if name == BASH_LINENO:
-                errors.append(f"{shell_voice()}unset: {name}: cannot unset\n")
-                continue
-            try:
-                await view.unset(name, follow_ref=False)
-            except PolicyDenied as exc:
-                errors.append(f"{exc.strerror}\n")
-            continue
-        if mode == "f":
-            if name in session.readonly_functions:
-                errors.append(_readonly(name, "function"))
-                continue
-            session.remove_function(name)
-            continue
-        target = TARGET_RE.match(name)
-        subscript = target.group(2) if target is not None else None
-        is_element = subscript is not None
-        # `readonly arr` records the base name, so an `arr[i]` operand has
-        # to be resolved before the guard, as bash does, and a reference
-        # to the variable it reaches: bash names that variable, not the
-        # element or the reference, in the error.
-        base = target.group(1) if target is not None else name
-        if view.is_readonly(base):
-            errors.append(_readonly(deref(session, base), "variable"))
-            continue
-        if not is_element and deref(session, base) == BASH_LINENO:
-            errors.append(f"{shell_voice()}unset: {name}: cannot unset\n")
-            continue
-        existed = (
-            is_element
-            or name in session.env
-            or name in session.arrays
-            or name in session.assocs
+    said: list[tuple[bool, bytes]] = []
+    failed = 0
+    for word in args[i:]:
+        pieces, status = await _unset_word(
+            "".join(sorted(letters)), word, context, execute_fn, call_stack
         )
-        # Both spellings go through the session view: the whole-variable
-        # unset through its env half, an element unset inside _unset_one.
-        try:
-            if subscript is not None:
-                # `@` and `*` name every element as typed, never once a
-                # subscript expands to them (`i=@; unset 'a[$i]'`).
-                every = subscript in ("@", "*")
-                if subscripts is not None:
-                    subscript = await subscripts(subscript)
-                status = await _unset_one(session, base, subscript, every)
-            else:
-                await view.unset(name)
-                _unset_variable(session, deref(session, name))
-                status = "ok"
-        except PolicyDenied as exc:
-            errors.append(f"{exc.strerror}\n")
-            continue
-        if status != "ok":
-            # bash names the base for "not an array variable" but prints
-            # only the bracketed part for a bad subscript.
-            detail = (
-                f"unset: {base}: not an array variable"
-                if status == "notarray"
-                else f"unset: {name[len(base) :]}: bad array subscript"
-            )
-            errors.append(f"{shell_voice()}{detail}\n")
-            continue
-        if mode == "auto" and not existed and name in session.functions:
-            if name in session.readonly_functions:
-                errors.append(_readonly(name, "function"))
-                continue
-            session.remove_function(name)
-    return finish("unset", errors)
+        said.extend(pieces)
+        failed |= status
+    return written("unset", said, failed)
 
 
 async def unset_builtin(call: BuiltinCall) -> Result:
@@ -246,11 +129,5 @@ async def unset_builtin(call: BuiltinCall) -> Result:
         call (BuiltinCall): the invocation.
     """
     return await handle_unset(
-        list(call.argv.args),
-        call.context.session,
-        session_view(
-            call.context.session,
-            diagnostics=call.context.frame.diagnostics,
-        ),
-        subscript_expansion(call),
+        list(call.argv.args), call.context, call.execute_fn, call.call_stack
     )

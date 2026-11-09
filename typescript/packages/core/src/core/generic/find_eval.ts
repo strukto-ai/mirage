@@ -197,17 +197,12 @@ export function evaluate(node: PredNode, entry: FindEntry, effects: Effects): bo
       // Only a directory has contents to skip; a file key that is also a
       // directory prefix (an object store allows both) must not drop what
       // sits under the directory.
-      if (entry.kind === 'd' && effects.deferred.length > 0) {
-        node.pending.push({ entry })
-      } else if (entry.kind === 'd') {
-        node.pruned.push(entry.key)
-      }
       effects.pruned = effects.pruned || entry.kind === 'd'
       return true
     case 'mtime': {
       // An entry the walk fetched no time for passes here and meets the
       // expression's flat window afterwards; the test is recorded so a
-      // `-prune` reached past it is only pending.
+      // `-prune` skipped on its strength still counts.
       const at = stamp(entry, node.field ?? 'm')
       if (at === null) {
         effects.deferred.push(node)
@@ -231,18 +226,13 @@ export function displayPath(prefix: string, key: string): string {
 // Copy of a predicate tree bound to one start point. `-path` matches the
 // row as printed, but backend find ops evaluate entries by mount-relative
 // key; stamping the prefix and the operand's spelling onto the tree keeps
-// the evaluation site prefix-free (#396). Every prune node comes back with
-// an empty ledger, so what one start point pruned never drops rows from the
-// next (`find a/skip/inner a -path a/skip -prune -o -print` lists the first
-// operand in full, as GNU does).
+// the evaluation site prefix-free (#396).
 export function bindTree(node: PredNode, prefix: string, root = '', raw = ''): PredNode {
   switch (node.op) {
     case 'path':
       return { ...node, prefix, root, raw }
     case 'regex':
       return { ...node, prefix, root, raw, hits: new Map() }
-    case 'prune':
-      return { op: 'prune', pruned: [], pending: [] }
     case 'quit':
       return { op: 'quit', fired: [] }
     case 'not':
@@ -354,27 +344,9 @@ export function withoutPrune(node: PredNode): PredNode {
   }
 }
 
-// Every directory key the tree's `-prune` nodes reached, pending ones
-// included.
-export function prunedKeys(node: PredNode): string[] {
-  if (node.op === 'prune') return [...node.pruned, ...node.pending.map((p) => p.entry.key)]
-  if (node.op === 'not') return prunedKeys(node.kid)
-  if (node.op === 'and' || node.op === 'or') return node.kids.flatMap(prunedKeys)
-  return []
-}
-
-function pruneNodes(node: PredNode): Extract<PredNode, { op: 'prune' }>[] {
-  if (node.op === 'prune') return [node]
-  if (node.op === 'not') return pruneNodes(node.kid)
-  if (node.op === 'and' || node.op === 'or') return node.kids.flatMap(pruneNodes)
-  return []
-}
-
-// The tree with every time test false, sharing the prune ledgers. An entry
-// that reports no mtime once asked passes no time test, the way the flat
-// window admits no such row, so it matches and reaches the prunes it would
-// with every test false. The prune nodes are the original objects, so what
-// this copy records lands on the tree.
+// The tree with every time test false. An entry that reports no mtime once
+// asked passes no time test, the way the flat window admits no such row, so
+// it matches and reaches the prunes it would with every test false.
 export function timeTestsFailing(node: PredNode): PredNode {
   switch (node.op) {
     case 'mtime':
@@ -397,31 +369,39 @@ export function treeHasEmpty(node: PredNode): boolean {
   return false
 }
 
-// Whether `find` reports the entry. With no action in the tree the rows are
-// the entries the whole expression holds for, GNU's implicit `-print`. With
-// one, they are the entries an action reached: `-path ./skip -prune -o -type
-// f -print` holds for `./skip` but never prints it. `-mindepth` applies
-// neither tests nor actions above its level, so a shallow directory is not
-// pruned either. `acts` is whether the tree holds an action, for a walk that
-// works it out once for every entry.
+// Whether `find` reports the entry, and whether a walk stays out of it. With
+// no action in the tree the rows are the entries the whole expression holds
+// for, GNU's implicit `-print`. With one, they are the entries an action
+// reached: `-path ./skip -prune -o -type f -print` holds for `./skip` but
+// never prints it. `-mindepth` applies neither tests nor actions above its
+// level, so a shallow directory is not pruned either. A directory is pruned
+// when the evaluation reached a `-prune`, or passed every one on the
+// strength of a time test it carried no time for (`-mtime 1 -o -prune`),
+// since that time may send it into one: the most a walk without it can say.
+// `acts` is whether the tree holds an action, for a walk that works it out
+// once for every entry.
+export function verdict(
+  entry: FindEntry,
+  tree: PredNode,
+  minDepth: number | null | undefined,
+  acts = treeHasAction(tree),
+): [boolean, boolean] {
+  if (minDepth !== null && minDepth !== undefined && entry.depth < minDepth) return [false, false]
+  const effects = freshEffects()
+  const matched = evaluate(tree, entry, effects)
+  const pruned =
+    effects.pruned || (entry.kind === 'd' && effects.deferred.length > 0 && treeHasPrune(tree))
+  return [acts ? effects.acted : matched, pruned]
+}
+
+// Whether `find` reports the entry (`verdict`).
 export function keep(
   entry: FindEntry,
   tree: PredNode,
   minDepth: number | null | undefined,
   acts = treeHasAction(tree),
 ): boolean {
-  if (minDepth !== null && minDepth !== undefined && entry.depth < minDepth) return false
-  const effects = freshEffects()
-  const matched = evaluate(tree, entry, effects)
-  if (entry.kind === 'd' && effects.deferred.length > 0 && !effects.pruned) {
-    // The answer passed every -prune on the strength of an undecided test,
-    // and the directory's mtime may send it into one (`-mtime 1 -o
-    // -prune`), so it waits with the prunes it might reach, on the first
-    // of them.
-    const [first] = pruneNodes(tree)
-    if (first !== undefined) first.pending.push({ entry })
-  }
-  return acts ? effects.acted : matched
+  return verdict(entry, tree, minDepth, acts)[0]
 }
 
 // Basename of a find start path, as GNU prints and matches it. Single source

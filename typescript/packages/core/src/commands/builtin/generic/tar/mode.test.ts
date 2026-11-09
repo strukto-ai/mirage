@@ -21,6 +21,7 @@ it.each([
   [['-xzf', 'a.tgz', './m/x.json'], false],
   [['-tzf', 'a.tgz'], false],
   [['cf', 'a.tar', 'd'], true],
+  [['fc', 'a.tar', 'd'], true],
   [['-xf', 'a.tar', 'crate'], false],
   [['--exclude', 'c', '-xf', 'a.tar'], false],
   // GNU reads everything after -- as an operand (`tar: -C: Not found in

@@ -18,6 +18,7 @@ import { config } from './config.ts'
 import type { C } from './config.ts'
 import { githubRoutes } from './routes.ts'
 import { seedRepos } from './seed.ts'
+import { forgetKept } from './store.ts'
 
 export const githubFake: Fake<C> = {
   config,
@@ -39,5 +40,6 @@ export const githubFake: Fake<C> = {
   // stateable in a fixture, so that happens here, along with registering the
   // workflow files each repository holds.
   afterSeed: seedRepos,
+  afterReset: forgetKept,
   routes: githubRoutes,
 }

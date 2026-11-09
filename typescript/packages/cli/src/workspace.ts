@@ -128,7 +128,6 @@ interface Internals {
 interface WorkspaceDetail {
   id: string
   status: string
-  mode: string
   created_at: number
   mounts?: MountSummary[]
   sessions?: SessionSummary[]
@@ -158,7 +157,6 @@ function formatWorkspaceDetail(d: WorkspaceDetail): string {
   const lines: string[] = [
     `ID:        ${d.id}`,
     `Status:    ${d.status}`,
-    `Mode:      ${d.mode}`,
     `Created:   ${formatAge(d.created_at)} ago`,
   ]
   if (d.mounts !== undefined && d.mounts.length > 0) {

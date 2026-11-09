@@ -20,10 +20,8 @@ import pytest
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import (
-    create_repo,
     ensure_ref,
     fetch_default_branch,
-    list_repos,
     parse_repo,
 )
 
@@ -111,51 +109,6 @@ async def test_ensure_ref_keeps_a_pinned_ref_without_a_request(
     accessor = GitHubAccessor(account, "acme", "proj", "release-2")
     assert await ensure_ref(accessor) == "release-2"
     mock_get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("owner", "expected"),
-    [("Alice", "/user/repos"), ("acme", "/orgs/acme/repos")],
-)
-async def test_create_repo_distinguishes_the_user_from_an_org(
-    monkeypatch, account, owner, expected
-):
-    calls = []
-
-    async def request(account, method, path, body=None):
-        calls.append((method, path, body))
-        return {"login": "alice"} if path == "/user" else {"name": "new"}
-
-    monkeypatch.setitem(create_repo.__globals__, "github_request", request)
-    body = {"name": "new"}
-
-    assert await create_repo(account, owner, body) == {"name": "new"}
-    assert calls == [("GET", "/user", None), ("POST", expected, body)]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("kind", "expected"),
-    [("User", "/users/alice/repos"), ("Organization", "/orgs/alice/repos")],
-)
-async def test_list_repos_resolves_the_owner_type(monkeypatch, kind, expected):
-    calls = []
-
-    async def request(account, method, path):
-        return {"type": kind}
-
-    async def pages(account, path, *, params, limit):
-        calls.append((path, params, limit))
-        return []
-
-    monkeypatch.setitem(list_repos.__globals__, "github_request", request)
-    monkeypatch.setitem(list_repos.__globals__, "github_pages", pages)
-
-    assert (
-        await list_repos(GitHubAccount(GhConfig(token="t")), "alice", 5) == []
-    )
-    assert calls == [(expected, {"sort": "pushed"}, 5)]
 
 
 @pytest.mark.asyncio

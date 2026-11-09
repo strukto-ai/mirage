@@ -15,7 +15,7 @@
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { BIN_PREFIX } from '@struktoai/mirage-core/shell/constants'
 import { HISTORY_PREFIX } from '@struktoai/mirage-core/vfs/history/history'
-import { parseMountMode, type JsonValue } from '@struktoai/mirage-core/types'
+import { MountBackend, parseMountMode, type JsonValue } from '@struktoai/mirage-core/types'
 import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import { normDir } from '@struktoai/mirage-core/utils/slash'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -66,38 +66,39 @@ async function buildInternals(ws: Workspace): Promise<WorkspaceInternals> {
 }
 
 export function makeBrief(entry: WorkspaceEntry): WorkspaceBrief {
-  const ws = entry.runner.ws
-  const mounts = userMounts(ws)
-  return {
-    id: entry.id,
-    status: 'running',
-    mode: mounts[0]?.mode ?? 'read',
-    mount_count: mounts.length,
-    session_count: ws.listSessions().length,
-    created_at: entry.createdAt,
-  }
+  return { id: entry.id, status: 'running', created_at: entry.createdAt }
+}
+
+/** A kernel-mount map keyed by directory prefix, as mounts list theirs. */
+function byDir<T>(map: Record<string, T>): Map<string, T> {
+  return new Map(Object.entries(map).map(([k, v]) => [normDir(k), v]))
 }
 
 export async function makeDetail(entry: WorkspaceEntry, verbose = false): Promise<WorkspaceDetail> {
   const ws = entry.runner.ws
   const mounts = userMounts(ws)
+  const kernel = ws as {
+    fuseMountpoints?: Record<string, string>
+    kernelBackends?: Record<string, MountBackend>
+  }
+  const points = byDir(kernel.fuseMountpoints ?? {})
+  const backends = byDir(kernel.kernelBackends ?? {})
   const mountSummaries: MountSummary[] = mounts.map((m) => ({
     prefix: m.prefix,
     vfs: m.vfs.name,
     mode: m.mode,
     description: describeVfs(m.vfs),
+    backend: backends.get(m.prefix) ?? MountBackend.WORKSPACE,
+    mountpoint: points.get(m.prefix) ?? null,
   }))
   const sessions: SessionSummary[] = ws.listSessions().map((s) => ({
     session_id: s.sessionId,
     cwd: s.cwd,
   }))
-  const fuseMountpoints = (ws as { fuseMountpoints?: Record<string, string> }).fuseMountpoints ?? {}
   return {
     id: entry.id,
     status: 'running',
-    mode: mounts[0]?.mode ?? 'read',
     created_at: entry.createdAt,
-    fuse_mountpoints: fuseMountpoints,
     system_time: ws.systemTime,
     mounts: mountSummaries,
     sessions,
@@ -122,10 +123,21 @@ function configMounts(config: Record<string, JsonValue> | null): MountSummary[] 
         vfs: typeof spec.vfs === 'string' ? spec.vfs : '',
         mode: modeOf(spec.mode, mode),
         description: '',
+        backend: backendOf(spec.backend),
+        mountpoint: null,
       }
     })
     .filter((m) => !isAutoPrefix(m.prefix))
     .sort((a, b) => b.prefix.length - a.prefix.length)
+}
+
+/** The backend a saved config's mount names, `workspace` when it names none. */
+function backendOf(value: JsonValue | undefined): MountBackend {
+  if (typeof value !== 'string' || value === '') return MountBackend.WORKSPACE
+  const known = Object.values(MountBackend) as string[]
+  if (known.includes(value.toLowerCase())) return value.toLowerCase() as MountBackend
+  console.debug(`mirage: a saved config's backend did not parse: ${value}`)
+  return MountBackend.WORKSPACE
 }
 
 /**
@@ -143,24 +155,11 @@ function modeOf(value: JsonValue | undefined, fallback: string): string {
 }
 
 /**
- * A stopped workspace's brief, from the config it starts from (null when
- * it kept none) and when it was first created. Mirrors Python's
- * `make_stopped_brief`.
+ * A stopped workspace's brief, from when it was first created. Mirrors
+ * Python's `make_stopped_brief`.
  */
-export function makeStoppedBrief(
-  id: string,
-  config: Record<string, JsonValue> | null,
-  createdAt: number,
-): WorkspaceBrief {
-  const mounts = configMounts(config)
-  return {
-    id,
-    status: 'stopped',
-    mode: mounts[0]?.mode ?? 'read',
-    mount_count: mounts.length,
-    session_count: 0,
-    created_at: createdAt,
-  }
+export function makeStoppedBrief(id: string, createdAt: number): WorkspaceBrief {
+  return { id, status: 'stopped', created_at: createdAt }
 }
 
 /** A stopped workspace's detail, as `makeStoppedBrief`. Mirrors Python's `make_stopped_detail`. */
@@ -169,15 +168,12 @@ export function makeStoppedDetail(
   config: Record<string, JsonValue> | null,
   createdAt: number,
 ): WorkspaceDetail {
-  const mounts = configMounts(config)
   return {
     id,
     status: 'stopped',
-    mode: mounts[0]?.mode ?? 'read',
     created_at: createdAt,
-    fuse_mountpoints: {},
     system_time: null,
-    mounts,
+    mounts: configMounts(config),
     sessions: [],
     internals: null,
   }

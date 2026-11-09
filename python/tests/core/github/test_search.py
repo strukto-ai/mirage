@@ -17,13 +17,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
-from mirage.core.api.client import ApiResponse
 from mirage.core.github.config import GhConfig
 from mirage.core.github.search import (
     SearchResult,
     files_containing,
     narrow_paths,
-    search,
     search_code,
 )
 from mirage.core.github.tree_entry import TreeEntry
@@ -417,36 +415,6 @@ async def test_narrow_paths_big_files_do_not_rescue_a_truncated_answer(
     assert out is None
 
 
-@pytest.mark.asyncio
-async def test_rest_search_paginates_and_clips_the_final_page(monkeypatch):
-    requests = []
-
-    async def request(*args, **kwargs):
-        params = kwargs["params"]
-        requests.append(dict(params))
-        start = (int(params["page"]) - 1) * 100
-        return ApiResponse(
-            {"items": list(range(start, start + 100))},
-            200,
-            {"link": '<https://api.github.test/next>; rel="next"'},
-        )
-
-    monkeypatch.setitem(search.__globals__, "github_request_response", request)
-    rows = await search(
-        GitHubAccount(GhConfig(token="test")),
-        "issues",
-        "repo:acme/proj",
-        102,
-        "created",
-        "asc",
-    )
-    assert rows == list(range(102))
-    assert [params["page"] for params in requests] == ["1", "2"]
-    assert all(params["per_page"] == "100" for params in requests)
-    assert requests[0]["sort"] == "created"
-    assert requests[0]["order"] == "asc"
-
-
 REFUSED_AT_4 = b"more than 4 files in scope (walk_limit); narrow the path\n"
 
 STOPPED_AT_4 = b"stopped after 4 files (walk_limit); narrow the path\n"
@@ -508,8 +476,14 @@ async def _on_github(
 
 
 def _read(hub: FakeGitHub) -> list[str]:
+    # A file is read by its blob, or in a batch the read-ahead sends.
     names = {blob_sha(data): path for path, data in REPO.items()}
-    return sorted(names[sha] for route, sha in hub.log if route == "blob")
+    return sorted(
+        names[sha]
+        for route, raw in hub.log
+        if route in ("blob", "graphql")
+        for sha in raw.split(",")
+    )
 
 
 @pytest.mark.asyncio
@@ -589,7 +563,8 @@ async def test_a_ref_off_the_default_branch_stops_at_the_cap(monkeypatch):
     got, hub = await _on_github(line, monkeypatch, pinned=True, limit=4)
     assert got == await _run(_ram(), line, 4)
     assert got[1:] == (b"grep: /gh: " + STOPPED_AT_4, 2)
-    assert len(_read(hub)) == 4
+    # The walk reads four; the read-ahead warmed the file after them.
+    assert len(_read(hub)) == 5
 
 
 @pytest.mark.asyncio

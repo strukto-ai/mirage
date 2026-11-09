@@ -428,6 +428,9 @@ impl<'a> Writer<'a> {
         every: bool,
     ) -> Result<Element, Fault> {
         let name = self.store.target(name);
+        if self.deciding {
+            return Err(Fault::Hidden(name));
+        }
         if self.store.hidden(&name) {
             return Ok(Element::Landed);
         }
@@ -773,7 +776,7 @@ impl<'a> Writer<'a> {
         let value = outcome.value;
         let mut landed = Ok(());
         for write in outcome.writes {
-            if self.store.hidden(&self.store.target(&write.name)) {
+            if self.deciding || self.store.hidden(&self.store.target(&write.name)) {
                 landed = Err(Fault::Hidden(write.name));
                 break;
             }

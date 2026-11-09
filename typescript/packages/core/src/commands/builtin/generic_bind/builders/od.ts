@@ -6,7 +6,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { byteView } from '../../../../shell/bytes.ts'
 import { StreamHost, hostedStream } from '../../utils/stream_host.ts'
 import { type GenericCommand } from '../adapter.ts'
-import { commandFiles, resolveOrEmpty } from '../files.ts'
+import { commandFiles, fileSize, resolveOrEmpty } from '../files.ts'
 
 export const BUILDER: GenericCommand = {
   name: 'od',
@@ -25,7 +25,8 @@ export const BUILDER: GenericCommand = {
       options,
       operands: resolved.map((path) => byteView(path.rawPath)),
     }
-    const host = new StreamHost(resolved, files.read, ctx, true, 'od')
+    const sized = files.answers('read_range') ? fileSize(files, ctx, true) : undefined
+    const host = new StreamHost(resolved, files.read, ctx, true, 'od', undefined, false, sized)
     const io = new IOResult()
     return [hostedStream('od', config, host, io, ctx.signal), io]
   },

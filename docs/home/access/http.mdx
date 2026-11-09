@@ -56,8 +56,8 @@ Use `http://127.0.0.1:8765` as the base URL for requests to this server and send
 `Authorization: Bearer <your-token>` on authenticated requests.
 
 For workspace creation and command execution, see
-[Create a workspace](/api/operations/workspaces/create-a-workspace) and
-[Run a shell line](/api/operations/shell/run-a-shell-line).
+[Create a workspace](/api/operations/workspaces/create-workspace) and
+[Run shell command](/api/operations/shell/run-shell-command).
 Replace the example API host with your server's base URL.
 
 ## Configure authentication
@@ -292,10 +292,10 @@ it keeps serving. See the [Python](/python/access/server) or
 
 ## Lines, jobs and processes
 
-Inspect active and recently completed work with [List lines](/api/operations/lines/list-lines),
+Inspect active and recently completed work with [List commands](/api/operations/lines/list-commands),
 [List jobs](/api/operations/jobs/list-jobs), and
 [List processes](/api/operations/processes/list-processes). A shell result's
-`line_id` identifies its [line record](/api/operations/lines/get-a-line).
+`line_id` identifies its [line record](/api/operations/lines/get-command).
 Servers using the same workspace store share these records, and snapshots keep
 ended records. See those endpoint pages for retention, filters, and response fields.
 

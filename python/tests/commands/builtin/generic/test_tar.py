@@ -8,6 +8,7 @@ from mirage.commands.builtin.generic.tar import (
     pruned,
     strip_prefix,
 )
+from mirage.commands.builtin.generic.tar.create import Exclusion
 from mirage.commands.builtin.generic.tar.types import CreateResult
 from mirage.types import (
     ContentType,
@@ -106,16 +107,20 @@ def _names(plan: CreateResult) -> list[str]:
 
 
 def test_excluded_matches_whole_name_and_every_component_suffix():
-    assert excluded("d/sub/b.txt", "sub/b.txt")
+    assert excluded("d/sub/b.txt", Exclusion("sub/b.txt"))
     # The pattern is anchored at a component boundary, not mid-name.
-    assert not excluded("d/abc.txt", "bc.txt")
+    assert not excluded("d/abc.txt", Exclusion("bc.txt"))
 
 
 def test_pruned_takes_the_children_of_an_excluded_directory():
     names = ["d/", "d/a.txt", "d/sub/", "d/sub/b.txt"]
-    assert pruned(names, "sub") == ["d/", "d/a.txt"]
-    assert pruned(names, "sub/b.txt") == ["d/", "d/a.txt", "d/sub/"]
-    assert pruned(names, None) == names
+    assert pruned(names, [Exclusion("sub")]) == ["d/", "d/a.txt"]
+    assert pruned(names, [Exclusion("sub/b.txt")]) == [
+        "d/",
+        "d/a.txt",
+        "d/sub/",
+    ]
+    assert pruned(names, []) == names
 
 
 @pytest.mark.parametrize(

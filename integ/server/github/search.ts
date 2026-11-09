@@ -384,7 +384,10 @@ async function searchCode(ctx: Ctx<C>): Promise<Reply> {
 // enough to search.
 function validatedSearch(handler: Handler): Handler {
   return async (ctx) => {
-    const { qualifiers } = tokens(ctx.query.get('q') ?? '')
+    const { qualifiers } = tokens(
+      ctx.query.get('q') ?? '',
+      ctx.query.get('advanced_search') === 'true',
+    )
     const names = qualifiers.get('repo') ?? []
     const owners = ownersOf(qualifiers)
     const repos = await Promise.all(names.map((name) => repoByName(ctx.db, ctx.tenant, name)))
@@ -436,10 +439,24 @@ function searchReply(ctx: Ctx<C>, items: JsonValue[]): Reply {
   }
 }
 
-function tokens(query: string): { words: string[]; qualifiers: Map<string, string[]> } {
+// A term without the parentheses advanced issue search groups terms with.
+function ungrouped(token: string): string {
+  let start = 0,
+    end = token.length
+  while (token[start] === '(') start += 1
+  while (end > start && token[end - 1] === ')') end -= 1
+  return token.slice(start, end)
+}
+
+function tokens(
+  query: string,
+  advanced = false,
+): { words: string[]; qualifiers: Map<string, string[]> } {
   const words: string[] = [],
     qualifiers = new Map<string, string[]>()
-  for (const token of query.match(/(?:[^\s"]|"(?:\\.|[^"\\])*")+/g) ?? []) {
+  for (const found of query.match(/(?:[^\s"]|"(?:\\.|[^"\\])*")+/g) ?? []) {
+    const token = advanced ? ungrouped(found) : found
+    if (advanced && (token === '' || token === 'OR')) continue
     const at = token.indexOf(':')
     const raw = at < 0 ? token : token.slice(at + 1)
     const value = raw.startsWith('"') ? String(JSON.parse(raw)) : raw
@@ -505,7 +522,10 @@ function countMatches(value: number, query: string): boolean {
 // reviews have no rows behind them, so those qualifiers are dropped, which
 // only ever widens.
 async function searchIssues(ctx: Ctx<C>): Promise<Reply> {
-  const { words, qualifiers: q } = tokens(ctx.query.get('q') ?? '')
+  const { words, qualifiers: q } = tokens(
+    ctx.query.get('q') ?? '',
+    ctx.query.get('advanced_search') === 'true',
+  )
   const owners = ownersOf(q)
   const is = q.get('is') ?? []
   const items: Record<string, JsonValue>[] = []

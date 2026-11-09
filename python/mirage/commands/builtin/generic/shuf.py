@@ -9,6 +9,7 @@ from collections.abc import (
 from contextlib import aclosing
 from dataclasses import dataclass
 from functools import partial
+from typing import cast
 
 from mirage.commands.builtin.utils.random_source import (
     RandomSource,
@@ -204,6 +205,9 @@ class ShufHost:
             offset, size = request["offset"], request["size"]
             assert isinstance(offset, int) and isinstance(size, int)
             return Served({}, await store.read(offset, size))
+        if op == "gather":
+            windows = cast(list[tuple[int, int]], request["windows"])
+            return Served({}, await store.gather(windows))
         if op == "swap":
             left, right = request["left"], request["right"]
             assert isinstance(left, int) and isinstance(right, int)

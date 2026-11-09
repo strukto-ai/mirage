@@ -36,9 +36,8 @@ export type ActionKind = RowActionKind | 'exec' | 'printf'
 // mtimes whenever the tree holds one of these. An entry whose mtime is
 // unknown passes here. The node also orders prunes: a `-prune` after it fires
 // only for a directory the test holds for, and one before it fires
-// regardless, as GNU orders them. A prune reached past an undecided test is
-// recorded as pending for the caller to settle once it has statted the
-// directory.
+// regardless, as GNU orders them. A prune reached past an undecided test
+// still counts, the most a walk without that time can say.
 /**
  * `-mtime`, `-newermt` and a resolved `-newer`: an inclusive epoch-second
  * window over the entry's modification time, or over its access or
@@ -50,16 +49,6 @@ export interface Mtime {
   lo: number | null
   hi: number | null
   field?: 'm' | 'a' | 'c'
-}
-
-// A directory whose `-prune` decision waited on time tests the walk could
-// not decide: a prune reached past one, or every prune skipped on the
-// strength of one (`-mtime 1 -o -prune`). The entry is kept whole: whether
-// the prune stands is settled by evaluating the expression again with the
-// directory's mtime, since a failing test may send GNU down another arm
-// that prunes anyway (`( -mtime 1 -o -type d ) -prune`).
-export interface PendingPrune {
-  entry: FindEntry
 }
 
 export interface Name {
@@ -236,17 +225,12 @@ export interface Action {
 }
 
 /**
- * `-prune`: true, and a directory it reaches loses its contents. The node
- * keeps the ledger of pruned directory keys (mount-relative), which the
- * walk reads before it enters a directory; `bindTree` hands every start
- * point a fresh ledger. A prune reached past a time test the entry could
- * not answer lands in `pending` and counts as pruned, the most a walk
- * without that time can say.
+ * `-prune`: true, and a directory it reaches loses its contents, which the
+ * walk reads off the entry's evaluation (`Effects`) before it enters the
+ * directory.
  */
 export interface Prune {
   op: 'prune'
-  pruned: string[]
-  pending: PendingPrune[]
 }
 
 export type PredNode =
@@ -273,8 +257,8 @@ export type PredNode =
   | Mtime
 
 // What evaluating an expression on one entry did besides answer: whether an
-// action was reached, whether a prune node recorded the entry (firm or
-// pending), whether a -quit ended the evaluation, and the time tests the
+// action was reached, whether a -prune was reached on a directory, whether
+// a -quit ended the evaluation, and the time tests the
 // entry carried no mtime for on the path that decided the answer so far; a
 // branch whose outcome they could not have changed drops them again.
 export interface Effects {

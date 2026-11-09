@@ -23,6 +23,8 @@ import { fsErrorLine } from '../../../errors/render.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
+import { boundedMap } from '../../../concurrency/limiter.ts'
+import { OPERAND_CONCURRENCY } from '../constants.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
 
@@ -129,13 +131,11 @@ export async function splitInOrder(
   cmdName: string,
 ): Promise<(PathSpec | string)[]> {
   const order: (PathSpec | string)[] = []
-  for (const p of paths) {
-    let st: FileStat
-    try {
-      st = await stat(p)
-    } catch (e) {
-      if (!isFsError(e)) throw e
-      order.push(fsErrorLine(cmdName, p, e))
+  const found = await statted(paths, stat)
+  for (const [i, p] of paths.entries()) {
+    const st = found[i]
+    if (st === undefined || 'failure' in st) {
+      order.push(fsErrorLine(cmdName, p, st?.failure))
       continue
     }
     if (st.type === FileType.DIRECTORY) {
@@ -145,6 +145,27 @@ export async function splitInOrder(
     order.push(p)
   }
   return order
+}
+
+// Each operand's stat in operand order, OPERAND_CONCURRENCY at once, so a
+// store's round trips overlap: a filesystem failure stands in its place, and
+// any other propagates. Mirrors Python's `_statted`.
+function statted(
+  paths: readonly PathSpec[],
+  stat: StatFn,
+): Promise<(FileStat | { failure: unknown })[]> {
+  return boundedMap(
+    paths,
+    async (path) => {
+      try {
+        return await stat(path)
+      } catch (failure) {
+        if (!isFsError(failure)) throw failure
+        return { failure }
+      }
+    },
+    OPERAND_CONCURRENCY,
+  )
 }
 
 /**
@@ -220,14 +241,15 @@ export async function splitOpened(
 ): Promise<[(PathSpec | string)[], Map<string, string>]> {
   const order: (PathSpec | string)[] = []
   const unread = new Map<string, string>()
-  for (const p of paths) {
-    let failure: unknown = null
-    try {
-      if ((await stat(p)).type === FileType.DIRECTORY) failure = eisdir(p)
-    } catch (e) {
-      if (!isFsError(e)) throw e
-      failure = e
-    }
+  const found = await statted(paths, stat)
+  for (const [i, p] of paths.entries()) {
+    const st = found[i]
+    const failure: unknown =
+      st === undefined || 'failure' in st
+        ? st?.failure
+        : st.type === FileType.DIRECTORY
+          ? eisdir(p)
+          : null
     if (failure !== null) {
       const line = fsErrorLine(cmdName, p, failure)
       const code = (failure as { code?: string }).code

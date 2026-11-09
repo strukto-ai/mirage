@@ -2,6 +2,7 @@ import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
 from dataclasses import replace
 from functools import partial
+from typing import Any
 
 from mirage.cache.context import active_cache_manager
 from mirage.context import session_visibility
@@ -11,7 +12,7 @@ from mirage.core.generic.find_eval import (
     printf_kind,
 )
 from mirage.errors.classify import is_entry_error
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec, ReaddirFn
 from mirage.utils.dates import in_mtime_window, iso_timestamp
 from mirage.utils.hidden import path_visible
 from mirage.utils.stat_view import DIR_SIZE
@@ -64,12 +65,13 @@ async def _stat_entry(
 
 
 async def _is_empty_entry(
-    readdir: Callable[[PathSpec], Awaitable[list[str]]],
+    readdir: ReaddirFn,
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     path: str,
     is_dir: bool,
     unstatted: dict[str, Exception] | None = None,
     unreadable: list[str] | None = None,
+    known: FileStat | None = None,
 ) -> bool:
     if is_dir:
         spec = PathSpec(
@@ -88,14 +90,14 @@ async def _is_empty_entry(
             if path not in unreadable:
                 unreadable.append(path)
             return False
-    st = await _stat_entry(stat, path, unstatted)
+    st = known or await _stat_entry(stat, path, unstatted)
     return st is not None and st.type is FileType.FILE and st.size == 0
 
 
 async def walk_find(
     search_path: PathSpec,
     *,
-    readdir: Callable[[PathSpec], Awaitable[list[str]]],
+    readdir: ReaddirFn,
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     args: find_types.FindArgs,
     follow: LinkView | None = None,
@@ -104,7 +106,8 @@ async def walk_find(
     root: FileStat | None = None,
     loops: list[tuple[str, str]] | None = None,
     enters: Callable[[str], bool] | None = None,
-    listing: Callable[[PathSpec], Awaitable[list[str]]] | None = None,
+    listing: Callable[[ReaddirFn, PathSpec], Awaitable[list[str]]]
+    | None = None,
     links: LinkView | None = None,
     stopped: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
@@ -152,8 +155,9 @@ async def walk_find(
         enters (Callable[[str], bool] | None): ``-xdev``'s test of a
             directory's virtual path: one it fails is an entry still, and
             ``-empty`` still reads it, but the walk does not descend.
-        listing (Callable | None): the walk's own listing of a directory,
-            where the caller bounds it; None lists with ``readdir``.
+        listing (Callable | None): the walk's own listing of a directory
+            through the readdir it is handed, where the caller bounds it;
+            None lists with ``readdir``.
         links (LinkView | None): the namespace's links whether or not the
             walk follows them, which ``-xtype`` reads past.
         stopped (list[str] | None): receives the entry a ``-quit`` was
@@ -169,7 +173,6 @@ async def walk_find(
         search_path.virtual,
         search_path.raw_path,
     )
-    prunes = find_eval.tree_has_prune(tree)
     quits = find_eval.tree_has(tree, (find_types.Quit,))
     regexes = find_eval.tree_has(tree, (find_types.Regex,))
     need_empty = find_eval.tree_has_empty(tree)
@@ -183,18 +186,32 @@ async def walk_find(
     vis = session_visibility()
     real = follow.resolve if follow is not None else None
     quit = False
+    # The directory a -prune keeps the walk out of: the one just judged,
+    # which the walk enters next if at all.
+    pruned: str | None = None
+    # The last directory read and its names: -empty and the walk each read
+    # a directory, and whichever comes second takes what the first read.
+    held: tuple[str, list[str]] | None = None
+
+    async def listed(spec: PathSpec, **kwargs: Any) -> list[str]:
+        nonlocal held
+        if held is not None and held[0] == spec.virtual:
+            return held[1]
+        names = await readdir(spec, **kwargs)
+        held = (spec.virtual, names)
+        return names
 
     async def judge(
         p: str, kind: str, depth: int, known: FileStat | None
     ) -> bool:
-        nonlocal quit
+        nonlocal quit, pruned
         if not path_visible(vis, p):
             return False
         is_dir = kind == "d"
         is_empty = None
         if need_empty:
             is_empty = await _is_empty_entry(
-                readdir, stat, p, is_dir, unstatted, unreadable
+                listed, stat, p, is_dir, unstatted, unreadable, known
             )
         # With a time test in the tree the stat comes first, so the entry
         # answers the test itself; the stat that -size alone needs waits
@@ -231,7 +248,9 @@ async def walk_find(
             target=target,
         )
         judged = failing if need_mtime and mtime is None else tree
-        kept = find_eval.keep(entry, judged, args.mindepth, acts)
+        kept, prunes = find_eval.verdict(entry, judged, args.mindepth, acts)
+        if prunes:
+            pruned = p
         if quits and find_eval.quit_fired(judged):
             quit = True
             if stopped is not None:
@@ -240,7 +259,7 @@ async def walk_find(
         if not kept:
             return False
         if need_size and not is_dir and st is None:
-            st = await _stat_entry(stat, p, unstatted)
+            st = known or await _stat_entry(stat, p, unstatted)
             if st is None:
                 return False
         if need_size and not _sized(
@@ -256,14 +275,16 @@ async def walk_find(
         if (
             (args.maxdepth is not None and depth >= args.maxdepth)
             or (enters is not None and not enters(p))
-            or (prunes and p in find_eval.pruned_keys(tree))
+            or p == pruned
         ):
             return []
         spec = PathSpec(
             virtual=p, directory=p, resolved=False, vfs_path=p.strip("/")
         )
         try:
-            children = await (listing or readdir)(spec)
+            children = await (
+                listed(spec) if listing is None else listing(listed, spec)
+            )
         except (FileNotFoundError, NotADirectoryError) as exc:
             # Only vanished dirs are skipped; API errors (rate limit, auth)
             # propagate.
@@ -345,11 +366,12 @@ async def walk_find(
         # readdir that populated it). The one in-band proof is a trailing
         # slash on a cold listing: no backend renders a file with one.
         trimmed = child.rstrip("/")
-        kind = (
-            "d"
+        found = (
+            None
             if child.endswith("/")
-            else printf_kind(await _stat_entry(stat, trimmed, unstatted))
+            else await _stat_entry(stat, trimmed, unstatted)
         )
+        kind = "d" if child.endswith("/") else printf_kind(found)
         inner = above
         if kind == "d" and real is not None:
             # Under -L a directory is the one it resolves to, and one
@@ -363,7 +385,7 @@ async def walk_find(
                 continue
             inner = (*above, (trimmed, here))
         first = not args.depth_first or kind != "d"
-        if first and await judge(trimmed, kind, depth + 1, None):
+        if first and await judge(trimmed, kind, depth + 1, found):
             yield trimmed
         if kind == "d" and not quit:
             frames.append(
@@ -373,7 +395,7 @@ async def walk_find(
                     inner,
                     iter(await entries(trimmed, depth + 1)),
                     True,
-                    None,
+                    found,
                 )
             )
 

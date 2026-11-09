@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage._rs import Shell
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.errors.types import BadDescriptorError
 from mirage.io import IOResult
@@ -173,110 +174,6 @@ def _read_timeout(text: str) -> float | None:
     return value if value >= 0 else None
 
 
-def _read_chars(text: str, raw: bool) -> list[tuple[str, bool]]:
-    """The characters ``read`` splits, each with whether a backslash
-    quoted it.
-
-    Without ``-r`` a backslash quotes the next character (``\\x`` reads
-    as a quoted ``x``), a backslash-newline pair is a line continuation
-    and a backslash at the end goes.
-
-    Args:
-        text (str): the raw text read.
-        raw (bool): ``-r``, no backslash processing.
-    """
-    out: list[tuple[str, bool]] = []
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        if ch == "\\" and not raw:
-            if i + 1 < len(text) and text[i + 1] != "\n":
-                out.append((text[i + 1], True))
-            i += 2
-            continue
-        out.append((ch, False))
-        i += 1
-    return out
-
-
-def _unescape_read(text: str) -> str:
-    """Apply ``read``'s default backslash handling (``_read_chars``).
-
-    Args:
-        text (str): the raw text read.
-    """
-    return "".join(ch for ch, _ in _read_chars(text, False))
-
-
-def _read_fields(text: str, ifs: str, slots: int, raw: bool) -> list[str]:
-    """Split one ``read`` line into at most ``slots`` fields on IFS, as
-    bash does.
-
-    Leading IFS whitespace goes; a delimiter is one other IFS character
-    with the IFS whitespace around it, or a run of IFS whitespace, and a
-    quoted character never splits. The last field takes the rest of the
-    line, its trailing IFS whitespace dropped, and the delimiter ending
-    it too when it holds one field only (``x:y:`` reads ``y`` into the
-    second of two). A zero slot count (``read -a``) means every field,
-    a delimiter at the end opening none.
-
-    Args:
-        text (str): the line, delimiter already removed.
-        ifs (str): the session's IFS.
-        slots (int): how many variables are waiting, 0 for unbounded.
-        raw (bool): ``-r``, no backslash processing.
-    """
-    chars = _read_chars(text, raw)
-    n = len(chars)
-
-    def white(k: int) -> bool:
-        return (
-            not chars[k][1] and chars[k][0] in " \t\n" and chars[k][0] in ifs
-        )
-
-    def splits(k: int) -> bool:
-        return not chars[k][1] and chars[k][0] in ifs
-
-    def joined(a: int, b: int) -> str:
-        return "".join(ch for ch, _ in chars[a:b])
-
-    def past_delimiter(k: int) -> int:
-        other = not white(k)
-        k += 1
-        while k < n and white(k):
-            k += 1
-        if not other and k < n and splits(k):
-            k += 1
-            while k < n and white(k):
-                k += 1
-        return k
-
-    k = 0
-    while k < n and white(k):
-        k += 1
-    fields: list[str] = []
-    while k < n and (not slots or len(fields) < slots - 1):
-        start = k
-        while k < n and not splits(k):
-            k += 1
-        fields.append(joined(start, k))
-        if k < n:
-            k = past_delimiter(k)
-    if not slots or k >= n:
-        return fields
-    end = n
-    while end > k and white(end - 1):
-        end -= 1
-    if splits(end - 1):
-        cut = end - 1
-        while cut > k and white(cut - 1):
-            cut -= 1
-        if not any(splits(i) for i in range(k, cut)):
-            end = cut
-    fields.append(joined(k, end))
-    return fields
-
-
 async def _read_raw(
     buffer: AsyncLineIterator,
     raw: bool,
@@ -345,7 +242,7 @@ async def _read_counted(
         held += len(data)
         check_memory(held)
         piece = decode_text(data)
-        n, escaped = _counted(piece, escaped)
+        n, escaped = Shell.read_counted(piece, escaped)
         text += piece
         got += n
         if not complete:
@@ -359,27 +256,6 @@ async def _read_counted(
     return text, True
 
 
-def _counted(piece: str, escaped: bool) -> tuple[int, bool]:
-    """How many characters `piece` leaves once backslashes are processed,
-    and whether a backslash ends it, quoting what follows.
-
-    Args:
-        piece (str): text read after `escaped`'s state.
-        escaped (bool): a backslash before `piece` quotes its first
-            character.
-    """
-    n = 0
-    for ch in piece:
-        if escaped:
-            n += ch != "\n"
-            escaped = False
-        elif ch == "\\":
-            escaped = True
-        else:
-            n += 1
-    return n, escaped
-
-
 async def read_reply(buffer: AsyncLineIterator) -> str | None:
     """One line as a bare `read` stores it in REPLY: backslashes
     processed, a continuation joined, nothing split off; None at end of
@@ -389,7 +265,7 @@ async def read_reply(buffer: AsyncLineIterator) -> str | None:
         buffer (AsyncLineIterator): the input's line reader.
     """
     line, complete = await _read_raw(buffer, False, b"\n", None, None)
-    return _unescape_read(line) if complete else None
+    return Shell.read_text(line, False) if complete else None
 
 
 async def handle_read(
@@ -514,9 +390,11 @@ async def handle_read(
                 f"{shell_voice()}read: read error: 0: Bad file descriptor\n"
             )
     ifs = visible_env(session).get("IFS", " \t\n")
-    whole = "".join(ch for ch, _ in _read_chars(line, raw))
+    whole = Shell.read_text(line, raw)
     if array_name is not None:
-        parts = [] if exact is not None else _read_fields(line, ifs, 0, raw)
+        parts = (
+            [] if exact is not None else Shell.read_fields(line, ifs, 0, raw)
+        )
         if exact is not None and whole:
             parts = [whole]
         if view.is_readonly(array_name):
@@ -535,7 +413,7 @@ async def handle_read(
     if exact is not None or not parse.operands:
         parts = [whole]
     else:
-        parts = _read_fields(line, ifs, len(variables), raw)
+        parts = Shell.read_fields(line, ifs, len(variables), raw)
     for i, var in enumerate(variables):
         if TARGET_RE.match(var) is None:
             # bash stops at the first name it cannot assign, the ones

@@ -5,9 +5,44 @@
 
 use super::parse::{CUT, Hunk, Line};
 
-/// The fuzz factor the manual gives as patch's default: a hunk may leave
-/// up to this many of its outer context lines unmatched to be placed.
-const FUZZ_FACTOR: i64 = 2;
+/// How hunks are placed: `-F`, `-l`, and what `-f` and `-t` do about a
+/// patch that reads the other way round; `--verbose` reports every hunk.
+#[derive(Clone, Copy)]
+pub(super) struct Placing {
+    pub(super) fuzz: i64,
+    pub(super) loose: bool,
+    pub(super) force: bool,
+    pub(super) batch: bool,
+    pub(super) verbose: bool,
+}
+
+/// Whether two lines match with their blanks taken loosely (`-l`): any run
+/// of blanks matches any other, and blanks at the end of a line count for
+/// nothing.
+fn loosely_same(left: &[u8], right: &[u8]) -> bool {
+    let blank = |byte: &u8| matches!(*byte, b' ' | b'\t' | b'\n' | b'\r');
+    let trim = |line: &'_ [u8]| -> usize {
+        line.len() - line.iter().rev().take_while(|byte| blank(byte)).count()
+    };
+    let (left, right) = (&left[..trim(left)], &right[..trim(right)]);
+    let (mut a, mut b) = (0, 0);
+    while a < left.len() && b < right.len() {
+        if blank(&left[a]) && blank(&right[b]) {
+            while a < left.len() && blank(&left[a]) {
+                a += 1;
+            }
+            while b < right.len() && blank(&right[b]) {
+                b += 1;
+            }
+        } else if left[a] == right[b] {
+            a += 1;
+            b += 1;
+        } else {
+            return false;
+        }
+    }
+    a == left.len() && b == right.len()
+}
 
 /// What a hunk looks for in the file: its old side (context and removed
 /// lines), the context lines before its first change and after its last,
@@ -19,9 +54,11 @@ struct Needle<'a> {
     lead: usize,
     trail: usize,
     claimed: i64,
+    /// `-l`: blanks are matched loosely.
+    loose: bool,
 }
 
-fn needle<'a>(hunk: &Hunk<'a>) -> Needle<'a> {
+fn needle<'a>(hunk: &Hunk<'a>, loose: bool) -> Needle<'a> {
     let context = |line: &&Line<'_>| line.kind == b' ';
     let lead = hunk.body.iter().take_while(context).count();
     let trail = hunk.body[lead..].iter().rev().take_while(context).count();
@@ -37,6 +74,7 @@ fn needle<'a>(hunk: &Hunk<'a>) -> Needle<'a> {
         lead,
         trail,
         claimed,
+        loose,
     }
 }
 
@@ -81,7 +119,10 @@ fn sits(
     if above < below && needle.claimed <= 1 && (at != 0 || (needle.lead as i64) < used) {
         return false;
     }
-    (top..stop).all(|index| lines[(at + index as i64) as usize] == needle.old[index])
+    (top..stop).all(|index| {
+        let (line, old) = (lines[(at + index as i64) as usize], needle.old[index]);
+        line == old || (needle.loose && loosely_same(line, old))
+    })
 }
 
 /// The first line `found` takes, in the order GNU patch 2.8 tries a hunk.
@@ -172,9 +213,9 @@ fn seek(lines: &[&[u8]], needle: &Needle<'_>, fuzz: i64, expected: i64, used: i6
 }
 
 /// The fuzz levels worth trying, each one comparing less than the last.
-fn fuzz_steps(needle: &Needle<'_>) -> Vec<i64> {
+fn fuzz_steps(needle: &Needle<'_>, most: i64) -> Vec<i64> {
     let mut steps: Vec<i64> = Vec::new();
-    for fuzz in 0..=FUZZ_FACTOR {
+    for fuzz in 0..=most.min(needle.lead.max(needle.trail) as i64) {
         let seen = steps.last().map(|&last| compared_at(needle, last));
         if seen != Some(compared_at(needle, fuzz)) {
             steps.push(fuzz);
@@ -234,6 +275,15 @@ pub(super) fn question(reverse: bool, forward: bool) -> (&'static str, &'static 
     }
 }
 
+/// What `-t` says of a patch that reads as the other direction.
+fn batch_note(reverse: bool) -> String {
+    if reverse {
+        "Unreversed patch detected!  Ignoring -R.".to_owned()
+    } else {
+        "Reversed (or previously applied) patch detected!  Assuming -R.".to_owned()
+    }
+}
+
 /// GNU's lines for a patch that reads as the other direction.
 fn reversed_notes(reverse: bool, forward: bool) -> Vec<String> {
     let seen = if reverse {
@@ -281,6 +331,7 @@ pub(super) fn section<'a>(
     hunks: &[Hunk<'a>],
     reverse: bool,
     forward: bool,
+    placing: Placing,
 ) -> Outcome<'a> {
     let mut out = Vec::with_capacity(lines.len());
     let mut notes = Vec::new();
@@ -294,17 +345,28 @@ pub(super) fn section<'a>(
             notes.push(CUT.to_owned());
         }
         let hunk = given.tried(reverse);
-        let want = needle(&hunk);
-        let other = (ordinal == 1).then(|| needle(&hunk.swapped()));
+        let want = needle(&hunk, placing.loose);
+        let swapped = (ordinal == 1 && !placing.force).then(|| hunk.swapped());
+        let other = swapped.as_ref().map(|hunk| needle(hunk, placing.loose));
         let expected = want.claimed - 1 + shift;
         let mut placed = None;
-        for fuzz in fuzz_steps(&want) {
+        for fuzz in fuzz_steps(&want, placing.fuzz) {
             if let Some(at) = seek(lines, &want, fuzz, expected, used) {
                 placed = Some((at, fuzz));
                 break;
             }
             if let Some(other) = &other {
                 if seek(lines, other, fuzz, other.claimed - 1, 0).is_some() {
+                    if placing.batch && !forward {
+                        let again = Placing {
+                            force: true,
+                            batch: false,
+                            ..placing
+                        };
+                        let mut outcome = section(lines, hunks, !reverse, forward, again);
+                        outcome.notes.insert(0, batch_note(reverse));
+                        return outcome;
+                    }
                     notes.extend(reversed_notes(reverse, forward));
                     return Outcome {
                         lines: None,
@@ -343,6 +405,8 @@ pub(super) fn section<'a>(
         if fuzz != 0 || shift != 0 {
             notes.push(placed_note(ordinal, at + 1 + grown, fuzz, shift));
             exact = false;
+        } else if placing.verbose {
+            notes.push(format!("Hunk #{ordinal} succeeded at {}.", at + 1 + grown));
         }
         out.extend_from_slice(window(lines, used, at + want.lead as i64));
         used = emit(lines, &hunk, &want, at, &mut out);

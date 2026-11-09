@@ -13,12 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import subprocess
 
 import pytest
 
 from mirage.server.registry import WorkspaceRegistry
-from mirage.server.summary import _describe_vfs, make_detail
-from mirage.types import MountMode
+from mirage.server.summary import (
+    _describe_vfs,
+    make_detail,
+    make_stopped_detail,
+)
+from mirage.types import MountBackend, MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -90,3 +95,49 @@ async def test_the_detail_is_read_on_the_workspace_loop(monkeypatch):
         assert loops == [runner.loop]
     finally:
         await registry.remove(entry.id)
+
+
+class _FakeThread:
+    def __init__(self):
+        self.alive = True
+
+
+@pytest.mark.asyncio
+async def test_the_detail_names_each_mount_backend_and_mountpoint(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.workspace.fuse.mount_background",
+        lambda *_args, **_kwargs: _FakeThread(),
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mirage.workspace.fuse.unmount_with_fusermount",
+        lambda _mountpoint: None,
+    )
+    ws = Workspace(
+        {"/data": RAMVFS(), "/notes": RAMVFS()}, mode=MountMode.WRITE
+    )
+    ws.add_fuse_mount("/data", "/tmp/mp-data")
+    registry = WorkspaceRegistry()
+    entry = registry.add(ws)
+    try:
+        detail = await make_detail(entry)
+        got = {m.prefix: (m.backend, m.mountpoint) for m in detail.mounts}
+        assert got["/data/"] == (MountBackend.FUSE, "/tmp/mp-data")
+        assert got["/notes/"] == (MountBackend.WORKSPACE, None)
+    finally:
+        await registry.remove(entry.id)
+
+
+def test_a_stopped_detail_names_the_backend_with_no_mountpoint():
+    config = {
+        "mounts": {
+            "/data": {"vfs": "ram", "backend": "fuse", "mountpoint": "/x"},
+            "/notes": {"vfs": "ram"},
+        }
+    }
+    detail = make_stopped_detail("w", config, 0.0)
+    got = {m.prefix: (m.backend, m.mountpoint) for m in detail.mounts}
+    assert got == {
+        "/data/": (MountBackend.FUSE, None),
+        "/notes/": (MountBackend.WORKSPACE, None),
+    }

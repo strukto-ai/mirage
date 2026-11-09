@@ -34,7 +34,6 @@ export {
 export { handleDeclareFunctions } from './declare/index.ts'
 export { handleEnv } from './env/index.ts'
 export { handleGetopts } from './getopts/index.ts'
-export { handleLet } from './let/index.ts'
 export { handlePrintenv } from './printenv/index.ts'
 export { handleRead } from './read/index.ts'
 export { handleSet } from './set/index.ts'

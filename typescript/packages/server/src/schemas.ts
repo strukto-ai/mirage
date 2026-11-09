@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { loadWorkspaceConfig, type WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
-import type { JsonValue } from '@struktoai/mirage-core/types'
+import type { JsonValue, MountBackend } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { OverrideShape } from './clone.ts'
 
@@ -22,6 +22,8 @@ export interface MountSummary {
   vfs: string
   mode: string
   description: string
+  backend: MountBackend
+  mountpoint: string | null
 }
 
 /** Running while the server holds it in memory; stopped while only its config and state are kept. */
@@ -30,9 +32,6 @@ type WorkspaceStatus = 'running' | 'stopped'
 export interface WorkspaceBrief {
   id: string
   status: WorkspaceStatus
-  mode: string
-  mount_count: number
-  session_count: number
   created_at: number
 }
 
@@ -51,9 +50,7 @@ export interface WorkspaceInternals {
 export interface WorkspaceDetail {
   id: string
   status: WorkspaceStatus
-  mode: string
   created_at: number
-  fuse_mountpoints: Record<string, string>
   system_time: string | null
   sessions: SessionSummary[]
   mounts: MountSummary[]

@@ -28,6 +28,7 @@ import { runWc } from './wc.ts'
 import { runZip } from './zip_cmd.ts'
 import { DISPATCH_BUILDERS, RELAY_COMMANDS } from '../constants.ts'
 import { runDispatch } from '../../../generic_bind/dispatch.ts'
+import { ReadAhead } from '../../../generic_bind/files.ts'
 import type { CrossResult, DispatchFn, RunSingle } from '../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import type { SessionView } from '../../../../../view/types.ts'
@@ -82,6 +83,9 @@ export async function runRelay(
     return runSed(scopes, textArgs, flagKwargs, dispatch, stdin, cwd, argv, sessionView?.snapshot())
   if (cmdName === 'wc') return runWc(scopes, flagKwargs, dispatch, runSingle, cwd, vfs, stdin)
   if (cmdName === 'ls') return runLs(scopes, flagKwargs, dispatch, vfs, sessionView)
+  // Their walks read what they list, so each read warms the files after it,
+  // as on one mount.
+  if (['cp', 'mv', 'tar', 'zip'].includes(cmdName)) dispatch = new ReadAhead(dispatch, []).dispatch
   if (cmdName === 'cp') return runCp(scopes, flagKwargs, dispatch, storageKey, vfs, cwd, stdin)
   if (cmdName === 'mv') {
     return runMv(scopes, flagKwargs, dispatch, storageKey, vfs, stdin, checkUnlink)
@@ -89,7 +93,7 @@ export async function runRelay(
   if (cmdName === 'tar') return runTar(scopes, textArgs, flagKwargs, dispatch, cwd, vfs, stdin)
   if (cmdName === 'tee') return runTee(scopes, flagKwargs, dispatch, stdin, storageKey)
   if (cmdName === 'unzip') return runUnzip(scopes, textArgs, flagKwargs, dispatch, cwd)
-  if (cmdName === 'zip') return runZip(scopes, flagKwargs, dispatch, vfs)
+  if (cmdName === 'zip') return runZip(scopes, flagKwargs, dispatch, vfs, cwd, stdin)
   const builder = DISPATCH_BUILDERS.get(cmdName)
   if (builder !== undefined) {
     return runDispatch(

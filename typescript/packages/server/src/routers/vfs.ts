@@ -15,7 +15,6 @@
 import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
 import { classify } from '@struktoai/mirage-core/errors/classify'
 import type { FsCondition } from '@struktoai/mirage-core/errors/types'
-import { TooManyMatches } from '@struktoai/mirage-core/shell/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -110,18 +109,14 @@ export function queryFlag(value: string | undefined, name: string): boolean {
 export function failure(reply: RouteReply, err: unknown): RouteReply {
   if (err instanceof HttpError) return reply.status(err.status).send({ detail: err.message })
   if (err instanceof CallArgsError) return reply.status(400).send({ detail: err.message })
-  // A glob past its mount's walk_limit says so in words that carry
-  // nothing private, so the caller learns why.
-  if (err instanceof TooManyMatches) return reply.status(400).send({ detail: err.reason })
   const condition = classify(err)
   const status = condition === null ? 500 : STATUS[condition]
   return reply.status(status).send(failureToDict(err))
 }
 
 /**
- * Serve each `session.vfs` call at `POST /v1/workspaces/:wsId/vfs/<call>`
- * and `session.glob` at `POST /v1/workspaces/:wsId/glob`, each as the
- * session `?session_id=` names. `?explain=true` answers what a VFS call
+ * Serve each `session.vfs` call at `POST /v1/workspaces/:wsId/vfs/<call>`,
+ * as the session `?session_id=` names. `?explain=true` answers what a VFS call
  * would do instead of doing it. A `read` that asks for `stream` answers its
  * bytes as they are pulled, over HTTP only, where the body can carry them
  * raw. Mirrors Python's `vfs_route`.
@@ -187,28 +182,6 @@ export function registerVfsRoutes(
         logger.debug('vfs/%s failed', req.params.name, err)
         return failure(reply, err)
       }
-    },
-  )
-  app.post<{
-    Params: { wsId: string }
-    Querystring: CallQuery
-    Body: { pattern?: unknown } | undefined
-  }>(
-    '/v1/workspaces/:wsId/glob',
-    { bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE },
-    async (req, reply) => {
-      let paths: string[]
-      try {
-        const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
-        const pattern = req.body?.pattern
-        if (typeof pattern !== 'string') throw new HttpError(400, 'pattern must be a string')
-        const session = await sessionOf(ws, req.query.session_id)
-        paths = await session.glob(pattern)
-      } catch (err) {
-        logger.debug('glob failed', err)
-        return failure(reply, err)
-      }
-      return reply.type('application/json; charset=utf-8').send(JSON.stringify(paths))
     },
   )
 }

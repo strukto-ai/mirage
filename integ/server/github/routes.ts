@@ -25,6 +25,7 @@ import { issueRoutes } from './issues.ts'
 import { pullRoutes } from './pulls.ts'
 import { releaseRoutes } from './releases.ts'
 import { actionRoutes } from './actions.ts'
+import { adminRoutes } from './admin.ts'
 import { compareRoutes } from './compare.ts'
 import { pageRoutes } from './pages.ts'
 import { searchRoutes } from './search.ts'
@@ -56,6 +57,7 @@ export function githubRoutes(): KitRoute<C>[] {
   return [
     ...repoRoutes(),
     ...graphqlRoutes(),
+    ...adminRoutes(),
     // Before contentRoutes, and that is load-bearing. The kit router takes the
     // first registered match, not the most specific one, and contents claims
     // `commits/*ref` for a commit whose ref may itself contain a slash. That

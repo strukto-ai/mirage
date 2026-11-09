@@ -1968,19 +1968,21 @@ def test_tar_long_options_resolve_against_tars_whole_table(words, dest):
 
 
 def test_tar_names_an_ambiguity_with_every_option_its_table_holds():
-    # `--fil` could be --files-from, which mirage never declared; glibc
-    # names the word as typed, `=value` and all (GNU tar 1.35).
+    # `--lis` could be --listed-incremental, which mirage never declared;
+    # glibc names the word as typed, `=value` and all (tar 1.35).
     parsed = parse_command(
-        SPECS["tar"], ["--fil=/data/a.tar", "-t"], "/", "tar"
+        SPECS["tar"], ["--lis=/data/a", "-f", "x"], "/", "tar"
     )
     assert parsed.ambiguous_options == [
-        ("--fil=/data/a.tar", ("--file", "--files-from"))
+        ("--lis=/data/a", ("--list", "--listed-incremental"))
     ]
 
 
 def test_an_option_tar_has_and_mirage_does_not_stays_unrecognized():
-    parsed = parse_command(SPECS["tar"], ["--files-from=x", "-t"], "/", "tar")
-    assert parsed.invalid_options == ["--files-from=x"]
+    parsed = parse_command(
+        SPECS["tar"], ["--listed-incremental=x", "-t"], "/", "tar"
+    )
+    assert parsed.invalid_options == ["--listed-incremental=x"]
 
 
 def test_an_ambiguous_long_names_the_word_with_its_value():

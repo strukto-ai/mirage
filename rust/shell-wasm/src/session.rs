@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mirage_rs::arith;
+use mirage_rs::interp::builtin::{self, Unsetting};
 use mirage_rs::interp::codec::{Args, Item, one};
 use mirage_rs::interp::declare::{Declaration, Marking, Operand};
 use mirage_rs::interp::expand::Substitution;
@@ -48,6 +49,13 @@ fn operands_in(operands: Vec<Item>) -> Result<Vec<Operand>, String> {
             }
             word => Ok(Operand::Word(one(word, Args::bytes)?)),
         })
+        .collect()
+}
+
+fn words(items: Vec<Item>) -> Result<Vec<Vec<u8>>, String> {
+    items
+        .into_iter()
+        .map(|item| one(item, Args::bytes))
         .collect()
 }
 
@@ -294,6 +302,22 @@ fn letter(item: Option<Item>) -> Result<Option<u8>, String> {
 
 /// One operation on a shell, the handle its first argument.
 fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
+    if op == "read_fields" {
+        let text = args.bytes()?;
+        let ifs = args.bytes()?;
+        let slots = size(args.int()?)?;
+        let fields = builtin::read_fields(&text, &ifs, slots, args.flag()?);
+        return Ok(Item::list(fields.iter().map(Item::text)));
+    }
+    if op == "read_text" {
+        let text = args.bytes()?;
+        return Ok(Item::text(builtin::read_text(&text, args.flag()?)));
+    }
+    if op == "read_counted" {
+        let piece = args.bytes()?;
+        let (count, escaped) = builtin::read_counted(&piece, args.flag()?);
+        return Ok(Item::tuple([Item::int(count as i64), Item::Bool(escaped)]));
+    }
     if op == "new" {
         let source = args.handle()?;
         return Ok(Item::int(engine.adopt(Inner::new(Store::new(ids(source))))));
@@ -343,6 +367,21 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 deciding: args.flag()?,
             };
             return engine.start(handle, |inner| task::declare(inner, declaration));
+        }
+        "let_words" => {
+            let words = words(args.list()?)?;
+            let deciding = args.flag()?;
+            return engine.start(handle, |inner| task::let_words(inner, words, deciding));
+        }
+        "unset_word" => {
+            let unsetting = Unsetting {
+                letters: args.bytes()?,
+                word: args.bytes()?,
+                function: args.flag()?,
+                frozen: args.flag()?,
+                deciding: args.flag()?,
+            };
+            return engine.start(handle, |inner| task::unset_word(inner, unsetting));
         }
         "mark_names" => {
             let cmd = args.string()?;
@@ -465,7 +504,13 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "arith" => {
             let text = args.bytes()?;
             let expand = args.flag()?;
-            return engine.write(handle, Write::Arith { text, expand }, true);
+            let deciding = args.flag()?;
+            let write = Write::Arith {
+                text,
+                expand,
+                deciding,
+            };
+            return engine.write(handle, write, true);
         }
         "integer" => {
             let text = args.bytes()?;

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Awaitable, Callable
 
 from mirage.commands.builtin.generic.archive.types import (
@@ -7,12 +8,16 @@ from mirage.commands.builtin.generic.archive.types import (
     Scan,
     Walked,
 )
+from mirage.commands.builtin.utils.links import link_location
 from mirage.errors.classify import classify
+from mirage.errors.constants import FS_ERRORS
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec, StatFn
+from mirage.utils.dates import stat_epoch
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError
+from mirage.utils.stat_view import posix_mode
 from mirage.view.types import LinkView, MountView
 
 # A mount boundary is a filesystem boundary, so both archivers stop at
@@ -20,6 +25,7 @@ from mirage.view.types import LinkView, MountView
 # archive by accident exactly what the mount-root refusal forbids on
 # purpose.
 OTHER_FILESYSTEM = "file is on a different filesystem; not dumped"
+logger = logging.getLogger(__name__)
 
 WalkFn = Callable[[PathSpec, str], Awaitable[Walked]]
 DirProbe = Callable[[PathSpec], Awaitable[bool]]
@@ -363,3 +369,34 @@ async def scan_operand(
         crossings=tuple(crossings),
         problems=tuple(problems),
     )
+
+
+def link_time(links: LinkView | None, name: str) -> int | None:
+    """When a link itself last changed; None where no time is kept.
+
+    Args:
+        links (LinkView | None): the namespace's symlink facts.
+        name (str): the link's absolute virtual path.
+    """
+    link = None if links is None else links.stat_at(link_location(links, name))
+    return None if link is None else stat_epoch(link.modified)
+
+
+async def recorded_stamp(
+    stat: StatFn, path: PathSpec | None
+) -> tuple[int | None, int | None]:
+    """What an archive records of a file from its stat: its modification
+    time and permission bits, none where the backend keeps neither.
+
+    Args:
+        stat (StatFn): backend stat.
+        path (PathSpec | None): the file; None for a directory or a link.
+    """
+    if path is None:
+        return None, None
+    try:
+        row = await stat(path)
+    except FS_ERRORS as exc:
+        logger.debug("no stamp for %s: %s", path.virtual, exc)
+        return None, None
+    return stat_epoch(row.modified), posix_mode(row) & 0o7777

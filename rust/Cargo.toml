@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["mirage-rs", "python", "shell-wasm", "wasm"]
+members = ["gh-wasm", "mirage-rs", "python", "shell-wasm", "wasm"]
 exclude = ["vendor/grep-regex"]
 
 [workspace.package]
@@ -46,3 +46,8 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+# A module that waits on a service, so its whole tree is built for size.
+[profile.wasm-size]
+inherits = "release"
+opt-level = "z"

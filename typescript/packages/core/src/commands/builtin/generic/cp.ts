@@ -1642,10 +1642,9 @@ export async function walk(
   const entries: { path: string; kind: FileType }[] = [
     { path: root.virtual, kind: FileType.DIRECTORY },
   ]
+  // An array iterator reaches what is pushed while it runs: the walk's queue.
   const queue: PathSpec[] = [root]
-  while (queue.length > 0) {
-    const directory = queue.shift()
-    if (directory === undefined) break
+  for (const directory of queue) {
     let children: string[]
     try {
       children = await readdir(directory)

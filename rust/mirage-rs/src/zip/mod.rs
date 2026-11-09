@@ -105,6 +105,8 @@ pub(super) struct Entry {
     /// Where its local record starts, the archive's slack applied.
     pub(super) local: u64,
     pub(super) has_extra: bool,
+    /// The modification time an extended timestamp field holds, in UTC.
+    pub(super) utc: Option<i64>,
     pub(super) comment: Vec<u8>,
     /// The record as stored, which an update copies.
     pub(super) record: Vec<u8>,
@@ -163,6 +165,22 @@ fn end_record(tail: &[u8], base: u64, exact: bool) -> Option<End> {
         offset: u64::from(u32_at(tail, at + 16)),
         comment: tail[at + 22..comment_end].to_vec(),
     })
+}
+
+/// The modification time in an extended timestamp extra field, if any.
+fn extended_time(extra: &[u8]) -> Option<i64> {
+    let mut at = 0;
+    while at + 4 <= extra.len() {
+        let (tag, len) = (u16_at(extra, at), usize::from(u16_at(extra, at + 2)));
+        let body = &extra[at + 4..(at + 4 + len).min(extra.len())];
+        if tag == 0x5455 && body.len() >= 5 && body[0] & 1 != 0 {
+            return Some(i64::from(i32::from_le_bytes([
+                body[1], body[2], body[3], body[4],
+            ])));
+        }
+        at += 4 + len;
+    }
+    None
 }
 
 /// The values a ZIP64 extra field holds for the fields `wide` marks as
@@ -225,6 +243,7 @@ fn central(directory: &[u8], count: u64, slack: i128) -> Option<Vec<Entry>> {
             external: u32_at(head, 38),
             local: u64::try_from(i128::from(local) + slack).unwrap_or(u64::MAX),
             has_extra: extra_len > 0,
+            utc: extended_time(extra),
             comment: directory[next - comment_len..next].to_vec(),
             record: directory[at..next].to_vec(),
         });

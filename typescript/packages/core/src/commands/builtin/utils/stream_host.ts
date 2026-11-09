@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { statEpoch } from '../../../utils/dates.ts'
 import type { util } from 'zod'
 import { currentCaller } from '../../../context/session_context.ts'
 import { classify } from '../../../errors/classify.ts'
@@ -34,7 +35,7 @@ import { quoteText } from '../../quote.ts'
 import { callerStream } from '../generic_bind/dispatch.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { dispatchOf, linkLocation, linksOf, mountsOf } from './links.ts'
-import { isStdin, resolveSource } from './stream.ts'
+import { isStdin, rangedStream, resolveSource } from './stream.ts'
 
 const STDIN_NAMES: ReadonlySet<string> = new Set(['-', '/dev/stdin'])
 
@@ -71,7 +72,9 @@ function failure(err: unknown): Record<string, util.JSONType> {
  * names, empty leaving both to the stream;
  * `local`: whether the mount serves an operand, every one by default, as it
  * resolved them; `unbuffered`: the stream read no further into standard
- * input than it used, so what it hands back the next command reads.
+ * input than it used, so what it hands back the next command reads;
+ * `sized`: an operand's length where a read may open past the bytes it
+ * skips (`fileSize`), absent opening every input at its start.
  * Mirrors Python's StreamHost.
  */
 export class StreamHost {
@@ -84,15 +87,21 @@ export class StreamHost {
   private readonly named = new Map<number, PathSpec>()
   private readonly spools = new Map<number, ByteSpool>()
   private readonly outputs = new Map<string, ByteWriter>()
+  private readonly lengths = new Map<string, number | null>()
 
   constructor(
     private readonly operands: readonly PathSpec[],
-    private readonly stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+    private readonly stream: (
+      p: PathSpec,
+      offset?: number,
+      size?: number | null,
+    ) => AsyncIterable<Uint8Array>,
     private readonly ctx: Context,
     private readonly dash = true,
     private readonly command = '',
     private readonly local: (path: PathSpec) => boolean = () => true,
     private readonly unbuffered = false,
+    private readonly sized?: (p: PathSpec) => Promise<number | null>,
   ) {
     this.stdin = resolveSource(ctx.stdin)[Symbol.asyncIterator]()
     this.shared = ctx.stdin instanceof SharedInput ? ctx.stdin : undefined
@@ -201,7 +210,13 @@ export class StreamHost {
       case 'unlink':
       case 'mkdir':
       case 'stat':
+      case 'rmdir':
         return this.pathOp(request.op, typeof request.path === 'string' ? request.path : '')
+      case 'chmod':
+        return this.chmod(
+          typeof request.path === 'string' ? request.path : '',
+          typeof request.mode === 'number' ? request.mode : 0,
+        )
       case 'readlink':
         return this.readlink(typeof request.path === 'string' ? request.path : '')
       case 'copy':
@@ -275,6 +290,45 @@ export class StreamHost {
   }
 
   /**
+   * Open an input for a read. A range (`skip`, at most `size` bytes) opens an
+   * operand past the bytes it skips where its length is known, and the reply
+   * says how far (`skipped`) and that length (`size`); any other input opens
+   * at its start.
+   */
+  private async start(
+    fd: number,
+    request: Readonly<Record<string, util.JSONType>>,
+  ): Promise<[Record<string, util.JSONType>, AsyncIterableIterator<Uint8Array> | undefined]> {
+    const { path, skip, operand, size } = request
+    const sized = this.sized
+    if (
+      sized === undefined ||
+      typeof path !== 'string' ||
+      typeof skip !== 'number' ||
+      typeof operand !== 'number'
+    )
+      return [{}, this.open(fd, request)]
+    const named = this.operand(textView(path), operand)
+    if (named === undefined || isStdin(named, this.dash) || !this.local(named))
+      return [{}, this.open(fd, request)]
+    if (this.command !== '') this.named.set(fd, named)
+    if (!this.lengths.has(named.virtual)) this.lengths.set(named.virtual, await sized(named))
+    const length = this.lengths.get(named.virtual) ?? null
+    if (length === null) return [{}, this.open(fd, request)]
+    const start = Math.min(skip, length)
+    const end = typeof size === 'number' ? Math.min(length, start + size) : length
+    const opened = { skipped: start, size: length }
+    if (start >= end) {
+      // A skip past the whole file still opens it: one that refuses fails
+      // here, and its bytes are not skipped.
+      if (start > 0) await drain(rangedStream(this.stream, named, 0, 1))
+      this.named.delete(fd)
+      return [opened, undefined]
+    }
+    return [opened, chunks(rangedStream(this.stream, named, start, end), this.ctx.signal, false)]
+  }
+
+  /**
    * A failed input's reply, or a throw for what is not the file's own: the
    * failure's words, and the line the command words for an operand.
    */
@@ -319,11 +373,16 @@ export class StreamHost {
       return { reply: {}, data: await held.read(skip, Math.min(request.size, held.size - skip)) }
     }
     let source = this.inputs.get(fd)
+    let opened: Record<string, util.JSONType> = {}
     if (source === undefined) {
-      source = this.open(fd, request)
+      try {
+        ;[opened, source] = await this.start(fd, request)
+      } catch (err) {
+        return this.failed(fd, err)
+      }
       if (source !== undefined) this.inputs.set(fd, source)
     }
-    if (source === undefined) return { reply: { end: true } }
+    if (source === undefined) return { reply: { ...opened, end: true } }
     let next: IteratorResult<Uint8Array>
     const parts: Uint8Array[] = []
     try {
@@ -340,7 +399,7 @@ export class StreamHost {
       this.inputs.delete(fd)
       return this.failed(fd, err)
     }
-    const reply = next.done === true ? { end: true } : {}
+    const reply = next.done === true ? { ...opened, end: true } : opened
     if (next.done === true) {
       this.inputs.delete(fd)
       this.named.delete(fd)
@@ -442,8 +501,22 @@ export class StreamHost {
     return { reply: {} }
   }
 
+  /** Give a path a mode, through the workspace's attribute overlay. */
+  private async chmod(name: string, mode: number): Promise<Served> {
+    if (this.ctx.vfs === undefined) return { reply: { fatal: 'file output requires a workspace' } }
+    try {
+      await this.ctx.vfs.setattr(PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd), {
+        mode,
+      })
+    } catch (error) {
+      if (!isWalkError(error)) throw error
+      return { reply: failure(error) }
+    }
+    return { reply: {} }
+  }
+
   /** Unlink, make (one level) or stat a path; a stat answers what stands there, `dir` or `file`, or why it found nothing. */
-  private async pathOp(op: 'unlink' | 'mkdir' | 'stat', name: string): Promise<Served> {
+  private async pathOp(op: 'unlink' | 'mkdir' | 'stat' | 'rmdir', name: string): Promise<Served> {
     const dispatch = dispatchOf(this.ctx)
     if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
     let found: unknown
@@ -454,7 +527,13 @@ export class StreamHost {
       return { reply: failure(error) }
     }
     if (op !== 'stat' || found === null || found === undefined) return { reply: {} }
-    return { reply: { kind: (found as FileStat).type === FileType.DIRECTORY ? 'dir' : 'file' } }
+    const row = found as FileStat
+    return {
+      reply: {
+        kind: row.type === FileType.DIRECTORY ? 'dir' : 'file',
+        mtime: statEpoch(row.modified),
+      },
+    }
   }
 
   /**
@@ -481,8 +560,12 @@ export class StreamHost {
     if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
     const path = PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd)
     try {
-      const target = linksOf(this.ctx)?.statAt(this.where(path))?.extra[LINK_TARGET_KEY]
-      if (typeof target === 'string') return { reply: { target: byteView(target) } }
+      const link = linksOf(this.ctx)?.statAt(this.where(path))
+      const target = link?.extra[LINK_TARGET_KEY]
+      if (link !== null && link !== undefined && typeof target === 'string') {
+        await dispatch('readlink', path)
+        return { reply: { target: byteView(target), mtime: statEpoch(link.modified) } }
+      }
       const [found] = await dispatch('stat', path)
       if (found === null || found === undefined) throw enoent(path)
     } catch (error) {

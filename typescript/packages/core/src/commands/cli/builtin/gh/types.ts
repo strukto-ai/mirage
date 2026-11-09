@@ -18,5 +18,6 @@ export interface RepoEditField {
   readonly kind: 'value' | 'toggle' | 'security'
   readonly description: string
   readonly short?: string
+  readonly metavar?: string
   readonly choices?: readonly string[]
 }

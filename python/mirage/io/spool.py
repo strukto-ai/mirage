@@ -1,7 +1,7 @@
 import asyncio
 import errno
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import aclosing
 from typing import Any, BinaryIO
 
@@ -146,6 +146,23 @@ class ByteSpool:
         assert self._file is not None
         self._file.seek(offset)
         return self._file.read(size)
+
+    async def gather(self, windows: Sequence[tuple[int, int]]) -> bytes:
+        """Several windows' bytes, joined, read in one worker call that
+        fills no cache: scattered windows would each refill it.
+
+        Args:
+            windows (Sequence[tuple[int, int]]): each window's offset and
+                size, inside the spool.
+        """
+        async with self._lock:
+            self._usable()
+            if self._file is None:
+                return b"".join(self._memory[o : o + n] for o, n in windows)
+            await self._flush()
+            return await run_blocking(
+                lambda: b"".join(self._read(o, n) for o, n in windows)
+            )
 
     async def stream(
         self,

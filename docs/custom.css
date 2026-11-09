@@ -1,0 +1,3 @@
+#content-area:has(#api-playground-2-operation-page) #header > .prose {
+  margin-top: 1.5rem;
+}

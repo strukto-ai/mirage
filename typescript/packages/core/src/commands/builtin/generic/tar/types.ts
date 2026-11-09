@@ -29,6 +29,9 @@ export interface Member {
   // `t/priv`).
   spelled?: string
   size?: number | null
+  // Its modification time and permission bits, where the backend keeps them.
+  mtime?: number | null
+  mode?: number | null
 }
 
 // What one `tar -c` pass decided, before anything is written. Notices

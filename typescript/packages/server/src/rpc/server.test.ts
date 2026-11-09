@@ -14,12 +14,11 @@
 
 import { Readable } from 'node:stream'
 import { stderr, stdout } from 'node:process'
-import { ALL_COMMANDS } from '@struktoai/mirage-core/policy/builtin/output_cap'
-import { Limit, MountMode } from '@struktoai/mirage-core/types'
+import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Workspace } from '@struktoai/mirage-node'
 import { describe, expect, it, vi } from 'vitest'
+import * as ioSerde from '../io_serde.ts'
 import { MirageRpcServer } from './server.ts'
 
 function server(): MirageRpcServer {
@@ -127,7 +126,6 @@ describe('MirageRpcServer', () => {
     await call(rpc, 'vfs/rename', { src: '/d/a.txt', dst: '/d/b.txt' })
     await call(rpc, 'vfs/truncate', { path: '/d/b.txt', length: 3 })
     expect((await call(rpc, 'vfs/exists', { path: '/d/b.txt' })).result).toBe(true)
-    expect((await call(rpc, 'glob', { pattern: '/d/*.txt' })).result).toEqual(['/d/b.txt'])
     await call(rpc, 'vfs/unlink', { path: '/d/b.txt' })
     await call(rpc, 'vfs/rmdir', { path: '/d' })
     expect((await call(rpc, 'vfs/exists', { path: '/d' })).result).toBe(false)
@@ -169,11 +167,11 @@ describe('MirageRpcServer', () => {
 
   it('redacts unknown failures in both message and data', async () => {
     const err = new Error('token=secret')
-    const glob = vi.spyOn(Session.prototype, 'glob').mockRejectedValue(err)
+    const answered = vi.spyOn(ioSerde, 'answered').mockRejectedValue(err)
     const diagnostics = vi.spyOn(stderr, 'write').mockReturnValue(true)
     const protocolOutput = vi.spyOn(stdout, 'write').mockReturnValue(true)
     try {
-      expect((await call(server(), 'glob', { pattern: '/*' })).error).toEqual({
+      expect((await call(server(), 'vfs/read', { path: '/x' })).error).toEqual({
         code: -32603,
         message: 'internal server error',
         data: { detail: 'internal server error' },
@@ -181,7 +179,7 @@ describe('MirageRpcServer', () => {
       expect(diagnostics.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(err.stack)
       expect(protocolOutput).not.toHaveBeenCalled()
     } finally {
-      glob.mockRestore()
+      answered.mockRestore()
       diagnostics.mockRestore()
       protocolOutput.mockRestore()
     }
@@ -234,24 +232,5 @@ describe('MirageRpcServer', () => {
     const byId = new Map(out.map((message) => [message.id ?? null, message]))
     expect((byId.get(1)?.error as { code: number }).code).toBe(-32800)
     expect((byId.get(null)?.error as { code: number }).code).toBe(-32700)
-  })
-})
-
-// Twin of test_a_glob_past_the_walk_limit_is_invalid_params.
-describe('glob past the walk_limit', () => {
-  it('is invalid params, with the reason', async () => {
-    const rpc = new MirageRpcServer(
-      new Workspace(
-        { '/': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }] },
-        { mode: MountMode.WRITE },
-      ),
-    )
-    for (const name of ['a', 'b', 'c']) {
-      await call(rpc, 'vfs/write', { path: `/${name}.txt`, data: b64('x') })
-    }
-    expect((await call(rpc, 'glob', { pattern: '/*.txt' })).error).toEqual({
-      code: -32602,
-      message: '/*.txt: matches more than 2 files (walk_limit); narrow the path',
-    })
   })
 })

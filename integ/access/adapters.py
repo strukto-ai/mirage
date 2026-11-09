@@ -1566,7 +1566,7 @@ def route(step: dict[str, Any], sep: str = "/") -> str:
         sep (str): what joins ``vfs`` and the call; MCP's tools use ``_``.
     """
     call = step["call"]
-    return call if call in ("shell", "glob") else f"vfs{sep}{call}"
+    return call if call == "shell" else f"vfs{sep}{call}"
 
 
 def call_params(step: dict[str, Any]) -> dict[str, Any]:

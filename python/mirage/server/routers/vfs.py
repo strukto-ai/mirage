@@ -34,7 +34,6 @@ from mirage.server.io_serde import (
 )
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.vfs_calls import VFS_CALLS, VfsCall
-from mirage.shell.errors import TooManyMatches
 from mirage.types import JsonValue
 from mirage.workspace.workspace.workspace import Session
 
@@ -140,10 +139,6 @@ def failure(exc: Exception) -> JSONResponse:
     Args:
         exc (Exception): what the call raised.
     """
-    if isinstance(exc, TooManyMatches):
-        # A glob past its mount's walk_limit says so in words that
-        # carry nothing private, so the caller learns why.
-        return JSONResponse(status_code=400, content={"detail": exc.reason})
     condition = classify(exc)
     status = 500 if condition is None else STATUS[condition]
     return JSONResponse(status_code=status, content=failure_to_dict(exc))
@@ -233,27 +228,6 @@ for _call in VFS_CALLS:
     router.add_api_route(
         f"/vfs/{_call.name}", vfs_route(_call), methods=["POST"]
     )
-
-
-@router.post("/glob")
-async def glob(
-    workspace_id: str, request: Request, session_id: str | None = None
-) -> JSONResponse:
-    """``session.glob``: every path a pattern matches, as the session
-    sees them."""
-    entry = require_entry(request, workspace_id)
-    pattern = (await json_body(request)).get("pattern")
-    if not isinstance(pattern, str):
-        raise HTTPException(status_code=400, detail="pattern must be a string")
-    session = await session_of(entry, session_id)
-    try:
-        paths = await entry.runner.call(session.glob(pattern))
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        logger.debug("glob failed", exc_info=True)
-        return failure(exc)
-    return JSONResponse(content=list(paths))
 
 
 @router.post("/vfs/{name}")

@@ -2,6 +2,8 @@
 //! for, and the host's answers, which awk, sed, split, csplit and od
 //! share.
 
+#[cfg(feature = "gh")]
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 
 use serde::Deserialize;
@@ -50,7 +52,11 @@ pub(crate) enum WriteMode {
 /// program reads (where `-` and `/dev/stdin` are standard input), a file
 /// a script names, which no spelling of standard input stands for, or a
 /// spool the run filled, past its first `skip` bytes; a window, `size`
-/// bytes of a spool, comes whole in one reply and leaves nothing open.
+/// bytes of a spool, comes whole in one reply and leaves nothing open. A
+/// range, `Range(operand, skip, size)`, opens an operand past its first
+/// `skip` bytes, at most `size` of them, where the host knows the file's
+/// length, which its first reply says (`skipped`, `size`); otherwise the
+/// host reads the operand from its start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Opening {
     Operand(usize),
@@ -59,6 +65,7 @@ pub(crate) enum Opening {
     File,
     Spool { fd: u32, skip: u64 },
     Window { fd: u32, skip: u64, size: u64 },
+    Range(usize, u64, Option<u64>),
 }
 
 /// What the host is asked to do, in the order the run asks.
@@ -161,6 +168,48 @@ pub(crate) enum Request {
         stdin: Option<u32>,
         stdout: Option<u32>,
     },
+    /// One call to the service an account CLI drives, which the host
+    /// signs and sends: the JSON body, when there is one, as the payload.
+    #[cfg(feature = "gh")]
+    Http {
+        method: String,
+        path: String,
+        params: Vec<(String, String)>,
+        headers: Vec<(String, String)>,
+        body: Option<Vec<u8>>,
+        /// `body` goes as it is rather than read as JSON by the host.
+        raw_body: bool,
+    },
+    /// A file a command's option names, or standard input as `-`.
+    #[cfg(feature = "gh")]
+    ReadFile {
+        flag: Option<String>,
+        path: Option<String>,
+        option: String,
+    },
+    /// The time, for a command that reads the clock.
+    #[cfg(feature = "gh")]
+    Now,
+    /// Whether an object grown to `size` bytes still fits the workspace's
+    /// memory, the host refusing it if not.
+    #[cfg(feature = "gh")]
+    Memory {
+        size: u64,
+    },
+    /// Run a jq program over one value; the reply's bytes are its outputs,
+    /// a compact dump to a line, and the reply says what stopped it.
+    #[cfg(feature = "gh")]
+    Jq {
+        program: String,
+        doc: Vec<u8>,
+    },
+    /// End the run the way the host ends a command that failed.
+    #[cfg(feature = "gh")]
+    Fail {
+        kind: &'static str,
+        message: String,
+        code: i32,
+    },
 }
 
 /// Hand a payload on without copying it when nothing came before it.
@@ -170,6 +219,16 @@ fn take_payload(data: &mut Vec<u8>, payload: &mut Vec<u8>) {
     } else {
         data.append(payload);
     }
+}
+
+#[cfg(feature = "gh")]
+fn pairs(items: &[(String, String)]) -> Json {
+    Json::Array(
+        items
+            .iter()
+            .map(|(key, value)| Json::Array(vec![key.as_str().into(), value.as_str().into()]))
+            .collect(),
+    )
 }
 
 fn latin1(bytes: &[u8]) -> Json {
@@ -192,6 +251,14 @@ fn opening(put: &mut impl FnMut(&str, Json), path: &[u8], opening: Opening) {
         Opening::Operand(operand) => {
             put("path", latin1(path));
             put("operand", operand.into());
+        }
+        Opening::Range(operand, skip, size) => {
+            put("path", latin1(path));
+            put("operand", operand.into());
+            put("skip", skip.into());
+            if let Some(size) = size {
+                put("size", size.into());
+            }
         }
         Opening::AsOperand => {
             put("path", latin1(path));
@@ -362,6 +429,63 @@ impl Request {
                     put("stdout", (*stdout).into());
                 }
             }
+            #[cfg(feature = "gh")]
+            Request::Http {
+                method,
+                path,
+                params,
+                headers,
+                body,
+                raw_body,
+            } => {
+                put("op", "http".into());
+                put("method", method.as_str().into());
+                put("path", path.as_str().into());
+                put("params", pairs(params));
+                put("headers", pairs(headers));
+                if let Some(payload) = body {
+                    put("has_body", true.into());
+                    if *raw_body {
+                        put("raw_body", true.into());
+                    }
+                    take_payload(data, payload);
+                }
+            }
+            #[cfg(feature = "gh")]
+            Request::ReadFile { flag, path, option } => {
+                put("op", "read_file".into());
+                if let Some(flag) = flag {
+                    put("flag", flag.as_str().into());
+                }
+                if let Some(path) = path {
+                    put("path", path.as_str().into());
+                }
+                put("option", option.as_str().into());
+            }
+            #[cfg(feature = "gh")]
+            Request::Now => put("op", "now".into()),
+            #[cfg(feature = "gh")]
+            Request::Memory { size } => {
+                put("op", "memory".into());
+                put("size", (*size).into());
+            }
+            #[cfg(feature = "gh")]
+            Request::Jq { program, doc } => {
+                put("op", "jq".into());
+                put("program", program.as_str().into());
+                take_payload(data, doc);
+            }
+            #[cfg(feature = "gh")]
+            Request::Fail {
+                kind,
+                message,
+                code,
+            } => {
+                put("op", "fail".into());
+                put("kind", (*kind).into());
+                put("message", message.as_str().into());
+                put("code", (*code).into());
+            }
         }
         serde_json::to_vec(&Json::Object(header)).unwrap_or_default()
     }
@@ -394,15 +518,38 @@ pub(crate) struct Reply {
     /// Why the host refused outright, which ends the run.
     pub(crate) fatal: Option<String>,
     pub(crate) status: Option<f64>,
-    /// A filled spool's length.
+    /// A filled spool's length, or the length of the file a range opened.
     pub(crate) size: u64,
+    /// How far into its file a range opened; none when the host read it
+    /// from its start.
+    pub(crate) skipped: Option<u64>,
     /// What a stat found: `dir` or `file`; none when nothing stands there.
     pub(crate) kind: Option<String>,
     /// The permission bits a stat found, where the host keeps them.
     pub(crate) mode: Option<u32>,
+    /// The modification time a stat found, where the host keeps one.
+    pub(crate) mtime: Option<i64>,
     /// What a link a readlink found holds; none for a name that is no
     /// link.
     pub(crate) target: Option<String>,
+    /// A failed call's message, in the service's words where it gave any.
+    #[cfg(feature = "gh")]
+    pub(crate) message: Option<String>,
+    /// A call's response headers, their names lowercased.
+    #[cfg(feature = "gh")]
+    pub(crate) headers: BTreeMap<String, String>,
+    /// The URL a failed call reached.
+    #[cfg(feature = "gh")]
+    pub(crate) url: Option<String>,
+    /// The time, in seconds.
+    #[cfg(feature = "gh")]
+    pub(crate) now: Option<f64>,
+    /// Whether what stopped a jq run was a string.
+    #[cfg(feature = "gh")]
+    pub(crate) string: bool,
+    /// Whether the program raised that stop with `error` itself.
+    #[cfg(feature = "gh")]
+    pub(crate) own: bool,
 }
 
 impl Reply {

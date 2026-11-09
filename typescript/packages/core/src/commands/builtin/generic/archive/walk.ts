@@ -21,11 +21,14 @@ import {
   type StatFn,
 } from '../../../../types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
-import { isRefusal } from '../../../../errors/fs.ts'
+import { isFsError, isRefusal } from '../../../../errors/fs.ts'
 import { classify } from '../../../../errors/classify.ts'
+import { statEpoch } from '../../../../utils/dates.ts'
 import { CycleError } from '../../../../utils/path.ts'
+import { posixMode } from '../../../../utils/stat_view.ts'
 import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
 import type { Entry, MemberKind, Problem, Scan, Walked } from './types.ts'
+import { linkLocation } from '../../utils/links.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 
@@ -280,4 +283,31 @@ export async function scanOperand(path: PathSpec, deps: ScanDeps): Promise<Scan>
     entries = expanded
   }
   return { entries, crossings, problems, missing: false }
+}
+
+/** When a link itself last changed; null where no time is kept. */
+export function linkTime(links: LinkView | null, name: string): number | null {
+  const link = links === null ? null : links.statAt(linkLocation(links, name))
+  return link === null ? null : statEpoch(link.modified)
+}
+
+/**
+ * What an archive records of a file from its stat: its modification time and
+ * permission bits, none where the backend keeps neither. Mirrors Python's
+ * `recorded_stamp`.
+ */
+export async function recordedStamp(
+  stat: StatFn,
+  path: PathSpec | null,
+): Promise<[number | null, number | null]> {
+  if (path === null) return [null, null]
+  let row: FileStat
+  try {
+    row = await stat(path)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    console.debug(`no stamp for ${path.virtual}: ${String(err)}`)
+    return [null, null]
+  }
+  return [statEpoch(row.modified), posixMode(row) & 0o7777]
 }

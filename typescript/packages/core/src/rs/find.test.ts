@@ -306,7 +306,7 @@ describe('parseFindExpression', () => {
             { op: 'action', kind: 'exec', batch: true },
           ],
         },
-        { op: 'prune', pruned: [], pending: [] },
+        { op: 'prune' },
       ],
     })
   })
@@ -537,10 +537,7 @@ describe('time tests keep their place in the tree', () => {
     expect(expr.mtimeMin).not.toBeNull()
     expect(expr.tree).toEqual({
       op: 'and',
-      kids: [
-        { op: 'mtime', lo: expr.mtimeMin, hi: expr.mtimeMax },
-        { op: 'prune', pruned: [], pending: [] },
-      ],
+      kids: [{ op: 'mtime', lo: expr.mtimeMin, hi: expr.mtimeMax }, { op: 'prune' }],
     })
   })
 
@@ -549,10 +546,7 @@ describe('time tests keep their place in the tree', () => {
     expect(expr.mtimeMax).not.toBeNull()
     expect(expr.tree).toEqual({
       op: 'and',
-      kids: [
-        { op: 'prune', pruned: [], pending: [] },
-        { op: 'mtime', lo: expr.mtimeMin, hi: expr.mtimeMax },
-      ],
+      kids: [{ op: 'prune' }, { op: 'mtime', lo: expr.mtimeMin, hi: expr.mtimeMax }],
     })
   })
 
@@ -562,7 +556,7 @@ describe('time tests keep their place in the tree', () => {
     const expr = parseFindExpression(['-newer', 'ref', '-prune'])
     expect(expr.tree).toEqual({
       op: 'and',
-      kids: [{ op: 'true' }, { op: 'prune', pruned: [], pending: [] }],
+      kids: [{ op: 'true' }, { op: 'prune' }],
     })
     expect(expr.newer).toEqual(['ref'])
   })
@@ -576,10 +570,7 @@ describe('-prune', () => {
       kids: [
         {
           op: 'and',
-          kids: [
-            { op: 'path', pattern: './skip' },
-            { op: 'prune', pruned: [], pending: [] },
-          ],
+          kids: [{ op: 'path', pattern: './skip' }, { op: 'prune' }],
         },
         {
           op: 'and',

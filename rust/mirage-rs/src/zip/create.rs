@@ -10,9 +10,9 @@ use serde::Deserialize;
 
 use super::{
     ARCHIVE, CENTRAL, END, END64, GATHER, LOCAL, LOCATOR64, Spool, WINDOW, ZIP32, central,
-    end_record, say, u16_at, u32_at, wildcard,
+    end_record, say, u16_at, u32_at, unzip, wildcard,
 };
-use crate::request::{Opening, Reply, Request, WriteMode, failed, failure_text};
+use crate::request::{Opening, Reply, Request, WriteMode, bytes, failed, failure_text};
 use crate::task::Host;
 
 const INVALID: &str = "\nzip error: Zip file structure invalid ({})\n";
@@ -23,6 +23,11 @@ const REPEATED: &str = "\tzip warning:   first full name: {}
 const INVALID_EXIT: i32 = 3;
 const NOTHING_EXIT: i32 = 12;
 const CREATE_EXIT: i32 = 15;
+const TEMP_EXIT: i32 = 10;
+const TEST_EXIT: i32 = 8;
+const TEST_FAILED: &str = "\nzip error: Zip file invalid, could not spawn unzip, or wrong unzip (original files unmodified)\n";
+/// The most a comment's two-byte length can say.
+const MAX_COMMENT: usize = 0xFFFF;
 const REPEATED_EXIT: i32 = 16;
 /// The spool new members' data goes to.
 const ADDED: u32 = 2;
@@ -31,8 +36,20 @@ const ADDED: u32 = 2;
 const DIR_MODE: u64 = (0o40755 << 16) | 0x10;
 const FILE_MODE: u64 = 0o100644 << 16;
 const LINK_MODE: u64 = 0o120777 << 16;
-/// The stamp every member carries: 1980-01-01 00:00, the DOS epoch.
+/// The stamp a member with no time carries: 1980-01-01 00:00, the DOS epoch.
 const EPOCH: u64 = (1 << 5) | 1;
+/// The stamp a file with this time records, in the DOS date's high half.
+fn dos_stamp(time: Option<i64>) -> u64 {
+    let Some(time) = time.filter(|time| *time >= DOS_EPOCH) else {
+        return EPOCH << 16;
+    };
+    let (year, month, day, hour, minute, second) = crate::calendar::fields(i128::from(time));
+    let date = ((year as u64 - 1980) << 9) | ((month as u64) << 5) | day as u64;
+    let clock = ((hour as u64) << 11) | ((minute as u64) << 5) | (second as u64 / 2);
+    (date << 16) | clock
+}
+/// 1980-01-01 00:00 UTC.
+const DOS_EPOCH: i64 = 315_532_800;
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -57,6 +74,22 @@ struct Found {
     operand: usize,
     #[serde(deserialize_with = "crate::latin1")]
     target: Vec<u8>,
+    /// Its modification time, when the walk read one.
+    mtime: Option<i64>,
+    /// The path it was found at, which `-m` removes; a link's own, not
+    /// its target's.
+    #[serde(deserialize_with = "crate::latin1_opt")]
+    source: Option<Vec<u8>>,
+}
+
+/// What `-l` and `-ll` do to a text file's line ends.
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+enum LineEnds {
+    #[default]
+    Keep,
+    ToCrlf,
+    ToLf,
 }
 
 /// The archive as typed and where it is written, what the walk found and
@@ -73,8 +106,40 @@ pub(super) struct Config {
     warnings: Vec<Vec<u8>>,
     #[serde(deserialize_with = "crate::latin1_list")]
     exclude: Vec<Vec<u8>>,
+    #[serde(deserialize_with = "crate::latin1_list")]
+    include: Vec<Vec<u8>>,
     junk: bool,
     quiet: bool,
+    /// -u: only what is new or newer. -f: only what the archive holds and
+    /// is newer.
+    update: bool,
+    freshen: bool,
+    /// `-u` or `-f` with no file named: what the archive holds is refreshed.
+    refresh_all: bool,
+    /// `-y`: a link is stored as a link.
+    store_links: bool,
+    /// -d: the operands are patterns of members to remove.
+    delete: bool,
+    #[serde(deserialize_with = "crate::latin1_list")]
+    patterns: Vec<Vec<u8>>,
+    /// -m: what went in is removed once the archive is written.
+    move_files: bool,
+    /// -0 to -9.
+    level: Option<u32>,
+    /// -T: the archive is tested once written.
+    test: bool,
+    verbose: bool,
+    line_ends: LineEnds,
+    /// -D: no entries for directories.
+    no_directories: bool,
+    /// -b's directory, which must be there.
+    #[serde(deserialize_with = "crate::latin1_opt")]
+    temp: Option<Vec<u8>>,
+    /// -c and -z: each is prompted for, its text from `stdin_lines`.
+    comment_members: bool,
+    comment_archive: bool,
+    #[serde(deserialize_with = "crate::latin1_list")]
+    stdin_lines: Vec<Vec<u8>>,
 }
 
 /// Little-endian fields, each a value and its width in bytes.
@@ -110,10 +175,10 @@ fn full_name(found: &Found) -> Vec<u8> {
 /// directory is nothing; `-x` matches the stored name whole, wildcards
 /// crossing slashes. One path named twice is stored once, and the first
 /// name two paths share is worded as Info-ZIP's check_dup does.
-fn plan(config: &Config) -> (Vec<(Vec<u8>, &Found)>, Vec<u8>) {
+fn plan<'a>(config: &'a Config, stored: &'a [Found]) -> (Vec<(Vec<u8>, &'a Found)>, Vec<u8>) {
     let mut members = Vec::new();
     let mut formed: BTreeMap<Vec<u8>, Vec<Vec<u8>>> = BTreeMap::new();
-    for found in &config.found {
+    for found in config.found.iter().chain(stored) {
         let full = full_name(found);
         let name = relative(&full);
         let start = name
@@ -125,7 +190,16 @@ fn plan(config: &Config) -> (Vec<(Vec<u8>, &Found)>, Vec<u8>) {
             .exclude
             .iter()
             .any(|p| wildcard(relative(p), &name, true));
-        if name.is_empty() || excluded {
+        let included = config.include.is_empty()
+            || config
+                .include
+                .iter()
+                .any(|p| wildcard(relative(p), &name, true));
+        if name.is_empty()
+            || excluded
+            || !included
+            || (config.no_directories && found.kind == Kind::Dir)
+        {
             continue;
         }
         let fulls = formed.entry(name.clone()).or_default();
@@ -268,16 +342,33 @@ async fn original(spool: &mut Spool<'_>) -> Option<Original> {
     })
 }
 
-/// A new member's local header and central record, its offset left for
-/// `placed`; sizes past ZIP32 go in a ZIP64 field.
-fn encode(
-    name: &[u8],
+/// What a new member's two headers record besides its name.
+struct Facts<'a> {
     method: u64,
     crc: u32,
     packed: u64,
     size: u64,
     mode: u64,
-) -> (Vec<u8>, Vec<u8>) {
+    stamp: u64,
+    comment: &'a [u8],
+    level: u32,
+    text: bool,
+}
+
+/// A new member's local header and central record, its offset left for
+/// `placed`; sizes past ZIP32 go in a ZIP64 field.
+fn encode(name: &[u8], member: &Facts<'_>) -> (Vec<u8>, Vec<u8>) {
+    let Facts {
+        method,
+        crc,
+        packed,
+        size,
+        mode,
+        stamp,
+        comment,
+        level,
+        text,
+    } = *member;
     let large = size.max(packed) >= ZIP32;
     let version = if large { 45 } else { 20 };
     let extra = if large {
@@ -290,11 +381,17 @@ fn encode(
     } else {
         (packed, size)
     };
+    // Bits 1 and 2 of the flags say how hard a deflate tried.
+    let effort = match level {
+        8 | 9 if method == 8 => 2,
+        1 | 2 if method == 8 => 4,
+        _ => 0,
+    };
     let shared = fields(&[
-        (0x800, 2),
+        (0x800 | effort, 2),
         (method, 2),
-        (0, 2),
-        (EPOCH, 2),
+        (stamp & 0xFFFF, 2),
+        (stamp >> 16, 2),
         (u64::from(crc), 4),
         (packed, 4),
         (size, 4),
@@ -314,9 +411,16 @@ fn encode(
             (version, 2),
         ]),
         shared,
-        fields(&[(0, 6), (mode, 4), (0, 4)]),
+        fields(&[
+            (comment.len() as u64, 2),
+            (0, 2),
+            (u64::from(text), 2),
+            (mode, 4),
+            (0, 4),
+        ]),
         name.to_vec(),
         extra,
+        comment.to_vec(),
     ];
     (local.concat(), central.concat())
 }
@@ -395,6 +499,58 @@ struct Packer {
     deflater: Option<Compress>,
     held: Vec<u8>,
     sent: u64,
+    /// Bytes held back for line-end translation, none past a text check.
+    ends: Option<EndsState>,
+    /// Whether the first bytes read like text, which the record says.
+    text: bool,
+}
+
+/// A file on its way through `-l` or `-ll`: judged text from its first
+/// block, and the carriage return a window ended on.
+struct EndsState {
+    want: LineEnds,
+    judged: bool,
+    text: bool,
+    pending_cr: bool,
+}
+
+impl EndsState {
+    fn translate(&mut self, data: &[u8], end: bool) -> Vec<u8> {
+        if !self.judged {
+            self.judged = true;
+            self.text = !data.contains(&0);
+        }
+        if !self.text {
+            return data.to_vec();
+        }
+        let mut out = Vec::with_capacity(data.len() + data.len() / 8);
+        for &byte in data {
+            match self.want {
+                LineEnds::ToCrlf => {
+                    if byte == b'\n' && !self.pending_cr {
+                        out.push(b'\r');
+                    }
+                    self.pending_cr = byte == b'\r';
+                    out.push(byte);
+                }
+                LineEnds::ToLf => {
+                    if std::mem::take(&mut self.pending_cr) && byte != b'\n' {
+                        out.push(b'\r');
+                    }
+                    if byte == b'\r' {
+                        self.pending_cr = true;
+                    } else {
+                        out.push(byte);
+                    }
+                }
+                LineEnds::Keep => out.push(byte),
+            }
+        }
+        if end && self.want == LineEnds::ToLf && std::mem::take(&mut self.pending_cr) {
+            out.push(b'\r');
+        }
+        out
+    }
 }
 
 impl Packer {
@@ -425,6 +581,9 @@ impl Packer {
             }
         }
         self.held.extend_from_slice(data);
+        if self.held.len() >= WINDOW {
+            self.send(host).await;
+        }
     }
 }
 
@@ -436,18 +595,33 @@ async fn add(
     found: &Found,
     skip: u64,
     fd: u32,
+    config: &Config,
+    comment: &[u8],
 ) -> Result<Record, Vec<u8>> {
+    let level = config.level.unwrap_or(6);
+    let stored = found.kind == Kind::Dir || level == 0;
     let mut packer = Packer {
         crc: Crc::new(),
         size: 0,
-        deflater: (found.kind != Kind::Dir).then(|| Compress::new(Compression::new(6), false)),
+        deflater: (!stored).then(|| Compress::new(Compression::new(level), false)),
         held: Vec::new(),
         sent: 0,
+        ends: (config.line_ends != LineEnds::Keep && found.kind == Kind::File).then_some(
+            EndsState {
+                want: config.line_ends,
+                judged: false,
+                text: false,
+                pending_cr: false,
+            },
+        ),
+        text: found.kind == Kind::File,
     };
-    let mut open = found
-        .path
-        .clone()
-        .map(|path| (path, Opening::Operand(found.operand)));
+    // A short member is kept whole too, for when deflating it saves nothing.
+    let mut whole = Vec::new();
+    let mut open = found.path.clone().map(|path| match found.operand {
+        0 => (path, Opening::Name),
+        operand => (path, Opening::Operand(operand)),
+    });
     let mut next = (found.kind == Kind::Link).then(|| found.target.clone());
     let mut ended = false;
     loop {
@@ -464,11 +638,28 @@ async fn add(
                 data
             }
         };
-        packer.size += data.len() as u64;
-        packer.crc.update(&data);
-        packer.pack(host, &data, false).await;
+        if data.contains(&0) {
+            packer.text = false;
+        }
+        let translated = match packer.ends.as_mut() {
+            Some(ends) => ends.translate(&data, ended || next.is_some()),
+            None => data,
+        };
+        if !stored && packer.size + translated.len() as u64 <= WINDOW as u64 {
+            whole.extend_from_slice(&translated);
+        }
+        packer.size += translated.len() as u64;
+        packer.crc.update(&translated);
+        packer.pack(host, &translated, false).await;
     }
     packer.pack(host, b"", true).await;
+    let plain = !stored
+        && packer.sent == 0
+        && packer.size <= WINDOW as u64
+        && packer.held.len() as u64 >= packer.size;
+    if plain {
+        packer.held = whole;
+    }
     if !packer.held.is_empty() {
         packer.send(host).await;
     }
@@ -477,13 +668,20 @@ async fn add(
         Kind::Link => (8, LINK_MODE),
         Kind::File => (8, FILE_MODE),
     };
+    let method = if stored || plain { 0 } else { method };
     let (head, central) = encode(
         name,
-        method,
-        packer.crc.sum(),
-        packer.sent,
-        packer.size,
-        mode,
+        &Facts {
+            method,
+            crc: packer.crc.sum(),
+            packed: packer.sent,
+            size: packer.size,
+            mode,
+            stamp: dos_stamp(found.mtime),
+            comment,
+            level,
+            text: packer.text,
+        },
     );
     let (spool, size) = (ADDED, packer.sent);
     let name = name.to_vec();
@@ -539,6 +737,29 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
             CREATE_EXIT,
         )
     };
+    if let Some(temp) = &config.temp {
+        if host.stat(temp).await.as_deref() != Some("dir") {
+            let name = [&temp[..], b"/ziXXXXXX"].concat();
+            return fail(
+                &say(
+                    "zip I/O error: No such file or directory\nzip error: Temporary file failure ({})\n",
+                    &[&name],
+                ),
+                false,
+                TEMP_EXIT,
+            );
+        }
+    }
+    // `-T` looks at what the archive holds before anything replaces it;
+    // what this run adds is sound as it is written.
+    if config.test && host.stat(archive).await.is_some() {
+        let status = unzip::run(host.clone(), unzip::Config::testing(archive)).await;
+        host.ask(Request::Close { fd: ARCHIVE }).await;
+        if status != 0 {
+            host.print(&say("test of {} FAILED\n", &[archive]));
+            return fail(TEST_FAILED.as_bytes(), false, TEST_EXIT);
+        }
+    }
     let open = (config.archive.clone(), Opening::Operand(1));
     let (reply, _) = host
         .ask(Request::Fill {
@@ -552,6 +773,9 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
             None => return fail(&say(INVALID, &[archive]), false, INVALID_EXIT),
         }
     } else if reply.names(&["ENOENT"]) {
+        if (config.update || config.freshen || config.delete) && !config.quiet {
+            host.warn(&say("\tzip warning: {} not found or empty\n", &[archive]));
+        }
         None
     } else if reply.names(&["EISDIR"]) {
         return fail(&say(INVALID, &[archive]), false, INVALID_EXIT);
@@ -560,7 +784,12 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
         // overwrite.
         return create_error(&reply, false);
     };
-    let (mut members, repeated) = plan(&config);
+    let stored = if config.refresh_all {
+        stored_files(&host, old.as_ref(), &config).await
+    } else {
+        Vec::new()
+    };
+    let (mut members, repeated) = plan(&config, &stored);
     if !repeated.is_empty() {
         let repeated = if config.quiet { Vec::new() } else { repeated };
         let error = "\nzip error: Invalid command arguments (cannot repeat names in zip file)\n";
@@ -570,7 +799,41 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
             REPEATED_EXIT,
         );
     }
-    if members.is_empty() {
+    if config.delete {
+        return delete(&host, &config, archive, old, &warnings).await;
+    }
+    let held: HashMap<Vec<u8>, u64> = old.as_ref().map_or_else(HashMap::new, |old| {
+        old.records
+            .iter()
+            .map(|r| {
+                let stamp =
+                    (u64::from(u16_at(&r.central, 14)) << 16) | u64::from(u16_at(&r.central, 12));
+                (r.name.clone(), stamp)
+            })
+            .collect()
+    });
+    if config.update || config.freshen {
+        members.retain(|(name, found)| match held.get(name.as_slice()) {
+            Some(&stamp) => dos_stamp(found.mtime) > stamp,
+            None => config.update,
+        });
+    }
+    if members.is_empty() && !config.comment_archive {
+        if config.test && old.is_some() {
+            if !config.quiet {
+                host.print(&say("test of {} OK\n", &[archive]));
+            }
+            return 0;
+        }
+        if config.update || config.freshen {
+            return NOTHING_EXIT;
+        }
+        if !config.include.is_empty() {
+            if !config.quiet {
+                host.warn(b"\tzip warning: zip file empty\n");
+            }
+            return 0;
+        }
         // Nothing matched: no archive, and an error -q does not silence.
         return fail(
             &say("\nzip error: Nothing to do! ({})\n", &[archive]),
@@ -589,11 +852,23 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
     let mut added = Vec::new();
     let mut lines = Vec::new();
     let mut skip = 0;
+    let (mut replies, mut total_in, mut total_out) =
+        (config.stdin_lines.clone().into_iter(), 0u64, 0u64);
+    let mut prompts = Vec::new();
     for (index, (name, found)) in members.iter().enumerate() {
         if name.len() > 0xFFFF {
             return fail(&say(INVALID, &[archive]), false, INVALID_EXIT);
         }
-        let record = match add(&host, name, found, skip, 2000 + index as u32).await {
+        let comment = if config.comment_members {
+            prompts.extend(say("Enter comment for {}:\n", &[name]));
+            let mut comment = replies.next().unwrap_or_default();
+            comment.truncate(MAX_COMMENT);
+            comment
+        } else {
+            Vec::new()
+        };
+        let fd = 2000 + index as u32;
+        let record = match add(&host, name, found, skip, fd, &config, &comment).await {
             Ok(record) => record,
             // A member the session may not read aborts the run and writes no
             // archive; Info-ZIP writes the rest and exits 18.
@@ -603,18 +878,50 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
             }
         };
         skip += record.size;
-        let verb: &[u8] = if order.contains_key(name.as_slice()) {
+        let verb: &[u8] = if config.freshen {
+            b"freshening"
+        } else if order.contains_key(name.as_slice()) {
             b"updating"
         } else {
             b"  adding"
         };
-        lines.extend(say("{}: {}\n", &[verb, name]));
+        if config.verbose {
+            let (size, packed) = (u64::from(u32_at(&record.central, 24)), record.size);
+            (total_in, total_out) = (total_in + size, total_out + packed);
+            let ratio = (packed * 100)
+                .checked_div(size)
+                .map_or(0, |part| 100u64.saturating_sub(part));
+            let how = if u16_at(&record.central, 10) == 0 {
+                "stored".to_owned()
+            } else {
+                "deflated".to_owned()
+            };
+            let tail = format!("\t(in={size}) (out={packed}) ({how} {ratio}%)");
+            lines.extend([verb, b": ", name, tail.as_bytes(), b"\n"].concat());
+        } else {
+            lines.extend(say("{}: {}\n", &[verb, name]));
+        }
         added.push(record);
     }
+    let new_comment = config.comment_archive.then(|| {
+        let mut text = Vec::new();
+        for line in replies.by_ref() {
+            if line == b"." {
+                break;
+            }
+            if !text.is_empty() {
+                text.push(b'\n');
+            }
+            text.extend_from_slice(&line);
+        }
+        text.truncate(MAX_COMMENT);
+        text
+    });
     let (prefix, comment, old_records) = match old {
         Some(old) => (old.prefix, old.comment, old.records),
         None => (0, Vec::new(), Vec::new()),
     };
+    let comment = new_comment.unwrap_or(comment);
     // A new member takes the place of every old record of its name, as
     // an archive appended to can repeat one.
     let fresh: HashMap<&[u8], &Record> = added.iter().map(|r| (r.name.as_slice(), r)).collect();
@@ -643,7 +950,189 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
     let size = directory.len() as u64;
     directory.extend(ending(records.len() as u64, size, offset, &comment));
     pieces.push(Piece::Made(directory));
-    let path = config.output.clone();
+    if let Some(reply) = write_out(&host, &config.output, pieces).await {
+        return create_error(&reply, true);
+    }
+    let unremoved = if config.move_files {
+        remove_sources(&host, &members).await
+    } else {
+        Vec::new()
+    };
+    if !config.quiet {
+        host.print(&lines);
+        host.print(&prompts);
+        if config.comment_archive {
+            host.print(b"enter new zip file comment (end with .):\n");
+        }
+        if config.verbose {
+            let saved = (total_out * 100)
+                .checked_div(total_in)
+                .map_or(0, |part| 100u64.saturating_sub(part));
+            host.print(
+                format!("total bytes={total_in}, compressed={total_out} -> {saved}% savings\n")
+                    .as_bytes(),
+            );
+        }
+        if config.test {
+            host.print(&say("test of {} OK\n", &[archive]));
+        }
+        host.warn(&warnings);
+        host.warn(&unremoved);
+    }
+    0
+}
+
+/// What `-u` or `-f` with no file named looks at: each file the archive
+/// holds that still stands under its stored name, the archive itself left
+/// out. Under `-y` a link standing there is weighed by its own time and goes
+/// in as a link, the time of what it points at being no reason to change it,
+/// and a name the rules refuse to read as a link stays as the archive has it.
+async fn stored_files(host: &Host, old: Option<&Original>, config: &Config) -> Vec<Found> {
+    let mut stored = Vec::new();
+    for record in old.map_or(&[][..], |old| &old.records[..]) {
+        if record.name.ends_with(b"/") || record.name == relative(&config.archive) {
+            continue;
+        }
+        if config.store_links {
+            let path = record.name.clone();
+            let (reply, _) = host.ask(Request::Readlink { path }).await;
+            if failed(&reply) {
+                continue;
+            }
+            if let Some(target) = reply.target {
+                stored.push(Found {
+                    spelled: record.name.clone(),
+                    kind: Kind::Link,
+                    target: bytes(&target),
+                    mtime: reply.mtime,
+                    ..Found::default()
+                });
+                continue;
+            }
+        }
+        if let Some((kind, mtime)) = host.stat_time(&record.name).await {
+            if kind == "file" {
+                stored.push(Found {
+                    spelled: record.name.clone(),
+                    path: Some(record.name.clone()),
+                    mtime,
+                    ..Found::default()
+                });
+            }
+        }
+    }
+    stored
+}
+
+/// Remove what went into the archive: each file, then each directory,
+/// deepest first; the warnings for what could not be removed.
+async fn remove_sources(host: &Host, members: &[(Vec<u8>, &Found)]) -> Vec<u8> {
+    let mut warnings = Vec::new();
+    let mut note = |reply: &Reply, found: &Found| {
+        if failed(reply) {
+            warnings.extend(say("\tzip warning: error deleting {}\n", &[&found.spelled]));
+        }
+    };
+    let mut dirs = Vec::new();
+    for (_, found) in members {
+        let path = found
+            .source
+            .clone()
+            .or_else(|| found.path.clone())
+            .unwrap_or_else(|| found.spelled.clone());
+        if found.kind == Kind::Dir {
+            dirs.push((path, *found));
+        } else {
+            note(&host.ask(Request::Unlink { path }).await.0, found);
+        }
+    }
+    dirs.sort_by_key(|(dir, _)| std::cmp::Reverse(dir.len()));
+    for (path, found) in dirs {
+        note(&host.ask(Request::Rmdir { path }).await.0, found);
+    }
+    warnings
+}
+
+/// `-d`: the archive written again without the members the patterns name.
+async fn delete(
+    host: &Host,
+    config: &Config,
+    archive: &[u8],
+    old: Option<Original>,
+    warnings: &[u8],
+) -> i32 {
+    let (records, prefix, comment) = match old {
+        Some(old) => (old.records, old.prefix, old.comment),
+        None => (Vec::new(), 0, Vec::new()),
+    };
+    let mut matched = vec![false; config.patterns.len()];
+    let mut kept = Vec::new();
+    let mut lines = Vec::new();
+    for record in records {
+        let selected = |patterns: &[Vec<u8>]| {
+            patterns
+                .iter()
+                .any(|pattern| wildcard(relative(pattern), &record.name, true))
+        };
+        let spared =
+            selected(&config.exclude) || (!config.include.is_empty() && !selected(&config.include));
+        let hit = config
+            .patterns
+            .iter()
+            .position(|pattern| !spared && wildcard(relative(pattern), &record.name, true));
+        match hit {
+            Some(_) => {
+                for (index, pattern) in config.patterns.iter().enumerate() {
+                    matched[index] |= wildcard(relative(pattern), &record.name, true);
+                }
+                lines.extend(say("deleting: {}\n", &[&record.name]));
+            }
+            None => kept.push(record),
+        }
+    }
+    let mut notices = warnings.to_vec();
+    if !config.quiet {
+        for (pattern, found) in config.patterns.iter().zip(&matched) {
+            if !found {
+                notices.extend(say("\tzip warning: name not matched: {}\n", &[pattern]));
+            }
+        }
+    }
+    if lines.is_empty() {
+        notices.extend(say("\nzip error: Nothing to do! ({})\n", &[archive]));
+        host.warn(&notices);
+        return NOTHING_EXIT;
+    }
+    if kept.is_empty() && !config.quiet {
+        notices.extend_from_slice(b"\tzip warning: zip file empty\n");
+    }
+    let mut pieces = Vec::new();
+    keep(&mut pieces, ARCHIVE, 0, prefix);
+    let mut offset = prefix;
+    let mut directory = Vec::new();
+    for record in &kept {
+        directory.extend(placed(&record.central, offset));
+        offset += record.size;
+        keep(&mut pieces, record.spool, record.skip, record.size);
+    }
+    let size = directory.len() as u64;
+    directory.extend(ending(kept.len() as u64, size, offset, &comment));
+    pieces.push(Piece::Made(directory));
+    if let Some(reply) = write_out(host, &config.output, pieces).await {
+        let text = say(CREATE, &[&failure_text(&reply), archive]);
+        host.warn(&text);
+        return CREATE_EXIT;
+    }
+    if !config.quiet {
+        host.print(&lines);
+    }
+    host.warn(&notices);
+    0
+}
+
+/// The pieces as the file at `path`, whole; the host's failure if any.
+async fn write_out(host: &Host, path: &[u8], pieces: Vec<Piece>) -> Option<Reply> {
+    let path = path.to_vec();
     let mut writes = vec![Request::Write {
         path: path.clone(),
         mode: WriteMode::Create,
@@ -664,12 +1153,8 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
     for request in writes {
         let (reply, _) = host.ask(request).await;
         if failed(&reply) {
-            return create_error(&reply, true);
+            return Some(reply);
         }
     }
-    if !config.quiet {
-        host.print(&lines);
-        host.warn(&warnings);
-    }
-    0
+    None
 }

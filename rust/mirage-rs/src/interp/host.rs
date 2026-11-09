@@ -3,6 +3,7 @@
 //! spelled once for both hosts.
 
 use super::codec::Item;
+use super::declare::Declared;
 use super::expand::{Field, marked};
 use super::shell::Shell;
 use super::task::Expanded;
@@ -181,17 +182,33 @@ pub fn expanded_out(expanded: &Expanded) -> Item {
     match expanded {
         Expanded::Fields(fields) => fields_out(fields),
         Expanded::Text(text) => Item::text(text),
-        Expanded::Declared(declared) => Item::tuple([
-            Item::list(declared.pieces.iter().map(|(failed, piece)| {
-                Item::tuple([Item::Bool(*failed), Item::Raw(piece.clone())])
-            })),
-            Item::int(declared.status),
-        ]),
+        Expanded::Declared(declared) => Item::tuple(declared_out(declared)),
+        Expanded::Unset(unset) => {
+            let [pieces, status] = declared_out(&unset.said);
+            Item::tuple([
+                pieces,
+                status,
+                Item::Bool(unset.remove_function),
+                Item::opt(unset.tracked.as_deref(), Item::text),
+            ])
+        }
         Expanded::Runs(runs) => Item::list(
             runs.iter()
                 .map(|(text, quoted)| Item::tuple([Item::text(text), Item::Bool(*quoted)])),
         ),
     }
+}
+
+/// What a builtin said, then its status.
+fn declared_out(declared: &Declared) -> [Item; 2] {
+    [
+        Item::list(
+            declared.pieces.iter().map(|(failed, piece)| {
+                Item::tuple([Item::Bool(*failed), Item::Raw(piece.clone())])
+            }),
+        ),
+        Item::int(declared.status),
+    ]
 }
 
 /// How an expansion ended: `("ok", answer)`, or the fault it stopped on.

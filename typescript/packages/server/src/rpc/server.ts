@@ -21,7 +21,6 @@ import { PipeClosed } from '@struktoai/mirage-core/io/errors'
 import { BytePipe } from '@struktoai/mirage-core/io/pipe'
 import { currentRequest } from '@struktoai/mirage-core/io/web/request'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { TooManyMatches } from '@struktoai/mirage-core/shell/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -117,8 +116,7 @@ export interface MirageRpcServerOptions {
 /**
  * Serves one session of a workspace over JSON-RPC 2.0. The methods are
  * the in-app Session API under the same names: `shell` is
- * `session.shell`, `glob` is `session.glob`, `vfs/<call>` is
- * `session.vfs.<call>`, and `tools/<tool>` runs one of the session's agent
+ * `session.shell`, `vfs/<call>` is `session.vfs.<call>`, and `tools/<tool>` runs one of the session's agent
  * tools, which `tools/list` and `tools/call` also serve with MCP's
  * schemas. `shell` and `vfs/<call>` take `explain: true` to answer what the
  * call would do instead of doing it (`session.explain`). Bytes travel as
@@ -169,14 +167,6 @@ export class MirageRpcServer {
       'stdin/close': (params) => {
         this.stdinOf(params).end()
         return Promise.resolve(null)
-      },
-      glob: async (params) => {
-        try {
-          return await this.session.glob(text(params, 'pattern'))
-        } catch (err) {
-          if (err instanceof TooManyMatches) throw new RpcError(RPC_INVALID_PARAMS, err.reason)
-          throw err
-        }
       },
       ...Object.fromEntries(
         VFS_CALLS.map((call) => [`vfs/${call.name}`, (params: Params) => this.vfs(call, params)]),

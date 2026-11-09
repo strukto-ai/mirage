@@ -44,6 +44,31 @@ describe('executeDeclaration', () => {
     expect((await ws.shell(`declare -p ${name}`)).exitCode).toBe(1)
   })
 
+  it.each([
+    ['Y=1', 'Y: permission denied\n'],
+    ['let Y=1', 'Y: permission denied\n'],
+    ['((Y=1))', 'bash: line 1: Y: permission denied\n'],
+  ])('refuses a deciding policy assigning with %s', async (line, said) => {
+    const ws = makeWs()
+    const io = await runExplaining(DryRun.DECIDING, () => ws.shell(line))
+    expect(stderrStr(io)).toBe(said)
+    expect(io.exitCode).toBe(1)
+    expect((await ws.shell('declare -p Y')).exitCode).toBe(1)
+  })
+
+  it('refuses a deciding policy unsetting', async () => {
+    const ws = makeWs()
+    await ws.shell('HELD=1; A=(x y); kept() { :; }')
+    const io = await runExplaining(DryRun.DECIDING, () =>
+      ws.shell("unset HELD 'A[0]'; unset -f kept"),
+    )
+    expect(stderrStr(io)).toBe(
+      'HELD: permission denied\nA: permission denied\nkept: permission denied\n',
+    )
+    expect(io.exitCode).toBe(1)
+    expect(stdoutStr(await ws.shell('echo "$HELD ${A[0]}"; declare -F kept'))).toBe('1 x\nkept\n')
+  })
+
   it('refuses a deciding policy a local and lets it list', async () => {
     const ws = makeWs()
     await ws.shell('HELD=1')

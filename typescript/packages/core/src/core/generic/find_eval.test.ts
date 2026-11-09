@@ -22,11 +22,11 @@ import {
   emitStartPath,
   evaluate,
   keep,
-  prunedKeys,
   treeHasAction,
   treeHasPrune,
   treeHasTime,
   unrespellRaw,
+  verdict,
   withoutPrune,
 } from './find_eval.ts'
 import { type Effects, type FindEntry, type PredNode } from './types.ts'
@@ -40,13 +40,6 @@ function entry(over: Partial<FindEntry> = {}): FindEntry {
 }
 
 // The keys every `-prune` in the tree holds pending.
-function pending(node: PredNode): string[] {
-  if (node.op === 'prune') return node.pending.map((p) => p.entry.key)
-  if (node.op === 'not') return pending(node.kid)
-  if (node.op === 'and' || node.op === 'or') return node.kids.flatMap(pending)
-  return []
-}
-
 describe('size', () => {
   it('needs a stat for anything but a directory', () => {
     const unsized = { name: 'a.txt', type: FileType.FILE, size: null } as FileStat
@@ -204,23 +197,16 @@ describe('bindTree', () => {
     expect(evaluate(nested, entry({ key: '/sub/deep', kind: 'd' }), effects())).toBe(true)
   })
 
-  it('rewrites nested nodes and copies every ledger', () => {
+  it('rewrites nested nodes', () => {
     const tree = bindTree({ op: 'and', kids: [{ op: 'path', pattern: '/data/*' }] }, '/data')
     expect(evaluate(tree, { key: '/x', name: 'x', kind: 'f', depth: 1 }, effects())).toBe(true)
     const shared: Parameters<typeof bindTree>[0] = {
       op: 'and',
-      kids: [
-        { op: 'path', pattern: '*a*' },
-        { op: 'prune', pruned: [], pending: [] },
-      ],
+      kids: [{ op: 'path', pattern: '*a*' }, { op: 'prune' }],
     }
     const first = bindTree(shared, '')
-    const second = bindTree(shared, '')
     expect(first).not.toBe(shared)
-    keep(entry({ key: '/a', name: 'a', kind: 'd' }), first, null)
-    expect(prunedKeys(first)).toEqual(['/a'])
-    expect(prunedKeys(second)).toEqual([])
-    expect(prunedKeys(shared)).toEqual([])
+    expect(verdict(entry({ key: '/a', name: 'a', kind: 'd' }), first, null)).toEqual([true, true])
   })
 })
 
@@ -234,10 +220,7 @@ describe('actions and -prune', () => {
         kids: [
           {
             op: 'and',
-            kids: [
-              { op: 'path', pattern: './skip' },
-              { op: 'prune', pruned: [], pending: [] },
-            ],
+            kids: [{ op: 'path', pattern: './skip' }, { op: 'prune' }],
           },
           {
             op: 'and',
@@ -263,10 +246,7 @@ describe('actions and -prune', () => {
         kids: [
           {
             op: 'and',
-            kids: [
-              { op: 'path', pattern: './skip' },
-              { op: 'prune', pruned: [], pending: [] },
-            ],
+            kids: [{ op: 'path', pattern: './skip' }, { op: 'prune' }],
           },
           { op: 'type', kind: 'f' },
         ],
@@ -278,17 +258,14 @@ describe('actions and -prune', () => {
     expect(keep(entry({ key: '/skip', name: 'skip', kind: 'd' }), plain, null)).toBe(true)
   })
 
-  it('records the directories a prune reaches', () => {
+  it('names the directories a prune reaches', () => {
     const tree = bindTree(
       {
         op: 'or',
         kids: [
           {
             op: 'and',
-            kids: [
-              { op: 'name', pattern: 'skip', icase: false },
-              { op: 'prune', pruned: [], pending: [] },
-            ],
+            kids: [{ op: 'name', pattern: 'skip', icase: false }, { op: 'prune' }],
           },
           { op: 'action', kind: 'print' },
         ],
@@ -297,29 +274,35 @@ describe('actions and -prune', () => {
     )
     const dirs = new Set(['/', '/keep', '/skip', '/skip/inner'])
     const rows = ['/', '/keep', '/keep/f', '/skip', '/skip/inner', '/skip/inner/d', '/skipped']
-    const kept = rows.filter((r) =>
-      keep(
+    const answers = rows.map((r) =>
+      verdict(
         entry({ key: r, name: r.split('/').pop() ?? '', kind: dirs.has(r) ? 'd' : 'f' }),
         tree,
         null,
       ),
     )
-    expect(kept).toEqual(['/', '/keep', '/keep/f', '/skip/inner', '/skip/inner/d', '/skipped'])
-    expect(prunedKeys(tree)).toEqual(['/skip'])
+    expect(rows.filter((_, i) => answers[i]?.[0])).toEqual([
+      '/',
+      '/keep',
+      '/keep/f',
+      '/skip/inner',
+      '/skip/inner/d',
+      '/skipped',
+    ])
+    expect(rows.filter((_, i) => answers[i]?.[1])).toEqual(['/skip'])
     // A pruned file (an object store key that is also a directory prefix)
     // drops nothing.
     const fileTree = bindTree(
       {
         op: 'and',
-        kids: [
-          { op: 'name', pattern: 'data', icase: false },
-          { op: 'prune', pruned: [], pending: [] },
-        ],
+        kids: [{ op: 'name', pattern: 'data', icase: false }, { op: 'prune' }],
       },
       '',
     )
-    keep(entry({ key: '/data', name: 'data', kind: 'f' }), fileTree, null)
-    expect(prunedKeys(fileTree)).toEqual([])
+    expect(verdict(entry({ key: '/data', name: 'data', kind: 'f' }), fileTree, null)).toEqual([
+      true,
+      false,
+    ])
   })
 
   it('-mindepth prunes nothing above its level', () => {
@@ -329,18 +312,17 @@ describe('actions and -prune', () => {
         kids: [
           {
             op: 'and',
-            kids: [
-              { op: 'name', pattern: 'skip', icase: false },
-              { op: 'prune', pruned: [], pending: [] },
-            ],
+            kids: [{ op: 'name', pattern: 'skip', icase: false }, { op: 'prune' }],
           },
           { op: 'action', kind: 'print' },
         ],
       },
       '',
     )
-    expect(keep(entry({ key: '/skip', name: 'skip', kind: 'd', depth: 1 }), tree, 2)).toBe(false)
-    expect(prunedKeys(tree)).toEqual([])
+    expect(verdict(entry({ key: '/skip', name: 'skip', kind: 'd', depth: 1 }), tree, 2)).toEqual([
+      false,
+      false,
+    ])
   })
 
   it('withoutPrune and the tree probes', () => {
@@ -349,10 +331,7 @@ describe('actions and -prune', () => {
       kids: [
         {
           op: 'and',
-          kids: [
-            { op: 'path', pattern: './skip' },
-            { op: 'prune', pruned: [], pending: [] },
-          ],
+          kids: [{ op: 'path', pattern: './skip' }, { op: 'prune' }],
         },
         { op: 'not', kid: { op: 'action', kind: 'print' } },
       ],
@@ -370,10 +349,7 @@ describe('actions and -prune', () => {
     expect(
       treeHasAction({
         op: 'or',
-        kids: [
-          { op: 'path', pattern: 'x' },
-          { op: 'prune', pruned: [], pending: [] },
-        ],
+        kids: [{ op: 'path', pattern: 'x' }, { op: 'prune' }],
       }),
     ).toBe(false)
     expect(
@@ -394,10 +370,7 @@ describe('time tests and -prune', () => {
     bindTree(
       {
         op: 'and',
-        kids: [
-          { op: 'mtime', lo: 100, hi: null },
-          { op: 'prune', pruned: [], pending: [] },
-        ],
+        kids: [{ op: 'mtime', lo: 100, hi: null }, { op: 'prune' }],
       },
       '',
     )
@@ -412,81 +385,41 @@ describe('time tests and -prune', () => {
     )
   })
 
-  it('a prune past an undecided time test is pending and counts', () => {
+  it('a prune past an undecided time test counts', () => {
     const tree = gated()
     for (const key of ['/old', '/new']) {
-      expect(keep(entry({ key, name: key.slice(1), kind: 'd' }), tree, null)).toBe(true)
+      expect(verdict(entry({ key, name: key.slice(1), kind: 'd' }), tree, null)).toEqual([
+        true,
+        true,
+      ])
     }
-    expect(prunedKeys(tree)).toEqual(['/old', '/new'])
-    expect(pending(tree)).toEqual(['/old', '/new'])
-    // bindTree hands out a fresh pending ledger too.
-    const bound = bindTree(
-      {
-        op: 'prune',
-        pruned: ['/x'],
-        pending: [{ entry: entry({ key: '/y', kind: 'd' }) }],
-      },
-      '',
-    )
-    expect(bound).toEqual({ op: 'prune', pruned: [], pending: [] })
   })
 
-  it('a prune before a time test is firm', () => {
+  it('a prune before a time test fires whatever the time', () => {
     const tree = bindTree(
       {
         op: 'and',
-        kids: [
-          { op: 'prune', pruned: [], pending: [] },
-          { op: 'mtime', lo: 100, hi: null },
-        ],
+        kids: [{ op: 'prune' }, { op: 'mtime', lo: 100, hi: null }],
       },
       '',
     )
-    expect(keep(entry({ key: '/old', name: 'old', kind: 'd' }), tree, null)).toBe(true)
-    expect(prunedKeys(tree)).toEqual(['/old'])
-    expect(pending(tree)).toEqual([])
+    const old = entry({ key: '/old', name: 'old', kind: 'd', mtime: 50 })
+    expect(verdict(old, tree, null)).toEqual([false, true])
   })
 
-  it('a prune with a known mtime needs no settling', () => {
+  it('a prune with a known mtime follows the test', () => {
     const tree = gated()
-    expect(keep(entry({ key: '/old', name: 'old', kind: 'd', mtime: 50 }), tree, null)).toBe(false)
-    expect(keep(entry({ key: '/new', name: 'new', kind: 'd', mtime: 150 }), tree, null)).toBe(true)
-    expect(prunedKeys(tree)).toEqual(['/new'])
-    expect(pending(tree)).toEqual([])
+    const old = entry({ key: '/old', name: 'old', kind: 'd', mtime: 50 })
+    const fresh = entry({ key: '/new', name: 'new', kind: 'd', mtime: 150 })
+    expect(verdict(old, tree, null)).toEqual([false, false])
+    expect(verdict(fresh, tree, null)).toEqual([true, true])
   })
 
   it('deferred tests stay with the branch that needs them', () => {
     // `( -mtime 1 -type f ) -o ( -type d -prune )`: the first arm fails on
-    // -type f whatever the mtime, so the prune on the second is firm and no
-    // stat is owed (GNU prunes every directory here).
-    let tree = bindTree(
-      {
-        op: 'or',
-        kids: [
-          {
-            op: 'and',
-            kids: [
-              { op: 'mtime', lo: 100, hi: null },
-              { op: 'type', kind: 'f' },
-            ],
-          },
-          {
-            op: 'and',
-            kids: [
-              { op: 'type', kind: 'd' },
-              { op: 'prune', pruned: [], pending: [] },
-            ],
-          },
-        ],
-      },
-      '',
-    )
-    expect(keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)).toBe(true)
-    expect(pending(tree)).toEqual([])
-    expect(prunedKeys(tree)).toEqual(['/d'])
-    // `( ! -mtime +N -type d ) -o -prune`: the failing factor's own test is
-    // the one that may flip, so the prune waits on it.
-    const negated = (): PredNode =>
+    // -type f whatever the mtime, so the second arm prunes (GNU prunes every
+    // directory here).
+    const failedArm = (other: PredNode): PredNode =>
       bindTree(
         {
           op: 'or',
@@ -494,45 +427,63 @@ describe('time tests and -prune', () => {
             {
               op: 'and',
               kids: [
-                { op: 'not', kid: { op: 'mtime', lo: null, hi: 100 } },
-                { op: 'type', kind: 'd' },
+                { op: 'mtime', lo: 100, hi: null },
+                { op: 'type', kind: 'f' },
               ],
             },
-            { op: 'prune', pruned: [], pending: [] },
+            other,
           ],
         },
         '',
       )
-    tree = negated()
-    expect(keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)).toBe(true)
-    expect(pending(tree)).toEqual(['/d'])
+    const dir = entry({ key: '/d', name: 'd', kind: 'd' })
+    const typed = failedArm({ op: 'and', kids: [{ op: 'type', kind: 'd' }, { op: 'prune' }] })
+    expect(verdict(dir, typed, null)).toEqual([true, true])
+    // The same failed arm leaves nothing to wait on when the other arm
+    // reaches no prune.
+    const named = failedArm({
+      op: 'and',
+      kids: [{ op: 'name', pattern: 'skip', icase: false }, { op: 'prune' }],
+    })
+    expect(verdict(dir, named, null)).toEqual([false, false])
+    // `( ! -mtime +N -type d ) -o -prune`: the failing factor's own test is
+    // the one that may flip, so the prune counts.
+    const negated = bindTree(
+      {
+        op: 'or',
+        kids: [
+          {
+            op: 'and',
+            kids: [
+              { op: 'not', kid: { op: 'mtime', lo: null, hi: 100 } },
+              { op: 'type', kind: 'd' },
+            ],
+          },
+          { op: 'prune' },
+        ],
+      },
+      '',
+    )
+    expect(verdict(dir, negated, null)).toEqual([true, true])
   })
 
-  it('a time test steering past every prune leaves the directory pending', () => {
+  it('a time test steering past every prune still prunes', () => {
     // `-mtime 1 -o -prune`: without its mtime the directory takes the first
-    // arm, but GNU prunes it when the test fails, so it waits.
-    const either = (): PredNode =>
-      bindTree(
-        {
-          op: 'or',
-          kids: [
-            { op: 'mtime', lo: 100, hi: null },
-            { op: 'prune', pruned: [], pending: [] },
-          ],
-        },
-        '',
-      )
-    let tree = either()
-    expect(keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)).toBe(true)
-    expect(pending(tree)).toEqual(['/d'])
-    expect(prunedKeys(tree)).toEqual(['/d'])
+    // arm, but GNU prunes it when the test fails, so it counts.
+    const tree = bindTree(
+      {
+        op: 'or',
+        kids: [{ op: 'mtime', lo: 100, hi: null }, { op: 'prune' }],
+      },
+      '',
+    )
+    expect(verdict(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)).toEqual([true, true])
     // A file has nothing to prune, a known mtime decides at once, and a
     // tree without -prune has nothing to wait for.
-    tree = either()
-    expect(keep(entry({ key: '/f', name: 'f', kind: 'f' }), tree, null)).toBe(true)
-    expect(keep(entry({ key: '/d', name: 'd', kind: 'd', mtime: 150 }), tree, null)).toBe(true)
-    expect(pending(tree)).toEqual([])
-    tree = bindTree(
+    expect(verdict(entry({ key: '/f', name: 'f', kind: 'f' }), tree, null)).toEqual([true, false])
+    const known = entry({ key: '/d', name: 'd', kind: 'd', mtime: 150 })
+    expect(verdict(known, tree, null)).toEqual([true, false])
+    const plain = bindTree(
       {
         op: 'or',
         kids: [
@@ -542,8 +493,7 @@ describe('time tests and -prune', () => {
       },
       '',
     )
-    expect(keep(entry({ key: '/d', name: 'd', kind: 'd' }), tree, null)).toBe(true)
-    expect(prunedKeys(tree)).toEqual([])
+    expect(verdict(entry({ key: '/d', name: 'd', kind: 'd' }), plain, null)).toEqual([true, false])
   })
 })
 

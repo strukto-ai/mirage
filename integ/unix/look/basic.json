@@ -30,8 +30,8 @@
       ],
       "command": "look hel /data/a.txt",
       "expect": {
-        "exit": 0,
-        "stdout": "hello\n",
+        "exit": 1,
+        "stdout": "",
         "stderr": ""
       }
     },
@@ -284,6 +284,82 @@
         "stderr": "look: bad usage\nTry 'look --help' for more information.\nlook: bad usage\nTry 'look --help' for more information.\n"
       },
       "flags": []
+    },
+    {
+      "id": "look_searches_a_file_by_halves",
+      "seq": 42000001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qlooks && printf 'b\\na\\nab\\nc\\n' > /data/qlooks/f && look a /data/qlooks/f; echo rc=$?; printf 'a1\\na2\\nb1\\na3\\nb2\\nc\\nd\\ne\\nf\\ng\\nh\\n' > /data/qlooks/f && look b /data/qlooks/f; echo rc=$?; printf 'a1\\nb1\\na2\\nc1\\na3\\n' > /data/qlooks/f && look a /data/qlooks/f; echo rc=$?; printf 'Zx\\n_x\\nax\\n' > /data/qlooks/f && look -f _ /data/qlooks/f; echo rc=$?; rm -r /data/qlooks",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nb2\nrc=0\na1\nrc=0\nrc=1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "look_stops_at_the_first_line_past_the_prefix",
+      "seq": 42000002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qlookl && seq -w 1 20000 > /data/qlookl/n && look 0123 /data/qlookl/n | tr '\\n' ' '; echo rc=$?; look 2 /data/qlookl/n; echo rc=$?; a=$(printf '%5000s' '' | tr ' ' a) && printf '%s1\\n%s2\\n%s3\\n' \"$a\" \"$a\" \"$a\" > /data/qlookl/w && look \"${a}2\" /data/qlookl/w | wc -c; look \"$a\" /data/qlookl/w | wc -l; rm -r /data/qlookl",
+      "expect": {
+        "exit": 0,
+        "stdout": "01230 01231 01232 01233 01234 01235 01236 01237 01238 01239 rc=0\n20000\nrc=0\n5002\n3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
     }
   ]
 }

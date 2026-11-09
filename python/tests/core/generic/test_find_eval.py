@@ -6,11 +6,11 @@ from mirage.core.generic.find_eval import (
     emit_start_path,
     evaluate,
     keep,
-    pruned_keys,
     tree_has_action,
     tree_has_prune,
     tree_has_time,
     unrespell_raw,
+    verdict,
     without_prune,
 )
 from mirage.core.generic.types import (
@@ -25,7 +25,6 @@ from mirage.core.generic.types import (
     Not,
     Or,
     Path,
-    PendingPrune,
     Prune,
     Size,
     TrueNode,
@@ -227,17 +226,14 @@ def test_path_matches_the_row_as_typed():
     )
 
 
-def test_bind_tree_rewrites_nested_and_copies_every_ledger():
+def test_bind_tree_rewrites_nested():
     tree = bind_tree(And([Path("/data/*"), Name("x")]), "/data")
     assert evaluate(tree, _entry(key="/x", name="x"), Effects()) is True
     shared = And([Path("*a*"), Prune()])
     first = bind_tree(shared, "")
-    second = bind_tree(shared, "")
     assert first == shared and first is not shared
-    keep(_entry(key="/a", name="a", kind="d"), first, None)
-    assert pruned_keys(first) == ["/a"]
-    assert pruned_keys(second) == []
-    assert pruned_keys(shared) == []
+    entry = _entry(key="/a", name="a", kind="d")
+    assert verdict(entry, first, None) == (True, True)
 
 
 def test_action_marks_the_entry_and_keep_reports_only_reached_actions():
@@ -268,7 +264,7 @@ def test_action_marks_the_entry_and_keep_reports_only_reached_actions():
     )
 
 
-def test_prune_records_the_directories_it_reaches():
+def test_prune_names_the_directories_it_reaches():
     tree = bind_tree(Or([And([Name("skip"), Prune()]), Action("print")]), "")
     rows = [
         "/",
@@ -279,10 +275,8 @@ def test_prune_records_the_directories_it_reaches():
         "/skip/inner/d",
         "/skipped",
     ]
-    kept = [
-        r
-        for r in rows
-        if keep(
+    answers = {
+        r: verdict(
             _entry(
                 key=r,
                 name=r.rsplit("/", 1)[-1],
@@ -293,8 +287,9 @@ def test_prune_records_the_directories_it_reaches():
             tree,
             None,
         )
-    ]
-    assert kept == [
+        for r in rows
+    }
+    assert [r for r, (kept, _) in answers.items() if kept] == [
         "/",
         "/keep",
         "/keep/f",
@@ -302,12 +297,12 @@ def test_prune_records_the_directories_it_reaches():
         "/skip/inner/d",
         "/skipped",
     ]
-    assert pruned_keys(tree) == ["/skip"]
+    assert [r for r, (_, pruned) in answers.items() if pruned] == ["/skip"]
     # A pruned file (an object store key that is also a directory prefix)
     # drops nothing.
     file_tree = bind_tree(And([Name("data"), Prune()]), "")
-    keep(_entry(key="/data", name="data", kind="f"), file_tree, None)
-    assert pruned_keys(file_tree) == []
+    entry = _entry(key="/data", name="data", kind="f")
+    assert verdict(entry, file_tree, None) == (True, False)
 
 
 def test_mtime_node_answers_from_the_entry_and_defers_without_one():
@@ -320,49 +315,31 @@ def test_mtime_node_answers_from_the_entry_and_defers_without_one():
     )
 
 
-def _pending(node):
-    if isinstance(node, Prune):
-        return [p.entry.key for p in node.pending]
-    kids = [node.kid] if isinstance(node, Not) else getattr(node, "kids", [])
-    return [key for kid in kids for key in _pending(kid)]
-
-
-def test_prune_past_an_undecided_time_test_is_pending_and_counts():
+def test_prune_past_an_undecided_time_test_counts():
     tree = bind_tree(And([Mtime(100.0, None), Prune()]), "")
     for key in ("/old", "/new"):
-        assert keep(_entry(key=key, name=key[1:], kind="d"), tree, None)
-    assert pruned_keys(tree) == ["/old", "/new"]
-    assert _pending(tree) == ["/old", "/new"]
-    # bind_tree hands out a fresh pending ledger too.
-    bound = bind_tree(
-        Prune(pending=[PendingPrune(_entry(key="/y", kind="d"))]), ""
-    )
-    assert bound == Prune()
+        entry = _entry(key=key, name=key[1:], kind="d")
+        assert verdict(entry, tree, None) == (True, True)
 
 
-def test_prune_before_a_time_test_is_firm():
+def test_prune_before_a_time_test_fires_whatever_the_time():
     tree = bind_tree(And([Prune(), Mtime(100.0, None)]), "")
-    assert keep(_entry(key="/old", name="old", kind="d"), tree, None)
-    assert pruned_keys(tree) == ["/old"]
-    assert _pending(tree) == []
+    old = _entry(key="/old", name="old", kind="d", mtime=50.0)
+    assert verdict(old, tree, None) == (False, True)
 
 
-def test_prune_with_a_known_mtime_needs_no_settling():
+def test_prune_with_a_known_mtime_follows_the_test():
     tree = bind_tree(And([Mtime(100.0, None), Prune()]), "")
-    assert not keep(
-        _entry(key="/old", name="old", kind="d", mtime=50.0), tree, None
-    )
-    assert keep(
-        _entry(key="/new", name="new", kind="d", mtime=150.0), tree, None
-    )
-    assert pruned_keys(tree) == ["/new"]
-    assert _pending(tree) == []
+    old = _entry(key="/old", name="old", kind="d", mtime=50.0)
+    new = _entry(key="/new", name="new", kind="d", mtime=150.0)
+    assert verdict(old, tree, None) == (False, False)
+    assert verdict(new, tree, None) == (True, True)
 
 
 def test_deferred_tests_stay_with_the_branch_that_needs_them():
     # `( -mtime 1 -type f ) -o ( -type d -prune )`: the first arm fails on
-    # -type f whatever the mtime, so the prune on the second is firm and
-    # no stat is owed (GNU prunes every directory here).
+    # -type f whatever the mtime, so the second arm prunes (GNU prunes
+    # every directory here).
     tree = bind_tree(
         Or(
             [
@@ -372,46 +349,47 @@ def test_deferred_tests_stay_with_the_branch_that_needs_them():
         ),
         "",
     )
-    assert keep(_entry(key="/d", name="d", kind="d"), tree, None)
-    assert _pending(tree) == []
-    assert pruned_keys(tree) == ["/d"]
+    entry = _entry(key="/d", name="d", kind="d")
+    assert verdict(entry, tree, None) == (True, True)
+    # The same failed arm leaves nothing to wait on when the other arm
+    # reaches no prune.
+    tree = bind_tree(
+        Or(
+            [
+                And([Mtime(100.0, None), Type("f")]),
+                And([Name("skip"), Prune()]),
+            ]
+        ),
+        "",
+    )
+    assert verdict(entry, tree, None) == (False, False)
     # `( ! -mtime +N -type d ) -o -prune`: the failing factor's own test
-    # is the one that may flip, so the prune waits on it.
+    # is the one that may flip, so the prune counts.
     tree = bind_tree(
         Or([And([Not(Mtime(None, 100.0)), Type("d")]), Prune()]), ""
     )
-    assert keep(_entry(key="/d", name="d", kind="d"), tree, None)
-    assert _pending(tree) == ["/d"]
+    assert verdict(entry, tree, None) == (True, True)
 
 
-def test_a_time_test_steering_past_every_prune_leaves_the_directory_pending():
+def test_a_time_test_steering_past_every_prune_still_prunes():
     # `-mtime 1 -o -prune`: without its mtime the directory takes the
-    # first arm, but GNU prunes it when the test fails, so it waits.
-    def either() -> Or:
-        return bind_tree(Or([Mtime(100.0, None), Prune()]), "")
-
-    tree = either()
-    assert keep(_entry(key="/d", name="d", kind="d"), tree, None)
-    assert _pending(tree) == ["/d"]
-    assert pruned_keys(tree) == ["/d"]
+    # first arm, but GNU prunes it when the test fails, so it counts.
+    tree = bind_tree(Or([Mtime(100.0, None), Prune()]), "")
+    entry = _entry(key="/d", name="d", kind="d")
+    assert verdict(entry, tree, None) == (True, True)
     # A file has nothing to prune, a known mtime decides at once, and a
     # tree without -prune has nothing to wait for.
-    tree = either()
-    assert keep(_entry(key="/f", name="f", kind="f"), tree, None)
-    assert keep(_entry(key="/d", name="d", kind="d", mtime=150.0), tree, None)
-    assert _pending(tree) == []
-    tree = bind_tree(Or([Mtime(100.0, None), Type("d")]), "")
-    assert keep(_entry(key="/d", name="d", kind="d"), tree, None)
-    assert pruned_keys(tree) == []
+    assert verdict(_entry(key="/f", name="f"), tree, None) == (True, False)
+    known = _entry(key="/d", name="d", kind="d", mtime=150.0)
+    assert verdict(known, tree, None) == (True, False)
+    plain = bind_tree(Or([Mtime(100.0, None), Type("d")]), "")
+    assert verdict(entry, plain, None) == (True, False)
 
 
 def test_mindepth_prunes_nothing_above_its_level():
     tree = bind_tree(Or([And([Name("skip"), Prune()]), Action("print")]), "")
-    assert (
-        keep(_entry(key="/skip", name="skip", kind="d", depth=1), tree, 2)
-        is False
-    )
-    assert pruned_keys(tree) == []
+    entry = _entry(key="/skip", name="skip", kind="d", depth=1)
+    assert verdict(entry, tree, 2) == (False, False)
 
 
 def test_without_prune_and_tree_has_helpers():

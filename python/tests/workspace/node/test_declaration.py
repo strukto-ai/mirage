@@ -60,6 +60,38 @@ async def test_a_deciding_policy_cannot_declare(line: str, name: str):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,said",
+    [
+        ("Y=1", "Y: permission denied\n"),
+        ("let Y=1", "Y: permission denied\n"),
+        ("((Y=1))", "bash: line 1: Y: permission denied\n"),
+    ],
+)
+async def test_a_deciding_policy_cannot_assign(line: str, said: str):
+    ws = _ws()
+    _, err, code = await _run_deciding(ws, line)
+    assert err == said
+    assert code == 1
+    _, _, listed = await _run(ws, "declare -p Y")
+    assert listed == 1
+
+
+@pytest.mark.asyncio
+async def test_a_deciding_policy_cannot_unset():
+    ws = _ws()
+    await _run(ws, "HELD=1; A=(x y); kept() { :; }")
+    _, err, code = await _run_deciding(ws, "unset HELD 'A[0]'; unset -f kept")
+    assert err == (
+        "HELD: permission denied\nA: permission denied\n"
+        "kept: permission denied\n"
+    )
+    assert code == 1
+    out, _, _ = await _run(ws, 'echo "$HELD ${A[0]}"; declare -F kept')
+    assert out == "1 x\nkept\n"
+
+
+@pytest.mark.asyncio
 async def test_a_deciding_policy_is_refused_a_local_and_still_lists():
     ws = _ws()
     await _run(ws, "HELD=1")

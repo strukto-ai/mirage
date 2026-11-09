@@ -116,6 +116,16 @@ export async function nextNumber(db: C, tenant: string, repo: RepoRow): Promise<
   return Math.max(issue?.number ?? 0, pull?.number ?? 0) + 1
 }
 
+// One past the highest id in the repository, not the count: after a deletion
+// the count is the id of a comment that still exists.
+export async function nextCommentId(db: C, tenant: string, repo: RepoRow): Promise<number> {
+  const last = await db.githubComment.findFirst({
+    where: { ...scope(tenant), repo: repo.fullName },
+    orderBy: { id: 'desc' },
+  })
+  return (last?.id ?? 0) + 1
+}
+
 export function metaOf(repo: RepoRow): Record<string, JsonValue> {
   const parsed = JSON.parse(repo.metaJson) as JsonValue
   return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {}
@@ -1324,4 +1334,72 @@ export function searchTree(files: Tree, terms: string[], pathFilter: string | nu
     found = found.filter((p) => p === at || p.startsWith(`${at}/`))
   }
   return found
+}
+
+// What the vendor keeps that no client of the mounts reads: labels, caches,
+// variables, secrets, deploy keys, autolinks, gists and the pin and lock
+// bits. They live in memory with the run's client, like the run they belong
+// to, and a reset forgets its tenants' (`forgetKept`).
+const KEPT = new WeakMap<C, Map<string, Map<string, unknown>>>()
+
+export function kept<T>(ctx: { tenant: string; db: C }, kind: string): Map<string, T> {
+  let run = KEPT.get(ctx.db)
+  if (run === undefined) {
+    run = new Map()
+    KEPT.set(ctx.db, run)
+  }
+  const key = `${ctx.tenant}\0${kind}`
+  let found = run.get(key)
+  if (found === undefined) {
+    found = new Map()
+    run.set(key, found)
+  }
+  return found as Map<string, T>
+}
+
+export function forgetKept(db: C, tenants: readonly string[]): void {
+  const run = KEPT.get(db)
+  if (run === undefined) return
+  for (const key of run.keys()) {
+    if (tenants.includes(key.slice(0, key.indexOf('\0')))) run.delete(key)
+  }
+}
+
+function flagged(
+  ctx: { tenant: string; db: C },
+  kind: string,
+  repo: string,
+  number: number,
+): boolean {
+  return kept<boolean>(ctx, kind).get(`${repo}#${String(number)}`) === true
+}
+
+export function isPinned(ctx: { tenant: string; db: C }, repo: string, number: number): boolean {
+  return flagged(ctx, 'pinned', repo, number)
+}
+
+export function lockReason(
+  ctx: { tenant: string; db: C },
+  repo: string,
+  number: number,
+): { locked: boolean; reason: string | null } {
+  const row = kept<{ reason: string | null }>(ctx, 'locked').get(`${repo}#${String(number)}`)
+  return { locked: row !== undefined, reason: row?.reason ?? null }
+}
+
+export function autoMerge(
+  ctx: { tenant: string; db: C },
+  repo: string,
+  number: number,
+): string | null {
+  return kept<string>(ctx, 'auto').get(`${repo}#${String(number)}`) ?? null
+}
+
+export function pullExtras(
+  ctx: { tenant: string; db: C },
+  repo: string,
+  number: number,
+  key: string,
+): string[] {
+  return kept<string[]>(ctx, `pull-${key}\0${repo}`).get(String(number)) ?? []
 }

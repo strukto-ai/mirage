@@ -17,12 +17,30 @@ from collections.abc import Sequence
 from mirage.commands.spec.compile import expand_table_long
 from mirage.commands.spec.constants import TAR_LONG_OPTIONS
 
+_VALUE_LETTERS = "bCfFgGHIKLNTVX"
+
+
+def _names_a_source_mode(cluster: str) -> bool:
+    """Whether an option cluster holds ``c``, ``r`` or ``u``, reading no
+    further than a letter whose value is the rest of the word.
+
+    Args:
+        cluster (str): the letters after any leading dash.
+    """
+    for letter in cluster:
+        if letter in "cru":
+            return True
+        if letter in _VALUE_LETTERS:
+            return False
+    return False
+
 
 def is_create_mode(argv: Sequence[str]) -> bool:
     """Whether a tar line reads the filesystem rather than an archive.
 
-    Only ``-c`` makes tar's operands source paths. Under ``-t`` and
-    ``-x`` they are member selectors matched against names inside the
+    ``-c``, ``-r`` and ``-u`` make tar's operands source paths. Under
+    ``-t``, ``-x`` and ``--delete`` they are member selectors matched
+    against names inside the
     archive, so a selector that happens to spell a mount root is not a
     mount at all and refusing it would deny an ordinary listing.
 
@@ -46,15 +64,17 @@ def is_create_mode(argv: Sequence[str]) -> bool:
         if tok == "--":
             return False
         if tok.startswith("--"):
-            if expand_table_long(TAR_LONG_OPTIONS, tok.split("=", 1)[0]) == (
-                "--create",
+            if expand_table_long(TAR_LONG_OPTIONS, tok.split("=", 1)[0]) in (
+                ("--create",),
+                ("--append",),
+                ("--update",),
             ):
                 return True
             continue
         if tok.startswith("-"):
-            if "c" in tok[1:]:
+            if _names_a_source_mode(tok[1:]):
                 return True
             continue
-        if i == 0 and "c" in tok:
+        if i == 0 and any(letter in "cru" for letter in tok):
             return True
     return False

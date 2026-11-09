@@ -57,6 +57,14 @@ export interface GitHubTransport {
     params?: Record<string, string>,
     headers?: Record<string, string>,
   ): Promise<ApiResponse>
+  /** A call whose body comes back as its bytes, however it is typed. */
+  requestRaw?(
+    method: string,
+    path: string,
+    body?: unknown,
+    params?: Record<string, string>,
+    headers?: Record<string, string>,
+  ): Promise<ApiResponse>
   /** GET a path's raw media type as its bytes arrive. */
   stream?(path: string): AsyncIterable<Uint8Array>
 }
@@ -154,6 +162,17 @@ export class HttpGitHubTransport implements GitHubTransport {
     params?: Record<string, string>,
     headers?: Record<string, string>,
   ): Promise<ApiResponse> {
+    const raw = await this.requestRaw(method, path, body, params, headers)
+    return { ...raw, data: decoded(raw.data as Uint8Array, raw.headers['content-type'] ?? '') }
+  }
+
+  async requestRaw(
+    method: string,
+    path: string,
+    body?: unknown,
+    params?: Record<string, string>,
+    headers?: Record<string, string>,
+  ): Promise<ApiResponse> {
     const r = await this.send(method, path, body, params, headers)
     // Collect outside Octokit's retry policy: exceeding the byte limit
     // is a refusal, never a reason to send the request again.
@@ -163,11 +182,7 @@ export class HttpGitHubTransport implements GitHubTransport {
     for (const [key, value] of Object.entries(r.headers)) {
       if (value !== undefined) responseHeaders[key.toLowerCase()] = String(value)
     }
-    return {
-      data: decoded(data, responseHeaders['content-type'] ?? ''),
-      status: r.status,
-      headers: responseHeaders,
-    }
+    return { data, status: r.status, headers: responseHeaders }
   }
 
   async *stream(path: string): AsyncGenerator<Uint8Array, void> {

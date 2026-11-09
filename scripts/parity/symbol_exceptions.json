@@ -1,5 +1,5 @@
 {
- "baseline": 1653,
+ "baseline": 1642,
  "modules": {
   "server/app": {
    "python_only": {
@@ -223,6 +223,9 @@
   },
   "rs/shell": {
    "typescript_only": {
+    "readCounted": "Reaches the wasm engine with no shell handle; Python calls the same function as a static method of the PyO3 class Shell.",
+    "readFields": "Reaches the wasm engine with no shell handle; Python calls the same function as a static method of the PyO3 class Shell.",
+    "readText": "Reaches the wasm engine with no shell handle; Python calls the same function as a static method of the PyO3 class Shell.",
     "DeclarationItem": "The shape a declaration's operands cross the wasm engine ABI in; Python hands the PyO3 class its own tuples (mirage._rs.Shell.declare).",
     "operandItem": "Encodes a declaration operand for the wasm engine ABI; Python hands the PyO3 class its own tuples (mirage._rs.Shell.declare).",
     "Ask": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
@@ -274,20 +277,16 @@
     "movableFinalizer": "Closes the stream of a collected cached matcher; Python releases native streams by reference counting.",
     "RECYCLE_BYTES": "Linear memory never shrinks, so a grown instance is dropped past this size; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
     "bytesAt": "Copies bytes out of linear memory; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
-    "compiled": "The compiled module, shared by every instance; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
-    "current": "The live instance; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
-    "instance": "Compiles and instantiates the module once; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
-    "compiledSync": "Caches the embedded Wasm module for synchronous pure utilities; Python loads its native extension.",
     "compiledModule": "Hands the compiled module to the browser workers a page starts without a copy; Python imports mirage-rs as a native PyO3 module, so it has no module to compile or share.",
     "adoptModule": "Runs a browser worker on the module its page compiled; Python imports mirage-rs as a native PyO3 module, so it has no module to compile or share.",
     "moduleSync": "Compiles the module for a caller that cannot wait, as the shell parser's own instance does; Python imports mirage-rs as a native PyO3 module, so it has no module to compile.",
     "open": "Shares Wasm argument allocation between asynchronous and synchronous stream openers; Python constructs the native stream directly.",
     "openStreamSync": "Synchronous pure utilities lazily initialize embedded Wasm; Python native streams open synchronously.",
-    "synchronous": "Shares the current embedded Wasm instance between synchronous utilities and asynchronous command streams.",
     "movables": "The matcher streams each instance holds, which close with it when it retires; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
-    "retire": "Drops a grown or trapped instance and closes the matcher streams still on it; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
     "moduleSource": "TypeScript accepts a lazy Node Wasm loader alongside bundled bytes or a precompiled module; Python loads its native extension.",
-    "compileSync": "Compiles a module synchronously, which the shell module's loader shares; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has nothing to compile."
+    "compileSync": "Compiles a module synchronously, which the shell module's loader shares; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has nothing to compile.",
+    "StreamModule": "A Wasm module the TypeScript host compiles and instantiates itself; Python's native module needs no loader.",
+    "MAIN": "A Wasm module the TypeScript host compiles and instantiates itself; Python's native module needs no loader."
    }
   },
   "fuse/constants": {
@@ -812,10 +811,9 @@
   },
   "server/routers/vfs": {
    "python_only": {
-    "glob": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "router": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "vfs_route": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
-    "json_body": "FastAPI hands a route the raw request, so the VFS, glob and tool routes read their JSON object through json_body, bounded by MCP's size limit; Fastify parses and bounds the body itself (bodyLimit).",
+    "json_body": "FastAPI hands a route the raw request, so the VFS and tool routes read their JSON object through json_body, bounded by MCP's size limit; Fastify parses and bounds the body itself (bodyLimit).",
     "streamed_read": "FastAPI has module-level route handlers; the matching Fastify handler streams a read inline in registerVfsRoutes.",
     "custom_function": "FastAPI has module-level route handlers; the matching Fastify handler is a closure in registerVfsRoutes."
    },
@@ -1634,6 +1632,14 @@
     "registerMachinesRoutes": "FastAPI collects a module's routes on an APIRouter the app includes; Fastify registers them on the app in registerMachinesRoutes.",
     "WsIdParams": "Fastify types a route's path parameters with an interface; FastAPI reads each parameter from the route function's signature.",
     "WsMachineParams": "Fastify types a route's path parameters with an interface; FastAPI reads each parameter from the route function's signature."
+   }
+  },
+  "commands/cli/builtin/gh/host": {
+   "typescript_only": {
+    "Request": "The stream's request as TypeScript types it; Python reads the same JSON as a Mapping.",
+    "ghModule": "gh's Wasm module, which the TypeScript host loads on first use; Python's native module has gh built in.",
+    "openGhStream": "gh's Wasm module, which the TypeScript host loads on first use; Python's native module has gh built in.",
+    "pairs": "Octokit takes params and headers as plain objects; Python's dict() builds them inline."
    }
   }
  }

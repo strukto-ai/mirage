@@ -2,9 +2,9 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
+    file_size,
     resolve_or_empty,
 )
-from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream_host import (
     StreamHost,
     hosted_stream,
@@ -37,11 +37,16 @@ async def od(
     }
     host = StreamHost(
         resolved,
-        normalized_read(files.read),
+        files.read,
         ctx.stdin,
         None,
         ctx.cwd,
         command="od",
+        sized=(
+            file_size(files, ctx, opened=True)
+            if files.answers("read_range")
+            else None
+        ),
     )
     io = IOResult()
     return hosted_stream("od", config, host, io), io

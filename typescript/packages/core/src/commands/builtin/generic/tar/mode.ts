@@ -15,11 +15,23 @@
 import { expandTableLong } from '../../../spec/compile.ts'
 import { TAR_LONG_OPTIONS } from '../../../spec/constants.ts'
 
+const VALUE_LETTERS = 'bCfFgGHIKLNTVX'
+
+// Whether an option cluster holds c, r or u, reading no further than a letter
+// whose value is the rest of the word. Mirrors Python's `_names_a_source_mode`.
+function namesASourceMode(cluster: string): boolean {
+  for (const letter of cluster) {
+    if ('cru'.includes(letter)) return true
+    if (VALUE_LETTERS.includes(letter)) return false
+  }
+  return false
+}
+
 /**
  * Whether a tar line reads the filesystem rather than an archive.
  *
- * Only -c makes tar's operands source paths. Under -t and -x they are
- * member selectors matched against names inside the archive, so a
+ * -c, -r and -u make tar's operands source paths. Under -t, -x and
+ * --delete they are member selectors matched against names inside the archive, so a
  * selector that happens to spell a mount root is not a mount at all and
  * refusing it would deny an ordinary listing.
  *
@@ -39,14 +51,15 @@ export function isCreateMode(argv: readonly string[]): boolean {
     if (tok === '--') return false
     if (tok.startsWith('--')) {
       const found = expandTableLong(TAR_LONG_OPTIONS, tok.split('=', 1)[0] ?? tok)
-      if (found.length === 1 && found[0] === '--create') return true
+      if (found.length === 1 && ['--create', '--append', '--update'].includes(found[0] ?? ''))
+        return true
       continue
     }
     if (tok.startsWith('-')) {
-      if (tok.slice(1).includes('c')) return true
+      if (namesASourceMode(tok.slice(1))) return true
       continue
     }
-    if (i === 0 && tok.includes('c')) return true
+    if (i === 0 && /[cru]/.test(tok)) return true
   }
   return false
 }

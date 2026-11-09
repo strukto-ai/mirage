@@ -17,10 +17,11 @@ import { closeStream, streamOutputChunks, type OpenStream } from '../../../rs/st
 import { materialize, type ByteSource } from '../../../io/types.ts'
 import type { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { isEisdir } from '../../../errors/fs.ts'
-import { FileStat, FileType, type PathSpec } from '../../../types.ts'
+import { FileStat, FileType, type PathSpec, type ReadStreamFn } from '../../../types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { STDIN_HEADER_NAME } from './constants.ts'
 import { mergeSignals } from '../../../utils/abort.ts'
+import { chunks } from '../../../io/cooperative.ts'
 
 export async function readStdinAsync(stdin: ByteSource | null): Promise<Uint8Array | null> {
   return stdin === null ? null : materialize(stdin)
@@ -120,6 +121,24 @@ export function stdinStat(
     isStdin(path, dash)
       ? Promise.resolve(new FileStat({ name: '-', type: FileType.FIFO }))
       : stat(path)
+}
+
+/**
+ * A file's bytes from `offset` to `end`, read a window of at most 1 MiB at a
+ * time: a range-capable backend may answer a window whole. Mirrors Python's
+ * ranged_stream.
+ */
+export async function* rangedStream(
+  read: ReadStreamFn<[PathSpec, number, number | null]>,
+  path: PathSpec,
+  offset: number,
+  end: number,
+): AsyncGenerator<Uint8Array> {
+  while (offset < end) {
+    const size = Math.min(1 << 20, end - offset)
+    yield* chunks(read(path, offset, size))
+    offset += size
+  }
 }
 
 /** Drive an already validated stream through bounded calls. Mirrors Python's stream_output. */

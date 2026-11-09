@@ -1,15 +1,11 @@
-The --template and --jq handling that
-python/mirage/commands/cli/builtin/gh/constants.py and
-typescript/packages/core/src/commands/cli/builtin/gh/constants.ts set up
-follows go-gh v2.13.0 (https://github.com/cli/go-gh), the version gh 2.85.0
-builds with: TEMPLATE_TOKEN, TEMPLATE_ACTION and TEMPLATE_DECLARATION read a
-template's actions as its template package does, and GOJQ_RAISED holds the
-errors its jq package reports. In
-python/mirage/commands/cli/builtin/gh/accessor.py and
-typescript/packages/core/src/commands/cli/builtin/gh/accessor.ts, --jq prints
-each result and stops at a halt or an error as its jq package's Evaluate does,
-and a github.com subdomain reads as github.com as its auth package's
-NormalizeHostname has it; and python/mirage/core/github/repo.py and
+The --template and --jq handling in rust/mirage-rs/src/cli/gh/ follows go-gh
+v2.13.0 (https://github.com/cli/go-gh), the version gh 2.85.0 builds with:
+template.rs reads a template's actions and runs its functions as its template
+package does, gojq_raised in constants.rs holds the errors its jq package
+reports, and accessor.rs prints each --jq result and stops at a halt or an
+error as its jq package's Evaluate does and reads a github.com subdomain as
+github.com as its auth package's NormalizeHostname has it. And
+rust/mirage-rs/src/core/github/repo.rs, python/mirage/core/github/repo.py and
 typescript/packages/core/src/core/github/repo.ts read a repository argument,
 [HOST/]OWNER/REPO or a git remote URL, as its repository package's Parse and
 its internal/git IsURL, ParseURL and RepoInfoFromURL read one. go-gh carries

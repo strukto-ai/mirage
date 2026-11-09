@@ -5,10 +5,14 @@ mod bc;
 mod block_size;
 mod calendar;
 mod cat;
+#[cfg(feature = "gh")]
+pub mod cli;
 mod cmp;
 mod column;
 mod comm;
 mod compress;
+#[cfg(feature = "gh")]
+mod core;
 mod cut;
 mod date;
 mod diff;
@@ -457,6 +461,8 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "uniq" => uniq::open(config),
         "unzip" => zip::open_unzip(config),
         "wc" => wc::open(config),
+        #[cfg(feature = "gh")]
+        "gh" => cli::gh::open(config),
         "xxd" => xxd::open(config),
         "zip" => zip::open_zip(config),
         _ => Err(StreamError::new(format!("unknown stream: {kind}"))),
