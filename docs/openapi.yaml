@@ -2115,7 +2115,8 @@ paths:
       responses:
         '200':
           description: The line's result; with explain=true, its explanation; with stream=true,
-            an NDJSON stream ending in a status record
+            an NDJSON stream ending in a status record. With open_stdin, the first record names
+            the line.
           content:
             application/json:
               schema:
@@ -2123,7 +2124,6 @@ paths:
                   - $ref: '#/components/schemas/ShellResult'
                   - $ref: '#/components/schemas/ShellExplanation'
               example:
-                kind: io
                 exit_code: 0
                 stdout: 'hello
 
@@ -2134,6 +2134,13 @@ paths:
             application/x-ndjson:
               schema:
                 type: string
+              examples:
+                open_stdin:
+                  summary: Stream with open_stdin
+                  value: |
+                    {"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"}
+                    {"stream":"stdout","data":"aGVsbG8K"}
+                    {"status":"done","result":{"exit_code":0,"stdout":"","stderr":"","refusal":null,"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"},"error":null}
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2188,7 +2195,8 @@ paths:
       description: Run a shell line in a workspace. HTTP 200 means the request completed. Check
         exit_code to determine whether the command succeeded. Set stream=true for NDJSON output
         records. See [Streaming and stdin](/api/streaming#stream-command-output) for the record
-        format.
+        format. Set open_stdin with stream=true to keep writing to the line's stdin while it
+        runs; see [Write to a running line](/api/streaming#write-to-a-running-line).
   /v1/workspaces/{workspace_id}/tools/shell:
     post:
       summary: Shell tool
@@ -7930,8 +7938,6 @@ components:
     ShellResult:
       type: object
       properties:
-        kind:
-          type: string
         exit_code:
           type: integer
         stdout:
@@ -7946,7 +7952,6 @@ components:
           type: string
           description: The line's id, by which `GET .../lines/{line_id}` finds it.
       required:
-        - kind
         - exit_code
         - stdout
         - stderr

@@ -43,7 +43,7 @@ These examples use the `demo` workspace from the [CLI quickstart](/home/access/c
 Both answer:
 
 ```json
-{"jsonrpc": "2.0", "id": 1, "result": {"kind": "io", "exit_code": 0, "stdout": "3\n", "stderr": "", "refusal": null}}
+{"jsonrpc": "2.0", "id": 1, "result": {"exit_code": 0, "stdout": "3\n", "stderr": "", "refusal": null}}
 ```
 
 Answers come back as calls finish, so match them by `id`.
@@ -60,7 +60,7 @@ the header itself.
 | Method | Params | Result |
 | --- | --- | --- |
 | `initialize` | | `{server_info, protocol_version, workspace_id, session_id, methods}` |
-| `shell` | `command`, `cwd?`, `env?`, `stdin?`, `open_stdin?`, `explain?` | `{kind, exit_code, stdout, stderr, refusal}` |
+| `shell` | `command`, `cwd?`, `env?`, `stdin?`, `open_stdin?`, `explain?` | `{exit_code, stdout, stderr, refusal}` |
 | `stdin/write` | `id`, `data` | `null` |
 | `stdin/close` | `id` | `null` |
 | `glob` | `pattern` | `string[]`, the matching paths |
