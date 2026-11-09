@@ -400,17 +400,44 @@ export function lineSignal(session: SessionState): AbortSignal | undefined {
   return signals.size === 1 ? [...signals][0] : undefined
 }
 
+/** The one signal among `signals`, or none when they differ. */
+function soleSignal(signals: readonly (AbortSignal | undefined)[]): AbortSignal | undefined {
+  const distinct = new Set(signals)
+  return distinct.size === 1 ? [...distinct][0] : undefined
+}
+
 /**
  * The signal the current call answers to: its evaluation frame's and its
  * line's, which withdraw a pipe read or copy that waits; Python cancels the
- * awaiting task instead. None in a landing (`runLanding`).
+ * awaiting task instead. None in a landing (`runLanding`). Without task
+ * isolation the newest frame can be a job's, whose fork keeps its shell's
+ * session id, and a line must not read as its own the signal of a job it just
+ * killed; there it is the one signal every live evaluation and line of that
+ * shell answers to.
  */
 export function callerSignal(): AbortSignal | undefined {
   if (inLanding()) return undefined
   const session = getCurrentSession()
+  if (asyncContextIsolatesTasks || session === null) {
+    return mergeSignals(
+      getCurrentEvaluation()?.frame.abortSignal,
+      session === null ? undefined : lineSignal(session),
+    )
+  }
+  const sameShell = (other: SessionState): boolean => other.sessionId === session.sessionId
   return mergeSignals(
-    getCurrentEvaluation()?.frame.abortSignal,
-    session === null ? undefined : lineSignal(session),
+    soleSignal(
+      liveCallers().flatMap((caller) =>
+        caller.evaluation !== null && sameShell(caller.evaluation.session)
+          ? [caller.evaluation.frame.abortSignal ?? undefined]
+          : [],
+      ),
+    ),
+    soleSignal(
+      lineFrames()
+        .filter((frame) => frame.sessions.some(sameShell))
+        .map((frame) => frame.stop ?? frame.signal),
+    ),
   )
 }
 
