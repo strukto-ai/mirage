@@ -10,7 +10,7 @@ use crate::core::github::client::{
 use crate::core::github::json::{Json, Obj};
 use crate::core::github::paginate::github_pages;
 use crate::core::github::repo::{
-    RepoRef, mutate, parse_repo, repo_host, repository_fields, view_repo,
+    RepoRef, mutate, normalized_host, parse_repo, repo_host, repository_fields, view_repo,
 };
 
 fn full(repo: &RepoRef) -> String {
@@ -79,12 +79,14 @@ pub(crate) async fn unarchive_cmd(
     set_archived(account, flags, texts, false).await
 }
 
-/// The host a named repository lives on: its own, else the install's.
+/// The host a named repository lives on, its own else the install's,
+/// spelled as gh's ghrepo normalizes it.
 fn host_of(account: &Account, spec: &str) -> Result<String> {
-    match repo_host(spec)? {
-        Some(host) => Ok(host),
-        None => web_host(account),
-    }
+    let host = match repo_host(spec)? {
+        Some(host) => host,
+        None => web_host(account)?,
+    };
+    Ok(normalized_host(&host))
 }
 
 /// `gh repo sync`, of a repository on GitHub: there is no local checkout to

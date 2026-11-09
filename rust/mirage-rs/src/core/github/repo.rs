@@ -119,7 +119,13 @@ pub(crate) fn repo_host(spec: &str) -> Result<Option<String>> {
         return Ok(Some(url_of(spec)?.1));
     }
     let parts: Vec<&str> = spec.split('/').collect();
-    Ok((parts.len() == 3).then(|| parts[0].to_lowercase()))
+    Ok((parts.len() == 3).then(|| parts[0].to_owned()))
+}
+
+/// A host as gh's ghrepo compares it: a lowercase `www.` dropped, then
+/// the rest lowercased.
+pub(crate) fn normalized_host(host: &str) -> String {
+    host.strip_prefix("www.").unwrap_or(host).to_lowercase()
 }
 
 fn repo_from_url(spec: &str) -> Result<RepoRef> {
@@ -513,6 +519,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_host_is_normalized_as_gh_compares_it() {
+        assert_eq!(normalized_host("www.github.com"), "github.com");
+        assert_eq!(normalized_host("GitHub.com"), "github.com");
+        assert_eq!(normalized_host("WWW.GITHUB.COM"), "www.github.com");
+        assert_eq!(normalized_host("foo.github.com"), "foo.github.com");
+    }
+
+    #[test]
     fn a_struct_built_query_is_told_by_its_header() {
         assert!(built_from_struct("query UserCurrent{viewer{login}}"));
         assert!(built_from_struct(
@@ -563,7 +577,7 @@ mod tests {
     #[test]
     fn a_repository_names_its_host_only_when_it_has_three_parts() {
         assert_eq!(repo_host("a/b").unwrap(), None);
-        assert_eq!(repo_host("GHE.io/a/b").unwrap().as_deref(), Some("ghe.io"));
+        assert_eq!(repo_host("GHE.io/a/b").unwrap().as_deref(), Some("GHE.io"));
         assert_eq!(
             repo_host("https://ghe.io/a/b").unwrap().as_deref(),
             Some("ghe.io")
