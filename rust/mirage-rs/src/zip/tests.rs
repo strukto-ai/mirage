@@ -587,3 +587,12 @@ fn a_freshen_makes_no_directories() {
     assert!(!host.directories.iter().any(|dir| dir.starts_with("/out/d")));
     assert!(!host.files.contains_key("/out/d/b.txt"));
 }
+
+#[test]
+fn a_nul_anywhere_marks_a_member_binary() {
+    let body = format!("{}\0tail\n", "line\n".repeat(1000));
+    let mut host = Host::with(&[("t", body.as_str())], "");
+    assert_eq!(zip(&mut host, "z.zip", json!([file("t", 2)])).0, 0);
+    let listing = unzip(&mut host, "z.zip", json!({"Z": true})).1;
+    assert!(listing.contains(" b- "), "{listing}");
+}

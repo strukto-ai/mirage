@@ -614,7 +614,6 @@ async fn add(
         ),
         text: found.kind == Kind::File,
     };
-    let mut first = true;
     // A short member is kept whole too, for when deflating it saves nothing.
     let mut whole = Vec::new();
     let mut open = found.path.clone().map(|path| match found.operand {
@@ -637,7 +636,7 @@ async fn add(
                 data
             }
         };
-        if std::mem::take(&mut first) && data[..data.len().min(1024)].contains(&0) {
+        if data.contains(&0) {
             packer.text = false;
         }
         let translated = match packer.ends.as_mut() {

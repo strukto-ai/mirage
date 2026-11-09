@@ -633,7 +633,7 @@ async fn move_file(
         return Ok(None);
     }
     let note = [&b" ("[..], verb, b" from ", from, b")"].concat();
-    if files.dry_run {
+    if files.dry_run || config.output.is_some() {
         return Ok(Some((to.clone(), note, Some(from.clone()))));
     }
     let Ok(data) = files.whole(from, Opening::File).await else {
@@ -756,7 +756,7 @@ async fn patch_file(
         files.say(&[rule]);
     }
     let target = config.output.clone().unwrap_or_else(|| name.clone());
-    if target != name {
+    if target != name && how.is_empty() {
         how = [&b" (read from "[..], &name, b")"].concat();
     }
     files.note(&[verb, &target, &how]);
@@ -835,7 +835,7 @@ async fn patch_file(
     } else {
         git.new_mode
     };
-    if let Some(mode) = mode.filter(|_| !gone) {
+    if let Some(mode) = mode.filter(|_| !gone && config.output.is_none()) {
         if !files.chmod(&name, mode).await {
             return Err(1);
         }

@@ -75,6 +75,6 @@ def is_create_mode(argv: Sequence[str]) -> bool:
             if _names_a_source_mode(tok[1:]):
                 return True
             continue
-        if i == 0 and _names_a_source_mode(tok):
+        if i == 0 and any(letter in "cru" for letter in tok):
             return True
     return False

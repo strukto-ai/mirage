@@ -698,3 +698,17 @@ fn numbered_backups_keep_counting_past_the_first_run_of_names() {
     assert_eq!(file(&host, "f.~71~").as_deref(), Some("a\nb\nc\n"));
     assert_eq!(file(&host, "f.~70~").as_deref(), Some("old\n"));
 }
+
+#[test]
+fn an_output_file_leaves_a_renamed_source_where_it_is() {
+    let diff = "diff --git a/old b/new\nsimilarity index 50%\nrename from old\nrename to new\n--- a/old\n+++ b/new\n@@ -1,2 +1,2 @@\n a\n-b\n+X\n";
+    let mut host = Host::with(&[("old", "a\nb\n")], diff);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1", "output": "out"}"#);
+    assert_eq!(
+        (status, out.as_str()),
+        (0, "patching file out (renamed from old)\n")
+    );
+    assert_eq!(file(&host, "out").as_deref(), Some("a\nX\n"));
+    assert_eq!(file(&host, "old").as_deref(), Some("a\nb\n"));
+    assert_eq!(file(&host, "new"), None);
+}

@@ -509,3 +509,11 @@ fn absolute_names_still_lose_stripped_components() {
     assert_eq!(read(&mut host, &tar, options).0, 0);
     assert!(host.files.contains_key("/out/a.txt"));
 }
+
+#[test]
+fn a_delete_of_no_names_changes_nothing() {
+    let mut host = two();
+    packed(&mut host, json!([file("a.txt", 2, None)]));
+    assert_eq!(changed(&mut host, "delete", json!([]), json!([])).0, 0);
+    assert_eq!(names_in(&mut host), "a.txt\n");
+}

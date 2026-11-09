@@ -59,7 +59,7 @@ export function isCreateMode(argv: readonly string[]): boolean {
       if (namesASourceMode(tok.slice(1))) return true
       continue
     }
-    if (i === 0 && namesASourceMode(tok)) return true
+    if (i === 0 && /[cru]/.test(tok)) return true
   }
   return false
 }

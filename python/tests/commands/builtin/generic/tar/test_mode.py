@@ -25,6 +25,7 @@ from mirage.commands.builtin.generic.tar.mode import is_create_mode
         (["-xzf", "a.tgz", "./m/x.json"], False),
         (["-tzf", "a.tgz"], False),
         (["cf", "a.tar", "d"], True),
+        (["fc", "a.tar", "d"], True),
         (["-xf", "a.tar", "crate"], False),
         (["--exclude", "c", "-xf", "a.tar"], False),
         # GNU reads everything after -- as an operand (`tar: -C: Not

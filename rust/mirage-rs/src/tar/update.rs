@@ -137,7 +137,7 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
         member.name = long_name.take().unwrap_or(member.name);
         global.apply(&mut member);
         std::mem::take(&mut pax).apply(&mut member);
-        let gone = delete && selection.hit(&member.name);
+        let gone = delete && !config.selectors.is_empty() && selection.hit(&member.name);
         if gone {
             meta.clear();
             if !input.skip(member.size).await {
