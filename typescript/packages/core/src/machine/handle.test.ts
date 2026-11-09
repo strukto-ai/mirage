@@ -952,6 +952,25 @@ describe('a detached job', () => {
     ])
   })
 
+  // A view that ended early may not have delivered all its stdout (e2b sends
+  // the streams apart), so even its own mark ends nothing: the job is viewed
+  // again from what landed.
+  it.each([
+    ['a lost connection', new ConnectionLostError('closed by remote host')],
+    ['an SDK error', new Error('gone')],
+  ])('is viewed again after its own mark and %s', async (_, end) => {
+    const box = new JobBox([
+      [['step 0\n'], ['\0mirage-job 3\n'], end],
+      [['step 1\n'], ['\0mirage-job 3\n'], 0],
+    ])
+    const [done, out] = await jobRun(box)
+    expect([done?.exitCode, out]).toEqual([3, 'step 0\nstep 1\n'])
+    expect(box.viewed.map((view) => view.slice(1))).toEqual([
+      ['0', '0'],
+      ['7', '0'],
+    ])
+  })
+
   // A job whose wrapper went with no exit code is not left running: it ends
   // hung up, and says so.
   it('ends hung up once lost', async () => {

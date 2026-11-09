@@ -621,6 +621,7 @@ class MachineHandle:
 
             before = tuple(delivered)
             returned: tuple[bytes | None, bytes | None] = (None, None)
+            finished = False
             try:
                 await self._ensure_connected()
                 done = await self._exec_argv(
@@ -640,6 +641,7 @@ class MachineHandle:
                     err,
                 )
                 returned = (done.stdout, done.stderr)
+                finished = True
             except ConnectionLostError as exc:
                 logger.debug("%s: job view lost", self.id, exc_info=True)
                 returned = (exc.stdout, exc.stderr)
@@ -653,9 +655,13 @@ class MachineHandle:
             except Exception:
                 logger.debug("%s: job output not kept", self.id, exc_info=True)
             # A mark without this view's secret is the program's output. A
-            # view whose output did not all land is viewed again, however
-            # it ended.
-            ended = None if undelivered else JOB_END.fullmatch(bytes(held))
+            # view that raised may not have delivered all its stdout, and one
+            # whose output did not all land is viewed again either way.
+            ended = (
+                JOB_END.fullmatch(bytes(held))
+                if finished and not undelivered
+                else None
+            )
             if ended is not None and ended.group(1) == secret.encode():
                 stderr = bytes(kept[1])
                 code = ended.group(2).decode()

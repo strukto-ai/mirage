@@ -806,6 +806,25 @@ async def test_a_mark_the_program_wrote_is_its_output(end, no_view_wait):
     assert [view[1:] for view in box.viewed] == [("0", "0"), ("7", "0")]
 
 
+# A view that ended early may not have delivered all its stdout (e2b sends
+# the streams apart), so even its own mark ends nothing: the job is viewed
+# again from what landed.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "end", [ConnectionLostError("closed by remote host"), RuntimeError("gone")]
+)
+async def test_a_view_that_failed_never_ends_its_job(end, no_view_wait):
+    box = JobBox(
+        [
+            ([b"step 0\n"], [b"\0mirage-job 3\n"], end),
+            ([b"step 1\n"], [b"\0mirage-job 3\n"], 0),
+        ]
+    )
+    done, out, _, _ = await _job_run(box)
+    assert (done.exit_code, out) == (3, b"step 0\nstep 1\n")
+    assert [view[1:] for view in box.viewed] == [("0", "0"), ("7", "0")]
+
+
 # A job whose wrapper went with no exit code is not left running: it ends
 # hung up, and says so.
 @pytest.mark.asyncio

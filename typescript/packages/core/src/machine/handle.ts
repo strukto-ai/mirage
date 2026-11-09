@@ -583,6 +583,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       }
       const before = sent.out + sent.err
       let returned: [Uint8Array | null, Uint8Array | null] = [null, null]
+      let finished = false
       try {
         await this.ensureConnected(signal)
         const done = await this.execArgv(
@@ -595,6 +596,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
           signal,
         )
         returned = [done.stdout, done.stderr]
+        finished = true
       } catch (error) {
         if (signal?.aborted === true) throw error
         logger.debug?.(`${this.id.toString()}: job view ended: ${String(error)}`)
@@ -606,10 +608,13 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       } catch (error) {
         logger.debug?.(`${this.id.toString()}: job output not kept: ${String(error)}`)
       }
-      // A mark without this view's secret is the program's output. A view
-      // whose output did not all land is viewed again, however it ended.
+      // A mark without this view's secret is the program's output. A view that
+      // threw may not have delivered all its stdout, and one whose output did
+      // not all land is viewed again either way.
       const ended =
-        undelivered.length === 0 ? JOB_END.exec(new TextDecoder('latin1').decode(held)) : null
+        finished && undelivered.length === 0
+          ? JOB_END.exec(new TextDecoder('latin1').decode(held))
+          : null
       if (ended !== null && ended[1] === secret) {
         const stdout = concat(kept[0])
         const stderr = concat(kept[1])
