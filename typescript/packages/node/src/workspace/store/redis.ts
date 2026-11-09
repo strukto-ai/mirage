@@ -25,6 +25,7 @@ import { RedisConnection } from '../../optional_peer.ts'
 import { CAS_SCRIPT, RedisNamespaceStore } from '../mount/namespace/redis.ts'
 import type { ExecutionStore } from '@struktoai/mirage-core/execution/base'
 import { RedisExecutionStore } from '../../execution/redis.ts'
+import { quoteName } from '../record/disk.ts'
 import { DEFAULT_STATE_ROOT, DiskWorkspaceStateStore } from './disk.ts'
 
 export interface RedisWorkspaceStateStoreOptions extends WorkspaceStateStoreOverrides {
@@ -48,7 +49,9 @@ function historyRoot(root: string, url: string, keyPrefix: string): string {
 /**
  * WorkspaceStateStore backed by one Redis server.
  *
- * Key layout under one prefix, everything scoped by workspace id:
+ * Key layout under one prefix, everything scoped by workspace id, which
+ * `{ws}` writes percent-quoted so it holds no `:` or glob character and one
+ * id's keys never start with another's:
  *
  * - `{prefix}workspaces` — hash, workspace id -> metadata JSON
  * - `{prefix}{ws}:namespace:nodes` — node table
@@ -91,12 +94,16 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
     this.redis = new RedisConnection(this.url, 'RedisWorkspaceStateStore')
   }
 
+  private scope(workspaceId: string): string {
+    return `${this.prefix}${quoteName(workspaceId)}:`
+  }
+
   protected makeNamespace(workspaceId: string): NamespaceStore {
     let ns = this.namespaces.get(workspaceId)
     if (ns === undefined) {
       ns = new RedisNamespaceStore({
         url: this.url,
-        keyPrefix: `${this.prefix}${workspaceId}:namespace:`,
+        keyPrefix: `${this.scope(workspaceId)}namespace:`,
       })
       this.namespaces.set(workspaceId, ns)
     }
@@ -114,7 +121,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
     if (table === undefined) {
       table = new RedisNamespaceStore({
         url: this.url,
-        keyPrefix: `${this.prefix}${workspaceId}:`,
+        keyPrefix: this.scope(workspaceId),
         table: 'sessions',
       })
       this.sessionTables.set(workspaceId, table)
@@ -127,7 +134,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
     if (execution === undefined) {
       execution = new RedisExecutionStore({
         url: this.url,
-        keyPrefix: `${this.prefix}${workspaceId}:execution:`,
+        keyPrefix: `${this.scope(workspaceId)}execution:`,
       })
       this.executionPlanes.set(workspaceId, execution)
     }

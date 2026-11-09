@@ -186,3 +186,24 @@ async def test_drop_deletes_every_key_of_the_workspace(prefix, store):
     assert [key for key in keys if key.startswith(f"{prefix}ws1:")] == []
     assert meta is None
     assert await store.load_meta("ws2") is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("doomed", "kept"), [("w?", "w1"), ("a", "a:execution:x")]
+)
+async def test_drop_leaves_a_workspace_whose_keys_its_id_would_match(
+    store, doomed, kept
+):
+    for ws in (doomed, kept):
+        execution = store.execution(ws)
+        await execution.cas_set("s", {"generation": 1}, 0)
+        await execution.lease(ws)
+        await execution.publish(ws, {"7": {"pid": 7}}, 7)
+    assert list(await store.execution(doomed).processes()) == [doomed]
+    await store.drop(doomed)
+    execution = store.execution(kept)
+    assert await execution.load("s") == {"generation": 1}
+    assert await execution.holder() == kept
+    assert await execution.highest_pid() == 7
+    assert list(await execution.processes()) == [kept]

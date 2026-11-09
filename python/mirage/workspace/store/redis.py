@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 from typing import Any, Awaitable, cast
+from urllib.parse import quote
 
 import redis.asyncio as aioredis
 
@@ -51,7 +52,9 @@ def _history_root(root: str, url: str, key_prefix: str) -> str:
 class RedisWorkspaceStateStore(WorkspaceStateStore):
     """WorkspaceStateStore backed by one Redis server.
 
-    Key layout under one prefix, everything scoped by workspace id:
+    Key layout under one prefix, everything scoped by workspace id,
+    which ``{ws}`` writes percent-quoted so it holds no ``:`` or glob
+    character and one id's keys never start with another's:
 
     - ``{prefix}workspaces`` — hash, workspace id -> metadata JSON
     - ``{prefix}{ws}:namespace:nodes`` — node table
@@ -99,11 +102,14 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         self._sessions: dict[str, RedisNamespaceStore] = {}
         self._execution: dict[str, RedisExecutionStore] = {}
 
+    def _scope(self, workspace_id: str) -> str:
+        return f"{self._prefix}{quote(workspace_id, safe='')}:"
+
     def _make_namespace(self, workspace_id: str) -> NamespaceStore:
         if workspace_id not in self._namespaces:
             self._namespaces[workspace_id] = RedisNamespaceStore(
                 url=self._url,
-                key_prefix=f"{self._prefix}{workspace_id}:namespace:",
+                key_prefix=f"{self._scope(workspace_id)}namespace:",
             )
         return self._namespaces[workspace_id]
 
@@ -117,7 +123,7 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         if workspace_id not in self._sessions:
             self._sessions[workspace_id] = RedisNamespaceStore(
                 url=self._url,
-                key_prefix=f"{self._prefix}{workspace_id}:",
+                key_prefix=self._scope(workspace_id),
                 table="sessions",
             )
         return self._sessions[workspace_id]
@@ -126,7 +132,7 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         if workspace_id not in self._execution:
             self._execution[workspace_id] = RedisExecutionStore(
                 url=self._url,
-                key_prefix=f"{self._prefix}{workspace_id}:execution:",
+                key_prefix=f"{self._scope(workspace_id)}execution:",
             )
         return self._execution[workspace_id]
 

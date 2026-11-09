@@ -179,4 +179,30 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
       await store.close()
     }
   })
+
+  it.each([
+    ['w?', 'w1'],
+    ['a', 'a:execution:x'],
+  ])('drop(%s) leaves %s, whose keys its id would match', async (doomed, kept) => {
+    const prefix = testPrefix()
+    const store = makeStore(prefix)
+    try {
+      for (const ws of [doomed, kept]) {
+        const execution = store.execution(ws)
+        await execution.casSet('s', { generation: 1 }, 0)
+        await execution.lease(ws)
+        await execution.publish(ws, { '7': { pid: 7 } }, 7)
+      }
+      expect(Object.keys(await store.execution(doomed).processes())).toEqual([doomed])
+      await store.drop(doomed)
+      const execution = store.execution(kept)
+      expect(await execution.load('s')).toEqual({ generation: 1 })
+      expect(await execution.holder()).toBe(kept)
+      expect(await execution.highestPid()).toBe(7)
+      expect(Object.keys(await execution.processes())).toEqual([kept])
+    } finally {
+      await cleanup(prefix)
+      await store.close()
+    }
+  })
 })
