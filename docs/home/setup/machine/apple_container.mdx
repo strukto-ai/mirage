@@ -81,46 +81,14 @@ container a machine of its own and send each session to its machine with a
 
 ## Connecting the workspace
 
-A program in the container opens workspace files at the same paths as in
-Mirage, so the container must see the mounts there. `mount_type` picks how, as
-for [Docker](/home/setup/machine/docker#connecting-the-workspace):
-`ssh` serves every mount over `container exec` (the image needs `sshfs`),
-`fuse` leaves them to a Mirage inside, and `both` mixes the two.
-
-The default image lacks `sshfs`; add it with `apt-get install sshfs`.
-
-For `fuse`, write the same mounts at the same paths into `sandbox.yaml`, and
-start Mirage with it in the container:
-
-```yaml
-mounts:
-  /data:
-    vfs: s3
-    config:
-      bucket: my-bucket
-    backend: fuse
-    mountpoint: /data
-```
+Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). The default image lacks `sshfs` for `ssh`; add it
+with `apt-get install sshfs`. With `fuse`, copy `sandbox.yaml` in and start
+Mirage in the container:
 
 ```bash
 container cp sandbox.yaml my-sandbox:/tmp/sandbox.yaml
 container exec my-sandbox mirage workspace create /tmp/sandbox.yaml
 ```
-
-- This workspace's mount modes and permissions do not reach those files;
-  `sandbox.yaml` decides.
-- Keep the container's paths in step with the host's mounts yourself.
-
-## Runtime behavior
-
-| Capability | In the container |
-| --- | --- |
-| Command | The captured program and its words, as typed |
-| Piped input | stdin |
-| Environment | The session's, over the config `env` |
-| Working directory | The shell's, unchanged |
-| Workspace files | By `mount_type`; see [above](#connecting-the-workspace) |
-| Disk and network | The container's own |
 
 ## Notes
 

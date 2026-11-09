@@ -21,7 +21,8 @@ import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/machine/mixin'
 import { requireId } from '@struktoai/mirage-core/machine/config'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
-import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
+import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type Ssh2Sdk } from './sdk.ts'
 import { SSH_RUNTIME_CONFIG_FIELDS, type SSHMachineConfig } from './config.ts'
@@ -128,7 +129,7 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
    * closes the channel.
    *
    * @param tagged whether the command carries its run's `PROCESS`, so a
-   *   cancelled run's reap stops it.
+   *   cancelled run's stop ends it.
    * @param errors receives stderr as it arrives, as `output` does stdout.
    */
   protected ssh(
@@ -159,7 +160,7 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
         }
         const abort = (): void => {
           // A tagged command a kill stopped with a gentler signal is left
-          // to the reap, which sends it that signal first.
+          // to the stop, which sends it that signal first.
           if (!state.done && (!tagged || stopSignal(runner) === null)) stream.signal('KILL')
           fail(makeAbortError(signal))
         }
@@ -231,7 +232,7 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
     })
   }
 
-  openPipe(command: string): Promise<SandboxPipe> {
+  openPipe(command: string): Promise<MachinePipe> {
     const client = this.client
     if (client === null) return Promise.reject(new Error('ssh runtime not connected'))
     return new Promise((resolve, reject) => {

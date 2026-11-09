@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { MachineHandle } from '@struktoai/mirage-core/machine/handle'
-import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/machine/mixin'
 import { requireId } from '@struktoai/mirage-core/machine/config'
 import { registerMachine } from '@struktoai/mirage-core/machine/registry'
-import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
+import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { MICROSANDBOX_CONFIG_FIELDS, type MicrosandboxConfig } from './config.ts'
 import { notRunningHint, PROCESS } from '@struktoai/mirage-core/machine/constants'
@@ -27,21 +26,20 @@ import {
   INSPECT_TIMEOUT_SECONDS,
   TAGGED_PRELUDE,
 } from './constants.ts'
-import { execArgs, openProgramPipe, reportedState, runProgram } from '../program.ts'
+import { execArgs, openProgramPipe, reportedState } from '../program.ts'
+import { ProgramMachine } from '../transport.ts'
 
 /**
  * Run programs in an existing Microsandbox guest through `msb`.
- * The user starts the sandbox and serves its workspace at the same paths
+ * The user starts the machine and serves its workspace at the same paths
  * inside the guest. Mirage forwards commands, stdin, environment, and cwd
- * without managing the sandbox's lifecycle.
+ * without managing the machine's lifecycle.
  */
-export class MicrosandboxMachine
-  extends MachineHandle<MicrosandboxConfig>
-  implements PipeTransport
-{
+export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
   static override readonly configFields: ConfigFields = MICROSANDBOX_CONFIG_FIELDS
-  readonly [PIPE_TRANSPORT] = true as const
   static override readonly provider = 'microsandbox'
+  protected readonly program = 'msb'
+  protected readonly installHint = MICROSANDBOX_HINT
 
   constructor(name: string, config?: MicrosandboxConfig) {
     super(name, config, MicrosandboxMachine.configFields)
@@ -54,19 +52,8 @@ export class MicrosandboxMachine
     return Promise.resolve()
   }
 
-  // Run `msb` once.
-  protected microsandbox(
-    args: string[],
-    stdin: ByteSource | null = null,
-    output: OutputFn | null = null,
-    signal?: AbortSignal,
-    errors: OutputFn | null = null,
-  ): Promise<RunResult> {
-    return runProgram('msb', MICROSANDBOX_HINT, args, stdin, {
-      ...(signal !== undefined ? { signal } : {}),
-      ...(output !== null ? { output } : {}),
-      ...(errors !== null ? { errors } : {}),
-    })
+  protected execWords(): readonly [readonly string[], readonly string[]] {
+    return [['exec', this.config.sandbox, '--quiet'], ['--']]
   }
 
   /** Require a running sandbox before executing any commands. */
@@ -79,17 +66,16 @@ export class MicrosandboxMachine
     } catch (error) {
       signal?.throwIfAborted()
       if (deadline.aborted)
-        throw new Error(
-          `msb runtime inspection timed out after ${String(INSPECT_TIMEOUT_SECONDS)} seconds`,
-          { cause: error },
-        )
+        throw new Error(`msb status timed out after ${String(INSPECT_TIMEOUT_SECONDS)} seconds`, {
+          cause: error,
+        })
       throw error
     }
   }
 
   private async inspect(signal: AbortSignal): Promise<void> {
     const sandbox = this.config.sandbox
-    const status = await this.microsandbox(
+    const status = await this.execProgram(
       ['status', sandbox, '--format', 'json'],
       null,
       null,
@@ -114,13 +100,14 @@ export class MicrosandboxMachine
     await this.connect(signal)
     signal?.throwIfAborted()
     // Piped stdin skips --stream: msb fails more runs that close it early.
-    const head = stdin === null ? [...this.head(), '--stream'] : this.head()
+    const [words, tail] = this.execWords()
+    const head = stdin === null ? [...words, '--stream'] : words
     const tag = env[PROCESS]
-    let args = execArgs(head, ['--'], env, cwd, argv)
+    let args = execArgs(head, tail, env, cwd, argv)
     if (tag !== undefined) {
       const rest = Object.fromEntries(Object.entries(env).filter(([key]) => key !== PROCESS))
       const command = [`${PROCESS}=${tag}`, ...argv]
-      args = execArgs(head, ['--'], rest, null, [
+      args = execArgs(head, tail, rest, null, [
         '/bin/sh',
         '-c',
         TAGGED_PRELUDE,
@@ -129,19 +116,16 @@ export class MicrosandboxMachine
         ...command,
       ])
     }
-    return this.microsandbox(args, stdin, output, signal, errors)
+    return this.execProgram(args, stdin, output, signal, errors)
   }
 
-  async openPipe(command: string): Promise<SandboxPipe> {
+  override async openPipe(command: string): Promise<MachinePipe> {
     await this.connect()
+    const [head, tail] = this.execWords()
     return openProgramPipe(
-      'msb',
-      execArgs([...this.head(), '--stream'], ['--'], {}, null, ['/bin/sh', '-c', command]),
+      this.program,
+      execArgs([...head, '--stream'], tail, {}, null, ['/bin/sh', '-c', command]),
     )
-  }
-
-  private head(): string[] {
-    return ['exec', this.config.sandbox, '--quiet']
   }
 }
 

@@ -77,15 +77,14 @@ ws = Workspace(
             "commands": {"deny": ["slack send-message", "curl"]},
         },
     },
+    # The e2b sandbox is a machine; the machine runtime runs programs on it
+    machines={"box": {"provider": "e2b", "sandbox_id": sandbox_id, "mount_type": "ssh"}},
     runtimes=[
         MontyRuntime(captures=["python", "python3"]),
-        E2BRuntime(
-            captures=["python", "python3"],
-            config={"sandbox_id": sandbox_id, "mount_type": "ssh"},
-        ),
+        MachineRuntime(captures=["python", "python3"], machine="box"),
     ],
-    # route the underlying computation: numpy lines run in the e2b sandbox, the rest on monty
-    route_policy=lambda ctx: "e2b" if "numpy" in ctx.line else None,
+    # route the underlying computation: numpy lines run on the machine, the rest on monty
+    route_policy=lambda ctx: "machine" if "numpy" in ctx.line else None,
 )
 
 # Add an agent using the analyst profile

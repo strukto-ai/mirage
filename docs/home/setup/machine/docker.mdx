@@ -96,71 +96,13 @@ Python in the container too.
 
 ## Connecting the workspace
 
-A program in the container opens workspace files at the same paths as in
-Mirage, so the container must see the mounts there. `mount_type` picks how:
-
-| `mount_type` | How the files get there | Rules that apply |
-| --- | --- | --- |
-| `ssh` | Mirage serves every mount over `docker exec`; the container mounts each with `sshfs` | This workspace's mount modes, hides, permissions and policies |
-| `fuse` | A Mirage inside the container mounts your backends with FUSE | That Mirage's own config |
-| `both` | The container's own FUSE mounts where it has them, `ssh` for the rest | Each side's own |
-| unset | Nothing; you put the files there yourself | The container's |
-
-### ssh
-
-- The image needs only `sshfs`. No Mirage, keys or open port in the
-  container.
-- Each file call is a round trip to the workspace; with `both`, keep bulk
-  data on the container's own mounts.
-- The container shows one session's view, the first that runs a line there.
-  Give each agent its own container.
-- An sshfs still serving a path Mirage serves, another workspace's or one
-  of your own, is left alone and the line exits 1. Give each workspace its
-  own container.
-- If the container restarts, Mirage mounts the paths again. A line caught
-  mid-restart exits 126 without running.
-- The root mount and `/dev` are not served.
-
-### fuse
-
-Build [the machine image](/home/setup/machine/overview#the-machine-image), which
-carries Mirage and `fuse3`. Write the same mounts at the same paths into
-`sandbox.yaml`, and start Mirage with it in the container:
-
-```yaml
-mounts:
-  /data:
-    vfs: s3
-    config:
-      bucket: my-bucket
-    backend: fuse
-    mountpoint: /data
-```
+Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). With `ssh`, the image needs only `sshfs`. With
+`fuse`, copy `sandbox.yaml` in and start Mirage in the container:
 
 ```bash
 docker cp sandbox.yaml my-sandbox:/tmp/sandbox.yaml
 docker exec my-sandbox mirage workspace create /tmp/sandbox.yaml
 ```
-
-- This workspace's rules do not reach those files, so a line is refused
-  while the session's permissions hide or narrow anything under them.
-- If a path the container mounted goes away, as on a restart, lines exit
-  126 until it is mounted again. Start Mirage from the image's entrypoint
-  so a restart mounts it again.
-- Keep the container's paths in step with the host's mounts yourself.
-  `sandbox.yaml` can differ where it should, such as an endpoint
-  (`host.docker.internal`) or narrower credentials.
-
-## Runtime behavior
-
-| Capability | In the container |
-| --- | --- |
-| Command | The captured program and its words, as typed |
-| Piped input | stdin |
-| Environment | The session's, over the config `env` |
-| Working directory | The shell's, unchanged |
-| Workspace files | By `mount_type`, above |
-| Disk and network | The container's own |
 
 ## Notes
 
@@ -168,4 +110,4 @@ docker exec my-sandbox mirage workspace create /tmp/sandbox.yaml
   Docker Desktop, Colima and a compatible Podman alias all work.
 - Sizing, GPUs, networks, volumes and bind mounts go on your own
   `docker run`. You can bake `sandbox.yaml` into the image instead of
-  copying it.
+  copying it, and point it at `host.docker.internal` for a host service.

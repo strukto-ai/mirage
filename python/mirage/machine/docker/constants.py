@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 DOCKER_HINT = (
-    "the docker runtime needs `docker` on PATH "
+    "the docker machine needs `docker` on PATH "
     "(Docker Desktop, colima, or a podman alias)"
 )
 

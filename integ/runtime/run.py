@@ -1295,6 +1295,8 @@ async def _perform_step(
         kwargs["session_id"] = session_id
     if "runtime" in step:
         kwargs["runtime"] = step["runtime"]
+    if "machine" in step:
+        kwargs["machine"] = step["machine"]
     if "stdin" in step:
         kwargs["stdin"] = step["stdin"].encode()
     if expect.get("cancelled"):
@@ -1452,7 +1454,10 @@ def _for_runtime(case: dict[str, Any], runtime: str) -> dict[str, Any] | None:
         entry = _entry(runtime, case.get("entry", {}))
         if runtime in MACHINE_PROVIDERS and isinstance(entry, dict):
             config = entry.pop("config", {})
-            world["machines"] = {runtime: {"provider": runtime, **config}}
+            world["machines"] = {
+                name: {"provider": runtime, **config}
+                for name in (runtime, *case.get("also_machines", []))
+            }
             entry = {**entry, "name": "machine", "machine": runtime}
         world["runtimes"] = [entry, "workspace"]
     variant = {

@@ -87,6 +87,20 @@ def test_foreground_always_uses_the_stream_transport(
     assert not client.calls
 
 
+def test_a_line_may_name_its_machine(monkeypatch):
+    calls = []
+
+    async def run(client, path, payload, piped, *, json_output):
+        calls.append(payload)
+        return 0
+
+    monkeypatch.setattr(shell, "make_client", _Client)
+    monkeypatch.setattr(stream, "stream_shell", run)
+    args = ["-w", "w", "-c", "train", "--machine", "gpu"]
+    assert CliRunner().invoke(shell.app, args).exit_code == 0
+    assert calls == [{"command": "train", "machine": "gpu"}]
+
+
 def _command(
     text: str, outcome: str, reason: str = "", exit_code: int = 0
 ) -> dict[str, Any]:

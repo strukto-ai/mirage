@@ -115,6 +115,45 @@ describe('mirage shell', () => {
       }
     },
   )
+
+  it('sends the machine a line names', async () => {
+    const bodies: unknown[] = []
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = []
+      req.on('data', (chunk: Buffer) => chunks.push(chunk))
+      req.on('end', () => {
+        if (req.url === '/v1/health') {
+          res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
+          return
+        }
+        bodies.push(JSON.parse(Buffer.concat(chunks).toString()))
+        res
+          .writeHead(200, { 'content-type': 'application/x-ndjson' })
+          .end(
+            JSON.stringify({ status: 'done', result: { kind: 'io', exit_code: 0 }, error: null }) +
+              '\n',
+          )
+      })
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const home = mkdtempSync(join(tmpdir(), 'mirage-shell-'))
+    try {
+      const { port } = server.address() as AddressInfo
+      vi.stubEnv('MIRAGE_HOME', home)
+      vi.stubEnv('MIRAGE_DAEMON_URL', `http://127.0.0.1:${String(port)}`)
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+      const program = new Command()
+      registerShellCommand(program)
+      await program.parseAsync(['shell', '-w', 'w', '-c', 'train', '--machine', 'gpu'], {
+        from: 'user',
+      })
+      expect(bodies).toEqual([{ command: 'train', machine: 'gpu' }])
+    } finally {
+      server.closeAllConnections()
+      server.close()
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
 })
 
 function command(text: string, outcome: string, reason = '', exitCode = 0) {

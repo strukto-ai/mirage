@@ -28,19 +28,19 @@ from mirage.machine.constants import (
     CHECK_MARK,
     CHECK_WAIT_SECONDS,
     FAKETIME_PROBE_SECONDS,
+    MACHINE_STOP_WAIT_SECONDS,
+    NOT_RUNNING_STATUS,
     PROCESS,
-    REAP_ABSENT,
-    REAP_WAIT_SECONDS,
     SCAN_MARK,
     SCAN_WAIT_SECONDS,
     faketime_env,
     faketime_probe,
-    reap_line,
     scan_line,
     signal_line,
+    stop_line,
 )
 from mirage.machine.mixin import PipeTransportMixin
-from mirage.machine.mounts import SandboxMounts
+from mirage.machine.mounts import MachineMounts
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.types import OutputFn, RunResult
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
@@ -54,16 +54,16 @@ class MachineHandle:
     provider: the live connection, held once per workspace.
 
     Mirage never creates, provisions, or deletes a machine: you bring
-    your own (a running container, a live Daytona or E2B sandbox, an SSH
+    your own (a running container, a live Daytona or E2B machine, an SSH
     host) and its config says how to reach it. The workspace reaches the
     machine at the same prefixes as the host's, so the session cwd and
     every path in a line resolve unchanged: a machine with a
-    ``mount_type`` is served them (SandboxMounts), otherwise serve them
+    ``mount_type`` is served them (MachineMounts), otherwise serve them
     inside it yourself (``mirage workspace create`` in the image
     entrypoint or by hand). Subclasses adapt one provider by
     implementing connect() and _exec_argv(), and PipeTransportMixin for
     a ``mount_type``; everything Mirage does there derives from
-    _exec_argv: a program's run (``run``), a stop by tag (``reap``), the
+    _exec_argv: a program's run (``run``), a stop by tag (``stop``), the
     libfaketime probe. Constructed from the name the workspace gives it
     and its config, coerced through the provider's own config class.
 
@@ -88,7 +88,7 @@ class MachineHandle:
         # retries.
         self._connected = False
         self._connect_lock = asyncio.Lock()
-        self._mounts: SandboxMounts | None = None
+        self._mounts: MachineMounts | None = None
         # The libfaketime the machine holds, asked once the first program
         # runs there under a system_time: None for none. Its first runs
         # share one probe; a failed probe is not kept, so a later run
@@ -105,7 +105,7 @@ class MachineHandle:
                 raise ValueError(
                     f"{self.provider}: mount_type needs a pipe transport"
                 )
-            self._mounts = SandboxMounts(
+            self._mounts = MachineMounts(
                 self.provider,
                 self.config.mount_type,
                 self._setup,
@@ -166,8 +166,8 @@ class MachineHandle:
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        """Connect once, bring the served mounts in step, run, then land
-        what sshfs acknowledged, failing the run with a landing that failed.
+        """Connect once, validate the line, run it, then land what sshfs
+        acknowledged, failing the run with a landing that failed.
 
         Args:
             argv (tuple[str, ...]): the program and its arguments.
@@ -177,14 +177,10 @@ class MachineHandle:
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
         """
-        if self._mounts is not None:
-            refusal = self._mounts.enter(binding, ctx.cwd.virtual)
-            if refusal is not None:
-                return refusal
         await self._ensure_connected()
         run = argv
         if self._mounts is not None:
-            refusal = await self._mounts.admit(binding)
+            refusal = await self._mounts.validate(binding, ctx.cwd.virtual)
             if refusal is not None:
                 return refusal
             run = self._mounts.guarded(argv)
@@ -212,26 +208,24 @@ class MachineHandle:
                     if runner.signal is not None
                     else runner.interrupted
                 )
-            await asyncio.shield(self._reap(tag, signum or 15))
+            await asyncio.shield(self.stop(tag, signum or 15))
             raise
         finally:
             self._executing -= 1
-        if (
-            self._mounts is not None
-            and done.exit_code == CANNOT_EXECUTE_STATUS
-        ):
+        if self._mounts is None:
+            return done
+        if done.exit_code == CANNOT_EXECUTE_STATUS:
             self._mounts.forget()
-        if self._mounts is not None:
-            # sshfs acknowledged the writes before they landed.
-            lost = await self._mounts.land()
-            if lost:
-                said = "".join(f"{line}\n" for line in lost).encode()
-                done = RunResult(
-                    stdout=done.stdout,
-                    stderr=(done.stderr or b"") + said,
-                    exit_code=done.exit_code or 1,
-                )
-        return done
+        # sshfs acknowledged the writes before they landed.
+        lost = await self._mounts.land()
+        if not lost:
+            return done
+        said = "".join(f"{line}\n" for line in lost).encode()
+        return RunResult(
+            stdout=done.stdout,
+            stderr=(done.stderr or b"") + said,
+            exit_code=done.exit_code or 1,
+        )
 
     async def check(self) -> bool:
         """Reach the machine and run the check line (``CHECK_LINE``),
@@ -245,9 +239,7 @@ class MachineHandle:
             Exception: the machine could not be reached in time, or no
                 shell there ran the line (a stopped container).
         """
-        async with asyncio.timeout(CHECK_WAIT_SECONDS):
-            await self._ensure_connected()
-            ran = await self.exec_line(CHECK_LINE, None, {}, "/")
+        ran = await self._connected_line(CHECK_LINE, CHECK_WAIT_SECONDS)
         if CHECK_MARK.encode() not in (ran.stdout or b""):
             raise RuntimeError(
                 f"{self.id}: check did not run: exit {ran.exit_code}"
@@ -271,21 +263,19 @@ class MachineHandle:
             Exception: the machine could not be reached, or the scan
                 failed.
         """
-        async with asyncio.timeout(SCAN_WAIT_SECONDS):
-            await self._ensure_connected()
-            done = await self.exec_line(
-                scan_line(workspace), None, dict(self.config.env), "/"
-            )
+        done = await self._connected_line(
+            scan_line(workspace), SCAN_WAIT_SECONDS
+        )
         if done.exit_code != 0:
             raise RuntimeError(f"{self.id}: scan exited {done.exit_code}")
-        return _scanned(done.stdout)
+        return _parse_scan_rows(done.stdout)
 
     async def signal(self, target: str | MachinePid, signum: int) -> bool:
         """Send ``signum`` to one process on the machine, as ``kill``
         sent it (``signal_line``): the program a run's tag names, or the
         process a MachinePid names while it is the one that started
         then. Connecting and sending are bounded as a stop is
-        (``REAP_WAIT_SECONDS``).
+        (``MACHINE_STOP_WAIT_SECONDS``).
 
         Args:
             target (str | MachinePid): the run's tag, or the process.
@@ -298,25 +288,20 @@ class MachineHandle:
             Exception: the machine could not be reached, or the line
                 failed.
         """
-        async with asyncio.timeout(REAP_WAIT_SECONDS):
-            await self._ensure_connected()
-            done = await self.exec_line(
-                signal_line(target, signum),
-                None,
-                dict(self.config.env),
-                "/",
-            )
-        if done.exit_code not in (0, REAP_ABSENT):
+        done = await self._connected_line(
+            signal_line(target, signum), MACHINE_STOP_WAIT_SECONDS
+        )
+        if done.exit_code not in (0, NOT_RUNNING_STATUS):
             raise RuntimeError(
                 f"{self.id}: signal {signum} not sent: exit {done.exit_code}"
             )
         return done.exit_code == 0
 
-    async def reap(self, tag: str, signum: int) -> bool:
-        """Stop a run a lapsed workspace left on the machine: every process
-        its ``PROCESS`` tag marks gets ``signum``, then KILL a second
-        later. Connecting is bounded as the stop is
-        (``REAP_WAIT_SECONDS``).
+    async def stop(self, tag: str, signum: int) -> bool:
+        """Stop a run: every process its ``PROCESS`` tag marks gets
+        ``signum``, then KILL a second later. Connecting and stopping
+        take at most ``MACHINE_STOP_WAIT_SECONDS``, so a machine that
+        stopped answering never holds a cancel or an error.
 
         Args:
             tag (str): the id of the process the run is, as ``PROCESS``
@@ -325,37 +310,14 @@ class MachineHandle:
 
         Returns:
             bool: True once the machine held the run's processes and they
-            were stopped; False when it holds none of them, as a machine
-            other than the run's does.
-
-        Raises:
-            RuntimeError: the machine could not be reached, or the stop
-                failed.
-        """
-        async with asyncio.timeout(REAP_WAIT_SECONDS):
-            await self._ensure_connected()
-        code = await self._reap(tag, signum)
-        if code not in (0, REAP_ABSENT):
-            raise RuntimeError(f"{self.id}: run {tag} not stopped")
-        return code == 0
-
-    async def _reap(self, tag: str, signum: int) -> int | None:
-        """Stop what a cancelled or failed run left on the machine
-        (``PROCESS``), for at most ``REAP_WAIT_SECONDS``: a machine that
-        stopped answering would otherwise hold the cancel or the error.
-
-        Args:
-            tag (str): the run's tag.
-            signum (int): the signal the run is stopped with first.
-
-        Returns:
-            int | None: the stop line's status (``reap_line``); None when
-            the machine did not answer.
+            were stopped; False when it holds none of them, could not be
+            reached, or the stop failed.
         """
         try:
-            async with asyncio.timeout(REAP_WAIT_SECONDS):
+            async with asyncio.timeout(MACHINE_STOP_WAIT_SECONDS):
+                await self._ensure_connected()
                 done = await self._exec_argv(
-                    ("/bin/sh", "-c", reap_line(tag, signum)),
+                    ("/bin/sh", "-c", stop_line(tag, signum)),
                     None,
                     dict(self.config.env),
                     "/",
@@ -364,15 +326,15 @@ class MachineHandle:
                 )
         except Exception:
             logger.debug("%s: run %s not stopped", self.id, tag, exc_info=True)
-            return None
-        if done.exit_code not in (0, REAP_ABSENT):
+            return False
+        if done.exit_code not in (0, NOT_RUNNING_STATUS):
             logger.debug(
                 "%s: run %s not stopped: exit %d",
                 self.id,
                 tag,
                 done.exit_code,
             )
-        return done.exit_code
+        return done.exit_code == 0
 
     async def _system_time_env(self, env: dict[str, str]) -> dict[str, str]:
         """What a program on this machine needs to read the running
@@ -400,9 +362,7 @@ class MachineHandle:
                 return
             try:
                 async with asyncio.timeout(FAKETIME_PROBE_SECONDS):
-                    found = await self.exec_line(
-                        faketime_probe(), None, dict(self.config.env), "/"
-                    )
+                    found = await self._setup(faketime_probe())
             except Exception:
                 found = None
                 logger.debug(
@@ -427,7 +387,25 @@ class MachineHandle:
                 )
 
     async def _setup(self, line: str) -> RunResult:
+        """Run one of Mirage's own lines on the machine: its environment,
+        at ``/``.
+
+        Args:
+            line (str): the shell line.
+        """
         return await self.exec_line(line, None, dict(self.config.env), "/")
+
+    async def _connected_line(self, line: str, wait: float) -> RunResult:
+        """Connect, then run one of Mirage's own lines, within ``wait``
+        seconds in all.
+
+        Args:
+            line (str): the shell line.
+            wait (float): how long connecting and running may take.
+        """
+        async with asyncio.timeout(wait):
+            await self._ensure_connected()
+            return await self._setup(line)
 
     async def _ensure_connected(self) -> None:
         async with self._connect_lock:
@@ -492,7 +470,7 @@ class MachineHandle:
             self._connected = False
 
 
-def _scanned(stdout: bytes | None) -> list[MachineProcess]:
+def _parse_scan_rows(stdout: bytes | None) -> list[MachineProcess]:
     """The rows a scan printed (``scan_line``), each one a process; a
     line without the mark, or with a field that is not a number, is a
     message the provider mixed in.

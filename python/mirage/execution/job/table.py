@@ -176,7 +176,7 @@ class JobTable:
         # clock: past its length the lease may be another daemon's.
         self._renewed = 0.0
         # Records of programs this daemon left before a restart that the
-        # reaper could not reach, published with this life's so a later
+        # run_stopper could not reach, published with this life's so a later
         # claim or another daemon tries them again.
         self._left: dict[str, RecordFields] = {}
         self._jobs: dict[str, dict[int, JobHandle]] = {}
@@ -188,12 +188,12 @@ class JobTable:
         self._lease: asyncio.Task[None] | None = None
         self._checking: asyncio.Task[None] | None = None
         self._publishing: asyncio.Task[None] | None = None
-        self._reaping: set[asyncio.Task[None]] = set()
-        # Lapsed owners this table already set about reaping, so a listing
+        self._stopping_runs: set[asyncio.Task[None]] = set()
+        # Lapsed owners this table already set about stopping, so a listing
         # that finds one again does not stop its runs again; and whether
-        # teardown stopped the reaping, which its runtimes are closing for.
-        self._reaped: set[str] = set()
-        self._reaping_stopped = False
+        # teardown ended the stopping, which its runtimes are closing for.
+        self._stopped_owners: set[str] = set()
+        self._stops_ended = False
         self._swept = False
         # The table whose store and owner the process plane is read and
         # written through: this one, or for a child shell's table the
@@ -207,9 +207,9 @@ class JobTable:
         # workspace, given the process as it was published and the first
         # signal, and answers whether this workspace reached it; the
         # workspace sets it, since it holds the runtimes that reach it.
-        self.reaper: Callable[[RecordFields, int], Awaitable[bool]] | None = (
-            None
-        )
+        self.run_stopper: (
+            Callable[[RecordFields, int], Awaitable[bool]] | None
+        ) = None
         # Told each job this table's jobs run as it ends; the workspace
         # sets it, to trace the job.
         self.ended: Callable[[Job], None] | None = None
@@ -289,10 +289,10 @@ class JobTable:
                     await self.taken()
                 except Exception as exc:
                     logger.debug("lost records not ended: %s", exc)
-            if earlier and not self._reaping_stopped:
-                task = asyncio.ensure_future(self._reap_earlier(earlier))
-                self._reaping.add(task)
-                task.add_done_callback(self._reaping.discard)
+            if earlier and not self._stops_ended:
+                task = asyncio.ensure_future(self._stop_earlier(earlier))
+                self._stopping_runs.add(task)
+                task.add_done_callback(self._stopping_runs.discard)
             self.processes_changed()
 
     def _lapsed(self) -> bool:
@@ -621,7 +621,7 @@ class JobTable:
             await self._stop_runner(job, job.process, signal)
             return True
         if not await self._running(job.owner):
-            await self._reap_owner(job.owner)
+            await self._stop_owner(job.owner)
         await mark_killed(job.console, 128 + signal, signal)
         await self._refresh(job)
         return job.signal is not None
@@ -694,14 +694,14 @@ class JobTable:
         Disowned jobs are stopped too: the shell forgot them, the
         workspace did not, and a teardown that left them running would
         leak their tasks. Another workspace's jobs are its own to stop.
-        The reaping of lapsed owners' runs stops here as well, before the
+        The stopping of lapsed owners' runs ends here as well, before the
         runtimes it reaches them through close.
         """
-        self._reaping_stopped = True
-        reaping = list(self._reaping)
-        for task in reaping:
+        self._stops_ended = True
+        runs = list(self._stopping_runs)
+        for task in runs:
             task.cancel()
-        await asyncio.gather(*reaping, return_exceptions=True)
+        await asyncio.gather(*runs, return_exceptions=True)
         running = [j for j in self.all_running_jobs() if j.process is not None]
         for job in [*running, *self._disowned]:
             if job.state == JobState.RUNNING and job.process is not None:
@@ -726,7 +726,7 @@ class JobTable:
                 if task is not None:
                     task.cancel()
             self._lease = self._checking = self._publishing = None
-            for task in list(self._reaping):
+            for task in list(self._stopping_runs):
                 task.cancel()
             if self._claimed:
                 self._claimed = False
@@ -763,7 +763,7 @@ class JobTable:
 
         A killed job's console ends once its runner has stopped, or
         ``STOP_WAIT_SECONDS`` after the kill: what it started stops in
-        that time (a handler finishes, a sandbox is reaped) and the
+        that time (a handler finishes, a machine's run is stopped) and the
         status it leaves is the one answered, as bash's ``wait`` answers
         once the child has gone. An ending another workspace wrote is
         taken at once, before this table's watcher stops the runner. The
@@ -874,7 +874,7 @@ class JobTable:
             if await self._running(daemon):
                 found[daemon] = records
             else:
-                self._reap_later(daemon)
+                self._stop_later(daemon)
         return found
 
     async def signal_remote(
@@ -932,7 +932,7 @@ class JobTable:
         if granted is None or (granted.list == "session" and not own):
             return False
         if lapsed:
-            await self._reap_owner(daemons[0])
+            await self._stop_owner(daemons[0])
             return False
         if granted.kill == "session" and not own:
             raise PermissionError(errno.EPERM, "Operation not permitted")
@@ -1078,7 +1078,7 @@ class JobTable:
         if outcome is None:
             if await self._running(job.owner):
                 return
-            self._reap_later(job.owner)
+            self._stop_later(job.owner)
             await mark_killed(
                 job.console, HANGUP_EXIT_CODE, HANGUP_EXIT_CODE - 128
             )
@@ -1366,7 +1366,7 @@ class JobTable:
         it outlives its store's expiry. Each record carries ``seen_at``,
         when its processes were read, the last time this daemon vouched
         for them and their native runs, on the host's clock, which a host
-        reap compares with ``ps``. A failed round is logged and tried
+        stop compares with ``ps``. A failed round is logged and tried
         again the next one, and a stop that fails leaves the others it
         came with to be applied.
         """
@@ -1428,7 +1428,7 @@ class JobTable:
                 handle.terminate(signal)
                 return
 
-    def reap_lapsed(self) -> None:
+    def stop_lapsed(self) -> None:
         """Stop what the daemons that lost the lease left running,
         without waiting: the workspace calls it as it starts, so what a
         crashed daemon ran stops before anything lists it. Once per
@@ -1436,17 +1436,17 @@ class JobTable:
         daemon loses one but by closing."""
         if (
             self._swept
-            or self._reaping_stopped
+            or self._stops_ended
             or self.store.lease_seconds is None
         ):
             return
         self._swept = True
         task = asyncio.ensure_future(self._sweep())
-        self._reaping.add(task)
-        task.add_done_callback(self._reaping.discard)
+        self._stopping_runs.add(task)
+        task.add_done_callback(self._stopping_runs.discard)
 
     async def _sweep(self) -> None:
-        """Reap the daemons that lost the lease, and once more a lease
+        """Stop the programs of the daemons that lost the lease, and once more a lease
         later while another daemon still held it: one that died just
         before this one started still holds it until then."""
         try:
@@ -1462,25 +1462,25 @@ class JobTable:
         except Exception as exc:
             logger.debug("lapsed daemons not swept: %s", exc)
 
-    def _reap_later(self, owner: str) -> None:
+    def _stop_later(self, owner: str) -> None:
         """Stop the native runs a daemon that lost the lease left,
         without waiting.
 
         Args:
             owner (str): the daemon's id.
         """
-        if self._reaping_stopped or owner in self._reaped:
+        if self._stops_ended or owner in self._stopped_owners:
             return
-        self._reaped.add(owner)
-        task = asyncio.ensure_future(self._reap_owner(owner))
-        self._reaping.add(task)
-        task.add_done_callback(self._reaping.discard)
+        self._stopped_owners.add(owner)
+        task = asyncio.ensure_future(self._stop_owner(owner))
+        self._stopping_runs.add(task)
+        task.add_done_callback(self._stopping_runs.discard)
 
-    async def _reap_owner(self, owner: str) -> None:
+    async def _stop_owner(self, owner: str) -> None:
         """Stop the programs a daemon that lost the lease left, those
         this workspace reaches, and keep its record holding only the
         rest, for a daemon that reaches them. This table's own daemon's
-        record is its own life's, so it is never reaped here.
+        record is its own life's, so it is never stopped here.
 
         Args:
             owner (str): the daemon's id.
@@ -1489,15 +1489,15 @@ class JobTable:
             return
         try:
             records = (await self.store.processes()).get(owner, {})
-            kept = await self._reap_processes(owner, records)
+            kept = await self._stop_processes(owner, records)
             if not await self._running(owner):
                 await self.store.publish(owner, kept)
         except Exception as exc:
-            logger.debug("lapsed daemon %s not reaped: %s", owner, exc)
+            logger.debug("lapsed daemon %s not stopped: %s", owner, exc)
 
-    async def _reap_earlier(self, records: dict[str, RecordFields]) -> None:
+    async def _stop_earlier(self, records: dict[str, RecordFields]) -> None:
         """Stop the programs this daemon left before a restart, which
-        ``claim`` found under its id. The ones the reaper could not reach
+        ``claim`` found under its id. The ones the run_stopper could not reach
         stay in this life's record, as they were last vouched for.
 
         Args:
@@ -1505,18 +1505,18 @@ class JobTable:
                 earlier life last published them.
         """
         try:
-            self._left = await self._reap_processes(self.daemon, records)
+            self._left = await self._stop_processes(self.daemon, records)
         except Exception as exc:
-            logger.debug("runs left before a restart not reaped: %s", exc)
+            logger.debug("runs left before a restart not stopped: %s", exc)
             self._left = records
         if self._left:
             self.processes_changed()
 
-    async def _reap_processes(
+    async def _stop_processes(
         self, owner: str, records: dict[str, RecordFields]
     ) -> dict[str, RecordFields]:
         """Hand each process a daemon's records list that ran a program
-        past the workspace (its ``runtime``) to the reaper, and answer
+        past the workspace (its ``runtime``) to the run_stopper, and answer
         the ones this workspace could not reach. The lease is checked
         again before each is stopped, so a daemon that took it back
         meanwhile keeps its processes, and its records as they are.
@@ -1531,7 +1531,9 @@ class JobTable:
                 continue
             if await self._running(owner):
                 return records
-            if self.reaper is None or not await self.reaper(record, 15):
+            if self.run_stopper is None or not await self.run_stopper(
+                record, 15
+            ):
                 left[pid] = record
         return left
 

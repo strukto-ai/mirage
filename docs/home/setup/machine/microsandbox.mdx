@@ -74,39 +74,10 @@ Add `@python` to run Python programs in the guest too.
 
 ## Connecting the workspace
 
-A program in the sandbox opens workspace files at the same paths as in
-Mirage. Set `mount_type` in Python or YAML, or `mountType` in TypeScript:
-
-- `ssh` shares the host workspace through guest `sshfs`.
-- `fuse` uses a Mirage workspace running inside the guest.
-- `both` keeps the guest's own mounts and uses [ssh](#ssh) for the rest.
-- Unset leaves file access to you.
-
-### ssh
-
-Add `mount_type: ssh` to the config (`mountType: 'ssh'` in TypeScript).
-Install `mirage-ai[ssh]` on a Python host or `ssh2` on a Node host. The
-guest needs `sshfs` and access to `/dev/fuse`, but no Mirage installation,
-SSH keys or open port (`apt-get install sshfs`). In `ssh` and `both`, each
-runtime instance serves
-its first session only. If the guest restarts, Mirage mounts the paths
-again; a command caught mid-restart exits 126 without running.
-
-### fuse
-
-Use [the machine image](/home/setup/machine/overview#the-machine-image),
-which carries Mirage and `fuse3`. Put the same mounts at the same paths
-in a `sandbox.yaml` inside the guest:
-
-```yaml
-mounts:
-  /data:
-    vfs: s3
-    config:
-      bucket: my-bucket
-    backend: fuse
-    mountpoint: /data
-```
+Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). With `ssh`, install `mirage-ai[ssh]` on a Python
+host or `ssh2` on a Node host; the guest needs `sshfs` and access to
+`/dev/fuse`. With `fuse`, copy `sandbox.yaml` in and start Mirage in the
+guest:
 
 ```bash
 msb copy sandbox.yaml mirage-box:/tmp/sandbox.yaml
@@ -114,22 +85,8 @@ msb exec mirage-box -- mkdir -p /data
 msb exec mirage-box -- mirage workspace create /tmp/sandbox.yaml
 ```
 
-The guest's config controls these files, not the host workspace's rules.
-Mirage refuses commands if session rules restrict a guest mount it cannot
-enforce. Matching paths alone does not share data; configure both workspaces
-to use the same backend. If a path the guest mounted goes away, as on a
-restart, commands exit 126 until it is mounted again.
-
-## Runtime behavior
-
-| Capability | In the sandbox |
-| --- | --- |
-| Command | The captured program and its arguments, through `msb exec` |
-| Piped input | stdin |
-| Environment | The session's, over the config `env` |
-| Working directory | The shell's, unchanged |
-| Workspace files | By `mount_type`; see [above](#connecting-the-workspace) |
-| Disk and network | The sandbox's own |
+Matching paths alone does not share data; configure both workspaces to use
+the same backend.
 
 ## Notes
 

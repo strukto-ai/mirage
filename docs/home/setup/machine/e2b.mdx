@@ -96,34 +96,12 @@ Python in the sandbox too.
 
 ## Connecting the workspace
 
-A program in the sandbox opens workspace files at the same paths as in
-Mirage, so the sandbox must see the mounts there. `mount_type` picks how:
+Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). `ssh` and `both` do not work in browsers, and
+each file call is about 150 ms for a small file from a laptop. With `fuse`,
+base the template on [the machine image](/home/setup/machine/overview#the-machine-image)
+and run `mirage workspace create /tmp/sandbox.yaml` in the sandbox.
 
-| `mount_type` | How the files get there | Rules that apply |
-| --- | --- | --- |
-| `ssh` | Mirage serves every mount over E2B's command channel; the sandbox mounts each with `sshfs` | This workspace's mount modes, hides, permissions and policies |
-| `fuse` | A Mirage inside the sandbox mounts your backends with FUSE | That Mirage's own config |
-| `both` | The sandbox's own FUSE mounts where it has them, `ssh` for the rest | Each side's own |
-| unset | Nothing; you put the files there yourself | The sandbox's |
-
-### ssh
-
-- The template needs only `sshfs` ([below](#a-template-for-ssh)). No
-  Mirage, keys or open port in the sandbox.
-- `ssh` and `both` do not work in browsers.
-- Each file call is a round trip to the workspace, about 150 ms for a small
-  file from a laptop; with `both`, keep bulk data on the sandbox's own
-  mounts.
-- The sandbox shows one session's view, the first that runs a line there.
-  Give each agent its own sandbox.
-- An sshfs still serving a path Mirage serves, another workspace's or one
-  of your own, is left alone and the line exits 1. Give each workspace its
-  own sandbox.
-- If the sandbox restarts, Mirage mounts the paths again. A line caught
-  mid-restart exits 126 without running.
-- The root mount and `/dev` are not served.
-
-#### A template for ssh
+### A template for ssh
 
 Build a template with `sshfs` and pass its sandbox ID as `sandbox_id`:
 
@@ -151,45 +129,6 @@ Build a template with `sshfs` and pass its sandbox ID as `sandbox_id`:
 Keep the base image's user, which has `sudo` for mountpoints such as
 `/data`. On the default template, run `sudo apt-get install -y sshfs`
 instead.
-
-### fuse
-
-Base the template on [the machine image](/home/setup/machine/overview#the-machine-image),
-which carries Mirage and `fuse3`. Write the same mounts at the same paths
-into `sandbox.yaml`, and start Mirage with it in the sandbox:
-
-```yaml
-mounts:
-  /data:
-    vfs: s3
-    config:
-      bucket: my-bucket
-    backend: fuse
-    mountpoint: /data
-```
-
-```bash
-mirage workspace create /tmp/sandbox.yaml
-```
-
-- This workspace's rules do not reach those files, so a line is refused
-  while the session's permissions hide or narrow anything under them.
-- If a path the sandbox mounted goes away, as on a restart, lines exit
-  126 until it is mounted again. Start Mirage from the image's entrypoint
-  so a restart mounts it again.
-- Keep the sandbox's paths in step with the host's mounts yourself.
-  `sandbox.yaml` can differ where it should, such as narrower credentials.
-
-## Runtime behavior
-
-| Capability | In the sandbox |
-| --- | --- |
-| Command | The captured program and its words, as typed |
-| Piped input | stdin |
-| Environment | The session's, over the config `env` |
-| Working directory | The shell's, unchanged |
-| Workspace files | By `mount_type`, above |
-| Disk and network | The sandbox's own |
 
 ## Notes
 

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 APPLE_CONTAINER_HINT = (
-    "the apple_container runtime needs Apple's `container` on PATH "
+    "the apple_container machine needs Apple's `container` on PATH "
     "(`brew install container`, or the installer from "
     "https://github.com/apple/container/releases); it runs on Apple "
     "silicon with macOS 26 or later"

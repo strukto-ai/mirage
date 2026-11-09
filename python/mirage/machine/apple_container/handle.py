@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from mirage.io.types import ByteSource
 from mirage.machine.apple_container.config import AppleContainerConfig
 from mirage.machine.apple_container.constants import (
     APPLE_CONTAINER_HINT,
@@ -21,18 +20,11 @@ from mirage.machine.apple_container.constants import (
     STATE_HINTS,
 )
 from mirage.machine.constants import not_running_hint
-from mirage.machine.handle import MachineHandle
-from mirage.machine.mixin import PipeTransportMixin
-from mirage.machine.program import (
-    exec_args,
-    open_program_pipe,
-    reported_state,
-    run_program,
-)
-from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
+from mirage.machine.program import reported_state
+from mirage.machine.transport import ProgramMachine
 
 
-class AppleContainerMachine(MachineHandle, PipeTransportMixin):
+class AppleContainerMachine(ProgramMachine):
     """A container under Apple's `container` tool.
 
     You start the container yourself; mirage only connects to it and
@@ -61,28 +53,11 @@ class AppleContainerMachine(MachineHandle, PipeTransportMixin):
     provider = "apple_container"
     config_cls = AppleContainerConfig
     config: AppleContainerConfig
+    program = "container"
+    install_hint = APPLE_CONTAINER_HINT
 
-    async def _container(
-        self,
-        args: list[str],
-        stdin: ByteSource | None = None,
-        output: OutputFn | None = None,
-        errors: OutputFn | None = None,
-    ) -> RunResult:
-        """Run `container` once.
-
-        Args:
-            args (list[str]): arguments after the executable.
-            stdin (bytes | None): input delivered to the guest command.
-        """
-        return await run_program(
-            "container",
-            APPLE_CONTAINER_HINT,
-            args,
-            stdin,
-            output=output,
-            errors=errors,
-        )
+    def exec_words(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return ("exec", "-i"), (self.config.container,)
 
     async def connect(self) -> None:
         """Refuse a container in any state that cannot take a line.
@@ -91,7 +66,7 @@ class AppleContainerMachine(MachineHandle, PipeTransportMixin):
         well; probing up front names the state and how to recover.
         """
         container = self.config.container
-        status = await self._container(["inspect", container])
+        status = await self._exec_program(["inspect", container])
         state = reported_state(
             status, "container inspect", (0, "status", "state")
         )
@@ -99,33 +74,3 @@ class AppleContainerMachine(MachineHandle, PipeTransportMixin):
             raise RuntimeError(
                 not_running_hint("container", container, state, STATE_HINTS)
             )
-
-    async def _exec_argv(
-        self,
-        argv: tuple[str, ...],
-        stdin: ByteSource | None,
-        env: dict[str, str],
-        cwd: str,
-        output: OutputFn | None,
-        errors: OutputFn | None,
-    ) -> RunResult:
-        return await self._container(
-            exec_args(
-                ("exec", "-i"), (self.config.container,), env, cwd, argv
-            ),
-            stdin=stdin,
-            output=output,
-            errors=errors,
-        )
-
-    async def open_pipe(self, command: str) -> SandboxPipe:
-        return await open_program_pipe(
-            "container",
-            exec_args(
-                ("exec", "-i"),
-                (self.config.container,),
-                {},
-                None,
-                ("/bin/sh", "-c", command),
-            ),
-        )

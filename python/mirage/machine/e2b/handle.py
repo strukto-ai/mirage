@@ -37,8 +37,9 @@ from mirage.machine.e2b.constants import (
 )
 from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
+from mirage.machine.types import MachinePipe
 from mirage.runtime.constants import sdk_install_hint
-from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
+from mirage.runtime.types import OutputFn, RunResult
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,7 @@ class PtyWriter:
 
 
 class E2BMachine(MachineHandle, PipeTransportMixin):
-    """An E2B sandbox the user runs as a whole-line runtime.
+    """A running E2B sandbox, reached through its SDK.
 
     You create the sandbox yourself (`e2b sandbox spawn` or the SDK);
     mirage only connects by ``sandbox_id`` and execs lines.
@@ -217,7 +218,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
             )
         )
 
-        async def reap() -> Any:
+        async def wait_exit() -> Any:
             # The command may end without reading all its input (head), so
             # its exit, not the end of the input, ends the line.
             try:
@@ -229,13 +230,13 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                 feeding.cancel()
             return result
 
-        reaping = asyncio.create_task(reap())
+        exiting = asyncio.create_task(wait_exit())
         try:
-            await asyncio.gather(feeding, reaping)
-            result = reaping.result()
+            await asyncio.gather(feeding, exiting)
+            result = exiting.result()
         except BaseException as exc:
             # A tagged command a kill stopped with a gentler signal is left
-            # to the caller's reap, which sends it that signal first.
+            # to the caller's stop, which sends it that signal first.
             try:
                 if (
                     PROCESS not in env
@@ -244,15 +245,15 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                     await handle.kill()
             except Exception:
                 logger.warning("Failed to stop the E2B command", exc_info=True)
-            # The kill stops only the encoding shell; the caller reaps a cancel.
+            # The kill stops only the encoding shell; the caller stops a cancel.
             if PROCESS in env and not isinstance(exc, asyncio.CancelledError):
-                await self._reap(env[PROCESS], 15)
+                await self.stop(env[PROCESS], 15)
             raise
         finally:
-            for task in (feeding, reaping):
+            for task in (feeding, exiting):
                 if not task.done():
                     task.cancel()
-            await asyncio.gather(feeding, reaping, return_exceptions=True)
+            await asyncio.gather(feeding, exiting, return_exceptions=True)
             await handle.disconnect()
         if output is not None and (data := out.flush()):
             await output(data)
@@ -277,7 +278,7 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
     ) -> RunResult:
         """Execute one shell line, under a ``PROCESS`` tag of its own
         when the caller gave none: a cancel kills only the encoding shell,
-        so a cancelled line is reaped by that tag.
+        so a cancelled line is stopped by that tag.
 
         Args:
             line (str): the raw shell line.
@@ -293,10 +294,10 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                 line, stdin, {**env, PROCESS: tag}, cwd
             )
         except asyncio.CancelledError:
-            await asyncio.shield(self._reap(tag, 15))
+            await asyncio.shield(self.stop(tag, 15))
             raise
 
-    async def open_pipe(self, command: str) -> SandboxPipe:
+    async def open_pipe(self, command: str) -> MachinePipe:
         reader = asyncio.StreamReader()
         head = bytearray()
         started = False
@@ -360,4 +361,4 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
                     exc_info=True,
                 )
             raise
-        return SandboxPipe(reader, writer, stop)
+        return MachinePipe(reader, writer, stop)

@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.types import MachinePid
-from mirage.runtime.types import MountType
+from mirage.machine.types import MountType
 from mirage.utils.clock import bound_system_clock, system_now
 from mirage.utils.quote import single_quote
 
@@ -30,12 +30,12 @@ def not_running_hint(
     hints: Mapping[str, str],
     otherwise: str | None = None,
 ) -> str:
-    """Why a sandbox cannot take a line, named by the state its status
+    """Why a machine cannot take a line, named by the state its status
     command reported.
 
     Args:
         noun (str): what the provider calls it (container, machine,
-            sandbox).
+            machine).
         name (str): the configured id or name.
         state (str): the reported state.
         hints (Mapping[str, str]): the provider's advice per state, with
@@ -66,13 +66,13 @@ def stop_signal(runner: ProcessHandle | None) -> int | None:
 
 MOUNT_TYPES: tuple[MountType, ...] = ("ssh", "fuse", "both")
 
-# How long a sandbox has to show a served prefix as mounted, and how
+# How long a machine has to show a served prefix as mounted, and how
 # often it is asked.
 MOUNT_WAIT_SECONDS = 15.0
 MOUNT_POLL_SECONDS = 0.1
 
 # How long a served prefix's SFTP server may take to end once its
-# sandbox side is unmounted.
+# machine side is unmounted.
 UNMOUNT_WAIT_SECONDS = 5.0
 
 # How much of a pipe helper's stderr is kept to say why a mount failed,
@@ -89,31 +89,31 @@ SSHFS_OPTIONS = (
     "attr_timeout=0,entry_timeout=0,negative_timeout=0"
 )
 
-# Where sshfs writes its errors in the sandbox, one file per prefix; its
+# Where sshfs writes its errors in the machine, one file per prefix; its
 # stdout is the SFTP stream, so its stderr cannot share the pipe.
 SSHFS_LOG_PREFIX = "/tmp/.mirage_sshfs"
 
 # How an sshfs source names the mirage serving it: ``mirage-<id>:<prefix>``,
-# so each instance knows its own mounts from another's on the same sandbox.
+# so each instance knows its own mounts from another's on the same machine.
 SSHFS_SOURCE_PREFIX = "mirage-"
 
 SSHFS_HINT = (
-    "serving the workspace into a sandbox needs sshfs there; "
+    "serving the workspace into a machine needs sshfs there; "
     "install it in the image (apt-get install sshfs)"
 )
 PIPE_SERVER_HINT = (
-    "serving the workspace into a sandbox needs asyncssh; "
+    "serving the workspace into a machine needs asyncssh; "
     "install with: pip install mirage-ai[ssh]"
 )
 
-# Every argv a sandbox runs goes under this POSIX sh prelude, with the
+# Every argv a machine runs goes under this POSIX sh prelude, with the
 # cwd as $1: a provider program's exec passes `-w /` (exec_args), and a
 # provider whose exec takes one command line dresses it (wrap_line), so
 # no provider's own cwd is used. An exec's `-e` can append to the image's
 # environment rather than replace a name it already sets, `-w` can
 # create a missing directory, and an SDK's cwd fails a missing one its
 # own way (E2B: exit 1). sh imports the environment last-wins, `cd`
-# fails loud (126) on a cwd the sandbox does not serve, and `exec` hands
+# fails loud (126) on a cwd the machine does not serve, and `exec` hands
 # over the argv unchanged. `cd` runs without CDPATH, so a relative cwd
 # resolves from `/` and prints nothing, while the program still sees the
 # guest's own CDPATH. The shell is named by path, /bin/sh, since the
@@ -121,10 +121,10 @@ PIPE_SERVER_HINT = (
 # prelude is still found on it.
 EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
 
-# A line in a sandbox holding mounts runs under this guard, inside its own
-# exec, so it checks the boot the program runs in: a sandbox that
+# A line in a machine holding mounts runs under this guard, inside its own
+# exec, so it checks the boot the program runs in: a machine that
 # restarted after the line was admitted has lost its mounts, and a program
-# run over the bare directories would write to the sandbox's own disk.
+# run over the bare directories would write to the machine's own disk.
 # $1 is the mount table, then four words per mount (mountpoint and source
 # as the table escapes them, type, the message), then `--` and the argv.
 # Each mount must be the top entry at its mountpoint, or the guard prints
@@ -156,7 +156,7 @@ def mount_field(text: str, source: bool = False) -> str:
     return "".join(f"\\{ord(c):03o}" if c in escaped else c for c in text)
 
 
-# Every process a run starts in a sandbox carries this variable, set to
+# Every process a run starts in a machine carries this variable, set to
 # the id of the Mirage process the run is (``w1:9``), so a run cancelled
 # midway, or one a lapsed workspace left, can be stopped in the box:
 # stopping the client that started it does not reach the box everywhere
@@ -168,7 +168,7 @@ PROCESS = "MIRAGE_PROCESS"
 # How long stopping a cancelled run may hold the cancel: the stop line's
 # own second of grace, plus the exec's round trips. A box that stopped
 # answering is given up on after it.
-REAP_WAIT_SECONDS = 5.0
+MACHINE_STOP_WAIT_SECONDS = 5.0
 
 # What the check line prints first: a result without it is a line no
 # shell there ran (a stopped container's exec answers with a status of
@@ -193,7 +193,7 @@ STOP_GRACE_SECONDS = 1.0
 
 # How far a host process's start, as ``ps`` prints it to the second, may
 # be from when a run recorded starting it and still be that run's: past
-# it the PID names another process, which a reap leaves alone.
+# it the PID names another process, which a stop leaves alone.
 HOST_START_SLACK_SECONDS = 2.0
 
 # How often a stop in its grace checks whether the signalled group ended.
@@ -201,15 +201,15 @@ STOP_POLL_SECONDS = 0.02
 
 # Where the stop line finds tr, grep and sleep: the config's PATH is for
 # the programs it runs and may name none of the system's directories.
-REAP_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+TOOLS_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Output as base64 lines per read, status on fd 3, for an exec that returns text.
 ENCODE_PRELUDE = (
-    f"e() {{ PATH={REAP_PATH}; "
+    f"e() {{ PATH={TOOLS_PATH}; "
     'while c=$(dd bs=65536 count=1 2>/dev/null | base64) && [ -n "$c" ]; '
     "do printf '%s\\n' \"$c\"; done; }; "
-    f"(PATH={REAP_PATH}; command -v dd && command -v base64) >/dev/null || "
-    "{ echo 'mirage: the sandbox needs dd and base64 to return output' >&2; "
+    f"(PATH={TOOLS_PATH}; command -v dd && command -v base64) >/dev/null || "
+    "{ echo 'mirage: the machine needs dd and base64 to return output' >&2; "
     "exit 127; }; "
 )
 ENCODE_OUTPUT = ENCODE_PRELUDE + (
@@ -243,7 +243,7 @@ def encode_output(line: str, combined: bool = False) -> str:
 def decode_output(text: str) -> bytes:
     """The bytes an ``encode_output`` command wrote, from whole lines of
     its output. A blank line adds nothing; a line that is not base64,
-    which only the sandbox's own shell writes (the encoder missing), comes
+    which only the machine's own shell writes (the encoder missing), comes
     back as it is, with its newline.
 
     Args:
@@ -260,19 +260,19 @@ def decode_output(text: str) -> bytes:
 
 
 def wrap_line(argv: Sequence[str], env: Mapping[str, str], cwd: str) -> str:
-    """The command line for a sandbox whose exec takes one (ssh, e2b,
+    """The command line for a machine whose exec takes one (ssh, e2b,
     daytona): cwd, env, then the argv.
 
     Such an exec has no docker-style ``-w``/``-e`` to trust: SSH's env
     channel is AcceptEnv-gated server-side, so it silently drops names,
     and an SDK's own cwd fails a missing directory in its own words. So
     the working directory and the merged environment ride the command
-    itself: the prelude every sandbox runs a command under enters
-    ``cwd`` (exit 126 when the sandbox lacks it), then
+    itself: the prelude every machine runs a command under enters
+    ``cwd`` (exit 126 when the machine lacks it), then
     ``env 'K=V' ... 'prog' 'arg'``; a shell line is the argv
     ``/bin/sh -c line``. Every piece is single-quoted for sh, so the
     shell the exec starts reads each as one word whatever it holds; the
-    sandbox only needs a POSIX shell at ``/bin/sh``.
+    machine only needs a POSIX shell at ``/bin/sh``.
 
     Args:
         argv (Sequence[str]): the program and its arguments.
@@ -294,10 +294,10 @@ def wrap_line(argv: Sequence[str], env: Mapping[str, str], cwd: str) -> str:
 
 # What the stop line exits with when no process carries the run's id: the
 # box it ran in holds nothing of the run.
-REAP_ABSENT = 3
+NOT_RUNNING_STATUS = 3
 
 
-def reap_line(process: str, signum: int = 15) -> str:
+def stop_line(process: str, signum: int = 15) -> str:
     """The shell line that stops every process of the run ``process``
     tags.
 
@@ -305,8 +305,8 @@ def reap_line(process: str, signum: int = 15) -> str:
     ``/proc``, gets ``signum``, and what still runs a second later gets
     KILL, so a program that ignores it stops too. The tag is matched as
     a whole entry, so ``w1:9`` never stops the run of ``w1:90``. The line
-    exits 0 once it stopped them and ``REAP_ABSENT`` when there were
-    none. It looks tr and grep up on its own PATH (``REAP_PATH``) and
+    exits 0 once it stopped them and ``NOT_RUNNING_STATUS`` when there were
+    none. It looks tr and grep up on its own PATH (``TOOLS_PATH``) and
     exits 127 without them, so it needs only a POSIX shell, tr, grep and
     ``/proc``.
 
@@ -318,14 +318,14 @@ def reap_line(process: str, signum: int = 15) -> str:
     """
     mark = single_quote(f"{PROCESS}={process}")
     return (
-        f"PATH={REAP_PATH}; command -v tr >/dev/null || exit 127; "
+        f"PATH={TOOLS_PATH}; command -v tr >/dev/null || exit 127; "
         "command -v grep >/dev/null || exit 127; "
         f"m={mark}; "
         "left() { l=; for p in /proc/[0-9]*; do "
         "tr '\\000' '\\n' < \"$p/environ\" 2>/dev/null | grep -qxF \"$m\" "
         '&& l="$l ${p#/proc/}"; done; '
         '[ -n "$l" ]; }; '
-        f"left || exit {REAP_ABSENT}; kill -{signum} $l 2>/dev/null; "
+        f"left || exit {NOT_RUNNING_STATUS}; kill -{signum} $l 2>/dev/null; "
         "for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; "
         "kill -KILL $l 2>/dev/null; true"
     )
@@ -349,7 +349,7 @@ def scan_line(workspace: str) -> str:
     the tag, its pid, its parent's pid, when it started in clock ticks
     after boot (``stat``'s 22nd field) and its arguments, space
     separated. A process that exits mid-scan is skipped, and nothing else
-    is printed. It needs what ``reap_line`` does.
+    is printed. It needs what ``stop_line`` does.
 
     Args:
         workspace (str): the workspace's id, which every tag starts
@@ -357,7 +357,7 @@ def scan_line(workspace: str) -> str:
     """
     mark = single_quote(f"{PROCESS}={workspace}:")
     return (
-        f"PATH={REAP_PATH}; m={mark}; "
+        f"PATH={TOOLS_PATH}; m={mark}; "
         "for p in /proc/[0-9]*; do "
         "t=$(tr '\\000' '\\n' 2>/dev/null < \"$p/environ\" "
         f"| grep -m1 '^{PROCESS}=') || continue; "
@@ -378,7 +378,7 @@ def signal_line(target: str | MachinePid, signum: int) -> str:
     A tag names the program its run started: the process carrying it
     whose parent carries none. A MachinePid names its pid while that is
     the process that started then. The line exits 0 once it sent the
-    signal and ``REAP_ABSENT`` when no such process runs.
+    signal and ``NOT_RUNNING_STATUS`` when no such process runs.
 
     Args:
         target (str | MachinePid): the run's tag, or the process.
@@ -387,15 +387,15 @@ def signal_line(target: str | MachinePid, signum: int) -> str:
     if isinstance(target, MachinePid):
         pid = target.pid
         return (
-            f"PATH={REAP_PATH}; "
-            f"s=$(cat /proc/{pid}/stat 2>/dev/null) || exit {REAP_ABSENT}; "
+            f"PATH={TOOLS_PATH}; "
+            f"s=$(cat /proc/{pid}/stat 2>/dev/null) || exit {NOT_RUNNING_STATUS}; "
             "set -- ${s##*)}; "
-            f'[ "${{20}}" = {int(target.started)} ] || exit {REAP_ABSENT}; '
-            f"kill -{signum} {pid} 2>/dev/null || exit {REAP_ABSENT}"
+            f'[ "${{20}}" = {int(target.started)} ] || exit {NOT_RUNNING_STATUS}; '
+            f"kill -{signum} {pid} 2>/dev/null || exit {NOT_RUNNING_STATUS}"
         )
     mark = single_quote(f"{PROCESS}={target}")
     return (
-        f"PATH={REAP_PATH}; m={mark}; l=' '; r=; "
+        f"PATH={TOOLS_PATH}; m={mark}; l=' '; r=; "
         "for p in /proc/[0-9]*; do "
         "tr '\\000' '\\n' 2>/dev/null < \"$p/environ\" "
         '| grep -qxF "$m" || continue; '
@@ -403,16 +403,16 @@ def signal_line(target: str | MachinePid, signum: int) -> str:
         'l="$l${p#/proc/} "; r="$r ${p#/proc/}:$2"; done; '
         'k=; for e in $r; do case $l in *" ${e#*:} "*) ;; '
         '*) k="$k ${e%%:*}" ;; esac; done; '
-        f'[ -n "$k" ] || exit {REAP_ABSENT}; kill -{signum} $k 2>/dev/null; true'
+        f'[ -n "$k" ] || exit {NOT_RUNNING_STATUS}; kill -{signum} $k 2>/dev/null; true'
     )
 
 
-# How long a sandbox gets to answer the libfaketime probe, which every run
+# How long a machine gets to answer the libfaketime probe, which every run
 # waiting on it shares.
 FAKETIME_PROBE_SECONDS = 30
 
 # Where Linux distributions install libfaketime, which a process reads a
-# workspace's system time through, on this host or in a sandbox.
+# workspace's system time through, on this host or in a machine.
 FAKETIME_LIBRARIES = (
     "/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1",
     "/usr/lib/aarch64-linux-gnu/faketime/libfaketime.so.1",
@@ -451,7 +451,7 @@ def faketime_env(library: str, env: Mapping[str, str]) -> dict[str, str]:
 
 def faketime_probe() -> str:
     """A shell line that prints the first of ``FAKETIME_LIBRARIES`` a
-    sandbox holds, and nothing when it holds none. Mirrors TypeScript's
+    machine holds, and nothing when it holds none. Mirrors TypeScript's
     ``faketimeProbe``."""
     paths = " ".join(single_quote(path) for path in FAKETIME_LIBRARIES)
     return (

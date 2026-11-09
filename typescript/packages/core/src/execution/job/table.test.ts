@@ -1735,11 +1735,11 @@ describe('JobTable process plane', () => {
   })
 
   // The processes of a daemon that lost the lease are not listed; each that
-  // ran a program past the workspace is handed to the reaper as published,
+  // ran a program past the workspace is handed to the runStopper as published,
   // and its record keeps only the processes nobody here reached. One that
   // ran none (a shell) has nothing left to stop.
   it.each([false, true])(
-    "reaps a lapsed owner's programs (one unreached: %s)",
+    "stops a lapsed owner's programs (one unreached: %s)",
     async (unreached) => {
       const store = new RAMExecutionStore(30)
       const host = {
@@ -1750,17 +1750,17 @@ describe('JobTable process plane', () => {
       const box = ran(3)
       const shell = { pid: 4, session: 's', runtime: null }
       await store.publish('dead', { '2': host, '3': box, '4': shell })
-      const reaped: [unknown, number][] = []
+      const stopped: [unknown, number][] = []
       const b = new JobTable(store)
-      b.reaper = (record, signum) => {
-        reaped.push([record, signum])
+      b.runStopper = (record, signum) => {
+        stopped.push([record, signum])
         return Promise.resolve(!(unreached && record.pid === 3))
       }
       expect(await b.remoteProcesses()).toEqual({})
       await until(
-        async () => reaped.length === 2 && (await store.processes()).dead?.['2'] === undefined,
+        async () => stopped.length === 2 && (await store.processes()).dead?.['2'] === undefined,
       )
-      expect(reaped).toEqual([
+      expect(stopped).toEqual([
         [host, 15],
         [box, 15],
       ])
@@ -1769,26 +1769,26 @@ describe('JobTable process plane', () => {
     },
   )
 
-  // A start reaps the daemons on the store that lost the lease, and once
+  // A start stops the daemons on the store that lost the lease, and once
   // more a lease later: a daemon that still held it at the start, as one
-  // that died just before it would, is reaped once it lapsed.
-  it('reaps lapsed daemons as it starts', async () => {
+  // that died just before it would, is stopped once it lapsed.
+  it('stops lapsed daemons as it starts', async () => {
     const store = new RAMExecutionStore(0.5)
     for (const owner of ['dead', 'dying']) {
       await store.publish(owner, { '2': ran(2, `docker:${owner}`) })
     }
     await store.lease('dying')
-    const reaped: unknown[] = []
+    const stopped: unknown[] = []
     const b = new JobTable(store)
-    b.reaper = (record) => {
-      reaped.push(String(record.machine).split(':')[1])
+    b.runStopper = (record) => {
+      stopped.push(String(record.machine).split(':')[1])
       return Promise.resolve(true)
     }
-    b.reapLapsed()
-    await until(() => Promise.resolve(reaped.length > 0))
-    expect(reaped).toEqual(['dead'])
+    b.stopLapsed()
+    await until(() => Promise.resolve(stopped.length > 0))
+    expect(stopped).toEqual(['dead'])
     await until(async () => Object.keys(await store.processes()).length === 0)
-    expect(reaped).toEqual(['dead', 'dying'])
+    expect(stopped).toEqual(['dead', 'dying'])
     await b.close()
   })
 
@@ -1798,22 +1798,22 @@ describe('JobTable process plane', () => {
     const now = vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
     const store = new RAMExecutionStore(0.5)
     const b = new JobTable(store)
-    const reaped: unknown[] = []
-    b.reaper = (record) => {
-      reaped.push(String(record.machine).split(':')[1])
+    const stopped: unknown[] = []
+    b.runStopper = (record) => {
+      stopped.push(String(record.machine).split(':')[1])
       return Promise.resolve(true)
     }
     try {
       await store.publish('dying', { '2': ran(2, 'docker:dying') })
       await store.lease('dying')
-      b.reapLapsed()
+      b.stopLapsed()
       await vi.advanceTimersByTimeAsync(0)
       elapsed = 499
       await vi.advanceTimersByTimeAsync(500)
-      expect(reaped).toEqual([])
+      expect(stopped).toEqual([])
       elapsed = 500
       await vi.advanceTimersByTimeAsync(1)
-      expect(reaped).toEqual(['dying'])
+      expect(stopped).toEqual(['dying'])
       expect(await store.processes()).toEqual({})
     } finally {
       await b.close()
@@ -1826,8 +1826,8 @@ describe('JobTable process plane', () => {
   // nothing.
   it('sweeps nothing on a store without leases', async () => {
     const b = new JobTable(new RAMExecutionStore())
-    b.reapLapsed()
-    expect((b as unknown as { reaping: Set<Promise<void>> }).reaping.size).toBe(0)
+    b.stopLapsed()
+    expect((b as unknown as { stoppingRuns: Set<Promise<void>> }).stoppingRuns.size).toBe(0)
     await b.close()
   })
 
@@ -1837,7 +1837,7 @@ describe('JobTable process plane', () => {
     await store.lease('live')
     await store.publish('live', { '2': { pid: 2, session: 's', runs: [] } })
     const b = new JobTable(store)
-    b.reapLapsed()
+    b.stopLapsed()
     await new Promise((resolve) => setTimeout(resolve, 50))
     const started = Date.now()
     await b.killAll()
@@ -1863,7 +1863,7 @@ describe('JobTable process plane', () => {
     await store.lease('live')
     await store.publish('live', { '2': { pid: 2, session: 's', runs: [] } })
     const b = new JobTable(store)
-    b.reapLapsed()
+    b.stopLapsed()
     const started = Date.now()
     const killing = b.killAll()
     store.answer()
@@ -1916,7 +1916,7 @@ describe('JobTable process plane', () => {
     await a.close()
   }, 15_000)
 
-  // A daemon that takes the lease back while its programs are being reaped
+  // A daemon that takes the lease back while its programs are being stopped
   // keeps them: the lease is read again before each is stopped.
   it('lets a daemon that renews keep its programs', async () => {
     let asked = 0
@@ -1928,28 +1928,28 @@ describe('JobTable process plane', () => {
     }
     const store = new Revives(30)
     await store.publish('back', { '2': ran(2) })
-    const reaped: unknown[] = []
+    const stopped: unknown[] = []
     const b = new JobTable(store)
-    b.reaper = (record) => {
-      reaped.push(record)
+    b.runStopper = (record) => {
+      stopped.push(record)
       return Promise.resolve(true)
     }
     expect(await b.remoteProcesses()).toEqual({})
     await b.killAll()
-    expect(reaped).toEqual([])
+    expect(stopped).toEqual([])
     expect('back' in (await store.processes())).toBe(true)
     await b.close()
   })
 
-  // Teardown stops the reaping, before the runtimes it goes through close:
-  // a reap under way is waited for, and no listing starts another.
-  it('stops the reaping at teardown', async () => {
+  // Teardown ends the stopping, before the runtimes it goes through close:
+  // a stop under way is waited for, and no listing starts another.
+  it('ends the stopping at teardown', async () => {
     const store = new RAMExecutionStore(30)
     await store.publish('dead', { '2': ran(2) })
     let calls = 0
     let finished = false
     const b = new JobTable(store)
-    b.reaper = async () => {
+    b.runStopper = async () => {
       calls += 1
       await new Promise((resolve) => setTimeout(resolve, 50))
       finished = true
@@ -2105,15 +2105,15 @@ describe('JobTable process plane', () => {
     await b.close()
   })
 
-  // A claim reaps none of what its table runs now: a second claim waits for
+  // A claim stops none of what its table runs now: a second claim waits for
   // the first, and a record of a process this table runs is its own, not one
   // left before a restart.
-  it('reaps none of what its table runs as it claims', async () => {
+  it('stops none of what its table runs as it claims', async () => {
     const store = new RAMExecutionStore()
     const a = new JobTable(store, undefined, null, undefined, 'd')
-    const reaped: unknown[] = []
-    a.reaper = (record) => {
-      reaped.push(record.pid)
+    const stopped: unknown[] = []
+    a.runStopper = (record) => {
+      stopped.push(record.pid)
       return Promise.resolve(true)
     }
     const runner = a.processes.start(abortable('sleep 30'))
@@ -2121,9 +2121,9 @@ describe('JobTable process plane', () => {
     const own = { ...ran(pid), started_at: runner.record.startedAt }
     await store.publish('d', { [String(pid)]: own, '7': ran(7) }, 7)
     await Promise.all([a.claim(), a.claim()])
-    await until(() => Promise.resolve(reaped.length > 0))
+    await until(() => Promise.resolve(stopped.length > 0))
     await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(reaped).toEqual([7])
+    expect(stopped).toEqual([7])
     runner.terminate()
     await runner.join()
     await a.close()
@@ -2154,13 +2154,13 @@ describe('JobTable process plane', () => {
     expect(await store.holder()).toBeNull()
   })
 
-  // A program this daemon left before a restart that the reaper could not
+  // A program this daemon left before a restart that the runStopper could not
   // reach stays in its record, so a later claim tries it again.
   it('keeps the record of a program it could not reach as it claims', async () => {
     const store = new RAMExecutionStore()
     await store.publish('d', { '7': ran(7) }, 7)
     const a = new JobTable(store, undefined, null, undefined, 'd')
-    a.reaper = () => Promise.resolve(false)
+    a.runStopper = () => Promise.resolve(false)
     await a.claim()
     await until(async () => (await store.processes()).d?.['7']?.machine === 'docker:t')
     await a.close()
@@ -2221,19 +2221,19 @@ describe('JobTable process plane', () => {
 
   // A daemon taking the lease stops the programs it left before a restart
   // and numbers its pids past the highest the store recorded.
-  it("reaps this daemon's programs from before a restart as it claims", async () => {
+  it("stops this daemon's programs from before a restart as it claims", async () => {
     const store = new RAMExecutionStore()
     const pid = FIRST_PID + 6
     await store.publish('d', { [String(pid)]: ran(pid) }, pid)
-    const reaped: unknown[] = []
+    const stopped: unknown[] = []
     const a = new JobTable(store, undefined, null, undefined, 'd')
-    a.reaper = (record) => {
-      reaped.push(record)
+    a.runStopper = (record) => {
+      stopped.push(record)
       return Promise.resolve(true)
     }
     await a.claim()
-    await until(() => Promise.resolve(reaped.length > 0))
-    expect(reaped).toEqual([ran(pid)])
+    await until(() => Promise.resolve(stopped.length > 0))
+    expect(stopped).toEqual([ran(pid)])
     const job = await sleeping(a)
     expect(job.pid).toBe(pid + 1)
     await a.killAll()

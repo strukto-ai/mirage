@@ -19,7 +19,8 @@ import { currentCaller } from '../../context/session_context.ts'
 import { MachineHandle } from '../handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from '../mixin.ts'
 import { registerMachine } from '../registry.ts'
-import type { OutputFn, PipeWriter, RunResult, SandboxPipe } from '../../runtime/types.ts'
+import type { MachinePipe } from '../types.ts'
+import type { OutputFn, PipeWriter, RunResult } from '../../runtime/types.ts'
 import type { ConfigFields } from '../../runtime/config.ts'
 import { concat } from '../../utils/bytes.ts'
 import { requireId } from '../config.ts'
@@ -114,13 +115,13 @@ class PtyWriter implements PipeWriter {
 }
 
 /**
- * An E2B sandbox the user runs as a whole-line runtime.
+ * A running E2B sandbox, reached through its SDK.
  *
- * You create the sandbox yourself (`e2b sandbox spawn` or the SDK);
+ * You create the machine yourself (`e2b sandbox spawn` or the SDK);
  * mirage only connects by `sandboxId` and execs lines. `apiKey` falls
  * back to E2B_API_KEY. E2B's exec reports stdout and stderr
  * separately, stdout as it arrives when streamed, each base64-encoded in
- * the sandbox since the exec decodes output as text (`encodeOutput`: the
+ * the machine since the exec decodes output as text (`encodeOutput`: the
  * sandbox needs dd and base64). Piped bytes use native
  * stdin, chunk by chunk, followed by an explicit EOF; no input closes
  * stdin when the command starts. The SDK's own command timeout is off: a
@@ -227,15 +228,15 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
       } else {
         try {
           // A tagged command a kill stopped with a gentler signal is left
-          // to the caller's reap, which sends it that signal first.
+          // to the caller's stop, which sends it that signal first.
           if (env[PROCESS] === undefined || stopSignal(runner) === null) await handle.kill()
         } catch (cleanupError) {
           console.warn('Failed to stop the E2B command', cleanupError)
         }
         if (signal?.aborted) throw new DOMException('execute aborted', 'AbortError')
-        // The kill stops only the encoding shell; the caller reaps an abort.
+        // The kill stops only the encoding shell; the caller stops an abort.
         const tag = env[PROCESS]
-        if (tag !== undefined) await this.reapRun(tag, 15)
+        if (tag !== undefined) await this.stop(tag, 15)
         throw error
       }
     } finally {
@@ -254,7 +255,7 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   /**
    * Execute one shell line, under a `PROCESS` tag of its own when the
    * caller gave none: an abort kills only the encoding shell, so an aborted
-   * line is reaped by that tag.
+   * line is stopped by that tag.
    *
    * @param line the raw shell line.
    * @param stdin bytes piped into the line.
@@ -274,12 +275,12 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     try {
       return await super.execLine(line, stdin, { ...env, [PROCESS]: tag }, cwd, signal)
     } catch (error) {
-      if (signal?.aborted === true) await this.reapRun(tag, 15)
+      if (signal?.aborted === true) await this.stop(tag, 15)
       throw error
     }
   }
 
-  async openPipe(command: string): Promise<SandboxPipe> {
+  async openPipe(command: string): Promise<MachinePipe> {
     if (this.sandbox === null) throw new Error('e2b sandbox not connected')
     const pty = this.sandbox.pty
     let feed: ReadableStreamDefaultController<Uint8Array> | null = null

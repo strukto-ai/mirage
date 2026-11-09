@@ -18,14 +18,14 @@ microVM guest  --virtio-fs /s3-->  host FUSE mountpoint  -->  Mirage  -->  S3
 1. The guest script runs inside the microVM: it `os.listdir('/s3')` and reads
    `/s3/data/example.jsonl` as if they were local files. It is the Python
    example's
-   [`remote/guest.py`](../../../../python/runtime/sandbox/microsandbox/remote/guest.py),
+   [`remote/guest.py`](../../../python/machine/microsandbox/remote/guest.py),
    mapped in read-only at `/prog`.
 
 The microVM guest has no `/dev/fuse`, so Mirage can't run in the guest; the host
 mount is shared in instead.
 
 `msb run` runs as an async child process, as it does in Mirage's
-`MicrosandboxRuntime`. The FUSE mount is served by this process's event loop, so
+`MachineRuntime`. The FUSE mount is served by this process's event loop, so
 the loop must stay free while the guest reads through it.
 
 ## Prerequisites
@@ -49,7 +49,7 @@ There is **no separate `msb server` to start** (just run the example).
 From `examples/typescript`:
 
 ```bash
-pnpm exec tsx runtime/sandbox/microsandbox/microsandbox_fuse.ts
+pnpm exec tsx machine/microsandbox/microsandbox_fuse.ts
 ```
 
 Expected tail:
@@ -76,7 +76,7 @@ failed to start "mirage-fuse": mount s3_<hash>: Operation not permitted (os erro
 ```
 
 This is a libkrun + macFUSE interaction, not a Mirage or Microsandbox bug; the
-[Python example's README](../../../../python/runtime/sandbox/microsandbox/README.md#platform-note-linux-only)
+[Python example's README](../../../python/machine/microsandbox/README.md#platform-note-linux-only)
 has the details.
 
 Not run in CI. It needs the Microsandbox runtime, host FUSE, and live AWS

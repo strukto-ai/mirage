@@ -16,7 +16,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildMachine } from '@struktoai/mirage-core/machine/registry'
-import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
+import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
@@ -34,7 +35,7 @@ class FakeDockerMachine extends DockerMachine {
   running = true
   readonly calls: [string[], Uint8Array | null][] = []
 
-  protected override async docker(
+  protected override async execProgram(
     args: string[],
     source: ByteSource | null = null,
     output: OutputFn | null = null,
@@ -200,19 +201,19 @@ describe.skipIf(process.platform === 'win32')('DockerMachine pipe', () => {
 class MountingDockerMachine extends FakeDockerMachine {
   readonly table = new Map<string, [string, string]>()
 
-  protected override async docker(
+  protected override async execProgram(
     args: string[],
     source: ByteSource | null = null,
     output: OutputFn | null = null,
   ): Promise<RunResult> {
-    if (args[args.length - 1] !== 'cat /proc/mounts') return super.docker(args, source, output)
+    if (args[args.length - 1] !== 'cat /proc/mounts') return super.execProgram(args, source, output)
     const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     const rows = [...this.table].map(([p, [source, t]]) => `${source} ${p} ${t} rw 0 0\n`).join('')
     return Promise.resolve({ stdout: ENC.encode(rows), stderr: new Uint8Array(), exitCode: 0 })
   }
 
-  override openPipe(command: string): Promise<SandboxPipe> {
+  override openPipe(command: string): Promise<MachinePipe> {
     const words = [...command.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
     this.table.set(words[6] ?? '', [words[5] ?? '', 'fuse.sshfs'])
     let end: () => void = () => undefined

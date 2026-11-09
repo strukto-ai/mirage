@@ -136,6 +136,7 @@ interface Step {
   // The host entry point's program, run in this process under patchNodeFs.
   host_program?: string
   runtime?: string
+  machine?: string
   stdin?: string
   add_runtime?: string
   wait_job?: number
@@ -220,6 +221,7 @@ interface Case {
   hosts?: string[]
   runtimes?: string[]
   runtime?: string
+  also_machines?: string[]
   backends?: string[]
   backend?: string
   requires?: string[]
@@ -1266,6 +1268,7 @@ async function performStep(
   const options: Record<string, unknown> = {}
   if (sessionId !== undefined) options.sessionId = sessionId
   if (step.runtime !== undefined) options.runtime = step.runtime
+  if (step.machine !== undefined) options.machine = step.machine
   if (step.stdin !== undefined) options.stdin = ENC.encode(step.stdin)
   if (expect.cancelled === true) {
     try {
@@ -1555,7 +1558,12 @@ function forRuntime(testCase: Case, runtime: string): Case | null {
     let entry = runtimeEntry(runtime, testCase.entry ?? {})
     if (MACHINE_PROVIDERS.has(runtime) && typeof entry !== 'string') {
       const { config = {}, ...rest } = entry
-      world.machines = { [runtime]: { provider: runtime, ...(config as Record<string, unknown>) } }
+      world.machines = Object.fromEntries(
+        [runtime, ...(testCase.also_machines ?? [])].map((name) => [
+          name,
+          { provider: runtime, ...(config as Record<string, unknown>) },
+        ]),
+      )
       entry = { ...rest, name: 'machine', machine: runtime }
     }
     world.runtimes = [entry, 'workspace']

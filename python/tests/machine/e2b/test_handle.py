@@ -32,12 +32,13 @@ from mirage.machine.constants import (
     MOUNT_GUARD,
     PROCESS,
     encode_output,
-    reap_line,
+    stop_line,
     wrap_line,
 )
 from mirage.machine.e2b import E2BConfig, E2BMachine, sdk
 from mirage.machine.e2b.constants import PTY_MARK, PTY_RAW
-from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.machine.types import MachinePipe
+from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 from tests.fixtures.machine import machine_runtime, on
 
@@ -49,7 +50,7 @@ def _line(box: E2BMachine, line: str, stdin: bytes | None, env=None):
 
 
 def b64(text: str) -> str:
-    """``text`` as the sandbox's encoder sends it."""
+    """``text`` as the machine's encoder sends it."""
     return base64.b64encode(text.encode()).decode() + "\n"
 
 
@@ -160,7 +161,7 @@ class FakePty:
     async def send_stdin(self, pid, data):
         assert pid == self.handle.pid
         if self.refuse:
-            raise RuntimeError("the sandbox went away")
+            raise RuntimeError("the machine went away")
         self.sent.append(data)
         if len(self.sent) == 1:
             self.on_data(b"$ stty raw -echo\r\n" + PTY_MARK[:3])
@@ -172,7 +173,7 @@ class FakePty:
         return True
 
 
-class FakeSandbox:
+class FakeMachine:
     connected = []
     last = None
 
@@ -190,9 +191,9 @@ class FakeSandbox:
 
 @pytest.fixture(autouse=True)
 def fake_sdk(monkeypatch):
-    FakeSandbox.connected = []
-    FakeSandbox.last = None
-    monkeypatch.setattr(sdk, "AsyncSandbox", FakeSandbox)
+    FakeMachine.connected = []
+    FakeMachine.last = None
+    monkeypatch.setattr(sdk, "AsyncSandbox", FakeMachine)
 
 
 @pytest.mark.asyncio
@@ -201,7 +202,7 @@ async def test_connect_attaches_by_id_with_api_key():
         "box", config={"sandbox_id": "sb-live", "api_key": "k-123"}
     )
     await runtime.connect()
-    assert FakeSandbox.connected == [("sb-live", {"api_key": "k-123"})]
+    assert FakeMachine.connected == [("sb-live", {"api_key": "k-123"})]
 
 
 def test_sandbox_id_is_required():
@@ -221,7 +222,7 @@ async def test_native_stdin_eof_and_command_are_preserved(data, monkeypatch):
     assert result.exit_code == 0
     assert result.stdout == (data or b"").hex().encode()
     assert result.stderr == b"warn"
-    sandbox = FakeSandbox.last
+    sandbox = FakeMachine.last
     assert sandbox.commands.calls == [
         (
             encode_output(
@@ -261,7 +262,7 @@ async def test_exit_preserves_output_even_when_stdin_loses_exit_race(
 ):
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    FakeSandbox.last.commands.input_error = input_error
+    FakeMachine.last.commands.input_error = input_error
     result = await runtime.exec_line(
         f"exit {exit_code}", b"input", {}, "/workspace"
     )
@@ -270,7 +271,7 @@ async def test_exit_preserves_output_even_when_stdin_loses_exit_race(
         b"partial",
         b"boom-err",
     )
-    handle = FakeSandbox.last.commands.handles[0]
+    handle = FakeMachine.last.commands.handles[0]
     assert handle.disconnected and not handle.killed
 
 
@@ -287,7 +288,7 @@ async def test_a_command_that_exits_ends_the_line_while_its_input_stays_open():
         runtime.exec_line("head", open_input(), {}, "/workspace"), 5
     )
     assert (result.exit_code, result.stdout) == (0, b"one\n".hex().encode())
-    handle = FakeSandbox.last.commands.handles[0]
+    handle = FakeMachine.last.commands.handles[0]
     assert handle.disconnected and not handle.killed
 
 
@@ -298,14 +299,14 @@ async def test_parallel_calls_connect_once_and_keep_input_separate():
     results = await asyncio.gather(
         *(_line(runtime, "cat", data) for data in payloads)
     )
-    assert len(FakeSandbox.connected) == 1
+    assert len(FakeMachine.connected) == 1
     assert [r.stdout for r in results] == [
         data.hex().encode() for data in payloads
     ]
-    assert all(h.disconnected for h in FakeSandbox.last.commands.handles)
+    assert all(h.disconnected for h in FakeMachine.last.commands.handles)
 
 
-# An untagged run (the reap's own line) that fails is killed and starts
+# An untagged run (the stop's own line) that fails is killed and starts
 # nothing more.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -320,29 +321,29 @@ async def test_input_transport_failure_kills_only_its_command_and_disconnects(
 ):
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    FakeSandbox.last.commands.input_error = input_error
+    FakeMachine.last.commands.input_error = input_error
     with pytest.raises(type(input_error), match="stdin transport failed"):
         await runtime._exec_argv(
             ("/bin/sh", "-c", "cat"), b"input", {}, "/workspace", None, None
         )
-    handle = FakeSandbox.last.commands.handles[0]
+    handle = FakeMachine.last.commands.handles[0]
     assert handle.killed and handle.disconnected
-    assert len(FakeSandbox.last.commands.calls) == 1
+    assert len(FakeMachine.last.commands.calls) == 1
 
 
 # A kill reaches only the shell that encodes the output, so a tagged run
 # that fails for a reason other than a cancel is also stopped by its tag.
 @pytest.mark.asyncio
-async def test_a_tagged_run_that_fails_is_reaped_by_its_tag():
+async def test_a_tagged_run_that_fails_is_stopped_by_its_tag():
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
-    await runtime.connect()
-    commands = FakeSandbox.last.commands
+    await runtime._ensure_connected()
+    commands = FakeMachine.last.commands
     commands.input_error = RuntimeError("stdin transport failed")
     with pytest.raises(RuntimeError, match="stdin transport failed"):
         await runtime.exec_line("cat", b"input", {PROCESS: "run"}, "/")
     assert [shlex.split(command)[-1] for command, _ in commands.calls] == [
         "cat",
-        reap_line("run", 15),
+        stop_line("run", 15),
     ]
 
 
@@ -364,9 +365,9 @@ async def test_streamed_stderr_goes_to_the_errors_callback():
 
 
 # A kill reaches only the encoding shell, so a line run with no tag of its
-# caller's gets its own and a cancelled one is reaped by it.
+# caller's gets its own and a cancelled one is stopped by it.
 @pytest.mark.asyncio
-async def test_a_cancelled_line_is_killed_and_reaped_by_its_own_tag(
+async def test_a_cancelled_line_is_killed_and_stopped_by_its_own_tag(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -374,8 +375,8 @@ async def test_a_cancelled_line_is_killed_and_reaped_by_its_own_tag(
         lambda: SimpleNamespace(hex="line"),
     )
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
-    await runtime.connect()
-    commands = FakeSandbox.last.commands
+    await runtime._ensure_connected()
+    commands = FakeMachine.last.commands
     task = asyncio.create_task(
         runtime.exec_line("sleep", None, {}, "/workspace")
     )
@@ -388,17 +389,37 @@ async def test_a_cancelled_line_is_killed_and_reaped_by_its_own_tag(
     assert handle.killed and handle.disconnected
     assert [shlex.split(command)[-1] for command, _ in commands.calls] == [
         "sleep",
-        reap_line("line", 15),
+        stop_line("line", 15),
     ]
 
 
+async def _hang(_handle: FakeHandle) -> None:
+    await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_a_stop_that_times_out_starts_no_other_stop(monkeypatch):
+    monkeypatch.setattr(FakeHandle, "wait", _hang)
+    monkeypatch.setattr(
+        "mirage.machine.handle.MACHINE_STOP_WAIT_SECONDS", 0.01
+    )
+    runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
+    await runtime._ensure_connected()
+    async with asyncio.timeout(2):
+        assert await runtime.stop("t", 15) is False
+    assert [
+        shlex.split(command)[-1]
+        for command, _ in FakeMachine.last.commands.calls
+    ] == [stop_line("t", 15)]
+
+
 # A kill that names a gentler signal leaves a run's tagged command to the
-# reap, which sends it that signal first; an untagged one (mount setup, a
-# direct exec) has no reap behind it and is killed. Either way the runtime
-# runs nothing more: a cancelled run is the caller's to reap.
+# stop, which sends it that signal first; an untagged one (mount setup, a
+# direct exec) has no stop behind it and is killed. Either way the runtime
+# runs nothing more: a cancelled run is the caller's to stop.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("env,killed", [({PROCESS: "run"}, False), ({}, True)])
-async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
+async def test_a_term_kill_leaves_only_a_tagged_command_to_the_stop(
     env, killed
 ):
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
@@ -417,12 +438,12 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
         run=run,
     )
     await asyncio.sleep(0)
-    handle = FakeSandbox.last.commands.handles[0]
+    handle = FakeMachine.last.commands.handles[0]
     await handle.waiting.wait()
     assert runner.terminate(15)
     await runner.join()
     assert (handle.killed, handle.disconnected) == (killed, True)
-    assert len(FakeSandbox.last.commands.calls) == 1
+    assert len(FakeMachine.last.commands.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -439,7 +460,7 @@ def test_invalid_sandbox_id_is_rejected_before_connecting(value):
         E2BConfig(sandbox_id=value)
     with pytest.raises(ValueError, match="nonblank sandbox_id"):
         E2BMachine("box", config={"sandbox_id": value})
-    assert FakeSandbox.connected == []
+    assert FakeMachine.connected == []
 
 
 def test_mount_type_is_one_of_ssh_fuse_both():
@@ -452,7 +473,7 @@ def test_mount_type_is_one_of_ssh_fuse_both():
 async def test_a_pipe_is_a_raw_pty_past_the_shells_own_output():
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    pty = FakeSandbox.last.pty
+    pty = FakeMachine.last.pty
     pipe = await runtime.open_pipe("exec sshfs x y")
     assert pty.created == (24, 80, 0)
     assert pty.sent == [f"{PTY_RAW}exec sshfs x y\n".encode()]
@@ -471,12 +492,12 @@ async def test_a_pipe_is_a_raw_pty_past_the_shells_own_output():
 async def test_a_reply_that_cannot_be_sent_ends_the_pipe_with_its_error():
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    pty = FakeSandbox.last.pty
+    pty = FakeMachine.last.pty
     pipe = await runtime.open_pipe("exec sshfs x y")
     assert await pipe.reader.readexactly(5) == b"\x00sftp"
     pty.refuse = True
     pipe.writer.write(b"reply")
-    with pytest.raises(RuntimeError, match="the sandbox went away"):
+    with pytest.raises(RuntimeError, match="the machine went away"):
         await asyncio.wait_for(pipe.reader.read(1), 1)
     assert pty.handle.ended.is_set()
 
@@ -485,9 +506,9 @@ async def test_a_reply_that_cannot_be_sent_ends_the_pipe_with_its_error():
 async def test_a_pty_whose_command_cannot_be_sent_is_killed():
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    pty = FakeSandbox.last.pty
+    pty = FakeMachine.last.pty
     pty.refuse = True
-    with pytest.raises(RuntimeError, match="the sandbox went away"):
+    with pytest.raises(RuntimeError, match="the machine went away"):
         await runtime.open_pipe("exec sshfs x y")
     assert pty.handle.ended.is_set()
 
@@ -526,7 +547,7 @@ class MountingE2BMachine(E2BMachine):
         async def stop() -> None:
             requests.feed_eof()
 
-        return SandboxPipe(requests, io.BytesIO(), stop)
+        return MachinePipe(requests, io.BytesIO(), stop)
 
 
 RESTRICTIONS = [
@@ -558,7 +579,7 @@ async def test_a_session_restriction_refuses_a_line_with_no_mount_type(
         126,
         b"e2b: Permission denied\n",
     )
-    assert FakeSandbox.connected == []
+    assert FakeMachine.connected == []
     assert (await (await ws.session("other")).shell("tool run")).exit_code == 0
     await ws.close()
 
@@ -677,7 +698,7 @@ async def test_arbitrary_output_bytes_and_the_exit_code_come_back_exactly(
 ):
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    FakeSandbox.last.commands = ShellCommands()
+    FakeMachine.last.commands = ShellCommands()
     said = {"out": bytearray(), "err": bytearray()}
 
     async def output(chunk: bytes) -> None:
@@ -712,7 +733,7 @@ async def test_arbitrary_output_bytes_and_the_exit_code_come_back_exactly(
 async def test_output_streams_while_the_program_runs():
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    FakeSandbox.last.commands = ShellCommands()
+    FakeMachine.last.commands = ShellCommands()
     said = bytearray()
     first = asyncio.Event()
 
@@ -760,7 +781,7 @@ class TailCommands:
 async def test_a_streamed_tail_without_a_newline_still_comes_out():
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    FakeSandbox.last.commands = TailCommands()
+    FakeMachine.last.commands = TailCommands()
     said: dict[str, list[bytes]] = {"out": [], "err": []}
 
     async def output(chunk: bytes) -> None:

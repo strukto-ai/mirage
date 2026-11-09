@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ConfigFields, RuntimeConfig } from '../runtime/config.ts'
-import type { MountType } from '../runtime/types.ts'
+import type { MountType } from './types.ts'
 import { MOUNT_TYPES } from './constants.ts'
 
 /**
- * How to reach the sandbox: the fields every provider has.
+ * How to reach the machine: the fields every provider has.
  *
  * This base carries only what all providers support; each provider
  * extends it with its own fields (DockerConfig, DaytonaConfig,
@@ -26,13 +26,13 @@ import { MOUNT_TYPES } from './constants.ts'
  * entry's `config` block, mirroring a mount's.
  */
 export interface MachineConfig extends RuntimeConfig {
-  /** Environment set in the sandbox. */
+  /** Environment set in the machine. */
   env?: Record<string, string>
   /**
-   * How the sandbox sees the workspace: `ssh` serves every prefix the
+   * How the machine sees the workspace: `ssh` serves every prefix the
    * session sees from the host over SFTP (the image needs sshfs), `fuse`
-   * leaves them to a mirage in the sandbox, `both` serves from the host
-   * what the sandbox does not mount itself. Unset serves nothing.
+   * leaves them to a mirage in the machine, `both` serves from the host
+   * what the machine does not mount itself. Unset serves nothing.
    */
   mountType?: MountType
 }

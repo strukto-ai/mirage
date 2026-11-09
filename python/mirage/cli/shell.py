@@ -49,6 +49,12 @@ def shell_cmd(
         help="Workspace runtime entry to place this line's captured "
         "stages on.",
     ),
+    machine: str | None = typer.Option(
+        None,
+        "--machine",
+        help="Machine to run this line's captured stages on, by its "
+        "name under machines:.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -74,6 +80,8 @@ def shell_cmd(
         payload["cwd"] = cwd
     if runtime:
         payload["runtime"] = runtime
+    if machine:
+        payload["machine"] = machine
     if explain:
         said = answer(post(workspace_id, "shell", payload, session_id, True))
         emit(said, human=None if json_output else _format_explanation)

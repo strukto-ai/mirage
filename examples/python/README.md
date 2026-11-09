@@ -2,7 +2,7 @@
 
 Runnable scripts, laid out like the docs: `vfs/` holds one directory per
 backend and `vfs/new/` the custom-VFS examples, `agents/` one per agent
-framework, `runtime/sandbox/` one per sandbox, and `core/`, `cli/`,
+framework, `machine/` one per machine provider, and `core/`, `cli/`,
 `policy/`, `configuration/`, `integration/`, `notifications/` and `fuse/`
 match the docs sections of the same name. Run them from the repo root with
 the venv interpreter so `.env.development` resolves:

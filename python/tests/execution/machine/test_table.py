@@ -329,6 +329,59 @@ async def test_a_group_signal_reaches_a_shells_program_as_sent():
 
 
 @pytest.mark.asyncio
+async def test_a_group_signal_reaches_a_parent_before_its_child():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        await ws.shell("( train 1; true ) &")
+        await _started(box)
+        await ws.shell("kill -QUIT -- -$$")
+        assert box.sent == [
+            (MachinePid(412, 100.0), 3),
+            (MachinePid(413, 101.0), 3),
+        ]
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_forwarded_group_signal_reaches_a_parent_first():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        await ws.shell("train 1 &")
+        await _started(box)
+        await ws.process_table.scan()
+        found = next(
+            p for p in ws.process_table.records() if p.machine_pid is not None
+        )
+        await ws.process_table.send_group(found.group, 28)
+        assert box.sent == [
+            (MachinePid(412, 100.0), 28),
+            (MachinePid(413, 101.0), 28),
+        ]
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_process_a_scan_no_longer_sees_is_gone_from_that_ps():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        await ws.shell("train 1 &")
+        await _started(box)
+        assert b"413" in (await ws.shell("ps -o mpid")).stdout
+        box.rows = box.rows[:1]
+        assert b"413" not in (await ws.shell("ps -o mpid")).stdout
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_kept_signal_reaches_a_program_as_sent():
     box = _Sleeper("a")
     ws = _sleepers(a=box)
@@ -339,10 +392,10 @@ async def test_a_kept_signal_reaches_a_program_as_sent():
         assert [signum for _, signum in box.sent] == [28]
         box.sent.clear()
         assert (await ws.shell("kill -WINCH -- -$$")).exit_code == 0
-        assert set(box.sent) == {
+        assert box.sent == [
             (MachinePid(412, 100.0), 28),
             (MachinePid(413, 101.0), 28),
-        }
+        ]
         said = await ws.shell("jobs")
         assert said.stdout == b"[1] running train 1\n"
     finally:

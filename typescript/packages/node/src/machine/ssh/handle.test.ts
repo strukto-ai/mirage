@@ -322,12 +322,12 @@ describe('SSHMachine cancellation', () => {
   })
 
   // A kill that names a gentler signal leaves a run's tagged command to the
-  // reap, which sends it that signal first; an untagged one (mount setup, a
-  // direct exec) has no reap behind it and is killed.
+  // stop, which sends it that signal first; an untagged one (mount setup, a
+  // direct exec) has no stop behind it and is killed.
   it.each([
     [true, []],
     [false, ['KILL']],
-  ])('leaves only a tagged command to the reap on TERM: %s', async (tagged, signals) => {
+  ])('leaves only a tagged command to the stop on TERM: %s', async (tagged, signals) => {
     const runtime = new HungRuntime()
     const controller = new AbortController()
     const started = new Promise((resolve) => runtime.channel.once('eof', resolve))

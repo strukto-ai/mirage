@@ -142,7 +142,7 @@ runtime_variants() {
               then {config: (($base.config // {}) + ($over.config // {}))} else {} end)
          end) as $entry
       | (if ($t.machines | index($r)) != null and ($entry | type) == "object"
-         then {machines: {($r): ({provider: $r} + ($entry.config // {}))},
+         then {machines: ([$r, ($c.also_machines // [])[]] | map({key: ., value: ({provider: $r} + ($entry.config // {}))}) | from_entries),
                runtimes: [($entry | del(.config)) + {name: "machine", machine: $r}, "workspace"]}
          else {runtimes: [$entry, "workspace"]} end) as $placed
       | $c + {
@@ -222,7 +222,7 @@ write_world_yaml() {
 exec_step() {
   local cli="$1" step="$2" dir="$3"
   shift 3
-  local cmd script runtime
+  local cmd script runtime machine
   cmd=$(jq -r '.command' <<<"$step")
   script=$(jq -r '.script // empty' <<<"$step")
   if [ -n "$script" ]; then
@@ -231,6 +231,8 @@ exec_step() {
   runtime=$(jq -r '.runtime // empty' <<<"$step")
   local args=("$@" --json -c "$cmd")
   [ -n "$runtime" ] && args+=(--runtime "$runtime")
+  machine=$(jq -r '.machine // empty' <<<"$step")
+  [ -n "$machine" ] && args+=(--machine "$machine")
   if jq -e 'has("stdin")' >/dev/null <<<"$step"; then
     jq -j '.stdin' <<<"$step" > "$dir/stdin.bin"
   else

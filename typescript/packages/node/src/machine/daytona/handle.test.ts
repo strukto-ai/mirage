@@ -53,7 +53,7 @@ class FakeFs {
   }
 }
 
-class FakeSandbox {
+class FakeMachine {
   readonly id = 'sb-77'
   readonly process = new FakeProcess()
   readonly fs = new FakeFs()
@@ -63,15 +63,15 @@ class FakeClient {
   static configs: (object | undefined)[] = []
   static fetched: string[] = []
   static disposed = 0
-  static last: FakeSandbox | null = null
+  static last: FakeMachine | null = null
 
   constructor(readonly config?: object) {
     FakeClient.configs.push(config)
   }
 
-  get(sandboxId: string): Promise<FakeSandbox> {
+  get(sandboxId: string): Promise<FakeMachine> {
     FakeClient.fetched.push(sandboxId)
-    FakeClient.last = new FakeSandbox()
+    FakeClient.last = new FakeMachine()
     return Promise.resolve(FakeClient.last)
   }
 
@@ -128,7 +128,7 @@ describe('DaytonaMachine', () => {
     )
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBeNull()
-    const sandbox = FakeClient.last ?? new FakeSandbox()
+    const sandbox = FakeClient.last ?? new FakeMachine()
     const [path] = [...sandbox.fs.files.keys()]
     // Unique per invocation, so concurrent stdin lines never collide.
     expect(path).toMatch(/^\/tmp\/\.mirage_stdin_/)
@@ -144,7 +144,7 @@ describe('DaytonaMachine', () => {
     expect([cwd, env]).toEqual([undefined, undefined])
   })
 
-  it('close releases the client, never the sandbox', async () => {
+  it('close releases the client, never the machine', async () => {
     const runtime = makeRuntime()
     await runtime.connect()
     await runtime.close()

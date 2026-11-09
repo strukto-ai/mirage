@@ -26,19 +26,20 @@ import type { E2bSdk } from '@struktoai/mirage-core/machine/e2b/sdk'
 import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/machine/e2b/constants'
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
-import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
+import type { RunResult } from '@struktoai/mirage-core/runtime/types'
 import {
   MOUNT_GUARD,
   PROCESS,
   encodeOutput,
-  reapLine,
+  stopLine,
   wrapLine,
 } from '@struktoai/mirage-core/machine/constants'
 import { captured, machineRuntime, on } from '../../../tests/fixtures/machine.ts'
 
 const DEC = new TextDecoder()
 
-/** `text` as the sandbox's encoder sends it. */
+/** `text` as the machine's encoder sends it. */
 function b64(text: string): string {
   return `${Buffer.from(text).toString('base64')}\n`
 }
@@ -183,7 +184,7 @@ class FakePty {
 
   sendInput(pid: number, data: Uint8Array): Promise<void> {
     expect(pid).toBe(this.pid)
-    if (this.refuse) return Promise.reject(new Error('the sandbox went away'))
+    if (this.refuse) return Promise.reject(new Error('the machine went away'))
     this.sent.push(data)
     if (this.sent.length === 1) {
       this.onData(
@@ -202,23 +203,23 @@ class FakePty {
   }
 }
 
-class FakeSandbox {
+class FakeMachine {
   static connected: [string, Record<string, unknown>][] = []
-  static last: FakeSandbox
+  static last: FakeMachine
   readonly commands = new FakeCommands()
   readonly pty = new FakePty()
-  static async connect(sandboxId: string, params: Record<string, unknown>): Promise<FakeSandbox> {
-    FakeSandbox.connected.push([sandboxId, params])
+  static async connect(sandboxId: string, params: Record<string, unknown>): Promise<FakeMachine> {
+    FakeMachine.connected.push([sandboxId, params])
     await Promise.resolve()
-    FakeSandbox.last = new FakeSandbox()
-    return FakeSandbox.last
+    FakeMachine.last = new FakeMachine()
+    return FakeMachine.last
   }
 }
 
 class FakedE2BMachine extends E2BMachine {
   protected override loadSdk(): Promise<E2bSdk> {
     return Promise.resolve({
-      Sandbox: FakeSandbox,
+      Sandbox: FakeMachine,
       CommandExitError: FakeExitError,
       NotFoundError: FakeNotFoundError,
       SandboxError: FakeSandboxError,
@@ -231,8 +232,8 @@ function makeRuntime() {
 }
 
 beforeEach(() => {
-  FakeSandbox.connected = []
-  FakeSandbox.last = new FakeSandbox()
+  FakeMachine.connected = []
+  FakeMachine.last = new FakeMachine()
   vi.restoreAllMocks()
 })
 
@@ -240,7 +241,7 @@ describe('E2BMachine', () => {
   it('connects by sandbox id with api key', async () => {
     const runtime = new FakedE2BMachine('box', { sandboxId: 'sb-live', apiKey: 'k-123' })
     await runtime.connect()
-    expect(FakeSandbox.connected).toEqual([['sb-live', { apiKey: 'k-123' }]])
+    expect(FakeMachine.connected).toEqual([['sb-live', { apiKey: 'k-123' }]])
   })
   it('takes a mountType of ssh, fuse or both', () => {
     expect(
@@ -251,7 +252,7 @@ describe('E2BMachine', () => {
   it("opens a pipe as a raw pty past the shell's own output", async () => {
     const runtime = makeRuntime()
     await runtime.connect()
-    const pty = FakeSandbox.last.pty
+    const pty = FakeMachine.last.pty
     const pipe = await runtime.openPipe('exec sshfs x y')
     expect(pty.created).toEqual([24, 80, 0])
     expect(pty.sent.map((d) => DEC.decode(d))).toEqual([`${PTY_RAW}exec sshfs x y\n`])
@@ -267,21 +268,21 @@ describe('E2BMachine', () => {
   it('ends the pipe with the error of a reply it cannot send', async () => {
     const runtime = makeRuntime()
     await runtime.connect()
-    const pty = FakeSandbox.last.pty
+    const pty = FakeMachine.last.pty
     const pipe = await runtime.openPipe('exec sshfs x y')
     const chunks = pipe.reader.getReader()
     await chunks.read()
     pty.refuse = true
     pipe.writer.write(new Uint8Array([1]))
-    await expect(chunks.read()).rejects.toThrow('the sandbox went away')
+    await expect(chunks.read()).rejects.toThrow('the machine went away')
     expect(pty.ended).toBe(true)
   })
   it('kills a pty whose command cannot be sent', async () => {
     const runtime = makeRuntime()
     await runtime.connect()
-    const pty = FakeSandbox.last.pty
+    const pty = FakeMachine.last.pty
     pty.refuse = true
-    await expect(runtime.openPipe('exec sshfs x y')).rejects.toThrow('the sandbox went away')
+    await expect(runtime.openPipe('exec sshfs x y')).rejects.toThrow('the machine went away')
     expect(pty.ended).toBe(true)
   })
   it('requires a sandbox id', () => {
@@ -299,7 +300,7 @@ describe('E2BMachine', () => {
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe(Buffer.from(data ?? []).toString('hex'))
     expect(DEC.decode(result.stderr)).toBe('warn')
-    expect(FakeSandbox.last.commands.calls).toEqual([
+    expect(FakeMachine.last.commands.calls).toEqual([
       [
         encodeOutput(
           wrapLine(['/bin/sh', '-c', 'wc -l | cat'], { E: '1', [PROCESS]: 'runid' }, '/workspace'),
@@ -307,7 +308,7 @@ describe('E2BMachine', () => {
         data !== null,
       ],
     ])
-    expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
+    expect(FakeMachine.last.commands.handles[0]).toMatchObject({
       eof: true,
       disconnected: true,
       killed: false,
@@ -326,7 +327,7 @@ describe('E2BMachine', () => {
     for (const exitCode of [0, 3]) {
       const runtime = makeRuntime()
       await runtime.connect()
-      FakeSandbox.last.commands.inputError = inputError
+      FakeMachine.last.commands.inputError = inputError
       const result = await runtime.execLine(
         `exit ${String(exitCode)}`,
         new TextEncoder().encode('input'),
@@ -338,7 +339,7 @@ describe('E2BMachine', () => {
         'partial',
         'boom-err',
       ])
-      expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
+      expect(FakeMachine.last.commands.handles[0]).toMatchObject({
         disconnected: true,
         killed: false,
       })
@@ -350,11 +351,11 @@ describe('E2BMachine', () => {
     const results = await Promise.all(
       payloads.map((data) => runLine(runtime, 'cat', data, '/workspace')),
     )
-    expect(FakeSandbox.connected).toHaveLength(1)
+    expect(FakeMachine.connected).toHaveLength(1)
     expect(results.map((r) => DEC.decode(r.stdout))).toEqual(
       payloads.map((data) => Buffer.from(data).toString('hex')),
     )
-    expect(FakeSandbox.last.commands.handles.every((h) => h.disconnected)).toBe(true)
+    expect(FakeMachine.last.commands.handles.every((h) => h.disconnected)).toBe(true)
   })
   it('ends the line when its command exits while the input stays open', async () => {
     const runtime = makeRuntime()
@@ -368,12 +369,12 @@ describe('E2BMachine', () => {
       0,
       Buffer.from('one\n').toString('hex'),
     ])
-    expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
+    expect(FakeMachine.last.commands.handles[0]).toMatchObject({
       killed: false,
       disconnected: true,
     })
   })
-  // An untagged run (the reap's own line) that fails is killed and starts
+  // An untagged run (the stop's own line) that fails is killed and starts
   // nothing more.
   it.each([
     new Error('stdin transport failed'),
@@ -381,20 +382,20 @@ describe('E2BMachine', () => {
   ])('kills its command and disconnects when sending stdin fails: %s', async (inputError) => {
     const runtime = makeRuntime()
     await runtime.connect()
-    FakeSandbox.last.commands.inputError = inputError
+    FakeMachine.last.commands.inputError = inputError
     await expect(
       execArgv(runtime, ['/bin/sh', '-c', 'cat'], new Uint8Array([1]), {}),
     ).rejects.toThrow('stdin transport failed')
-    expect(FakeSandbox.last.commands.handles[0]).toMatchObject({ killed: true, disconnected: true })
-    expect(FakeSandbox.last.commands.calls).toHaveLength(1)
+    expect(FakeMachine.last.commands.handles[0]).toMatchObject({ killed: true, disconnected: true })
+    expect(FakeMachine.last.commands.calls).toHaveLength(1)
   })
   // A kill reaches only the encoding shell, so a line run with no tag of its
-  // caller's gets its own and an aborted one is reaped by it.
-  it('reaps an aborted line by its own tag', async () => {
+  // caller's gets its own and an aborted one is stopped by it.
+  it('stops an aborted line by its own tag', async () => {
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('l-i-n-e-')
     const runtime = makeRuntime()
-    await runtime.connect()
-    const commands = FakeSandbox.last.commands
+    await (runtime as unknown as { ensureConnected(): Promise<void> }).ensureConnected()
+    const commands = FakeMachine.last.commands
     const abort = new AbortController()
     const run = runtime.execLine('sleep', null, {}, '/', abort.signal)
     await vi.waitFor(() => {
@@ -405,20 +406,27 @@ describe('E2BMachine', () => {
     expect(commands.handles[0]).toMatchObject({ killed: true, disconnected: true })
     expect(commands.calls.map(([command]) => lineOf(command))).toEqual([
       'sleep',
-      reapLine('line', 15),
+      stopLine('line', 15),
     ])
+  })
+  it('starts no other stop when a stop times out', async () => {
+    const runtime = makeRuntime()
+    await (runtime as unknown as { ensureConnected(): Promise<void> }).ensureConnected()
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => AbortSignal.abort())
+    expect(await runtime.stop('t', 15)).toBe(false)
+    expect(FakeMachine.last.commands.calls.length).toBeLessThanOrEqual(1)
   })
   // A kill reaches only the shell that encodes the output, so a tagged run
   // that fails for a reason other than a cancel is also stopped by its tag.
-  it('reaps a tagged run that fails by its tag', async () => {
+  it('stops a tagged run that fails by its tag', async () => {
     const runtime = makeRuntime()
-    await runtime.connect()
-    const commands = FakeSandbox.last.commands
+    await (runtime as unknown as { ensureConnected(): Promise<void> }).ensureConnected()
+    const commands = FakeMachine.last.commands
     commands.inputError = new Error('stdin transport failed')
     await expect(
       runtime.execLine('cat', new Uint8Array([1]), { [PROCESS]: 'run' }, '/'),
     ).rejects.toThrow('stdin transport failed')
-    expect(commands.calls.map(([command]) => lineOf(command))).toEqual(['cat', reapLine('run', 15)])
+    expect(commands.calls.map(([command]) => lineOf(command))).toEqual(['cat', stopLine('run', 15)])
   })
   it("registers under the config name 'e2b'", () => {
     const machine = buildMachine('box', { provider: 'e2b', sandboxId: 'sb-live' })
@@ -444,7 +452,7 @@ describe('E2B cancellation and validation', () => {
       expect(() => new E2BMachine('box', { sandboxId: sandboxId as string })).toThrow(
         'nonblank sandboxId',
       )
-      expect(FakeSandbox.connected).toEqual([])
+      expect(FakeMachine.connected).toEqual([])
     },
   )
 
@@ -453,12 +461,12 @@ describe('E2B cancellation and validation', () => {
     abort.abort()
     const aborted = runLine(makeRuntime(), 'cat', null, '/', { signal: abort.signal })
     await expect(aborted).rejects.toMatchObject({ name: 'AbortError' })
-    expect(FakeSandbox.connected).toEqual([])
+    expect(FakeMachine.connected).toEqual([])
   })
 
   it('cancels one connection waiter without cancelling another', async () => {
-    const connection = deferred<FakeSandbox>()
-    const connect = vi.spyOn(FakeSandbox, 'connect').mockReturnValue(connection.promise)
+    const connection = deferred<FakeMachine>()
+    const connect = vi.spyOn(FakeMachine, 'connect').mockReturnValue(connection.promise)
     const runtime = makeRuntime()
     const abort = new AbortController()
     const cancelled = runLine(runtime, 'sleep', null, '/', { signal: abort.signal })
@@ -466,7 +474,7 @@ describe('E2B cancellation and validation', () => {
     const other = runLine(runtime, 'cat', new Uint8Array([7]))
     abort.abort()
     await rejected
-    const sandbox = new FakeSandbox()
+    const sandbox = new FakeMachine()
     connection.resolve(sandbox)
     expect(DEC.decode((await other).stdout)).toBe('07')
     expect(connect).toHaveBeenCalledTimes(1)
@@ -474,13 +482,13 @@ describe('E2B cancellation and validation', () => {
   })
 
   // A kill that names a gentler signal leaves a run's tagged command to the
-  // reap, which sends it that signal first; an untagged one (mount setup, a
-  // direct exec) has no reap behind it and is killed. Either way the
-  // runtime runs nothing more: an aborted run is the caller's to reap.
+  // stop, which sends it that signal first; an untagged one (mount setup, a
+  // direct exec) has no stop behind it and is killed. Either way the
+  // runtime runs nothing more: an aborted run is the caller's to stop.
   it.each([
     [{ [PROCESS]: 'run' }, false],
     [{}, true],
-  ])('leaves only a tagged command to the reap on TERM: %j', async (env, killed) => {
+  ])('leaves only a tagged command to the stop on TERM: %j', async (env, killed) => {
     const runtime = makeRuntime()
     await runtime.connect()
     const abort = new AbortController()
@@ -495,19 +503,19 @@ describe('E2B cancellation and validation', () => {
         (await execArgv(runtime, ['/bin/sh', '-c', 'sleep'], null, env, abort.signal)).exitCode,
     })
     await vi.waitFor(() => {
-      expect(FakeSandbox.last.commands.handles).toHaveLength(1)
+      expect(FakeMachine.last.commands.handles).toHaveLength(1)
     })
     expect(runner.terminate(15)).toBe(true)
     expect((await runner.join()).exit).toBe(143)
-    expect(FakeSandbox.last.commands.handles[0]).toMatchObject({ killed, disconnected: true })
-    expect(FakeSandbox.last.commands.calls).toHaveLength(1)
+    expect(FakeMachine.last.commands.handles[0]).toMatchObject({ killed, disconnected: true })
+    expect(FakeMachine.last.commands.calls).toHaveLength(1)
   })
 
   it('kills a handle that arrives after startup was aborted', async () => {
     const runtime = makeRuntime()
     await runtime.connect()
     const startup = deferred<FakeHandle>()
-    const start = vi.spyOn(FakeSandbox.last.commands, 'run').mockReturnValue(startup.promise)
+    const start = vi.spyOn(FakeMachine.last.commands, 'run').mockReturnValue(startup.promise)
     const abort = new AbortController()
     const cancelled = runtime.execLine('sleep', null, {}, '/', abort.signal)
     const rejected = expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
@@ -535,33 +543,33 @@ describe('E2B cancellation and validation', () => {
     })
     abort.abort()
     await rejected
-    expect(FakeSandbox.last.commands.handles[0]).toMatchObject({ killed: true, disconnected: true })
+    expect(FakeMachine.last.commands.handles[0]).toMatchObject({ killed: true, disconnected: true })
     expect(removed).toHaveBeenCalledTimes(added.mock.calls.length)
     input.reject(new Error('late input failure'))
   })
 
-  it('stops only the cancelled command and keeps the sandbox usable', async () => {
+  it('stops only the cancelled command and keeps the machine usable', async () => {
     const runtime = makeRuntime()
     const abort = new AbortController()
     const cancelled = runLine(runtime, 'sleep', null, '/', { signal: abort.signal })
     const rejected = expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
     const other = runLine(runtime, 'cat', new Uint8Array([9]))
     await vi.waitFor(() => {
-      expect(FakeSandbox.last.commands.handles).toHaveLength(2)
+      expect(FakeMachine.last.commands.handles).toHaveLength(2)
     })
     abort.abort()
     await rejected
     expect(DEC.decode((await other).stdout)).toBe('09')
-    expect(FakeSandbox.last.commands.handles.find((h) => h.command === 'sleep')).toMatchObject({
+    expect(FakeMachine.last.commands.handles.find((h) => h.command === 'sleep')).toMatchObject({
       killed: true,
       disconnected: true,
     })
-    expect(FakeSandbox.last.commands.handles.find((h) => h.command === 'cat')).toMatchObject({
+    expect(FakeMachine.last.commands.handles.find((h) => h.command === 'cat')).toMatchObject({
       killed: false,
       disconnected: true,
     })
     expect((await runLine(runtime, 'cat', null)).exitCode).toBe(0)
-    expect(FakeSandbox.connected).toHaveLength(1)
+    expect(FakeMachine.connected).toHaveLength(1)
   })
 
   it.each(['caller', 'timeout'])('propagates %s cancellation from a workspace', async (kind) => {
@@ -582,7 +590,7 @@ describe('E2B cancellation and validation', () => {
       if (kind === 'caller') {
         const rejected = expect(run).rejects.toMatchObject({ name: 'AbortError' })
         await vi.waitFor(() => {
-          expect(FakeSandbox.last.commands.handles).toHaveLength(1)
+          expect(FakeMachine.last.commands.handles).toHaveLength(1)
         })
         abort.abort()
         await rejected
@@ -592,7 +600,7 @@ describe('E2B cancellation and validation', () => {
         expect(result.stderrText).toContain('line: timed out after 0.05s')
       }
       await vi.waitFor(() => {
-        expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
+        expect(FakeMachine.last.commands.handles[0]).toMatchObject({
           killed: true,
           disconnected: true,
         })
@@ -621,7 +629,7 @@ class MountingE2BMachine extends FakedE2BMachine {
     return Promise.resolve({ stdout: new TextEncoder().encode(stdout), stderr: null, exitCode: 0 })
   }
 
-  override openPipe(command: string): Promise<SandboxPipe> {
+  override openPipe(command: string): Promise<MachinePipe> {
     const words = [...command.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
     this.table.set(words[6] ?? '', [words[5] ?? '', 'fuse.sshfs'])
     let end: () => void = () => undefined
@@ -667,7 +675,7 @@ describe('E2BMachine under session restrictions', () => {
         126,
         'e2b: Permission denied\n',
       ])
-      expect(FakeSandbox.connected).toEqual([])
+      expect(FakeMachine.connected).toEqual([])
       expect((await (await ws.session('other')).shell('tool run')).exitCode).toBe(0)
     } finally {
       await ws.close()

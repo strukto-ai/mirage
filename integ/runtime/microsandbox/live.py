@@ -368,7 +368,7 @@ async def guest_pid(path):
     raise AssertionError("guest command never started")
 
 
-async def reaped(pid):
+async def stopped(pid):
     for _ in range(60):
         if (await raw(f"test ! -e /proc/{pid}")).exit_code == 0:
             return
@@ -543,7 +543,7 @@ async def lifecycle_checks():
     runtime = MicrosandboxMachine("msb", {"sandbox": SANDBOX})
 
     await check(
-        "storage_lock_does_not_block_exec_and_cancel_reaps_probe",
+        "storage_lock_does_not_block_exec_and_cancel_stops_probe",
         probe_with_storage_locked,
     )
 
@@ -577,7 +577,7 @@ async def lifecycle_checks():
             os.kill(hosts[0], signal.SIGSTOP)
             await asyncio.wait_for(pipe.stop(), 8)
             assert not await host_pids(marker)
-            await reaped(pid)
+            await stopped(pid)
         finally:
             for host in await host_pids(marker):
                 os.kill(host, signal.SIGCONT)
@@ -603,12 +603,12 @@ async def lifecycle_checks():
                 raise AssertionError(
                     "execution did not propagate cancellation"
                 )
-            await reaped(pid)
+            await stopped(pid)
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
-    await check("cancelled_execution_reaps_guest", cancelled_call)
+    await check("cancelled_execution_stops_guest", cancelled_call)
 
     await check(
         "missing_fuse_device_preserves_sshfs_error", missing_fuse_device

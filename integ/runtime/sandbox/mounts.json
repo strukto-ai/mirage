@@ -281,7 +281,7 @@
           "expect": {
             "exit": 126,
             "stdout": "",
-            "stderr": "docker: /restart is no longer mounted in the sandbox (did it restart?); the line did not run\n"
+            "stderr": "docker: /restart is no longer mounted in the machine (did it restart?); the line did not run\n"
           }
         },
         {
@@ -336,7 +336,7 @@
           "expect": {
             "exit": 126,
             "stdout": "",
-            "stderr": "docker: the sandbox cannot see the working directory /notes; cd into a mount first\n"
+            "stderr": "docker: the machine cannot see the working directory /notes; cd into a mount first\n"
           }
         },
         {

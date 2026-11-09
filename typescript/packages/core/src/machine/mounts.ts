@@ -27,7 +27,8 @@ import type { Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { refusedRun, restrictedMountsFor, type WorkspaceBinding } from '../runtime/binding.ts'
 import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
-import type { MountType, PipeWriter, RunResult, SandboxPipe } from '../runtime/types.ts'
+import type { MachinePipe, MountType } from './types.ts'
+import type { PipeWriter, RunResult } from '../runtime/types.ts'
 import {
   MOUNT_GUARD,
   MOUNT_POLL_SECONDS,
@@ -93,7 +94,7 @@ export function mountTable(text: string): Map<string, [string, string]> {
   return table
 }
 
-/** The mountpoints a sandbox could hold of `prefixes`. */
+/** The mountpoints a machine could hold of `prefixes`. */
 function mountPaths(prefixes: Iterable<string>): Set<string> {
   const paths = new Set<string>()
   for (const prefix of prefixes) paths.add(rstripSlash(prefix))
@@ -103,9 +104,9 @@ function mountPaths(prefixes: Iterable<string>): Set<string> {
 }
 
 /**
- * The prefixes a sandbox mounts: each one under no other. A prefix under
+ * The prefixes a machine mounts: each one under no other. A prefix under
  * another is served through it. The root and the workspace's devices are
- * left out: a sandbox's `/` and `/dev` are its own, and nothing can be
+ * left out: a machine's `/` and `/dev` are its own, and nothing can be
  * mounted over them.
  */
 export function topPrefixes(prefixes: Iterable<string>): string[] {
@@ -116,19 +117,19 @@ export function topPrefixes(prefixes: Iterable<string>): string[] {
   return tops
 }
 
-/** The sandbox command that lazily unmounts `prefix`. */
+/** The machine command that lazily unmounts `prefix`. */
 function unmountLine(prefix: string): string {
   const path = singleQuote(prefix)
   return `fusermount3 -uz ${path} || fusermount -uz ${path}`
 }
 
-/** Why a line did not run: the sandbox no longer holds `prefix`. */
-function unmounted(runtime: string, prefix: string): string {
-  return `${runtime}: ${prefix} is no longer mounted in the sandbox (did it restart?); the line did not run`
+/** Why a line did not run: the machine no longer holds `prefix`. */
+function unmounted(provider: string, prefix: string): string {
+  return `${provider}: ${prefix} is no longer mounted in the machine (did it restart?); the line did not run`
 }
 
 /**
- * The sandbox command that exits 0 while a program runs with `source` as
+ * The machine command that exits 0 while a program runs with `source` as
  * one of its arguments, as an sshfs serving it does, 1 once none does, and
  * 2 when it read no process at all. It reads `/proc`, never the mount, so a
  * mount whose server stalled cannot hang it, and hands awk the source in
@@ -169,7 +170,7 @@ async function within(task: Promise<void>, ms: number): Promise<void> {
 }
 
 interface Served {
-  pipe: SandboxPipe
+  pipe: MachinePipe
   server: PipeServer
   // Settles when the server ends, never rejecting: `failure` says why.
   serving: Promise<void>
@@ -178,26 +179,26 @@ interface Served {
 }
 
 /**
- * The workspace prefixes one sandbox sees, by its `mountType`.
+ * The workspace prefixes one machine sees, by its `mountType`.
  *
  * `ssh`: every prefix the session sees is served from the host over SFTP,
- * and the sandbox mounts each with `sshfs -o passive` on a pipe the
- * provider holds open, so every file op in the sandbox is an op of the
+ * and the machine mounts each with `sshfs -o passive` on a pipe the
+ * provider holds open, so every file op in the machine is an op of the
  * session, held to its hides, modes and policies. `fuse`: a mirage in the
- * sandbox serves its prefixes itself and the host serves none. `both`: a
- * prefix the sandbox already mounts is its own, and the host serves the
- * rest. A prefix the sandbox serves itself is out of the session's rules'
+ * machine serves its prefixes itself and the host serves none. `both`: a
+ * prefix the machine already mounts is its own, and the host serves the
+ * rest. A prefix the machine serves itself is out of the session's rules'
  * reach, so a line is refused while a hide, rule or mode cap covers
  * anything under one, hidden mounts included.
  *
  * Each line first brings the mounts in step with the workspace: a mount
  * added or shown since is served, one hidden is dropped, and a server
  * that ended is started again. While a rule reaches under a prefix, the
- * sandbox's own mounts are read again for each line, so one it mounted
+ * machine's own mounts are read again for each line, so one it mounted
  * since is refused too. A server runs outside the line that started it,
  * so it answers as the session alone and never with a grant that line was
  * given. What the host serves shows one session's view, and a program a line starts may outlive it, so under `ssh` and
- * `both` the sandbox belongs to the first session it serves or runs a line
+ * `both` the machine belongs to the first session it serves or runs a line
  * for, until it is closed: a line of another session is refused rather
  * than shown, or showing, the first one's view, and so is a session made
  * again under the same id, which a program the first one started could
@@ -206,27 +207,27 @@ interface Served {
  *
  * Each sshfs source names the instance serving it (`mirage-<id>:<prefix>`),
  * so an instance unmounts only its own: a prefix another sshfs still
- * serves, as another workspace's runtime on the same sandbox does, refuses
+ * serves, as another workspace on the same machine does, refuses
  * the line (1) rather than being taken, and one whose sshfs has gone is
  * unmounted and served.
  *
- * A sandbox may restart between a line's admit and its exec and come back
+ * A machine may restart between a line's admit and its exec and come back
  * without its mounts, so each line runs under `MOUNT_GUARD`, which checks
  * every mount it holds in the boot the program runs in and exits 126 with
  * nothing run when one is gone. The next line reads the mounts again: what
- * the host served is served again, and while a mount of the sandbox's own
- * is gone lines are refused (126) until the sandbox mounts it again, rather
+ * the host served is served again, and while a mount of the machine's own
+ * is gone lines are refused (126) until the machine mounts it again, rather
  * than served over by the host. Under `fuse` the mounts are read on every
- * line until the sandbox holds every prefix, so one it mounts late is
+ * line until the machine holds every prefix, so one it mounts late is
  * guarded too.
  */
-export class SandboxMounts {
+export class MachineMounts {
   private session: SessionState | null = null
   // Each running line's write admission, and the served requests running on it.
   private readonly lines: (Pick<Caller, 'stop' | 'writeHeld'> & { lent: Set<Promise<void>> })[] = []
   private readonly served = new Map<string, Served>()
   private seen: string | null = null
-  // The sandbox's own mounts as last read, and each prefix held since.
+  // The machine's own mounts as last read, and each prefix held since.
   private own = new Map<string, [string, string]>()
   private owned = new Set<string>()
   // What each served prefix was laid over (as JSON), shown again once its server ends.
@@ -235,17 +236,17 @@ export class SandboxMounts {
   private readonly name = `${SSHFS_SOURCE_PREFIX}${crypto.randomUUID().replaceAll('-', '')}`
 
   /**
-   * @param runtime the runtime's name, for messages.
+   * @param provider the machine's provider, for messages.
    * @param mountType ssh, fuse or both.
-   * @param run runs one setup command in the sandbox.
-   * @param openPipe starts a command in the sandbox with its stdin and
+   * @param run runs one setup command in the machine.
+   * @param openPipe starts a command in the machine with its stdin and
    *   stdout held open.
    */
   constructor(
-    private readonly runtime: string,
+    private readonly provider: string,
     private readonly mountType: MountType,
     private readonly run: (line: string, signal?: AbortSignal) => Promise<RunResult>,
-    private readonly openPipe: (command: string) => Promise<SandboxPipe>,
+    private readonly openPipe: (command: string) => Promise<MachinePipe>,
   ) {}
 
   get fileEffectsDispatched(): boolean {
@@ -253,14 +254,24 @@ export class SandboxMounts {
   }
 
   /**
-   * Record the line for `sync`, then refuse a cwd other than `/` that ssh
-   * serves no mount for (126), before connecting. Mirrors Python's
-   * `SandboxMounts.enter`.
+   * Record the line for `sync`, bring the mounts in step, then refuse a line
+   * that may not run: one from a cwd other than `/` that ssh serves no mount
+   * for (126), one the session's restrictions reach past the dispatcher, as a
+   * policy refuses it (126), one the machine cannot serve because another
+   * session or another sshfs holds it, or another mount covers it (1), and
+   * one over a mount of the machine's own that is gone (126). Null when the
+   * line may run.
    */
-  enter(binding: WorkspaceBinding | null, cwd: string): RunResult | null {
+  async validate(
+    binding: WorkspaceBinding | null,
+    cwd: string,
+    signal?: AbortSignal,
+  ): Promise<RunResult | null> {
+    const files = binding?.files ?? null
+    const getSession = binding?.getSession ?? null
     const mountPrefixes = binding?.mountPrefixes ?? null
-    if (mountPrefixes === null) {
-      throw new Error(`${this.runtime}: mountType needs the runtime in a workspace`)
+    if (binding === null || files === null || getSession === null || mountPrefixes === null) {
+      throw new Error(`${this.provider}: mountType needs the machine in a workspace`)
     }
     const { stop, writeHeld } = currentCaller()
     this.lines.push({ stop, writeHeld, lent: new Set() })
@@ -273,28 +284,10 @@ export class SandboxMounts {
       return {
         stdout: new Uint8Array(),
         stderr: new TextEncoder().encode(
-          `${this.runtime}: the sandbox cannot see the working directory ${seen}; cd into a mount first\n`,
+          `${this.provider}: the machine cannot see the working directory ${seen}; cd into a mount first\n`,
         ),
         exitCode: CANNOT_EXECUTE_STATUS,
       }
-    return null
-  }
-
-  /**
-   * Bring the mounts in step, then refuse a line that may not run: one the
-   * session's restrictions reach past the dispatcher is refused as a policy
-   * refuses it (126), one the sandbox cannot serve because another session
-   * or another sshfs holds it, or another mount covers it, fails (1), and
-   * one over a mount of the sandbox's own that is gone is refused (126). Null
-   * when the line may run.
-   */
-  async admit(binding: WorkspaceBinding | null, signal?: AbortSignal): Promise<RunResult | null> {
-    const files = binding?.files ?? null
-    const getSession = binding?.getSession ?? null
-    const mountPrefixes = binding?.mountPrefixes ?? null
-    if (binding === null || files === null || getSession === null || mountPrefixes === null) {
-      throw new Error(`${this.runtime}: mountType needs the runtime in a workspace`)
-    }
     const current = getCurrentSession()
     const rules = current?.commands
     if (
@@ -304,12 +297,12 @@ export class SandboxMounts {
       )
     )
       return refusedRun(
-        this.runtime,
+        this.provider,
         'this file transport cannot enforce program-specific path rules',
       )
     if (current === null) {
       throw new Error(
-        `${this.runtime}: mountType serves a session's view, and this line runs as none`,
+        `${this.provider}: mountType serves a session's view, and this line runs as none`,
       )
     }
     return this.locked(async () => {
@@ -320,8 +313,8 @@ export class SandboxMounts {
         return {
           stdout: new Uint8Array(),
           stderr: new TextEncoder().encode(
-            `${this.runtime}: this sandbox shows ${earlier}session ${served.sessionId}'s view ` +
-              `of the workspace; give session ${current.sessionId} a sandbox of its own\n`,
+            `${this.provider}: this machine shows ${earlier}session ${served.sessionId}'s view ` +
+              `of the workspace; give session ${current.sessionId} a machine of its own\n`,
           ),
           exitCode: 1,
         }
@@ -334,7 +327,7 @@ export class SandboxMounts {
       if (refused !== null) {
         return {
           stdout: new Uint8Array(),
-          stderr: new TextEncoder().encode(`${this.runtime}: ${refused}\n`),
+          stderr: new TextEncoder().encode(`${this.provider}: ${refused}\n`),
           exitCode: 1,
         }
       }
@@ -342,7 +335,7 @@ export class SandboxMounts {
       if (lost !== null) {
         return {
           stdout: new Uint8Array(),
-          stderr: new TextEncoder().encode(`${unmounted(this.runtime, lost)}\n`),
+          stderr: new TextEncoder().encode(`${unmounted(this.provider, lost)}\n`),
           exitCode: CANNOT_EXECUTE_STATUS,
         }
       }
@@ -352,7 +345,7 @@ export class SandboxMounts {
       }
       return unserved
         ? refusedRun(
-            this.runtime,
+            this.provider,
             'a mount this session restricts is not served through the dispatcher',
           )
         : null
@@ -360,7 +353,7 @@ export class SandboxMounts {
   }
 
   /**
-   * `argv` under `MOUNT_GUARD`, holding every mount the sandbox had at the
+   * `argv` under `MOUNT_GUARD`, holding every mount the machine had at the
    * line's admit; unchanged when it had none.
    */
   guarded(argv: readonly string[]): readonly string[] {
@@ -375,7 +368,7 @@ export class SandboxMounts {
         mountField(prefix),
         mountField(source, true),
         kind,
-        unmounted(this.runtime, prefix),
+        unmounted(this.provider, prefix),
       ])
     return ['/bin/sh', '-c', MOUNT_GUARD, 'sh', '/proc/mounts', ...words, '--', ...argv]
   }
@@ -420,7 +413,7 @@ export class SandboxMounts {
         const failed = await runDetached(() =>
           runWithCaller({ ...currentCaller(), stop, writeHeld }, () => server.sync()),
         )
-        for (const [path, err] of failed) lost.push(`${this.runtime}: ${path}: ${strerrorOf(err)}`)
+        for (const [path, err] of failed) lost.push(`${this.provider}: ${path}: ${strerrorOf(err)}`)
       }
     } catch (error) {
       // The line hears of none of these, and no landing reports them again.
@@ -453,7 +446,7 @@ export class SandboxMounts {
 
   /**
    * Run one served request with the write admission of the latest line
-   * running in the sandbox, from its `admit` to its `sync`, and none
+   * running in the machine, from its `validate` to its `sync`, and none
    * between lines. A program's file op then counts as its line's, so a
    * capture waiting for that line lets it land rather than holding it while
    * the line waits on it.
@@ -493,7 +486,7 @@ export class SandboxMounts {
    * Serve what the session sees and drop what it no longer does. Returns
    * why the line may not run, a prefix another sshfs still serves or another
    * mount covers, which is left alone and nothing new served, or null once
-   * in step, or with a mount of the sandbox's own gone, which `admit`
+   * in step, or with a mount of the machine's own gone, which `validate`
    * refuses.
    */
   private async reconcile(
@@ -544,13 +537,13 @@ export class SandboxMounts {
       )
     })
     if (covered !== undefined) {
-      return `another mount covers ${covered} in this sandbox; the line did not run`
+      return `another mount covers ${covered} in this machine; the line did not run`
     }
     for (const prefix of wanted) {
       const under = own.find((o) => o.startsWith(prefix + '/'))
       if (under !== undefined) {
         throw new Error(
-          `${this.runtime}: the sandbox mounts ${under} itself, and serving ${prefix} would cover it`,
+          `${this.provider}: the machine mounts ${under} itself, and serving ${prefix} would cover it`,
         )
       }
     }
@@ -560,14 +553,14 @@ export class SandboxMounts {
     const fresh = wanted.filter((p) => !this.served.has(p))
     for (const prefix of fresh) {
       if (await this.held(prefix, present, signal)) {
-        return `another sshfs serves ${prefix} in this sandbox; give this workspace a sandbox of its own`
+        return `another sshfs serves ${prefix} in this machine; give this workspace a machine of its own`
       }
     }
     if (fresh.length > 0) {
       const make = pipeServer
       if (make === null) throw new Error(PIPE_SERVER_HINT)
       if ((await this.run('command -v sshfs', signal)).exitCode !== 0) {
-        throw new Error(`${this.runtime}: ${SSHFS_HINT}`)
+        throw new Error(`${this.provider}: ${SSHFS_HINT}`)
       }
       try {
         for (const prefix of fresh) {
@@ -594,7 +587,7 @@ export class SandboxMounts {
   }
 
   /**
-   * A mount of the sandbox's own it held and no longer does; the prefixes
+   * A mount of the machine's own it held and no longer does; the prefixes
    * held are kept only while the workspace mounts them.
    */
   private lost(): string | null {
@@ -612,7 +605,7 @@ export class SandboxMounts {
     const found = await this.run(runningLine(source), signal)
     if (found.exitCode !== 0 && found.exitCode !== 1) {
       throw new Error(
-        `${this.runtime}: cannot tell whether ${source} is served: ${said(found.stderr)}`,
+        `${this.provider}: cannot tell whether ${source} is served: ${said(found.stderr)}`,
       )
     }
     return found.exitCode === 0
@@ -633,7 +626,9 @@ export class SandboxMounts {
       signal,
     )
     if (made.exitCode !== 0) {
-      throw new Error(`${this.runtime}: cannot make ${prefix} in the sandbox: ${said(made.stderr)}`)
+      throw new Error(
+        `${this.provider}: cannot make ${prefix} in the machine: ${said(made.stderr)}`,
+      )
     }
     const log = singleQuote(`${SSHFS_LOG_PREFIX}_${crypto.randomUUID().replaceAll('-', '')}.log`)
     const source = singleQuote(this.source(prefix))
@@ -661,7 +656,7 @@ export class SandboxMounts {
           if (diagnostic) {
             const said = error instanceof Error ? error.message : String(error)
             throw new Error(
-              `${this.runtime}: sshfs did not mount ${prefix}: ${said}; helper said: ${diagnostic}`,
+              `${this.provider}: sshfs did not mount ${prefix}: ${said}; helper said: ${diagnostic}`,
               { cause: error },
             )
           }
@@ -676,12 +671,12 @@ export class SandboxMounts {
             if (logText) reason = logText + (diagnostic ? `; helper said: ${diagnostic}` : '')
           } catch (error) {
             signal?.throwIfAborted()
-            console.debug(`${this.runtime}: reading the sshfs log failed`, error)
+            console.debug(`${this.provider}: reading the sshfs log failed`, error)
             if (!reason) reason = `cannot read the sshfs log: ${String(error)}`
           }
           reason ||= 'no word from sshfs'
           if (entry.failure !== null) reason += `; the SFTP server failed: ${entry.failure.message}`
-          throw new Error(`${this.runtime}: sshfs did not mount ${prefix}: ${reason}`)
+          throw new Error(`${this.provider}: sshfs did not mount ${prefix}: ${reason}`)
         }
         signal?.throwIfAborted()
         await sleep(MOUNT_POLL_SECONDS * 1000)
@@ -705,7 +700,7 @@ export class SandboxMounts {
     const listed = await this.run('cat /proc/mounts', signal)
     if (listed.exitCode !== 0) {
       throw new Error(
-        `${this.runtime}: cannot read the sandbox's mount table: ${said(listed.stderr)}`,
+        `${this.provider}: cannot read the machine's mount table: ${said(listed.stderr)}`,
       )
     }
     return mountTable(DECODER.decode(listed.stdout))
@@ -728,11 +723,11 @@ export class SandboxMounts {
         const done = await this.run(unmountLine(prefix))
         if (done.exitCode !== 0) {
           console.warn(
-            `${this.runtime}: unmounting ${prefix} in the sandbox failed: ${said(done.stderr)}`,
+            `${this.provider}: unmounting ${prefix} in the machine failed: ${said(done.stderr)}`,
           )
         }
       } catch (err) {
-        console.warn(`${this.runtime}: unmounting ${prefix} in the sandbox failed:`, err)
+        console.warn(`${this.provider}: unmounting ${prefix} in the machine failed:`, err)
       }
     }
     try {
@@ -740,7 +735,7 @@ export class SandboxMounts {
       await within(entry.serving, UNMOUNT_WAIT_SECONDS * 1000)
       if (entry.failure !== null) throw entry.failure
     } catch (err) {
-      console.warn(`${this.runtime}: ending the SFTP server for ${prefix} failed:`, err)
+      console.warn(`${this.provider}: ending the SFTP server for ${prefix} failed:`, err)
     }
   }
 
@@ -751,7 +746,7 @@ export class SandboxMounts {
         present = await this.table()
       } catch (err) {
         console.warn(
-          `${this.runtime}: reading the mount table to unmount failed; unmounting every served prefix:`,
+          `${this.provider}: reading the mount table to unmount failed; unmounting every served prefix:`,
           err,
         )
         present = new Map([...this.served.keys()].map((p) => [p, [this.source(p), 'fuse.sshfs']]))

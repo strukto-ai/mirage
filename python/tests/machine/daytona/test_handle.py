@@ -51,7 +51,7 @@ class FakeFs:
         self.files[path] = data
 
 
-class FakeSandbox:
+class FakeMachine:
     id = "sb-77"
 
     def __init__(self) -> None:
@@ -63,14 +63,14 @@ class FakeClient:
     configs: list[object] = []
     fetched: list[str] = []
     closed = 0
-    last: "FakeSandbox | None" = None
+    last: "FakeMachine | None" = None
 
     def __init__(self, config=None) -> None:
         FakeClient.configs.append(config)
 
     async def get(self, sandbox_id):
         FakeClient.fetched.append(sandbox_id)
-        FakeClient.last = FakeSandbox()
+        FakeClient.last = FakeMachine()
         return FakeClient.last
 
     async def close(self):

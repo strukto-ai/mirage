@@ -115,11 +115,11 @@ export abstract class Runtime<E = unknown> {
 
   /**
    * The name a refusal of one run speaks in: the runtime's. Mirrors
-   * Python's `Runtime.voice`.
+   * Python's `Runtime.refusal_name`.
    *
    * @param _ctx the run's context.
    */
-  voice(_ctx: Context): string {
+  refusalName(_ctx: Context): string {
     return this.name
   }
 
@@ -187,7 +187,7 @@ export abstract class Runtime<E = unknown> {
         !this.servesSession(restricted, ctx)
       )
         return refusedRun(
-          this.voice(ctx),
+          this.refusalName(ctx),
           "runtime cannot enforce this session's file restrictions",
         )
       // A process on this machine opens its connections around the gateway,
@@ -196,7 +196,10 @@ export abstract class Runtime<E = unknown> {
       if (this.reach === 'process') {
         for (const egress of liveEgress()) {
           if (egress.rule !== null || (await egress.hooked))
-            return refusedRun(this.voice(ctx), "runtime cannot enforce this workspace's network")
+            return refusedRun(
+              this.refusalName(ctx),
+              "runtime cannot enforce this workspace's network",
+            )
         }
       }
       const engine = await this.engine()

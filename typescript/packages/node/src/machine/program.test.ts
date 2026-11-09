@@ -32,9 +32,9 @@ import {
   serve,
   unserve,
   closeChildren,
-  hostStatus,
+  scanHost,
   openProgramPipe,
-  reapHostRun,
+  stopHostRun,
   runProgram,
   systemTimeEnv,
 } from './program.ts'
@@ -700,7 +700,7 @@ describe('host runs', () => {
   // A program a lapsed workspace left on this host is stopped, its whole
   // group, while its PID still names the process it started; a PID that
   // names a later process is left alone.
-  it('reaps a left host run only while it is the same', async () => {
+  it('stops a left host run only while it is the same', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
     const child = spawn(
@@ -716,9 +716,9 @@ describe('host runs', () => {
     const pid = await escapedPid(pidFile)
     const found = { pid, started: Date.now() / 1000 }
     try {
-      expect(await reapHostRun({ pid, started: 0 }, null, 15)).toBe(true)
+      expect(await stopHostRun({ pid, started: 0 }, null, 15)).toBe(true)
       expect(child.exitCode === null && child.signalCode === null).toBe(true)
-      expect(await reapHostRun(found, null, 15)).toBe(true)
+      expect(await stopHostRun(found, null, 15)).toBe(true)
       expect(await exited).toBe('SIGKILL')
     } finally {
       if (child.exitCode === null && child.signalCode === null) process.kill(-pid, 'SIGKILL')
@@ -730,7 +730,7 @@ describe('host runs', () => {
   // group was last known to be the run's; a group none of whose members
   // proves that, which may have taken the id since, is left alone and out of
   // reach, so its record stays.
-  it('reaps a left host run whose leader exited', async () => {
+  it('stops a left host run whose leader exited', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
     const child = spawn('sh', ['-c', `sleep 30 & echo $! > ${pidFile}`], {
@@ -741,10 +741,10 @@ describe('host runs', () => {
     await new Promise((resolve) => child.once('exit', resolve))
     const survivor = await escapedPid(pidFile)
     try {
-      expect(await reapHostRun(found, null, 15)).toBe(false)
-      expect(await reapHostRun(found, found.started - 60, 15)).toBe(false)
+      expect(await stopHostRun(found, null, 15)).toBe(false)
+      expect(await stopHostRun(found, found.started - 60, 15)).toBe(false)
       expect(running(survivor)).toBe(true)
-      expect(await reapHostRun({ ...found, exited: Date.now() / 1000 }, null, 15)).toBe(true)
+      expect(await stopHostRun({ ...found, exited: Date.now() / 1000 }, null, 15)).toBe(true)
       expect(await ended(survivor)).toBe(true)
     } finally {
       if (running(survivor)) process.kill(survivor, 'SIGKILL')
@@ -761,7 +761,7 @@ describe('host runs', () => {
     const path = process.env.PATH
     process.env.PATH = `${dir}:${path ?? ''}`
     try {
-      expect(await reapHostRun({ pid: 2 ** 22 + 7, started: Date.now() / 1000 }, null, 15)).toBe(
+      expect(await stopHostRun({ pid: 2 ** 22 + 7, started: Date.now() / 1000 }, null, 15)).toBe(
         false,
       )
     } finally {
@@ -786,7 +786,7 @@ describe('host runs', () => {
       return kill(target, signal)
     })
     try {
-      expect(await reapHostRun({ pid, started: Date.now() / 1000 }, null, 15)).toBe(false)
+      expect(await stopHostRun({ pid, started: Date.now() / 1000 }, null, 15)).toBe(false)
     } finally {
       spy.mockRestore()
       process.kill(-pid, 'SIGKILL')
@@ -839,9 +839,9 @@ it.skipIf(process.platform === 'win32')(
     const began = Date.now() / 1000
     const pid = leader.pid ?? 0
     try {
-      const rows = await hostStatus(new Map([[pid, ['run', began] as const]]))
+      const rows = await scanHost(new Map([[pid, ['run', began] as const]]))
       expect(rows.map((row) => [row.tag, row.pid])).toEqual([['run', pid]])
-      expect(await hostStatus(new Map([[pid, ['old', began - 3600] as const]]))).toEqual([])
+      expect(await scanHost(new Map([[pid, ['old', began - 3600] as const]]))).toEqual([])
     } finally {
       leader.kill('SIGKILL')
     }

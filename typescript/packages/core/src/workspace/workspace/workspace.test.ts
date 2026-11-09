@@ -390,13 +390,13 @@ describe('a manual clock workspace', () => {
 })
 
 /**
- * A sandbox runtime on machine `reapbox:b1` that records the processes it
- * was asked to reap, holds those of the pids in `holds`, and does not answer
+ * A sandbox runtime on machine `stopbox:b1` that records the processes it
+ * was asked to stop, holds those of the pids in `holds`, and does not answer
  * for pid 6.
  */
-class ReapedBox extends MachineHandle {
-  static override readonly provider = 'reapbox'
-  readonly reaped: [string, number][] = []
+class StoppedBox extends MachineHandle {
+  static override readonly provider = 'stopbox'
+  readonly stopped: [string, number][] = []
 
   constructor(private readonly holds: readonly number[]) {
     super('b1')
@@ -410,15 +410,14 @@ class ReapedBox extends MachineHandle {
     return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
   }
 
-  override reap(tag: string, signum: number): Promise<boolean> {
-    this.reaped.push([tag, signum])
+  override stop(tag: string, signum: number): Promise<boolean> {
+    this.stopped.push([tag, signum])
     const pid = Number(tag.slice(tag.lastIndexOf(':') + 1))
-    if (pid === 6) return Promise.reject(new Error('box not answering'))
-    return Promise.resolve(this.holds.includes(pid))
+    return Promise.resolve(pid !== 6 && this.holds.includes(pid))
   }
 }
 
-function boxProcess(pid: number, machine = 'reapbox:b1'): Record<string, unknown> {
+function boxProcess(pid: number, machine = 'stopbox:b1'): Record<string, unknown> {
   return { pid, session: 's', machine, runtime: 'x' }
 }
 
@@ -427,26 +426,23 @@ function boxProcess(pid: number, machine = 'reapbox:b1'): Record<string, unknown
 // process's tag. One the machine does not hold, one whose machine did not
 // answer, one on a machine this workspace does not declare and a host program
 // of another host are out of reach.
-it('reaps the programs its machines reach', async () => {
-  const box = new ReapedBox([2])
+it('stops the programs its machines reach', async () => {
+  const box = new StoppedBox([2])
   const ws = new Workspace({}, { machines: { b1: box } })
   try {
     const wid = ws.processTable.workspaceId
-    const reap = (
-      ws as unknown as {
-        reapProcess: (record: Record<string, unknown>, signum: number) => Promise<boolean>
-      }
-    ).reapProcess.bind(ws)
-    expect(await reap(boxProcess(2), 15)).toBe(true)
-    expect(await reap(boxProcess(3), 15)).toBe(false)
-    expect(await reap(boxProcess(6), 15)).toBe(false)
-    expect(await reap(boxProcess(4, 'other:b2'), 15)).toBe(false)
+    const stop = (record: Record<string, unknown>, signum: number) =>
+      ws.machineTable.stop(ws.processTable, record, signum)
+    expect(await stop(boxProcess(2), 15)).toBe(true)
+    expect(await stop(boxProcess(3), 15)).toBe(false)
+    expect(await stop(boxProcess(6), 15)).toBe(false)
+    expect(await stop(boxProcess(4, 'other:b2'), 15)).toBe(false)
     const host = {
       ...boxProcess(5, 'host:elsewhere'),
       machine_pid: { pid: 41, started: 1, exited: null },
     }
-    expect(await reap(host, 15)).toBe(false)
-    expect(box.reaped).toEqual([
+    expect(await stop(host, 15)).toBe(false)
+    expect(box.stopped).toEqual([
       [`${wid}:2`, 15],
       [`${wid}:3`, 15],
       [`${wid}:6`, 15],
@@ -458,8 +454,8 @@ it('reaps the programs its machines reach', async () => {
 
 // A workspace stops what a lapsed instance left as it starts, before anything
 // lists processes.
-it('reaps a lapsed instance as it starts', async () => {
-  const box = new ReapedBox([2])
+it('stops a lapsed instance as it starts', async () => {
+  const box = new StoppedBox([2])
   const ws = new Workspace({}, { machines: { b1: box } })
   try {
     const store = new RAMExecutionStore(30)
@@ -469,7 +465,7 @@ it('reaps a lapsed instance as it starts', async () => {
     await vi.waitFor(async () => {
       expect('dead' in (await store.processes())).toBe(false)
     })
-    expect(box.reaped).toEqual([[`${ws.processTable.workspaceId}:2`, 15]])
+    expect(box.stopped).toEqual([[`${ws.processTable.workspaceId}:2`, 15]])
   } finally {
     await ws.close()
   }

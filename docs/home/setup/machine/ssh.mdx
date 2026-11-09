@@ -96,13 +96,8 @@ Python on the machine too.
 
 ## Connecting the workspace
 
-A program on the machine opens workspace files at the same paths as in
-Mirage, so the machine must see the mounts there. With `mount_type: ssh`,
-Mirage serves every mount over the runtime's own connection and the machine
-mounts each with `sshfs`, as for
-[Docker](/home/setup/machine/docker#connecting-the-workspace). The
-machine needs `sshfs`, and passwordless `sudo` for a mountpoint its user
-cannot create (`/data`).
+Pick a [`mount_type`](/home/setup/machine/overview#connecting-the-workspace). With `ssh`, the machine needs `sshfs`, and
+passwordless `sudo` for a mountpoint its user cannot create (`/data`).
 
 Without `mount_type`, two ways:
 
@@ -128,38 +123,15 @@ runtimes:
 ```
 
 **Any other mount** (S3, Slack and so on). Install Mirage and `fuse3` on the
-machine. Write the same mounts at the same paths into `sandbox.yaml`, and
-start Mirage with it there:
-
-```yaml
-mounts:
-  /data:
-    vfs: s3
-    config:
-      bucket: my-bucket
-    backend: fuse
-    mountpoint: /data
-```
+machine, and start Mirage with a `sandbox.yaml` that lists the same paths:
 
 ```bash
 ssh mybox mirage workspace create sandbox.yaml
 ```
 
-Nothing checks that the paths match; a mismatch shows only when a program
-misses a file. For a friendlier name, put or link the directory at that path
-on the machine: Mirage never rewrites paths. A program on the machine opens its files directly, outside
-this workspace's mount modes and permissions.
-
-## Runtime behavior
-
-| Capability | On the machine |
-| --- | --- |
-| Command | The captured program and its words, as typed |
-| Piped input | stdin |
-| Environment | The session's, over the config `env` |
-| Working directory | The shell's, unchanged |
-| Workspace files | The machine's own paths; see [above](#connecting-the-workspace) |
-| Disk and network | The machine's own |
+Mirage never rewrites paths and nothing checks that they match. A program on
+the machine opens its files directly, outside this workspace's mount modes
+and permissions.
 
 ## Notes
 

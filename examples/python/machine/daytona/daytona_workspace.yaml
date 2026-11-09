@@ -7,7 +7,7 @@
 #
 #   set -a; source .env.development; set +a
 #   export DAYTONA_SANDBOX_ID=$(./python/.venv/bin/python \
-#     examples/python/runtime/sandbox/daytona/create_sandbox.py)
+#     examples/python/machine/daytona/create_sandbox.py)
 #   mirage workspace create daytona_workspace.yaml --id daytona-demo
 #   printf 'print("hello from the sandbox")\n' \
 #     | mirage shell -w daytona-demo -c 'cat > /data/hello.py'

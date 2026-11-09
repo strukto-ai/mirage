@@ -89,7 +89,6 @@ from mirage.execution.types import (
     JobId,
     LineId,
     MachineId,
-    MachinePid,
     ProcessId,
 )
 from mirage.io import IOResult
@@ -99,7 +98,7 @@ from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.machine.handle import MachineHandle
-from mirage.machine.program import host_status, reap_host_run, signal_host
+from mirage.machine.program import scan_host, signal_host, stop_host_run
 from mirage.observe.log_entry import EVENT_COMMAND, EVENT_RESULT, EVENT_VFS
 from mirage.observe.observer import Observer
 from mirage.observe.store import ObserverStore
@@ -207,7 +206,6 @@ from mirage.workspace.node.explain import (
     line_judgments,
     off_line_refusal,
 )
-from mirage.workspace.record.types import RecordFields
 from mirage.workspace.session import SessionManager, SessionState
 from mirage.workspace.session.budget import check_env_fits
 from mirage.workspace.session.constants import DEFAULT_PROFILE, MAX_ENV
@@ -453,7 +451,6 @@ class Workspace:
             clock=self._clock,
             daemon=daemon_id,
         )
-        self.job_table.reaper = self._reap_process
 
         def trace_job(record: Job) -> None:
             machine = next(
@@ -801,7 +798,12 @@ class Workspace:
             self._sandbox_mounts,
             self.process_table,
         )
-        self.machine_table = MachineTable(machines, host_status, signal_host)
+        self.machine_table = MachineTable(
+            machines, scan_host, signal_host, stop_host_run
+        )
+        self.job_table.run_stopper = lambda record, signum: (
+            self.machine_table.stop(self.process_table, record, signum)
+        )
         self.process_table.scanner = lambda: self.machine_table.scan(
             self.process_table, self._workspace_id
         )
@@ -838,7 +840,7 @@ class Workspace:
         except BaseException:
             self._registry.release_clocks()
             raise
-        self.machine_table.claim()
+        self.machine_table.hold_handles()
 
     async def history(
         self,
@@ -1623,48 +1625,6 @@ class Workspace:
     def runtimes(self) -> list[Runtime[Any]]:
         """The ordered runtime world, first capturer first."""
         return list(self._runtimes.entries)
-
-    async def _reap_process(self, record: RecordFields, signum: int) -> bool:
-        """Stop the program a lapsed workspace's process ran past the
-        workspace, answering whether this workspace reached it: a host
-        program by its pid when it ran on this host, a sandbox's run
-        through the machine it ran on, which stops what the process's tag
-        marks there. It counts as reached only
-        once a box held it and it was stopped: a box that holds none of
-        it, or one that could not be reached, leaves it to a workspace
-        that reaches its own.
-
-        Args:
-            record (RecordFields): the process, as its workspace published
-                it.
-            signum (int): the first signal.
-        """
-        machine, pid = record.get("machine"), record.get("pid")
-        found, seen = record.get("machine_pid"), record.get("seen_at")
-        if not isinstance(pid, int):
-            return False
-        if machine == str(self.process_table.machine) and isinstance(
-            found, dict
-        ):
-            return await reap_host_run(
-                MachinePid(found["pid"], found["started"], found["exited"]),
-                seen,
-                signum,
-            )
-        handle = (
-            self.machine_table.find(machine)
-            if isinstance(machine, str)
-            else None
-        )
-        if handle is None:
-            return False
-        try:
-            return await handle.reap(
-                str(ProcessId(self._workspace_id, pid)), signum
-            )
-        except Exception as exc:
-            logger.debug("%s: run not reaped: %s", machine, exc)
-            return False
 
     def add_runtime(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
         """Add a runtime entry to the workspace's ordered set;
@@ -2889,12 +2849,12 @@ class Workspace:
         The discovery record resolves first so a minted default session
         id can adopt the stored pointer before hydration keys off it. The
         first call also starts stopping what lapsed instances of the
-        workspace left running (``JobTable.reap_lapsed``). Closing waits
+        workspace left running (``JobTable.stop_lapsed``). Closing waits
         for the record's write in flight, so it never races the state's
         drop.
         """
         self._sync_bridge.observe()
-        self.job_table.reap_lapsed()
+        self.job_table.stop_lapsed()
         async with self._meta_lock:
             self._meta_loop = asyncio.get_running_loop()
             try:
