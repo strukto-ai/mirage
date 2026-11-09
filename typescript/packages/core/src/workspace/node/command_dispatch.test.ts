@@ -15,7 +15,11 @@
 import { describe, expect, it } from 'vitest'
 import type { Context } from '../../commands/config.ts'
 import { materialize } from '../../io/types.ts'
+import { MachineHandle } from '../../machine/handle.ts'
+import type { Policy } from '../../policy/base.ts'
 import { Outcome, Scope } from '../../policy/index.ts'
+import type { CommandContext, Route } from '../../policy/types.ts'
+import { MachineRuntime } from '../../runtime/machine/runtime.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
@@ -233,16 +237,18 @@ describe('a wrapper run outside Mirage', () => {
     })
   })
 
-  it.each(['nohup python3 -c x', 'nohup --help', 'nohup -- python3 -c x'])(
-    'runs a listed program: %s',
-    async (line) => {
-      await withBox({ commands: { allow: ['nohup', 'python3'] } }, async (ws, box) => {
-        const io = await ws.shell(line, { sessionId: 's' })
-        expect(io.exitCode).toBe(0)
-        expect(box.ran).toEqual([line.split(' ')])
-      })
-    },
-  )
+  it.each([
+    'nohup python3 -c x',
+    'nohup --help',
+    'nohup -- python3 -c x',
+    'nice --ad 5 python3 -c x',
+  ])('runs a listed program: %s', async (line) => {
+    await withBox({ commands: { allow: ['nohup', 'nice', 'python3'] } }, async (ws, box) => {
+      const io = await ws.shell(line, { sessionId: 's' })
+      expect(io.exitCode).toBe(0)
+      expect(box.ran).toEqual([line.split(' ')])
+    })
+  })
 
   it("reads its program's operands", async () => {
     const profile = { commands: { deny: [{ reason: 'secret', paths: ['/data/secret.py'] }] } }
@@ -293,5 +299,75 @@ describe('a wrapper run outside Mirage', () => {
         expect(box.ran).toEqual([['nohup', '/usr/bin/env', 'python3', '-c', 'x']])
       }
     })
+  })
+
+  // GNU env splits -S into a command line the gate cannot read, and the
+  // machine runs its own pip, not the session's function of that name.
+  it.each([
+    ['', "nohup time env --split-string='python3 -c x'", 'env'],
+    ['', "nohup time env -S 'python3 -c x'", 'env'],
+    ['pip() { echo harmless; }', 'nohup time pip --version', 'pip'],
+  ])('admits what the machine runs: %s %s', async (setup, line, refused) => {
+    await withBox({ commands: { allow: ['nohup', 'time', 'env', 'echo'] } }, async (ws, box) => {
+      if (setup !== '') await ws.shell(setup, { sessionId: 's' })
+      const io = await ws.shell(line, { sessionId: 's' })
+      expect([io.exitCode, text(io.stderr)]).toEqual([126, `${refused}: Permission denied\n`])
+      expect(box.ran).toEqual([])
+    })
+  })
+})
+
+class Named extends MachineHandle {
+  static override readonly provider = 'box'
+
+  connect(): Promise<void> {
+    return Promise.resolve()
+  }
+
+  protected override execArgv(): Promise<RunResult> {
+    return Promise.resolve({
+      stdout: new TextEncoder().encode(`${this.name}\n`),
+      stderr: null,
+      exitCode: 0,
+    })
+  }
+}
+
+class HostnameOn implements Policy {
+  constructor(private readonly machine: string) {}
+
+  preCommand(ctx: CommandContext): Route | null {
+    return ctx.command === 'hostname' ? { kind: 'route', machine: this.machine } : null
+  }
+}
+
+// The machine the wrapper runs on runs its program, so a route placing the
+// program on another one is refused, as in a line run whole.
+describe('a wrapper whose program is routed', () => {
+  it.each([
+    ['b', null],
+    ['a', 'a\n'],
+  ])('runs where the program goes: %s', async (machine, out) => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        machines: { a: new Named('a'), b: new Named('b') },
+        runtimes: [new MachineRuntime({ captures: ['hostname'], machine: 'a' }), 'workspace'],
+        policies: [new HostnameOn(machine)],
+      },
+    )
+    try {
+      expect(text((await ws.shell('hostname')).stdout)).toBe(`${machine}\n`)
+      const io = await ws.shell('nohup hostname')
+      if (out === null) {
+        expect([io.exitCode, text(io.stdout)]).toEqual([126, ''])
+        expect(io.refusal?.reason.startsWith('HostnameOn routes hostname elsewhere')).toBe(true)
+      } else {
+        expect([io.exitCode, text(io.stdout)]).toEqual([0, out])
+      }
+    } finally {
+      await ws.close()
+    }
   })
 })

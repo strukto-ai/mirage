@@ -164,6 +164,21 @@ function execInner(args: readonly Word[]): InnerLine[] {
 
 // `env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]`, read the
 // way the tree's `env` builtin reads it.
+// Whether an `env` word is GNU's `-S` / `--split-string`, whose value env
+// splits into the command line itself.
+function splits(word: string): boolean {
+  if (word.startsWith('--')) {
+    const name = word.slice(2).split('=', 1)[0] ?? ''
+    return name !== '' && 'split-string'.startsWith(name)
+  }
+  if (!word.startsWith('-')) return false
+  for (const flag of word.slice(1)) {
+    if (flag === 'S') return true
+    if ('uCa'.includes(flag)) return false
+  }
+  return false
+}
+
 function envInner(args: readonly Word[]): InnerLine[] {
   let i = 0
   while (i < args.length) {
@@ -172,6 +187,7 @@ function envInner(args: readonly Word[]): InnerLine[] {
       i += 1
       break
     }
+    if (splits(word)) return [UNREADABLE]
     if (ENV_FLAGS.has(word) || word.startsWith('--unset=')) {
       i += 1
       continue
@@ -247,19 +263,8 @@ function findInner(args: readonly Word[]): InnerLine[] {
 }
 
 // `nice [-n N] COMMAND [ARG]...`.
-function niceInner(args: readonly Word[]): InnerLine[] {
-  let i = 0
-  while (i < args.length && valueAt(args, i).startsWith('-')) {
-    const word = valueAt(args, i)
-    i += 1
-    if (word === '--') break
-    if (word === '-n' || word === '--adjustment') i += 1
-  }
-  return asArgv(args.slice(i))
-}
-
-// `nohup`, `stdbuf`, `setsid` and `ionice` run what stands after their own
-// options.
+// `nohup`, `nice`, `stdbuf`, `setsid` and `ionice` run what stands after
+// their own options.
 function wrapperInner(head: string, args: readonly Word[]): InnerLine[] {
   const [at] = readWrapper(
     head,
@@ -345,7 +350,6 @@ export function innerLines(head: string, args: readonly Word[]): InnerLine[] {
     case 'find':
       return findInner(args)
     case 'nice':
-      return niceInner(args)
     case 'nohup':
     case 'stdbuf':
     case 'setsid':
