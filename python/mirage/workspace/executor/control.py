@@ -474,6 +474,8 @@ class _ConstructHost(ExpandHost):
             _keep(self.all_stdout, sig.stdout)
             self.merged_io = await self.merged_io.merge(sig.io)
             self.loop_signal = sig
+            if framed:
+                frame(session, self.call_stack)
             tag = "break" if isinstance(sig, BreakSignal) else "continue"
             return sig.io.exit_code, tag, sig.levels, False
         except UNWINDING as sig:

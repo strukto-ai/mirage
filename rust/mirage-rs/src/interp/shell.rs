@@ -44,6 +44,9 @@ pub struct Shell {
     pub paren: bool,
     /// An ERR action is set, which a failing statement runs on the host.
     pub err_trap: bool,
+    /// A loop is trying a statement that may yet go to the host, so an
+    /// arithmetic expansion that would write or fail stops instead.
+    pub attempting: bool,
 }
 
 /// What a host hands the shell before an operation: the parameters, the
@@ -125,6 +128,7 @@ impl Shell {
             outside: 0,
             paren: false,
             err_trap: false,
+            attempting: false,
         }
     }
 

@@ -407,6 +407,7 @@ class ConstructHost extends ExpandHost {
         keep(this.allStdout, sig.stdout)
         this.mergedIo = await this.mergedIo.merge(sig.io)
         this.loopSignal = sig
+        if (framed) frame(session, this.callStack)
         const tag = sig instanceof BreakSignal ? 'break' : 'continue'
         return [sig.io.exitCode, tag, sig.levels, false]
       }

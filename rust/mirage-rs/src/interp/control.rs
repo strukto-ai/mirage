@@ -156,16 +156,17 @@ pub trait Runs {
 /// A statement that runs inside the loop: it touches no stream, no mount
 /// and no state of the host's.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Quick {
-    Arith {
-        node: usize,
-        line: usize,
-    },
-    Assign {
-        name: String,
-        value: Option<usize>,
-        line: usize,
-    },
+struct Quick {
+    /// Its place in the host's list.
+    at: usize,
+    line: usize,
+    action: Action,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Action {
+    Arith(usize),
+    Assign(String, Option<usize>),
 }
 
 /// Whether a node expands with nothing happening but reads.
@@ -183,7 +184,7 @@ fn calm(tree: &Tree, node: usize) -> bool {
 /// Whether an assignment's value is one of the words that expand quietly.
 fn plain_word(tree: &Tree, node: usize) -> bool {
     let reading = match tree.kind(node) {
-        "arithmetic_expansion" => tree.children(node).all(|child| !writes(tree, child)),
+        "arithmetic_expansion" => true,
         "word" | "number" | "raw_string" | "string" | "simple_expansion" | "expansion"
         | "concatenation" => tree
             .named_children(node)
@@ -194,27 +195,7 @@ fn plain_word(tree: &Tree, node: usize) -> bool {
     reading && calm(tree, node)
 }
 
-/// Whether an arithmetic node assigns.
-fn writes(tree: &Tree, node: usize) -> bool {
-    matches!(
-        tree.kind(node),
-        "=" | "+="
-            | "-="
-            | "*="
-            | "/="
-            | "%="
-            | "**="
-            | "<<="
-            | ">>="
-            | "&="
-            | "^="
-            | "|="
-            | "++"
-            | "--"
-    ) || tree.children(node).any(|child| writes(tree, child))
-}
-
-fn quick_statement(tree: &Tree, node: usize, line: usize) -> Option<Quick> {
+fn quick_action(tree: &Tree, node: usize) -> Option<Action> {
     let parent = tree.nodes[node].parent;
     let backgrounded = parent != u32::MAX
         && tree.children(parent as usize).contains(&(node + 1))
@@ -225,7 +206,7 @@ fn quick_statement(tree: &Tree, node: usize, line: usize) -> Option<Quick> {
     let children: Vec<usize> = tree.children(node).collect();
     match tree.kind(node) {
         "compound_statement" if tree.kind(*children.first()?) == "((" && calm(tree, node) => {
-            Some(Quick::Arith { node, line })
+            Some(Action::Arith(node))
         }
         "variable_assignment" => {
             let [name, operator, rest @ ..] = children.as_slice() else {
@@ -239,11 +220,7 @@ fn quick_statement(tree: &Tree, node: usize, line: usize) -> Option<Quick> {
                 && spelled != "OPTIND"
                 && spelled != "PIPESTATUS"
                 && value.is_none_or(|value| plain_word(tree, value));
-            plain.then(|| Quick::Assign {
-                name: spelled.to_owned(),
-                value,
-                line,
-            })
+            plain.then(|| Action::Assign(spelled.to_owned(), value))
         }
         _ => None,
     }
@@ -253,8 +230,12 @@ fn quick_statement(tree: &Tree, node: usize, line: usize) -> Option<Quick> {
 fn quick_list(tree: &Tree, nodes: &[(usize, usize)]) -> Option<Vec<Quick>> {
     let statements = nodes
         .iter()
-        .filter(|&&(node, _)| tree.kind(node) != "comment")
-        .map(|&(node, line)| quick_statement(tree, node, line))
+        .enumerate()
+        .filter(|&(_, &(node, _))| tree.kind(node) != "comment")
+        .map(|(at, &(node, line))| {
+            let action = quick_action(tree, node)?;
+            Some(Quick { at, line, action })
+        })
         .collect::<Option<Vec<_>>>()?;
     (!statements.is_empty()).then_some(statements)
 }
@@ -304,21 +285,20 @@ impl<H: Host + Runs> Walk<'_, H> {
     /// Run a statement here. None leaves the shell as it was, for the host
     /// to run it and report what it finds.
     async fn quick(&mut self, statement: &Quick) -> Option<i32> {
-        match statement {
-            Quick::Arith { node, line } => {
-                self.shell.vars.set_line(*line);
-                let text = self.expander().arith(*node).await.ok()?;
-                let value =
-                    Writer::of(self.shell, Some(&mut *self.diagnostics)).clean_arith(&text)?;
-                Some(i32::from(value == 0))
-            }
-            Quick::Assign { name, value, line } => {
-                self.shell.vars.set_line(*line);
-                let value = match value {
-                    Some(node) => self.expander().assignment(*node).await.ok()?,
-                    None => Vec::new(),
-                };
-                Writer::of(self.shell, Some(&mut *self.diagnostics)).clean_scalar(name, &value)?;
+        self.shell.vars.set_line(statement.line);
+        self.shell.attempting = true;
+        let expanded = match &statement.action {
+            Action::Arith(node) => self.expander().arith(*node).await,
+            Action::Assign(_, Some(node)) => self.expander().assignment(*node).await,
+            Action::Assign(_, None) => Ok(Vec::new()),
+        };
+        self.shell.attempting = false;
+        let expanded = expanded.ok()?;
+        let mut writer = Writer::of(self.shell, Some(&mut *self.diagnostics));
+        match &statement.action {
+            Action::Arith(_) => Some(i32::from(writer.clean_arith(&expanded)? == 0)),
+            Action::Assign(name, _) => {
+                writer.clean_scalar(name, &expanded)?;
                 self.shell.vars.seed("_", Value::Scalar(Vec::new()));
                 Some(0)
             }
@@ -336,16 +316,18 @@ impl<H: Host + Runs> Walk<'_, H> {
             self.turns = self.turns.wrapping_add(1);
             if self.turns % QUICK_TURNS != 0 {
                 let mut status = 0;
+                let mut stopped = None;
                 for statement in statements {
                     let Some(ended) = self.quick(statement).await else {
+                        stopped = Some(statement.at);
                         break;
                     };
                     status = ended;
-                    start += 1;
                     self.shell.record_status(status);
                     self.pending = Some(status);
                 }
-                if start == statements.len() {
+                start = stopped.unwrap_or_default();
+                if stopped.is_none() {
                     if !test {
                         self.status = Some(status);
                     }
@@ -558,11 +540,11 @@ impl<H: Host + Runs> Walk<'_, H> {
     }
 
     async fn case(&mut self, word: Vec<u8>, arms: Vec<Arm>) -> Result<Control, Fault> {
-        let utf8 = self.shell.utf8();
         let mut fallthrough = false;
         for arm in arms {
-            // An arm a `;;&` left can have turned extglob on for this one.
+            // An arm a `;;&` left can have changed either for this one.
             let extglob = self.shell.shopt("extglob");
+            let utf8 = self.shell.utf8();
             let mut matched = fallthrough;
             for &node in &arm.patterns {
                 if matched {
@@ -922,6 +904,34 @@ mod tests {
     }
 
     #[test]
+    fn a_comment_keeps_the_host_at_the_statement_that_failed() {
+        let mut shell = shell();
+        let construct = Construct::For {
+            variable: "v".to_owned(),
+            values: vec![b"1".to_vec()],
+            body: 0,
+        };
+        let line = b"# c\n((x++))\n((1/0))";
+        let (_, starts) = drive_line(&mut shell, line, &[(0, 3)], construct);
+        assert_eq!(starts, vec![2]);
+        assert_eq!(shell.vars.scalar("x"), Some(&b"1"[..]));
+    }
+
+    #[test]
+    fn an_expansion_that_would_write_lands_nothing_before_the_host_runs_it() {
+        let mut shell = shell();
+        let construct = Construct::For {
+            variable: "v".to_owned(),
+            values: vec![b"1".to_vec()],
+            body: 0,
+        };
+        let line = b"(( $((x++)) / 0 ))";
+        let (_, starts) = drive_line(&mut shell, line, &[(0, 1)], construct);
+        assert_eq!(starts, vec![0]);
+        assert_eq!(shell.vars.scalar("x"), None);
+    }
+
+    #[test]
     fn a_traced_shell_runs_every_list_on_the_host() {
         let mut shell = shell();
         shell.options.insert("xtrace".to_owned(), true);
@@ -947,7 +957,6 @@ mod tests {
             &b"x=$(date)"[..],
             b"((i+=$(date)))",
             b"x=${y:-z}",
-            b"z=$((i++))",
             b"PIPESTATUS=1",
             b"x+=1",
             b"a[0]=1",
