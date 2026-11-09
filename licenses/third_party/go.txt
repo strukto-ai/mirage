@@ -1,12 +1,10 @@
-In python/mirage/commands/cli/builtin/gh/constants.py and
-typescript/packages/core/src/commands/cli/builtin/gh/constants.ts,
-HTTP_REASONS are the reason phrases of net/http's StatusText in the Go 1.25.5
-standard library (https://github.com/golang/go), the toolchain gh 2.85.0
-builds with, and the TEMPLATE_ patterns read the action syntax of its
-text/template; and python/mirage/commands/cli/builtin/gh/shape.py,
-typescript/packages/core/src/commands/cli/builtin/gh/shape.ts and the fields
-modules beside them print a field the way its encoding/json marshals the Go
-type gh decodes the field into. Go carries this notice:
+In rust/mirage-rs/src/cli/gh/, http_reason in constants.rs gives the reason
+phrases of net/http's StatusText in the Go 1.25.5 standard library
+(https://github.com/golang/go), the toolchain gh 2.85.0 builds with, and
+template.rs runs a template as its text/template does; shape.rs, fields.rs and
+accessor.rs print a field, and rust/mirage-rs/src/core/github/json.rs a number
+or a string, the way its encoding/json marshals the Go type gh decodes the
+field into. Go carries this notice:
 
 Copyright 2009 The Go Authors.
 

@@ -15,19 +15,13 @@
 # Repository arguments are read as go-gh v2.13.0 reads them (MIT; see
 # licenses/third_party/go-gh.txt).
 
-import base64
 from dataclasses import dataclass
 from typing import Any, cast
 from urllib.parse import urlsplit
 
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
-from mirage.core.github.client import (
-    GitHubApiError,
-    github_get,
-    github_request,
-)
+from mirage.core.github.client import github_get, github_request
 from mirage.core.github.constants import GRAPHQL_PATH
-from mirage.core.github.paginate import github_pages
 from mirage.types import JsonValue
 
 
@@ -213,12 +207,6 @@ async def login(account: GitHubAccount) -> str:
     return name if isinstance(name, str) else ""
 
 
-async def view_repo(account: GitHubAccount, ref: RepoRef) -> JsonValue:
-    return await github_request(
-        account, "GET", f"/repos/{ref.owner}/{ref.repo}"
-    )
-
-
 async def graphql_data(
     account: GitHubAccount, query: str, variables: dict[str, JsonValue]
 ) -> dict[str, Any]:
@@ -249,205 +237,3 @@ async def graphql_data(
         raise ValueError(f"GraphQL: {', '.join(messages)}")
     data = payload.get("data")
     return data if isinstance(data, dict) else {}
-
-
-async def repository_fields(
-    account: GitHubAccount, ref: RepoRef, selection: str
-) -> dict[str, Any]:
-    """The selected fields of one repository, over GraphQL, as gh reads
-    them for ``repo view --json``: one query naming only what was asked
-    for.
-
-    Args:
-        account (GitHubAccount): the token, API base and pool to ride.
-        ref (RepoRef): the repository.
-        selection (str): the GraphQL selection inside ``repository { }``.
-    """
-    data = await graphql_data(
-        account,
-        "query RepositoryInfo($owner: String!, $name: String!) {\n"
-        f"    repository(owner: $owner, name: $name) {{{selection}}}\n  }}",
-        {"owner": ref.owner, "name": ref.repo},
-    )
-    repository = data.get("repository")
-    return repository if isinstance(repository, dict) else {}
-
-
-async def list_repository_fields(
-    account: GitHubAccount, owner: str | None, limit: int, selection: str
-) -> list[dict[str, Any]]:
-    """The selected fields of an owner's repositories, over GraphQL, as gh
-    reads them for ``repo list --json``: the owner's own, most recently
-    pushed first, a page of up to 100 at a time until ``limit``. No owner
-    means the viewer.
-
-    Args:
-        account (GitHubAccount): the token, API base and pool to ride.
-        owner (str | None): the user or organization, or the viewer.
-        limit (int): how many repositories at most.
-        selection (str): the GraphQL selection for each repository.
-    """
-    if owner is None:
-        head = (
-            "query RepositoryList($perPage:Int!,$endCursor:String,"
-            "$privacy:RepositoryPrivacy,$fork:Boolean) {\n"
-            "    repositoryOwner: viewer {"
-        )
-    else:
-        head = (
-            "query RepositoryList($perPage:Int!,$endCursor:String,"
-            "$privacy:RepositoryPrivacy,$fork:Boolean,$owner:String!) {\n"
-            "    repositoryOwner(login: $owner) {"
-        )
-    query = (
-        f"{head}\n      login\n      repositories(first: $perPage, "
-        "after: $endCursor, privacy: $privacy, isFork: $fork, "
-        "ownerAffiliations: OWNER, orderBy: { field: PUSHED_AT, "
-        f"direction: DESC }}) {{\n        nodes{{{selection}}}\n"
-        "        totalCount\n        pageInfo{hasNextPage,endCursor}\n"
-        "      }\n    }\n  }"
-    )
-    rows: list[dict[str, Any]] = []
-    cursor: str | None = None
-    while len(rows) < limit:
-        variables: dict[str, JsonValue] = {"perPage": min(limit, 100)}
-        if owner is not None:
-            variables["owner"] = owner
-        if cursor is not None:
-            variables["endCursor"] = cursor
-        data = await graphql_data(account, query, variables)
-        owner_node = data.get("repositoryOwner") or {}
-        page = owner_node.get("repositories") or {}
-        rows.extend(page.get("nodes") or [])
-        info = page.get("pageInfo") or {}
-        following = info.get("endCursor")
-        if not info.get("hasNextPage") or following in (None, cursor):
-            break
-        cursor = following
-    return rows[:limit]
-
-
-async def read_readme(account: GitHubAccount, ref: RepoRef) -> str | None:
-    """The repository's README as text, or None when it has none.
-
-    Args:
-        account (GitHubAccount): the token, API base and pool to ride.
-        ref (RepoRef): the repository.
-
-    Returns:
-        str | None: the decoded README, None when the repo has none.
-    """
-    try:
-        data = await github_request(
-            account, "GET", f"/repos/{ref.owner}/{ref.repo}/readme"
-        )
-    except GitHubApiError as exc:
-        if exc.status == 404:
-            return None
-        raise
-    if not isinstance(data, dict):
-        return None
-    content = data.get("content")
-    if not isinstance(content, str):
-        return None
-    return base64.b64decode(content).decode("utf-8", "replace")
-
-
-async def fork_repo(
-    account: GitHubAccount,
-    ref: RepoRef,
-    body: dict[str, JsonValue] | None = None,
-) -> JsonValue:
-    """Fork a repository.
-
-    Args:
-        account (GitHubAccount): the token, API base and pool to ride.
-        ref (RepoRef): the repository to fork.
-        body (dict[str, JsonValue] | None): the request's ``name``,
-            ``organization`` and ``default_branch_only``.
-    """
-    return await github_request(
-        account, "POST", f"/repos/{ref.owner}/{ref.repo}/forks", body or {}
-    )
-
-
-async def edit_repo(
-    account: GitHubAccount, ref: RepoRef, body: dict[str, JsonValue]
-) -> JsonValue:
-    """Change a repository's settings: the one PATCH ``gh repo edit`` sends.
-
-    Args:
-        account (GitHubAccount): the token, API base and pool to ride.
-        ref (RepoRef): the repository.
-        body (dict[str, JsonValue]): the settings to change.
-    """
-    return await github_request(
-        account, "PATCH", f"/repos/{ref.owner}/{ref.repo}", body
-    )
-
-
-async def repo_topics(account: GitHubAccount, ref: RepoRef) -> list[str]:
-    """A repository's topics, which GitHub keeps and replaces as one list.
-
-    Args:
-        account (GitHubAccount): the token, API base and pool to ride.
-        ref (RepoRef): the repository.
-    """
-    data = await github_request(
-        account, "GET", f"/repos/{ref.owner}/{ref.repo}/topics"
-    )
-    names = data.get("names") if isinstance(data, dict) else None
-    return (
-        [n for n in names if isinstance(n, str)]
-        if isinstance(names, list)
-        else []
-    )
-
-
-async def set_repo_topics(
-    account: GitHubAccount, ref: RepoRef, names: list[str]
-) -> JsonValue:
-    return await github_request(
-        account,
-        "PUT",
-        f"/repos/{ref.owner}/{ref.repo}/topics",
-        {"names": cast(JsonValue, names)},
-    )
-
-
-async def delete_repo(account: GitHubAccount, ref: RepoRef) -> JsonValue:
-    return await github_request(
-        account, "DELETE", f"/repos/{ref.owner}/{ref.repo}"
-    )
-
-
-async def rename_repo(
-    account: GitHubAccount, ref: RepoRef, name: str
-) -> JsonValue:
-    return await github_request(
-        account, "PATCH", f"/repos/{ref.owner}/{ref.repo}", {"name": name}
-    )
-
-
-async def list_repos(
-    account: GitHubAccount, owner: str | None, limit: int
-) -> list[dict[str, Any]]:
-    path = "/user/repos"
-    if owner is not None:
-        user = await github_request(account, "GET", f"/users/{owner}")
-        kind = user.get("type") if isinstance(user, dict) else None
-        prefix = "orgs" if kind == "Organization" else "users"
-        path = f"/{prefix}/{owner}/repos"
-    return await github_pages(
-        account, path, params={"sort": "pushed"}, limit=limit
-    )
-
-
-async def create_repo(
-    account: GitHubAccount, owner: str | None, body: dict[str, JsonValue]
-) -> JsonValue:
-    personal = owner is None
-    if owner is not None:
-        personal = owner.casefold() == (await login(account)).casefold()
-    path = "/user/repos" if personal else f"/orgs/{owner}/repos"
-    return await github_request(account, "POST", path, body)

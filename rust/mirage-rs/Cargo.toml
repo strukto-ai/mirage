@@ -8,6 +8,10 @@ repository.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# The GitHub CLI, which the Python module and its own Wasm module carry.
+gh = []
+
 [dependencies]
 blake2 = { version = "0.11", default-features = false }
 byteorder = "1.5"

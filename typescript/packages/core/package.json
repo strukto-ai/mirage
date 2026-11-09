@@ -55,6 +55,7 @@
     },
     "./mirage_rs.wasm": "./dist/generated/mirage_rs.wasm",
     "./mirage_shell.wasm": "./dist/generated/mirage_shell.wasm",
+    "./mirage_gh.wasm": "./dist/generated/mirage_gh.wasm",
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js"
@@ -73,6 +74,12 @@
       "workerd": "./dist/generated/mirage_shell.workerd.js",
       "node": "./dist/generated/mirage_shell.node.js",
       "default": "./dist/generated/mirage_shell.js"
+    },
+    "#mirage-gh-wasm": {
+      "types": "./src/generated/mirage_gh.ts",
+      "workerd": "./dist/generated/mirage_gh.workerd.js",
+      "node": "./dist/generated/mirage_gh.node.js",
+      "default": "./dist/generated/mirage_gh.js"
     }
   },
   "files": [

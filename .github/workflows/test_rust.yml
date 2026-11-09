@@ -63,7 +63,7 @@ jobs:
       # The browser's target. Every TypeScript job also builds the release
       # wasm through embed-rs.mjs.
       - name: Clippy (wasm)
-        run: cargo clippy -p mirage-rs-wasm -p mirage-shell-wasm --target wasm32-unknown-unknown --locked -- -D warnings
+        run: cargo clippy -p mirage-rs-wasm -p mirage-shell-wasm -p mirage-gh-wasm --target wasm32-unknown-unknown --locked -- -D warnings
       # A host no wheel covers, so a dependency that needs a C toolchain,
       # threads or the filesystem fails here and not in a release.
       - name: Check (Android)
@@ -79,7 +79,7 @@ jobs:
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].rust_version')
           rustup toolchain install "$version" --profile minimal --target wasm32-unknown-unknown
           cargo "+$version" check --workspace --all-targets
-          cargo "+$version" check -p mirage-rs-wasm -p mirage-shell-wasm --target wasm32-unknown-unknown
+          cargo "+$version" check -p mirage-rs-wasm -p mirage-shell-wasm -p mirage-gh-wasm --target wasm32-unknown-unknown
       - name: Licenses
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:

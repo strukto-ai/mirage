@@ -47,6 +47,13 @@ This list is generated from Mirage's registered command tree.
 | `gh issue close` | Close an issue |
 | `gh issue reopen` | Reopen an issue |
 | `gh issue comment` | Add a comment to an issue |
+| `gh issue delete` | Delete issue |
+| `gh issue lock` | Lock issue conversation |
+| `gh issue pin` | Pin an issue to a repository |
+| `gh issue status` | Show status of relevant issues |
+| `gh issue transfer` | Transfer issue to another repository |
+| `gh issue unlock` | Unlock issue conversation |
+| `gh issue unpin` | Unpin an issue from a repository |
 | `gh pr list` | List pull requests. Aliases: `ls`. |
 | `gh pr view` | View a pull request |
 | `gh pr create` | Create a pull request. Aliases: `new`. |
@@ -57,6 +64,13 @@ This list is generated from Mirage's registered command tree.
 | `gh pr comment` | Add a comment to a pull request |
 | `gh pr diff` | View changes in a pull request |
 | `gh pr checks` | Show CI checks for a pull request |
+| `gh pr lock` | Lock pull request conversation |
+| `gh pr ready` | Mark a pull request as ready for review |
+| `gh pr revert` | Revert a pull request |
+| `gh pr review` | Add a review to a pull request |
+| `gh pr status` | Show status of relevant pull requests |
+| `gh pr unlock` | Unlock pull request conversation |
+| `gh pr update-branch` | Update a pull request branch with latest changes of the base branch |
 | `gh repo list` | List repositories. Aliases: `ls`. |
 | `gh repo clone` | Clone a repository locally |
 | `gh repo view` | View a repository |
@@ -65,20 +79,65 @@ This list is generated from Mirage's registered command tree.
 | `gh repo rename` | Rename a repository |
 | `gh repo edit` | Edit repository settings |
 | `gh repo delete` | Delete a repository |
+| `gh repo archive` | Archive a GitHub repository |
+| `gh repo sync` | Sync destination repository from source repository |
+| `gh repo unarchive` | Unarchive a GitHub repository |
+| `gh repo autolink create` | Create a new autolink reference for a repository. Aliases: `new`. |
+| `gh repo autolink delete` | Delete an autolink reference for a repository |
+| `gh repo autolink list` | Gets all autolink references that are configured for a repository. Aliases: `ls`. |
+| `gh repo autolink view` | View an autolink reference for a repository |
+| `gh repo deploy-key add` | Add a deploy key to a GitHub repository |
+| `gh repo deploy-key delete` | Delete a deploy key from a GitHub repository |
+| `gh repo deploy-key list` | List deploy keys in a GitHub repository. Aliases: `ls`. |
+| `gh repo gitignore list` | List available repository gitignore templates. Aliases: `ls`. |
+| `gh repo gitignore view` | View an available repository `.gitignore` template |
+| `gh repo license list` | List common repository licenses. Aliases: `ls`. |
+| `gh repo license view` | View a specific repository license by license key or SPDX ID |
 | `gh release list` | List releases. Aliases: `ls`. |
 | `gh release view` | View a release |
 | `gh release create` | Create a release |
+| `gh release delete` | Delete a release |
+| `gh release delete-asset` | Delete an asset from a release |
+| `gh release edit` | Edit a release |
 | `gh run list` | List workflow runs. Aliases: `ls`. |
 | `gh run view` | View a workflow run |
 | `gh run rerun` | Rerun a workflow run |
+| `gh run cancel` | Cancel a workflow run |
+| `gh run delete` | Delete a workflow run |
 | `gh workflow list` | List workflows. Aliases: `ls`. |
 | `gh workflow view` | View a workflow |
 | `gh workflow run` | Run a workflow |
+| `gh workflow disable` | Disable a workflow, preventing it from running or showing up when listing workflows |
+| `gh workflow enable` | Enable a workflow, allowing it to be run and show up when listing workflows |
 | `gh search issues` | Search for issues |
 | `gh search prs` | Search for prs |
 | `gh search repos` | Search for repos |
 | `gh search code` | Search for code |
 | `gh search commits` | Search for commits |
+| `gh cache delete` | Delete GitHub Actions caches |
+| `gh cache list` | List GitHub Actions caches. Aliases: `ls`. |
+| `gh gist create` | Create a new GitHub gist with given contents. Aliases: `new`. |
+| `gh gist delete` | Delete a GitHub gist |
+| `gh gist edit` | Edit one of your gists |
+| `gh gist list` | List gists from your user account. Aliases: `ls`. |
+| `gh gist rename` | Rename a file in the given gist ID / URL |
+| `gh gist view` | View the given gist or select from recent gists |
+| `gh gist clone` | Clone a GitHub gist locally |
+| `gh label clone` | Clones labels from a source repository to a destination repository on GitHub |
+| `gh label create` | Create a new label on GitHub, or update an existing one with `--force` |
+| `gh label delete` | Delete a label from a repository |
+| `gh label edit` | Update a label on GitHub |
+| `gh label list` | Display labels in a GitHub repository. Aliases: `ls`. |
+| `gh org list` | List organizations for the authenticated user. Aliases: `ls`. |
+| `gh ruleset check` | View information about GitHub rules that apply to a given branch |
+| `gh ruleset list` | List GitHub rulesets for a repository or organization. Aliases: `ls`. |
+| `gh ruleset view` | View information about a GitHub ruleset |
+| `gh secret delete` | Delete a secret on one of the following levels:. Aliases: `remove`. |
+| `gh secret list` | List secrets on one of the following levels:. Aliases: `ls`. |
+| `gh variable delete` | Delete a variable on one of the following levels:. Aliases: `remove`. |
+| `gh variable get` | Get a variable on one of the following levels: |
+| `gh variable list` | List variables on one of the following levels:. Aliases: `ls`. |
+| `gh variable set` | Set a value for a variable on one of the following levels: |
 {/* END GENERATED CLI COMMANDS */}
 
 ## Issues, pull requests and Actions
@@ -96,9 +155,8 @@ gh workflow view ci.yml --yaml --ref release
 
 Use `-R/--repo [HOST/]OWNER/REPO` where supported to override the configured
 repository. Typed `--jq` requires `--json`. List commands paginate up to
-`-L/--limit`; issue, pull-request and repository JSON fields follow the
-supported upstream field sets. Other typed groups expose smaller REST-backed
-field sets; use `gh api` for additional data.
+`-L/--limit`. Typed `--json` fields follow upstream's for each command, except
+`jobs` on `run view`; use `gh api` for additional data.
 
 ```bash
 gh issue create --title 'Broken build' --body-file /work/issue.md --label bug
@@ -163,10 +221,10 @@ gh api graphql -f query='{viewer{login}}'
 | `-F` / `--field` | Typed booleans, null and integers; `@FILE` reads a workspace file and `@-` reads stdin |
 | `-X` / `--method` | Explicit method; GET fields become query parameters, other methods use JSON |
 | `key[nested]`, `key[]` | Nested objects and arrays |
-| `--input FILE` | JSON body from a file or `-`; additional fields move to the query string |
+| `--input FILE` | Request body from a file or `-`, sent as raw bytes; additional fields move to the query string |
 | `-H` / `--header` | Add or replace a header |
-| `--paginate` | Follow REST Link headers; array pages are joined |
-| `--slurp` | Wrap pages in an array; Mirage also permits `--jq` on that array |
+| `--paginate` | Follow REST Link headers, joining array pages, or a GraphQL query's `endCursor` |
+| `--slurp` | Wrap pages in an array; cannot be combined with `--jq` |
 | `-i` / `--include` | Print status and headers for each response, including failures |
 | `--silent` | Suppress the response body; `--include` still prints headers |
 | `-q` / `--jq` | Filter API output in process; unlike typed commands, needs no `--json` |
@@ -194,9 +252,9 @@ invalidate mounted caches; read API methods leave them intact.
 | Interactive tools | No editor, browser, extension manager, codespace or host-checkout workflow. |
 | Pull-request creation | Requires a title and a body or body file. `--head` defaults to `branch` and `--base` to the repository's default branch. |
 | Forks | `--clone` is refused; `--remote` without a repository is refused. |
-| Repository operations | No archive, unarchive, sync, deploy-key, autolink, gitignore, license or set-default verbs. |
-| Release assets and live runs | Asset upload and `run watch` are absent. |
-| Raw API | JSON `--input` only; REST pagination only; no verbose or cache flags. |
+| Repository operations | No `repo set-default`. `repo sync` acts on a repository on GitHub, never a local checkout. |
+| Release assets and live runs | `release upload`, `release download`, `run watch` and `run download` are absent. |
+| Raw API | REST pagination only; no verbose, cache, hostname, preview or template flags. |
 | Help topics | `environment` and `exit-codes` are supported, alongside command help. |
 | HTTP display | `--include` prints HTTP/1.1 rather than upstream's HTTP/2.0 display. |
 | jq compatibility | Uses jq rather than gojq: builtin error wording and floating-point edge cases can differ. Numbers above 2^53 can lose precision; NaN, infinities and negative zero follow jq's values. |

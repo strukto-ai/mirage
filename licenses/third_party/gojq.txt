@@ -1,8 +1,7 @@
-GOJQ_RAISED in python/mirage/commands/cli/builtin/gh/constants.py and
-typescript/packages/core/src/commands/cli/builtin/gh/constants.ts lists the
-builtins that gojq v0.12.17 (https://github.com/itchyny/gojq), the version gh
-2.85.0 builds with, writes in jq in its builtin.jq, with the messages they
-raise. gojq carries this notice:
+gojq_raised in rust/mirage-rs/src/cli/gh/constants.rs lists the builtins that
+gojq v0.12.17 (https://github.com/itchyny/gojq), the version gh 2.85.0 builds
+with, writes in jq in its builtin.jq, with the messages they raise. gojq
+carries this notice:
 
 The MIT License (MIT)
 

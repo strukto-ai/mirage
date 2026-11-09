@@ -45,6 +45,7 @@ export interface ReleaseRow {
 export function releaseJson(repo: RepoRow, row: ReleaseRow): JsonValue {
   return {
     id: row.id,
+    url: `https://api.github.com/repos/${repo.fullName}/releases/${String(row.id)}`,
     tag_name: row.tagName,
     target_commitish: row.targetCommitish,
     name: row.name,

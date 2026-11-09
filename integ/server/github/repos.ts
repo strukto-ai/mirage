@@ -12,12 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { JsonValue, KitRoute } from '../kit/typescript/index.ts'
+import type { Ctx, JsonValue, KitRoute } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN, REPO_DATE } from './config.ts'
 import type { C } from './config.ts'
 import { commitHistory } from './compare.ts'
-import { PROJECTS_CLASSIC_GONE, nodeId, ownerNode, rootCommit } from './wire.ts'
+import {
+  EMPTY_PAGE,
+  PROJECTS_CLASSIC_GONE,
+  nodeId,
+  ownerNode,
+  rootCommit,
+  userNode,
+} from './wire.ts'
 import { createReposAllowed, initRepo } from './seed.ts'
+import { labelConnection, releaseConnection, rulesetPage } from './admin.ts'
 import { commentConnection, issueConnection, issueNode, issueRow } from './issues.ts'
 import type { IssueRow, IssuesArgs } from './issues.ts'
 import { commitNode, pullRequestConnection, pullRequestNode, pullRow } from './pulls.ts'
@@ -335,8 +343,15 @@ export async function repositoryNode(
     }),
     issueTemplates: [],
     pullRequestTemplates: [],
-    labels: { nodes: [] },
-    milestones: { nodes: [] },
+    labels: labelConnection(ctx, repo),
+    milestones: { nodes: [], pageInfo: EMPTY_PAGE },
+    milestone: () => null,
+    releases: releaseConnection(ctx, repo),
+    rulesets: rulesetPage(ctx, repo.fullName),
+    release: async ({ tagName }: { tagName: string }) => {
+      const row = await ctx.db.githubRelease.findFirst({ where: { ...where, tagName } })
+      return row === null ? null : { databaseId: row.id, isDraft: row.draft, tagName: row.tagName }
+    },
     latestRelease: async () => {
       const rows = await ctx.db.githubRelease.findMany({ where, orderBy: { seq: 'desc' } })
       const row = rows.find((release) => !release.draft && !release.prerelease)
@@ -348,7 +363,8 @@ export async function repositoryNode(
         publishedAt: row.createdAt,
       }
     },
-    assignableUsers: { nodes: [user] },
+    assignableUsers: { nodes: [user], totalCount: 1, pageInfo: EMPTY_PAGE },
+    suggestedActors: { nodes: [userNode(DEFAULT_LOGIN)], totalCount: 1, pageInfo: EMPTY_PAGE },
     mentionableUsers: { nodes: [user] },
     projects: () => {
       throw new Error(PROJECTS_CLASSIC_GONE)
@@ -612,24 +628,27 @@ const listRepos: Handler = async (ctx) => {
   return pagedReply(ctx, items)
 }
 
-const createRepo: Handler = async (ctx) => {
-  if (!(await createReposAllowed(ctx.db, ctx.tenant))) {
-    return fail(403, 'Resource not accessible by personal access token')
-  }
-  const body = jsonBodyOf(ctx)
-  const name = str(body, 'name').trim()
-  if (name === '') return fail(422, 'Repository creation failed.')
-  const owner = ctx.params.owner ?? DEFAULT_LOGIN
+interface NewRepo {
+  private: boolean
+  description: JsonValue
+  homepage: JsonValue
+  readme: boolean
+}
+
+/** One new repository under `owner`, or null when the name is taken. */
+async function addRepo(
+  ctx: Ctx<C>,
+  owner: string,
+  name: string,
+  fields: NewRepo,
+): Promise<RepoRow | null> {
   const fullName = `${owner}/${name}`
-  if ((await repoByName(ctx.db, ctx.tenant, fullName)) !== null) {
-    return fail(422, 'Repository creation failed.')
-  }
-  const priv = body.private === true
+  if ((await repoByName(ctx.db, ctx.tenant, fullName)) !== null) return null
   const meta: Record<string, JsonValue> = {
-    description: body.description ?? null,
-    homepage: body.homepage ?? null,
-    private: priv,
-    visibility: priv ? 'private' : 'public',
+    description: fields.description,
+    homepage: fields.homepage,
+    private: fields.private,
+    visibility: fields.private ? 'private' : 'public',
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     pushed_at: '2026-01-01T00:00:00Z',
@@ -646,7 +665,7 @@ const createRepo: Handler = async (ctx) => {
     },
   })) as RepoRow
   await initRepo(ctx.db, ctx.tenant, created)
-  if (body.auto_init === true) {
+  if (fields.readme) {
     await ctx.db.githubFile.create({
       data: {
         tenant: ctx.tenant,
@@ -658,7 +677,56 @@ const createRepo: Handler = async (ctx) => {
       },
     })
   }
+  return created
+}
+
+const createRepo: Handler = async (ctx) => {
+  if (!(await createReposAllowed(ctx.db, ctx.tenant))) {
+    return fail(403, 'Resource not accessible by personal access token')
+  }
+  const body = jsonBodyOf(ctx)
+  const name = str(body, 'name').trim()
+  if (name === '') return fail(422, 'Repository creation failed.')
+  const created = await addRepo(ctx, ctx.params.owner ?? DEFAULT_LOGIN, name, {
+    private: body.private === true,
+    description: body.description ?? null,
+    homepage: body.homepage ?? null,
+    readme: body.auto_init === true,
+  })
+  if (created === null) return fail(422, 'Repository creation failed.')
   return { status: 201, body: await repoJson(ctx.db, ctx.tenant, created) }
+}
+
+/** GraphQL's `createRepository`, on the same rows as the REST route. */
+export function createRepositoryRoot(ctx: Ctx<C>) {
+  return async ({
+    input,
+  }: {
+    input: {
+      name: string
+      visibility: string
+      ownerId?: string | null
+      description?: string | null
+      homepageUrl?: string | null
+    }
+  }) => {
+    if (!(await createReposAllowed(ctx.db, ctx.tenant))) {
+      throw new Error('Resource not accessible by personal access token')
+    }
+    const owner =
+      input.ownerId === undefined || input.ownerId === null
+        ? DEFAULT_LOGIN
+        : (/([^:]+)$/.exec(Buffer.from(input.ownerId, 'base64').toString('utf8'))?.[1] ??
+          DEFAULT_LOGIN)
+    const created = await addRepo(ctx, owner, input.name, {
+      private: input.visibility === 'PRIVATE',
+      description: input.description ?? null,
+      homepage: input.homepageUrl ?? null,
+      readme: false,
+    })
+    if (created === null) throw new Error('Name already exists on this account')
+    return { repository: await repositoryNode(ctx, created) }
+  }
 }
 
 // Validate every accepted field before writing metadata or moving repository
@@ -945,6 +1013,12 @@ const forkRepo: Handler = authed(
         data: { tenant: ctx.tenant, repo: fullName, path: s.path },
       })
     }
-    return { status: 202, body: await repoJson(ctx.db, ctx.tenant, fork) }
+    return {
+      status: 202,
+      body: {
+        ...((await repoJson(ctx.db, ctx.tenant, fork)) as Record<string, JsonValue>),
+        created_at: new Date().toISOString(),
+      },
+    }
   }),
 )

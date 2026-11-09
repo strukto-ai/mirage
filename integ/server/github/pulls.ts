@@ -36,11 +36,14 @@ import {
 import type { CommitRow, PageArgs } from './wire.ts'
 import {
   allRepos,
+  autoMerge,
   branchFor,
   commitsBySha,
   commitsJson,
   forkOwnedBy,
+  lockReason,
   nextNumber,
+  pullExtras,
   reachableFrom,
   repoJson,
   resolveRef,
@@ -315,7 +318,7 @@ async function listPulls(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
 // between the same two already. Each refusal is GitHub's. A head may be
 // spelled `owner:branch`: this repository's branch when the owner is its own,
 // and otherwise that account's fork in this repository's network.
-async function createPull(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
+export async function createPull(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const body = jsonBodyOf(ctx)
   const title = str(body, 'title')
   const head = str(body, 'head')
@@ -637,6 +640,29 @@ async function recordReview(
   return { review: made, comments: rows }
 }
 
+/** A review as GraphQL's addPullRequestReview leaves it. */
+export async function recordPullReview(
+  ctx: Ctx<C>,
+  repo: RepoRow,
+  pull: PullRow,
+  event: string,
+  body: string,
+): Promise<void> {
+  const state =
+    event === 'APPROVE'
+      ? 'APPROVED'
+      : event === 'REQUEST_CHANGES'
+        ? 'CHANGES_REQUESTED'
+        : 'COMMENTED'
+  await recordReview(
+    ctx,
+    repo,
+    pull,
+    { user: DEFAULT_LOGIN, body, state, commitId: pull.headSha, submittedAt: COMMENTED_AT },
+    [],
+  )
+}
+
 async function listReviewComments(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const row = await found(ctx, repo)
   if (row === null) return fail(404, 'Not Found')
@@ -855,6 +881,7 @@ export function commitNode(
             completedAt: check.completedAt,
             detailsUrl: check.detailsUrl,
             checkSuite: { workflowRun: { event: 'pull_request', workflow: { name: 'CI' } } },
+            isRequired: false,
           })),
           ...statuses.map((status) => ({
             __typename: 'StatusContext',
@@ -863,6 +890,7 @@ export function commitNode(
             targetUrl: status.targetUrl,
             createdAt: status.createdAt,
             description: status.description,
+            isRequired: false,
           })),
         ]
         return page(contexts, first, after)
@@ -940,6 +968,14 @@ export async function pullRequestNode(
     headRefName: headBranch(row),
     headRefOid: async () => (await now()).head,
     isDraft: row.draft,
+    locked: lockReason(ctx, repo.fullName, row.number).locked,
+    activeLockReason: lockReason(ctx, repo.fullName, row.number).reason,
+    isInMergeQueue: false,
+    isMergeQueueEnabled: false,
+    baseRef: {
+      compare: () => ({ aheadBy: 1, behindBy: 1, status: 'DIVERGED' }),
+      branchProtectionRule: null,
+    },
     isCrossRepository: cross,
     maintainerCanModify: false,
     mergeable: open ? 'MERGEABLE' : 'UNKNOWN',
@@ -957,12 +993,31 @@ export async function pullRequestNode(
       ...ownerNode(headOwner),
       name: headOwner === DEFAULT_LOGIN ? headOwner : null,
     },
-    autoMergeRequest: null,
+    autoMergeRequest:
+      autoMerge(ctx, repo.fullName, row.number) === null
+        ? null
+        : {
+            mergeMethod: autoMerge(ctx, repo.fullName, row.number),
+            enabledBy: userNode(DEFAULT_LOGIN),
+          },
     mergeCommit: row.merged ? { oid: commitSha('merge') } : null,
     potentialMergeCommit: open ? { oid: commitSha(`merge:${String(row.number)}`) } : null,
     milestone: null,
-    assignees: ({ first, after }: PageArgs) => page([], first, after),
-    labels: ({ first, after }: PageArgs) => page([], first, after),
+    assignees: ({ first, after }: PageArgs) =>
+      page(pullExtras(ctx, repo.fullName, row.number, 'assignees').map(userNode), first, after),
+    assignedActors: ({ first, after }: PageArgs) =>
+      page(pullExtras(ctx, repo.fullName, row.number, 'assignees').map(userNode), first, after),
+    labels: ({ first, after }: PageArgs) =>
+      page(
+        pullExtras(ctx, repo.fullName, row.number, 'labels').map((name) => ({
+          id: nodeId('05:Label', name),
+          name,
+          description: null,
+          color: 'ededed',
+        })),
+        first,
+        after,
+      ),
     reactionGroups: reactionGroups(),
     reviews: ({ first, after }: PageArgs) =>
       page(
@@ -1044,7 +1099,8 @@ export async function pullRequestConnection(
     return !args.headRefName || headBranch(row) === args.headRefName
   })
   const connection = page(kept, args.first ?? 0, args.after)
-  return { ...connection, nodes: await Promise.all(connection.nodes.map(nodes)) }
+  const built = await Promise.all(connection.nodes.map(nodes))
+  return { ...connection, nodes: built, edges: built.map((node) => ({ node })) }
 }
 
 export function pullRoutes(): KitRoute<C>[] {

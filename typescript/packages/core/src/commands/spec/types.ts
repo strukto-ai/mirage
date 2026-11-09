@@ -83,9 +83,9 @@ export type ValueType = 'bool' | 'str' | 'int' | 'float' | 'path'
  * leaving each leaf to word its own complaint. Those are one decision (whose
  * voice this is), so they read off this knob rather than a second one.
  *
- * COBRA keeps standard help and option errors, while handlers own missing
- * positional refusals for programs such as gh. It does not reproduce Cobra's
- * full help formatting.
+ * COBRA answers option errors in pflag's words with gh's usage block and
+ * exits 1, while handlers own missing positional refusals. Its `--help` keeps
+ * the standard layout rather than Cobra's full page.
  *
  * It lives in the spec layer, not beside the CLI tree, because the help
  * renderer is the spec's and cannot import upward to reach it.

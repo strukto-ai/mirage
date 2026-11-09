@@ -19,7 +19,7 @@ import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { PathSpec } from '../../types.ts'
 import type { GitHubTransport } from './client.ts'
 import { SCOPE_WARN } from './constants.ts'
-import { filesContaining, narrowPaths, search as restSearch, searchCode } from './search.ts'
+import { filesContaining, narrowPaths, searchCode } from './search.ts'
 import type { TreeEntry } from './tree_entry.ts'
 
 // The code search endpoint, as the accessor's transport reaches it.
@@ -305,27 +305,4 @@ describe('narrowPaths', () => {
     expect(out?.map((p) => p.virtual)).toEqual(['/gh/src/main.py', '/gh/src/utils.py'])
     expect(out?.map((p) => p.vfsPath)).toEqual(['src/main.py', 'src/utils.py'])
   })
-})
-
-it('paginates REST search and clips the final page', async () => {
-  const requests: Record<string, string>[] = []
-  const transport: GitHubTransport = {
-    get: () => Promise.reject(new Error('expected response metadata')),
-    request: () => Promise.reject(new Error('expected response metadata')),
-    requestWithResponse: (_method, _path, _body, params = {}) => {
-      requests.push({ ...params })
-      const start = (Number(params.page) - 1) * 100
-      return Promise.resolve({
-        data: { items: Array.from({ length: 100 }, (_, i) => start + i) },
-        status: 200,
-        headers: { link: '<https://api.github.test/next>; rel="next"' },
-      })
-    },
-  }
-  expect(await restSearch(transport, 'issues', 'repo:acme/proj', 102, 'created', 'asc')).toEqual(
-    Array.from({ length: 102 }, (_, i) => i),
-  )
-  expect(requests.map((params) => params.page)).toEqual(['1', '2'])
-  expect(requests.every((params) => params.per_page === '100')).toBe(true)
-  expect(requests[0]).toMatchObject({ sort: 'created', order: 'asc' })
 })

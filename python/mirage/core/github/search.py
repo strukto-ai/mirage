@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass
 
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
-from mirage.core.github.client import github_get, github_request_response
+from mirage.core.github.client import github_get
 from mirage.core.github.constants import SCOPE_WARN, SEARCH_PAGE_SIZE
 from mirage.core.github.pushdown import (
     count_scope_files,
@@ -25,7 +25,7 @@ from mirage.core.github.pushdown import (
 )
 from mirage.core.github.repo import ensure_default_branch, ensure_ref
 from mirage.core.github.tree import ensure_tree
-from mirage.types import JsonValue, PathSpec
+from mirage.types import PathSpec
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.key_prefix import mount_key, mount_prefix_of, raw_path_of
 
@@ -210,52 +210,3 @@ async def files_containing(
         if get_extension(p.virtual) not in BINARY_EXTENSIONS
     ]
     return texts or None
-
-
-async def search(
-    account: GitHubAccount,
-    kind: str,
-    query: str,
-    limit: int,
-    sort: str | None = None,
-    order: str | None = None,
-) -> list[JsonValue]:
-    """Fetch a bounded REST search, following the server's pagination.
-
-    Args:
-        account (GitHubAccount): the token, API base and pool to ride.
-        kind (str): REST search resource.
-        query (str): GitHub search expression.
-        limit (int): maximum rows.
-        sort (str | None): server ordering field.
-        order (str | None): ordering direction.
-    """
-    params = {"q": query, "per_page": str(min(limit, 100)), "page": "1"}
-    if sort is not None:
-        params["sort"] = sort
-    if order is not None:
-        params["order"] = order
-    rows: list[JsonValue] = []
-    page = 1
-    while len(rows) < limit:
-        params["page"] = str(page)
-        response = await github_request_response(
-            account,
-            "GET",
-            f"/search/{kind}",
-            params=params,
-            headers={
-                "Accept": "application/vnd.github.text-match+json"
-                if kind == "code"
-                else "application/vnd.github.v3+json"
-            },
-        )
-        body = response.data
-        items = body.get("items", []) if isinstance(body, dict) else []
-        if not isinstance(items, list):
-            raise ValueError("invalid search response: items must be an array")
-        rows.extend(items[: limit - len(rows)])
-        if not items or 'rel="next"' not in response.headers.get("link", ""):
-            break
-        page += 1
-    return rows

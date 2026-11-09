@@ -2,6 +2,8 @@
 //! for, and the host's answers, which awk, sed, split, csplit and od
 //! share.
 
+#[cfg(feature = "gh")]
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 
 use serde::Deserialize;
@@ -166,6 +168,48 @@ pub(crate) enum Request {
         stdin: Option<u32>,
         stdout: Option<u32>,
     },
+    /// One call to the service an account CLI drives, which the host
+    /// signs and sends: the JSON body, when there is one, as the payload.
+    #[cfg(feature = "gh")]
+    Http {
+        method: String,
+        path: String,
+        params: Vec<(String, String)>,
+        headers: Vec<(String, String)>,
+        body: Option<Vec<u8>>,
+        /// `body` goes as it is rather than read as JSON by the host.
+        raw_body: bool,
+    },
+    /// A file a command's option names, or standard input as `-`.
+    #[cfg(feature = "gh")]
+    ReadFile {
+        flag: Option<String>,
+        path: Option<String>,
+        option: String,
+    },
+    /// The time, for a command that reads the clock.
+    #[cfg(feature = "gh")]
+    Now,
+    /// Whether an object grown to `size` bytes still fits the workspace's
+    /// memory, the host refusing it if not.
+    #[cfg(feature = "gh")]
+    Memory {
+        size: u64,
+    },
+    /// Run a jq program over one value; the reply's bytes are its outputs,
+    /// a compact dump to a line, and the reply says what stopped it.
+    #[cfg(feature = "gh")]
+    Jq {
+        program: String,
+        doc: Vec<u8>,
+    },
+    /// End the run the way the host ends a command that failed.
+    #[cfg(feature = "gh")]
+    Fail {
+        kind: &'static str,
+        message: String,
+        code: i32,
+    },
 }
 
 /// Hand a payload on without copying it when nothing came before it.
@@ -175,6 +219,16 @@ fn take_payload(data: &mut Vec<u8>, payload: &mut Vec<u8>) {
     } else {
         data.append(payload);
     }
+}
+
+#[cfg(feature = "gh")]
+fn pairs(items: &[(String, String)]) -> Json {
+    Json::Array(
+        items
+            .iter()
+            .map(|(key, value)| Json::Array(vec![key.as_str().into(), value.as_str().into()]))
+            .collect(),
+    )
 }
 
 fn latin1(bytes: &[u8]) -> Json {
@@ -375,6 +429,63 @@ impl Request {
                     put("stdout", (*stdout).into());
                 }
             }
+            #[cfg(feature = "gh")]
+            Request::Http {
+                method,
+                path,
+                params,
+                headers,
+                body,
+                raw_body,
+            } => {
+                put("op", "http".into());
+                put("method", method.as_str().into());
+                put("path", path.as_str().into());
+                put("params", pairs(params));
+                put("headers", pairs(headers));
+                if let Some(payload) = body {
+                    put("has_body", true.into());
+                    if *raw_body {
+                        put("raw_body", true.into());
+                    }
+                    take_payload(data, payload);
+                }
+            }
+            #[cfg(feature = "gh")]
+            Request::ReadFile { flag, path, option } => {
+                put("op", "read_file".into());
+                if let Some(flag) = flag {
+                    put("flag", flag.as_str().into());
+                }
+                if let Some(path) = path {
+                    put("path", path.as_str().into());
+                }
+                put("option", option.as_str().into());
+            }
+            #[cfg(feature = "gh")]
+            Request::Now => put("op", "now".into()),
+            #[cfg(feature = "gh")]
+            Request::Memory { size } => {
+                put("op", "memory".into());
+                put("size", (*size).into());
+            }
+            #[cfg(feature = "gh")]
+            Request::Jq { program, doc } => {
+                put("op", "jq".into());
+                put("program", program.as_str().into());
+                take_payload(data, doc);
+            }
+            #[cfg(feature = "gh")]
+            Request::Fail {
+                kind,
+                message,
+                code,
+            } => {
+                put("op", "fail".into());
+                put("kind", (*kind).into());
+                put("message", message.as_str().into());
+                put("code", (*code).into());
+            }
         }
         serde_json::to_vec(&Json::Object(header)).unwrap_or_default()
     }
@@ -421,6 +532,24 @@ pub(crate) struct Reply {
     /// What a link a readlink found holds; none for a name that is no
     /// link.
     pub(crate) target: Option<String>,
+    /// A failed call's message, in the service's words where it gave any.
+    #[cfg(feature = "gh")]
+    pub(crate) message: Option<String>,
+    /// A call's response headers, their names lowercased.
+    #[cfg(feature = "gh")]
+    pub(crate) headers: BTreeMap<String, String>,
+    /// The URL a failed call reached.
+    #[cfg(feature = "gh")]
+    pub(crate) url: Option<String>,
+    /// The time, in seconds.
+    #[cfg(feature = "gh")]
+    pub(crate) now: Option<f64>,
+    /// Whether what stopped a jq run was a string.
+    #[cfg(feature = "gh")]
+    pub(crate) string: bool,
+    /// Whether the program raised that stop with `error` itself.
+    #[cfg(feature = "gh")]
+    pub(crate) own: bool,
 }
 
 impl Reply {

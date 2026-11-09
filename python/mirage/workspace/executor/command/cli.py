@@ -18,6 +18,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from mirage.commands.builtin.general.interpreter import run_output
+from mirage.commands.cli.cobra import COBRA_EXIT, cobra_refusal, leaf_message
 from mirage.commands.cli.constants import CLI_CONFIG_ENV, GIT_LONG_OPTIONS
 from mirage.commands.cli.refusal import (
     ARGPARSE_EXIT,
@@ -104,6 +105,8 @@ def parse_spec_for(
         return replace(
             leaf, arguments=(*leaf.arguments, PASSTHROUGH_REST)
         ), False
+    if style is UsageStyle.COBRA:
+        leaf = replace(leaf, allow_abbrev=False)
     if not leaf.add_help or any(
         "--help" in arg.names for arg in leaf.arguments
     ):
@@ -505,7 +508,7 @@ async def walk_leaf(
         prog,
         session.cwd,
         env=env_snapshot(session),
-        unknown_is_operand=True,
+        unknown_is_operand=style is not UsageStyle.COBRA,
         abbreviations=abbreviations,
     )
     if mirage_help and parsed.flag_kwargs.get("help") is True:
@@ -520,7 +523,15 @@ async def walk_leaf(
     msg: bytes | None = None
     shown: bytes | None = None
     code = 0
-    if refusal is not None:
+    wording = (
+        leaf_message(parsed, leaf, result.argv, " ".join(result.path))
+        if style is UsageStyle.COBRA and refusal is not None
+        else None
+    )
+    if wording is not None:
+        msg = encode_text(cobra_refusal(wording, prog, leaf))
+        code = COBRA_EXIT
+    elif refusal is not None:
         msg, code, shown = leaf_refusal(
             style, refusal[0], parsed, " ".join(result.path), leaf
         )

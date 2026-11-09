@@ -182,16 +182,27 @@ async def github_request(
     return cast(JsonValue, response.data)
 
 
-async def github_request_response(
+async def github_raw_response(
     account: GitHubAccount,
     method: str,
     path: str,
-    body: "JsonValue | _NoBody" = _NO_BODY,
+    body: "JsonValue | bytes | _NoBody" = _NO_BODY,
     params: dict[str, str] | None = None,
     *,
     headers: dict[str, str] | None = None,
 ) -> ApiResponse:
-    """One GitHub call retaining status and headers for CLI pagination."""
+    """One GitHub call and its body as bytes, for a caller that reads the
+    body by its own rules.
+
+    Args:
+        account (GitHubAccount): the token, API base and pool to ride.
+        method (str): the HTTP method.
+        path (str): the endpoint path.
+        body (JsonValue | bytes | _NoBody): the JSON body, or bytes sent as
+            they are; omitted sends none.
+        params (dict[str, str] | None): query parameters.
+        headers (dict[str, str] | None): headers to set over the defaults.
+    """
     base_url = account.config.base_url
     url = (
         graphql_url(base_url)
@@ -206,7 +217,8 @@ async def github_request_response(
         if prior is not None:
             merged.pop(prior)
         merged[key] = value
-    present = body is not _NO_BODY
+    data = body if isinstance(body, bytes) else None
+    present = body is not _NO_BODY and data is None
     try:
         raw: ApiResponse = await api_request(
             method.upper(),
@@ -216,6 +228,7 @@ async def github_request_response(
             params=params,
             json_body=None if not present else cast(JsonValue, body),
             json_body_present=present,
+            data=data,
             read="bytes_response",
             session=account.pool,
         )
@@ -239,6 +252,22 @@ async def github_request_response(
         ) from exc
     except aiohttp.ClientConnectionError as exc:
         raise GitHubConnectionError(str(exc)) from exc
+    return raw
+
+
+async def github_request_response(
+    account: GitHubAccount,
+    method: str,
+    path: str,
+    body: "JsonValue | _NoBody" = _NO_BODY,
+    params: dict[str, str] | None = None,
+    *,
+    headers: dict[str, str] | None = None,
+) -> ApiResponse:
+    """One GitHub call retaining status and headers for CLI pagination."""
+    raw = await github_raw_response(
+        account, method, path, body, params, headers=headers
+    )
     return ApiResponse(
         _decoded(raw.data, raw.headers.get("content-type", "")),
         raw.status,

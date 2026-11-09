@@ -18,6 +18,7 @@ import { argparseHelp, clapGroupRefusal, clapUnexpectedArgument, renderHelp } fr
 import { CommandSpec, type CommandSpecInit, UsageStyle, Argument } from '../spec/types.ts'
 import { PathSpec } from '../../types.ts'
 
+import { COBRA_EXIT, cobraRefusal, groupMessage, unknownCommand } from './cobra.ts'
 import { WalkResult, type CLI, type WalkFlagBag } from './types.ts'
 
 import { CLAP_EXIT, GIT_SYNOPSES, HELP_EXIT, USAGE_EXIT } from './constants.ts'
@@ -323,6 +324,13 @@ function usageError(
   style: UsageStyle,
   token?: string,
 ): WalkResult {
+  if (style === UsageStyle.COBRA) {
+    return new WalkResult({
+      output: encodeText(cobraRefusal(groupMessage(message, token), name, node)),
+      stream: 'stderr',
+      exitCode: COBRA_EXIT,
+    })
+  }
   if (style === UsageStyle.CLAP) {
     const first = token === undefined ? message : clapUnexpectedArgument(token)
     return new WalkResult({
@@ -697,7 +705,12 @@ export function walk(
         // getopt_long: an exact spelling wins; otherwise a unique prefix
         // expands (git status --porcel) and an ambiguous one is refused
         // with every possibility (git wording).
-        if (node.allowAbbrev && !cs.dest.has(spelling) && spelling !== '--help') {
+        if (
+          node.allowAbbrev &&
+          style !== UsageStyle.COBRA &&
+          !cs.dest.has(spelling) &&
+          spelling !== '--help'
+        ) {
           const candidates = expandGroupLong(node, cs, spelling)
           if (candidates.length === 1) {
             spelling = candidates[0] ?? spelling
@@ -828,6 +841,13 @@ export function walk(
       // render as `gws checkout`).
       const child = token.startsWith('-') ? null : findChild(node, token)
       if (child === null) {
+        if (style === UsageStyle.COBRA) {
+          return new WalkResult({
+            output: encodeText(cobraRefusal(unknownCommand(token, name, node), name, node)),
+            stream: 'stderr',
+            exitCode: COBRA_EXIT,
+          })
+        }
         return unknownVerb(head, name, token)
       }
       node = child
@@ -843,7 +863,7 @@ export function walk(
     return new WalkResult({
       output: encodeText(nodeHelp(name, node, style)),
       stream: 'stdout',
-      exitCode: 1,
+      exitCode: style === UsageStyle.COBRA ? 0 : 1,
     })
   }
 }

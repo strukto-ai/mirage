@@ -1,13 +1,16 @@
-python/mirage/commands/cli/builtin/gh/fields.py and
-typescript/packages/core/src/commands/cli/builtin/gh/fields.ts hold the
-GraphQL selection gh 2.85.0 (https://github.com/cli/cli) sends for each --json
-field and its export of the answer (ExportData);
-python/mirage/commands/cli/builtin/gh/shape.py and
-typescript/packages/core/src/commands/cli/builtin/gh/shape.ts follow the way
-its Author, ReactionGroups and Owner types marshal themselves; and
-python/mirage/commands/cli/builtin/gh/constants.py and
-typescript/packages/core/src/commands/cli/builtin/gh/constants.ts carry its
-diffHeaderRegexp and the --limit refusals of gh 2.46. gh carries this notice:
+rust/mirage-rs/src/cli/gh/ and rust/mirage-rs/src/core/github/ follow gh
+2.85.0 (https://github.com/cli/cli): the commands of its pkg/cmd and their
+output, the REST and GraphQL calls of its api package, the GraphQL selection
+it sends for each --json field and its export of the answer (ExportData), the
+way its Author, ReactionGroups and Owner types marshal themselves, the query
+builder of its pkg/search, its diffHeaderRegexp and the --limit refusals of
+gh 2.46. The command tree, flags and flag descriptions in
+python/mirage/commands/cli/builtin/gh/ and
+typescript/packages/core/src/commands/cli/builtin/gh/ are the ones gh declares,
+and python/mirage/commands/cli/cobra.py and
+typescript/packages/core/src/commands/cli/cobra.ts print its usage block as its
+root command does.
+gh carries this notice:
 
 MIT License
 
