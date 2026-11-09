@@ -188,6 +188,26 @@ def _exec_inner(args: Sequence[Word]) -> list[InnerLine]:
     return [InnerLine(argv=rest)] if rest else []
 
 
+def _splits(word: str) -> bool:
+    """Whether an ``env`` word is GNU's ``-S`` / ``--split-string``, whose
+    value env splits into the command line itself.
+
+    Args:
+        word (str): one option word.
+    """
+    if word.startswith("--"):
+        name = word[2:].split("=", 1)[0]
+        return bool(name) and "split-string".startswith(name)
+    if not word.startswith("-"):
+        return False
+    for flag in word[1:]:
+        if flag == "S":
+            return True
+        if flag in "uCa":
+            return False
+    return False
+
+
 def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
     """``env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]``,
     read the way the tree's ``env`` builtin reads it."""
@@ -197,6 +217,8 @@ def _env_inner(args: Sequence[Word]) -> list[InnerLine]:
         if word == "--":
             i += 1
             break
+        if _splits(word):
+            return [InnerLine()]
         if word in _ENV_FLAGS or word.startswith("--unset="):
             i += 1
             continue
@@ -281,23 +303,9 @@ def _find_inner(args: Sequence[Word]) -> list[InnerLine]:
     return inner
 
 
-def _nice_inner(args: Sequence[Word]) -> list[InnerLine]:
-    """``nice [-n N] COMMAND [ARG]...``."""
-    i = 0
-    while i < len(args) and args[i].value.startswith("-"):
-        word = args[i].value
-        i += 1
-        if word == "--":
-            break
-        if word in ("-n", "--adjustment"):
-            i += 1
-    rest = tuple(args[i:])
-    return [InnerLine(argv=rest)] if rest else []
-
-
 def _wrapper_inner(head: str, args: Sequence[Word]) -> list[InnerLine]:
-    """``nohup``, ``stdbuf``, ``setsid`` and ``ionice`` run what stands
-    after their own options.
+    """``nohup``, ``nice``, ``stdbuf``, ``setsid`` and ``ionice`` run what
+    stands after their own options.
 
     Args:
         head (str): the wrapper.
@@ -394,9 +402,7 @@ def inner_lines(head: str, args: Sequence[Word]) -> list[InnerLine]:
         return _mapfile_inner(args)
     if head == "find":
         return _find_inner(args)
-    if head == "nice":
-        return _nice_inner(args)
-    if head in ("nohup", "stdbuf", "setsid", "ionice"):
+    if head in ("nohup", "nice", "stdbuf", "setsid", "ionice"):
         return _wrapper_inner(head, args)
     if head == "time":
         return _time_inner(args)

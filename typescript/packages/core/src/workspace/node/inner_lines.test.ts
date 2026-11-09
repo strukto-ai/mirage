@@ -63,6 +63,12 @@ describe('innerLines', () => {
     ['builtin', ['--', 'echo', 'hi'], [['argv', ['echo', 'hi'], false]]],
     ['builtin', [], []],
     ['nice', ['-n', '5', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
+    ['nice', ['--ad', '5', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
+    // GNU env splits -S's value into the command line itself.
+    ['env', ['-S', 'rm /x'], [['none', null, false]]],
+    ['env', ['--split-string=rm /x'], [['none', null, false]]],
+    ['env', ['-iS', 'rm /x'], [['none', null, false]]],
+    ['env', ['-uPATHS', 'rm'], [['argv', ['rm'], false]]],
     ['ionice', ['-c', '3', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
     ['time', ['-p', 'rm', '/x'], [['argv', ['rm', '/x'], false]]],
     // Operands the runtime appends: stdin items, matched paths.

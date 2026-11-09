@@ -14,11 +14,15 @@
 
 import pytest
 
+from mirage import Policy
 from mirage.io.types import materialize
+from mirage.machine.handle import MachineHandle
+from mirage.policy import Route
 from mirage.policy.types import Outcome, Scope
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.machine import MachineRuntime
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.types import RunResult
 from mirage.shell.parse import parse, syntax_refusal
@@ -210,14 +214,20 @@ async def test_an_outside_wrapper_admits_every_wrapper_it_runs():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "line", ["nohup python3 -c x", "nohup --help", "nohup -- python3 -c x"]
+    "line",
+    [
+        "nohup python3 -c x",
+        "nohup --help",
+        "nohup -- python3 -c x",
+        "nice --ad 5 python3 -c x",
+    ],
 )
 async def test_an_outside_wrapper_runs_a_listed_program(line):
     box = Box()
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
     try:
         ws.create_session(
-            "s", profile={"commands": {"allow": ["nohup", "python3"]}}
+            "s", profile={"commands": {"allow": ["nohup", "nice", "python3"]}}
         )
         r = await ws.shell(line, session_id="s")
         assert r.exit_code == 0
@@ -308,5 +318,89 @@ async def test_an_outside_wrapper_runs_a_path_only_without_an_allow_list(
         else:
             assert r.exit_code == 0
             assert box.ran == [["nohup", "/usr/bin/env", "python3", "-c", "x"]]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("setup", "line", "refused"),
+    [
+        ("", "nohup time env --split-string='python3 -c x'", "env"),
+        ("", "nohup time env -S 'python3 -c x'", "env"),
+        ("pip() { echo harmless; }", "nohup time pip --version", "pip"),
+    ],
+)
+async def test_an_outside_wrapper_s_program_is_what_the_machine_runs(
+    setup, line, refused
+):
+    # GNU env splits -S into a command line the gate cannot read, and the
+    # machine runs its own pip, not the session's function of that name.
+    box = Box()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box])
+    try:
+        ws.create_session(
+            "s",
+            profile={"commands": {"allow": ["nohup", "time", "env", "echo"]}},
+        )
+        if setup:
+            await ws.shell(setup, session_id="s")
+        r = await ws.shell(line, session_id="s")
+        assert (r.exit_code, r.stderr) == (
+            126,
+            f"{refused}: Permission denied\n".encode(),
+        )
+        assert box.ran == []
+    finally:
+        await ws.close()
+
+
+class Named(MachineHandle):
+    provider = "box"
+
+    async def connect(self) -> None:
+        return None
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        return RunResult(
+            stdout=f"{self.name}\n".encode(), stderr=None, exit_code=0
+        )
+
+
+class HostnameOn(Policy):
+    def __init__(self, machine: str) -> None:
+        self.machine = machine
+
+    def pre_command(self, ctx):
+        return (
+            Route(machine=self.machine) if ctx.command == "hostname" else None
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("machine", "out"), [("b", None), ("a", b"a\n")])
+async def test_an_outside_wrapper_runs_where_its_program_is_routed(
+    machine, out
+):
+    # The machine the wrapper runs on runs its program, so a route placing
+    # the program on another one is refused, as in a line run whole.
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={"a": Named("a"), "b": Named("b")},
+        runtimes=[MachineRuntime(["hostname"], machine="a"), "workspace"],
+        policies=[HostnameOn(machine)],
+    )
+    try:
+        assert (await ws.shell("hostname")).stdout == f"{machine}\n".encode()
+        r = await ws.shell("nohup hostname")
+        if out is None:
+            assert (r.exit_code, r.stdout) == (126, b"")
+            assert r.refusal is not None
+            assert r.refusal.reason.startswith(
+                "HostnameOn routes hostname elsewhere"
+            )
+        else:
+            assert (r.exit_code, r.stdout) == (0, out)
     finally:
         await ws.close()

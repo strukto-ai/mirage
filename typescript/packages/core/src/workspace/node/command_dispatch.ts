@@ -41,11 +41,14 @@ import {
   PolicyDenied,
   postCommandGate,
   refusalOf,
+  renderCommandDeny,
   renderDeny,
   resolveProducer,
+  type Route,
 } from '../../policy/index.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import { RouteError } from '../../runtime/routing/index.ts'
+import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { routed } from '../../runtime/table.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { DispatchFn, OutputFn, RouteDecision, RunResult } from '../../runtime/types.ts'
@@ -1218,9 +1221,31 @@ function refused(command: string, verdict: Refused): RedirectResult {
  * line's pass follows it (`innerLines`): each program is admitted as `env`
  * and `timeout` have theirs admitted, at the place the pass judged it, and a
  * line the gate cannot read (`nohup /usr/bin/env`) is refused under an allow
- * list, which only names what it can read. Returns the first refusal, or
- * null.
+ * list, which only names what it can read. The machine runs the program
+ * itself, so a function of its name does not stand in for it, and a route
+ * that would place it elsewhere is refused, as for a line a runtime takes
+ * whole. Returns the first refusal, or null.
  */
+/** The runtime and machine a decision runs a native program on, as `runExternal` picks them. */
+function placement(routing: RouteDecision<Runtime>, name: string): [Runtime | null, string | null] {
+  const key = Object.hasOwn(routing.bindings, name) ? name : EXTERNAL_COMMANDS
+  const runtime = routing.bindings[key] ?? null
+  if (runtime === null) return [null, routing.machine ?? null]
+  try {
+    const machine = runtime.machineFor({
+      stdin: null,
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+      ...(routing.machine !== undefined ? { machine: routing.machine } : {}),
+    })
+    return [runtime, machine === null ? null : String(machine)]
+  } catch (caught) {
+    throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
+      cause: caught,
+    })
+  }
+}
+
 async function wrappedRefusal(
   words: readonly Word[],
   session: SessionState,
@@ -1229,6 +1254,7 @@ async function wrappedRefusal(
   stdin: ByteSource | null,
   signal: AbortSignal | undefined,
   claimant: Claimant | null,
+  elsewhere: (route: Route) => boolean,
 ): Promise<Refused | null> {
   const [first, ...rest] = words
   if (first === undefined) return null
@@ -1249,7 +1275,13 @@ async function wrappedRefusal(
             line: claimant.line,
             occurrence: wholeOccurrence(argvFrame([name, ...args], claimant.occurrence)),
           }
-    const operands = await classifiedWords(name, args, session, registry)
+    let view = session
+    if (Object.hasOwn(session.functions, name)) {
+      view = session.fork()
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete view.functions[name]
+    }
+    const operands = await classifiedWords(name, args, view, registry)
     const verdict = await admit(
       name,
       args,
@@ -1261,8 +1293,19 @@ async function wrappedRefusal(
       [],
       signal,
       place,
+      true,
     )
     if (!(verdict instanceof Admitted)) return verdict
+    const route = verdict.route
+    if (route !== null && elsewhere(route)) {
+      const deny: Deny = {
+        kind: 'deny',
+        reason: `${route.policy ?? ''} routes ${name} elsewhere, and ${head} runs it where it runs`,
+        ...(route.policy !== undefined ? { policy: route.policy } : {}),
+      }
+      const [stderr, exitCode] = await renderCommandDeny(name, deny, verdict.ctx)
+      return { stderr, exitCode, refusal: refusalOf(deny) }
+    }
     const deeper = await wrappedRefusal(
       inner.argv,
       session,
@@ -1271,6 +1314,7 @@ async function wrappedRefusal(
       stdin,
       signal,
       place,
+      elsewhere,
     )
     if (deeper !== null) return deeper
   }
@@ -1375,6 +1419,26 @@ async function routeArgv(
   )
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
+    const here = routing
+    const elsewhere = (route: Route): boolean => {
+      let placed: RouteDecision<Runtime>
+      try {
+        placed = routed(
+          registry.runtimeEntries,
+          here.bindings,
+          route.runtime,
+          route.machine ?? here.machine,
+        )
+      } catch (caught) {
+        throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
+          cause: caught,
+        })
+      }
+      const moved = routedConsumer(name, argv.args, session, registry, placed)[1] ?? placed
+      const [runtime, machine] = placement(moved, name)
+      const [mine, where] = placement(here, name)
+      return runtime !== mine || machine !== where
+    }
     const denied = PROGRAM_WRAPPERS.has(name)
       ? await wrappedRefusal(
           [name, ...argv.args].map((w) => ({ raw: w, text: w })),
@@ -1384,6 +1448,7 @@ async function routeArgv(
           stdin,
           signal,
           claimant,
+          elsewhere,
         )
       : null
     if (denied !== null) return refused([name, ...argv.args].join(' '), denied)

@@ -63,6 +63,12 @@ def _argv(inner: InnerLine) -> list[str]:
         ("builtin", ["--", "echo", "hi"], [("argv", ["echo", "hi"], False)]),
         ("builtin", [], []),
         ("nice", ["-n", "5", "rm", "/x"], [("argv", ["rm", "/x"], False)]),
+        ("nice", ["--ad", "5", "rm", "/x"], [("argv", ["rm", "/x"], False)]),
+        # GNU env splits -S's value into the command line itself.
+        ("env", ["-S", "rm /x"], [("none", None, False)]),
+        ("env", ["--split-string=rm /x"], [("none", None, False)]),
+        ("env", ["-iS", "rm /x"], [("none", None, False)]),
+        ("env", ["-uPATHS", "rm"], [("argv", ["rm"], False)]),
         ("ionice", ["-c", "3", "rm", "/x"], [("argv", ["rm", "/x"], False)]),
         ("time", ["-p", "rm", "/x"], [("argv", ["rm", "/x"], False)]),
         # Operands the runtime appends: stdin items, matched paths.
