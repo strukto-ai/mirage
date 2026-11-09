@@ -95,7 +95,7 @@ mirage workspace create /tmp/sandbox.yaml
 
 ## Notes
 
-- Closing the workspace leaves the sandbox running.
+- Stopping or closing the workspace leaves the sandbox running.
 - Piped input is uploaded to a temporary file in the sandbox and read as
   stdin.
 - Output comes back as the program wrote it, binary included: the
@@ -107,6 +107,6 @@ mirage workspace create /tmp/sandbox.yaml
   Daytona settings. The
   [Daytona example](https://github.com/strukto-ai/mirage/tree/main/examples/python/machine/daytona)
   covers baking a snapshot and a full read and write round trip.
-- A Daytona sandbox has no timeout of its own: after a Mirage
-  [timeout](/home/setup/machine/overview#timeouts), the program keeps running and billing until you
-  stop it.
+- A Daytona sandbox has no timeout of its own. After a Mirage
+  [timeout](/home/setup/machine/overview#timeouts), Python stops the
+  program; in TypeScript it keeps running and billing until you stop it.

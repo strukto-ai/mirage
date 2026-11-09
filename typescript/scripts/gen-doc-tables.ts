@@ -101,7 +101,7 @@ const PEER_FEATURES: readonly { feature: string; packages: readonly string[]; ne
   {
     feature: 'SSH',
     packages: ['ssh2'],
-    needs: '`SSHVFS`, the SSH sandbox runtime and the SFTP mount.',
+    needs: '`SSHVFS`, the `ssh` machine, `mountType` `ssh` and `both`, and the SFTP mount.',
   },
   {
     feature: 'Email',
@@ -115,9 +115,9 @@ const PEER_FEATURES: readonly { feature: string; packages: readonly string[]; ne
     needs: 'The Pyodide and Monty runtimes behind `python3`.',
   },
   {
-    feature: 'Sandboxes',
+    feature: 'Cloud machines',
     packages: ['e2b', '@daytonaio/sdk'],
-    needs: 'The E2B and Daytona sandbox runtimes.',
+    needs: 'The `e2b` and `daytona` machines.',
   },
   { feature: '1Password', packages: ['@1password/sdk'], needs: 'The `1password` secret source.' },
 ]

@@ -23,8 +23,8 @@ specific to the Python SDK.
   stops the run.
 - **Local:** with neither `home` nor `MIRAGE_LOCAL_HOME`, `python3` is the
   interpreter running Mirage.
-- **Sandboxes:** `mount_type: ssh` needs `pip install 'mirage-ai[ssh]'` on
-  the host. The `ssh` runtime matches `host` against `~/.ssh/config`.
+- **Machines:** `mount_type: ssh` needs `pip install 'mirage-ai[ssh]'` on
+  the host. The `ssh` machine matches `host` against `~/.ssh/config`.
 - **WASI** is in the Python SDK only; Pyodide is in the TypeScript SDK only.
 
 ## WASI
@@ -52,8 +52,8 @@ Without it, `WasiRuntime(...)` raises `ImportError`.
 
 `Workspace(runtimes=[...])` takes names and runtime objects, and adds
 `workspace` when the list leaves it out. On a live workspace, `add_runtime`
-appends an entry (a remote sandbox goes after the last sandbox listed, else
-ahead of Monty and QuickJS),
+appends an entry (one that runs on a machine goes after the last such entry,
+else ahead of Monty and QuickJS),
 `remove_runtime` takes one out, and `runtimes()` lists them:
 
 ```python

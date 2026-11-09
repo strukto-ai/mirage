@@ -90,8 +90,9 @@ the same backend.
 
 ## Notes
 
-- Keep the sandbox running while Mirage is connected. Reconnect after a restart.
-- Closing the runtime leaves the sandbox running.
+- Keep the sandbox running while Mirage uses it. Each line runs its own
+  `msb exec`, so after a restart the next line needs nothing from you.
+- Stopping or closing the workspace leaves the sandbox running.
 - A [timeout](/home/setup/machine/overview#timeouts) cancels the CLI call and
   stops that run's processes in the sandbox.
 - A program's output reaches Mirage as it prints, except when Mirage pipes

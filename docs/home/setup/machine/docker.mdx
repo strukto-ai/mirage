@@ -111,3 +111,9 @@ docker exec my-sandbox mirage workspace create /tmp/sandbox.yaml
 - Sizing, GPUs, networks, volumes and bind mounts go on your own
   `docker run`. You can bake `sandbox.yaml` into the image instead of
   copying it, and point it at `host.docker.internal` for a host service.
+
+<Warning>
+  Environment values, the session's and the config `env`'s, go on the
+  `docker exec` command line, so other users of the host can see them in
+  `ps`. Avoid secrets on a host shared with untrusted users.
+</Warning>
