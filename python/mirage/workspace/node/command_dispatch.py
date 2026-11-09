@@ -239,44 +239,42 @@ def _owned_word(
     return False
 
 
-async def execute_command(
+async def _run_alias(
     recurse: Callable[..., Awaitable[RedirectResult]],
-    dispatch: DispatchFn,
     registry: MountRegistry,
-    namespace: Namespace,
-    execute_fn: ExecuteFn,
     node: TSNodeLike,
+    parts: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
-    job_table: JobTable,
-    cancel: asyncio.Event | None = None,
-    handed: HandOff | None = None,
-    sink: JobConsole | None = None,
-    expanded: ExpandedWords | None = None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Dispatch a command node by name.
+    handed: HandOff | None,
+    sink: JobConsole | None,
+) -> RedirectResult | None:
+    """Run a command whose head word is an alias, None when it is not.
 
-    ``sink`` is where a command that runs statements of its own (a
-    function body, a nested shell) writes them as they finish, and
-    ``expanded`` is filled with the words the command expanded to, so
-    its caller knows what the head ran as.
+    bash rewrites the head word of a simple command before any other
+    expansion, textually, and reads the result as a fresh line: an alias
+    holding a pipe is a pipe. Only an unquoted plain word qualifies
+    (`\\x` and `'x'` are never aliases), and `alias_value` applies the
+    rest of bash's rules (the aliases and expand_aliases as the
+    command's read found them, the guards on inserted text). The
+    rewritten line runs through the same executor with the same call
+    stack, so `$1` inside a function still means the function's
+    argument. A line run as a program (`exec`, `env`, `find -exec`) is
+    an argv, which no alias rewrites.
+
+    Args:
+        recurse (Callable): runs the rewritten line.
+        registry (MountRegistry): holds the decision ledger.
+        node (TSNodeLike): the command.
+        parts (list[TSNodeLike]): its words past the prefix assignments.
+        context (EvaluationContext): the evaluation.
+        stdin (ByteSource | None): its input.
+        call_stack (CallStack | None): the call stack.
+        handed (HandOff | None): the line's grants.
+        sink (JobConsole | None): where its statements write.
     """
     session = context.session
-    name = get_command_name(node)
-    assignment_nodes, parts = split_env_prefix(get_parts(node))
-
-    # ── alias expansion ─────────────────────────
-    # bash rewrites the head word of a simple command before any other
-    # expansion, textually, and reads the result as a fresh line: an
-    # alias holding a pipe is a pipe. Only an unquoted plain word
-    # qualifies (`\x` and `'x'` are never aliases), and `alias_value`
-    # applies the rest of bash's rules (the aliases and expand_aliases as
-    # the command's read found them, the guards on inserted text). The
-    # rewritten line runs through the same executor with the same call
-    # stack, so `$1` inside a function still means the function's
-    # argument. A line run as a program (`exec`, `env`, `find -exec`) is
-    # an argv, which no alias rewrites.
     if (
         (session.aliases or session._alias_view or session._alias_marks)
         and not program_invocation(session)
@@ -361,6 +359,49 @@ async def execute_command(
                         )
             finally:
                 scope.release()
+    return None
+
+
+async def execute_command(
+    recurse: Callable[..., Awaitable[RedirectResult]],
+    dispatch: DispatchFn,
+    registry: MountRegistry,
+    namespace: Namespace,
+    execute_fn: ExecuteFn,
+    node: TSNodeLike,
+    context: EvaluationContext,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    job_table: JobTable,
+    cancel: asyncio.Event | None = None,
+    handed: HandOff | None = None,
+    sink: JobConsole | None = None,
+    expanded: ExpandedWords | None = None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Dispatch a command node by name.
+
+    ``sink`` is where a command that runs statements of its own (a
+    function body, a nested shell) writes them as they finish, and
+    ``expanded`` is filled with the words the command expanded to, so
+    its caller knows what the head ran as.
+    """
+    session = context.session
+    name = get_command_name(node)
+    assignment_nodes, parts = split_env_prefix(get_parts(node))
+
+    aliased = await _run_alias(
+        recurse,
+        registry,
+        node,
+        parts,
+        context,
+        stdin,
+        call_stack,
+        handed,
+        sink,
+    )
+    if aliased is not None:
+        return aliased
 
     prefix_assignments: list[tuple[str, str]] = []
     # A readonly name before a command is refused before its value
@@ -1122,6 +1163,195 @@ def _run_program(
     return stdout, io, node
 
 
+async def _run_namespace_program(
+    name: str,
+    namespace: Namespace,
+    made: DispatchFn,
+    registry: MountRegistry,
+    session: SessionState,
+    operands: list[str | PathSpec],
+    stdin: ByteSource | None,
+) -> RedirectResult | None:
+    """Run a program that lives above the mounts, None for any other.
+
+    Args:
+        name (str): the command.
+        namespace (Namespace): the link table.
+        made (DispatchFn): the dispatcher the program's ops go through.
+        registry (MountRegistry): the mounts.
+        session (SessionState): the session.
+        operands (list[str | PathSpec]): its operands.
+        stdin (ByteSource | None): its input.
+    """
+    # ── symlinks (namespace-backed; not bash builtins, not mount
+    #    commands: they mutate the addressing layer) ──
+    if name == "ln":
+        return await handle_ln(namespace, made, session, operands)
+
+    if name == "readlink":
+        return await handle_readlink(namespace, made, session, operands)
+
+    # ── extended attributes (the namespace's node table and the backend's
+    #    own facts; they read -h themselves) ──
+    if name == "getfattr":
+        return await handle_getfattr(namespace, made, session, operands)
+    if name == "setfattr":
+        return await handle_setfattr(made, session, operands, stdin)
+
+    # ── metadata commands (namespace-routed: resolve-then-setattr with
+    #    overlay fallback; they run their own link follow) ──
+    if name == "chmod":
+        return await handle_chmod(namespace, made, session, operands)
+    if name == "chown":
+        return await handle_chown(namespace, made, session, operands)
+    if name == "chgrp":
+        return await handle_chgrp(namespace, made, session, operands)
+    if name == "touch":
+        return await handle_touch(namespace, made, session, operands)
+
+    # ── capacity (registry-routed: enumerates mounts, reports per-mount
+    #    capacity; never fabricates numbers) ──
+    if name == "df":
+        return await handle_df(registry, session, made, operands)
+    if name == "mount":
+        return await handle_mount(registry, session, operands)
+    return None
+
+
+async def _strip_links(
+    name: str,
+    argv: Argv,
+    operands: list[str | PathSpec],
+    dispatch: DispatchFn,
+    namespace: Namespace,
+    session: SessionState,
+) -> tuple[list[str | PathSpec], list[str], RedirectResult | None]:
+    """Act on the link operands ``rm``, ``unlink`` and ``mv`` name.
+
+    Args:
+        name (str): the command.
+        argv (Argv): its words.
+        operands (list[str | PathSpec]): its operands.
+        dispatch (DispatchFn): the op dispatcher.
+        namespace (Namespace): the link table.
+        session (SessionState): the session.
+
+    Returns:
+        The operands left, the refused links' lines, and the answer when
+        no operand is left for the command.
+    """
+    link_errors: list[str] = []
+    try:
+        # Both remove the link entry itself, which no backend can
+        # see; unlink(1) is rm(1) restricted to one non-directory.
+        # Gated on the line being one the command layer accepts,
+        # because this removal happens before that layer parses and
+        # it cannot be taken back (GNU refuses `rm --bogus dlink`
+        # and `unlink dlink other` with the link still there).
+        if name in ("rm", "unlink") and accepts_line(
+            name, argv.args, operands, session.cwd
+        ):
+            operands, handled, link_errors = await strip_link_operands(
+                name,
+                dispatch,
+                namespace.session_links(session),
+                operands,
+                argv.args,
+                session.cwd,
+            )
+            if handled and not any(isinstance(a, PathSpec) for a in operands):
+                if not link_errors:
+                    return (
+                        operands,
+                        link_errors,
+                        (
+                            None,
+                            IOResult(),
+                            ExecutionNode(command=name, exit_code=0),
+                        ),
+                    )
+                err = encode_text("".join(link_errors))
+                return (
+                    operands,
+                    link_errors,
+                    (
+                        None,
+                        IOResult(exit_code=1, stderr=err),
+                        ExecutionNode(command=name, exit_code=1, stderr=err),
+                    ),
+                )
+        elif name == "mv":
+            operands, early = await prepare_mv(
+                namespace.session_links(session),
+                dispatch,
+                operands,
+                argv.args,
+                session.cwd,
+            )
+            if early is not None:
+                return operands, link_errors, early
+    except CycleError as exc:
+        err = encode_text(f"{name}: {exc.filename}: {exc.strerror}\n")
+        return (
+            operands,
+            link_errors,
+            (
+                None,
+                IOResult(exit_code=1, stderr=err),
+                ExecutionNode(command=name, exit_code=1, stderr=err),
+            ),
+        )
+    return operands, link_errors, None
+
+
+async def _purge_removed(
+    namespace: Namespace,
+    operands: list[str | PathSpec],
+    unseen: tuple[dict[str, frozenset[str]], frozenset[str]],
+) -> None:
+    """Drop the node meta of what ``rm`` removed.
+
+    A removed path takes its node meta (overlay attrs) with it; a
+    removed dir purges everything underneath. Glob operands reach here
+    unexpanded (backend wrappers expand them), so the node table matches
+    the pattern itself. A name the session cannot see was never removed:
+    rm met it as absent (-f silenced that), so its node stays.
+
+    Args:
+        namespace (Namespace): the node table.
+        operands (list[str | PathSpec]): rm's operands.
+        unseen (tuple): what the session could not see of them.
+    """
+    kept, hidden = unseen
+    for item in operands:
+        if not isinstance(item, PathSpec):
+            continue
+        if item.walk_error is not None:
+            # The walk refused it, so rm removed nothing there
+            # (-f only silenced the refusal), and the empty
+            # name's `virtual` is the working directory: purging
+            # under it dropped every link the directory held.
+            continue
+        if item.raw_path.endswith("/"):
+            # A trailing slash asked for the directory, and rm
+            # refused (or -f silenced the refusal). Nothing was
+            # removed, so nothing may be purged: dropping the
+            # node here deleted the very link the slash
+            # protects (GNU keeps it through `rm -rf dlink/`).
+            continue
+        if item.pattern:
+            # A quoted metacharacter is a literal here too,
+            # so the node table is matched with the same
+            # pattern the backend resolved with.
+            pattern = glob_pattern(item.virtual)
+            await namespace.unlink_glob(
+                pattern, keep=kept.get(pattern, frozenset())
+            )
+        elif item.virtual not in hidden:
+            await namespace.unlink(item.virtual)
+            await namespace.purge_under(item.virtual)
+
+
 async def _route_argv(
     recurse: Callable[..., Awaitable[RedirectResult]],
     dispatch: DispatchFn,
@@ -1267,93 +1497,21 @@ async def _route_argv(
     # to it reaches what ``chmod -R`` walks into, not only its operands.
     made = made_by_command(dispatch)
 
-    # ── symlinks (namespace-backed; not bash builtins, not mount
-    #    commands: they mutate the addressing layer) ──
-    if name == "ln":
-        return await handle_ln(namespace, made, session, operands)
-
-    if name == "readlink":
-        return await handle_readlink(namespace, made, session, operands)
-
-    # ── extended attributes (the namespace's node table and the backend's
-    #    own facts; they read -h themselves) ──
-    if name == "getfattr":
-        return await handle_getfattr(namespace, made, session, operands)
-    if name == "setfattr":
-        return await handle_setfattr(made, session, operands, stdin)
-
-    # ── metadata commands (namespace-routed: resolve-then-setattr with
-    #    overlay fallback; they run their own link follow) ──
-    if name == "chmod":
-        return await handle_chmod(namespace, made, session, operands)
-    if name == "chown":
-        return await handle_chown(namespace, made, session, operands)
-    if name == "chgrp":
-        return await handle_chgrp(namespace, made, session, operands)
-    if name == "touch":
-        return await handle_touch(namespace, made, session, operands)
-
-    # ── capacity (registry-routed: enumerates mounts, reports per-mount
-    #    capacity; never fabricates numbers) ──
-    if name == "df":
-        return await handle_df(registry, session, made, operands)
-    if name == "mount":
-        return await handle_mount(registry, session, operands)
+    program = await _run_namespace_program(
+        name, namespace, made, registry, session, operands, stdin
+    )
+    if program is not None:
+        return program
 
     # ── symlink-aware dispatch: reads follow links (open(2)); rm/mv act
     #    on the link entry itself (lstat semantics) ──
     link_errors: list[str] = []
     if namespace.nodes:
-        try:
-            # Both remove the link entry itself, which no backend can
-            # see; unlink(1) is rm(1) restricted to one non-directory.
-            # Gated on the line being one the command layer accepts,
-            # because this removal happens before that layer parses and
-            # it cannot be taken back (GNU refuses `rm --bogus dlink`
-            # and `unlink dlink other` with the link still there).
-            if name in ("rm", "unlink") and accepts_line(
-                name, argv.args, operands, session.cwd
-            ):
-                operands, handled, link_errors = await strip_link_operands(
-                    name,
-                    dispatch,
-                    namespace.session_links(session),
-                    operands,
-                    argv.args,
-                    session.cwd,
-                )
-                if handled and not any(
-                    isinstance(a, PathSpec) for a in operands
-                ):
-                    if not link_errors:
-                        return (
-                            None,
-                            IOResult(),
-                            ExecutionNode(command=name, exit_code=0),
-                        )
-                    err = encode_text("".join(link_errors))
-                    return (
-                        None,
-                        IOResult(exit_code=1, stderr=err),
-                        ExecutionNode(command=name, exit_code=1, stderr=err),
-                    )
-            elif name == "mv":
-                operands, early = await prepare_mv(
-                    namespace.session_links(session),
-                    dispatch,
-                    operands,
-                    argv.args,
-                    session.cwd,
-                )
-                if early is not None:
-                    return early
-        except CycleError as exc:
-            err = encode_text(f"{name}: {exc.filename}: {exc.strerror}\n")
-            return (
-                None,
-                IOResult(exit_code=1, stderr=err),
-                ExecutionNode(command=name, exit_code=1, stderr=err),
-            )
+        operands, link_errors, early = await _strip_links(
+            name, argv, operands, dispatch, namespace, session
+        )
+        if early is not None:
+            return early
         argv = argv.with_operands(operands)
 
     # What rm's bookkeeping may drop is read before rm runs: removing a
@@ -1386,40 +1544,7 @@ async def _route_argv(
 
     if io.exit_code == 0 and namespace.nodes:
         if name == "rm":
-            # A removed path takes its node meta (overlay attrs) with it;
-            # a removed dir purges everything underneath. Glob operands
-            # reach here unexpanded (backend wrappers expand them), so
-            # the node table matches the pattern itself. A name the
-            # session cannot see was never removed: rm met it as absent
-            # (-f silenced that), so its node stays.
-            kept, hidden = unseen
-            for item in operands:
-                if not isinstance(item, PathSpec):
-                    continue
-                if item.walk_error is not None:
-                    # The walk refused it, so rm removed nothing there
-                    # (-f only silenced the refusal), and the empty
-                    # name's `virtual` is the working directory: purging
-                    # under it dropped every link the directory held.
-                    continue
-                if item.raw_path.endswith("/"):
-                    # A trailing slash asked for the directory, and rm
-                    # refused (or -f silenced the refusal). Nothing was
-                    # removed, so nothing may be purged: dropping the
-                    # node here deleted the very link the slash
-                    # protects (GNU keeps it through `rm -rf dlink/`).
-                    continue
-                if item.pattern:
-                    # A quoted metacharacter is a literal here too,
-                    # so the node table is matched with the same
-                    # pattern the backend resolved with.
-                    pattern = glob_pattern(item.virtual)
-                    await namespace.unlink_glob(
-                        pattern, keep=kept.get(pattern, frozenset())
-                    )
-                elif item.virtual not in hidden:
-                    await namespace.unlink(item.virtual)
-                    await namespace.purge_under(item.virtual)
+            await _purge_removed(namespace, operands, unseen)
     if link_errors:
         # A refused link operand fails the line the way a refused
         # backend operand does: its lines lead (they were reported
