@@ -138,9 +138,11 @@ from mirage.workspace.lookup import (
     Consumer,
     runtime_refused,
 )
+from mirage.workspace.lookup.constants import RUNNERS
 from mirage.workspace.lookup.lookup import (
     mirage_program_at,
     routed_consumer,
+    wrapper_answer,
     wrapper_refusal,
 )
 from mirage.workspace.mount import MountRegistry
@@ -1436,6 +1438,25 @@ async def _route_argv(
         assert routing is not None
         return await run_external(
             argv, stdin, session, registry, routing, sink
+        )
+
+    if consumer is Consumer.UNKNOWN and name in RUNNERS:
+        answer = wrapper_answer(name, argv.args, session, registry)
+        if answer.runs_from is not None:
+            return _run_program(
+                execute_fn,
+                name,
+                shell_join(argv.args[answer.runs_from :]),
+                session,
+                stdin,
+            )
+        err = encode_text(answer.stderr)
+        return (
+            encode_text(answer.stdout) if answer.stdout else None,
+            IOResult(exit_code=answer.exit_code, stderr=err or None),
+            ExecutionNode(
+                command=name, exit_code=answer.exit_code, stderr=err
+            ),
         )
 
     # ── `--help` as a builtin's first word ─────

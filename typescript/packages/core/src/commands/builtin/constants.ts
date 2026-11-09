@@ -70,3 +70,4 @@ export const FALLBACK_TMPDIR = '/tmp'
 
 // The one name every host answers with; hostname and uname -n print it.
 export const HOSTNAME = 'mirage'
+export const MACHINE = 'x86_64'

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec, Argument } from '../types.ts'
-import { PATH2_OPERAND, PATHS_OPERAND, TEXT_OPERAND } from '../constants.ts'
+import { PATH2_OPERAND, PATHS_OPERAND, TEXT_OPERAND, TEXTS_OPERAND } from '../constants.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   cat: new CommandSpec({
@@ -178,5 +178,9 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('--first-only', { action: 'store_true' }),
       PATHS_OPERAND,
     ],
+  }),
+  colrm: new CommandSpec({
+    description: 'Remove columns from a file read on standard input.',
+    arguments: [TEXTS_OPERAND],
   }),
 }

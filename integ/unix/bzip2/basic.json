@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "bzip2_compresses_and_refuses",
+      "seq": 16200023,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_b/d; printf 'hello bzip2\\n' > /data/ez_b/a; bzip2 /data/ez_b/a; ls /data/ez_b; bzip2 -d /data/ez_b/a.bz2; cat /data/ez_b/a; bzip2 -k /data/ez_b/a; ls /data/ez_b; bzip2 -c /data/ez_b/a | bzip2 -d; bzip2 -t /data/ez_b/a.bz2; echo rc=$?; bzip2 -k -f -9 /data/ez_b/a; bzip2 -k /data/ez_b/a; echo rc=$?; bzip2 /data/ez_b/a.bz2; echo rc=$?; bzip2 /data/ez_b/nosuch; echo rc=$?; bzip2 /data/ez_b/d; echo rc=$?; bunzip2 -k /data/ez_b/a.bz2; echo rc=$?; cp /data/ez_b/a /data/ez_b/plain; bunzip2 /data/ez_b/plain; echo rc=$?; ls /data/ez_b; rm -f /data/ez_b/plain.out; printf 'junk' > /data/ez_b/j.bz2; bzip2 -d /data/ez_b/j.bz2; echo rc=$?; bzip2 -t /data/ez_b/j.bz2; echo rc=$?; printf 'x\\n' | bzip2 | bunzip2; rm -r /data/ez_b",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.bz2\nd\nhello bzip2\na\na.bz2\nd\nhello bzip2\nrc=0\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=2\na\na.bz2\nd\nplain\nrc=2\nrc=2\nx\n",
+        "stderr": "bzip2: Output file /data/ez_b/a.bz2 already exists.\nbzip2: Input file /data/ez_b/a.bz2 already has .bz2 suffix.\nbzip2: Can't open input file /data/ez_b/nosuch: No such file or directory.\nbzip2: Input file /data/ez_b/d is a directory.\nbunzip2: Output file /data/ez_b/a already exists.\nbunzip2: Can't guess original name for /data/ez_b/plain -- using /data/ez_b/plain.out\nbunzip2: /data/ez_b/plain is not a bzip2 file.\nbzip2: /data/ez_b/j.bz2 is not a bzip2 file.\nbzip2: /data/ez_b/j.bz2: bad magic number (file not created by bzip2)\n\nYou can use the `bzip2recover' program to attempt to recover\ndata from undamaged sections of corrupted files.\n\n"
+      }
+    }
+  ]
+}

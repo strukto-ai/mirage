@@ -60,6 +60,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-R", "--random-sort", action="store_true"),
             Argument("--random-source", type="path", action="append"),
             Argument("--files0-from", type="path"),
+            Argument("--batch-size", action="append"),
+            Argument("--compress-program", action="append"),
             PATHS_OPERAND,
         )
     ),

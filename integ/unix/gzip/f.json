@@ -25,10 +25,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/qgzf && printf 'first' > /data/qgzf/g.txt && gzip -k /data/qgzf/g.txt && printf 'second' > /data/qgzf/g.txt && gzip -f /data/qgzf/g.txt && gzip -dc /data/qgzf/g.txt.gz",
+      "command": "mkdir -p /data/qgzf && printf 'first' > /data/qgzf/g.txt && gzip -k /data/qgzf/g.txt && printf 'second' > /data/qgzf/g.txt && gzip -f /data/qgzf/g.txt && gzip -dc /data/qgzf/g.txt.gz; printf 'flags\\n' | gzip --rsyncable --synchronous | gzip -d --rsyncable --synchronous",
       "expect": {
         "exit": 0,
-        "stdout": "second",
+        "stdout": "secondflags\n",
         "stderr": ""
       },
       "flags": [

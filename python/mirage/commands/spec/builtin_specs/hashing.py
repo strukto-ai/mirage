@@ -51,6 +51,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-B", "--ignore-blank-lines", action="store_true"),
             Argument("-I", "--ignore-matching-lines", action="append"),
             Argument("--strip-trailing-cr", action="store_true"),
+            Argument("--speed-large-files", action="store_true"),
+            Argument("--horizon-lines", action="append"),
             Argument("-a", "--text", action="store_true"),
             # The output styles; two different ones are refused.
             Argument("--normal", action="store_true"),
@@ -180,3 +182,8 @@ SPECS: dict[str, CommandSpec] = {
         )
     ),
 }
+
+CMP = SPECS["cmp"]
+DIFF = SPECS["diff"]
+SPECS["zcmp"] = CMP
+SPECS["zdiff"] = DIFF

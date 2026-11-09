@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { specOf } from './builtins.ts'
 import { compileSpec, expandLong, optionSpellings } from './compile.ts'
-import { HELP_OPTION, VERSION_OPTION } from './constants.ts'
+import { HELP_OPTION, REMAINDER_OPERAND, VERSION_OPTION } from './constants.ts'
 import { Argument, CommandSpec } from './types.ts'
 
 const DECLARE_OPTIONS = [
@@ -738,6 +738,35 @@ export const SHELL_SPECS = Object.freeze(
           metavar: 'var',
           help: 'store in VAR the ID whose status is returned',
         }),
+      ],
+    }),
+    nice: new CommandSpec({
+      description: 'Run a command at another scheduling priority.',
+      arguments: [
+        new Argument(['-n', '--adjustment'], { numericShorthand: true }),
+        REMAINDER_OPERAND,
+      ],
+    }),
+    nohup: new CommandSpec({
+      description: 'Run a command that outlives its terminal.',
+      arguments: [REMAINDER_OPERAND],
+    }),
+    setsid: new CommandSpec({
+      description: 'Run a command in a session of its own.',
+      arguments: [
+        new Argument(['-c', '--ctty'], { action: 'store_true' }),
+        new Argument(['-f', '--fork'], { action: 'store_true' }),
+        new Argument(['-w', '--wait'], { action: 'store_true' }),
+        REMAINDER_OPERAND,
+      ],
+    }),
+    stdbuf: new CommandSpec({
+      description: 'Run a command with other standard stream buffering.',
+      arguments: [
+        new Argument(['-i', '--input']),
+        new Argument(['-o', '--output']),
+        new Argument(['-e', '--error']),
+        REMAINDER_OPERAND,
       ],
     }),
     while: new CommandSpec({

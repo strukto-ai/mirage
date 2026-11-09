@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_xz_reads_both_mounts",
+      "seq": 16200108,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "printf 'a\\n' > /data/xm_ez_xz; printf 'b\\n' > /data2/xm_ez_xz; xz /data/xm_ez_xz /data2/xm_ez_xz; xz -dc /data/xm_ez_xz.xz /data2/xm_ez_xz.xz; rm /data/xm_ez_xz.xz /data2/xm_ez_xz.xz",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

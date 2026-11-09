@@ -165,6 +165,10 @@ _SCANNED = (
 # The environment ls reads where no option gives the value, and the name
 # the scan reads each one under.
 _ENVIRONMENT = (("QUOTING_STYLE", "quoting_env"), ("COLUMNS", "columns_env"))
+# The options dir and vdir list as when nothing else is typed: columns,
+# and long, each with names quoted as -b does.
+DEFAULT_FORMATS = {"dir": "C", "vdir": "args_l"}
+ESCAPED = {"QUOTING_STYLE": "escape"}
 # The quoting styles that leave some names bare, under which a bare name
 # in columns or a long listing takes a space to line up with quoted ones.
 _ALIGNED_STYLES = frozenset(("shell", "shell-escape", "c-maybe"))
@@ -247,6 +251,7 @@ def scan_values(
     fl: FlagView,
     names: Sequence[str] = _SCANNED,
     env: Mapping[str, str] | None = None,
+    default_format: str | None = None,
 ) -> LsValues:
     """ls's option values, read by mirage-rs in one pass over the line.
 
@@ -257,12 +262,16 @@ def scan_values(
         env (Mapping[str, str] | None): the environment, whose
             ``QUOTING_STYLE`` and ``COLUMNS`` stand in for an option the
             line did not type.
+        default_format (str | None): the option that stands for the
+            format of a line that types none (``vdir`` lists long).
 
     Raises:
         UsageError: the first value ls refuses, in its words and with its
             exit status.
     """
     tape = _tape(fl, names)
+    if default_format is not None and not fl.typed_order(*_FORMAT_DESTS):
+        tape.insert(0, (default_format, ""))
     if env is not None:
         tape += [(dest, env[var]) for var, dest in _ENVIRONMENT if var in env]
     values = scanned("ls", tape)
@@ -308,7 +317,11 @@ def scan_values(
     )
 
 
-def link_mode(fl: FlagView, values: LsValues | None = None) -> LsLinkMode:
+def link_mode(
+    fl: FlagView,
+    values: LsValues | None = None,
+    default_format: str | None = None,
+) -> LsLinkMode:
     """Which command-line links ls resolves before it lists them.
 
     It is settled once: the last of ``-L``, ``-H`` and
@@ -322,6 +335,7 @@ def link_mode(fl: FlagView, values: LsValues | None = None) -> LsLinkMode:
         fl (FlagView): the ls flag view.
         values (LsValues | None): a scan of the whole line already read;
             None reads the format and indicator options here.
+        default_format (str | None): as in ``scan_values``.
     """
     typed = fl.typed_order(*_DEREF_DESTS)
     if typed:
@@ -334,7 +348,11 @@ def link_mode(fl: FlagView, values: LsValues | None = None) -> LsLinkMode:
         read = (
             values
             if values is not None
-            else scan_values(fl, (*_INDICATOR_DESTS, *_FORMAT_DESTS))
+            else scan_values(
+                fl,
+                (*_INDICATOR_DESTS, *_FORMAT_DESTS),
+                default_format=default_format,
+            )
         )
         long = read.layout is LsFormat.VERBOSE
         classify = read.indicator is LsIndicator.CLASSIFY
@@ -346,24 +364,33 @@ def link_mode(fl: FlagView, values: LsValues | None = None) -> LsLinkMode:
     return LsLinkMode.DIRECTORY
 
 
-def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+def facts(
+    fl: FlagView,
+    operands: Sequence[str | PathSpec],
+    program: str = "ls",
+) -> LineFacts:
     """An ls line resolves the command-line links ``link_mode`` says, and
     walks, and reads, below its operands under ``-R``.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
         operands (Sequence[str | PathSpec]): the line's operands.
+        program (str): the name the listing was run under.
     """
     recursive = fl.as_bool("recursive")
     return LineFacts(
-        follows=_FOLLOWS[link_mode(fl)],
+        follows=_FOLLOWS[
+            link_mode(fl, default_format=DEFAULT_FORMATS.get(program))
+        ],
         walks=recursive,
         reads_subtree=recursive,
     )
 
 
 def parse_flags(
-    flags: Mapping[str, FlagValue], env: Mapping[str, str] | None = None
+    flags: Mapping[str, FlagValue],
+    env: Mapping[str, str] | None = None,
+    default_format: str | None = None,
 ) -> LsFlags:
     """Parse the ls flag bag once into a frozen struct.
 
@@ -385,9 +412,10 @@ def parse_flags(
         flags (Mapping[str, FlagValue]): flags for the shared ls spec.
         env (Mapping[str, str] | None): the environment, for
             ``QUOTING_STYLE`` and ``COLUMNS``.
+        default_format (str | None): as in ``scan_values``.
     """
     fl = FlagView(flags, spec=SPECS["ls"])
-    values = scan_values(fl, env=env)
+    values = scan_values(fl, env=env, default_format=default_format)
     long = values.layout is LsFormat.VERBOSE
     sort_by = LsSortBy.NAME if values.sort_by is None else values.sort_by
     if (
@@ -440,8 +468,39 @@ def parse_flags(
     )
 
 
+def parse_program_flags(
+    flags: Mapping[str, FlagValue],
+    env: Mapping[str, str] | None = None,
+    program: str = "ls",
+) -> LsFlags:
+    """``parse_flags`` for the name the listing was run under: ``dir`` and
+    ``vdir`` start from their own format and quoting, and refuse a line
+    in their own name.
+
+    Args:
+        flags (Mapping[str, FlagValue]): Flags for the shared ls spec.
+        env (Mapping[str, str] | None): the environment, for
+            ``QUOTING_STYLE`` and ``COLUMNS``.
+        program (str): the name the listing was run under.
+    """
+    default_format = DEFAULT_FORMATS.get(program)
+    if default_format is None:
+        return parse_flags(flags, env)
+    try:
+        return parse_flags(flags, {**ESCAPED, **(env or {})}, default_format)
+    except UsageError as exc:
+        said = (
+            str(exc)
+            .replace("ls: ", f"{program}: ", 1)
+            .replace("'ls --help'", f"'{program} --help'")
+        )
+        raise UsageError(said, exc.exit_code) from exc
+
+
 def ls_options(
-    flags: Mapping[str, FlagValue], env: Mapping[str, str] | None = None
+    flags: Mapping[str, FlagValue],
+    env: Mapping[str, str] | None = None,
+    program: str = "ls",
 ) -> dict[str, Any]:
     """Parsed ls flags as the generic's own keyword arguments.
 
@@ -454,8 +513,9 @@ def ls_options(
         flags (Mapping[str, FlagValue]): Flags for the shared ls spec.
         env (Mapping[str, str] | None): the environment, for
             ``QUOTING_STYLE`` and ``COLUMNS``.
+        program (str): the name the listing was run under.
     """
-    parsed = parse_flags(flags, env)
+    parsed = parse_program_flags(flags, env, program)
     return {f.name: getattr(parsed, f.name) for f in fields(parsed)}
 
 
@@ -1465,8 +1525,21 @@ def _render_group(
         results.extend(laid_out(rows, layout, width, tabsize))
 
 
+def _spoken(line: str, program: str) -> str:
+    """A line ls said, in the words of the name it was run under.
+
+    Args:
+        line (str): the line.
+        program (str): that name.
+    """
+    return program + line[2:] if line.startswith("ls:") else line
+
+
 def _finish(
-    results: list[str], warnings: list[LsWarning], notices: Sequence[str]
+    results: list[str],
+    warnings: list[LsWarning],
+    notices: Sequence[str],
+    program: str = "ls",
 ) -> tuple[ByteSource, IOResult]:
     """The listing, with what GNU reports before it said on ``io`` first.
 
@@ -1474,10 +1547,14 @@ def _finish(
         results (list[str]): the listing's lines.
         warnings (list[LsWarning]): reported before the listing.
         notices (Sequence[str]): stderr lines that come first of all.
+        program (str): the name the listing was run under.
     """
     out = format_records(results)
     io = IOResult(exit_code=exit_status_for(warnings))
-    lines = [*notices, *(w.message for w in warnings)]
+    lines = [
+        _spoken(line, program)
+        for line in (*notices, *(w.message for w in warnings))
+    ]
     if not out:
         io.stderr = format_optional_records(lines)
         return out, io
@@ -1516,6 +1593,7 @@ async def ls(
     tabsize: int = TAB_SIZE,
     ignore: Sequence[str] = (),
     notices: Sequence[str] = (),
+    program: str = "ls",
 ) -> tuple[ByteSource, IOResult]:
     results: list[str] = []
     warnings: list[LsWarning] = []
@@ -1569,7 +1647,7 @@ async def ls(
                 rows, row_hrefs, links, long, indicator
             ),
         )
-        return _finish(results, warnings, notices)
+        return _finish(results, warnings, notices, program)
 
     needed = stat_needed(
         long=long,
@@ -1807,7 +1885,10 @@ async def ls(
     # GNU looks at every operand before it lists one, so what that found
     # goes first; the rest goes where the walk met it.
     reported = list(warnings)
-    pending = [*notices, *(w.message for w in warnings)]
+    pending = [
+        _spoken(line, program)
+        for line in (*notices, *(w.message for w in warnings))
+    ]
     if recursive:
         io = IOResult()
 
@@ -1817,7 +1898,7 @@ async def ls(
                     async for piece in walked:
                         if isinstance(piece, LsWarning):
                             reported.append(piece)
-                            pending.append(piece.message)
+                            pending.append(_spoken(piece.message, program))
                             continue
                         if pending:
                             await say(io, format_records(pending))
@@ -1839,7 +1920,7 @@ async def ls(
                         if id(warning) not in seen:
                             seen.add(id(warning))
                             reported.append(warning)
-                            pending.append(warning.message)
+                            pending.append(_spoken(warning.message, program))
                 if pending:
                     await say(io, format_records(pending))
                 io.exit_code = exit_status_for(reported)
@@ -1851,7 +1932,7 @@ async def ls(
     async for piece in pieces():
         if isinstance(piece, LsWarning):
             reported.append(piece)
-            pending.append(piece.message)
+            pending.append(_spoken(piece.message, program))
             continue
         if pending:
             notes.append((offset, format_records(pending)))
@@ -1875,6 +1956,7 @@ async def ls_generic(
     readdir: ReaddirFn,
     stat: StatFn,
     options: Mapping[str, Any] | None = None,
+    program: str = "ls",
 ) -> tuple[ByteSource, IOResult]:
     """Run ls over resolved operands, GNU semantics; mirrors lsGeneric.
 
@@ -1896,6 +1978,7 @@ async def ls_generic(
         stat (StatFn): Bound (overlaid) stat called as ``stat(p)``.
         options (Mapping[str, Any] | None): ``ls_options`` the caller read
             before it resolved the operands; None reads them here.
+        program (str): the name it was run under (``dir``, ``vdir``).
     """
     return await ls(
         paths,
@@ -1910,6 +1993,7 @@ async def ls_generic(
         mounts=mounts_of(ctx),
         stat_path=vfs_stat_path(ctx.vfs),
         identity=identity_of(ctx),
+        program=program,
         **(ls_options(ctx.flags, ctx.env) if options is None else options),
     )
 

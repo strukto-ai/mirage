@@ -80,6 +80,11 @@ const BARE_PREDICATES: &[&[u8]] = &[
     b"-nogroup",
     b"-daystart",
     b"-follow",
+    b"-noleaf",
+    b"-warn",
+    b"-nowarn",
+    b"-ignore_readdir_race",
+    b"-noignore_readdir_race",
 ];
 /// The words that test an entry, which a top-level `-a` chain may not
 /// hold after an action: the host applies every action to the rows the

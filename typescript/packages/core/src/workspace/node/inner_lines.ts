@@ -19,6 +19,7 @@ import { hasGlob, markEscapedGlobs } from '../../utils/glob_walk.ts'
 import { patternShape } from '../../utils/fnmatch.ts'
 import { parseBashArgs } from '../executor/builtins/script/bash.ts'
 import { CondParser, PATTERN_OPS, condLeaves, condTokens } from './test_tokens.ts'
+import { readWrapper } from '../lookup/constants.ts'
 
 /**
  * One word of a line as the gate reads it: `raw` as typed, `text` what
@@ -257,6 +258,15 @@ function niceInner(args: readonly Word[]): InnerLine[] {
   return asArgv(args.slice(i))
 }
 
+// `stdbuf` and `setsid` run what stands after their own options.
+function wrapperInner(head: string, args: readonly Word[]): InnerLine[] {
+  const [at] = readWrapper(
+    head,
+    args.map((_, i) => valueAt(args, i)),
+  )
+  return at === null ? [] : asArgv(args.slice(at))
+}
+
 // `time [-p] COMMAND [ARG]...`.
 function timeInner(args: readonly Word[]): InnerLine[] {
   let i = 0
@@ -336,6 +346,9 @@ export function innerLines(head: string, args: readonly Word[]): InnerLine[] {
       return findInner(args)
     case 'nice':
       return niceInner(args)
+    case 'stdbuf':
+    case 'setsid':
+      return wrapperInner(head, args)
     case 'time':
       return timeInner(args)
     default:

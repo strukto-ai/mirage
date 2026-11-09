@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_bzip2_reads_both_mounts",
+      "seq": 16200110,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "printf 'a\\n' > /data/xm_ez_bzip2; printf 'b\\n' > /data2/xm_ez_bzip2; bzip2 /data/xm_ez_bzip2 /data2/xm_ez_bzip2; bzip2 -dc /data/xm_ez_bzip2.bz2 /data2/xm_ez_bzip2.bz2; rm /data/xm_ez_bzip2.bz2 /data2/xm_ez_bzip2.bz2",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

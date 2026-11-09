@@ -68,6 +68,8 @@ STDIN_DASH_COMMANDS = frozenset(
         "awk",
         "b2sum",
         "base64",
+        "bunzip2",
+        "bzip2",
         "cat",
         "cmp",
         "comm",
@@ -99,8 +101,10 @@ STDIN_DASH_COMMANDS = frozenset(
         "tail",
         "unexpand",
         "uniq",
+        "unxz",
         "wc",
         "xxd",
+        "xz",
         "zcat",
     }
 )
@@ -477,7 +481,12 @@ TAR_LONG_OPTIONS: tuple[tuple[str, ...], ...] = (
     ("--HANG",),
     ("--version",),
 )
-LONG_OPTION_TABLES = {**GNU_LONG_OPTIONS, "tar": TAR_LONG_OPTIONS}
+LONG_OPTION_TABLES = {
+    **GNU_LONG_OPTIONS,
+    "dir": GNU_LONG_OPTIONS["ls"],
+    "vdir": GNU_LONG_OPTIONS["ls"],
+    "tar": TAR_LONG_OPTIONS,
+}
 
 # The programs whose short value options drop one `=` from an attached
 # value, the way lexopt (ripgrep's parser), clap and argparse read
@@ -739,6 +748,8 @@ USAGE_EXIT = {
     "zgrep": 2,
     "rg": 2,
     "ls": 2,
+    "dir": 2,
+    "vdir": 2,
     "sort": 2,
     "diff": 2,
     "cmp": 2,
@@ -746,6 +757,9 @@ USAGE_EXIT = {
     "jq": 2,
     "curl": 2,
     "patch": 2,
+    "tty": 2,
+    "zcmp": 2,
+    "zdiff": 2,
     "tar": 64,
     "timeout": 125,
     "hostname": 255,
@@ -834,13 +848,20 @@ OLD_OPTION_EXIT = 2
 
 # Commands whose `Try '--help'` hint line is prefixed with the command
 # name (GNU diffutils style: `diff: Try 'diff --help' ...`).
-USAGE_HINT_PREFIX = frozenset({"diff", "cmp", "patch"})
+USAGE_HINT_PREFIX = frozenset({"diff", "cmp", "patch", "xz", "unxz"})
 
 # Commands that print their usage page where the rest print the
 # `Try '--help'` line: sed follows every option error, and a missing
 # script, with its usage. The page is mirage's own, rendered from the
 # spec.
-USAGE_PAGE = frozenset({"sed"})
+USAGE_PAGE = frozenset({"sed", "bzip2", "bunzip2"})
+
+# The programs zcmp and zdiff run, whose refusal of an option they do not
+# know is theirs, not the wrapper's.
+COMPARE_PROGRAMS = {"zcmp": "cmp", "zdiff": "diff"}
+
+# The two programs that say `Bad flag` with their usage page.
+BZIP2_FAMILY = frozenset({"bzip2", "bunzip2"})
 
 # How many distinct readings one spec keeps before it starts over. A
 # line reads each command's words from classification, admission,

@@ -1017,8 +1017,11 @@ function scanValues(
   fl: FlagView,
   names: readonly string[] = SCANNED,
   env?: Readonly<Record<string, string>>,
+  defaultFormat?: string,
 ): LsValues {
   const typed = tape(fl, names)
+  if (defaultFormat !== undefined && fl.typedOrder(...FORMAT_DESTS).length === 0)
+    typed.unshift([defaultFormat, ''])
   for (const [variable, dest] of ENVIRONMENT) {
     const value = env?.[variable]
     if (value !== undefined) typed.push([dest, value])
@@ -1080,7 +1083,7 @@ function scanValues(
  * is a scan of the whole line already read; without it the format and
  * indicator options are read here. Mirrors Python's link_mode.
  */
-export function linkMode(fl: FlagView, values?: LsValues): LsLinkMode {
+export function linkMode(fl: FlagView, values?: LsValues, defaultFormat?: string): LsLinkMode {
   const typed = fl.typedOrder(...DEREF_DESTS)
   const last = typed.at(-1)
   if (last !== undefined) {
@@ -1089,7 +1092,8 @@ export function linkMode(fl: FlagView, values?: LsValues): LsLinkMode {
   let long = false
   let classify = false
   try {
-    const read = values ?? scanValues(fl, [...INDICATOR_DESTS, ...FORMAT_DESTS])
+    const read =
+      values ?? scanValues(fl, [...INDICATOR_DESTS, ...FORMAT_DESTS], undefined, defaultFormat)
     long = read.layout === 'verbose'
     classify = read.indicator === 'classify'
   } catch (err) {
@@ -1103,13 +1107,42 @@ export function linkMode(fl: FlagView, values?: LsValues): LsLinkMode {
  * An ls line resolves the command-line links `linkMode` says, and walks, and
  * reads, below its operands under `-R`. Mirrors Python's `facts`.
  */
-export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+export function facts(
+  fl: FlagView,
+  _operands: readonly (string | PathSpec)[],
+  program = 'ls',
+): LineFacts {
   const recursive = fl.asBool('recursive')
   return new LineFacts({
-    follows: FOLLOWS[linkMode(fl)],
+    follows: FOLLOWS[linkMode(fl, undefined, DEFAULT_FORMATS[program])],
     walks: recursive,
     readsSubtree: recursive,
   })
+}
+
+// The options dir and vdir list as when nothing else is typed: columns, and
+// long, each with names quoted as -b does.
+const DEFAULT_FORMATS: Readonly<Record<string, string>> = { dir: 'C', vdir: 'args_l' }
+const ESCAPED = { QUOTING_STYLE: 'escape' }
+
+/** `parseFlags` for the name the listing was run under: `dir` and `vdir` start
+ * from their own format and quoting, and refuse a line in their own name. */
+export function parseProgramFlags(
+  fl: FlagView,
+  env: Readonly<Record<string, string>>,
+  program: string,
+): LsFlags {
+  const defaultFormat = DEFAULT_FORMATS[program]
+  if (defaultFormat === undefined) return parseFlags(fl, env)
+  try {
+    return parseFlags(fl, { ...ESCAPED, ...env }, defaultFormat)
+  } catch (error) {
+    if (!(error instanceof UsageError)) throw error
+    const said = error.message
+      .replace('ls: ', `${program}: `)
+      .replace("'ls --help'", `'${program} --help'`)
+    throw new UsageError(said, error.exitCode)
+  }
 }
 
 // Parse the ls flag bag once into a frozen struct. The rules that are easy to
@@ -1124,8 +1157,12 @@ export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): 
 // --block-size) are mirage-rs's, read in one pass. `env` is the environment,
 // for QUOTING_STYLE and COLUMNS. Throws UsageError for a value ls refuses,
 // with its exit status for that option. Mirrors Python's parse_flags.
-export function parseFlags(fl: FlagView, env?: Readonly<Record<string, string>>): LsFlags {
-  const values = scanValues(fl, SCANNED, env)
+export function parseFlags(
+  fl: FlagView,
+  env?: Readonly<Record<string, string>>,
+  defaultFormat?: string,
+): LsFlags {
+  const values = scanValues(fl, SCANNED, env, defaultFormat)
   const long = values.layout === 'verbose'
   const sortBy: LsSortBy =
     values.sortBy === null && values.timeKind !== 'mtime' && !long
@@ -1200,14 +1237,22 @@ function statNeeded(flags: LsFlags): boolean {
 // listing would have printed: `placed` holds each such warning with the index
 // in `lines` it is written before, in order.
 // Mirrors Python's _finish.
+/** A line ls said, in the words of the name it was run under. */
+function spoken(line: string, program: string): string {
+  return line.startsWith('ls:') ? program + line.slice(2) : line
+}
+
 function finish(
   lines: string[],
   warnings: readonly LsWarning[],
   notices: readonly string[],
+  program = 'ls',
 ): CommandFnResult {
   const out = formatRecords(lines)
   const exitCode = exitStatusFor(warnings)
-  const leading = [...notices, ...warnings.map((w) => w.message)]
+  const leading = [...notices, ...warnings.map((w) => w.message)].map((line) =>
+    spoken(line, program),
+  )
   if (leading.length === 0) return [out, new IOResult({ exitCode })]
   const stderr = formatRecords(leading)
   if (out.byteLength === 0) return [out, new IOResult({ stderr, exitCode })]
@@ -1223,6 +1268,7 @@ export async function lsGeneric(
   stat: StatFn,
   statPath: StatPath | null = vfsStatPath(ctx.vfs) ?? null,
   flags: LsFlags = parseFlags(new FlagView(ctx.flags, specOf('ls')), ctx.env),
+  program = 'ls',
 ): Promise<CommandFnResult> {
   const targets: PathSpec[] =
     paths.length > 0
@@ -1301,7 +1347,7 @@ export async function lsGeneric(
       flags.hyperlink ? rowPaths : null,
       await linkTargets(rows, rowPaths, links, render),
     )
-    return finish(lines, warnings, notices)
+    return finish(lines, warnings, notices, program)
   }
 
   const walkOpts: WalkOpts = {
@@ -1490,7 +1536,9 @@ export async function lsGeneric(
   // GNU looks at every operand before it lists one, so what that found goes
   // first; the rest goes where the walk met it.
   const reported = [...warnings]
-  const pending = [...notices, ...warnings.map((w) => w.message)]
+  const pending = [...notices, ...warnings.map((w) => w.message)].map((line) =>
+    spoken(line, program),
+  )
   if (recursive) {
     const io = new IOResult()
     const stream = async function* (): AsyncGenerator<Uint8Array> {
@@ -1498,7 +1546,7 @@ export async function lsGeneric(
         for await (const piece of pieces()) {
           if (!(piece instanceof Uint8Array)) {
             reported.push(piece)
-            pending.push(piece.message)
+            pending.push(spoken(piece.message, program))
             continue
           }
           if (pending.length > 0) await say(io, formatRecords(pending.splice(0)))
@@ -1518,7 +1566,7 @@ export async function lsGeneric(
             if (seen.has(warning)) continue
             seen.add(warning)
             reported.push(warning)
-            pending.push(warning.message)
+            pending.push(spoken(warning.message, program))
           }
         }
         if (pending.length > 0) await say(io, formatRecords(pending.splice(0)))
@@ -1533,7 +1581,7 @@ export async function lsGeneric(
   for await (const piece of pieces()) {
     if (!(piece instanceof Uint8Array)) {
       reported.push(piece)
-      pending.push(piece.message)
+      pending.push(spoken(piece.message, program))
       continue
     }
     if (pending.length > 0) notes.push([offset, formatRecords(pending.splice(0))])

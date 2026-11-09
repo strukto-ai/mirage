@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xz_refuses_bad_values",
+      "seq": 16200022,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "xz -T x; echo rc=$?; xz --check=bad; echo rc=$?; xz -F bad; echo rc=$?; xz -S '' ; echo rc=$?; xz --bogus; echo rc=$?; xz -Z; echo rc=$?; unxz --bogus; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "xz: x: Value is not a non-negative decimal integer\nxz: bad: Unsupported integrity check type\nxz: bad: Unknown file format type\nxz: : Invalid filename suffix\nxz: unrecognized option '--bogus'\nxz: Try 'xz --help' for more information.\nxz: invalid option -- 'Z'\nxz: Try 'xz --help' for more information.\nunxz: unrecognized option '--bogus'\nunxz: Try 'unxz --help' for more information.\n"
+      }
+    }
+  ]
+}

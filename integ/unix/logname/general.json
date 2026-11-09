@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "logname_has_no_login",
+      "seq": 16200003,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "logname; echo rc=$?; logname x; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "logname: no login name\nlogname: extra operand 'x'\nTry 'logname --help' for more information.\n"
+      }
+    }
+  ]
+}

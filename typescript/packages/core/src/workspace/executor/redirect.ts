@@ -116,6 +116,8 @@ const STREAM_OUTPUT_BUILTINS = new Set([
   'rev',
   'tac',
   'ls',
+  'dir',
+  'vdir',
   'find',
   'du',
   'stat',

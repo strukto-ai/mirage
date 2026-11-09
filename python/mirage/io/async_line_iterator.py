@@ -29,6 +29,18 @@ logger = logging.getLogger(__name__)
 RELEASE = 1 << 16
 
 
+def lead_width(lead: int) -> int:
+    """How many bytes a UTF-8 character with this first byte takes, 1 for
+    a byte no character starts with.
+
+    Args:
+        lead (int): the first byte.
+    """
+    if lead < 0xC2 or lead >= 0xF5:
+        return 1
+    return 2 if lead < 0xE0 else 3 if lead < 0xF0 else 4
+
+
 def char_width(data: bytes | bytearray, at: int = 0) -> int:
     """How many bytes the character at ``at`` in ``data`` spans, decoded
     as UTF-8.
@@ -45,11 +57,7 @@ def char_width(data: bytes | bytearray, at: int = 0) -> int:
             ``at``.
         at (int): where the character starts.
     """
-    lead = data[at]
-    if lead < 0xC2 or lead >= 0xF5:
-        return 1
-    width = 2 if lead < 0xE0 else 3 if lead < 0xF0 else 4
-    limit = min(width, len(data) - at)
+    limit = min(lead_width(data[at]), len(data) - at)
     for i in range(1, limit):
         if not 0x80 <= data[at + i] < 0xC0:
             return i

@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "users_lists_nobody",
+      "seq": 16200005,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "users; echo rc=$?; users a; echo rc=$?; users a b; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=0\nrc=1\n",
+        "stderr": "users: extra operand 'b'\nTry 'users --help' for more information.\n"
+      }
+    }
+  ]
+}

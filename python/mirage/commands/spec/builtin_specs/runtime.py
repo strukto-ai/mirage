@@ -593,4 +593,94 @@ SPECS: dict[str, CommandSpec] = {
             TEXTS_OPERAND,
         ),
     ),
+    "arch": CommandSpec(
+        description="Print the machine architecture.",
+        arguments=(TEXTS_OPERAND,),
+    ),
+    "tty": CommandSpec(
+        description="Print the name of the terminal on standard input.",
+        arguments=(
+            Argument("-s", "--silent", "--quiet", action="store_true"),
+            TEXTS_OPERAND,
+        ),
+    ),
+    "sync": CommandSpec(
+        description="Finish writes that are still in flight.",
+        arguments=(
+            Argument("-d", "--data", action="store_true"),
+            Argument("-f", "--file-system", action="store_true"),
+            PATHS_OPERAND,
+        ),
+    ),
+    "logname": CommandSpec(
+        description="Print the name the session logged in with.",
+        arguments=(TEXTS_OPERAND,),
+    ),
+    "hostid": CommandSpec(
+        description="Print the host's numeric identifier.",
+        arguments=(TEXTS_OPERAND,),
+    ),
+    "users": CommandSpec(
+        description="Print who is logged in, on one line.",
+        arguments=(TEXTS_OPERAND,),
+    ),
+    "groups": CommandSpec(
+        description="Print the groups a user belongs to.",
+        arguments=(TEXTS_OPERAND,),
+    ),
+    "who": CommandSpec(
+        description="Print who is logged in.",
+        arguments=(
+            Argument("-a", "--all", action="store_true"),
+            Argument("-b", "--boot", action="store_true"),
+            Argument("-d", "--dead", action="store_true"),
+            Argument("-H", "--heading", action="store_true"),
+            Argument("-l", "--login", action="store_true"),
+            Argument("--lookup", action="store_true"),
+            Argument("-m", action="store_true"),
+            Argument("-p", "--process", action="store_true"),
+            Argument("-q", "--count", action="store_true"),
+            Argument("-r", "--runlevel", action="store_true"),
+            Argument("-s", "--short", action="store_true"),
+            Argument("-t", "--time", action="store_true"),
+            Argument(
+                "-T",
+                "-w",
+                "--mesg",
+                "--message",
+                "--writable",
+                action="store_true",
+            ),
+            Argument("-u", "--users", action="store_true"),
+            TEXTS_OPERAND,
+        ),
+    ),
+    "nproc": CommandSpec(
+        description="Print the number of processors available.",
+        arguments=(
+            Argument("--all", action="store_true"),
+            Argument("--ignore"),
+            TEXTS_OPERAND,
+        ),
+    ),
+    "yes": CommandSpec(
+        description="Print a line over and over.",
+        arguments=(TEXTS_OPERAND,),
+    ),
+    "envsubst": CommandSpec(
+        description="Fill environment variables into text on standard input.",
+        arguments=(
+            Argument("-v", "--variables", action="store_true"),
+            TEXTS_OPERAND,
+        ),
+    ),
+    "pathchk": CommandSpec(
+        description="Check that file names are valid or portable.",
+        arguments=(
+            Argument("-p", action="store_true"),
+            Argument("-P", action="store_true"),
+            Argument("--portability", action="store_true"),
+            TEXTS_OPERAND,
+        ),
+    ),
 }

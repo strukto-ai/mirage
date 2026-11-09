@@ -18,6 +18,8 @@ from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.builtin_specs import SPECS
 from mirage.commands.spec.constants import (
+    BZIP2_FAMILY,
+    COMPARE_PROGRAMS,
     IN_ORDER_OPERANDS,
     NOT_GETOPT_LONG,
     OLD_OPTION_EXIT,
@@ -221,6 +223,12 @@ def unknown_option_error(
         dashed = token if token.startswith("-") else f"-{token}"
         line = f"zgrep: {dashed}: option not supported\n"
         return encode_text(line), usage_exit_code(cmd_name)
+    if builtin and cmd_name in COMPARE_PROGRAMS:
+        return unknown_option_error(COMPARE_PROGRAMS[cmd_name], token)
+    if builtin and cmd_name in BZIP2_FAMILY:
+        dashed = token if token.startswith("-") else f"-{token}"
+        line = f"{cmd_name}: Bad flag `{dashed}'\n"
+        return encode_text(line + usage_hint(cmd_name, builtin) + "\n"), 1
     if builtin and cmd_name in PYTHON_NAMES:
         # CPython names the whole typed token, long or short (pinned on
         # 3.14.7; 3.12 still spelled a long one `unknown option`).

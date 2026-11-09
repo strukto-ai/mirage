@@ -19,6 +19,8 @@ import { ERRNO_ARMS } from '../../errors/constants.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 import type { FsCondition } from '../../errors/types.ts'
 import {
+  BZIP2_FAMILY,
+  COMPARE_PROGRAMS,
   IN_ORDER_OPERANDS,
   NOT_GETOPT_LONG,
   OLD_OPTION_EXIT,
@@ -195,6 +197,13 @@ export function unknownOptionError(
     // 3.12 still spelled a long one `unknown option`).
     const dashed = token.startsWith('-') ? token : `-${token}`
     return pythonOptionError(cmdName, `Unknown option: ${dashed}\n`)
+  }
+  if (builtin && COMPARE_PROGRAMS[cmdName] !== undefined) {
+    return unknownOptionError(COMPARE_PROGRAMS[cmdName], token)
+  }
+  if (builtin && BZIP2_FAMILY.has(cmdName)) {
+    const dashed = token.startsWith('-') ? token : `-${token}`
+    return [encodeText(`${cmdName}: Bad flag \`${dashed}'\n${usageHint(cmdName, builtin)}\n`), 1]
   }
   const line = token.startsWith('--')
     ? `${cmdName}: unrecognized option '${token}'\n`

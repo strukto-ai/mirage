@@ -522,6 +522,13 @@ export function lineBuffer(stdin: ByteSource): AsyncLineIterator {
   return stdin instanceof SharedInput ? stdin.lines : new AsyncLineIterator(stdin)
 }
 
+/** How many bytes a UTF-8 character with this first byte takes, 1 for a byte
+ * no character starts with. */
+export function leadWidth(lead: number): number {
+  if (lead < 0xc2 || lead >= 0xf5) return 1
+  return lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4
+}
+
 /**
  * How many bytes the character at `at` in `data` spans, decoded as UTF-8.
  *
@@ -533,10 +540,7 @@ export function lineBuffer(stdin: ByteSource): AsyncLineIterator {
  * cannot continue it.
  */
 export function charWidth(data: Uint8Array, at = 0): number {
-  const lead = data[at] ?? 0
-  if (lead < 0xc2 || lead >= 0xf5) return 1
-  const width = lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4
-  const limit = Math.min(width, data.byteLength - at)
+  const limit = Math.min(leadWidth(data[at] ?? 0), data.byteLength - at)
   for (let i = 1; i < limit; i++) {
     const byte = data[at + i] ?? 0
     if (byte < 0x80 || byte >= 0xc0) return i

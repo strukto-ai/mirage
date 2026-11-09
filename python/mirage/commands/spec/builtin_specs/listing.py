@@ -94,6 +94,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-f", "--file-system", action="store_true"),
             Argument("-L", "--dereference", action="store_true"),
             Argument("-t", "--terse", action="store_true"),
+            Argument("--cached"),
             PATHS_OPERAND,
         )
     ),
@@ -162,6 +163,11 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-delete", action="store_true"),
             Argument("-depth", action="store_true"),
             Argument("-xdev", action="store_true"),
+            Argument("-noleaf", action="store_true"),
+            Argument("-warn", action="store_true"),
+            Argument("-nowarn", action="store_true"),
+            Argument("-ignore_readdir_race", action="store_true"),
+            Argument("-noignore_readdir_race", action="store_true"),
             Argument("-mount", action="store_true"),
             Argument("-prune", action="store_true"),
             Argument("-ls", action="store_true"),
@@ -346,3 +352,7 @@ SPECS: dict[str, CommandSpec] = {
         )
     ),
 }
+
+LS = SPECS["ls"]
+SPECS["dir"] = LS
+SPECS["vdir"] = LS

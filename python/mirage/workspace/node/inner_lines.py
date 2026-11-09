@@ -22,6 +22,7 @@ from mirage.shell.types import TSNodeLike
 from mirage.utils.fnmatch import pattern_shape
 from mirage.utils.glob_walk import has_glob, mark_escaped_globs
 from mirage.workspace.executor.builtins.script.bash import parse_bash_args
+from mirage.workspace.lookup.constants import read_wrapper
 from mirage.workspace.node.test_tokens import (
     PATTERN_OPS,
     CondParser,
@@ -294,6 +295,17 @@ def _nice_inner(args: Sequence[Word]) -> list[InnerLine]:
     return [InnerLine(argv=rest)] if rest else []
 
 
+def _wrapper_inner(head: str, args: Sequence[Word]) -> list[InnerLine]:
+    """``stdbuf`` and ``setsid`` run what stands after their own options.
+
+    Args:
+        head (str): the wrapper.
+        args (Sequence[Word]): the words after it.
+    """
+    at = read_wrapper(head, [word.value for word in args])[0]
+    return [] if at is None else [InnerLine(argv=tuple(args[at:]))]
+
+
 def _time_inner(args: Sequence[Word]) -> list[InnerLine]:
     """``time [-p] COMMAND [ARG]...``."""
     i = 0
@@ -383,6 +395,8 @@ def inner_lines(head: str, args: Sequence[Word]) -> list[InnerLine]:
         return _find_inner(args)
     if head == "nice":
         return _nice_inner(args)
+    if head in ("stdbuf", "setsid"):
+        return _wrapper_inner(head, args)
     if head == "time":
         return _time_inner(args)
     return []

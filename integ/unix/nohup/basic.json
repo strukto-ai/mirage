@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "wrappers_answer_for_themselves",
+      "seq": 16200025,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "nohup echo hi; nohup; echo rc=$?; nohup nosuch; echo rc=$?; nohup --bogus; echo rc=$?; nice; nice -n 19 nice; nice -n 5 nice -n 3 nice; nice -n 100 nice; nice -5 nice; nice --adjustment=2 nice; nice -n -5 nice; echo rc=$?; nice -n x; echo rc=$?; nice -n 3; echo rc=$?; nice -n; echo rc=$?; nice nosuch; echo rc=$?; nice --bogus; echo rc=$?; nice -n 3 echo a; nohup nice; nice nohup; echo rc=$?; stdbuf -oL echo b; stdbuf; echo rc=$?; stdbuf -oL; echo rc=$?; stdbuf echo x; echo rc=$?; stdbuf -oX echo x; echo rc=$?; stdbuf -iL echo x; echo rc=$?; stdbuf -o; echo rc=$?; stdbuf -o0 nosuch; echo rc=$?; setsid echo c; setsid; echo rc=$?; setsid -w echo d; setsid nosuch; echo rc=$?; setsid --bogus; echo rc=$?; nice nice; nice nice nice; nice nice -n 2 nice; printf '#!/bin/sh\\necho ran\\n' > /data/ez_job.sh; chmod +x /data/ez_job.sh; nice nice /data/ez_job.sh; echo rc=$?; nice nice nosuch; echo rc=$?; rm /data/ez_job.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nrc=125\nrc=127\nrc=125\n0\n19\n8\n19\n5\n2\n0\nrc=0\nrc=125\nrc=125\nrc=125\nrc=127\nrc=125\na\n0\nrc=125\nb\nrc=125\nrc=125\nrc=125\nrc=125\nrc=125\nrc=125\nrc=127\nc\nrc=1\nd\nrc=127\nrc=1\n10\n19\n12\nran\nrc=0\nrc=127\n",
+        "stderr": "nohup: missing operand\nTry 'nohup --help' for more information.\nnohup: failed to run command 'nosuch': No such file or directory\nnohup: unrecognized option '--bogus'\nTry 'nohup --help' for more information.\nnice: cannot set niceness: Permission denied\nnice: invalid adjustment 'x'\nnice: a command must be given with an adjustment\nTry 'nice --help' for more information.\nnice: option requires an argument -- 'n'\nTry 'nice --help' for more information.\nnice: 'nosuch': No such file or directory\nnice: unrecognized option '--bogus'\nTry 'nice --help' for more information.\nnohup: missing operand\nTry 'nohup --help' for more information.\nstdbuf: missing operand\nTry 'stdbuf --help' for more information.\nstdbuf: missing operand\nTry 'stdbuf --help' for more information.\nstdbuf: you must specify a buffering mode option\nTry 'stdbuf --help' for more information.\nstdbuf: invalid mode 'X'\nstdbuf: line buffering stdin is meaningless\nTry 'stdbuf --help' for more information.\nstdbuf: option requires an argument -- 'o'\nTry 'stdbuf --help' for more information.\nstdbuf: failed to run command 'nosuch': No such file or directory\nsetsid: no command specified\nTry 'setsid --help' for more information.\nsetsid: failed to execute nosuch: No such file or directory\nsetsid: unrecognized option '--bogus'\nTry 'setsid --help' for more information.\nnice: 'nosuch': No such file or directory\n"
+      }
+    }
+  ]
+}

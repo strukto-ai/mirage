@@ -65,7 +65,8 @@ def classify(
         return NameKind.KEYWORD
     consumer = lookup(name, session, registry)
     if consumer is Consumer.UNKNOWN:
-        return None
+        has_file = program(name, session, registry) is not None
+        return NameKind.FILE if has_file else None
     kind = _kind(consumer, name)
     if kind is NameKind.FILE and program(name, session, registry) is None:
         return None

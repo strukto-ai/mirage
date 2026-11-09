@@ -41,9 +41,12 @@ Tables list common supported flags. Use `man COMMAND` or `COMMAND --help` for th
 | `gzip` | Compress or decompress gzip data | `-d`, `-k`, `-f`, `-c`, `-q`, `-S SUFFIX`, `-1` through `-9` |
 | `gunzip` | Decompress or test gzip data | `-k`, `-f`, `-c`, `-t`, `-q`, `-S SUFFIX` |
 | `zcat` | Read compressed content to stdout | `-f`, `-q`, `-S SUFFIX` |
+| `zcmp`, `zdiff` | Compare compressed files | The options of `cmp` and `diff` |
+| `xz`, `unxz` | Compress, decompress, or test `.xz` data | `-z`, `-d`, `-t`, `-k`, `-f`, `-c`, `-q`, `-S SUFFIX`, `-0` through `-9` |
+| `bzip2`, `bunzip2` | Compress, decompress, or test `.bz2` data | `-z`, `-d`, `-t`, `-k`, `-f`, `-c`, `-q`, `-v`, `-1` through `-9` |
 | `zgrep` | Search compressed content | `-E`, `-F`, `-P`, `-i`, `-n`, `-v`, `-c`, `-l`, `-o`, `-e`, `-f` |
 
-`zegrep` and `zfgrep` invoke `zgrep` with `-E` and `-F` respectively.
+`zegrep` and `zfgrep` invoke `zgrep` with `-E` and `-F` respectively. `uncompress` is `gzip -d`.
 
 **Limits:** Archive creation does not traverse descendant mounts, and a mount root cannot be a source for `tar -c` or `zip`. Extracting or writing an archive requires a writable destination.
 

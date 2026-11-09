@@ -273,4 +273,8 @@ export const SPECS: Record<string, CommandSpec> = {
   unlink: new CommandSpec({
     arguments: [PATHS_OPERAND],
   }),
+  link: new CommandSpec({
+    description: 'Make a hard link to a file.',
+    arguments: [PATHS_OPERAND],
+  }),
 }
