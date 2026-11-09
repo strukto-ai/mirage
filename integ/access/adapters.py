@@ -41,7 +41,7 @@ from deploy import ROOT, SEED, Deployment, mirage_cli
 from mcp import Client, StdioServerParameters
 from mcp.client.streamable_http import streamable_http_client
 
-from mirage import Workspace, mcp_cli
+from mirage import Workspace
 from mirage.errors.classify import classify
 from mirage.policy.types import Outcome
 from mirage.server.io_serde import answered, checked, explanation_to_dict
@@ -689,17 +689,6 @@ class Gate:
         )
 
 
-def mcp_entry() -> dict[str, Any]:
-    """The ``clis`` entry the access cases install: the shared MCP fake."""
-    return {
-        "cli": "mcp",
-        "config": {
-            "url": os.environ["MCP_URL"],
-            "auth": {"type": "bearer", "token": "integ-token"},
-        },
-    }
-
-
 class HttpSteps:
     """The admin steps over the HTTP routes."""
 
@@ -818,14 +807,6 @@ class HttpSteps:
         await self._ok(
             "PUT", f"/v1/workspaces/{wid}/profiles/{name}", json=profile
         )
-
-    async def set_cli(self, wid: str, name: str) -> None:
-        await self._ok(
-            "PUT", f"/v1/workspaces/{wid}/clis/{name}", json=mcp_entry()
-        )
-
-    async def delete_cli(self, wid: str, name: str) -> None:
-        await self._ok("DELETE", f"/v1/workspaces/{wid}/clis/{name}")
 
     async def stop_workspace(self, wid: str) -> None:
         await self._ok("POST", f"/v1/workspaces/{wid}/stop")
@@ -1263,14 +1244,6 @@ class InAppSteps:
     ) -> None:
         self.workspaces[wid].set_profile(name, profile)
 
-    async def set_cli(self, wid: str, name: str) -> None:
-        ws = self.workspaces[wid]
-        config = mcp_entry()["config"]
-        ws.register_cli(name, await mcp_cli(config), config)
-
-    async def delete_cli(self, wid: str, name: str) -> None:
-        await self.workspaces[wid].unregister_cli(name)
-
     async def stop_workspace(self, wid: str) -> None:
         await self.workspaces.pop(wid).close()
 
@@ -1442,12 +1415,6 @@ async def run_steps(
             elif kind == "set_profile":
                 await steps.set_profile(wid, step["name"], step["profile"])
                 answer = {"text": step["name"]}
-            elif kind == "set_cli":
-                await steps.set_cli(wid, step["name"])
-                answer = {"text": step["name"]}
-            elif kind == "delete_cli":
-                await steps.delete_cli(wid, step["name"])
-                answer = {"text": step["name"]}
             elif kind == "stop_workspace":
                 await steps.stop_workspace(wid)
                 answer = {"text": "stopped"}
@@ -1515,7 +1482,7 @@ async def run_steps(
 
 
 STEP_OPS = frozenset(
-    {"workspace", "session_admin", "cli_admin", "snapshot", "ask", "history"}
+    {"workspace", "session_admin", "snapshot", "ask", "history"}
 )
 
 
@@ -1661,7 +1628,6 @@ class InAppPython:
             "session",
             "workspace",
             "session_admin",
-            "cli_admin",
             "snapshot",
             "ask",
             "history",
@@ -1878,7 +1844,6 @@ class Http:
             "session",
             "workspace",
             "session_admin",
-            "cli_admin",
             "snapshot",
             "ask",
             "history",

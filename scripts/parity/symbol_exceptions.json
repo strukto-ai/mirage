@@ -582,13 +582,11 @@
   },
   "server/routers/workspaces": {
    "python_only": {
-    "delete_cli": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "cancel_workspace_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "start_workspace": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "stop_workspace": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "kill_workspace_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy.",
-    "set_cli": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "workspace_logs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes."
    },
    "typescript_only": {

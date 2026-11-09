@@ -20,7 +20,6 @@ import type {
 import { METHODS } from '@struktoai/mirage-core/policy/constants'
 import { compileProgram, parseProgram } from '@struktoai/mirage-core/policy/profile'
 import {
-  buildCliEntries as buildCliEntriesFor,
   checkWorkspaceConfig,
   configToWorkspaceArgs as configToWorkspaceArgsFor,
   interpolateEnv,
@@ -35,8 +34,6 @@ import {
   type WorkspaceConfigRaw,
 } from '@struktoai/mirage-core/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
-import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
-import type { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
 import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
@@ -91,14 +88,6 @@ export async function configToWorkspaceArgs(
   cfg: WorkspaceConfigRaw,
 ): ReturnType<typeof configToWorkspaceArgsFor> {
   return configToWorkspaceArgsFor(cfg, HOST)
-}
-
-/** Each `clis:` entry checked and resolved to its tree and its config, on Node. */
-export async function buildCliEntries(
-  clis: Readonly<Record<string, unknown>>,
-  sources?: Readonly<Record<string, ResolvedSource>>,
-): Promise<Record<string, [string | CLI, Record<string, unknown> | null]>> {
-  return buildCliEntriesFor(clis, sources, HOST)
 }
 
 /**

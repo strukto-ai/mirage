@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  buildCliEntries,
   configToWorkspaceArgs,
   loadProfilePolicy,
   type ConfigHost,
@@ -152,7 +151,6 @@ export function edgeHost(): ServerHost {
     workspaceArgs: (cfg) => configToWorkspaceArgs(cfg, CONFIG),
     buildVfs,
     vfsSchemas: CONFIG_SCHEMAS,
-    buildCliEntries: (clis, sources) => buildCliEntries(clis, sources, CONFIG),
     loadProfile: (profile) => loadProfilePolicy(profile, CONFIG),
     stateStore: () => state,
     daemonId: () => Promise.resolve(daemon),

@@ -1019,7 +1019,7 @@ function asCliSpec(value: unknown, name: string, ref: string): CLI {
  * Each `clis:` entry checked and resolved to its tree and its config, pointers
  * read; an `mcp` entry's tree is listed from its server.
  */
-export async function buildCliEntries(
+async function buildCliEntries(
   clis: Readonly<Record<string, unknown>>,
   sources: Readonly<Record<string, ResolvedSource>> | undefined,
   host: ConfigHost,

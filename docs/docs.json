@@ -761,9 +761,7 @@
                   "POST /v1/workspaces/{workspace_id}/start",
                   "POST /v1/workspaces/{workspace_id}/cancel",
                   "POST /v1/workspaces/{workspace_id}/kill",
-                  "PUT /v1/workspaces/{workspace_id}/profiles/{name}",
-                  "PUT /v1/workspaces/{workspace_id}/clis/{name}",
-                  "DELETE /v1/workspaces/{workspace_id}/clis/{name}"
+                  "PUT /v1/workspaces/{workspace_id}/profiles/{name}"
                 ]
               },
               {
