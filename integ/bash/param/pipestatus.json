@@ -1078,10 +1078,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "false | true; ! false; echo \"$? ${PIPESTATUS[*]}\"; false | true; ! false | true; echo \"$? ${PIPESTATUS[*]}\"; false | true; for zpi in 1; do break; done; echo \"$? ${PIPESTATUS[*]}\"; false | true; for zpi in 1; do continue; done; echo \"$? ${PIPESTATUS[*]}\"; false | true; ! { false; }; echo \"$? ${PIPESTATUS[*]}\"",
+      "command": "false | true; ! false; echo \"$? ${PIPESTATUS[*]}\"; false | true; ! false | true; echo \"$? ${PIPESTATUS[*]}\"; false | true; for zpi in 1; do break; done; echo \"$? ${PIPESTATUS[*]}\"; false | true; for zpi in 1; do continue; done; echo \"$? ${PIPESTATUS[*]}\"; false | true; ! { false; }; echo \"$? ${PIPESTATUS[*]}\"; bash -c 'PIPESTATUS=9; true | false; echo \"${PIPESTATUS[*]}\"; declare -p PIPESTATUS'; bash -c 'for zpv in 1; do PIPESTATUS=9; zpx=${PIPESTATUS[0]}; done; echo \"$zpx\"'; bash -c 'PIPESTATUS=9; unset PIPESTATUS; true; echo \"${PIPESTATUS[*]}\"'",
       "expect": {
         "exit": 0,
-        "stdout": "0 1\n1 1 0\n0 0\n0 0\n0 1\n",
+        "stdout": "0 1\n1 1 0\n0 0\n0 0\n0 1\n9\ndeclare -- PIPESTATUS=\"9\"\n9\n0\n",
         "stderr": ""
       }
     },

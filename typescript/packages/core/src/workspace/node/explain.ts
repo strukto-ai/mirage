@@ -55,7 +55,7 @@ import { lineFacts } from '../lookup/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { SessionState } from '../session/session.ts'
-import { homeDir } from '../session/shell_dirs.ts'
+import { tildeHome } from '../session/shell_dirs.ts'
 import { envIsReadonly, envSnapshot, seedVar, setAttr } from '../session/state.ts'
 import { sessionAccess } from '../../context/session_context.ts'
 import {
@@ -885,7 +885,7 @@ function* walkedLine(
   frame: Frame | null = null,
   lost = false,
 ): Generator<Walked> {
-  yield* walkNode(root, session, homeDir(session), frame ?? rootFrame(root, null), reparse, lost)
+  yield* walkNode(root, session, tildeHome(session), frame ?? rootFrame(root, null), reparse, lost)
 }
 
 /**

@@ -123,6 +123,7 @@ class ExpandHost:
         start: int,
         pending: int | None,
         framed: bool,
+        traced: str,
     ) -> tuple[int, str, int, bool]:
         raise RuntimeError(f"no construct holds list {index} (test={test})")
 

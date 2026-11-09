@@ -35,6 +35,8 @@ impl Store {
         if name == RANDOM {
             self.random_seed = Seed::Off;
         }
+        self.plain
+            .retain(|held| held != PIPESTATUS || name != PIPESTATUS);
         self.make_plain(name);
     }
 

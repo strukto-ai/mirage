@@ -39,6 +39,7 @@ from mirage.shell.parse.program import shell_node
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.shell.voice import shell_voice
+from mirage.shell.xtrace import trace_line
 from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.background import run_program, run_statement
@@ -58,6 +59,7 @@ from mirage.workspace.executor.traps import (
     run_return_trap,
 )
 from mirage.workspace.expand.node import ExpandHost
+from mirage.workspace.node.diagnostics import diagnostic_stderr
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import frame, session_view, visible_env
 from mirage.workspace.session.task import drive
@@ -80,6 +82,7 @@ async def execute_body(
     execute_fn: Callable[..., Any] | None = None,
     sink: JobConsole | None = None,
     bound: tuple[SharedInput | None, bool] | None = None,
+    leading: bytes = b"",
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a list of statements in order: a group, a loop or ``if``
     body, a ``case`` arm, a function body.
@@ -93,6 +96,7 @@ async def execute_body(
     ``exec <&-`` in a loop body reaches the next test. A comment leaves
     ``$?`` as it was, and a ``break`` or ``continue`` records its own
     status as it leaves (bash leaves ``${PIPESTATUS[@]}`` at ``0``).
+    ``leading`` is stderr that goes out before the first statement.
     """
     session = context.session
     all_stdout: list[ByteSource | None] = []
@@ -100,6 +104,10 @@ async def execute_body(
     last_exec = ExecutionNode(command="", exit_code=0)
     if bound is None:
         bound = fd0_binding(session)
+    if leading:
+        merged_io = await land(
+            [(Channel.STDERR, leading, False)], sink, all_stdout, merged_io
+        )
     for cmd in body:
         if cmd.type == NT.COMMENT:
             continue
@@ -438,6 +446,17 @@ class _ConstructHost(ExpandHost):
         # so an `exec < f` in one reaches the rest.
         self.bound = fd0_binding(context.session)
 
+    def leading(self, traced: str) -> bytes:
+        """What goes out before the next list: what the construct's own
+        words said, then what ``set -x`` printed since the last list.
+
+        Args:
+            traced (str): the lines the shell traced.
+        """
+        said = diagnostic_stderr(None, self.context)
+        self.context.frame.diagnostics.clear()
+        return said + encode_text(traced)
+
     async def run(
         self,
         index: int,
@@ -445,6 +464,7 @@ class _ConstructHost(ExpandHost):
         start: int,
         pending: int | None,
         framed: bool,
+        traced: str,
     ) -> tuple[int, str, int, bool]:
         session = self.session
         if pending is not None:
@@ -452,11 +472,12 @@ class _ConstructHost(ExpandHost):
         statements = self.lists[index]
         if start:
             statements = statements[start:]
+        leading = self.leading(traced)
         try:
             if test:
                 with ignoring_errexit(session):
                     stdout, io, _ = await self.body(
-                        statements, bound=self.bound
+                        statements, bound=self.bound, leading=leading
                     )
                 kept = (
                     io
@@ -467,7 +488,7 @@ class _ConstructHost(ExpandHost):
                 )
             else:
                 stdout, io, self.last_exec = await self.body(
-                    statements, bound=self.bound
+                    statements, bound=self.bound, leading=leading
                 )
                 kept = io
         except LoopSignal as sig:
@@ -533,7 +554,7 @@ async def _run_construct(
         body, lists, context, execute_fn, call_stack, word, whole_tests
     )
     try:
-        said, failed, tag, levels, pending, status = await drive(
+        said, failed, tag, levels, pending, status, traced = await drive(
             start(session.vars.shell), host, context.frame.diagnostics
         )
     except UNWINDING as sig:
@@ -542,6 +563,13 @@ async def _run_construct(
         )
     if pending is not None:
         record_status(session, pending)
+    if traced:
+        _, last, _ = await body(
+            [], bound=host.bound, leading=host.leading(traced)
+        )
+        host.merged_io = await host.merged_io.merge(
+            IOResult(stderr=last.stderr, exit_code=host.merged_io.exit_code)
+        )
     stdout = _chain_streams(host.all_stdout)
     if host.left is not None:
         raise await carried(host.left, stdout, host.merged_io)
@@ -630,6 +658,7 @@ async def handle_for(
     run: BodyRun,
     variable: str,
     values: list[str | PathSpec],
+    head: str,
     body: list[TSNodeLike],
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
@@ -642,6 +671,7 @@ async def handle_for(
         run (BodyRun): ``execute_body`` bound to the walk.
         variable (str): the loop variable.
         values (list[str | PathSpec]): its words, already expanded.
+        head (str): its first line as ``set -x`` prints it.
         body (list[TSNodeLike]): the loop's statements.
         context (EvaluationContext): the evaluation.
         execute_fn (Callable[..., Any]): evaluator for nested lines.
@@ -650,7 +680,7 @@ async def handle_for(
     words = [word_text(value) for value in values]
     host = await _run_construct(
         lambda shell: shell.run_for(
-            variable, words, 0, _statements(context.session, [body])
+            variable, words, head, 0, _statements(context.session, [body])
         ),
         run,
         [body],
@@ -848,6 +878,7 @@ async def handle_select(
     run: BodyRun,
     variable: str,
     values: list[str | PathSpec],
+    head: str,
     body: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None = None,
@@ -866,6 +897,7 @@ async def handle_select(
         run (BodyRun): ``execute_body`` bound to the walk.
         variable (str): the select variable name.
         values (list[str | PathSpec]): menu entries, already expanded.
+        head (str): its first line as ``set -x`` prints it.
         body (list[TSNodeLike]): loop body statements.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (ByteSource | None): line source for choices.
@@ -880,11 +912,27 @@ async def handle_select(
     bound = fd0_binding(session)
     words = [word_text(v) for v in values]
     show_menu = bool(words)
+    if session.shell_options.get("xtrace"):
+        merged_io = await land(
+            [(Channel.STDERR, trace_line(head), False)],
+            sink,
+            all_stdout,
+            merged_io,
+        )
     while words and not session.shell_options.get("noexec"):
         env = visible_env(session)
         menu = _select_menu(words, env.get("COLUMNS", "")) if show_menu else ""
-        merged_io = await merged_io.merge(
-            IOResult(stderr=encode_text(menu + env.get("PS3", "#? ")) or None)
+        merged_io = await land(
+            [
+                (
+                    Channel.STDERR,
+                    encode_text(menu + env.get("PS3", "#? ")),
+                    False,
+                )
+            ],
+            sink,
+            all_stdout,
+            merged_io,
         )
         reply = await read_reply(lines) if lines is not None else None
         # A failed choice read (end of input, a readonly REPLY) ends the

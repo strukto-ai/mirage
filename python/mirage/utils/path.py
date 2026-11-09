@@ -425,8 +425,7 @@ def expand_tilde(word: str, home: str | None) -> str:
     ``~`` alone or ``~/rest`` expands to ``home`` (or ``home/rest``).
     ``~user`` and any non-leading ``~`` are left unchanged, matching
     bash behavior when no matching user exists. When ``home`` is ``None``
-    (``$HOME`` unset/empty), a leading ``~`` is left literal, mirroring
-    GNU bash with no home directory.
+    the word is left unchanged.
 
     Args:
         word: The unexpanded word.

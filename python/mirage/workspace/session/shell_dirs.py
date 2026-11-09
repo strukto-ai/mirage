@@ -17,19 +17,30 @@ from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import env_get, seed_var, set_attr
 
 
+def tilde_home(session: SessionState) -> str:
+    """What a ``~`` names: ``$HOME``, or ``/`` when it is unset, as bash
+    answers for a user with no entry in its user database, which mirage
+    has none of.
+
+    Args:
+        session (SessionState): the shell session.
+    """
+    home = env_get(session, "HOME")
+    return "/" if home is None else home
+
+
 def home_dir(session: SessionState) -> str | None:
-    """Return the session home directory used for ``~`` expansion.
+    """Return the session home directory a bare ``cd`` goes to.
 
     Args:
         session: The shell session.
 
     Returns:
         ``$HOME`` from the session env, or ``None`` when unset/empty,
-        matching GNU bash (no implicit home; ``cd`` errors, ``~`` and
-        ``$HOME`` do not expand). Read through the session view, not
-        the raw env: this is HOME's own resolution channel ($HOME,
-        tilde expansion, bare ``cd``), so a hidden HOME must read as
-        unset here too.
+        matching GNU bash (no implicit home; ``cd`` errors). Read
+        through the session view, not the raw env: this is HOME's own
+        resolution channel, so a hidden HOME must read as unset here
+        too.
     """
     return env_get(session, "HOME") or None
 

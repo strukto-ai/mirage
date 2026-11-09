@@ -241,9 +241,10 @@ impl Shell {
         self.vars.scalar("IFS")
     }
 
-    /// The home directory `~` names: `$HOME`, None when unset or empty.
-    pub fn home(&self) -> Option<&[u8]> {
-        self.vars.scalar("HOME").filter(|home| !home.is_empty())
+    /// The home directory `~` names: `$HOME`, or `/` when unset, which
+    /// bash answers for a user with no entry in its user database.
+    pub fn home(&self) -> &[u8] {
+        self.vars.scalar("HOME").unwrap_or(b"/")
     }
 
     /// Whether characters are UTF-8 here (`Store::utf8`).

@@ -54,9 +54,10 @@ export interface TaskHost {
    * Run the list a compound command picked, `test` when it is a test, on the
    * shell the task moved here, from statement `start`, those before it
    * having run on the shell and left `pending` in `$?`; `framed` when the
-   * construct reads the session, so the shell is framed again after. Answers
-   * its status, how it left, the levels of a `break` or `continue`, and
-   * whether `set -e` is ending the shell.
+   * construct reads the session, so the shell is framed again after; `traced`
+   * the lines `set -x` printed since the last list, which go out first.
+   * Answers its status, how it left, the levels of a `break` or `continue`,
+   * and whether `set -e` is ending the shell.
    */
   run(
     index: number,
@@ -64,6 +65,7 @@ export interface TaskHost {
     start: number,
     pending: number | null,
     framed: boolean,
+    traced: string,
   ): Promise<[number, string, number, boolean]>
 }
 
@@ -174,7 +176,7 @@ export async function drive(
           break
         }
         case 'run': {
-          const ran = await host.run(ask[2], ask[3], ask[4], ask[5], ask[6])
+          const ran = await host.run(ask[2], ask[3], ask[4], ask[5], ask[6], ask[7])
           answer = () => {
             task.answerRan(ask[1], ...ran)
           }
