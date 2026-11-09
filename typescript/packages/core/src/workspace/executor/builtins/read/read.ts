@@ -22,6 +22,7 @@ import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { makeArray } from '../../../../shell/array.ts'
+import { readCounted as counted, readFields, readText } from '../../../../rs/shell.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { endsEscaped } from '../../../../shell/escapes.ts'
 import type { SessionView } from '../../../../view/types.ts'
@@ -84,93 +85,6 @@ function lastCountFlag(args: string[]): string | null {
     i++
   }
   return which
-}
-
-/**
- * The characters `read` splits, as whole code points, each with whether a
- * backslash quoted it. Without `-r` a backslash quotes the next character, a
- * backslash-newline pair is a line continuation and a backslash at the end
- * goes. Mirrors Python's _read_chars.
- */
-function readChars(text: string, raw: boolean): (readonly [string, boolean])[] {
-  const out: (readonly [string, boolean])[] = []
-  const points = Array.from(text)
-  let i = 0
-  while (i < points.length) {
-    const ch = points[i] ?? ''
-    if (ch === '\\' && !raw) {
-      const next = points[i + 1]
-      if (next !== undefined && next !== '\n') out.push([next, true])
-      i += 2
-      continue
-    }
-    out.push([ch, false])
-    i++
-  }
-  return out
-}
-
-/** read's default backslash handling (`readChars`). */
-function unescapeRead(text: string): string {
-  return readChars(text, false)
-    .map(([ch]) => ch)
-    .join('')
-}
-
-/**
- * Split one `read` line into at most `slots` fields on IFS, as bash does.
- * Leading IFS whitespace goes; a delimiter is one other IFS character with
- * the IFS whitespace around it, or a run of IFS whitespace, and a quoted
- * character never splits. The last field takes the rest of the line, its
- * trailing IFS whitespace dropped, and the delimiter ending it too when it
- * holds one field only (`x:y:` reads `y` into the second of two). A zero
- * slot count (`read -a`) means every field, a delimiter at the end opening
- * none. Mirrors Python's _read_fields.
- */
-function readFields(text: string, ifs: string, slots: number, raw: boolean): string[] {
-  const chars = readChars(text, raw)
-  const n = chars.length
-  const splits = (k: number): boolean => {
-    const [ch, quoted] = chars[k] ?? ['', true]
-    return !quoted && ifs.includes(ch)
-  }
-  const white = (k: number): boolean => splits(k) && ' \t\n'.includes(chars[k]?.[0] ?? '')
-  const joined = (a: number, b: number): string =>
-    chars
-      .slice(a, b)
-      .map(([ch]) => ch)
-      .join('')
-  const pastDelimiter = (start: number): number => {
-    const other = !white(start)
-    let k = start + 1
-    while (k < n && white(k)) k++
-    if (!other && k < n && splits(k)) {
-      k++
-      while (k < n && white(k)) k++
-    }
-    return k
-  }
-  let k = 0
-  while (k < n && white(k)) k++
-  const fields: string[] = []
-  while (k < n && (slots === 0 || fields.length < slots - 1)) {
-    const start = k
-    while (k < n && !splits(k)) k++
-    fields.push(joined(start, k))
-    if (k < n) k = pastDelimiter(k)
-  }
-  if (slots === 0 || k >= n) return fields
-  let end = n
-  while (end > k && white(end - 1)) end--
-  if (splits(end - 1)) {
-    let cut = end - 1
-    while (cut > k && white(cut - 1)) cut--
-    let single = true
-    for (let i = k; i < cut; i++) if (splits(i)) single = false
-    if (single) end = cut
-  }
-  fields.push(joined(k, end))
-  return fields
 }
 
 async function readRaw(
@@ -238,26 +152,6 @@ async function readCounted(
 }
 
 /**
- * How many characters `piece` leaves once backslashes are processed, and
- * whether a backslash ends it, quoting what follows. Mirrors Python's
- * _counted.
- */
-function counted(piece: string, escaped: boolean): [number, boolean] {
-  let n = 0
-  for (const ch of piece) {
-    if (escaped) {
-      if (ch !== '\n') n++
-      escaped = false
-    } else if (ch === '\\') {
-      escaped = true
-    } else {
-      n++
-    }
-  }
-  return [n, escaped]
-}
-
-/**
  * One line as a bare `read` stores it in REPLY: backslashes processed, a
  * continuation joined, nothing split off; null at end of input. `select`
  * takes its choice this way (bash calls this builtin).
@@ -267,7 +161,7 @@ export async function readReply(
   signal?: AbortSignal,
 ): Promise<string | null> {
   const [line, complete] = await readRaw(buffer, false, 10, null, null, signal)
-  return complete ? unescapeRead(line) : null
+  return complete ? readText(line, false) : null
 }
 
 /**
@@ -364,9 +258,7 @@ export async function handleRead(
     }
   }
   const ifs = visibleEnv(session).IFS ?? ' \t\n'
-  const whole = readChars(line, raw)
-    .map(([ch]) => ch)
-    .join('')
+  const whole = readText(line, raw)
   if (arrayName !== null) {
     const parts = exact !== null ? (whole !== '' ? [whole] : []) : readFields(line, ifs, 0, raw)
     if (view.isReadonly(arrayName)) return readonlyRefusal('read', arrayName)

@@ -38,7 +38,7 @@ pub struct Declared {
 }
 
 impl Declared {
-    fn failed(line: Vec<u8>, status: i32) -> Self {
+    pub(super) fn failed(line: Vec<u8>, status: i32) -> Self {
         Self {
             pieces: vec![(true, line)],
             status,
@@ -318,7 +318,7 @@ fn unshaped(marks: &[(u8, bool)]) -> Marks {
 }
 
 /// A name as the store takes it.
-fn text(name: &[u8]) -> String {
+pub(super) fn text(name: &[u8]) -> String {
     String::from_utf8_lossy(name).into_owned()
 }
 
@@ -338,7 +338,7 @@ fn result_of(errors: &[Vec<u8>], warnings: &[Vec<u8>], failed: Option<bool>) -> 
 }
 
 /// The line a write the session hides answers with.
-fn denied(name: &str) -> Vec<u8> {
+pub(super) fn denied(name: &str) -> Vec<u8> {
     format!("{name}: permission denied\n").into_bytes()
 }
 
@@ -1621,14 +1621,14 @@ pub fn run_marking<H: Host>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::sync::Arc;
 
     use super::super::expand::{Field, Substitution};
     use super::*;
     use crate::vars::Store;
 
-    struct NoHost;
+    pub(in crate::interp) struct NoHost;
 
     impl Host for NoHost {
         async fn substitute(

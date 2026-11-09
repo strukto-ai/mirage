@@ -5,6 +5,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyList, PyTuple};
 use streams::arith;
+use streams::interp::builtin::{self, Unsetting};
 use streams::interp::codec::Item;
 use streams::interp::declare::{Declaration, Marking, Operand};
 use streams::interp::expand::Substitution;
@@ -121,6 +122,10 @@ fn record_in(
 /// The tree of a task that names no node of one.
 fn no_tree() -> (Arc<Tree>, u64) {
     (Arc::new(streams::shell::parse(b"")), 0)
+}
+
+fn byte_words(words: &[Bound<'_, PyAny>]) -> PyResult<Vec<Vec<u8>>> {
+    words.iter().map(bytes_of).collect()
 }
 
 /// Declaration operands: a word, or `(name, append, items)`.
@@ -846,12 +851,92 @@ impl Shell {
         self.write(py, write, true)
     }
 
-    /// Evaluate an arithmetic command or `let` operand, its writes landed;
-    /// `expand` for a `let` operand, whose subscripts expand first.
-    #[pyo3(signature = (text, *, expand = false))]
-    fn arith(&mut self, py: Python<'_>, text: Bound<'_, PyAny>, expand: bool) -> PyResult<Outcome> {
+    /// Evaluate an arithmetic command or a test's integer operand, its
+    /// writes landed; `expand` when its subscripts expand first, and
+    /// `deciding` when a policy is deciding, so a write refuses.
+    #[pyo3(signature = (text, *, expand = false, deciding = false))]
+    fn arith(
+        &mut self,
+        py: Python<'_>,
+        text: Bound<'_, PyAny>,
+        expand: bool,
+        deciding: bool,
+    ) -> PyResult<Outcome> {
         let text = bytes_of(&text)?;
-        self.write(py, Write::Arith { text, expand }, true)
+        self.write(
+            py,
+            Write::Arith {
+                text,
+                expand,
+                deciding,
+            },
+            true,
+        )
+    }
+
+    /// Run `let`: each word one expression.
+    fn let_words(
+        slf: &Bound<'_, Self>,
+        words: Vec<Bound<'_, PyAny>>,
+        deciding: bool,
+    ) -> PyResult<ShellTask> {
+        let words = byte_words(&words)?;
+        ShellTask::start(slf, no_tree(), |inner| {
+            task::let_words(inner, words, deciding)
+        })
+    }
+
+    /// Run `unset`: `functions` and `frozen` are the operands that name a
+    /// function and a readonly one.
+    fn unset_names(
+        slf: &Bound<'_, Self>,
+        letters: &str,
+        operands: Vec<Bound<'_, PyAny>>,
+        functions: Vec<Bound<'_, PyAny>>,
+        frozen: Vec<Bound<'_, PyAny>>,
+        deciding: bool,
+    ) -> PyResult<ShellTask> {
+        let unsetting = Unsetting {
+            letters: letters.as_bytes().to_vec(),
+            operands: byte_words(&operands)?,
+            functions: byte_words(&functions)?,
+            frozen: byte_words(&frozen)?,
+            deciding,
+        };
+        ShellTask::start(slf, no_tree(), |inner| task::unset_names(inner, unsetting))
+    }
+
+    /// Split one `read` line into at most `slots` fields on `ifs`, 0 for
+    /// every field.
+    #[staticmethod]
+    fn read_fields<'py>(
+        py: Python<'py>,
+        text: Bound<'py, PyAny>,
+        ifs: Bound<'py, PyAny>,
+        slots: usize,
+        raw: bool,
+    ) -> PyResult<Vec<Bound<'py, PyAny>>> {
+        builtin::read_fields(&bytes_of(&text)?, &bytes_of(&ifs)?, slots, raw)
+            .iter()
+            .map(|field| text_of(py, field))
+            .collect()
+    }
+
+    /// A line as `read` takes it, backslashes processed unless `raw`.
+    #[staticmethod]
+    fn read_text<'py>(
+        py: Python<'py>,
+        text: Bound<'py, PyAny>,
+        raw: bool,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        text_of(py, &builtin::read_text(&bytes_of(&text)?, raw))
+    }
+
+    /// The characters `piece` leaves once backslashes are processed, and
+    /// whether a backslash ends it.
+    #[staticmethod]
+    fn read_counted(piece: Bound<'_, PyAny>, escaped: bool) -> PyResult<(usize, bool)> {
+        Ok(builtin::read_counted(&bytes_of(&piece)?, escaped))
     }
 
     /// Evaluate a value as an `-i` write coerces it, its writes landed;

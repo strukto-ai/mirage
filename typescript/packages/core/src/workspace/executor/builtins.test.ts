@@ -95,6 +95,9 @@ const handleExport = (
 ): Promise<RedirectResult> =>
   markNames(assignments, new EvaluationContext(s), noLines, null, VarAttr.Export)
 
+const runUnset = (args: string[], s: SessionState): Promise<RedirectResult> =>
+  handleUnset(args, new EvaluationContext(s), noLines)
+
 const runLocal = (cmd: string, s: SessionState): Promise<RedirectResult> =>
   declared(
     cmd,
@@ -253,7 +256,7 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
 
   it('unset removes keys', async () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ A: '1', B: '2' }) })
-    await handleUnset(['A'], s, sessionView(s))
+    await runUnset(['A'], s)
     expect('A' in s.env).toBe(false)
     expect(s.env.B).toBe('2')
   })
@@ -262,7 +265,7 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ fn: 'v' }) })
     s.functions.fn = 'fn() { :; }'
     s.functionSites.set('fn', { source: 'fn() { :; }', mark: [1, 0], origin: null })
-    await handleUnset(['-f', 'fn'], s, sessionView(s))
+    await runUnset(['-f', 'fn'], s)
     expect('fn' in s.functions).toBe(false)
     expect(s.functionSites.has('fn')).toBe(false)
     expect(s.env.fn).toBe('v')
@@ -271,7 +274,7 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
   it('unset -v removes a variable but not a same-named function', async () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ fn: 'v' }) })
     s.functions.fn = 'fn() { :; }'
-    await handleUnset(['-v', 'fn'], s, sessionView(s))
+    await runUnset(['-v', 'fn'], s)
     expect('fn' in s.functions).toBe(true)
     expect('fn' in s.env).toBe(false)
   })
@@ -279,12 +282,12 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
   it('unset bare prefers a variable, else the function', async () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ a: 'v' }) })
     s.functions.a = 'a() { :; }'
-    await handleUnset(['a'], s, sessionView(s))
+    await runUnset(['a'], s)
     expect('a' in s.env).toBe(false)
     expect('a' in s.functions).toBe(true)
     s.functions.b = 'b() { :; }'
     s.functionSites.set('b', { source: 'b() { :; }', mark: [1, 0], origin: null })
-    await handleUnset(['b'], s, sessionView(s))
+    await runUnset(['b'], s)
     expect('b' in s.functions).toBe(false)
     expect(s.functionSites.has('b')).toBe(false)
   })
@@ -294,16 +297,16 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     seedVar(s, 'arr', makeArray(['x', 'y', 'z']))
     // An interior element leaves a hole so later indices keep their
     // positions; a trailing one drops off, as bash does.
-    await handleUnset(['arr[1]'], s, sessionView(s))
+    await runUnset(['arr[1]'], s)
     expect(s.arrays.arr).toEqual(
       new ShellArray([
         [0, 'x'],
         [2, 'z'],
       ]),
     )
-    await handleUnset(['arr[2]'], s, sessionView(s))
+    await runUnset(['arr[2]'], s)
     expect(s.arrays.arr).toEqual(makeArray(['x']))
-    await handleUnset(['arr'], s, sessionView(s))
+    await runUnset(['arr'], s)
     expect('arr' in s.arrays).toBe(false)
   })
 
@@ -311,48 +314,48 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     const s = new SessionState({ sessionId: 'test' })
     seedVar(s, 'arr', makeArray(['x', 'y']))
     setAttr(s, 'arr', VarAttr.Readonly)
-    const [, io] = await handleUnset(['arr[1]'], s, sessionView(s))
+    const [, io] = await runUnset(['arr[1]'], s)
     expect(io.exitCode).toBe(1)
     expect(decode(io.stderr as Uint8Array)).toBe(
-      'bash: unset: arr: cannot unset: readonly variable\n',
+      'bash: line 1: unset: arr: cannot unset: readonly variable\n',
     )
     expect(s.arrays.arr).toEqual(makeArray(['x', 'y']))
   })
 
   it('unset NAME[0] removes a scalar, a non-zero subscript errors', async () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ Y: 'sc', Z: 'sc' }) })
-    const [, io] = await handleUnset(['Y[0]'], s, sessionView(s))
+    const [, io] = await runUnset(['Y[0]'], s)
     expect(io.exitCode).toBe(0)
     expect('Y' in s.env).toBe(false)
-    const [, io2] = await handleUnset(['Z[1]'], s, sessionView(s))
+    const [, io2] = await runUnset(['Z[1]'], s)
     expect(io2.exitCode).toBe(1)
-    expect(decode(io2.stderr as Uint8Array)).toBe('bash: unset: Z: not an array variable\n')
+    expect(decode(io2.stderr as Uint8Array)).toBe('bash: line 1: unset: Z: not an array variable\n')
     expect(s.env.Z).toBe('sc')
   })
 
   it('unset of a negative element outside the extent errors', async () => {
     const s = new SessionState({ sessionId: 'test' })
     seedVar(s, 'arr', makeArray(['x']))
-    const [, io] = await handleUnset(['arr[-2]'], s, sessionView(s))
+    const [, io] = await runUnset(['arr[-2]'], s)
     expect(io.exitCode).toBe(1)
     // bash prints only the bracketed part here, not the base name.
-    expect(decode(io.stderr as Uint8Array)).toBe('bash: unset: [-2]: bad array subscript\n')
+    expect(decode(io.stderr as Uint8Array)).toBe('bash: line 1: unset: [-2]: bad array subscript\n')
     expect(s.arrays.arr).toEqual(makeArray(['x']))
     seedVar(s, 'two', makeArray(['x', 'y']))
-    const [, io2] = await handleUnset(['two[-2]'], s, sessionView(s))
+    const [, io2] = await runUnset(['two[-2]'], s)
     expect(io2.exitCode).toBe(0)
     expect(s.arrays.two).toEqual(new ShellArray([[1, 'y']]))
   })
 
   it('unset of an element of an unset name is a no-op', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    const [, io] = await handleUnset(['GONE[3]'], s, sessionView(s))
+    const [, io] = await runUnset(['GONE[3]'], s)
     expect(io.exitCode).toBe(0)
   })
 
   it('unset -z is an invalid option (exit 2)', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    const [, io] = await handleUnset(['-z', 'x'], s, sessionView(s))
+    const [, io] = await runUnset(['-z', 'x'], s)
     expect(io.exitCode).toBe(2)
   })
 

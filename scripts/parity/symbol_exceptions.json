@@ -223,6 +223,9 @@
   },
   "rs/shell": {
    "typescript_only": {
+    "readCounted": "Reaches the wasm engine with no shell handle; Python calls the same function as a static method of the PyO3 class Shell.",
+    "readFields": "Reaches the wasm engine with no shell handle; Python calls the same function as a static method of the PyO3 class Shell.",
+    "readText": "Reaches the wasm engine with no shell handle; Python calls the same function as a static method of the PyO3 class Shell.",
     "DeclarationItem": "The shape a declaration's operands cross the wasm engine ABI in; Python hands the PyO3 class its own tuples (mirage._rs.Shell.declare).",
     "operandItem": "Encodes a declaration operand for the wasm engine ABI; Python hands the PyO3 class its own tuples (mirage._rs.Shell.declare).",
     "Ask": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
