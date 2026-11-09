@@ -32,7 +32,7 @@ export const TEMPLATE = new Argument(['-t', '--template'], {
 
 // gh's boolean flags are pflag's: a bare `--draft` is true, and `--draft=true`
 // or `--draft=false` spells the value out, which is how a script turns one
-// off. Their shorts still cluster (`-sd`). Read one with `ghBool`.
+// off. Their shorts still cluster (`-sd`). Read one with `gh_bool`.
 export function flag(init: {
   short?: string
   long: string
