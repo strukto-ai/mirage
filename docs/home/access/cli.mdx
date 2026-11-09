@@ -228,9 +228,11 @@ a `workspace_id`.
 `mirage workspace stop ID` ends a workspace's lines and jobs and keeps what
 it needs to start again: its config, and each session's working directory,
 variables, functions and history, with the workspace's symlinks.
-`mirage workspace start ID` builds it again from them. Files on a backend,
-such as S3 or a disk folder, stay where they are, while a `ram` mount comes
-back empty. The local daemon keeps this state under `~/.mirage/state`.
+`mirage workspace start ID` builds it again from them. The local daemon keeps
+this state under `~/.mirage/state`, or in the workspace's own
+[`store`](/home/infrastructure/overview); a `store` of `type: ram` keeps
+none of it, so the sessions start fresh. Files on a backend, such as S3 or a
+disk folder, stay where they are, while a `ram` mount comes back empty.
 
 ```bash
 mirage workspace stop demo
