@@ -237,6 +237,7 @@ describe('Shell', () => {
       line: 1,
       bashPid: 1,
       voice: 'bash: ',
+      errTrap: false,
     }
     shell.frame({ ...frame, status: 2 ** 40 })
     expect(() => shell.has('x')).toThrow('out of range')

@@ -36,6 +36,7 @@ import { STANDARD_AFTER_SCAN } from '../../../commands/spec/constants.ts'
 import { spreadOperands } from '../../../commands/spec/flag_view.ts'
 import { SPECS } from '../../../commands/spec/index.ts'
 import { standardRequest } from '../../../commands/spec/standard.ts'
+import type { CommandSpec } from '../../../commands/spec/types.ts'
 import type { RedirectResult } from '../../../context/session_context.ts'
 import {
   currentCaller,
@@ -641,6 +642,124 @@ async function runSingleMount(
   return [stdout, io, await execNode(cmdStr, io, paths)]
 }
 
+/**
+ * Answer `--help` or `--version`, unless a scanned option's value refuses the
+ * line first. Mirrors Python's _standard_answer.
+ */
+async function standardAnswer(
+  cmdName: string,
+  cmdStr: string,
+  cmdSpec: CommandSpec | null,
+  standardOut: Uint8Array,
+  parts: readonly (string | PathSpec)[],
+  session: SessionState,
+): Promise<RedirectResult> {
+  const builtinSpec = SPECS[cmdName]
+  if (
+    STANDARD_AFTER_SCAN.has(cmdName) &&
+    isBuiltinGrammar(cmdName, cmdSpec) &&
+    builtinSpec !== undefined
+  ) {
+    const refused = valueRefusal(
+      cmdName,
+      parseFlags(parts.slice(1), registeredSpec(cmdName, builtinSpec), cmdName, session.cwd)
+        .flagKwargs,
+    )
+    if (refused !== null) {
+      return [
+        null,
+        refused,
+        new ExecutionNode({
+          command: cmdStr,
+          exitCode: refused.exitCode,
+          stderr: await materialize(refused.stderr),
+        }),
+      ]
+    }
+  }
+  return [standardOut, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
+}
+
+/**
+ * The paths that route a line, and the path-valued flags among them.
+ *
+ * Path-valued flags (e.g. shuf --output=/dst/out) own a mount just like
+ * positional operands, so they join routing and mount validation instead of
+ * being dropped whenever a positional path is also present. The empty name
+ * joins onto the working directory in `virtual` but names no path there, so
+ * it routes nowhere: the line runs where its other operands (or the cwd) put
+ * it, and that run's op guards refuse it. A line is not cross-mount because
+ * one of its words is empty. A prepared program line already holds its
+ * positional operands. Mirrors Python's _routing_scopes.
+ */
+function routedScopes(
+  cmdName: string,
+  cmdMount: MountEntry | null,
+  rawArgv: string[],
+  parts: readonly (string | PathSpec)[],
+  pathScopes: PathSpec[],
+  prepared: ParsedCommand | null,
+  session: SessionState,
+): [PathSpec[], PathSpec[]] {
+  if (optionLoopExits(cmdName, cmdMount?.specFor(cmdName) ?? null, rawArgv, session.cwd)) {
+    return [[], []]
+  }
+  const routed = routableScopes(
+    cmdName,
+    prepared !== null
+      ? pathScopes
+      : routedOperands(cmdName, rawArgv, session.cwd, parts.slice(1), pathScopes),
+  )
+  const flagScopes = pathFlagScopes(cmdName, rawArgv, session.cwd)
+  return [mergeScopes(routed, flagScopes).filter((s) => s.walkError !== 'ENOENT'), flagScopes]
+}
+
+/**
+ * Refuse a line whose paths span mounts its command cannot. Path-flag targets
+ * count: a command bound to one mount cannot write its output through another.
+ * A borrowed line runs on its predicted mount, so every path its own spec
+ * reads, operand or option value, must lie there too, or its handler reads
+ * another mount's path through its own. Mirrors Python's _spanning.
+ */
+function spanning(
+  cmdName: string,
+  cmdStr: string,
+  registry: MountRegistry,
+  routingScopes: PathSpec[],
+  borrowedMount: MountEntry | null,
+  ownSpec: CommandSpec | null,
+  parts: readonly (string | PathSpec)[],
+  session: SessionState,
+): RedirectResult | null {
+  let spanScopes = routingScopes
+  const mountPrefixes = new Set<string>()
+  if (borrowedMount !== null) {
+    const own = parseFlags(parts.slice(1), ownSpec, cmdName, session.cwd)
+    spanScopes = [
+      ...own.paths,
+      ...Object.values(own.flagKwargs)
+        .flatMap((value) => (Array.isArray(value) ? value : [value]))
+        .filter((item): item is PathSpec => item instanceof PathSpec),
+    ]
+    mountPrefixes.add(borrowedMount.prefix)
+  }
+  for (const s of spanScopes) {
+    // a scope outside any mount contributes nothing here
+    const m = registry.tryMountFor(s.virtual)
+    if (m !== null) mountPrefixes.add(m.prefix)
+  }
+  if (mountPrefixes.size <= 1) return null
+  const prefixesStr = [...mountPrefixes].sort(compareCodePoints).join(', ')
+  const err = encodeText(
+    `${cmdName}: paths span multiple mounts (${prefixesStr}), cross-mount not supported\n`,
+  )
+  return [
+    null,
+    new IOResult({ exitCode: 1, stderr: err }),
+    new ExecutionNode({ command: cmdStr, exitCode: 1 }),
+  ]
+}
+
 export async function handleCommand(
   executeNode: ExecuteNodeFn,
   dispatch: CallerDispatchFn,
@@ -903,32 +1022,8 @@ export async function handleCommand(
   const cmdMount = ownMount ?? registry.mountForCommand(cmdName)
   const cmdSpec = cmdMount?.specFor(cmdName) ?? null
   const standardOut = standardRequest(cmdName, cmdSpec, rawArgv)
-  const builtinSpec = SPECS[cmdName]
-  if (
-    standardOut !== null &&
-    STANDARD_AFTER_SCAN.has(cmdName) &&
-    isBuiltinGrammar(cmdName, cmdSpec) &&
-    builtinSpec !== undefined
-  ) {
-    const refused = valueRefusal(
-      cmdName,
-      parseFlags(parts.slice(1), registeredSpec(cmdName, builtinSpec), cmdName, session.cwd)
-        .flagKwargs,
-    )
-    if (refused !== null) {
-      return [
-        null,
-        refused,
-        new ExecutionNode({
-          command: cmdStr,
-          exitCode: refused.exitCode,
-          stderr: await materialize(refused.stderr),
-        }),
-      ]
-    }
-  }
   if (standardOut !== null) {
-    return [standardOut, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
+    return standardAnswer(cmdName, cmdStr, cmdSpec, standardOut, parts, session)
   }
 
   let prepared: ParsedCommand | null = null
@@ -974,29 +1069,9 @@ export async function handleCommand(
     }
   }
 
-  // Path-valued flags (e.g. shuf --output=/dst/out) own a mount just like
-  // positional operands, so they join routing and mount validation instead of
-  // being dropped whenever a positional path is also present.
-  // The empty name joins onto the working directory in `virtual` but names
-  // no path there, so it routes nowhere: the line runs where its other
-  // operands (or the cwd) put it, and that run's op guards refuse it. A line
-  // is not cross-mount because one of its words is empty.
-  // A prepared program line already holds its positional operands.
-  let routingScopes: PathSpec[] = borrowed ? operands : []
-  let flagScopes: PathSpec[] = []
-  if (
-    !borrowed &&
-    !optionLoopExits(cmdName, cmdMount?.specFor(cmdName) ?? null, rawArgv, session.cwd)
-  ) {
-    const routed = routableScopes(
-      cmdName,
-      prepared !== null
-        ? pathScopes
-        : routedOperands(cmdName, rawArgv, session.cwd, parts.slice(1), pathScopes),
-    )
-    flagScopes = pathFlagScopes(cmdName, rawArgv, session.cwd)
-    routingScopes = mergeScopes(routed, flagScopes).filter((s) => s.walkError !== 'ENOENT')
-  }
+  const [routingScopes, flagScopes] = borrowed
+    ? [operands, []]
+    : routedScopes(cmdName, cmdMount, rawArgv, parts, pathScopes, prepared, session)
 
   let findExpr: FindExpr | null = null
   if (!borrowed && cmdName === 'find') {
@@ -1037,38 +1112,17 @@ export async function handleCommand(
     )
   }
 
-  // Path-flag targets count: a command bound to one mount cannot write its
-  // output through another. A borrowed line runs on its predicted mount, so
-  // every path its own spec reads, operand or option value, must lie there
-  // too, or its handler reads another mount's path through its own.
-  let spanScopes = routingScopes
-  const mountPrefixes = new Set<string>()
-  if (borrowed && ownMount !== null) {
-    const own = parseFlags(parts.slice(1), ownSpec, cmdName, session.cwd)
-    spanScopes = [
-      ...own.paths,
-      ...Object.values(own.flagKwargs)
-        .flatMap((value) => (Array.isArray(value) ? value : [value]))
-        .filter((item): item is PathSpec => item instanceof PathSpec),
-    ]
-    mountPrefixes.add(ownMount.prefix)
-  }
-  for (const s of spanScopes) {
-    // a scope outside any mount contributes nothing here
-    const m = registry.tryMountFor(s.virtual)
-    if (m !== null) mountPrefixes.add(m.prefix)
-  }
-  if (mountPrefixes.size > 1) {
-    const prefixesStr = [...mountPrefixes].sort(compareCodePoints).join(', ')
-    const err = encodeText(
-      `${cmdName}: paths span multiple mounts (${prefixesStr}), cross-mount not supported\n`,
-    )
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: err }),
-      new ExecutionNode({ command: cmdStr, exitCode: 1 }),
-    ]
-  }
+  const spans = spanning(
+    cmdName,
+    cmdStr,
+    registry,
+    routingScopes,
+    borrowed ? ownMount : null,
+    ownSpec,
+    parts,
+    session,
+  )
+  if (spans !== null) return spans
 
   let mount: MountEntry | null
   try {

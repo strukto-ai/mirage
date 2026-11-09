@@ -16,6 +16,7 @@ use std::task::{Context, Poll, Waker};
 
 use super::Diagnostic;
 use super::builtin::{Unset, Unsetting, run_let, run_unset};
+use super::control::{Construct, Control, ListRun, Ran, Runs, run_construct};
 use super::declare::{Declaration, Declared, Marking, run_declaration, run_marking};
 use super::expand::{Expander, Field, Host, Substitution};
 use super::shell::Shell;
@@ -41,6 +42,10 @@ pub enum Ask {
     /// Expand a subscript given as text; `shell` is the operation's own,
     /// moved to the host for it and handed back with the answer.
     Subscript { shell: Shell, text: Vec<u8> },
+    /// Run the statements of list `list`, `test` when its status decides
+    /// a branch; `shell` is the construct's own, handed back with the
+    /// answer.
+    Run { shell: Shell, run: ListRun },
     /// A long piece of work has run a while; the host lets others run, or
     /// stops the operation, before it goes on. `view` is the session as the
     /// work has left it so far, which whatever the host runs meanwhile reads
@@ -58,6 +63,11 @@ pub enum Answer {
     Subscripted {
         shell: Box<Shell>,
         text: Option<Vec<u8>>,
+    },
+    /// How a list ran, and the shell the host held meanwhile.
+    Ran {
+        shell: Box<Shell>,
+        ran: Ran,
     },
     /// The host could not do it; the operation stops with this.
     Failed(Fault),
@@ -176,6 +186,21 @@ impl Host for Line {
     }
 }
 
+impl Runs for Line {
+    async fn run(&mut self, shell: &mut Shell, run: ListRun) -> Result<Ran, Fault> {
+        let stand_in = Shell::new(shell.vars.fork());
+        let lent = std::mem::replace(shell, stand_in);
+        match self.ask(Ask::Run { shell: lent, run }).await {
+            Answer::Ran { shell: back, ran } => {
+                *shell = *back;
+                Ok(ran)
+            }
+            Answer::Failed(fault) => Err(fault),
+            _ => Err(Fault::Host("an answer that is no run")),
+        }
+    }
+}
+
 /// A running operation, its result once it ends.
 pub struct Task<T> {
     future: Pin<Box<dyn Future<Output = T>>>,
@@ -278,6 +303,7 @@ pub enum Expanded {
     Runs(Vec<(Vec<u8>, bool)>),
     Declared(Declared),
     Unset(Unset),
+    Control(Control),
 }
 
 /// An operation's end: the shell it ran on, its result, and what it left
@@ -331,6 +357,34 @@ pub fn expand(shell: Shell, tree: Arc<Tree>, node: usize, mode: Mode) -> Task<En
     })
 }
 
+/// Run a compound command, the host running each list it picks.
+pub fn control(
+    shell: Shell,
+    tree: Arc<Tree>,
+    construct: Construct,
+    statements: Vec<Option<Vec<(usize, usize)>>>,
+) -> Task<Ended<Expanded>> {
+    Task::new(move |mut line| async move {
+        let mut shell = shell;
+        let mut diagnostics = Vec::new();
+        let result = run_construct(
+            &mut shell,
+            &mut line,
+            &tree,
+            &mut diagnostics,
+            construct,
+            statements,
+        )
+        .await
+        .map(Expanded::Control);
+        Ended {
+            shell,
+            result,
+            diagnostics,
+        }
+    })
+}
+
 /// Run a `declare`, `typeset` or `local` statement.
 pub fn declare(shell: Shell, declaration: Declaration) -> Task<Ended<Expanded>> {
     Task::new(move |mut line| async move {
@@ -364,12 +418,11 @@ pub fn mark_names(shell: Shell, marking: Marking, functions: bool) -> Task<Ended
 }
 
 /// Run `let` on its words.
-pub fn let_words(shell: Shell, words: Vec<Vec<u8>>, deciding: bool) -> Task<Ended<Expanded>> {
+pub fn let_words(shell: Shell, words: Vec<Vec<u8>>) -> Task<Ended<Expanded>> {
     Task::new(move |_line| async move {
         let mut shell = shell;
         let mut diagnostics = Vec::new();
-        let result =
-            run_let(&mut shell, &mut diagnostics, &words, deciding).map(Expanded::Declared);
+        let result = run_let(&mut shell, &mut diagnostics, &words).map(Expanded::Declared);
         Ended {
             shell,
             result,
@@ -424,7 +477,6 @@ pub enum Write {
     Arith {
         text: Vec<u8>,
         expand: bool,
-        deciding: bool,
     },
     /// A value evaluated as an `-i` write coerces it (`declare -ni r=M`),
     /// `added` an integer `+=`'s text; the result is its value.
@@ -502,14 +554,7 @@ pub fn write(
             follow_ref,
         } => writer.mark(&name, attr, on, follow_ref).map(|()| 0),
         Write::Index { subscript } => writer.subscript_index(&subscript),
-        Write::Arith {
-            text,
-            expand,
-            deciding,
-        } => {
-            writer.deciding = deciding;
-            writer.arith(&text, expand)
-        }
+        Write::Arith { text, expand } => writer.arith(&text, expand),
         Write::IsSet {
             reference,
             expanded,
@@ -583,7 +628,6 @@ mod tests {
             Write::Arith {
                 text: b"y = 6 * 7".to_vec(),
                 expand: false,
-                deciding: false,
             },
             true,
         );

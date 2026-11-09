@@ -65,6 +65,7 @@ export function frame(session: SessionState, callStack: CallStack | null = null)
     line: session.lineNumber,
     bashPid: session.bashPid,
     voice: sessionVoice(session),
+    errTrap: session.errTrap !== null && session.errTrap !== '',
   })
 }
 
@@ -76,11 +77,9 @@ export function deciding(): boolean {
   return explaining() === DryRun.DECIDING
 }
 
-/** Refuse a write a policy makes while it decides. Mirrors Python's _refuse_deciding. */
-function refuseDeciding(name: string): void {
-  if (deciding()) {
-    throw new PolicyDenied(`${name}: permission denied`, name)
-  }
+/** A policy method's write to the session it reads. Mirrors Python's _refuse_write. */
+function refuseWrite(name: string): Promise<void> {
+  return Promise.reject(new PolicyDenied(`${name}: permission denied`, name))
 }
 
 /**
@@ -261,7 +260,7 @@ export async function sessionArith(
   callStack: CallStack | null = null,
   expand = false,
 ): Promise<bigint> {
-  return runWrite(session, (shell) => shell.arith(text, expand, deciding()), null, callStack)
+  return runWrite(session, (shell) => shell.arith(text, expand), null, callStack)
 }
 
 /**
@@ -353,7 +352,6 @@ export async function pushWords(
   name: string,
   words: readonly string[],
 ): Promise<void> {
-  refuseDeciding(name)
   elementWrite(session, (shell) => shell.push(name, words))
 }
 
@@ -406,7 +404,6 @@ export async function assignElement(
   append = false,
   diagnostics: (string | Uint8Array)[] | null = null,
 ): Promise<(typeof ELEMENT_STATUS)[number]> {
-  refuseDeciding(name)
   const warns = diagnostics !== null
   return elementWrite(
     session,
@@ -434,7 +431,6 @@ async function setVar(
   assigned: ReadonlySet<bigint | string> | null = null,
   added: string | null = null,
 ): Promise<void> {
-  refuseDeciding(name)
   const [raw, assoc] = rawValue(value)
   runWrite(
     session,
@@ -459,7 +455,6 @@ async function setVar(
  */
 // eslint-disable-next-line @typescript-eslint/require-await
 async function unsetVar(session: SessionState, name: string, followRef = true): Promise<void> {
-  refuseDeciding(name)
   runWrite(session, (shell) => shell.unset(name, { followRef }))
 }
 
@@ -478,7 +473,6 @@ async function markVar(
   on: boolean,
   followRef = true,
 ): Promise<void> {
-  refuseDeciding(name)
   runWrite(session, (shell) => shell.mark(name, attr, on, { followRef }))
 }
 
@@ -616,8 +610,9 @@ export function setAttr(
 export function sessionView(
   session: SessionState,
   diagnostics?: (string | Uint8Array)[],
+  readOnly = false,
 ): SessionView {
-  return {
+  const view: SessionView = {
     get: (name) => envGet(session, name),
     snapshot: () => envSnapshot(session),
     set: (name, value, followRef = true, assigned = null, added = null) =>
@@ -630,4 +625,5 @@ export function sessionView(
     sessionId: session.sessionId,
     access: () => sessionAccess(session),
   }
+  return readOnly ? { ...view, set: refuseWrite, unset: refuseWrite, mark: refuseWrite } : view
 }

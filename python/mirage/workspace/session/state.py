@@ -15,6 +15,7 @@
 import errno
 import functools
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
 from mirage._rs import Shell
@@ -83,6 +84,7 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
         line=session.line_number,
         bash_pid=session.bash_pid,
         voice=session_voice(session),
+        err_trap=bool(session.err_trap),
     )
 
 
@@ -92,14 +94,13 @@ def deciding() -> bool:
     return explaining() is DryRun.DECIDING
 
 
-def _refuse_deciding(name: str) -> None:
-    """Refuse a write a policy makes while it decides.
+async def _refuse_write(name: str, *_: Any, **__: Any) -> None:
+    """A policy method's write to the session it reads.
 
     Args:
         name (str): the variable written.
     """
-    if deciding():
-        raise PolicyDenied(errno.EACCES, f"{name}: permission denied", name)
+    raise PolicyDenied(errno.EACCES, f"{name}: permission denied", name)
 
 
 def run_write(
@@ -327,7 +328,7 @@ async def session_arith(
     """
     return run_write(
         session,
-        lambda shell: shell.arith(text, expand=expand, deciding=deciding()),
+        lambda shell: shell.arith(text, expand=expand),
         call_stack=call_stack,
     )
 
@@ -445,7 +446,6 @@ async def push_words(
         ReadonlyVariableError: the name is readonly.
         PolicyDenied: the name is hidden.
     """
-    _refuse_deciding(name)
     _element_write(session, lambda shell: shell.push(name, words))
 
 
@@ -536,7 +536,6 @@ async def assign_element(
         ArithError: the name carries ``-i`` and the text does not
             evaluate.
     """
-    _refuse_deciding(name)
     return _element_write(
         session,
         lambda shell: shell.element(
@@ -585,7 +584,6 @@ async def set_var(
         ReadonlyVariableError: the name is readonly.
         PolicyDenied: the name is hidden.
     """
-    _refuse_deciding(name)
     raw, assoc = raw_value(value)
     keys = None if assigned is None else list(assigned)
     run_write(
@@ -620,7 +618,6 @@ async def unset_var(
         ReadonlyVariableError: the name is readonly.
         PolicyDenied: the name is protected.
     """
-    _refuse_deciding(name)
     run_write(session, lambda shell: shell.unset(name, follow_ref=follow_ref))
 
 
@@ -647,7 +644,6 @@ async def mark_var(
     Raises:
         PolicyDenied: the name is hidden.
     """
-    _refuse_deciding(name)
     letter = None if attr is None else attr.value
     run_write(
         session,
@@ -817,7 +813,10 @@ def set_attr(
 
 
 def session_view(
-    session: SessionState, *, diagnostics: list[str | bytes] | None = None
+    session: SessionState,
+    *,
+    diagnostics: list[str | bytes] | None = None,
+    read_only: bool = False,
 ) -> SessionView:
     """The session plane's view: ten facts bound to one session.
 
@@ -829,8 +828,9 @@ def session_view(
         session (SessionState): the session the view fronts.
         diagnostics (list[str | bytes] | None): the evaluator's warning
             sink.
+        read_only (bool): a policy method's view, whose writes refuse.
     """
-    return SessionView(
+    view = SessionView(
         get=functools.partial(env_get, session),
         snapshot=functools.partial(env_snapshot, session),
         set=functools.partial(set_var, session, diagnostics=diagnostics),
@@ -842,3 +842,8 @@ def session_view(
         session_id=session.session_id,
         access=functools.partial(session_access, session),
     )
+    if read_only:
+        return replace(
+            view, set=_refuse_write, unset=_refuse_write, mark=_refuse_write
+        )
+    return view

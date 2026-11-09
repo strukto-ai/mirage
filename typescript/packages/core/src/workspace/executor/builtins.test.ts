@@ -101,7 +101,7 @@ const runUnset = (args: string[], s: SessionState): Promise<RedirectResult> =>
 const runLocal = (cmd: string, s: SessionState): Promise<RedirectResult> =>
   declared(
     cmd,
-    (shell) => shell.declare(cmd, '', '', ['X=1'], [], false, false),
+    (shell) => shell.declare(cmd, '', '', ['X=1'], [], false),
     new EvaluationContext(s),
     noLines,
     null,
@@ -124,15 +124,7 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
       declared(
         'declare',
         (shell) =>
-          shell.declare(
-            'declare',
-            '',
-            '',
-            ['KEPT=local', 'LANDED=1', 'a[$(x)]=v'],
-            [],
-            true,
-            false,
-          ),
+          shell.declare('declare', '', '', ['KEPT=local', 'LANDED=1', 'a[$(x)]=v'], [], true),
         new EvaluationContext(s),
         stopping,
         null,

@@ -4,6 +4,7 @@
 pub mod brace;
 pub mod builtin;
 pub mod codec;
+pub mod control;
 pub mod declare;
 pub mod escapes;
 pub mod expand;

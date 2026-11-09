@@ -14,7 +14,6 @@
 
 from mirage.workspace.executor.builtins.declare.declare import declared
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session.state import deciding
 
 
 async def let_builtin(call: BuiltinCall) -> Result:
@@ -26,7 +25,7 @@ async def let_builtin(call: BuiltinCall) -> Result:
     words = list(call.argv.args)
     return await declared(
         "let",
-        lambda shell: shell.let_words(words, deciding()),
+        lambda shell: shell.let_words(words),
         call.context,
         call.execute_fn,
         call.call_stack,

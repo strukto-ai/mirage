@@ -38,68 +38,23 @@ async def _run_deciding(ws: Workspace, cmd: str) -> tuple[str, str, int]:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line,name",
-    [
-        ("export A=1", "A"),
-        ("export B", "B"),
-        ("readonly C=1", "C"),
-        ("declare D=1", "D"),
-        ("declare -x E", "E"),
-        ("declare -a F=(a b)", "F"),
-        ("declare -a G", "G"),
-    ],
-)
-async def test_a_deciding_policy_cannot_declare(line: str, name: str):
-    ws = _ws()
-    _, err, code = await _run_deciding(ws, line)
-    assert err == f"{name}: permission denied\n"
-    assert code == 1
-    _, _, listed = await _run(ws, f"declare -p {name}")
-    assert listed == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line,said",
-    [
-        ("Y=1", "Y: permission denied\n"),
-        ("let Y=1", "Y: permission denied\n"),
-        ("((Y=1))", "bash: line 1: Y: permission denied\n"),
-    ],
-)
-async def test_a_deciding_policy_cannot_assign(line: str, said: str):
-    ws = _ws()
-    _, err, code = await _run_deciding(ws, line)
-    assert err == said
-    assert code == 1
-    _, _, listed = await _run(ws, "declare -p Y")
-    assert listed == 1
-
-
-@pytest.mark.asyncio
-async def test_a_deciding_policy_cannot_unset():
+async def test_a_deciding_line_changes_only_its_copy():
     ws = _ws()
     await _run(ws, "HELD=1; A=(x y); kept() { :; }")
-    _, err, code = await _run_deciding(ws, "unset HELD 'A[0]'; unset -f kept")
-    assert err == (
-        "HELD: permission denied\nA: permission denied\n"
-        "kept: permission denied\n"
+    out, err, code = await _run_deciding(
+        ws,
+        "export E=1; readonly R=1; declare D=1; Y=1; let L=1; ((F=1)); "
+        "unset HELD 'A[0]'; unset -f kept; eval 'V=1'; "
+        'echo "$E$R$D$Y$L$F${G:=1}$V${HELD-h}"; declare -F kept',
     )
+    assert (out, err) == ("11111111h\n", "")
     assert code == 1
-    out, _, _ = await _run(ws, 'echo "$HELD ${A[0]}"; declare -F kept')
-    assert out == "1 x\nkept\n"
-
-
-@pytest.mark.asyncio
-async def test_a_deciding_policy_is_refused_a_local_and_still_lists():
-    ws = _ws()
-    await _run(ws, "HELD=1")
-    out, err, _ = await _run_deciding(
-        ws, 'f() { local L=1; echo "in=$L"; }; f; declare -p HELD'
+    out, _, _ = await _run(
+        ws,
+        'echo "${E-e}${R-r}${D-d}${Y-y}${L-l}${F-f}${G-g}${V-v}$HELD ${A[0]}"'
+        "; declare -F kept",
     )
-    assert out == 'in=\ndeclare -- HELD="1"\n'
-    assert err == "L: permission denied\n"
+    assert out == "erdylfgv1 x\nkept\n"
 
 
 @pytest.mark.asyncio

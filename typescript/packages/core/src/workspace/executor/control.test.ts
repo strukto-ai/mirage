@@ -30,6 +30,8 @@ function bg(text: string): TSNodeLike {
   return node(text, { type: '&', text: '&', children: [], namedChildren: [], isNamed: false })
 }
 
+const noLine = (): Promise<IOResult> => Promise.reject(new Error('nothing to run'))
+
 function runner(execute: ExecuteNodeFn, session: SessionState): BodyRun {
   const context = new EvaluationContext(session)
   return (nodes, bound) =>
@@ -47,7 +49,14 @@ describe('handleWhile', () => {
     }
     const s = new SessionState({ sessionId: 'test' })
     s.shellOptions.errexit = true
-    const [, io] = await handleWhile(runner(execute, s), [node('cond')], [node('body')], s)
+    const [, io] = await handleWhile(
+      runner(execute, s),
+      [node('cond')],
+      [node('body')],
+      new EvaluationContext(s),
+      noLine,
+      null,
+    )
     expect([turns, io.exitCode]).toEqual([1, 1])
   })
 
@@ -62,7 +71,14 @@ describe('handleWhile', () => {
       return Promise.resolve([null, new IOResult(), new ExecutionNode()])
     }
     const s = new SessionState({ sessionId: 'test' })
-    const [, io] = await handleWhile(runner(execute, s), [node('cond')], [node('body')], s)
+    const [, io] = await handleWhile(
+      runner(execute, s),
+      [node('cond')],
+      [node('body')],
+      new EvaluationContext(s),
+      noLine,
+      null,
+    )
     expect(turns).toBe(10002)
     expect((await materialize(io.stderr)).byteLength).toBe(0)
   })
@@ -74,6 +90,8 @@ describe('& inside a body', () => {
       Promise.resolve([null, new IOResult(), new ExecutionNode()])
     const branches: [TSNodeLike[], TSNodeLike[]][] = [[[node('c')], [bg('x')]]]
     const s = new SessionState({ sessionId: 'test' })
-    await expect(handleIf(runner(execute, s), branches, null, s)).rejects.toThrow(/job table/)
+    await expect(
+      handleIf(runner(execute, s), branches, null, new EvaluationContext(s), noLine, null),
+    ).rejects.toThrow(/job table/)
   })
 })

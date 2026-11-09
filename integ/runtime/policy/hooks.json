@@ -405,7 +405,8 @@
             "let DE=1",
             "((DF=1))",
             "unset HELD",
-            "unset -f held"
+            "unset -f held",
+            "echo ${DG:=1}"
           ]
         }
       },
@@ -427,10 +428,10 @@
           }
         },
         {
-          "command": "echo \"${DA-a}${DB-b}${DC-c}${DD-d}${DE-e}${DF-f}$HELD\"; declare -F held",
+          "command": "echo \"${DA-a}${DB-b}${DC-c}${DD-d}${DE-e}${DF-f}${DG-g}$HELD\"; declare -F held",
           "expect": {
             "exit": 0,
-            "stdout": "abcdef1\nheld\n",
+            "stdout": "abcdefg1\nheld\n",
             "stderr": ""
           }
         }

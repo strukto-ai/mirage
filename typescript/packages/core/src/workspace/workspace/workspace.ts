@@ -38,7 +38,7 @@ import {
   sessionCaller,
   sessionVisibility,
 } from '../../context/session_context.ts'
-import { eacces, enoent } from '../../errors/fs.ts'
+import { enoent } from '../../errors/fs.ts'
 import type { EventRuntime } from '../../events/base.ts'
 import { newLineId } from '../../execution/context.ts'
 import { LineTable } from '../../execution/line/table.ts'
@@ -209,9 +209,43 @@ import { forkForCall } from './utils.ts'
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
 
-// A method's session write where the deciding mark cannot reach it.
-function refuseWrite(name: string): Promise<void> {
-  return Promise.reject(eacces(name))
+/** A workspace's secret source declarations and its seed variables. Mirrors Python's _declared_sources. */
+function declaredSources(options: WorkspaceOptions) {
+  // The env block, translated once: a literal entry becomes an
+  // exported var, a managed one becomes a pointer the fill step
+  // resolves at command time. Each managed entry's source is
+  // resolved now, so a typo'd name (or a source nothing registered)
+  // fails at construction, naming the known sources, rather than at
+  // the first fetch.
+  // The source table, kept as declarations: building one reads its
+  // bootstrap pointers, which is I/O, and this constructor is sync.
+  // `secretSources` builds them once, before the first fetch.
+  // Checked here, so every caller-supplied route is covered at once:
+  // an array arrives from an untyped REST override, and
+  // `Object.entries` on one yields nothing, so the declarations
+  // would silently vanish and every restored pointer would read as
+  // an unknown source.
+  // Read as `unknown` on purpose: the declared type says mapping,
+  // and the value comes from an untyped REST override that can say
+  // otherwise, which is exactly the case being caught.
+  const declared: unknown = options.secrets
+  if (
+    declared !== undefined &&
+    (typeof declared !== 'object' || declared === null || Array.isArray(declared))
+  ) {
+    throw new SecretsError('config `secrets` must be a mapping')
+  }
+  const sources: Record<string, SecretSource> = Object.fromEntries(
+    Object.entries(options.secrets ?? {}).map(([name, block]) => [name, SecretSource.parse(block)]),
+  )
+  for (const block of Object.values(sources)) sourceFor(block.source)
+  const seedVars = options.env !== undefined ? varsFromEntries(options.env) : undefined
+  for (const seeded of Object.values(seedVars ?? {})) {
+    if (seeded.managed !== undefined && !Object.hasOwn(sources, seeded.managed.source)) {
+      sourceFor(seeded.managed.source)
+    }
+  }
+  return [sources, seedVars] as const
 }
 
 export class Workspace {
@@ -288,6 +322,7 @@ export class Workspace {
   readonly machineTable: MachineTable
   // Named for what it holds: the source declarations, never a secret.
   private readonly declaredSecretSources: Readonly<Record<string, SecretSource>>
+  private keptView: { session: SessionState; policies: Policies; view: SessionView } | null = null
   private secretSourcesBuilt: Readonly<Record<string, ResolvedSource>> | null = null
   private readonly policyFunctions: Readonly<Record<string, (...args: never[]) => unknown>>
   private secretSourcesPending: Promise<Record<string, ResolvedSource>> | null = null
@@ -382,92 +417,16 @@ export class Workspace {
       options.daemonId ?? null,
     )
     this.jobTable.ended = (record) => {
-      const machine =
-        this.processTable.records().find((process) => process.id.pid === record.pid)?.machine ??
-        this.processTable.machine
-      this.observer.traceJob(record, machine)
+      this.traceJob(record)
     }
-    // What the daemon before this one left running ended with it, as its
-    // jobs did: hung up.
-    this.jobTable.taken = async () => {
-      const now = this.clock.now()
-      const hangup = HANGUP_EXIT_CODE - 128
-      const store = this.jobTable.store
-      // Read the store first: a process or line started, or ended, while it
-      // answers is this workspace's own by the time it is checked, and keeps
-      // the record it wrote.
-      const records = await store.findProcesses()
-      const own = new Set(this.processTable.records().map((record) => record.id.pid))
-      for (const record of records) {
-        if (record.endedAt === null && !own.has(record.id.pid)) {
-          store.note({
-            ...record,
-            state: 'exited',
-            endedAt: now,
-            exit: HANGUP_EXIT_CODE,
-            signal: hangup,
-          })
-        }
-      }
-      const lines = await store.findLines()
-      const read = new Set(this.lineTable.lines().map((line) => line.id.value))
-      for (const line of lines) {
-        if (line.endedAt === null && !read.has(line.id.value)) {
-          store.note({
-            ...line,
-            state: 'exited',
-            endedAt: now,
-            exit: HANGUP_EXIT_CODE,
-            signal: hangup,
-          })
-        }
-      }
-    }
+    this.jobTable.taken = () => this.endLost()
     this.lineTable = new LineTable(this.clock, (record) => {
       this.jobTable.store.note(record)
     })
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
-    // The env block, translated once: a literal entry becomes an
-    // exported var, a managed one becomes a pointer the fill step
-    // resolves at command time. Each managed entry's source is
-    // resolved now, so a typo'd name (or a source nothing registered)
-    // fails at construction, naming the known sources, rather than at
-    // the first fetch.
-    // The source table, kept as declarations: building one reads its
-    // bootstrap pointers, which is I/O, and this constructor is sync.
-    // `secretSources` builds them once, before the first fetch.
-    // Checked here, so every caller-supplied route is covered at once:
-    // an array arrives from an untyped REST override, and
-    // `Object.entries` on one yields nothing, so the declarations
-    // would silently vanish and every restored pointer would read as
-    // an unknown source.
-    // Read as `unknown` on purpose: the declared type says mapping,
-    // and the value comes from an untyped REST override that can say
-    // otherwise, which is exactly the case being caught.
-    const declared: unknown = options.secrets
-    if (
-      declared !== undefined &&
-      (typeof declared !== 'object' || declared === null || Array.isArray(declared))
-    ) {
-      throw new SecretsError('config `secrets` must be a mapping')
-    }
-    this.declaredSecretSources = Object.fromEntries(
-      Object.entries(options.secrets ?? {}).map(([name, block]) => [
-        name,
-        SecretSource.parse(block),
-      ]),
-    )
-    for (const block of Object.values(this.declaredSecretSources)) sourceFor(block.source)
-    const seedVars = options.env !== undefined ? varsFromEntries(options.env) : undefined
-    for (const seeded of Object.values(seedVars ?? {})) {
-      if (
-        seeded.managed !== undefined &&
-        !Object.hasOwn(this.declaredSecretSources, seeded.managed.source)
-      ) {
-        sourceFor(seeded.managed.source)
-      }
-    }
+    const [sources, seedVars] = declaredSources(options)
+    this.declaredSecretSources = sources
     this.sessionManager = new SessionManager(
       sessionId,
       stores.sessions,
@@ -540,46 +499,7 @@ export class Workspace {
     // the sessions, the host answers through `onAsk` (or just records
     // the question when none is wired) and reads `ws.decisions`.
     this.registry.policies.decisions = new Decisions(this.sessionManager, options.onAsk ?? null)
-    // What every method sees of its session: the one its context was built
-    // from when given (a line explain walks, a call's cwd and env), else
-    // the one the call is made under when the method's is it, else the
-    // session the id names, the default for none; nothing for an id this
-    // workspace holds no session for. Its caller is a copy of that session's
-    // id and working directory, so nothing a method does to it reaches the
-    // session. The view holds no state of its own, so the last session's is
-    // kept.
-    let kept: { session: SessionState; policies: Policies; view: SessionView } | null = null
-    this.registry.policies.views = (sessionId, given) => {
-      let session =
-        given ??
-        (asyncContextIsolatesTasks ? getCurrentSessionUnlessForeign(this.sessionManager) : null)
-      if (session === null || (sessionId !== '' && session.sessionId !== sessionId)) {
-        const wanted = sessionId === '' ? this.sessionManager.defaultId : sessionId
-        session = this.sessionManager.has(wanted) ? this.sessionManager.get(wanted) : null
-      }
-      if (session === null) return null
-      if (kept?.session !== session || kept.policies !== this.policies)
-        kept = {
-          session,
-          policies: this.policies,
-          view: Object.freeze(sessionView(session)),
-        }
-      const view = kept.view
-      // A method decides: its files say so on each op's own caller, so its
-      // reads run and its writes are refused wherever it runs.
-      const vfs = withCaller(this.vfs.forSession(session.sessionId), {
-        explaining: DryRun.DECIDING,
-      })
-      const called = policyCaller(session, this.policies.account)
-      if (asyncContextIsolatesTasks) return { session: view, vfs, caller: called }
-      // Without task isolation the mark cannot reach a session write through
-      // the async context, so there its session refuses every write.
-      return {
-        session: { ...view, set: refuseWrite, unset: refuseWrite, mark: refuseWrite },
-        vfs,
-        caller: called,
-      }
-    }
+    this.registry.policies.views = (sessionId, given) => this.policyViews(sessionId, given)
     // Installed CLIs, fully separate from mounts: a spec name resolves
     // against the named registry and every entry installs through the
     // same fail-loud path as registerCli.
@@ -595,27 +515,7 @@ export class Workspace {
     )
     this.registry.observer = this.observer
     this.planes = [stores.namespace, stores.observe, stores.sessions]
-    // Explicit at the construction site: the history view does not cache
-    // reads, so its policy can only ever be bounded.
-    this.registry.mount(
-      HISTORY_PREFIX,
-      new HistoryViewVFS(this.observer),
-      MountMode.READ,
-      DEFAULT_READ_SPEC,
-      { write: WritePolicy.UNCONDITIONAL },
-    )
-    // One file per program, where PATH finds it: the same lookup which,
-    // type and command -v answer from.
-    this.registry.mount(
-      BIN_PREFIX,
-      new BinViewVFS(
-        () => programs(this.callSession(), this.registry),
-        (name) => programNote(name, this.callSession(), this.registry),
-      ),
-      MountMode.READ,
-      DEFAULT_READ_SPEC,
-      { write: WritePolicy.UNCONDITIONAL },
-    )
+    this.mountViews()
     this.registry.attachFileCache(this.cache)
     this.namespace = new Namespace(this.registry, (p) => this.resolveInternal(p), stores.namespace)
     this.dispatcher = new Dispatcher(
@@ -656,30 +556,7 @@ export class Workspace {
       defaultBase === null && this.workspaceProcesses === null
         ? null
         : this.compile(defaultBase, null)
-    checkCommandLimits(options.commandLimits ?? {}, 'workspace', true)
-    this.registry.commandLimits = { ...options.commandLimits }
-    // What the RAM mounts store and what a command builds share the
-    // workspace's max_memory; null runs uncapped.
-    this.registry.bodyLimit =
-      options.maxBodyBytes == null
-        ? MAX_BODY_BYTES
-        : parseLimit(options.maxBodyBytes, 'max_body_bytes')
-    const maxMemory = options.maxMemory === undefined ? MAX_MEMORY : options.maxMemory
-    const memory = underCeiling(
-      maxMemory === null ? null : parseLimit(maxMemory, 'max_memory'),
-      this.registry.ceilings.maxMemory,
-    )
-    this.registry.memory =
-      memory === null ? null : new MemoryBudget(memory, () => this.registry.heldInMemory())
-    const maxEnv = options.maxEnv === undefined ? MAX_ENV : options.maxEnv
-    this.registry.maxEnv = underCeiling(
-      maxEnv === null ? null : parseLimit(maxEnv, 'max_env'),
-      this.registry.ceilings.maxEnv,
-    )
-    // Every session starts within max_env, this one with the workspace's
-    // env and its profile's.
-    this.sessionManager.maxEnv = this.registry.maxEnv
-    checkEnvFits(this.sessionManager.get(this.sessionManager.defaultId), this.registry.maxEnv)
+    this.applyLimits(options)
     // Every connection a line or an op opens must clear the workspace's
     // network setting and the process's ceiling.
     this.networkSetting = options.network ?? true
@@ -751,11 +628,7 @@ export class Workspace {
       (target, signum) => this.signalHost(target, signum),
       (target, seenAt, signum) => this.stopHostRun(target, seenAt, signum),
     )
-    this.jobTable.runStopper = (record, signum) =>
-      this.machineTable.stop(this.processTable, record, signum)
-    this.processTable.scanner = () => this.machineTable.scan(this.processTable, this.workspaceId)
-    this.processTable.sender = (handle, signum) =>
-      this.machineTable.send(this.processTable, handle, signum)
+    this.wireMachines()
     this.runtimeWorld = new Runtimes({
       registry: this.registry,
       entries: options.runtimes,
@@ -771,6 +644,148 @@ export class Workspace {
     }
     this.registry.bindClocks()
     this.machineTable.holdHandles()
+  }
+
+  /** Set the workspace's bounds on its registry. */
+  private applyLimits(options: WorkspaceOptions): void {
+    checkCommandLimits(options.commandLimits ?? {}, 'workspace', true)
+    this.registry.commandLimits = { ...options.commandLimits }
+    // What the RAM mounts store and what a command builds share the
+    // workspace's max_memory; null runs uncapped.
+    this.registry.bodyLimit =
+      options.maxBodyBytes == null
+        ? MAX_BODY_BYTES
+        : parseLimit(options.maxBodyBytes, 'max_body_bytes')
+    const maxMemory = options.maxMemory === undefined ? MAX_MEMORY : options.maxMemory
+    const memory = underCeiling(
+      maxMemory === null ? null : parseLimit(maxMemory, 'max_memory'),
+      this.registry.ceilings.maxMemory,
+    )
+    this.registry.memory =
+      memory === null ? null : new MemoryBudget(memory, () => this.registry.heldInMemory())
+    const maxEnv = options.maxEnv === undefined ? MAX_ENV : options.maxEnv
+    this.registry.maxEnv = underCeiling(
+      maxEnv === null ? null : parseLimit(maxEnv, 'max_env'),
+      this.registry.ceilings.maxEnv,
+    )
+    // Every session starts within max_env, this one with the workspace's
+    // env and its profile's.
+    this.sessionManager.maxEnv = this.registry.maxEnv
+    checkEnvFits(this.sessionManager.get(this.sessionManager.defaultId), this.registry.maxEnv)
+  }
+
+  /** Tell the observer a job ended, on the machine it ran on. */
+  private traceJob(record: Job): void {
+    const machine =
+      this.processTable.records().find((process) => process.id.pid === record.pid)?.machine ??
+      this.processTable.machine
+    this.observer.traceJob(record, machine)
+  }
+
+  /** End what the daemon before this one left running, as its jobs ended: hung up. */
+  private async endLost(): Promise<void> {
+    const now = this.clock.now()
+    const hangup = HANGUP_EXIT_CODE - 128
+    const store = this.jobTable.store
+    // Read the store first: a process or line started, or ended, while it
+    // answers is this workspace's own by the time it is checked, and keeps
+    // the record it wrote.
+    const records = await store.findProcesses()
+    const own = new Set(this.processTable.records().map((record) => record.id.pid))
+    for (const record of records) {
+      if (record.endedAt === null && !own.has(record.id.pid)) {
+        store.note({
+          ...record,
+          state: 'exited',
+          endedAt: now,
+          exit: HANGUP_EXIT_CODE,
+          signal: hangup,
+        })
+      }
+    }
+    const lines = await store.findLines()
+    const read = new Set(this.lineTable.lines().map((line) => line.id.value))
+    for (const line of lines) {
+      if (line.endedAt === null && !read.has(line.id.value)) {
+        store.note({
+          ...line,
+          state: 'exited',
+          endedAt: now,
+          exit: HANGUP_EXIT_CODE,
+          signal: hangup,
+        })
+      }
+    }
+  }
+
+  /**
+   * What a policy method sees of its session.
+   *
+   * What every method sees of its session: the one its context was built
+   * from when given (a line explain walks, a call's cwd and env), else
+   * the one the call is made under when the method's is it, else the
+   * session the id names, the default for none; nothing for an id this
+   * workspace holds no session for. Its caller is a copy of that session's
+   * id and working directory, so nothing a method does to it reaches the
+   * session. The view holds no state of its own, so the last session's is
+   * kept.
+   */
+  private policyViews(sessionId: string, given?: SessionState | null) {
+    let session =
+      given ??
+      (asyncContextIsolatesTasks ? getCurrentSessionUnlessForeign(this.sessionManager) : null)
+    if (session === null || (sessionId !== '' && session.sessionId !== sessionId)) {
+      const wanted = sessionId === '' ? this.sessionManager.defaultId : sessionId
+      session = this.sessionManager.has(wanted) ? this.sessionManager.get(wanted) : null
+    }
+    if (session === null) return null
+    if (this.keptView?.session !== session || this.keptView.policies !== this.policies)
+      this.keptView = {
+        session,
+        policies: this.policies,
+        view: Object.freeze(sessionView(session, undefined, true)),
+      }
+    const view = this.keptView.view
+    // A method decides: its files say so on each op's own caller, so its
+    // reads run and its writes are refused wherever it runs.
+    const vfs = withCaller(this.vfs.forSession(session.sessionId), {
+      explaining: DryRun.DECIDING,
+    })
+    return { session: view, vfs, caller: policyCaller(session, this.policies.account) }
+  }
+
+  /** Mount the views the workspace itself serves. */
+  private mountViews(): void {
+    // Explicit at the construction site: the history view does not cache
+    // reads, so its policy can only ever be bounded.
+    this.registry.mount(
+      HISTORY_PREFIX,
+      new HistoryViewVFS(this.observer),
+      MountMode.READ,
+      DEFAULT_READ_SPEC,
+      { write: WritePolicy.UNCONDITIONAL },
+    )
+    // One file per program, where PATH finds it: the same lookup which,
+    // type and command -v answer from.
+    this.registry.mount(
+      BIN_PREFIX,
+      new BinViewVFS(
+        () => programs(this.callSession(), this.registry),
+        (name) => programNote(name, this.callSession(), this.registry),
+      ),
+      MountMode.READ,
+      DEFAULT_READ_SPEC,
+      { write: WritePolicy.UNCONDITIONAL },
+    )
+  }
+
+  /** Send what the job and process tables do to a machine through the machine table. */
+  private wireMachines(): void {
+    this.jobTable.runStopper = (record, signum) =>
+      this.machineTable.stop(this.processTable, record, signum)
+    this.processTable.scanner = () => this.machineTable.scan(this.processTable, this.workspaceId)
+    this.processTable.sender = (handle, signum) =>
+      this.machineTable.send(this.processTable, handle, signum)
   }
 
   /**

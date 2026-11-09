@@ -66,6 +66,10 @@ def runner(execute, sess: SessionState):
     )
 
 
+async def no_line(*_args, **_kw):
+    raise AssertionError("nothing to run")
+
+
 def result(stdout=None, exit_code=0):
     return stdout, IOResult(exit_code=exit_code), ExecutionNode()
 
@@ -85,7 +89,12 @@ async def test_while_stops_at_a_set_e_failure_in_its_body():
     sess = SessionState(session_id="test")
     sess.shell_options["errexit"] = True
     _, io, _ = await handle_while(
-        runner(execute, sess), [node("cond")], [node("body")], sess
+        runner(execute, sess),
+        [node("cond")],
+        [node("body")],
+        EvaluationContext(sess),
+        no_line,
+        None,
     )
     assert (turns, io.exit_code) == (1, 1)
 
@@ -110,7 +119,12 @@ async def test_while_runs_until_its_condition_fails():
 
     sess = SessionState(session_id="test")
     _, io, _ = await handle_while(
-        runner(execute, sess), [node("cond")], [node("body")], sess
+        runner(execute, sess),
+        [node("cond")],
+        [node("body")],
+        EvaluationContext(sess),
+        no_line,
+        None,
     )
     assert turns == 10002
     assert await materialize(io.stderr) == b""
@@ -124,5 +138,10 @@ async def test_body_ampersand_without_a_job_table_fails_loud():
     sess = SessionState(session_id="test")
     with pytest.raises(RuntimeError, match="job table"):
         await handle_if(
-            runner(execute, sess), [([node("c")], [bg("x")])], None, sess
+            runner(execute, sess),
+            [([node("c")], [bg("x")])],
+            None,
+            EvaluationContext(sess),
+            no_line,
+            None,
         )

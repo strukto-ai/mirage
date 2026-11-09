@@ -111,7 +111,7 @@ from mirage.workspace.session import (
 )
 from mirage.workspace.session.budget import run_with_env_limit
 from mirage.workspace.session.manager import SessionManager
-from mirage.workspace.session.state import visible_env
+from mirage.workspace.session.state import deciding, visible_env
 from mirage.workspace.snapshot import ContentDriftError
 from mirage.workspace.snapshot.drift import DriftQueue
 from mirage.workspace.types import StatusWriter
@@ -518,6 +518,23 @@ async def _preflight(ws: ExecuteEnv) -> None:
         await ws.drift.drain(ws.registry.try_mount_for)
 
 
+def _beside(ws: ExecuteEnv, source: SessionState) -> SessionState:
+    """A subshell of ``source`` as it is now, beside its lines: nothing
+    it changes reaches them but what its jobs write, which goes on to
+    the session's terminal.
+
+    Args:
+        ws (ExecuteEnv): the workspace running the line.
+        source (SessionState): the session it copies.
+    """
+    session = source.fork()
+    session.process_id = None
+    session.job_table = ws.job_table.child()
+    session.tty = source.tty
+    session.job_output = JobOutput(source.tty.jobs)
+    return session
+
+
 async def execute_line(
     ws: ExecuteEnv,
     command: str,
@@ -587,12 +604,7 @@ async def execute_line(
         session = ambient
         session_id = ambient.session_id
         if ambient.vars.shell.closed:
-            source = ws.sessions.get(session_id)
-            session = source.fork()
-            session.process_id = None
-            session.job_table = ws.job_table.child()
-            session.tty = source.tty
-            session.job_output = JobOutput(source.tty.jobs)
+            session = _beside(ws, ws.sessions.get(session_id))
     else:
         if session_id is None:
             session_id = ws.sessions.default_id
@@ -602,6 +614,10 @@ async def execute_line(
         # reached the terminal while it ran, a job's output from before
         # it first.
         tty = session.tty
+    # A policy deciding reads the session and changes nothing, so a line
+    # it runs ends with the copy it ran on.
+    if handed is None and deciding():
+        session = _beside(ws, session)
     line_handle = line_handle or LineHandle(
         new_line_id(ws.registry.ids),
         session_id,
@@ -1048,6 +1064,202 @@ async def _run_on_line_runtime(
     return io
 
 
+async def _open_history(
+    ws: ExecuteEnv,
+    command: str,
+    ast: Any,
+    session: SessionState,
+    line_handle: LineHandle,
+    sink: JobConsole | None,
+    typed: bool,
+) -> LineHistory | None:
+    """Record a line as it starts.
+
+    A line bash's reader reads as several commands records each as it
+    reaches it; any other is recorded as it starts, how it ended following
+    it, as is one a post_execute policy sees whole before any of its
+    output escapes.
+
+    Args:
+        ws (ExecuteEnv): the workspace running the line.
+        command (str): the line's text.
+        ast (Any): its parse.
+        session (SessionState): the session it runs on.
+        line_handle (LineHandle): the line's handle.
+        sink (JobConsole | None): where its output streams.
+        typed (bool): it came as text rather than as an argv.
+
+    Returns:
+        The line's history, None when the line is logged whole.
+    """
+    session_id = session.session_id
+    history = (
+        LineHistory.open(
+            ws.observer,
+            command,
+            ast,
+            session_id,
+            session,
+            str(line_handle.id),
+            sink,
+        )
+        if typed
+        and not await ws.registry.policies.wants_for(
+            "post_execute", session_id
+        )
+        else None
+    )
+    if history is None:
+        await ws.observer.log_command(
+            command, session_id, session.cwd, str(line_handle.id)
+        )
+    return history
+
+
+async def _run_limited(
+    ws: ExecuteEnv,
+    command: str,
+    ast: Any,
+    context: EvaluationContext,
+    stdin: ByteSource | None,
+    cancel: asyncio.Event | None,
+    job_table: JobTable,
+    exec_recursion: Callable[..., Awaitable[IOResult]],
+    handed: HandOff,
+    sink: JobConsole | None,
+    call_stack: CallStack | None,
+    line_handle: LineHandle,
+    judged: Callable[[], Awaitable[list[tuple[Walked, list[Judged]]]]],
+    timeout: float | None,
+    budget_start: float,
+) -> IOResult:
+    """Run a line's tree under the workspace's clock and limits.
+
+    No seam of its own: the whole line is one task under
+    ``Workspace.shell``, and a cancel lands on whichever await the tree
+    is in. A top-level line runs under its ``@line`` deadline, which a
+    nested one shares, every object a line builds must fit in what the
+    workspace's max_memory has left, and every connection it opens must
+    clear its network.
+
+    Args:
+        ws (ExecuteEnv): the workspace running the line.
+        command (str): the line's text.
+        ast (Any): its parse.
+        context (EvaluationContext): its evaluation.
+        stdin (ByteSource | None): its input.
+        cancel (asyncio.Event | None): its abort event.
+        job_table (JobTable): the jobs it starts.
+        exec_recursion (Callable): runs its nested lines.
+        handed (HandOff): its grants.
+        sink (JobConsole | None): where its output streams.
+        call_stack (CallStack | None): its call stack.
+        line_handle (LineHandle): its handle.
+        judged (Callable): its commands as admission judged them.
+        timeout (float | None): its ``@line`` deadline.
+        budget_start (float): when that deadline started.
+    """
+    session = context.session
+    route = (
+        ws.router.context(command, session, await judged())
+        if await ws.registry.policies.wants_for(
+            "post_execute", session.session_id
+        )
+        else None
+    )
+    io, _ = await run_with_system_clock(
+        ws.registry.system_clock,
+        run_with_egress(
+            ws.registry.network_of(session.network),
+            ws.registry.policies,
+            run_with_memory(
+                ws.registry.memory,
+                run_with_timeout(
+                    run_with_env_limit(
+                        ws.registry.max_env,
+                        run_command_tree(
+                            ws.dispatch,
+                            ws.registry,
+                            ws.namespace,
+                            job_table,
+                            exec_recursion,
+                            ast,
+                            context,
+                            stdin,
+                            cancel,
+                            handed=handed,
+                            sink=sink,
+                            call_stack=call_stack,
+                            line_handle=line_handle,
+                            route=route,
+                        ),
+                    ),
+                    timeout,
+                    LINE_NAME,
+                    budget_start,
+                ),
+                body=ws.registry.body_limit,
+            ),
+            session.session_id,
+        ),
+    )
+    return io
+
+
+async def _end_record(
+    ws: ExecuteEnv,
+    io: IOResult,
+    records: list[OpRecord],
+    history: LineHistory | None,
+    session: SessionState,
+    line_handle: LineHandle,
+    sink: JobConsole | None,
+) -> None:
+    """Record how a line ended, on its history or as one result.
+
+    Args:
+        ws (ExecuteEnv): the workspace running the line.
+        io (IOResult): how it ended.
+        records (list[OpRecord]): the ops it made.
+        history (LineHistory | None): its history.
+        session (SessionState): the session it ran on.
+        line_handle (LineHandle): its handle.
+        sink (JobConsole | None): where its output streamed.
+    """
+    if history is not None:
+        await history.end(io, records)
+        return
+    await ws.observer.log_result(
+        await _shown(io, sink),
+        records,
+        session.session_id,
+        session.cwd,
+        str(line_handle.id),
+    )
+
+
+async def _settle_grants(
+    ws: ExecuteEnv, session_id: str, handed: HandOff, held: bool
+) -> None:
+    """Settle what a line's passes and gates claimed, however it ended.
+
+    Args:
+        ws (ExecuteEnv): the workspace running the line.
+        session_id (str): its session.
+        handed (HandOff): its grants.
+        held (bool): a question holds it for its retry.
+    """
+    if held:
+        ws.registry.decisions.release(session_id, handed)
+    elif handed.parent is not None:
+        # A nested evaluation's claims are the outer line's to keep for
+        # the next evaluation from the same node and to spend at its
+        # own end.
+        ws.registry.decisions.hand_up(session_id, handed)
+    else:
+        await ws.registry.decisions.revoke(session_id, handed)
+
+
 async def run_prepared_line(
     ws: ExecuteEnv,
     command: str,
@@ -1164,32 +1376,15 @@ async def run_prepared_line(
             if argv is None
             else literal_tree(argv)
         )
-        # A line bash's reader reads as several commands records each as
-        # it reaches it; any other is recorded as it starts, how it ended
-        # following it, as is one a post_execute policy sees whole before
-        # any of its output escapes.
-        if (
-            recorded
-            and argv is None
-            and not await ws.registry.policies.wants_for(
-                "post_execute", session_id
-            )
-        ):
-            history = LineHistory.open(
-                ws.observer,
+        if recorded:
+            history = await _open_history(
+                ws,
                 command,
                 ast,
-                session_id,
                 effective_session,
-                str(line_handle.id),
+                line_handle,
                 sink,
-            )
-        if recorded and history is None:
-            await ws.observer.log_command(
-                command,
-                session_id,
-                effective_session.cwd,
-                str(line_handle.id),
+                argv is None,
             )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
@@ -1375,50 +1570,22 @@ async def run_prepared_line(
             # deadline, which a nested one shares, and every object a
             # line builds must fit in what the workspace's max_memory has
             # left, and every connection it opens must clear its network.
-            io, _ = await run_with_system_clock(
-                ws.registry.system_clock,
-                run_with_egress(
-                    ws.registry.network_of(effective_session.network),
-                    ws.registry.policies,
-                    run_with_memory(
-                        ws.registry.memory,
-                        run_with_timeout(
-                            run_with_env_limit(
-                                ws.registry.max_env,
-                                run_command_tree(
-                                    ws.dispatch,
-                                    ws.registry,
-                                    ws.namespace,
-                                    job_table or ws.job_table,
-                                    exec_recursion,
-                                    ast,
-                                    context,
-                                    stdin,
-                                    cancel,
-                                    handed=handed,
-                                    sink=sink,
-                                    call_stack=call_stack,
-                                    line_handle=line_handle,
-                                    route=ws.router.context(
-                                        command,
-                                        effective_session,
-                                        await judged(),
-                                    )
-                                    if await ws.registry.policies.wants_for(
-                                        "post_execute",
-                                        effective_session.session_id,
-                                    )
-                                    else None,
-                                ),
-                            ),
-                            context.frame.line_timeout if top_level else None,
-                            LINE_NAME,
-                            budget_start,
-                        ),
-                        body=ws.registry.body_limit,
-                    ),
-                    effective_session.session_id,
-                ),
+            io = await _run_limited(
+                ws,
+                command,
+                ast,
+                context,
+                stdin,
+                cancel,
+                job_table or ws.job_table,
+                exec_recursion,
+                handed,
+                sink,
+                call_stack,
+                line_handle,
+                judged,
+                context.frame.line_timeout if top_level else None,
+                budget_start,
             )
             # A record a nested line earned is the line's to report when
             # its own tree earned none (see NestedRefusal).
@@ -1432,21 +1599,9 @@ async def run_prepared_line(
             held = is_pending(io.refusal)
         finally:
             reset_caller(line_token)
-            if held:
-                ws.registry.decisions.release(
-                    effective_session.session_id, handed
-                )
-            elif handed.parent is not None:
-                # A nested evaluation's claims are the outer line's to
-                # keep for the next evaluation from the same node and
-                # to spend at its own end.
-                ws.registry.decisions.hand_up(
-                    effective_session.session_id, handed
-                )
-            else:
-                await ws.registry.decisions.revoke(
-                    effective_session.session_id, handed
-                )
+            await _settle_grants(
+                ws, effective_session.session_id, handed, held
+            )
         # The program loop stamped each statement; the line as a whole
         # is a wrapper around them, like a group.
         worded = getattr(ast, "warnings", None)
@@ -1524,13 +1679,13 @@ async def run_prepared_line(
         reset_current_session(session_token)
         await ws.sessions.end_line(session_id, parent is None)
         ws.records.extend(scope.records)
-        if history is not None:
-            await history.end(io, scope.records)
-        elif recorded:
-            await ws.observer.log_result(
-                await _shown(io, sink),
+        if recorded:
+            await _end_record(
+                ws,
+                io,
                 scope.records,
-                session_id,
-                effective_session.cwd,
-                str(line_handle.id),
+                history,
+                effective_session,
+                line_handle,
+                sink,
             )
