@@ -23,6 +23,8 @@ from collections.abc import Awaitable, Callable
 from mirage.execution.base import ExecutionStore
 from mirage.execution.errors import WorkspaceHeldError
 from mirage.execution.job.constants import (
+    ADOPT_RETRIES,
+    ADOPT_RETRY_SECONDS,
     GENERATION_BITS,
     HANGUP_EXIT_CODE,
     IGNORED_SIGNALS,
@@ -346,14 +348,12 @@ class JobTable:
             self._claimed = True
             self._renewed = time.monotonic()
             self._keep_lease()
-            try:
-                adopted = await self._adopt_left()
-            except Exception as exc:
-                adopted = set()
-                logger.debug("detached jobs not adopted: %s", exc)
+            adopted = await self._adopt_retrying()
             if not self._claimed:
                 return
             self._adopted = True
+            # Owners swept while adopting kept their detached records.
+            self._stopped_owners.clear()
             earlier = {
                 pid: record
                 for pid, record in earlier.items()
@@ -644,19 +644,40 @@ class JobTable:
                 return
         raise RuntimeError(f"job {job.id}: entry kept conflicting")
 
-    async def _adopt_left(self) -> set[int]:
+    async def _adopt_retrying(self) -> set[int]:
+        """Adopt the jobs left detached (``_adopt_left``), again while one
+        failed to, up to ``ADOPT_RETRIES`` times: a store that could not
+        be read for a moment leaves no job to be stopped as abandoned.
+        Answers the pids adopted.
+        """
+        adopted: set[int] = set()
+        for attempt in range(ADOPT_RETRIES + 1):
+            if attempt:
+                await asyncio.sleep(ADOPT_RETRY_SECONDS)
+            try:
+                found, complete = await self._adopt_left()
+            except Exception as exc:
+                found, complete = set(), False
+                logger.debug("detached jobs not adopted: %s", exc)
+            adopted |= found
+            if complete or not self._claimed:
+                break
+        return adopted
+
+    async def _adopt_left(self) -> tuple[set[int], bool]:
         """Adopt every running job whose program a daemon that no longer
         holds the lease left detached, this daemon's earlier life
         included: each one whose entry this daemon takes first runs here
         from then on, viewed from what its console holds. Answers the
-        pids adopted, whose published records no sweep stops after. A
-        disowned job is adopted as one, and a lease lost meanwhile stops
-        the adopting.
+        pids adopted, whose published records no sweep stops after, and
+        whether no job failed to be. A disowned job is adopted as one,
+        and a lease lost meanwhile stops the adopting.
         """
         adopted: set[int] = set()
+        complete = True
         resume = self.resumer
         if resume is None or self.store.lease_seconds is None:
-            return adopted
+            return adopted, complete
         own = {
             j.console_name
             for j in [*self.all_jobs(), *self._disowned]
@@ -672,7 +693,7 @@ class JobTable:
             found += [(None, e) for e in fields.get("disowned", {}).values()]
             for number, entry in found:
                 if not self._claimed:
-                    return adopted
+                    return adopted, complete
                 if (
                     entry["state"] != JobState.RUNNING.value
                     or not entry.get("detached")
@@ -687,6 +708,7 @@ class JobTable:
                     logger.debug(
                         "job %s not adopted", entry["console"], exc_info=True
                     )
+                    complete = False
                     continue
                 if taken:
                     adopted.add(entry["pid"])
@@ -700,7 +722,7 @@ class JobTable:
             }
             if kept != records and not await self._running(owner):
                 await self.store.publish(owner, kept)
-        return adopted
+        return adopted, complete
 
     async def _adopt(
         self,
@@ -2024,12 +2046,16 @@ class JobTable:
         live = {handle.record.pid for handle in self.processes.live()}
         for pid, record in records.items():
             # Only the lease holder, which adopted the detached jobs it
-            # could, stops the rest; never one it runs, should a daemon
-            # that lost the lease republish it.
-            if record.get("runtime") is None or (
-                record.get("detached")
-                and (not self._plane._adopted or record.get("pid") in live)
-            ):
+            # could, stops the rest, so one not adopted yet stays listed;
+            # never one it runs, should a daemon that lost the lease
+            # republish it.
+            if record.get("runtime") is None:
+                continue
+            if record.get("detached") and record.get("pid") not in live:
+                if not self._plane._adopted:
+                    left[pid] = record
+                    continue
+            elif record.get("detached"):
                 continue
             if await self._running(owner):
                 return records

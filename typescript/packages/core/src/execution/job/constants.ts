@@ -71,6 +71,11 @@ export const GENERATION_BITS = 52
 // gives up: every workspace of a session writes the one record.
 export const LIST_MAX_RETRIES = 32
 
+// How many times a claim adopts again a detached job whose adoption failed,
+// and how long it waits between, before the jobs left are stopped.
+export const ADOPT_RETRIES = 3
+export const ADOPT_RETRY_SECONDS = 0.5
+
 // What bash starts a background job ignoring when job control is off:
 // `kill -INT` or `kill -QUIT` reaches it and nothing happens, and timeout's
 // (`-s INT`) stops only the program the job runs right now.

@@ -2370,6 +2370,67 @@ describe('detached jobs a daemon left', () => {
     }
   })
 
+  // A store read that fails for a moment while a restart adopts leaves the
+  // job adopted, its program never stopped as abandoned.
+  it.each(['console', 'sessions'])('are adopted though a %s read fails once', async (fails) => {
+    const store = new RAMExecutionStore(30)
+    const [old, job] = await leftDetached(store)
+    const fresh = new JobTable(store, new ProcessTable(), null, undefined, old.daemon)
+    const seen: unknown[] = []
+    resuming(fresh, 3, seen)
+    const stopped: unknown[] = []
+    fresh.runStopper = (record) => {
+      stopped.push(record.pid)
+      return Promise.resolve(true)
+    }
+    const failing =
+      fails === 'console' ? vi.spyOn(JobConsole.prototype, 'readFrom') : vi.spyOn(store, 'sessions')
+    failing.mockRejectedValueOnce(new Error('store unavailable'))
+    try {
+      await fresh.claim()
+      expect(fresh.get(job.id, job.sessionId)).not.toBeNull()
+      expect((await fresh.wait(job.id, job.sessionId)).exitCode).toBe(3)
+      expect([seen.length, stopped]).toEqual([1, []])
+    } finally {
+      failing.mockRestore()
+      await fresh.killAll()
+      await fresh.close()
+      await old.killAll()
+    }
+  })
+
+  // A sweep before the lease holder adopted keeps a detached program's
+  // record, for the adopting or the stop after it.
+  it('keep their record through a sweep before adoption', async () => {
+    const store = new RAMExecutionStore(30)
+    const [old] = await leftDetached(store)
+    const recorded = async (): Promise<boolean> =>
+      Object.values((await store.processes())[old.daemon] ?? {}).some(
+        (record) => record.detached === true,
+      )
+    await until(recorded)
+    Reflect.set(old, 'closed', true)
+    await (Reflect.get(old, 'publishing') as Promise<void> | null)
+    const fresh = new JobTable(store, new ProcessTable())
+    const stopped: unknown[] = []
+    fresh.runStopper = (record) => {
+      stopped.push(record.pid)
+      return Promise.resolve(true)
+    }
+    try {
+      await (Reflect.get(fresh, 'stopOwner') as (owner: string) => Promise<void>).call(
+        fresh,
+        old.daemon,
+      )
+      expect(stopped).toEqual([])
+      expect(await recorded()).toBe(true)
+    } finally {
+      await fresh.close()
+      Reflect.set(old, 'closed', false)
+      await old.killAll()
+    }
+  })
+
   // A restart adopts a detached job its session disowned, unlisted as it
   // was, rather than leave its program to the sweep.
   it('are adopted disowned when disowned', async () => {
