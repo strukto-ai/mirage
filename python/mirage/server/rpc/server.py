@@ -204,7 +204,7 @@ class MirageRpcServer:
             stdin (ByteSource | None): the line's stdin.
 
         Returns:
-            JsonValue: ``{kind, exit_code, stdout, stderr, refusal}``.
+            JsonValue: ``{exit_code, stdout, stderr, refusal}``.
         """
         io = await self._session.shell(command, stdin=stdin, cwd=cwd, env=env)
         return await io_result_to_dict(io)

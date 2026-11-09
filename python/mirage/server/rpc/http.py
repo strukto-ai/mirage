@@ -100,7 +100,7 @@ class DaemonRpcServer(MirageRpcServer):
             stdin (ByteSource | None): the line's stdin.
 
         Returns:
-            JsonValue: ``{kind, exit_code, stdout, stderr, refusal}``.
+            JsonValue: ``{exit_code, stdout, stderr, refusal}``.
 
         Raises:
             RpcError: the job was cancelled or failed.

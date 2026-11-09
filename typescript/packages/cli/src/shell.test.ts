@@ -128,10 +128,7 @@ describe('mirage shell', () => {
         bodies.push(JSON.parse(Buffer.concat(chunks).toString()))
         res
           .writeHead(200, { 'content-type': 'application/x-ndjson' })
-          .end(
-            JSON.stringify({ status: 'done', result: { kind: 'io', exit_code: 0 }, error: null }) +
-              '\n',
-          )
+          .end(JSON.stringify({ status: 'done', result: { exit_code: 0 }, error: null }) + '\n')
       })
     })
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
