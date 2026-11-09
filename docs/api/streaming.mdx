@@ -4,7 +4,7 @@ description: Stream shell output and send input over HTTP.
 icon: arrows-left-right
 ---
 
-Use [Run a shell line](/api/operations/shell/run-a-shell-line) with an
+Use [Run shell command](/api/operations/shell/run-shell-command) with an
 existing workspace. Set `MIRAGE_AUTH_TOKEN` to your server's configured token, or
 omit the authorization header in local mode without a token.
 
@@ -43,7 +43,7 @@ A stream without a final status record was interrupted. HTTP `200` alone does no
 mean the shell command succeeded. Closing the request cancels the running line.
 Streaming cannot be combined with `explain`.
 
-The server includes `line_id` in the result. Use it to [get the line record](/api/operations/lines/get-a-line).
+The server includes `line_id` in the result. Use it to [get the line record](/api/operations/lines/get-command-execution).
 
 ## Send stdin
 
@@ -94,5 +94,5 @@ process.stdout.write(result.stdout)
 
 The command sorts the input and returns `a\nb\n` in `stdout`.
 
-See [Run a shell line](/api/operations/shell/run-a-shell-line) for the complete
+See [Run shell command](/api/operations/shell/run-shell-command) for the complete
 request fields and response schemas.
