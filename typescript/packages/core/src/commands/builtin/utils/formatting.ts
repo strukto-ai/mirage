@@ -59,7 +59,7 @@ export interface BlockSize {
 }
 
 /** Which columns an `ls` row carries and how its time is spelled: -g
- * drops the owner, -o the group; -i leads with the inode column, -s with
+ * drops the owner, -o the group, --author adds the owner after the group; -i leads with the inode column, -s with
  * the block column after it, and -Z puts the context column before the
  * size, each `?` since a VFS has no inode, allocation or context;
  * timeKind picks the timestamp; timeStyle is `locale` (the six-month
@@ -67,6 +67,7 @@ export interface BlockSize {
 export interface LsColumns {
   readonly owner: boolean
   readonly group: boolean
+  readonly author: boolean
   readonly inode: boolean
   readonly blocks: boolean
   readonly context: boolean
@@ -78,6 +79,7 @@ export interface LsColumns {
 export const DEFAULT_COLUMNS: LsColumns = Object.freeze({
   owner: true,
   group: true,
+  author: false,
   inode: false,
   blocks: false,
   context: false,
@@ -366,6 +368,7 @@ export function formatLsLong(
       : [lsModeString(s), '1']
     if (columns.owner) fields.push(failed ? UNKNOWN_STAT_FIELD : ownerName(s.uid, identity))
     if (columns.group) fields.push(failed ? UNKNOWN_STAT_FIELD : groupName(s.gid, identity))
+    if (columns.author) fields.push(failed ? UNKNOWN_STAT_FIELD : ownerName(s.uid, identity))
     if (columns.context) fields.push(UNKNOWN_STAT_FIELD)
     fields.push(
       rawSize.padStart(width),

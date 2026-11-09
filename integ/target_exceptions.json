@@ -31,7 +31,13 @@
     "integ/bash/redirect/append_mtime.json": "The case sets an mtime with touch -d first and checks a `>>` that writes nothing keeps it; the list is touch/d.json's, the backends that support setting one.",
     "integ/session/skills.json": "SKILL.md, help and man render registered CLIs, and only the git-* and cli-* targets register one: ram, disk and opfs, the directory's list, mount none.",
     "integ/bash/glob/extglob.json": "These cases pin the shared shell parser, quote handling and pattern matcher, which run before backend dispatch. RAM and disk exercise both the in-memory and filesystem namespace walks; operator, case, conditional and parameter semantics do not depend on a service. Fixture cases create temporary directories and punctuation-bearing names that not every service can represent. Existing glob cases continue covering provider traversal; no existing target was removed.",
-    "integ/unix/df/quota.json": "df reports numbers only for a backend that keeps a quota; ram keeps none (df/basic.json pins its dashes), so the list is the backends whose service answers one: ssh through statvfs and the drive fakes through their quota endpoints."
+    "integ/unix/df/quota.json": "df reports numbers only for a backend that keeps a quota; ram keeps none (df/basic.json pins its dashes), so the list is the backends whose service answers one: ssh through statvfs and the drive fakes through their quota endpoints.",
+    "integ/unix/tree/flags.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep.",
+    "integ/unix/ls/zero.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep.",
+    "integ/unix/du/files0.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep.",
+    "integ/unix/truncate/o.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep.",
+    "integ/unix/find/hosts.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep.",
+    "integ/unix/cp/debug.json": "These flags are read above the backend, so ram, disk and where a case says so s3 and ssh cover them; the cases make links, control-character names or an output file that the other backends would not keep."
   },
   "entries": {
     "integ/unix/bc/files.json :: bc_a_file_is_named_by_its_bytes": {

@@ -633,7 +633,7 @@ export async function applyFindActions(
             exitCode = 1
             break
           }
-          sink(action.kind === 'printf' ? action.file : null).push(
+          sink(action.kind === 'printf' || action.kind === 'ls' ? action.file : null).push(
             formatter !== undefined
               ? await renderPrintf(
                   formatter,

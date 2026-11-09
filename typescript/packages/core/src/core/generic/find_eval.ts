@@ -69,7 +69,11 @@ function stamp(entry: FindEntry, field: 'm' | 'a' | 'c'): number | null {
   return other ? isoTimestamp(other) : (entry.mtime ?? null)
 }
 
-function count(st: FileStat, field: 'links' | 'uid' | 'gid'): number | null {
+const SECONDS_PER_DAY = 86400
+
+function count(st: FileStat, field: 'links' | 'uid' | 'gid' | 'inum'): number | null {
+  // No backend here numbers its files, as `stat %i` says.
+  if (field === 'inum') return null
   // One name per entry, as ls -l counts it: mirage has no hard links, and a
   // directory's own entries are not counted.
   if (field === 'links') return 1
@@ -118,6 +122,17 @@ function test(node: PredNode, entry: FindEntry): boolean | null {
       if (node.cmp === '+') return value > node.count
       if (node.cmp === '-') return value < node.count
       return value === node.count
+    }
+    case 'used': {
+      const st = entry.stat
+      if (st === null || st === undefined) return false
+      const accessed = isoTimestamp(st.atime ?? st.modified)
+      const changed = isoTimestamp(st.ctime ?? st.modified)
+      if (accessed === null || changed === null) return false
+      const days = (accessed - changed) / SECONDS_PER_DAY
+      if (node.cmp === '+') return days > node.days
+      if (node.cmp === '-') return days < node.days
+      return node.days - 1 < days && days < node.days
     }
     case 'owner':
       return st !== null && owns(node, st)
@@ -274,7 +289,17 @@ export function treeHasTime(node: PredNode): boolean {
  * a link's target.
  */
 export function treeReadsStat(node: PredNode): boolean {
-  return treeHas(node, ['mtime', 'size', 'perm', 'count', 'owner', 'nouser', 'access', 'lname'])
+  return treeHas(node, [
+    'mtime',
+    'size',
+    'perm',
+    'count',
+    'used',
+    'owner',
+    'nouser',
+    'access',
+    'lname',
+  ])
 }
 
 /**

@@ -122,12 +122,22 @@ class Perm:
 
 @dataclass(frozen=True, slots=True)
 class Count:
-    """``-links``, ``-uid`` and ``-gid``: a number compared more than
+    """``-links``, ``-uid``, ``-gid`` and ``-inum``: a number compared more than
     (``+``), less than (``-``) or equal to (``=``) ``count``."""
 
-    field: Literal["links", "uid", "gid"]
+    field: Literal["links", "uid", "gid", "inum"]
     cmp: Literal["+", "-", "="]
     count: int
+
+
+@dataclass(frozen=True, slots=True)
+class Used:
+    """``-used``: whole days from an entry's status change to its last
+    access, compared more than (``+``), less than (``-``) or equal to
+    (``=``) ``days``."""
+
+    cmp: Literal["+", "-", "="]
+    days: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,6 +279,7 @@ PredNode = (
     | XType
     | Perm
     | Count
+    | Used
     | Owner
     | NoOwner
     | Access

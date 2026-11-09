@@ -1137,3 +1137,44 @@ async def test_columns_come_from_the_environment_and_notices_lead_stderr():
         b"QUOTING_STYLE: 'bogus'\n"
         b"ls: cannot access '/nope': No such file or directory\n"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,stdout",
+    [
+        (
+            "touch -d '2024-03-05 06:07:08' /d/a; ls -lD /d/a",
+            "  -rw-r--r-- 1 - - 0 Mar  5  2024 /d/a\n//DIRED// 34 38\n"
+            "//DIRED-OPTIONS// --quoting-style=literal\n",
+        ),
+        (
+            "mkdir /d/e; ls --dired -l /d/e",
+            "  total 0\n//DIRED-OPTIONS// --quoting-style=literal\n",
+        ),
+        (
+            "mkdir /d/e /d/f; ls -lD /d/e /d/f",
+            "  /d/e:\n  total 0\n\n  /d/f:\n  total 0\n//SUBDIRED// 2 6 21 25\n"
+            "//DIRED-OPTIONS// --quoting-style=literal\n",
+        ),
+        (
+            "touch -d '2024-03-05 06:07:08' '/d/b c'; ls -lDQ '/d/b c'",
+            '  -rw-r--r-- 1 - - 0 Mar  5  2024 "/d/b c"\n//DIRED// 34 42\n'
+            "//DIRED-OPTIONS// --quoting-style=c\n",
+        ),
+        (
+            "touch -d '2024-03-05 06:07:08' /d/a; ls -l --author /d/a",
+            "-rw-r--r-- 1 - - - 0 Mar  5  2024 /d/a\n",
+        ),
+        (
+            "touch -d '2024-03-05 06:07:08' /d/a; ls -lg --author /d/a",
+            "-rw-r--r-- 1 - - 0 Mar  5  2024 /d/a\n",
+        ),
+        ("touch /d/a; ls -D -C /d/a", "/d/a\n"),
+    ],
+)
+async def test_ls_host_flags(line, stdout):
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell(line)
+    assert await io.stdout_str() == stdout
+    assert await io.stderr_str() == ""

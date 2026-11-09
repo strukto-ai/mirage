@@ -123,12 +123,19 @@ export interface Perm {
   bits: 'exact' | 'all' | 'any'
 }
 
-/** `-links`, `-uid` and `-gid`: a number compared with `count`. */
+/** `-links`, `-uid`, `-gid` and `-inum`: a number compared with `count`. */
 export interface Count {
   op: 'count'
-  field: 'links' | 'uid' | 'gid'
+  field: 'links' | 'uid' | 'gid' | 'inum'
   cmp: '+' | '-' | '='
   count: number
+}
+
+/** `-used`: whole days from an entry's status change to its last access. */
+export interface Used {
+  op: 'used'
+  cmp: '+' | '-' | '='
+  days: number
 }
 
 /**
@@ -242,6 +249,7 @@ export type PredNode =
   | XType
   | Perm
   | Count
+  | Used
   | Owner
   | NoOwner
   | Access

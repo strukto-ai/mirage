@@ -119,6 +119,13 @@ def default_cwd_operand(
     ).as_bool("type_list"):
         # --type-list reads no path, so there is no cwd to walk.
         return None
+    if (
+        cmd_name == "du"
+        and FlagView(parse_to_kwargs(parsed), spec=spec).raw("files0_from")
+        is not None
+    ):
+        # The list names the operands in the cwd's place.
+        return None
     if cmd_name == "grep":
         fl = FlagView(parse_to_kwargs(parsed), spec=spec)
         if not recurses(fl):

@@ -838,11 +838,7 @@ async def _apply_find_actions(
                         if isinstance(action, PrintfAction)
                         else _ls_row(match, held, identity)
                     )
-                    sink(
-                        action.file
-                        if isinstance(action, PrintfAction)
-                        else None
-                    ).append(rendered)
+                    sink(action.file).append(rendered)
                 elif isinstance(action, PrintfAction):
                     sink(action.file).append(
                         await _printf_row(

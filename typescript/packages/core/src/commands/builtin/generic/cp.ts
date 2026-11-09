@@ -117,6 +117,7 @@ export interface CpFlags {
   noClobber: boolean
   interactive: boolean
   verbose: boolean
+  debug: boolean
   update: string | null
   backup: string | null
   suffix: string
@@ -168,6 +169,7 @@ export function cpFlags(init: Partial<CpFlags> = {}): CpFlags {
     noClobber: init.noClobber ?? false,
     interactive: init.interactive ?? false,
     verbose: init.verbose ?? false,
+    debug: init.debug ?? false,
     update: init.update ?? null,
     backup: init.backup ?? null,
     suffix: init.suffix ?? DEFAULT_BACKUP_SUFFIX,
@@ -723,7 +725,8 @@ export function parseFlags(fl: FlagView): CpFlags {
     recursive,
     noClobber,
     interactive: asking === 'interactive',
-    verbose: fl.asBool('verbose'),
+    verbose: fl.asBool('verbose') || fl.asBool('debug'),
+    debug: fl.asBool('debug'),
     update,
     backup: control,
     suffix: suffix ?? DEFAULT_BACKUP_SUFFIX,
@@ -1435,6 +1438,18 @@ export async function makeBackup(
 // The verbose line for one copied entry, with GNU's backup note. GNU prints
 // it before the create, so a create that fails still shows it; mv words a
 // copy across mounts `copied`. Mirrors Python's transfer_line.
+/** What --debug says of one file it copied, pinned on the reference image's
+ * files: nothing for a copy that moved no bytes. */
+async function debugLine(
+  flags: CpFlags,
+  stat: (path: PathSpec) => Promise<FileStat>,
+  src: PathSpec,
+): Promise<string[]> {
+  if (!flags.debug || flags.attributesOnly || flags.link !== null) return []
+  const offload = (await stat(src)).size === 0 ? 'unknown' : 'yes'
+  return [`copy offload: ${offload}, reflink: unsupported, sparse detection: no`]
+}
+
 function transferLine(
   src: PathSpec,
   target: PathSpec,
@@ -2397,6 +2412,7 @@ export async function cpGeneric(
           errors.push(copyFailed('cp', entry, entryDst, err))
           continue
         }
+        lines.push(...(await debugLine(flags, stat, entry)))
         await keeper?.copied(entry, entryDst)
       }
       if (copies !== undefined) {
@@ -2466,6 +2482,7 @@ export async function cpGeneric(
         continue
       }
     }
+    lines.push(...(await debugLine(flags, stat, src)))
     await keeper?.copied(src, target)
     created.add(keyOf(target))
   }

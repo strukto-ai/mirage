@@ -135,6 +135,7 @@ class CpFlags:
     no_clobber: bool = False
     interactive: bool = False
     verbose: bool = False
+    debug: bool = False
     update: str | None = None
     backup: str | None = None
     suffix: str = DEFAULT_BACKUP_SUFFIX
@@ -642,7 +643,8 @@ def parse_flags(fl: FlagView) -> CpFlags:
         recursive=recursive,
         no_clobber=no_clobber,
         interactive=bool(asking) and asking[-1] == "interactive",
-        verbose=fl.as_bool("verbose"),
+        verbose=fl.as_bool("verbose") or fl.as_bool("debug"),
+        debug=fl.as_bool("debug"),
         update=update,
         backup=control,
         suffix=suffix if suffix is not None else DEFAULT_BACKUP_SUFFIX,
@@ -1633,6 +1635,28 @@ def transfer_line(
     if backup is not None:
         line += f" (backup: '{backup.raw_path}')"
     return f"copied {line}" if cmd_name == "mv" else line
+
+
+async def _debug_line(
+    flags: CpFlags,
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    src: PathSpec,
+) -> list[str]:
+    """What ``--debug`` says of one file it copied, pinned on the reference
+    image's files: nothing for a copy that moved no bytes.
+
+    Args:
+        flags (CpFlags): the options.
+        stat (Callable[[PathSpec], Awaitable[FileStat]]): stats the source.
+        src (PathSpec): the file copied.
+    """
+    if not flags.debug or flags.attributes_only or flags.link is not None:
+        return []
+    empty = (await stat(src)).size == 0
+    offload = "unknown" if empty else "yes"
+    return [
+        f"copy offload: {offload}, reflink: unsupported, sparse detection: no"
+    ]
 
 
 def _repeated_source(
@@ -3116,6 +3140,7 @@ async def cp_generic(
                 except FS_ERRORS as exc:
                     errors.append(copy_failed("cp", entry, entry_dst, exc))
                     continue
+                lines += await _debug_line(flags, stat, entry)
                 if keeper is not None:
                     await keeper.copied(entry, entry_dst)
             if copies is not None:
@@ -3188,6 +3213,7 @@ async def cp_generic(
             except FS_ERRORS as exc:
                 errors.append(copy_failed("cp", src, target, exc))
                 continue
+        lines += await _debug_line(flags, stat, src)
         if keeper is not None:
             await keeper.copied(src, target)
         created.add(key_of(target))

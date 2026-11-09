@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
@@ -540,4 +542,25 @@ describe('treeGeneric while it is read', () => {
     await out.return?.()
     expect(seen).toEqual(opened)
   })
+})
+
+it.each([
+  ['touch /d/a; tree -u -g --noreport /d', '[-        -       ]  /d\n`-- [-        -       ]  a\n'],
+  ['touch /d/a; tree --inodes --noreport /d', '[      ?]  /d\n`-- [      ?]  a\n'],
+  [
+    'touch /d/a; tree -J -u -g --noreport /d',
+    '[\n  {"type":"directory","name":"/d","user":"-","group":"-","contents":[\n    {"type":"file","name":"a","user":"-","group":"-"}\n  ]}\n\n]\n',
+  ],
+  ['truncate -s 9947 /d/a; tree --si --noreport -L 1 /d | tail -n 1', '`-- [9.9k]  a\n'],
+  ['truncate -s 9948 /d/a; tree --si --noreport -L 1 /d | tail -n 1', '`-- [ 10k]  a\n'],
+  ['truncate -s 10500 /d/a; tree --si --noreport -L 1 /d | tail -n 1', '`-- [ 10k]  a\n'],
+  ['truncate -s 1250 /d/a; tree --si --noreport -L 1 /d | tail -n 1', '`-- [1.2k]  a\n'],
+  ['truncate -s 999500 /d/a; tree --si --noreport -L 1 /d | tail -n 1', '`-- [1000k]  a\n'],
+  ['truncate -s 1000000 /d/a; tree --si --noreport -L 1 /d | tail -n 1', '`-- [1.0M]  a\n'],
+  ["touch '/d/x y'; LC_ALL=C.UTF-8 tree --noreport /d | tail -n 1", '└── x y\n'],
+])('%s', async (line, stdout) => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+  const io = await ws.shell(line)
+  await ws.close()
+  expect([io.stdoutText, io.stderrText]).toEqual([stdout, ''])
 })

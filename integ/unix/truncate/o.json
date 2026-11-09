@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "truncate_o_counts_in_blocks",
+      "seq": 16300227,
+      "targets": [
+        "ram",
+        "disk",
+        "s3",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/ez_u; printf x > /data/ez_u/a; truncate -o -s 2 /data/ez_u/a; stat -c %s /data/ez_u/a; truncate --io-blocks -s +1 /data/ez_u/a; stat -c %s /data/ez_u/a; truncate -o -s -1 /data/ez_u/a; stat -c %s /data/ez_u/a; truncate -o -s %3 /data/ez_u/a; stat -c %s /data/ez_u/a; truncate -o -c -s 3 /data/ez_u/n; ls /data/ez_u/n 2>/dev/null; echo rc=$?; truncate -o /data/ez_u/a; echo rc=$?; truncate -o -r /data/ez_u/a /data/ez_u/b; echo rc=$?; truncate -o -r /data/ez_u/a -s 1 /data/ez_u/b; echo rc=$?; rm -r /data/ez_u",
+      "expect": {
+        "exit": 0,
+        "stdout": "8192\n12288\n8192\n12288\nrc=2\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "truncate: you must specify either '--size' or '--reference'\nTry 'truncate --help' for more information.\ntruncate: '--io-blocks' was specified but '--size' was not\nTry 'truncate --help' for more information.\ntruncate: you must specify a relative '--size' with '--reference'\nTry 'truncate --help' for more information.\n"
+      }
+    }
+  ]
+}

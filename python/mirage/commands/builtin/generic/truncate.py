@@ -34,6 +34,8 @@ SizeMode = Literal[
 ]
 
 MODES: frozenset[str] = frozenset(get_args(SizeMode))
+# What -o counts in, the block size of the pinned image's files.
+IO_BLOCK = 4096
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,12 +103,20 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags | IOResult:
     fl = FlagView(flags, spec=SPECS["truncate"])
     reference = fl.as_path("reference")
     typed = fl.texts("size")
+    sized = bool(typed)
     if reference is not None:
         typed.append(("reference", ""))
     try:
         values = scan("truncate", typed)
     except StreamRefusal as refusal:
         return refused(refusal)
+    io_blocks = fl.as_bool("io_blocks")
+    if io_blocks and not sized:
+        raise UsageError(
+            "truncate: '--io-blocks' was specified but '--size' was not\n"
+            f"{usage_hint('truncate')}",
+            1,
+        )
     size = values["size"]
     if not (
         isinstance(size, dict)
@@ -116,7 +126,10 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags | IOResult:
     ):
         raise ValueError(f"truncate: mirage-rs read -s as {size!r}")
     return TruncateFlags(
-        size=Size(mode=cast(SizeMode, mode), number=int(number)),
+        size=Size(
+            mode=cast(SizeMode, mode),
+            number=int(number) * (IO_BLOCK if io_blocks else 1),
+        ),
         no_create=fl.as_bool("no_create"),
         reference=reference,
     )

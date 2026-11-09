@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.builtin.generic.tree import (
     _HELD_LINES,
     TreeFlags,
@@ -468,3 +469,60 @@ async def test_tree_writes_a_flat_directory_a_bounded_run_at_a_time():
     first = await anext(output)
     await close_quietly(output)
     assert first.count(b"\n") == _HELD_LINES
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,stdout",
+    [
+        (
+            "touch /d/a; tree -u -g --noreport /d",
+            "[-        -       ]  /d\n`-- [-        -       ]  a\n",
+        ),
+        (
+            "touch /d/a; tree --inodes --noreport /d",
+            "[      ?]  /d\n`-- [      ?]  a\n",
+        ),
+        (
+            "touch /d/a; tree -J -u -g --noreport /d",
+            '[\n  {"type":"directory","name":"/d","user":"-","group":"-",'
+            '"contents":[\n    {"type":"file","name":"a","user":"-",'
+            '"group":"-"}\n  ]}\n\n]\n',
+        ),
+        (
+            "truncate -s 9947 /d/a; tree --si --noreport -L 1 /d | tail -n 1",
+            "`-- [9.9k]  a\n",
+        ),
+        (
+            "truncate -s 9948 /d/a; tree --si --noreport -L 1 /d | tail -n 1",
+            "`-- [ 10k]  a\n",
+        ),
+        (
+            "truncate -s 10500 /d/a; tree --si --noreport -L 1 /d | tail -n 1",
+            "`-- [ 10k]  a\n",
+        ),
+        (
+            "truncate -s 1250 /d/a; tree --si --noreport -L 1 /d | tail -n 1",
+            "`-- [1.2k]  a\n",
+        ),
+        (
+            "truncate -s 999500 /d/a; tree --si --noreport -L 1 /d | "
+            "tail -n 1",
+            "`-- [1000k]  a\n",
+        ),
+        (
+            "truncate -s 1000000 /d/a; tree --si --noreport -L 1 /d | "
+            "tail -n 1",
+            "`-- [1.0M]  a\n",
+        ),
+        (
+            "touch '/d/x y'; LC_ALL=C.UTF-8 tree --noreport /d | tail -n 1",
+            "└── x y\n",
+        ),
+    ],
+)
+async def test_tree_host_flags(line, stdout):
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell(line)
+    assert await io.stdout_str() == stdout
+    assert await io.stderr_str() == ""

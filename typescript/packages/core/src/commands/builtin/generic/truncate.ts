@@ -72,6 +72,9 @@ export interface TruncateFlags {
   readonly reference?: PathSpec | null
 }
 
+// What -o counts in, the block size of the pinned image's files.
+const IO_BLOCK = 4096n
+
 /**
  * truncate's options, `-s` read by mirage-rs before any operand is resolved:
  * the flags, or truncate's refusal. Mirrors Python's `parse_flags`.
@@ -80,6 +83,7 @@ export function parseFlags(bag: Record<string, FlagValue>): TruncateFlags | IORe
   const fl = new FlagView(bag, specOf('truncate'))
   const reference = fl.asPath('reference') ?? null
   const typed = fl.texts('size')
+  const sized = typed.length > 0
   if (reference !== null) typed.push(['reference', ''])
   let values
   try {
@@ -87,6 +91,13 @@ export function parseFlags(bag: Record<string, FlagValue>): TruncateFlags | IORe
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
     return refused(err)
+  }
+  const ioBlocks = fl.asBool('io_blocks')
+  if (ioBlocks && !sized) {
+    throw new UsageError(
+      `truncate: '--io-blocks' was specified but '--size' was not\n${usageHint('truncate')}`,
+      1,
+    )
   }
   const size = values.size
   if (
@@ -100,7 +111,10 @@ export function parseFlags(bag: Record<string, FlagValue>): TruncateFlags | IORe
     throw new Error(`truncate: mirage-rs read -s as ${JSON.stringify(size)}`)
   }
   return {
-    size: { mode: size.mode as SizeMode, number: BigInt(size.size) },
+    size: {
+      mode: size.mode as SizeMode,
+      number: BigInt(size.size) * (ioBlocks ? IO_BLOCK : 1n),
+    },
     noCreate: fl.asBool('no_create'),
     reference,
   }

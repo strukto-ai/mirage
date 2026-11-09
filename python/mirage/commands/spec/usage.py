@@ -425,6 +425,9 @@ def missing_value_error(
         token (str): long token ('--max-depth') or short char ('m').
         builtin (bool): as in :func:`usage_exit_code`.
     """
+    if builtin and cmd_name == "tree":
+        said = token if token.startswith("--") else f"-{token} option."
+        return encode_text(f"tree: Missing argument to {said}\n"), 1
     if builtin and cmd_name in PYTHON_NAMES:
         dashed = token if token.startswith("-") else f"-{token}"
         return python_option_error(

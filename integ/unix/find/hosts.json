@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "id": "find_anewer_cnewer_compare_with_a_reference",
+      "seq": 16300300,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/ez_f; printf x > /data/ez_f/a; printf y > /data/ez_f/b; touch -d '2020-01-01' /data/ez_f/a; touch -d '2024-01-01' /data/ez_f/b; cd /data/ez_f; find . -type f -anewer nosuch; echo rc=$?; find . -cnewer nosuch; echo rc=$?; find . -anewer; echo rc=$?; find . -cnewer; echo rc=$?; cd /; rm -r /data/ez_f",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "find: 'nosuch': No such file or directory\nfind: 'nosuch': No such file or directory\nfind: missing argument to `-anewer'\nfind: missing argument to `-cnewer'\n"
+      }
+    },
+    {
+      "id": "find_inum_used_fstype_refuse_bad_values",
+      "seq": 16300301,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "find /data -maxdepth 0 -inum x; echo rc=$?; find /data -inum; echo rc=$?; find /data -used x; echo rc=$?; find /data -used; echo rc=$?; find /data -fstype; echo rc=$?; find /data -fls; echo rc=$?; find /data -maxdepth 0 -fstype bogusfs; echo rc=$?; find /data -maxdepth 0 -fls /nosuch/x; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=0\nrc=1\n",
+        "stderr": "find: non-numeric argument to -inum: 'x'\nfind: missing argument to `-inum'\nfind: Invalid argument x to -used\nfind: missing argument to `-used'\nfind: missing argument to `-fstype'\nfind: missing argument to `-fls'\nfind: '/nosuch/x': No such file or directory\n"
+      }
+    },
+    {
+      "id": "find_fls_writes_the_listing_to_a_file",
+      "seq": 16300302,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/ez_f; printf x > /data/ez_f/a; find /data/ez_f -name zzz -fls /data/ez_f/out; echo rc=$?; wc -c < /data/ez_f/out; rm -r /data/ez_f",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n0\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

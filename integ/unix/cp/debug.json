@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "cp_debug_reports_each_copy",
+      "seq": 16300400,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/ez_c/d; printf x > /data/ez_c/a; : > /data/ez_c/e; printf y > /data/ez_c/d/f; ln -s a /data/ez_c/l; cd /data/ez_c; cp --debug a b; echo rc=$?; cp --debug e e2; cp --debug a a2; cp --debug -v a v; cp --debug nosuch x; echo rc=$?; cp --debug a a; echo rc=$?; cp --debug -P l l2; cp --debug --attributes-only a at; cp --debug -l a hl; cp --debug -s /data/ez_c/a sl; cp --debug -r d d2; cd /; rm -r /data/ez_c",
+      "expect": {
+        "exit": 0,
+        "stdout": "'a' -> 'b'\ncopy offload: yes, reflink: unsupported, sparse detection: no\nrc=0\n'e' -> 'e2'\ncopy offload: unknown, reflink: unsupported, sparse detection: no\n'a' -> 'a2'\ncopy offload: yes, reflink: unsupported, sparse detection: no\n'a' -> 'v'\ncopy offload: yes, reflink: unsupported, sparse detection: no\nrc=1\nrc=1\n'l' -> 'l2'\n'a' -> 'at'\n'a' -> 'hl'\n'/data/ez_c/a' -> 'sl'\n'd' -> 'd2'\n'd/f' -> 'd2/f'\ncopy offload: yes, reflink: unsupported, sparse detection: no\n",
+        "stderr": "cp: cannot stat 'nosuch': No such file or directory\ncp: 'a' and 'a' are the same file\n"
+      }
+    }
+  ]
+}

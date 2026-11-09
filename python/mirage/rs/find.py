@@ -53,6 +53,7 @@ from mirage.core.generic.types import (
     Size,
     TrueNode,
     Type,
+    Used,
     XType,
 )
 from mirage.rs.scan import scanned
@@ -421,6 +422,7 @@ class _Binding:
     utf8: bool = False
     profile: str | None = None
     window: tuple[float | None, float | None] | None = None
+    fs_type: str | None = None
 
 
 def _node(
@@ -448,11 +450,16 @@ def _node(
     if op == "perm":
         return Perm(_int(raw["mode"]), _perm_bits(_str(raw["bits"])))
     if op == "count":
+        if _str(raw["field"]) == "used":
+            return Used(_cmp(_str(raw["cmp"])), _int(raw["count"]))
         return Count(
             _count_field(_str(raw["field"])),
             _cmp(_str(raw["cmp"])),
             _int(raw["count"]),
         )
+    if op == "fstype":
+        same = text_view(_str(raw["name"])) == binding.fs_type
+        return TrueNode() if same else Not(TrueNode())
     if op == "owner":
         return Owner(
             text_view(_str(raw["name"])),
@@ -497,7 +504,9 @@ def _perm_bits(bits: str) -> Literal["exact", "all", "any"]:
     raise TypeError(f"find: mirage-rs answered the -perm kind {bits!r}")
 
 
-def _count_field(name: str) -> Literal["links", "uid", "gid"]:
+def _count_field(name: str) -> Literal["links", "uid", "gid", "inum"]:
+    if name == "inum":
+        return "inum"
     if name == "links":
         return "links"
     if name == "uid":
@@ -568,6 +577,8 @@ def _time_node(
             None,
         )
     else:
+        if op != "newer":
+            stamp = "a" if op == "anewer" else "c"
         index = _int(raw["index"])
         if index >= len(binding.refs):
             return TrueNode()
@@ -624,6 +635,7 @@ class FindParse:
         now: float | None = None,
         env: Mapping[str, str] | None = None,
         profile: str | None = None,
+        fs_type: str | None = None,
     ) -> FindExpr:
         """The expression with its time tests resolved.
 
@@ -637,6 +649,8 @@ class FindParse:
             env (Mapping[str, str] | None): the command's environment,
                 whose ``TZ`` places ``-daystart``'s midnight and whose
                 locale reads a ``-regex`` subject.
+            fs_type (str | None): the type of the mount the line starts
+                on, which ``-fstype`` compares with.
             profile (str | None): the session's name, the owner
                 ``-user`` sees on an entry that reports none.
 
@@ -649,6 +663,7 @@ class FindParse:
             zone=zone_from_env(env),
             utf8=utf8_locale(env),
             profile=profile,
+            fs_type=fs_type,
         )
         tree = _node(_object(self.values["tree"]), binding)
         window = binding.window or (None, None)

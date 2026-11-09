@@ -8,8 +8,16 @@ from typing import Literal
 
 from mirage.commands.builtin.generic.ls import sort_by_version
 from mirage.commands.builtin.utils.formatting import (
+    LsTimeKind,
     ls_mode_string,
     styled_time,
+    time_of,
+)
+from mirage.commands.builtin.utils.identity import (
+    Identity,
+    group_name,
+    identity_of,
+    owner_name,
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.output import format_records
@@ -19,14 +27,15 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.errors.constants import MISS_ERRORS, WALK_ERRORS
+from mirage.errors.constants import FS_ERRORS, MISS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import enoent
+from mirage.io.async_line_iterator import char_width
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.glob import AnyTailMatcher, any_tail_matcher
 from mirage.rs.scan import refused, scan
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import encode_text, utf8_locale
 from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
@@ -41,6 +50,7 @@ from mirage.utils.dates import iso_timestamp
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.stat_view import content_size, posix_mode
 from mirage.view.types import (
+    LinkResolve,
     LinkTargetStat,
     LinkView,
     MountView,
@@ -56,8 +66,25 @@ _BRANCH = "|-- "
 _LAST = "`-- "
 _VERTICAL = "|   "
 _INDENT = "    "
+# The drawing set of a UTF-8 locale.
+_UTF8_BRANCH = "\u251c\u2500\u2500 "
+_UTF8_LAST = "\u2514\u2500\u2500 "
+_UTF8_VERTICAL = "\u2502   "
+# The same four as -A draws them, in the terminal's line-drawing set.
+_ANSI_BRANCH = "tqq "
+_ANSI_LAST = "mqq "
+_ANSI_VERTICAL = "x   "
+_ANSI_OPEN = "\x1b(0"
+_ANSI_CLOSE = "\x1b(B"
 
 UNOPENABLE_MARK = "  [error opening dir]"
+RECURSIVE_MARK = "  [recursive, not followed]"
+UNKNOWN_INODE = "?"
+# The escapes a name's control characters take in the C locale.
+_C_ESCAPES = {7: "a", 8: "b", 9: "t", 10: "n", 11: "v", 12: "f", 13: "r"}
+_SI_UNITS = "kMGTPE"
+# Where --si stops writing a tenth, pinned on tree 2.2.1.
+_SI_TENTHS_BELOW = 9.948
 # The lines a drawing holds before it writes them, whatever comes next.
 _HELD_LINES = 1024
 
@@ -102,6 +129,23 @@ class TreeFlags:
     gitignore: bool = False
     file_limit: int | None = None
     json: bool = False
+    follow: bool = False
+    ansi_lines: bool = False
+    quote: bool = False
+    raw_names: bool = False
+    question: bool = False
+    owner: bool = False
+    group: bool = False
+    change_time: bool = False
+    si: bool = False
+    time_format: str | None = None
+    files_first: bool = False
+    ignore_case: bool = False
+    match_dirs: bool = False
+    inodes: bool = False
+    output: PathSpec | None = None
+    utf8: bool = False
+    identity: Identity | None = None
 
 
 async def _cross_readdir(
@@ -231,6 +275,9 @@ class _TreeOpts:
     cross_stat: StatFn | None
     target_stat: LinkTargetStat | None
     budget: WalkBudget
+    root: str = ""
+    resolve: LinkResolve | None = None
+    seen: set[str] = field(default_factory=set)
 
 
 @dataclass(slots=True)
@@ -330,6 +377,43 @@ def _segments_match(parts: list[str], pattern: list[str]) -> bool:
     return want == len(pattern)
 
 
+def _hit(flags: TreeFlags, pattern: str, name: str) -> bool:
+    """Whether a name fits ``-P`` or ``-I``, ``|`` parting alternatives.
+
+    Args:
+        flags (TreeFlags): the options.
+        pattern (str): the pattern as typed.
+        name (str): the entry's name.
+    """
+    if flags.ignore_case:
+        pattern, name = pattern.lower(), name.lower()
+    return any(fnmatch(name, part) for part in pattern.split("|"))
+
+
+def _lets_files_through(flags: TreeFlags, root: str, directory: str) -> bool:
+    """Whether ``--matchdirs`` passes a directory's own files: its path
+    under the operand fits the pattern, ``*`` stopping at each ``/``.
+
+    Args:
+        flags (TreeFlags): the options.
+        root (str): the operand's virtual path.
+        directory (str): the directory's virtual path.
+    """
+    if not (flags.match_dirs and flags.match_pattern):
+        return False
+    relative = posixpath.relpath(directory, root)
+    if relative == ".":
+        return False
+    pattern = flags.match_pattern
+    if flags.ignore_case:
+        pattern, relative = pattern.lower(), relative.lower()
+    parts = relative.split("/")
+    return any(
+        _segments_match(parts, part.rstrip("/").split("/"))
+        for part in pattern.split("|")
+    )
+
+
 def _name_matcher(rules: Sequence[_Ignore]) -> AnyTailMatcher | None:
     """One matcher over the patterns a name alone decides, so an entry
     none of them matches costs one call however many there are.
@@ -405,9 +489,9 @@ def _sorted(flags: TreeFlags, nodes: list[_TreeNode]) -> list[_TreeNode]:
         order = sorted(nodes, key=key)
     if flags.reverse and flags.sort != "none":
         order.reverse()
-    if flags.dirs_first:
-        order = [n for n in order if n.is_dir] + [
-            n for n in order if not n.is_dir
+    if flags.dirs_first or flags.files_first:
+        order = [n for n in order if n.is_dir == flags.dirs_first] + [
+            n for n in order if n.is_dir != flags.dirs_first
         ]
     return order
 
@@ -497,6 +581,7 @@ async def _open_dir(
     if flags.gitignore:
         rules = [*rules, *await _gitignore(opts.read, path, entries)]
     names = _name_matcher(rules)
+    all_files = _lets_files_through(flags, opts.root, path.virtual)
 
     kept: list[tuple[_TreeNode, bool]] = []
     for entry in entries:
@@ -518,7 +603,7 @@ async def _open_dir(
                 continue
         if not flags.show_hidden and s.name.startswith("."):
             continue
-        if flags.ignore_pattern and fnmatch(s.name, flags.ignore_pattern):
+        if flags.ignore_pattern and _hit(flags, flags.ignore_pattern, s.name):
             continue
         is_dir = s.type == FileType.DIRECTORY
         leads: FileStat | None = None
@@ -535,7 +620,8 @@ async def _open_dir(
         if (
             flags.match_pattern
             and s.type != FileType.DIRECTORY
-            and not fnmatch(s.name, flags.match_pattern)
+            and not all_files
+            and not _hit(flags, flags.match_pattern, s.name)
         ):
             continue
         if rules and _ignored(rules, names, entry, is_dir):
@@ -559,20 +645,32 @@ async def _open_dir(
 
 
 def _opens(opts: _TreeOpts, node: _TreeNode, depth: int) -> bool:
-    """Whether the walk goes into a drawn entry: a real directory, above
-    ``-L``, and inside the budget. A directory past the budget is drawn
-    but not opened.
+    """Whether the walk goes into a drawn entry: a real directory, or
+    under ``-l`` a link to one it has not been in, above ``-L``, and
+    inside the budget. A directory past the budget is drawn but not
+    opened.
 
     Args:
         opts (_TreeOpts): the operand's walk.
         node (_TreeNode): the entry.
         depth (int): how far down the directory holding it is.
     """
-    if node.stat.type != FileType.DIRECTORY:
+    linked = node.stat.type == FileType.SYMLINK
+    if node.stat.type != FileType.DIRECTORY and not (
+        linked and opts.flags.follow and node.is_dir
+    ):
         return False
     if opts.flags.max_depth is not None and depth + 1 >= opts.flags.max_depth:
         return False
-    return opts.budget.opens(node.spec.virtual)
+    if not opts.budget.opens(node.spec.virtual):
+        return False
+    if opts.flags.follow and opts.resolve is not None:
+        real = opts.resolve(node.spec.virtual)
+        if linked and real in opts.seen:
+            node.note = RECURSIVE_MARK
+            return False
+        opts.seen.add(real)
+    return True
 
 
 def _read_below(
@@ -596,6 +694,8 @@ def _read_below(
         readdir (ReaddirFn): the listing its parent is read through.
         stat (StatFn): the stat its parent is read through.
     """
+    if node.stat.type == FileType.SYMLINK:
+        return opts.cross_readdir or readdir, stat
     if id(node) not in listing.crossed:
         return readdir, stat
     return opts.cross_readdir or readdir, opts.cross_stat or stat
@@ -680,37 +780,174 @@ def _size(flags: TreeFlags, node: _TreeNode) -> int:
     return node.du if flags.du else content_size(node.stat)
 
 
+def _si_text(size: int) -> str:
+    """A size as ``--si`` writes it, in powers of 1000.
+
+    Args:
+        size (int): the bytes.
+    """
+    if size < 1000:
+        return f"{size:>4}"
+    value = float(size)
+    unit = -1
+    while value >= 1000 and unit < len(_SI_UNITS) - 1:
+        value /= 1000
+        unit += 1
+    digits = 1 if value < _SI_TENTHS_BELOW else 0
+    return f"{value:.{digits}f}{_SI_UNITS[unit]}".rjust(4)
+
+
+def _time_text(flags: TreeFlags, node: _TreeNode) -> str:
+    """The time ``-D`` shows: the change time under ``-c``, in the format
+    ``--timefmt`` names.
+
+    Args:
+        flags (TreeFlags): the options.
+        node (_TreeNode): the entry.
+    """
+    stamp = (
+        time_of(node.stat, LsTimeKind.CTIME)
+        if flags.change_time
+        else node.stat.modified
+    )
+    style = "locale" if flags.time_format is None else f"+{flags.time_format}"
+    return styled_time(stamp, style)
+
+
 def _meta(flags: TreeFlags, node: _TreeNode) -> str:
-    """The bracket ``-p``, ``-s`` (or ``--du``) and ``-D`` open a line with,
-    empty without them.
+    """The bracket ``--inodes``, ``-p``, ``-u``, ``-g``, ``-s`` (or
+    ``--du``, ``--si``) and ``-D`` open a line with, empty without them.
 
     Args:
         flags (TreeFlags): the options.
         node (_TreeNode): the entry.
     """
     fields = []
+    if flags.inodes:
+        fields.append(UNKNOWN_INODE.rjust(7))
     if flags.perms:
         fields.append(ls_mode_string(node.stat))
-    if flags.sizes or flags.du:
+    if flags.owner:
+        fields.append(owner_name(node.stat.uid, flags.identity).ljust(8))
+    if flags.group:
+        fields.append(group_name(node.stat.gid, flags.identity).ljust(8))
+    if flags.si:
+        fields.append(_si_text(_size(flags, node)))
+    elif flags.sizes or flags.du:
         fields.append(f"{_size(flags, node):>11}")
     if flags.dates:
-        fields.append(styled_time(node.stat.modified, "locale"))
+        fields.append(_time_text(flags, node))
     return f"[{' '.join(fields)}]  " if fields else ""
 
 
+def _c_locale_name(flags: TreeFlags, name: str) -> str:
+    """A name as the C locale draws it, one byte at a time.
+
+    Args:
+        flags (TreeFlags): the options.
+        name (str): the name.
+    """
+    shown = []
+    for byte in encode_text(name):
+        if byte in _C_ESCAPES:
+            shown.append(f"\\{_C_ESCAPES[byte]}")
+        elif byte == 0x5C:
+            shown.append("\\\\")
+        elif byte == 0x20 and not flags.quote:
+            shown.append("\\ ")
+        elif byte == 0x22 and flags.quote:
+            shown.append('\\"')
+        elif 0x20 <= byte < 0x7F:
+            shown.append(chr(byte))
+        else:
+            shown.append("?" if flags.question else f"\\{byte:03o}")
+    return "".join(shown)
+
+
+def _utf8_locale_name(flags: TreeFlags, name: str) -> str:
+    """A name as a UTF-8 locale draws it: a control character escaped or
+    under ``-q`` a ``?``, a byte no character holds escaped or under
+    ``-q`` left as it is, the rest as they are.
+
+    Args:
+        flags (TreeFlags): the options.
+        name (str): the name.
+    """
+    raw = encode_text(name)
+    shown = bytearray()
+    at = 0
+    while at < len(raw):
+        width = char_width(raw, at)
+        piece = raw[at : at + width]
+        at += width
+        if width == 1 and piece[0] >= 0x80:
+            shown += piece if flags.question else f"\\{piece[0]:03o}".encode()
+        elif (
+            piece < b" "
+            or piece == b"\x7f"
+            or b"\xc2\x80" <= piece < b"\xc2\xa0"
+        ):
+            escaped = "".join(f"\\{byte:03o}" for byte in piece)
+            shown += b"?" if flags.question else escaped.encode()
+        else:
+            shown += piece
+    return shown.decode("utf-8", "surrogateescape")
+
+
+def _label(flags: TreeFlags, name: str) -> str:
+    """A name or link target as a line draws it, under ``-N``, ``-q``,
+    ``-Q`` and the locale.
+
+    Args:
+        flags (TreeFlags): the options.
+        name (str): the name.
+    """
+    if flags.raw_names:
+        shown = name
+    elif flags.utf8:
+        shown = _utf8_locale_name(flags, name)
+    else:
+        shown = _c_locale_name(flags, name)
+    return f'"{shown}"' if flags.quote else shown
+
+
 def _shown(flags: TreeFlags, node: _TreeNode, root: bool = False) -> str:
-    shown = node.spec.raw_path if flags.full_path or root else node.stat.name
+    shown = _label(
+        flags,
+        node.spec.raw_path if flags.full_path or root else node.stat.name,
+    )
     if node.stat.type == FileType.SYMLINK:
-        target = node.stat.extra.get(LINK_TARGET_KEY, "")
+        target = _label(flags, node.stat.extra.get(LINK_TARGET_KEY, ""))
         tail = _classify(node.leads) if flags.classify else ""
         return f"{shown} -> {target}{tail}"
     return shown + (_classify(node.stat) if flags.classify else "")
 
 
+def _drawn_lead(flags: TreeFlags, prefix: str, last: bool) -> str:
+    """What stands left of a name, in the locale's drawing set or under
+    ``-A`` the terminal's.
+
+    Args:
+        flags (TreeFlags): the options.
+        prefix (str): the lines of the directories above.
+        last (bool): whether the entry ends its directory.
+    """
+    if flags.no_indent:
+        return ""
+    if not flags.ansi_lines:
+        if not flags.utf8:
+            return prefix + (_LAST if last else _BRANCH)
+        above = prefix.replace(_VERTICAL, _UTF8_VERTICAL)
+        return above + (_UTF8_LAST if last else _UTF8_BRANCH)
+    above = prefix.replace(_VERTICAL, _ANSI_VERTICAL)
+    tail = _ANSI_LAST if last else _ANSI_BRANCH
+    return f"{_ANSI_OPEN}{above}{tail}{_ANSI_CLOSE}"
+
+
 def _text_line(
     flags: TreeFlags, node: _TreeNode, prefix: str, last: bool
 ) -> str:
-    lead = "" if flags.no_indent else prefix + (_LAST if last else _BRANCH)
+    lead = _drawn_lead(flags, prefix, last)
     return lead + _meta(flags, node) + _shown(flags, node) + node.note
 
 
@@ -828,10 +1065,14 @@ def _json_entry(
     if flags.perms:
         mode = posix_mode(node.stat) & 0o7777
         text += f',"mode":"{mode:04o}","prot":"{ls_mode_string(node.stat)}"'
-    if flags.sizes or flags.du:
+    if flags.owner:
+        text += f',"user":"{owner_name(node.stat.uid, flags.identity)}"'
+    if flags.group:
+        text += f',"group":"{group_name(node.stat.gid, flags.identity)}"'
+    if flags.sizes or flags.du or flags.si:
         text += f',"size":{_size(flags, node)}'
     if flags.dates:
-        text += f',"time":"{styled_time(node.stat.modified, "locale")}"'
+        text += f',"time":"{_time_text(flags, node)}"'
     if node.note:
         error = node.note.strip().removeprefix("[").removesuffix("]")
         newline, indent = ("", "") if flags.no_indent else ("\n", "  " * level)
@@ -965,7 +1206,11 @@ async def _rendered(
             cross_stat,
             links.target_stat if links is not None else None,
             budget,
+            root=path.virtual,
+            resolve=links.resolve if links is not None else None,
         )
+        if flags.follow and opts.resolve is not None:
+            opts.seen.add(opts.resolve(path.virtual))
         if live:
             listing = await _open_dir(spec, readdir, stat, opts, ())
             root.children, root.note = listing.nodes, listing.note
@@ -1038,7 +1283,11 @@ async def _rendered(
         if not flags.no_report:
             summary = _summary(total_dirs, total_files, flags.dirs_only)
             if flags.du:
-                summary = f" {du:>11} bytes used in {summary}"
+                summary = (
+                    f" {_si_text(du)} used in {summary}"
+                    if flags.si
+                    else f" {du:>11} bytes used in {summary}"
+                )
             lines += ["", summary]
         yield format_records(lines)
 
@@ -1113,7 +1362,11 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
         fl (FlagView): spec-validated view over the raw flag kwargs.
         operands (Sequence[str | PathSpec]): the line's operands.
     """
-    return LineFacts(walks=not fl.as_bool("x"), reads_subtree=True)
+    return LineFacts(
+        walks=not fl.as_bool("x"),
+        reads_subtree=True,
+        writes=fl.as_path("o") is not None,
+    )
 
 
 __all__ = ["facts", "tree"]
@@ -1122,7 +1375,8 @@ __all__ = ["facts", "tree"]
 def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags | IOResult:
     """tree's options, ``-L`` and ``--filelimit`` read by mirage-rs before
     any operand is resolved; ``-t``, ``-v``, ``-U`` and ``--sort`` each set
-    the order, the last one typed winning.
+    the order, the last one typed winning, and ``-c`` turns a modification
+    time order into a change time one.
 
     Args:
         flags (Mapping[str, FlagValue]): the parsed flags.
@@ -1141,7 +1395,11 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags | IOResult:
     assert level is None or isinstance(level, int)
     assert limit is None or isinstance(limit, int)
     sort: TreeSort = "name"
-    for name, value in fl.occurrences("t", "v", "U", "sort"):
+    for name, value in fl.occurrences("t", "v", "U", "sort", "c"):
+        if name == "c":
+            if value is True and sort == "mtime":
+                sort = "ctime"
+            continue
         if name in _SHORTHANDS:
             if value is True:
                 sort = _SHORTHANDS[name]
@@ -1156,6 +1414,8 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags | IOResult:
                 ).encode(),
             )
         sort = typed
+    time_format = fl.as_str("timefmt")
+    grouped = fl.typed_order("dirsfirst", "filesfirst")
     return TreeFlags(
         max_depth=level,
         show_hidden=fl.as_bool("a"),
@@ -1166,18 +1426,33 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags | IOResult:
         full_path=fl.as_bool("f"),
         no_indent=fl.as_bool("i"),
         sizes=fl.as_bool("s"),
-        dates=fl.as_bool("D"),
+        dates=fl.as_bool("D") or time_format is not None,
         perms=fl.as_bool("p"),
         classify=fl.as_bool("F"),
         sort=sort,
         reverse=fl.as_bool("r"),
-        dirs_first=fl.as_bool("dirsfirst"),
+        dirs_first=grouped[-1:] == ["dirsfirst"],
+        files_first=grouped[-1:] == ["filesfirst"],
         no_report=fl.as_bool("noreport"),
         du=fl.as_bool("du"),
         prune=fl.as_bool("prune"),
         gitignore=fl.as_bool("gitignore"),
         file_limit=limit,
         json=fl.as_bool("J"),
+        follow=fl.as_bool("args_l"),
+        ansi_lines=fl.as_bool("A"),
+        quote=fl.as_bool("Q"),
+        raw_names=fl.as_bool("N"),
+        question=fl.as_bool("q"),
+        owner=fl.as_bool("u"),
+        group=fl.as_bool("g"),
+        change_time=fl.as_bool("c"),
+        si=fl.as_bool("si"),
+        time_format=time_format,
+        ignore_case=fl.as_bool("ignore_case"),
+        match_dirs=fl.as_bool("matchdirs"),
+        inodes=fl.as_bool("inodes"),
+        output=fl.as_path("o"),
     )
 
 
@@ -1206,16 +1481,36 @@ async def tree_generic(
         read (ReadStreamFn | None): the mount's reader, for
             ``--gitignore``.
     """
-    if unbounded is not None and parsed.max_depth is None:
+    if (
+        unbounded is not None
+        and parsed.max_depth is None
+        and not parsed.follow
+    ):
         readdir, stat = unbounded
-    return await tree(
+    output = parsed.output
+    if output is not None:
+        if ctx.vfs is None:
+            return None, IOResult(exit_code=1)
+        try:
+            await ctx.vfs.write(output, b"")
+        except FS_ERRORS as exc:
+            logger.debug("tree: cannot write %s: %s", output.virtual, exc)
+            line = f"tree: invalid filename '{output.raw_path}'\n"
+            return None, IOResult(exit_code=1, stderr=encode_text(line))
+    body, io = await tree(
         paths,
         readdir=readdir,
         stat=stat,
-        flags=parsed,
+        flags=replace(
+            parsed, utf8=utf8_locale(ctx.env), identity=identity_of(ctx)
+        ),
         read=read,
         stat_path=vfs_stat_path(ctx.vfs),
         readdir_path=vfs_readdir_path(ctx.vfs),
         mounts=mounts_of(ctx),
         links=links_of(ctx),
     )
+    if output is None or ctx.vfs is None:
+        return body, io
+    await ctx.vfs.write(output, body)
+    return None, io
