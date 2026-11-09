@@ -6,11 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.server.rpc.server import MirageRpcServer
-from mirage.types import Limit
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.workspace import Session
 
 
 def server() -> MirageRpcServer:
@@ -72,8 +69,6 @@ async def test_vfs_methods_mirror_the_ops():
     await call(rpc, "vfs/rename", {"src": "/d/a.txt", "dst": "/d/b.txt"})
     await call(rpc, "vfs/truncate", {"path": "/d/b.txt", "length": 3})
     assert (await call(rpc, "vfs/exists", {"path": "/d/b.txt"}))["result"]
-    globbed = (await call(rpc, "glob", {"pattern": "/d/*.txt"}))["result"]
-    assert globbed == ["/d/b.txt"]
     await call(rpc, "vfs/unlink", {"path": "/d/b.txt"})
     await call(rpc, "vfs/rmdir", {"path": "/d"})
     assert (await call(rpc, "vfs/exists", {"path": "/d"}))["result"] is False
@@ -118,9 +113,10 @@ async def test_errors_carry_codes_and_the_errno():
 @pytest.mark.asyncio
 async def test_unknown_failure_is_redacted_in_message_and_data(monkeypatch):
     monkeypatch.setattr(
-        Session, "glob", AsyncMock(side_effect=RuntimeError("token=secret"))
+        "mirage.server.rpc.server.answered",
+        AsyncMock(side_effect=RuntimeError("token=secret")),
     )
-    result = await call(server(), "glob", {"pattern": "/*"})
+    result = await call(server(), "vfs/read", {"path": "/x"})
     assert result["error"] == {
         "code": -32603,
         "message": "internal server error",
@@ -191,32 +187,6 @@ async def test_serve_answers_lines_and_cancels_a_running_request():
     assert by_id[1]["error"]["code"] == -32800
     assert by_id[None]["error"]["code"] == -32700
     assert 2 in by_id
-
-
-@pytest.mark.asyncio
-async def test_a_glob_past_the_walk_limit_is_invalid_params():
-    rpc = MirageRpcServer(
-        Workspace(
-            {
-                "/": (
-                    RAMVFS(),
-                    MountMode.WRITE,
-                    {ALL_COMMANDS: Limit(walk_limit=2)},
-                )
-            },
-            mode=MountMode.WRITE,
-        )
-    )
-    for name in "abc":
-        await call(
-            rpc, "vfs/write", {"path": f"/{name}.txt", "data": b64("x")}
-        )
-    result = await call(rpc, "glob", {"pattern": "/*.txt"})
-    assert result["error"] == {
-        "code": -32602,
-        "message": "/*.txt: matches more than 2 files (walk_limit); "
-        "narrow the path",
-    }
 
 
 @pytest.mark.asyncio

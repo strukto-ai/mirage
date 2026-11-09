@@ -12,11 +12,9 @@ from mirage.server.app import build_app
 from mirage.server.routers import vfs
 from mirage.vfs.call import vfs_call
 from mirage.vfs.types import Effect
-from mirage.workspace.workspace import Session
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("route", ["vfs/read", "glob"])
 @pytest.mark.parametrize(
     "exc, status, body",
     [
@@ -51,7 +49,7 @@ from mirage.workspace.workspace import Session
     ],
 )
 async def test_failures_keep_private_details_in_logs(
-    monkeypatch, caplog, route, exc, status, body
+    monkeypatch, caplog, exc, status, body
 ):
     app = build_app()
     async with app.router.lifespan_context(app):
@@ -64,13 +62,9 @@ async def test_failures_keep_private_details_in_logs(
             )
             wid = created.json()["id"]
             monkeypatch.setattr(vfs, "answered", AsyncMock(side_effect=exc))
-            monkeypatch.setattr(Session, "glob", AsyncMock(side_effect=exc))
             with caplog.at_level(logging.DEBUG, logger=vfs.__name__):
                 response = await client.post(
-                    f"/v1/workspaces/{wid}/{route}",
-                    json={"path": "/file"}
-                    if route == "vfs/read"
-                    else {"pattern": "/*"},
+                    f"/v1/workspaces/{wid}/vfs/read", json={"path": "/file"}
                 )
             assert response.status_code == status
             assert response.json() == body
@@ -169,42 +163,3 @@ async def test_custom_functions_and_streams_keep_the_session_gate():
                 json={"path": "/data/visible", "stream": "yes"},
             )
             assert reply.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_a_glob_past_the_walk_limit_answers_why():
-    app = build_app()
-    async with app.router.lifespan_context(app):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            created = await client.post(
-                "/v1/workspaces",
-                json={
-                    "config": {
-                        "mode": "write",
-                        "mounts": {
-                            "/": {
-                                "vfs": "ram",
-                                "command_limits": {"@all": {"walk_limit": 2}},
-                            }
-                        },
-                    }
-                },
-            )
-            wid = created.json()["id"]
-            for name in "abc":
-                await client.post(
-                    f"/v1/workspaces/{wid}/vfs/write",
-                    json={"path": f"/{name}.txt", "data": "eA=="},
-                )
-            response = await client.post(
-                f"/v1/workspaces/{wid}/glob", json={"pattern": "/*.txt"}
-            )
-            assert (response.status_code, response.json()) == (
-                400,
-                {
-                    "detail": "/*.txt: matches more than 2 files "
-                    "(walk_limit); narrow the path"
-                },
-            )

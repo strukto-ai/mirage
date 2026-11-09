@@ -116,8 +116,8 @@ server = MirageRpcServer(ws, session_id="agent")
 answer = await server.handle({
     "jsonrpc": "2.0",
     "id": 1,
-    "method": "glob",
-    "params": {"pattern": "/*"},
+    "method": "vfs/readdir",
+    "params": {"path": "/"},
 })
 ```
 

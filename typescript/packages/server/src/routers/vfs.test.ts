@@ -4,12 +4,11 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { vfsCall } from '@struktoai/mirage-core/vfs/call'
 import { Effect } from '@struktoai/mirage-core/vfs/types'
 import { stderr, stdout } from 'node:process'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../app.ts'
 import * as ioSerde from '../io_serde.ts'
 
-describe.each(['vfs/read', 'glob'])('%s failure responses', (route) => {
+describe('vfs/read failure responses', () => {
   it.each([
     [new Error('backend token=secret'), 500, { detail: 'internal server error' }],
     [
@@ -42,13 +41,12 @@ describe.each(['vfs/read', 'glob'])('%s failure responses', (route) => {
       })
       const wid = created.json<{ id: string }>().id
       vi.spyOn(ioSerde, 'answered').mockRejectedValue(err)
-      vi.spyOn(Session.prototype, 'glob').mockRejectedValue(err)
       const diagnostics = vi.spyOn(stderr, 'write').mockReturnValue(true)
       const protocolOutput = vi.spyOn(stdout, 'write').mockReturnValue(true)
       const response = await app.inject({
         method: 'POST',
-        url: `/v1/workspaces/${wid}/${route}`,
-        payload: route === 'vfs/read' ? { path: '/file' } : { pattern: '/*' },
+        url: `/v1/workspaces/${wid}/vfs/read`,
+        payload: { path: '/file' },
       })
       expect(response.statusCode).toBe(status)
       expect(response.json()).toEqual(body)
@@ -56,44 +54,6 @@ describe.each(['vfs/read', 'glob'])('%s failure responses', (route) => {
       expect(protocolOutput).not.toHaveBeenCalled()
     } finally {
       vi.restoreAllMocks()
-      await app.close()
-    }
-  })
-})
-
-// Twin of test_a_glob_past_the_walk_limit_answers_why.
-describe('glob past the walk_limit', () => {
-  it('answers 400 and says why', async () => {
-    const app = buildApp()
-    try {
-      const created = await app.inject({
-        method: 'POST',
-        url: '/v1/workspaces',
-        payload: {
-          config: {
-            mode: 'write',
-            mounts: { '/': { vfs: 'ram', command_limits: { '@all': { walk_limit: 2 } } } },
-          },
-        },
-      })
-      const wid = created.json<{ id: string }>().id
-      for (const name of ['a', 'b', 'c']) {
-        await app.inject({
-          method: 'POST',
-          url: `/v1/workspaces/${wid}/vfs/write`,
-          payload: { path: `/${name}.txt`, data: 'eA==' },
-        })
-      }
-      const response = await app.inject({
-        method: 'POST',
-        url: `/v1/workspaces/${wid}/glob`,
-        payload: { pattern: '/*.txt' },
-      })
-      expect([response.statusCode, response.json()]).toEqual([
-        400,
-        { detail: '/*.txt: matches more than 2 files (walk_limit); narrow the path' },
-      ])
-    } finally {
       await app.close()
     }
   })
