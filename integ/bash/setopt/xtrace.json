@@ -28,11 +28,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "set -x; echo hi; set +x; ( set -x; for xfv in 1 \"a b\"; do :; done; for ((xfi=0;xfi<2;xfi++)); do continue; done; for xfw; do :; done; ((xfa=1)); (( xfa > 5 )); if ((xfa)); then :; fi; case $xfa in 1) :;; esac; for xfv in 1 2; do set +x; done; set -x; select xfs in a; do echo body >&2; break; done <<< 1 )",
+      "command": "set -x; echo hi; set +x; ( set -- p; set -x; for xfv in 1 \"a b\"; do :; done; for ((xfi=0;xfi<2;xfi++)); do continue; done; for xfw; do :; done; ((xfa=1)); (( xfa > 5 )); if ((xfa)); then :; fi; case $xfa in 1) :;; esac; for xfv in 1 2; do set +x; done; set -x; select xfs in a; do echo body >&2; break; done <<< 1 )",
       "expect": {
         "exit": 0,
         "stdout": "hi\n",
-        "stderr": "+ echo hi\n+ set +x\n+ for xfv in 1 \"a b\"\n+ :\n+ for xfv in 1 \"a b\"\n+ :\n+ (( xfi=0 ))\n+ (( xfi<2 ))\n+ continue\n+ (( xfi++ ))\n+ (( xfi<2 ))\n+ continue\n+ (( xfi++ ))\n+ (( xfi<2 ))\n+ (( xfa=1 ))\n+ ((  xfa > 5  ))\n+ (( xfa ))\n+ :\n+ case $xfa in\n+ :\n+ for xfv in 1 2\n+ set +x\n+ select xfs in a\n1) a\n#? + echo body\nbody\n+ break\n"
+        "stderr": "+ echo hi\n+ set +x\n+ for xfv in 1 \"a b\"\n+ :\n+ for xfv in 1 \"a b\"\n+ :\n+ (( xfi=0 ))\n+ (( xfi<2 ))\n+ continue\n+ (( xfi++ ))\n+ (( xfi<2 ))\n+ continue\n+ (( xfi++ ))\n+ (( xfi<2 ))\n+ for xfw in \"$@\"\n+ :\n+ (( xfa=1 ))\n+ ((  xfa > 5  ))\n+ (( xfa ))\n+ :\n+ case $xfa in\n+ :\n+ for xfv in 1 2\n+ set +x\n+ select xfs in a\n1) a\n#? + echo body\nbody\n+ break\n"
       }
     },
     {

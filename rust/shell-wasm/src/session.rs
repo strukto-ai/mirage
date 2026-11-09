@@ -472,7 +472,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let construct = Construct::For {
                 variable: args.string()?,
                 values: words(args.list()?)?,
-                head: args.string()?.into_bytes(),
+                head: args.bytes()?,
                 body: size(args.int()?)?,
             };
             let tree = maybe_tree(args)?;
