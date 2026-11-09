@@ -51,6 +51,17 @@ export class ProcessHandle {
   detached = false
   released = false
   onDetach: ((where: RecordFields) => Promise<void>) | null = null
+  /**
+   * The tag its detached program carries in the box, when not its own id:
+   * an adopted job's process may run under another pid.
+   */
+  tag: string | null = null
+  /**
+   * What runs once its job's ending is recorded, a detached job's folder
+   * removal; null for a process no job ending is recorded for, which cleans
+   * up at once.
+   */
+  afterEnding: (() => Promise<void>)[] | null = null
   /** Told the record each time it changes, as its table keeps it. */
   noted: ((record: Process) => void) | null = null
   private current: Process

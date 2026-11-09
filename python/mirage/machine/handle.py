@@ -15,6 +15,7 @@
 import asyncio
 import logging
 import uuid
+from functools import partial
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
@@ -454,6 +455,12 @@ class MachineHandle:
             errors (OutputFn | None): receives stderr as it arrives.
         """
         folder = job_folder(tag)
+        if runner is not None and not await _tell_detached(
+            runner, self.id, folder
+        ):
+            return await self._exec_argv(
+                argv, None, {**env, PROCESS: tag}, cwd, output, errors
+            )
         self._detached[tag] = folder
         try:
             try:
@@ -489,9 +496,8 @@ class MachineHandle:
                     return started
             if runner is not None:
                 runner.detached = True
-                await _tell_detached(runner, self.id, folder)
             done = await self._view(folder, tag, runner, output, errors)
-            await self._remove(folder)
+            await self._settled(runner, folder)
             return done
         except asyncio.CancelledError:
             if runner is None or not runner.released:
@@ -535,7 +541,7 @@ class MachineHandle:
         finally:
             self._detached.pop(tag, None)
             self._executing -= 1
-        await self._remove(folder)
+        await self._settled(runner, folder)
         return done
 
     async def _view(
@@ -569,12 +575,17 @@ class MachineHandle:
         wait = VIEW_RETRY_SECONDS
         while True:
             held = bytearray()
+            undelivered: list[BaseException] = []
 
             async def out(data: bytes) -> None:
                 if output is None:
                     kept[0].extend(data)
                 else:
-                    await output(data)
+                    try:
+                        await output(data)
+                    except BaseException as exc:
+                        undelivered.append(exc)
+                        raise
                 delivered[0] += len(data)
 
             async def err(data: bytes) -> None:
@@ -583,11 +594,15 @@ class MachineHandle:
                 if not cut:
                     return
                 chunk = bytes(held[:cut])
-                del held[:cut]
                 if errors is None:
                     kept[1].extend(chunk)
                 else:
-                    await errors(chunk)
+                    try:
+                        await errors(chunk)
+                    except BaseException as exc:
+                        undelivered.append(exc)
+                        raise
+                del held[:cut]
                 delivered[1] += len(chunk)
 
             before = tuple(delivered)
@@ -615,11 +630,16 @@ class MachineHandle:
                 returned = (exc.stdout, exc.stderr)
             except Exception:
                 logger.debug("%s: job view failed", self.id, exc_info=True)
-            if returned[0]:
-                await out(returned[0])
-            if returned[1]:
-                await err(returned[1])
-            ended = JOB_END.fullmatch(bytes(held))
+            try:
+                if returned[0]:
+                    await out(returned[0])
+                if returned[1]:
+                    await err(returned[1])
+            except Exception:
+                logger.debug("%s: job output not kept", self.id, exc_info=True)
+            # A view whose output did not all land is viewed again, however
+            # it ended.
+            ended = None if undelivered else JOB_END.fullmatch(bytes(held))
             if ended is not None:
                 stderr = bytes(kept[1])
                 code = ended.group(1).decode()
@@ -636,6 +656,23 @@ class MachineHandle:
                 wait = VIEW_RETRY_SECONDS
             await asyncio.sleep(wait)
             wait = min(wait * 2, VIEW_RETRY_MAX_SECONDS)
+
+    async def _settled(
+        self, runner: ProcessHandle | None, folder: str
+    ) -> None:
+        """Remove a viewed job's folder once its ending is kept: after its
+        job's ending is recorded (``ProcessHandle.after_ending``), so a
+        daemon that adopts the job before then still reads how it ended;
+        at once for a run no job ending is recorded for.
+
+        Args:
+            runner (ProcessHandle | None): the process the run is.
+            folder (str): the job's folder.
+        """
+        if runner is not None and runner.after_ending is not None:
+            runner.after_ending.append(partial(self._remove, folder))
+        else:
+            await self._remove(folder)
 
     async def _remove(self, folder: str) -> None:
         """Remove a detached job's folder, bounded as a stop is; a box
@@ -806,18 +843,22 @@ def _stop_with(runner: ProcessHandle | None) -> int:
 
 async def _tell_detached(
     runner: ProcessHandle, machine: MachineId, folder: str
-) -> None:
-    """Tell the job a run is that its program runs detached, and where,
-    so a daemon that outlives this one finds it; a failed telling is
-    logged and the job runs on.
+) -> bool:
+    """Tell the job a run is where its program is about to run detached,
+    before it starts, so a daemon that outlives this one finds it. A job
+    that could not be told runs attached instead: one no daemon could find
+    must not outlive this one.
 
     Args:
         runner (ProcessHandle): the job's process.
         machine (MachineId): the machine it runs on.
         folder (str): its folder there.
+
+    Returns:
+        bool: whether it may run detached: told, or no job to tell.
     """
     if runner.on_detach is None:
-        return
+        return True
     try:
         await runner.on_detach(
             {
@@ -829,6 +870,8 @@ async def _tell_detached(
         )
     except Exception:
         logger.debug("%s: detached job not recorded", machine, exc_info=True)
+        return False
+    return True
 
 
 def _unmarked(held: bytearray) -> int:

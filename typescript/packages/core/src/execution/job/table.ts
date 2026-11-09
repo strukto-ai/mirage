@@ -115,6 +115,23 @@ function heldConsoles(fields: RecordFields | null): Set<string> {
 }
 
 /**
+ * Run what waited for a job's ending to be recorded, a detached job's folder
+ * removal; a released job's waits for its adopter. Mirrors Python's
+ * `_after_ending`.
+ */
+async function afterEnding(job: JobHandle): Promise<void> {
+  const process = job.process
+  if (process === null || process.released) return
+  for (const then of process.afterEnding ?? []) {
+    try {
+      await then()
+    } catch (err) {
+      console.debug(`job ${String(job.id)} cleanup failed:`, err)
+    }
+  }
+}
+
+/**
  * The shell's job table: bash's per-shell job list, one list per session.
  *
  * This is job control, not a process table. A job is numbered `%N`
@@ -443,6 +460,7 @@ export class JobTable {
     process.onDetach = async (where) => {
       if (job !== null) await this.markDetached(job, where)
     }
+    process.afterEnding = []
     const { line, group } = process.record
     let jobId: number
     try {
@@ -537,6 +555,7 @@ export class JobTable {
       await this.recordEnding(job)
       this.disowned = this.disowned.filter((j) => j !== job)
       this.dropChecking()
+      await afterEnding(job)
     }
   }
 
@@ -558,21 +577,25 @@ export class JobTable {
   /**
    * Record in a job's entry where its program runs detached, so a daemon
    * that outlives this one adopts it, and publish its process as detached,
-   * so no other daemon stops it. Mirrors Python's
+   * so no other daemon stops it; throws when the entry could not be
+   * written, so no daemon would find the job. Mirrors Python's
    * `JobTable._mark_detached`.
    */
   private async markDetached(job: JobHandle, where: RecordFields): Promise<void> {
-    job.detached = where
-    this.processesChanged()
     for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
       const fields = await this.store.load(job.sessionId)
       const jobs = { ...((fields?.jobs ?? {}) as Record<string, ListEntry>) }
       const entry = jobs[job.id.toString()]
-      if (fields === null || entry?.console !== job.consoleName) return
+      if (fields === null || entry?.console !== job.consoleName)
+        throw new Error(`job ${String(job.id)}: no entry to record`)
       jobs[job.id.toString()] = { ...entry, detached: where }
-      if (await this.write(job.sessionId, fields, jobs, Number(fields.next ?? 1))) return
+      if (await this.write(job.sessionId, fields, jobs, Number(fields.next ?? 1))) {
+        job.detached = where
+        this.processesChanged()
+        return
+      }
     }
-    console.debug('job detached entry kept conflicting:', job.id)
+    throw new Error(`job ${String(job.id)}: entry kept conflicting`)
   }
 
   /**
@@ -701,6 +724,8 @@ export class JobTable {
       programIgnores: IGNORED_SIGNALS,
     })
     process.detached = true
+    process.tag = (detached.tag as string | null | undefined) ?? null
+    process.afterEnding = []
     jobConsole.bindProcess(process.record.id.toString())
     this.track(job, process)
     return true
@@ -1715,10 +1740,16 @@ export class JobTable {
     records: Record<string, RecordFields>,
   ): Promise<Record<string, RecordFields>> {
     const left: Record<string, RecordFields> = {}
+    const live = new Set(this.processes.live().map((handle) => handle.record.id.pid))
     for (const [pid, record] of Object.entries(records)) {
       // Only the lease holder, which adopted the detached jobs it could,
-      // stops the rest.
-      if (record.runtime == null || (record.detached === true && !this.plane.adopted)) continue
+      // stops the rest; never one it runs, should a daemon that lost the lease
+      // republish it.
+      if (
+        record.runtime == null ||
+        (record.detached === true && (!this.plane.adopted || live.has(record.pid as number)))
+      )
+        continue
       if (await this.running(owner)) return records
       if (this.runStopper === null || !(await this.runStopper(record, 15))) left[pid] = record
     }

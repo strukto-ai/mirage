@@ -90,6 +90,13 @@ class ProcessHandle:
         self.detached = False
         self.released = False
         self.on_detach: Callable[[RecordFields], Awaitable[None]] | None = None
+        # The tag its detached program carries in the box, when not its own
+        # id: an adopted job's process may run under another pid.
+        self.tag: str | None = None
+        # What runs once its job's ending is recorded, a detached job's
+        # folder removal; None for a process no job ending is recorded for,
+        # which cleans up at once.
+        self.after_ending: list[Callable[[], Awaitable[None]]] | None = None
         # The host stopped it (its table stopped, its session closed),
         # which ends whoever waits for it as well.
         self.revoked = False

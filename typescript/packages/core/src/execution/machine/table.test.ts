@@ -320,6 +320,27 @@ describe('MachineTable scans', () => {
     }
   })
 
+  // An adopted job's program carries the tag its first run gave it, which a
+  // signal goes by whatever pid the adopter runs it under.
+  it('signals a detached program by the tag it carries', async () => {
+    const box = new Sleeper('a')
+    const ws = sleepers({ a: box })
+    try {
+      const pid = DEC.decode((await ws.shell('train 1 & echo $!')).stdout).trim()
+      await started(box)
+      const [job] = ws.jobTable.allJobs()
+      if (job?.process) {
+        job.process.detached = true
+        job.process.tag = 'w:777'
+      }
+      expect((await ws.shell(`kill ${pid}; wait ${pid}`)).exitCode).toBe(143)
+      expect(box.sent).toEqual([['w:777', 15]])
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  })
+
   it('signals a program no scan placed by its tag', async () => {
     const box = new Sleeper('a')
     const ws = sleepers({ a: box })

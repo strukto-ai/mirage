@@ -732,3 +732,22 @@ async def test_a_detached_program_is_signalled_by_its_tag_after_a_scan():
         assert box.sent == [(f"{ws.workspace_id}:{pid}", 15)]
     finally:
         await ws.close()
+
+
+# An adopted job's program carries the tag its first run gave it, which a
+# signal goes by whatever pid the adopter runs it under.
+@pytest.mark.asyncio
+async def test_a_detached_program_is_signalled_by_the_tag_it_carries():
+    box = _Sleeper("a")
+    ws = _sleepers(a=box)
+    try:
+        pid = int((await ws.shell("train 1 & echo $!")).stdout)
+        await _started(box)
+        [job] = ws.job_table.all_jobs()
+        assert job.process is not None
+        job.process.detached = True
+        job.process.tag = "w:777"
+        assert (await ws.shell(f"kill {pid}; wait {pid}")).exit_code == 143
+        assert box.sent == [("w:777", 15)]
+    finally:
+        await ws.close()

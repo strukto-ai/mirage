@@ -257,7 +257,7 @@ export class MachineTable {
     return this.deliverSignal(
       handle,
       record.machine,
-      target !== null && !handle.detached ? target : record.id.toString(),
+      target !== null && !handle.detached ? target : (handle.tag ?? record.id.toString()),
       signum,
     )
   }

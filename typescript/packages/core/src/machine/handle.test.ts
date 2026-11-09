@@ -1244,3 +1244,92 @@ it('runs attached a job the box cannot detach', async () => {
   expect(box.execs.at(-1)?.[0]).toBe('train')
   expect(box.execs.at(-1)?.[2][PROCESS]).toBe(runner.record.id.toString())
 })
+
+// Run `train` on `box` with output callbacks that fail once each, as a store
+// that went away mid-write: the stdout and stderr that landed.
+async function flakyRun(box: JobBox, fail: 'out' | 'err'): Promise<[string, string]> {
+  const landed = { out: '', err: '' }
+  let failed = false
+  const deliver =
+    (which: 'out' | 'err') =>
+    (chunk: Uint8Array): Promise<void> => {
+      if (which === fail && !failed) {
+        failed = true
+        return Promise.reject(new Error('console unavailable'))
+      }
+      landed[which] += DEC.decode(chunk)
+      return Promise.resolve()
+    }
+  const ctx = { stdin: null, flags: {}, env: {}, cwd: PathSpec.fromStrPath('/') }
+  const runner = new ProcessTable('w1', undefined, runAsProcess).start({
+    sessionId: 's',
+    command: 'train',
+    cwd: ctx.cwd,
+    cancel: () => undefined,
+    run: async () => {
+      runner.detachable = true
+      return (await box.run(['train'], ctx, null, deliver('out'), deliver('err'))).exitCode
+    },
+  })
+  expect((await runner.join()).exit).toBe(0)
+  return [landed.out, landed.err]
+}
+
+// The end mark counts only when all the view printed before it landed: a view
+// whose output failed to land is viewed again, however it ended.
+it('views again a mark after output that did not land', async () => {
+  const box = new JobBox([
+    [[], ['warn\n\0mirage-job 0\n'], 0],
+    [[], ['warn\n\0mirage-job 0\n'], 0],
+  ])
+  const [, err] = await flakyRun(box, 'err')
+  expect(box.viewed.map((view) => view.slice(1))).toEqual([
+    ['0', '0'],
+    ['0', '0'],
+  ])
+  expect(err).toBe('warn\n')
+})
+
+// The same holds for stdout a transport returns whole after the mark.
+it('views again a mark before stdout that did not land', async () => {
+  const whole: RunResult = { stdout: ENC.encode('x\n'), stderr: null, exitCode: 0 }
+  const box = new JobBox([
+    [[], ['\0mirage-job 0\n'], whole],
+    [[], ['\0mirage-job 0\n'], whole],
+  ])
+  const [out] = await flakyRun(box, 'out')
+  expect(box.viewed.map((view) => view.slice(1))).toEqual([
+    ['0', '0'],
+    ['0', '0'],
+  ])
+  expect(out).toBe('x\n')
+})
+
+// A job's folder outlives its viewing until its ending is recorded, so a
+// daemon that adopts it meanwhile still reads how it ended.
+it('removes a job folder once its ending is recorded', async () => {
+  const box = new JobBox([[[], ['\0mirage-job 3\n'], 0]])
+  const [done, , , runner] = await jobRun(box, {
+    started: (runner) => {
+      runner.afterEnding = []
+    },
+  })
+  expect([done?.exitCode, box.removed]).toEqual([3, []])
+  const [then] = runner.afterEnding ?? []
+  await then?.()
+  expect(box.removed).toEqual([box.viewed[0]?.[0]])
+})
+
+// A job no daemon could be told of runs attached: one no daemon could find
+// must not outlive this one.
+it('runs attached a job that could not be recorded', async () => {
+  const box = new JobBox()
+  const [done, , , runner] = await jobRun(box, {
+    started: (runner) => {
+      runner.onDetach = () => Promise.reject(new Error('store unavailable'))
+    },
+  })
+  expect([done?.exitCode, box.started]).toEqual([0, []])
+  expect(box.execs.at(-1)?.[0]).toBe('train')
+  expect(box.execs.at(-1)?.[2][PROCESS]).toBe(runner.record.id.toString())
+})

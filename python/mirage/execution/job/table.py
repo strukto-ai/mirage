@@ -114,6 +114,23 @@ def _held_consoles(fields: RecordFields | None) -> set[str]:
     return listed | set(fields.get("disowned", {}))
 
 
+async def _after_ending(job: JobHandle) -> None:
+    """Run what waited for a job's ending to be recorded, a detached
+    job's folder removal; a released job's waits for its adopter.
+
+    Args:
+        job (JobHandle): a job this table ran, now ended.
+    """
+    process = job.process
+    if process is None or process.released:
+        return
+    for then in process.after_ending or []:
+        try:
+            await then()
+        except Exception:
+            logger.debug("job %d cleanup failed", job.id, exc_info=True)
+
+
 class JobTable:
     """The shell's job table: bash's per-shell job list, one list per session.
 
@@ -448,6 +465,7 @@ class JobTable:
             and self.store.lease_seconds is not None
         )
         process.on_detach = detached
+        process.after_ending = []
         line, group = process.record.line, process.record.group
         try:
             job_id = await self._allocate(
@@ -525,6 +543,7 @@ class JobTable:
             await self._record_ending(job)
             self._disowned = [j for j in self._disowned if j is not job]
             self._drop_checking()
+            await _after_ending(job)
 
     def _track(self, job: JobHandle, process: ProcessHandle) -> None:
         """Hold a job this table runs as its process: listed in its
@@ -552,10 +571,12 @@ class JobTable:
 
         Args:
             job (JobHandle): the job.
-            where (RecordFields): its machine, folder and runtime.
+            where (RecordFields): its machine, folder, tag and runtime.
+
+        Raises:
+            RuntimeError: the entry could not be written, so no daemon
+                would find the job.
         """
-        job.detached = where
-        self.processes_changed()
         for _ in range(LIST_MAX_RETRIES):
             fields = await self.store.load(job.session_id)
             jobs = dict((fields or {}).get("jobs", {}))
@@ -565,13 +586,15 @@ class JobTable:
                 or entry is None
                 or entry["console"] != job.console_name
             ):
-                return
+                raise RuntimeError(f"job {job.id}: no entry to record")
             jobs[str(job.id)] = {**entry, "detached": where}
             if await self._write(
                 job.session_id, fields, jobs, int(fields.get("next", 1))
             ):
+                job.detached = where
+                self.processes_changed()
                 return
-        logger.debug("job %d detached entry kept conflicting", job.id)
+        raise RuntimeError(f"job {job.id}: entry kept conflicting")
 
     async def _adopt_left(self) -> set[int]:
         """Adopt every running job whose program a daemon that no longer
@@ -698,6 +721,8 @@ class JobTable:
             program_ignores=IGNORED_SIGNALS,
         )
         process.detached = True
+        process.tag = entry["detached"].get("tag")
+        process.after_ending = []
         console.bind_process(str(process.record.id))
         self._track(job, process)
         return True
@@ -1813,11 +1838,14 @@ class JobTable:
             records (dict[str, RecordFields]): PID to process.
         """
         left: dict[str, RecordFields] = {}
+        live = {handle.record.pid for handle in self.processes.live()}
         for pid, record in records.items():
             # Only the lease holder, which adopted the detached jobs it
-            # could, stops the rest.
+            # could, stops the rest; never one it runs, should a daemon
+            # that lost the lease republish it.
             if record.get("runtime") is None or (
-                record.get("detached") and not self._plane._adopted
+                record.get("detached")
+                and (not self._plane._adopted or record.get("pid") in live)
             ):
                 continue
             if await self._running(owner):

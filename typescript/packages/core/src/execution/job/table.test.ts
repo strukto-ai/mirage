@@ -2489,6 +2489,64 @@ describe('detached jobs a daemon left', () => {
     }
   })
 
+  // What waits for a job's ending, a detached job's folder removal, runs once
+  // the ending is in its entry.
+  it('run what waits for their ending once it is recorded', async () => {
+    const store = new RAMExecutionStore(30)
+    const table = new JobTable(store, new ProcessTable())
+    const seen: unknown[] = []
+    const run: JobRunner = (job) => {
+      job.process?.afterEnding?.push(async () => {
+        const fields = await store.load(job.sessionId)
+        seen.push(((fields?.jobs ?? {}) as Record<string, RecordFields>)[String(job.id)]?.state)
+      })
+      return Promise.resolve([new IOResult({ exitCode: 3 }), new ExecutionNode()])
+    }
+    try {
+      const job = await table.submit({
+        command: 'train',
+        run,
+        abort: new AbortController(),
+        cwd: '/',
+        simple: true,
+      })
+      expect((await table.wait(job.id)).exitCode).toBe(3)
+      await until(() => Promise.resolve(seen.length > 0))
+      expect(seen).toEqual(['exited'])
+    } finally {
+      await table.close()
+    }
+  })
+
+  // The lease holder never stops a program it adopted, should the daemon that
+  // lost the lease republish its record.
+  it('are never stopped by the lease holder that adopted them', async () => {
+    const store = new RAMExecutionStore(30)
+    const [old, job] = await leftDetached(store)
+    const stopped: unknown[] = []
+    const holder = new JobTable(store, new ProcessTable())
+    holder.runStopper = (record) => {
+      stopped.push(record.pid)
+      return Promise.resolve(true)
+    }
+    holder.resumer = () => new Promise(() => undefined)
+    try {
+      await holder.claim()
+      await store.publish(old.daemon, {
+        [String(job.pid)]: { pid: job.pid, runtime: 'box', machine: 'docker:t', detached: true },
+      })
+      await (Reflect.get(holder, 'stopOwner') as (owner: string) => Promise<void>).call(
+        holder,
+        old.daemon,
+      )
+      expect(stopped).toEqual([])
+    } finally {
+      await holder.killAll()
+      await holder.close()
+      await old.killAll()
+    }
+  })
+
   // A daemon that lost the lease releases a detached job: it stops viewing,
   // writes no ending, and lists it as the daemon that adopts it does.
   it('are released by a daemon that lost the lease', async () => {

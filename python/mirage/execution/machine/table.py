@@ -295,7 +295,7 @@ class MachineTable:
             record.machine,
             target
             if target is not None and not handle.detached
-            else str(record.id),
+            else handle.tag or str(record.id),
             signum,
         )
 

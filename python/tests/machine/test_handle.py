@@ -1120,3 +1120,104 @@ async def test_a_job_the_box_cannot_detach_runs_attached():
     assert box.removed == [box.started[0][0]]
     assert box.execs[-1][0] == "train"
     assert box.exec_envs[-1][PROCESS] == str(runner.record.id)
+
+
+# The end mark counts only when all the view printed before it landed: a
+# view whose output failed to land is viewed again, however it ended.
+@pytest.mark.asyncio
+async def test_a_mark_after_output_that_did_not_land_is_viewed_again(
+    no_view_wait,
+):
+    box = JobBox(
+        [
+            ([], [b"warn\n\0mirage-job 0\n"], 0),
+            ([], [b"warn\n\0mirage-job 0\n"], 0),
+        ]
+    )
+    err, failed = bytearray(), []
+    ctx = Context(cwd=PathSpec.from_str_path("/"))
+
+    async def output(data: bytes) -> None:
+        return None
+
+    async def errors(data: bytes) -> None:
+        if not failed:
+            failed.append(data)
+            raise ConnectionError("console unavailable")
+        err.extend(data)
+
+    async def run() -> int:
+        runner.detachable = True
+        return (await box.run(("train",), ctx, None, output, errors)).exit_code
+
+    runner = ProcessTable("w1", bind=run_as_process).start(
+        session_id="s", command="train", cwd=ctx.cwd, run=run
+    )
+    assert (await runner.join()).exit == 0
+    assert [view[1:] for view in box.viewed] == [("0", "0"), ("0", "0")]
+    assert err == b"warn\n"
+
+
+# A job's folder outlives its viewing until its ending is recorded, so a
+# daemon that adopts it meanwhile still reads how it ended.
+@pytest.mark.asyncio
+async def test_a_job_folder_goes_once_its_ending_is_recorded():
+    box = JobBox([([], [b"\0mirage-job 3\n"], 0)])
+
+    def started(runner) -> None:
+        runner.after_ending = []
+
+    done, _, _, runner = await _job_run(box, started=started)
+    assert (done.exit_code, box.removed) == (3, [])
+    [then] = runner.after_ending
+    await then()
+    assert box.removed == [box.viewed[0][0]]
+
+
+# A job no daemon could be told of runs attached: one no daemon could
+# find must not outlive this one.
+@pytest.mark.asyncio
+async def test_a_job_that_could_not_be_recorded_runs_attached():
+    box = JobBox()
+
+    async def unrecorded(where) -> None:
+        raise RuntimeError("store unavailable")
+
+    def started(runner) -> None:
+        runner.on_detach = unrecorded
+
+    done, _, _, runner = await _job_run(box, started=started)
+    assert (done.exit_code, box.started) == (0, [])
+    assert box.execs[-1][0] == "train"
+    assert box.exec_envs[-1][PROCESS] == str(runner.record.id)
+
+
+# The same holds for stdout a transport returns whole after the mark.
+@pytest.mark.asyncio
+async def test_a_mark_before_stdout_that_did_not_land_is_viewed_again(
+    no_view_wait,
+):
+    view = ([], [b"\0mirage-job 0\n"], RunResult(b"x\n", None, 0))
+    box = JobBox([view, view])
+    out, failed = bytearray(), []
+    ctx = Context(cwd=PathSpec.from_str_path("/"))
+
+    async def output(data: bytes) -> None:
+        if not failed:
+            failed.append(data)
+            raise ConnectionError("console unavailable")
+        out.extend(data)
+
+    async def errors(data: bytes) -> None:
+        return None
+
+    async def run() -> int:
+        runner.detachable = True
+        return (await box.run(("train",), ctx, None, output, errors)).exit_code
+
+    runner = ProcessTable("w1", bind=run_as_process).start(
+        session_id="s", command="train", cwd=ctx.cwd, run=run
+    )
+    assert (await runner.join()).exit == 0
+    assert [v[1:] for v in box.viewed] == [("0", "0"), ("0", "0")]
+    assert out == b"x\n"

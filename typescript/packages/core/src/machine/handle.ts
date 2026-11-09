@@ -416,6 +416,16 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     signal?: AbortSignal,
   ): Promise<RunResult> {
     const folder = jobFolder(tag)
+    if (runner !== null && !(await tellDetached(runner, this.id, folder)))
+      return await this.execArgv(
+        argv,
+        null,
+        { ...env, [PROCESS]: tag },
+        cwd,
+        output,
+        errors,
+        signal,
+      )
     this.detached.set(tag, folder)
     try {
       let started: RunResult | null = null
@@ -460,12 +470,9 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         await this.removeJob(folder)
         return started
       }
-      if (runner !== null) {
-        runner.detached = true
-        await tellDetached(runner, this.id, folder)
-      }
+      if (runner !== null) runner.detached = true
       const done = await this.view(folder, tag, runner, output, errors, signal)
-      await this.removeJob(folder)
+      await this.settled(runner, folder)
       return done
     } catch (error) {
       if (signal?.aborted === true && runner?.released !== true) await this.removeJob(folder)
@@ -513,7 +520,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       this.detached.delete(tag)
       this.runs -= 1
     }
-    await this.removeJob(folder)
+    await this.settled(runner, folder)
     return done
   }
 
@@ -540,9 +547,14 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     let wait = VIEW_RETRY_SECONDS
     for (;;) {
       let held = new Uint8Array()
+      const undelivered: unknown[] = []
       const out = async (data: Uint8Array): Promise<void> => {
         if (output === null) kept[0].push(data)
-        else await output(data)
+        else
+          await output(data).catch((error: unknown) => {
+            undelivered.push(error)
+            throw error
+          })
         sent.out += data.length
       }
       const err = async (data: Uint8Array): Promise<void> => {
@@ -550,9 +562,13 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         const cut = unmarked(held)
         if (cut === 0) return
         const chunk = held.slice(0, cut)
-        held = held.slice(cut)
         if (errors === null) kept[1].push(chunk)
-        else await errors(chunk)
+        else
+          await errors(chunk).catch((error: unknown) => {
+            undelivered.push(error)
+            throw error
+          })
+        held = held.slice(cut)
         sent.err += chunk.length
       }
       const before = sent.out + sent.err
@@ -574,9 +590,16 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         logger.debug?.(`${this.id.toString()}: job view ended: ${String(error)}`)
         if (error instanceof ConnectionLostError) returned = [error.stdout, error.stderr]
       }
-      if (returned[0] !== null && returned[0].length > 0) await out(returned[0])
-      if (returned[1] !== null && returned[1].length > 0) await err(returned[1])
-      const ended = JOB_END.exec(new TextDecoder('latin1').decode(held))
+      try {
+        if (returned[0] !== null && returned[0].length > 0) await out(returned[0])
+        if (returned[1] !== null && returned[1].length > 0) await err(returned[1])
+      } catch (error) {
+        logger.debug?.(`${this.id.toString()}: job output not kept: ${String(error)}`)
+      }
+      // A view whose output did not all land is viewed again, however it
+      // ended.
+      const ended =
+        undelivered.length > 0 ? null : JOB_END.exec(new TextDecoder('latin1').decode(held))
       if (ended !== null) {
         const stdout = concat(kept[0])
         const stderr = concat(kept[1])
@@ -592,6 +615,17 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       await sleep(wait * 1000, signal)
       wait = Math.min(wait * 2, VIEW_RETRY_MAX_SECONDS)
     }
+  }
+
+  /**
+   * Remove a viewed job's folder once its ending is kept: after its job's
+   * ending is recorded (`ProcessHandle.afterEnding`), so a daemon that adopts
+   * the job before then still reads how it ended; at once for a run no job
+   * ending is recorded for. Mirrors Python's `MachineHandle._settled`.
+   */
+  private async settled(runner: ProcessHandle | null, folder: string): Promise<void> {
+    if (runner?.afterEnding != null) runner.afterEnding.push(() => this.removeJob(folder))
+    else await this.removeJob(folder)
   }
 
   /**
@@ -764,16 +798,18 @@ function stopWith(runner: ProcessHandle | null): number {
 }
 
 /**
- * Tell the job a run is that its program runs detached, and where, so a
- * daemon that outlives this one finds it; a failed telling is logged and the
- * job runs on. Mirrors Python's `_tell_detached`.
+ * Tell the job a run is where its program is about to run detached, before
+ * it starts, so a daemon that outlives this one finds it. A job that could
+ * not be told runs attached instead: one no daemon could find must not
+ * outlive this one. Answers whether it may run detached: told, or no job to
+ * tell. Mirrors Python's `_tell_detached`.
  */
 async function tellDetached(
   runner: ProcessHandle,
   machine: MachineId,
   folder: string,
-): Promise<void> {
-  if (runner.onDetach === null) return
+): Promise<boolean> {
+  if (runner.onDetach === null) return true
   try {
     await runner.onDetach({
       machine: machine.toString(),
@@ -783,7 +819,9 @@ async function tellDetached(
     })
   } catch (error) {
     logger.debug?.(`${machine.toString()}: detached job not recorded: ${String(error)}`)
+    return false
   }
+  return true
 }
 
 /**

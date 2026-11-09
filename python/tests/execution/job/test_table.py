@@ -2217,3 +2217,70 @@ async def test_a_sync_before_adoption_never_hangs_up_a_detached_job():
         await holder.kill_all()
         await holder.close()
         await old.kill_all()
+
+
+# What waits for a job's ending, a detached job's folder removal, runs
+# once the ending is in its entry.
+@pytest.mark.asyncio
+async def test_what_waits_for_a_job_s_ending_runs_once_it_is_recorded():
+    store = RAMExecutionStore(lease_seconds=30.0)
+    table = JobTable(store, ProcessTable())
+    seen: list = []
+
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
+        assert job.process is not None and job.process.after_ending == []
+
+        async def then() -> None:
+            fields = await store.load(job.session_id)
+            seen.append(fields["jobs"][str(job.id)]["state"])
+
+        job.process.after_ending.append(then)
+        return IOResult(exit_code=3), ExecutionNode()
+
+    try:
+        job = await table.submit("train", run, "/", simple=True)
+        assert (await table.wait(job.id)).exit_code == 3
+        await _until(lambda: _seen(seen))
+        assert seen == [JobState.EXITED.value]
+    finally:
+        await table.close()
+
+
+async def _seen(seen: list) -> bool:
+    return bool(seen)
+
+
+# The lease holder never stops a program it adopted, should the daemon
+# that lost the lease republish its record.
+@pytest.mark.asyncio
+async def test_the_lease_holder_never_stops_a_program_it_adopted():
+    store = RAMExecutionStore(lease_seconds=30.0)
+    old, job = await _left_detached(store)
+    stopped: list = []
+
+    async def stopper(record: dict, signum: int) -> bool:
+        stopped.append(record["pid"])
+        return True
+
+    holder = JobTable(store, ProcessTable())
+    holder.run_stopper = stopper
+    holder.resumer = lambda job, sent: asyncio.Event().wait()
+    try:
+        await holder.claim()
+        await store.publish(
+            old.daemon,
+            {
+                str(job.pid): {
+                    "pid": job.pid,
+                    "runtime": "box",
+                    "machine": "docker:t",
+                    "detached": True,
+                }
+            },
+        )
+        await holder._stop_owner(old.daemon)
+        assert stopped == []
+    finally:
+        await holder.kill_all()
+        await holder.close()
+        await old.kill_all()

@@ -14,7 +14,16 @@
 
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -309,8 +318,8 @@ describe('ENCODE_OUTPUT', () => {
 // Python's constants test pins the same digests.
 describe('job scripts', () => {
   it.each([
-    ['start', JOB_START, 'cbdc227c30e0f913'],
-    ['view', JOB_VIEW, 'd2226d4e017eb5fd'],
+    ['start', JOB_START, '2afed504ed9b7356'],
+    ['view', JOB_VIEW, 'c9fae34d6d048244'],
     ['remove', JOB_REMOVE, '7cde63f731a3578a'],
     ['probe', SETSID_PROBE, '16bda6f7218e7026'],
   ])('%s matches Python', (_, script, digest) => {
@@ -389,6 +398,27 @@ describe.skipIf(!detaches)('a detached job in a real sh', () => {
     const folder = fresh()
     expect(startJob(folder, tag(), 'true').status).toBe(0)
     expect(statSync(folder).mode & 0o077).toBe(0)
+  })
+
+  // It ends once what its program started has stopped too, as an attached
+  // run ends once every writer closed its output.
+  it('ends once what it started stopped', () => {
+    const folder = fresh()
+    const program = '(sleep 1; echo late) & echo early; exit 7'
+    expect(startJob(folder, tag(), 'sh', '-c', program).status).toBe(0)
+    const viewed = viewJob(folder)
+    expect(viewed.stdout.toString()).toBe('early\nlate\n')
+    expect(viewed.stderr.toString()).toBe('\0mirage-job 7\n')
+  })
+
+  // Folders the user made writable by others before are made the user's alone
+  // again before the job writes there.
+  it('makes the folders above it private', () => {
+    const jobs = join(fresh(), '..', 'jobs')
+    mkdirSync(jobs)
+    chmodSync(jobs, 0o777)
+    expect(startJob(join(jobs, 'job'), tag(), 'true').status).toBe(0)
+    expect(statSync(jobs).mode & 0o777).toBe(0o700)
   })
 
   it('ends lost when its wrapper or folder went', () => {

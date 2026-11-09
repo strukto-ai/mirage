@@ -453,15 +453,16 @@ JOB_REFUSED_STATUS = 75
 # Starts a detached job: $1 the folder, $2 the tag, then the argv, from
 # the run's cwd. It returns 0 once the wrapper wrote ``pid``,
 # ``JOB_REFUSED_STATUS`` without setsid or a folder of the user's own, and
-# 126 when the wrapper never wrote ``pid``. The folder is the user's
-# alone, under folders no other user owns, so none reads the job's output
-# or swaps its files.
+# 126 when the wrapper never wrote ``pid``. The folder and the two above
+# it are the user's alone, mode 700 and no links, so none reads the job's
+# output or swaps its files.
 JOB_START = (
     f"_mT={TOOLS_PATH}; _ms=$(PATH=$_mT; command -v setsid) || "
     f"exit {JOB_REFUSED_STATUS}; "
     '_md=$1; _mt=$2; shift 2; (umask 077; PATH=$_mT mkdir -p -- "$_md") '
-    '&& [ ! -h "${_md%/*/*}" ] && [ -O "${_md%/*/*}" ] '
-    '&& [ -O "${_md%/*}" ] && [ -O "$_md" ] || '
+    '&& [ ! -h "${_md%/*/*}" ] && [ ! -h "${_md%/*}" ] '
+    '&& PATH=$_mT chmod 700 -- "${_md%/*/*}" "${_md%/*}" "$_md" '
+    '&& [ -O "${_md%/*/*}" ] && [ -O "${_md%/*}" ] && [ -O "$_md" ] || '
     '{ echo "mirage: ${_md%/*}: no folder of this user\'s own" >&2; '
     f"exit {JOB_REFUSED_STATUS}; }}; "
     f'"$_ms" /bin/sh -c {single_quote(JOB_WRAPPER)} '
@@ -473,22 +474,27 @@ JOB_START = (
 # Views a detached job: $1 the folder, $2 and $3 the bytes of ``out`` and
 # ``err`` already delivered. It prints the rest as it is written, each
 # read exactly up to the size measured first, and ends with ``JOB_MARK``:
-# the exit code once ``exit`` holds one, ``JOB_LOST`` once the folder or
-# a wrapper that wrote none is gone. A start the connection dropped gets
-# as long to write ``pid`` as ``JOB_START`` waits for it.
+# the exit code once ``exit`` holds one and no live process is left in the
+# program's group, as an attached run ends once what it started stops
+# writing; ``JOB_LOST`` once the folder or a wrapper that wrote none is
+# gone. A start the connection dropped gets as long to write ``pid`` as
+# ``JOB_START`` waits for it.
 JOB_VIEW = (
     f"PATH={TOOLS_PATH}; d=$1; o=$2; e=$3; "
     f"q() {{ printf '\\000{JOB_MARK[1:]}%s\\n' \"$1\" >&2; exit 0; }}; "
-    f'[ -d "$d" ] || q {JOB_LOST}; w=; v=; i=0; '
+    f'[ -d "$d" ] || q {JOB_LOST}; r=; w=; v=; i=0; '
     'while [ ! -s "$d/pid" ] && [ ! -s "$d/exit" ] && [ $i -lt 100 ]; '
     "do i=$((i + 1)); sleep 0.1; done; "
-    '[ -r "$d/pid" ] && read -r _ w v <"$d/pid"; '
+    '[ -r "$d/pid" ] && read -r r w v <"$d/pid"; '
     'u() { x=; read -r x 2>/dev/null </proc/"$w"/stat || return 1; '
     'set -- ${x##*)}; [ "$1" != Z ] && [ "${20}" = "$v" ]; }; '
+    "k() { for y in /proc/[0-9]*; do x=; "
+    'read -r x 2>/dev/null <"$y/stat" || continue; set -- ${x##*)}; '
+    '[ "$3" = "$r" ] && [ "$1" != Z ] && return 0; done; return 1; }; '
     'p() { n=$(wc -c 2>/dev/null <"$d/$1") || n=$2; n=$((n)); '
     '[ "$n" -gt "$2" ] || { n=$2; return 0; }; '
     'tail -c +$(($2 + 1)) "$d/$1" | head -c $((n - $2)); }; '
-    'while :; do f=; [ -s "$d/exit" ] && f=1; '
+    'while :; do f=; [ -s "$d/exit" ] && ! k && f=1; '
     'p out "$o"; o=$n; p err "$e" >&2; e=$n; '
     'if [ -n "$f" ]; then read -r c <"$d/exit"; q "$c"; fi; '
     f'[ -d "$d" ] || q {JOB_LOST}; u || [ -s "$d/exit" ] || q {JOB_LOST}; '

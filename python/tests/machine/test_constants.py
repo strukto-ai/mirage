@@ -323,8 +323,8 @@ def test_a_sandbox_without_the_encoder_runs_nothing(tmp_path):
 @pytest.mark.parametrize(
     ("script", "digest"),
     [
-        (JOB_START, "cbdc227c30e0f913"),
-        (JOB_VIEW, "d2226d4e017eb5fd"),
+        (JOB_START, "2afed504ed9b7356"),
+        (JOB_VIEW, "c9fae34d6d048244"),
         (JOB_REMOVE, "7cde63f731a3578a"),
         (SETSID_PROBE, "16bda6f7218e7026"),
     ],
@@ -445,3 +445,30 @@ def test_a_job_folder_is_the_users_alone(tmp_path):
     started = _start(other / "job", tag, "true")
     assert started.returncode == JOB_REFUSED_STATUS
     assert b"no folder of this user's own" in started.stderr
+
+
+# A job ends once what its program started has stopped too, as an attached
+# run ends once every writer closed its output: a child's late output is
+# viewed before the end mark.
+@DETACHES
+def test_a_job_ends_once_what_it_started_stopped(tmp_path):
+    folder, tag = tmp_path / "job", f"t{uuid.uuid4().hex}:9"
+    program = "(sleep 1; echo late) & echo early; exit 7"
+    assert _start(folder, tag, "sh", "-c", program).returncode == 0
+    viewed = _view(folder)
+    assert viewed.stdout == b"early\nlate\n"
+    assert viewed.stderr == b"\0mirage-job 7\n"
+
+
+# Folders the user made writable by others before are made the user's
+# alone again before the job writes there.
+@DETACHES
+def test_a_job_folder_s_parents_are_made_private(tmp_path):
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    jobs.chmod(0o777)
+    assert (
+        _start(jobs / "job", f"t{uuid.uuid4().hex}:9", "true").returncode == 0
+    )
+    assert jobs.stat().st_mode & 0o777 == 0o700
+    assert tmp_path.stat().st_mode & 0o777 == 0o700
