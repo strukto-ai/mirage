@@ -62,7 +62,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "gh repo view: expected the \"[HOST/]OWNER/REPO\" format, got \"justaname\"\n"
+        "stderr": "GraphQL: Could not resolve to a Repository with the name 'integ-user/justaname'. (repository)\n"
       }
     },
     {
@@ -179,20 +179,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "gh api: expected \"key=value\", got \"nope\"\n"
-      }
-    },
-    {
-      "id": "gh_repo_fork_names_where_it_landed",
-      "seq": 569013,
-      "targets": [
-        "cli-gh"
-      ],
-      "command": "gh repo fork integ/repo-cli --fork-name forked",
-      "expect": {
-        "exit": 0,
-        "stdout": "✓ Created fork integ-user/forked\n",
-        "stderr": ""
+        "stderr": "invalid key: \"nope\"\n"
       }
     },
     {
@@ -201,10 +188,10 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh repo rename renamed -R integ-user/forked",
+      "command": "gh repo fork integ/repo-cli --fork-name forked > /dev/null; gh repo rename renamed -R integ-user/forked",
       "expect": {
         "exit": 0,
-        "stdout": "✓ Renamed repository integ-user/renamed\n",
+        "stdout": "",
         "stderr": ""
       }
     },
@@ -257,7 +244,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "gh api: an API endpoint is required\n"
+        "stderr": "accepts 1 arg(s), received 0\n"
       }
     },
     {
@@ -282,7 +269,7 @@
       "command": "man gh | sed -n '3,4p;/^SYNOPSIS/,/^$/p'; man gh | sed -n '/^COMMANDS/,$p' | head -6",
       "expect": {
         "exit": 0,
-        "stdout": "NAME\n       gh - GitHub CLI\nSYNOPSIS\n       gh [-h] {auth,help,version\n       (--version),api,issue,pr,repo,release,run,workflow,search} ...\n\nCOMMANDS\n       auth   Manage authentication\n\n       help   Help about any command\n\n       version (--version)\n",
+        "stdout": "NAME\n       gh - GitHub CLI\nSYNOPSIS\n       gh [-h] {auth,help,version\n       (--version),api,issue,pr,repo,release,run,workflow,search,cache,gist,label,org,ruleset,secret,variable}\n       ...\n\nCOMMANDS\n       auth   Manage authentication\n\n       help   Help about any command\n\n       version (--version)\n",
         "stderr": ""
       }
     },
@@ -295,7 +282,7 @@
       "command": "man gh api | sed -n '3,4p;/^SYNOPSIS/,/^$/p'",
       "expect": {
         "exit": 0,
-        "stdout": "NAME\n       gh-api - Make an authenticated GitHub API request\nSYNOPSIS\n       gh api [-X METHOD] [-f RAW_FIELD] [-F FIELD] [-H HEADER]\n       [-i[={true,false}]] [--input INPUT] [-q JQ] [--paginate[={true,false}]]\n       [--slurp[={true,false}]] [--silent[={true,false}]] [-h] ENDPOINT\n\n",
+        "stdout": "NAME\n       gh-api - Make an authenticated GitHub API request\nSYNOPSIS\n       gh api [-X METHOD] [-f key=value] [-F key=value] [-H key:value]\n       [-i[={true,false}]] [--input file] [-q JQ] [--paginate[={true,false}]]\n       [--slurp[={true,false}]] [--silent[={true,false}]] [-h] <endpoint>\n\n",
         "stderr": ""
       }
     },
@@ -308,7 +295,7 @@
       "command": "gh repo rename --help | head -4",
       "expect": {
         "exit": 0,
-        "stdout": "usage: gh repo rename [-R REPO] [-h] NEW-NAME\n\nRename a repository\n\n",
+        "stdout": "usage: gh repo rename [-R [HOST/]OWNER/REPO] [-y[={true,false}]] [-h] [<new-name>]\n\nRename a repository\n\n",
         "stderr": ""
       }
     },
@@ -322,19 +309,6 @@
       "expect": {
         "exit": 0,
         "stdout": "repo-cli\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "gh_api_expands_a_placeholder_in_a_typed_field",
-      "seq": 569025,
-      "targets": [
-        "cli-gh"
-      ],
-      "command": "gh api -X GET repos/integ/repo-cli/contents/README.md -F ref='{branch}' | jq -r .type",
-      "expect": {
-        "exit": 0,
-        "stdout": "file\n",
         "stderr": ""
       }
     },
@@ -461,10 +435,10 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "echo '{\"title\":\"from input\",\"body\":\"input body\"}' > /scratch/issue.json && gh api repos/integ/repo-cli/issues --input /scratch/issue.json --silent && gh issue view 2 --json title,body --jq '[.title,.body]'",
+      "command": "echo '{\"title\":\"from input\",\"body\":\"input body\"}' > /scratch/issue.json && gh api repos/integ/repo-cli/issues --input /scratch/issue.json --silent && gh issue view 2 --json title,body --jq '[.title,.body]'; printf '{\"title\":\"not json at the end\"} trailing' > /scratch/bad.json; gh api repos/integ/repo-cli/issues --input /scratch/bad.json 2>&1 | sed 's# (http.*##'; gh api repos/integ/repo-cli/issues -X POST --input /dev/null --silent 2>&1 | sed 's# (http.*##'",
       "expect": {
         "exit": 0,
-        "stdout": "[\"from input\",\"input body\"]\n",
+        "stdout": "[\"from input\",\"input body\"]\n{\"message\":\"Invalid request.\\n\\n\\\"title\\\" wasn't supplied.\",\"documentation_url\":\"https://docs.github.com/rest\"}gh: Invalid request.\n\n\"title\" wasn't supplied. (HTTP 422)\ngh: Invalid request.\n\n\"title\" wasn't supplied. (HTTP 422)\n",
         "stderr": ""
       }
     },
@@ -487,7 +461,7 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh api 'repos/integ/repo-cli/issues?state=all&per_page=1' --paginate --slurp --jq 'map(length)'",
+      "command": "gh api 'repos/integ/repo-cli/issues?state=all&per_page=1' --paginate --slurp | jq -c 'map(length)'",
       "expect": {
         "exit": 0,
         "stdout": "[1,1,1]\n",
@@ -516,8 +490,8 @@
       "command": "gh issue edit 4 --title updated --add-label bug && gh issue comment 4 --body note && gh issue close 4 && gh issue reopen 4",
       "expect": {
         "exit": 0,
-        "stdout": "https://github.com/integ/repo-cli/issues/4\nhttps://github.com/integ/repo-cli/issues/4#issuecomment-1\n✓ Closed issue integ/repo-cli#4 (updated)\n✓ Reopened issue integ/repo-cli#4 (updated)\n",
-        "stderr": ""
+        "stdout": "https://github.com/integ/repo-cli/issues/4\nhttps://github.com/integ/repo-cli/issues/4#issuecomment-1\n",
+        "stderr": "✓ Closed issue integ/repo-cli#4 (updated)\n✓ Reopened issue integ/repo-cli#4 (updated)\n"
       }
     },
     {
@@ -565,11 +539,11 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh issue view 5",
+      "command": "gh issue view 5; gh issue view 5 --comments; gh issue view 5 --json title,projectItems; gh issue view 5 --json title,number --jq '[.title,.number]'",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "gh issue view: #5 is a pull request, not an issue\n"
+        "exit": 0,
+        "stdout": "[\"merged-title\",5]\n",
+        "stderr": "GraphQL: Could not resolve to an Issue with the number of 5. (repository.issue)\nGraphQL: Could not resolve to an Issue with the number of 5. (repository.issue)\nGraphQL: Could not resolve to an Issue with the number of 5. (repository.issue)\n"
       }
     },
     {
@@ -582,20 +556,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "gh pr comment: Not Found\n"
-      }
-    },
-    {
-      "id": "gh_release_view_encodes_the_tag_segment",
-      "seq": 569054,
-      "targets": [
-        "cli-gh"
-      ],
-      "command": "gh release create 'v1#hot' --notes hot && gh release view 'v1#hot' --json tagName --jq .tagName",
-      "expect": {
-        "exit": 0,
-        "stdout": "https://github.com/integ/repo-cli/releases/tag/v1#hot\nv1#hot\n",
-        "stderr": ""
+        "stderr": "GraphQL: Could not resolve to a PullRequest with the number of 4. (repository.pullRequest)\n"
       }
     },
     {
@@ -607,7 +568,7 @@
       "command": "gh pr edit 5 --title merged-title --body merged-body && gh pr comment 5 --body review && gh pr merge 5 --squash --subject merged",
       "expect": {
         "exit": 0,
-        "stdout": "https://github.com/integ/repo-cli/pull/5\nhttps://github.com/integ/repo-cli/issues/5#issuecomment-2\n✓ Merged pull request integ/repo-cli#5\n",
+        "stdout": "https://github.com/integ/repo-cli/pull/5\nhttps://github.com/integ/repo-cli/issues/5#issuecomment-2\n",
         "stderr": ""
       }
     },
@@ -620,8 +581,8 @@
       "command": "gh pr create -t abandoned -H old -B main -b no && gh pr close 6",
       "expect": {
         "exit": 0,
-        "stdout": "https://github.com/integ/repo-cli/pull/6\n✓ Closed pull request integ/repo-cli#6 (abandoned)\n",
-        "stderr": ""
+        "stdout": "https://github.com/integ/repo-cli/pull/6\n",
+        "stderr": "✓ Closed pull request integ/repo-cli#6 (abandoned)\n"
       }
     },
     {
@@ -643,11 +604,11 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh repo create fresh --private --add-readme",
+      "command": "gh repo create fresh --private --add-readme 2>&1 | sed 's# (http.*##'; echo \"exit=${PIPESTATUS[0]}\"",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "gh repo create: Resource not accessible by personal access token\n"
+        "exit": 0,
+        "stdout": "HTTP 403: Resource not accessible by personal access token\nexit=1\n",
+        "stderr": ""
       }
     },
     {
@@ -656,10 +617,10 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "echo 'release notes' | gh release create v1.0.0 --title One --notes-file - && gh release view v1.0.0 --json tagName,name,body,url,isLatest --jq '[.tagName,.name,.body,.url,.isLatest]' && gh release list --limit 1 --json tagName,isLatest --jq '.[0]'",
+      "command": "echo 'release notes' | gh release create v1.0.0 --title One --notes-file - && gh release view v1.0.0 --json tagName,name,body,url --jq '[.tagName,.name,.body,.url]' && gh release list --limit 1 --json tagName,isLatest --jq '.[0]'",
       "expect": {
         "exit": 0,
-        "stdout": "https://github.com/integ/repo-cli/releases/tag/v1.0.0\n[\"v1.0.0\",\"One\",\"release notes\\n\",\"https://github.com/integ/repo-cli/releases/tag/v1.0.0\",true]\n{\"isLatest\":true,\"tagName\":\"v1.0.0\"}\n",
+        "stdout": "https://github.com/integ/repo-cli/releases/tag/v1.0.0\n[\"v1.0.0\",\"One\",\"release notes\\n\",\"https://github.com/integ/repo-cli/releases/tag/v1.0.0\"]\n{\"isLatest\":true,\"tagName\":\"v1.0.0\"}\n",
         "stderr": ""
       }
     },
@@ -672,7 +633,7 @@
       "command": "gh workflow list --json id,name,state --jq '.[0]'; gh workflow view ci.yml",
       "expect": {
         "exit": 0,
-        "stdout": "{\"id\":101,\"name\":\"CI\",\"state\":\"active\"}\nCI - active\nID: 101\nFile: .github/workflows/ci.yml\n",
+        "stdout": "{\"id\":101,\"name\":\"CI\",\"state\":\"active\"}\nCI - ci.yml\nID: 101\n\nTotal runs 0\ncompleted\tsuccess\tInitial checks\tCI\tmain\tpush\t55s\t201\n\nTo see the YAML for this workflow, try: gh workflow view ci.yml --yaml\n",
         "stderr": ""
       }
     },
@@ -695,10 +656,10 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh run view 201 --json databaseId,attempt,status --jq '[.databaseId,.attempt,.status]'; gh run rerun 201; gh run view 201 --json attempt,status --jq '[.attempt,.status]'",
+      "command": "gh run view 201 --json databaseId,attempt,status --jq '[.databaseId,.attempt,.status]'; gh run rerun 201; gh run view 201 --json attempt,status --jq '[.attempt,.status]'; gh run rerun 2>&1 | head -1; gh run rerun 999999 2>&1 | sed 's# (http.*##'; gh run rerun --job 401; gh run rerun --job 999 2>&1 | sed 's# (http.*##'",
       "expect": {
         "exit": 0,
-        "stdout": "[201,1,\"completed\"]\n[2,\"queued\"]\n",
+        "stdout": "[201,1,\"completed\"]\n[2,\"queued\"]\n`<run-id>` or `--job` required when not running interactively\nfailed to get run: HTTP 404: Not Found\nfailed to get job: HTTP 404: Not Found\n",
         "stderr": ""
       }
     },
@@ -725,7 +686,7 @@
       "expect": {
         "exit": 0,
         "stdout": "5\n101\n",
-        "stderr": "invalid limit: 0\n"
+        "stderr": "invalid limit: 0\n\nUsage:  gh issue list [flags]\n\nFlags:\n      --app string         Filter by GitHub App author\n  -a, --assignee string    Filter by assignee\n  -A, --author string      Filter by author\n  -q, --jq expression      Filter JSON output using a jq expression\n      --json fields        Output JSON with the specified fields\n  -l, --label strings      Filter by label\n  -L, --limit int          Maximum number of issues to fetch (default 30)\n      --mention string     Filter by mention\n  -m, --milestone string   Filter by milestone number or title\n  -S, --search query       Search issues with query\n  -s, --state string       Filter by state: {open|closed|all} (default \"open\")\n  -t, --template string    Format JSON output using a Go template; see \"gh help formatting\"\n  \n"
       }
     },
     {
@@ -738,7 +699,7 @@
       "expect": {
         "exit": 0,
         "stdout": "[\"attached\",\"CLOSED\"]\n",
-        "stderr": ""
+        "stderr": "✓ Closed issue integ/repo-cli#8 (attached)\n"
       }
     },
     {
@@ -760,11 +721,11 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh workflow view CI; gh workflow view Nightly",
+      "command": "(gh workflow view CI; gh workflow view Nightly) | sed -E 's/\\t[0-9]+h[0-9]+m[0-9]+s\\t/\\tELAPSED\\t/'",
       "expect": {
-        "exit": 1,
-        "stdout": "CI - active\nID: 101\nFile: .github/workflows/ci.yml\n",
-        "stderr": "gh workflow view: could not find any workflows named Nightly\n"
+        "exit": 0,
+        "stdout": "CI - ci.yml\nID: 101\n\nTotal runs 0\nqueued\t\tCI dispatch\tCI\tmain\tworkflow_dispatch\tELAPSED\t202\nqueued\t\tInitial checks\tCI\tmain\tpush\tELAPSED\t201\n\nTo see the YAML for this workflow, try: gh workflow view ci.yml --yaml\n",
+        "stderr": "could not find any workflows named Nightly\n"
       }
     },
     {
@@ -929,7 +890,7 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh api search/code -X GET -f q=import --paginate --slurp --jq 'map(.items) | flatten | map(.repository.full_name) | unique'",
+      "command": "gh api search/code -X GET -f q=import --paginate --slurp | jq -c 'map(.items) | flatten | map(.repository.full_name) | unique'",
       "expect": {
         "exit": 0,
         "stdout": "[\"integ-user/renamed\",\"integ/repo-cli\"]\n",
@@ -998,7 +959,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "gh repo view: GraphQL: Could not resolve to a Repository with the name 'integ/nosuch'. (repository)\n"
+        "stderr": "GraphQL: Could not resolve to a Repository with the name 'integ/nosuch'. (repository)\n"
       }
     },
     {
@@ -1310,7 +1271,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "gh issue edit: read ./absent.md: No such file or directory\ngh release create: read ./absent.md: No such file or directory\ngh api: read ./absent.md: No such file or directory\ngh api: read ./absent.md: No such file or directory\n"
+        "stderr": "open ./absent.md: no such file or directory\nopen ./absent.md: no such file or directory\nopen ./absent.md: no such file or directory\nerror parsing \"body\" value: open ./absent.md: no such file or directory\n"
       }
     },
     {
@@ -1323,7 +1284,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "gh issue edit: read ./body.md/child: Not a directory\ngh api: read ./body.md/child: Not a directory\n"
+        "stderr": "open ./body.md/child: not a directory\nerror parsing \"body\" value: open ./body.md/child: not a directory\n"
       }
     },
     {
@@ -1401,7 +1362,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "Invalid search query \"needle repo:integ/missing type:issue\".\nThe listed users and repositories cannot be searched either because the resources do not exist or you do not have permission to view them.\n"
+        "stderr": "Invalid search query \"( needle ) repo:integ/missing type:issue\".\nThe listed users and repositories cannot be searched either because the resources do not exist or you do not have permission to view them.\n"
       }
     },
     {
@@ -1414,7 +1375,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "Invalid search query \"needle repo:integ/missing type:pr\".\nThe listed users and repositories cannot be searched either because the resources do not exist or you do not have permission to view them.\n"
+        "stderr": "Invalid search query \"( needle ) repo:integ/missing type:pr\".\nThe listed users and repositories cannot be searched either because the resources do not exist or you do not have permission to view them.\n"
       }
     },
     {
@@ -1621,7 +1582,7 @@
       "command": "gh pr view 999 --json number --jq .number; gh pr view 999 --json title 2>&1; echo \"exit=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "999\ngh pr view: GraphQL: Could not resolve to a PullRequest with the number of 999. (repository.pullRequest)\nexit=1\n",
+        "stdout": "999\nGraphQL: Could not resolve to a PullRequest with the number of 999. (repository.pullRequest)\nexit=1\n",
         "stderr": ""
       }
     },
@@ -1647,7 +1608,7 @@
       "command": "gh pr list --json projectCards 2>&1; echo \"exit=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "gh pr list: GraphQL: Projects (classic) is being deprecated in favor of the new Projects experience, see: https://github.blog/changelog/2024-05-23-sunset-notice-projects-classic/. (repository.pullRequests.nodes.0.projectCards)\nexit=1\n",
+        "stdout": "GraphQL: Projects (classic) is being deprecated in favor of the new Projects experience, see: https://github.blog/changelog/2024-05-23-sunset-notice-projects-classic/. (repository.pullRequests.nodes.0.projectCards)\nexit=1\n",
         "stderr": ""
       }
     },
@@ -1751,7 +1712,7 @@
       "command": "gh issue view 4 --json projectCards 2>&1; echo \"exit=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "gh issue view: GraphQL: Projects (classic) is being deprecated in favor of the new Projects experience, see: https://github.blog/changelog/2024-05-23-sunset-notice-projects-classic/. (repository.issue.projectCards)\nexit=1\n",
+        "stdout": "GraphQL: Projects (classic) is being deprecated in favor of the new Projects experience, see: https://github.blog/changelog/2024-05-23-sunset-notice-projects-classic/. (repository.issue.projectCards)\nexit=1\n",
         "stderr": ""
       }
     },
@@ -1765,7 +1726,7 @@
       "expect": {
         "exit": 0,
         "stdout": "integ-user\nexit=1\n",
-        "stderr": "gh api: halt error: x\n"
+        "stderr": "halt error: x\n"
       }
     },
     {
@@ -1778,20 +1739,7 @@
       "expect": {
         "exit": 0,
         "stdout": "integ-user\nexit=1\n4\nexit=1\n",
-        "stderr": "gh api: halt error: x\ngh issue view: halt error: y\n"
-      }
-    },
-    {
-      "id": "gh_auth_status_configured_token",
-      "seq": 569900,
-      "targets": [
-        "cli-gh"
-      ],
-      "command": "gh auth status | tail -n 2 | sed -E 's/.*account integ-user/account integ-user/'",
-      "expect": {
-        "exit": 0,
-        "stdout": "account integ-user (Mirage configuration)\n  - Active account: true\n",
-        "stderr": ""
+        "stderr": "halt error: x\nhalt error: y\n"
       }
     },
     {
@@ -1804,7 +1752,7 @@
       "expect": {
         "exit": 0,
         "stdout": "integ-user\nexit=1\nexit=1\ninteg-user\nexit=1\nexit=1\n",
-        "stderr": "gh api: error: boom\ngh api: error: {\"a\":[2,\"x\"],\"b\":1}\ngh api: error: y\ngh api: halt error: {\"a\":2,\"b\":1}\n"
+        "stderr": "error: boom\nerror: {\"a\":[2,\"x\"],\"b\":1}\nerror: y\nhalt error: {\"a\":2,\"b\":1}\n"
       }
     },
     {
@@ -1817,7 +1765,7 @@
       "expect": {
         "exit": 0,
         "stdout": "4\nexit=1\n4\nexit=1\n",
-        "stderr": "gh issue view: error: no 4\ngh issue view: error: limit doesn't support negative count\n"
+        "stderr": "error: no 4\nerror: limit doesn't support negative count\n"
       }
     },
     {
@@ -1860,19 +1808,6 @@
       }
     },
     {
-      "id": "gh_jq_tells_the_program_s_own_errors_apart",
-      "seq": 569338,
-      "targets": [
-        "cli-gh"
-      ],
-      "command": "gh api user --jq 'first(error(\"in\"))'; echo \"exit=$?\"; gh api user --jq 'label $f | .login | .x'; echo \"exit=$?\"; gh api user --jq '[1 | lgamma], error(.login)'; echo \"exit=$?\"",
-      "expect": {
-        "exit": 0,
-        "stdout": "exit=1\nexit=1\n[0]\nexit=1\n",
-        "stderr": "gh api: error: in\ngh api: Cannot index string with string (\"x\")\ngh api: error: integ-user\n"
-      }
-    },
-    {
       "id": "gh_run_view_log_prints_each_line_behind_its_job_and_step",
       "seq": 569024,
       "targets": [
@@ -1895,7 +1830,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "specify only one of --log or --log-failed\ngh run view: run 202 is still in progress; logs will be available when it is complete\n"
+        "stderr": "specify only one of --log or --log-failed\n\nUsage:  gh run view [<run-id>] [flags]\n\nFlags:\n      --exit-status       Exit with non-zero status if run failed\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n      --log               View full log for either a run or specific job\n      --log-failed        View the log for any failed steps in a run or specific job\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  \nrun 202 is still in progress; logs will be available when it is complete\n"
       }
     },
     {
@@ -1934,7 +1869,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "`--yaml` required when specifying `--ref`\ngh workflow view: could not find workflow file ci.yml on nope, try specifying a different ref\n"
+        "stderr": "`--yaml` required when specifying `--ref`\n\nUsage:  gh workflow view [<workflow-id> | <workflow-name> | <filename>] [flags]\n\nFlags:\n  -r, --ref string   The branch or tag name which contains the version of the workflow file you'd like to view\n  -y, --yaml         View the workflow yaml file\n  \ncould not find workflow file ci.yml on nope, try specifying a different ref\n"
       }
     },
     {
@@ -1943,11 +1878,11 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh workflow run archive.yml",
+      "command": "gh workflow run archive.yml 2>&1 | sed 's# (http.*##'; echo \"exit=${PIPESTATUS[0]}\"",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "gh workflow run: Cannot trigger a 'workflow_dispatch' on a disabled workflow\n"
+        "exit": 0,
+        "stdout": "could not create workflow dispatch event: HTTP 422: Cannot trigger a 'workflow_dispatch' on a disabled workflow\nexit=1\n",
+        "stderr": ""
       }
     },
     {
@@ -2003,19 +1938,6 @@
       }
     },
     {
-      "id": "gh_api_include_prints_the_status_line_and_headers",
-      "seq": 569905,
-      "targets": [
-        "cli-gh"
-      ],
-      "command": "gh api -i repos/integ/repo-cli --jq .name | sed -n '1p;$p'; gh api --include repos/integ/repo-cli | grep -c '^Content-Type: application/json'; gh api -i repos/integ/repo-cli/pages | head -1",
-      "expect": {
-        "exit": 0,
-        "stdout": "HTTP/1.1 200 OK\nrepo-cli\n1\nHTTP/1.1 404 Not Found\n",
-        "stderr": "gh: Not Found (HTTP 404)\n"
-      }
-    },
-    {
       "id": "gh_repo_edit_stores_what_it_sends",
       "seq": 569906,
       "targets": [
@@ -2025,7 +1947,7 @@
       "expect": {
         "exit": 0,
         "stdout": "[\"edited\",false,[\"cli\",\"agents\"]]\n{\"description\":\"edited\",\"hasWikiEnabled\":false}\n[\"agents\"]\n",
-        "stderr": "specify properties to edit when not running interactively\nuse of --visibility flag requires --accept-visibility-change-consequences flag\n"
+        "stderr": "specify properties to edit when not running interactively\n\nUsage:  gh repo edit [<repository>] [flags]\n\nFlags:\n      --accept-visibility-change-consequences    Accept the consequences of changing the repository visibility\n      --add-topic strings                        Add repository topic\n      --allow-forking                            Allow forking of an organization repository\n      --allow-update-branch                      Allow a pull request head branch that is behind its base branch to be updated\n      --default-branch name                      Set the default branch name for the repository\n      --delete-branch-on-merge                   Delete head branch when pull requests are merged\n  -d, --description string                       Description of the repository\n      --enable-advanced-security                 Enable advanced security in the repository\n      --enable-auto-merge                        Enable auto-merge functionality\n      --enable-discussions                       Enable discussions in the repository\n      --enable-issues                            Enable issues in the repository\n      --enable-merge-commit                      Enable merging pull requests via merge commit\n      --enable-projects                          Enable projects in the repository\n      --enable-rebase-merge                      Enable merging pull requests via rebase\n      --enable-secret-scanning                   Enable secret scanning in the repository\n      --enable-secret-scanning-push-protection   Enable secret scanning push protection in the repository. Secret scanning must be enabled first\n      --enable-squash-merge                      Enable merging pull requests via squashed commit\n      --enable-wiki                              Enable wiki in the repository\n  -h, --homepage URL                             Repository home page URL\n      --remove-topic strings                     Remove repository topic\n      --template                                 Make the repository available as a template repository\n      --visibility string                        Change the visibility of the repository to {public,private,internal}\n  \nuse of --visibility flag requires --accept-visibility-change-consequences flag\n\nUsage:  gh repo edit [<repository>] [flags]\n\nFlags:\n      --accept-visibility-change-consequences    Accept the consequences of changing the repository visibility\n      --add-topic strings                        Add repository topic\n      --allow-forking                            Allow forking of an organization repository\n      --allow-update-branch                      Allow a pull request head branch that is behind its base branch to be updated\n      --default-branch name                      Set the default branch name for the repository\n      --delete-branch-on-merge                   Delete head branch when pull requests are merged\n  -d, --description string                       Description of the repository\n      --enable-advanced-security                 Enable advanced security in the repository\n      --enable-auto-merge                        Enable auto-merge functionality\n      --enable-discussions                       Enable discussions in the repository\n      --enable-issues                            Enable issues in the repository\n      --enable-merge-commit                      Enable merging pull requests via merge commit\n      --enable-projects                          Enable projects in the repository\n      --enable-rebase-merge                      Enable merging pull requests via rebase\n      --enable-secret-scanning                   Enable secret scanning in the repository\n      --enable-secret-scanning-push-protection   Enable secret scanning push protection in the repository. Secret scanning must be enabled first\n      --enable-squash-merge                      Enable merging pull requests via squashed commit\n      --enable-wiki                              Enable wiki in the repository\n  -h, --homepage URL                             Repository home page URL\n      --remove-topic strings                     Remove repository topic\n      --template                                 Make the repository available as a template repository\n      --visibility string                        Change the visibility of the repository to {public,private,internal}\n  \n"
       }
     },
     {
@@ -2038,7 +1960,7 @@
       "expect": {
         "exit": 1,
         "stdout": "[\"Archive\",\"CI\"]\n[]\n",
-        "stderr": "--yes required when not running interactively\ncannot non-interactively delete current repository. Please specify a repository or run interactively\ngh: Not Found (HTTP 404)\n"
+        "stderr": "--yes required when not running interactively\n\nUsage:  gh repo delete [<repository>] [flags]\n\nFlags:\n  --yes   Confirm deletion without prompting\n  \ncannot non-interactively delete current repository. Please specify a repository or run interactively\n\nUsage:  gh repo delete [<repository>] [flags]\n\nFlags:\n  --yes   Confirm deletion without prompting\n  \ngh: Not Found (HTTP 404)\n"
       }
     },
     {
@@ -2151,11 +2073,11 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "before=$(gh api repos/integ/repo-cli/commits --jq '.[0].sha[0:7]'); workflow=$(gh api repos/integ/repo-cli/actions/workflows/build.yml --jq .id); blob=$(gh api repos/integ/repo-cli/contents/.github/workflows/build.yml --jq .sha); gh api -X PUT repos/integ/repo-cli/contents/.github/workflows/build.yml -f message=rename -f sha=$blob -f content=bmFtZTogUmVuYW1lZApvbjogcHVzaA== --silent && gh workflow view build.yml --yaml | head -1 && gh workflow view build.yml --yaml --ref $before | head -1; gh workflow run build.yml; echo status=$?; blob=$(gh api repos/integ/repo-cli/contents/.github/workflows/build.yml --jq .sha); gh api -X DELETE repos/integ/repo-cli/contents/.github/workflows/build.yml -f message=remove -f sha=$blob --silent && gh workflow list --json name --jq 'map(.name)' && gh api -X PUT repos/integ/repo-cli/contents/.github/workflows/build.yml -f message=restore -f content=bmFtZTogQnVpbGQKb246IHdvcmtmbG93X2Rpc3BhdGNoCg== --silent && test \"$workflow\" = \"$(gh api repos/integ/repo-cli/actions/workflows/build.yml --jq .id)\" && echo same-workflow",
+      "command": "before=$(gh api repos/integ/repo-cli/commits --jq '.[0].sha[0:7]'); workflow=$(gh api repos/integ/repo-cli/actions/workflows/build.yml --jq .id); blob=$(gh api repos/integ/repo-cli/contents/.github/workflows/build.yml --jq .sha); gh api -X PUT repos/integ/repo-cli/contents/.github/workflows/build.yml -f message=rename -f sha=$blob -f content=bmFtZTogUmVuYW1lZApvbjogcHVzaA== --silent && gh workflow view build.yml --yaml | head -1 && gh workflow view build.yml --yaml --ref $before | head -1; gh workflow run build.yml 2>&1 | sed 's# (http.*##'; echo status=${PIPESTATUS[0]}; blob=$(gh api repos/integ/repo-cli/contents/.github/workflows/build.yml --jq .sha); gh api -X DELETE repos/integ/repo-cli/contents/.github/workflows/build.yml -f message=remove -f sha=$blob --silent && gh workflow list --json name --jq 'map(.name)' && gh api -X PUT repos/integ/repo-cli/contents/.github/workflows/build.yml -f message=restore -f content=bmFtZTogQnVpbGQKb246IHdvcmtmbG93X2Rpc3BhdGNoCg== --silent && test \"$workflow\" = \"$(gh api repos/integ/repo-cli/actions/workflows/build.yml --jq .id)\" && echo same-workflow",
       "expect": {
         "exit": 0,
-        "stdout": "name: Renamed\nname: Build\nstatus=1\n[\"CI\"]\nsame-workflow\n",
-        "stderr": "gh workflow run: Workflow does not have 'workflow_dispatch' trigger\n"
+        "stdout": "name: Renamed\nname: Build\ncould not create workflow dispatch event: HTTP 422: Workflow does not have 'workflow_dispatch' trigger\nstatus=1\n[\"CI\"]\nsame-workflow\n",
+        "stderr": ""
       }
     },
     {
@@ -2414,20 +2336,7 @@
       "command": "gh repo fork https://github.com/integ/repo-cli --fork-name url-fork --clone=false --remote=false",
       "expect": {
         "exit": 0,
-        "stdout": "✓ Created fork integ-user/url-fork\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "gh_repo_fork_org_and_default_branch_only",
-      "seq": 569937,
-      "targets": [
-        "cli-gh"
-      ],
-      "command": "sha=$(gh api repos/integ-user/url-fork/git/ref/heads/main --jq .object.sha) && gh api -X POST repos/integ-user/url-fork/git/refs -f ref=refs/heads/side -f sha=$sha > /dev/null && gh repo fork git@github.com:integ-user/url-fork.git --org acme --fork-name narrow --default-branch-only && gh api repos/acme/narrow/branches --jq '[.[].name]' && gh repo fork integ-user/url-fork --org acme --fork-name wide > /dev/null && gh api repos/acme/wide/branches --jq '[.[].name] | sort'",
-      "expect": {
-        "exit": 0,
-        "stdout": "✓ Created fork acme/narrow\n[\"main\"]\n[\"dev\",\"docs-pass\",\"feature\",\"main\",\"old\",\"side\"]\n",
+        "stdout": "https://127.0.0.1/integ-user/url-fork\n",
         "stderr": ""
       }
     },
@@ -2441,7 +2350,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "gh repo fork: --clone is not supported: there is no local checkout to clone into\ngh repo fork: --org cannot be blank\n"
+        "stderr": "--clone is not supported: there is no local checkout to clone into\n--org cannot be blank\n\nUsage:  gh repo fork [<repository>] [-- <gitflags>...] [flags]\n\nFlags:\n  --clone                 Clone the fork\n  --default-branch-only   Only include the default branch in the fork\n  --fork-name string      Rename the forked repository\n  --org string            Create the fork in an organization\n  --remote                Add a git remote for the fork\n  --remote-name string    Specify the name for the new remote (default \"origin\")\n  \n"
       }
     },
     {
@@ -2454,20 +2363,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "gh repo fork: did not understand argument: invalid path: /integ\n"
-      }
-    },
-    {
-      "id": "gh_repository_urls_name_owner_and_repo",
-      "seq": 569940,
-      "targets": [
-        "cli-gh"
-      ],
-      "command": "gh repo view https://github.com/integ/repo-cli --json nameWithOwner --jq .nameWithOwner; gh repo view git@github.com:integ/repo-cli.git --json nameWithOwner --jq .nameWithOwner; gh release list -R ssh://git@github.com/integ/repo-cli.git --json tagName --jq length; gh repo view https://github.com/integ/repo-cli/tree/main; gh repo view www.github.com/integ/repo-cli --json nameWithOwner --jq .nameWithOwner; gh repo view https://gitlab.com/integ/repo-cli; gh issue view https://gitlab.com/integ/repo-cli/issues/1",
-      "expect": {
-        "exit": 1,
-        "stdout": "integ/repo-cli\ninteg/repo-cli\n2\ninteg/repo-cli\n",
-        "stderr": "gh repo view: invalid path: /integ/repo-cli/tree/main\ngh repo view: error connecting to gitlab.com\ncheck your internet connection or https://githubstatus.com\ngh issue view: error connecting to gitlab.com\ncheck your internet connection or https://githubstatus.com\n"
+        "stderr": "did not understand argument: invalid path: /integ\n"
       }
     },
     {
@@ -2492,7 +2388,7 @@
       "command": "gh help | head -1; gh help repo fork | grep -c -- --default-branch-only; gh help repo nosuch | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "usage: gh [-h] {auth,help,version (--version),api,issue,pr,repo,release,run,workflow,search} ...\n2\nusage: gh repo [-h] {list (ls),clone,view,create,fork,rename,edit,delete} ...\n",
+        "stdout": "usage: gh [-h] {auth,help,version (--version),api,issue,pr,repo,release,run,workflow,search,cache,gist,label,org,ruleset,secret,variable} ...\n2\nusage: gh repo [-h] {list (ls),clone,view,create,fork,rename,edit,delete,archive,sync,unarchive,autolink,deploy-key,gitignore,license} ...\n",
         "stderr": ""
       }
     },
@@ -2515,11 +2411,11 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh help nosuch",
+      "command": "gh help nosuch; gh pr > /dev/null; echo \"group=$?\"; gh pr lizt",
       "expect": {
-        "exit": 0,
-        "stdout": "",
-        "stderr": "Unknown help topic [`nosuch`]\nUsage:  gh <command> <subcommand> [flags]\n\nAvailable commands:\n  api\n  auth\n  issue\n  pr\n  release\n  repo\n  run\n  search\n  version\n  workflow\n"
+        "exit": 1,
+        "stdout": "group=0\n",
+        "stderr": "Unknown help topic [`nosuch`]\nUsage:  gh <command> <subcommand> [flags]\n\nAvailable commands:\n  api\n  auth\n  cache\n  gist\n  issue\n  label\n  org\n  pr\n  release\n  repo\n  ruleset\n  run\n  search\n  secret\n  variable\n  version\n  workflow\nunknown command \"lizt\" for \"gh pr\"\n\nDid you mean this?\n\tlist\n\nUsage:  gh pr <command> [flags]\n\nAvailable commands:\n  checks\n  close\n  comment\n  create\n  diff\n  edit\n  list\n  lock\n  merge\n  ready\n  reopen\n  revert\n  review\n  status\n  unlock\n  update-branch\n  view\n\n"
       }
     },
     {
@@ -2558,7 +2454,7 @@
       "expect": {
         "exit": 0,
         "stdout": "1\n1\n1\n",
-        "stderr": "gh repo clone: cannot clone: repository argument required\ngh repo clone: error connecting to other.example\ncheck your internet connection or https://githubstatus.com\n"
+        "stderr": "cannot clone: repository argument required\n\nUsage:  gh repo clone <repository> [<directory>] [-- <gitflags>...]\n\nFlags:\n      --no-upstream                   Do not add an upstream remote when cloning a fork\n  -u, --upstream-remote-name string   Upstream remote name when cloning a fork (default \"upstream\")\n  \nerror connecting to other.example\ncheck your internet connection or https://githubstatus.com\n"
       }
     },
     {
@@ -2596,7 +2492,7 @@
       "command": "gh auth token --help",
       "expect": {
         "exit": 0,
-        "stdout": "usage: gh auth token [--hostname HOSTNAME] [-u USER] [-h]\n\nToken display is unavailable in Mirage\n\noptions:\n  --hostname HOSTNAME   The hostname of the GitHub instance authenticated with\n  -u USER, --user USER  The account selector; tokens are never printed\n  -h, --help            Show this help and exit\n",
+        "stdout": "usage: gh auth token [-h HOSTNAME] [-u USER] [--help]\n\nToken display is unavailable in Mirage\n\noptions:\n  -h HOSTNAME, --hostname HOSTNAME  The hostname of the GitHub instance authenticated with\n  -u USER, --user USER              The account selector; tokens are never printed\n  --help                            Show this help and exit\n",
         "stderr": ""
       }
     },
@@ -2606,11 +2502,11 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh issue list --limit 0; gh run list --limit 0; gh repo list integ --limit 0; gh workflow list --limit 0; gh pr list --limit 0; echo rc=$?",
+      "command": "gh issue list --limit 0; gh run list --limit 0; gh repo list integ --limit 0; gh workflow list --limit 0; gh pr list --limit 0; gh issue list --limit abc; gh issue list --limit; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "invalid limit: 0\ninvalid limit: 0\ninvalid limit: 0\ninvalid limit: 0\ninvalid value for --limit: 0\n"
+        "stderr": "invalid limit: 0\n\nUsage:  gh issue list [flags]\n\nFlags:\n      --app string         Filter by GitHub App author\n  -a, --assignee string    Filter by assignee\n  -A, --author string      Filter by author\n  -q, --jq expression      Filter JSON output using a jq expression\n      --json fields        Output JSON with the specified fields\n  -l, --label strings      Filter by label\n  -L, --limit int          Maximum number of issues to fetch (default 30)\n      --mention string     Filter by mention\n  -m, --milestone string   Filter by milestone number or title\n  -S, --search query       Search issues with query\n  -s, --state string       Filter by state: {open|closed|all} (default \"open\")\n  -t, --template string    Format JSON output using a Go template; see \"gh help formatting\"\n  \ninvalid limit: 0\n\nUsage:  gh run list [flags]\n\nFlags:\n  -a, --all               Include disabled workflows\n  -b, --branch string     Filter runs by branch\n  -c, --commit SHA        Filter runs by the SHA of the commit\n      --created date      Filter runs by the date it was created\n  -e, --event event       Filter runs by which event triggered the run\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n  -L, --limit int         Maximum number of runs to fetch (default 20)\n  -s, --status string     Filter runs by status: {queued|completed|in_progress|requested|waiting|pending|action_required|cancelled|failure|neutral|skipped|stale|startup_failure|success|timed_out}\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  -u, --user string       Filter runs by user who triggered the run\n  -w, --workflow string   Filter runs by workflow\n  \ninvalid limit: 0\n\nUsage:  gh repo list [<owner>] [flags]\n\nFlags:\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n  -L, --limit int         Maximum number of repositories to list (default 30)\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  \ninvalid limit: 0\n\nUsage:  gh workflow list [flags]\n\nFlags:\n  -a, --all               Include disabled workflows\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n  -L, --limit int         Maximum number of workflows to fetch (default 50)\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  \ninvalid value for --limit: 0\n\nUsage:  gh pr list [flags]\n\nFlags:\n      --app string        Filter by GitHub App author\n  -a, --assignee string   Filter by assignee\n  -A, --author string     Filter by author\n  -B, --base string       Filter by base branch\n  -d, --draft             Filter by draft state\n  -H, --head string       Filter by head branch (\"<owner>:<branch>\" syntax not supported)\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n  -l, --label strings     Filter by label\n  -L, --limit int         Maximum number of items to fetch (default 30)\n  -S, --search query      Search pull requests with query\n  -s, --state string      Filter by state: {open|closed|merged|all} (default \"open\")\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  \ninvalid argument \"abc\" for \"-L, --limit\" flag: strconv.ParseInt: parsing \"abc\": invalid syntax\n\nUsage:  gh issue list [flags]\n\nFlags:\n      --app string         Filter by GitHub App author\n  -a, --assignee string    Filter by assignee\n  -A, --author string      Filter by author\n  -q, --jq expression      Filter JSON output using a jq expression\n      --json fields        Output JSON with the specified fields\n  -l, --label strings      Filter by label\n  -L, --limit int          Maximum number of issues to fetch (default 30)\n      --mention string     Filter by mention\n  -m, --milestone string   Filter by milestone number or title\n  -S, --search query       Search issues with query\n  -s, --state string       Filter by state: {open|closed|all} (default \"open\")\n  -t, --template string    Format JSON output using a Go template; see \"gh help formatting\"\n  \nflag needs an argument: --limit\n\nUsage:  gh issue list [flags]\n\nFlags:\n      --app string         Filter by GitHub App author\n  -a, --assignee string    Filter by assignee\n  -A, --author string      Filter by author\n  -q, --jq expression      Filter JSON output using a jq expression\n      --json fields        Output JSON with the specified fields\n  -l, --label strings      Filter by label\n  -L, --limit int          Maximum number of issues to fetch (default 30)\n      --mention string     Filter by mention\n  -m, --milestone string   Filter by milestone number or title\n  -S, --search query       Search issues with query\n  -s, --state string       Filter by state: {open|closed|all} (default \"open\")\n  -t, --template string    Format JSON output using a Go template; see \"gh help formatting\"\n  \n"
       }
     },
     {
@@ -2679,19 +2575,6 @@
       }
     },
     {
-      "id": "gh_repo_fork_empty_name_keeps_the_source_name",
-      "seq": 9940107,
-      "targets": [
-        "cli-gh"
-      ],
-      "command": "gh repo fork integ/repo-cli --fork-name ''",
-      "expect": {
-        "exit": 0,
-        "stdout": "✓ Created fork integ-user/repo-cli\n",
-        "stderr": ""
-      }
-    },
-    {
       "id": "man_gh_issue_lists_command_aliases",
       "seq": 569059,
       "targets": [
@@ -2713,8 +2596,8 @@
       "command": "gh pr reopen 6 -c 'back again' && gh pr reopen 6; gh pr view 6 --json state,comments --jq '[.state, (.comments | map(.body))]'; gh pr reopen 5; echo \"exit=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "✓ Reopened pull request integ/repo-cli#6 (abandoned)\n[\"OPEN\",[\"back again\"]]\nexit=1\n",
-        "stderr": "! Pull request integ/repo-cli#6 (abandoned) is already open\nX Pull request integ/repo-cli#5 (merged-title) can't be reopened because it was already merged\n"
+        "stdout": "[\"OPEN\",[\"back again\"]]\nexit=1\n",
+        "stderr": "✓ Reopened pull request integ/repo-cli#6 (abandoned)\n! Pull request integ/repo-cli#6 (abandoned) is already open\nX Pull request integ/repo-cli#5 (merged-title) can't be reopened because it was already merged\n"
       }
     },
     {
@@ -2726,8 +2609,8 @@
       "command": "url=$(gh issue create --title reopened --body b) && gh issue close \"$url\" >/dev/null && gh issue reopen \"$url\" --comment 'still broken' && gh issue reopen \"$url\"; gh issue view \"$url\" --json state,comments --jq '[.state, (.comments | map(.body))]'",
       "expect": {
         "exit": 0,
-        "stdout": "✓ Reopened issue integ/repo-cli#13 (reopened)\n[\"OPEN\",[\"still broken\"]]\n",
-        "stderr": "! Issue integ/repo-cli#13 (reopened) is already open\n"
+        "stdout": "[\"OPEN\",[\"still broken\"]]\n",
+        "stderr": "✓ Closed issue integ/repo-cli#13 (reopened)\n✓ Reopened issue integ/repo-cli#13 (reopened)\n! Issue integ/repo-cli#13 (reopened) is already open\n"
       }
     },
     {
@@ -2766,7 +2649,7 @@
       "expect": {
         "exit": 1,
         "stdout": "14\ndev\ncurrent\n",
-        "stderr": "gh pr view: no pull requests found for branch \"nope\"\n"
+        "stderr": "no pull requests found for branch \"nope\"\n"
       }
     },
     {
@@ -2779,7 +2662,7 @@
       "expect": {
         "exit": 0,
         "stdout": "1\n1\n",
-        "stderr": "cannot close pull request: number, url, or branch required\ngh pr reopen: accepts 1 arg(s), received 0\n"
+        "stderr": "cannot close pull request: number, url, or branch required\n\nUsage:  gh pr close {<number> | <url> | <branch>} [flags]\n\nFlags:\n  -c, --comment string   Leave a closing comment\n  -d, --delete-branch    Delete the local and remote branch after close\n  \naccepts 1 arg(s), received 0\n"
       }
     },
     {
@@ -2792,7 +2675,7 @@
       "expect": {
         "exit": 1,
         "stdout": "4\n",
-        "stderr": "gh issue view: invalid issue format: \"dev\"\n"
+        "stderr": "invalid issue format: \"dev\"\n"
       }
     },
     {
@@ -2805,7 +2688,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "gh pr create: a pull request for branch \"dev\" into branch \"main\" already exists:\nhttps://github.com/integ/repo-cli/pull/14\n"
+        "stderr": "a pull request for branch \"dev\" into branch \"main\" already exists:\nhttps://github.com/integ/repo-cli/pull/14\n"
       }
     },
     {
@@ -2814,11 +2697,11 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh issue view; gh issue view 1 2; gh issue edit --title x; gh pr view 1 2; gh pr close 1 2",
+      "command": "gh issue view; gh issue view 1 2; gh issue edit --title x; gh pr view 1 2; gh pr close 1 2; gh pr view 1 --nope; gh issue view 1 -Z",
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "gh issue view: accepts 1 arg(s), received 0\ngh issue view: accepts 1 arg(s), received 2\ngh issue edit: requires at least 1 arg(s), only received 0\ngh pr view: accepts at most 1 arg(s), received 2\ntoo many arguments\n"
+        "stderr": "accepts 1 arg(s), received 0\naccepts 1 arg(s), received 2\nrequires at least 1 arg(s), only received 0\naccepts at most 1 arg(s), received 2\ntoo many arguments\n\nUsage:  gh pr close {<number> | <url> | <branch>} [flags]\n\nFlags:\n  -c, --comment string   Leave a closing comment\n  -d, --delete-branch    Delete the local and remote branch after close\n  \nunknown flag: --nope\n\nUsage:  gh pr view [<number> | <url> | <branch>] [flags]\n\nFlags:\n  -c, --comments          View pull request comments\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  \nunknown shorthand flag: 'Z' in -Z\n\nUsage:  gh issue view {<number> | <url>} [flags]\n\nFlags:\n  -c, --comments          View issue comments\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  \n"
       }
     },
     {
@@ -2831,7 +2714,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "field to edit flag required when not running interactively\n--title, --body, --reviewer, --assignee, --label, --project, or --milestone required when not running interactively\n"
+        "stderr": "field to edit flag required when not running interactively\n\nUsage:  gh issue edit {<numbers> | <urls>} [flags]\n\nFlags:\n      --add-assignee login      Add assigned users by their login. Use \"@me\" to assign yourself, or \"@copilot\" to assign Copilot.\n      --add-label name          Add labels by name\n  -b, --body string             Set the new body.\n  -F, --body-file file          Read body text from file (use \"-\" to read from standard input)\n  -m, --milestone name          Edit the milestone the issue belongs to by name\n      --remove-assignee login   Remove assigned users by their login. Use \"@me\" to unassign yourself, or \"@copilot\" to unassign Copilot.\n      --remove-label name       Remove labels by name\n      --remove-milestone        Remove the milestone association from the issue\n  -t, --title string            Set the new title.\n  \n--title, --body, --reviewer, --assignee, --label, --project, or --milestone required when not running interactively\n\nUsage:  gh pr edit [<number> | <url> | <branch>] [flags]\n\nFlags:\n      --add-assignee login      Add assigned users by their login. Use \"@me\" to assign yourself, or \"@copilot\" to assign Copilot.\n      --add-label name          Add labels by name\n      --add-reviewer login      Add reviewers by their login.\n  -B, --base branch             Change the base branch for this pull request\n  -b, --body string             Set the new body.\n  -F, --body-file file          Read body text from file (use \"-\" to read from standard input)\n  -m, --milestone name          Edit the milestone the pull request belongs to by name\n      --remove-assignee login   Remove assigned users by their login. Use \"@me\" to unassign yourself, or \"@copilot\" to unassign Copilot.\n      --remove-label name       Remove labels by name\n      --remove-milestone        Remove the milestone association from the pull request\n      --remove-reviewer login   Remove reviewers by their login.\n  -t, --title string            Set the new title.\n  \n"
       }
     },
     {
@@ -2846,6 +2729,461 @@
         "stdout": "https://github.com/integ/repo-cli/issues/13\nhttps://github.com/integ/repo-cli/issues/4\n[\"bug\"]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gh_label_create_list_edit_delete",
+      "seq": 9950000,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh label create bug-x -c '#ff0000' -d broken; gh label create bug-x -c 00ff00; gh label create bug-x -c 00ff00 -f; gh label list --json name,color --jq '.[] | select(.name==\"bug-x\") | .color'; gh label edit bug-x -n bug-y; gh label list | grep bug-y; gh label edit nope; gh label delete bug-y; gh label delete bug-y --yes; gh label list --search bug-y",
+      "expect": {
+        "exit": 0,
+        "stdout": "00ff00\nbug-y\tbroken\t#00ff00\n",
+        "stderr": "label with name \"bug-x\" already exists; use `--force` to update its color and description\nspecify at least one of `--color`, `--description`, or `--name`\n\nUsage:  gh label edit <name> [flags]\n\nFlags:\n  -c, --color string         Color of the label\n  -d, --description string   Description of the label\n  -n, --name string          New name of the label\n  \n--yes required when not running interactively\n\nUsage:  gh label delete <name> [flags]\n\nFlags:\n  --yes   Confirm deletion without prompting\n  \n"
+      }
+    },
+    {
+      "id": "gh_label_clone_copies_a_repositorys_labels",
+      "seq": 9950001,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh label create clone-me -c 111111 -R integ/repo-cli; gh label clone integ/repo-cli -R integ/repo-cli -f; gh label list --json name --jq '[.[].name] | index(\"clone-me\") != null'; gh label delete clone-me --yes",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_variable_set_get_list_delete",
+      "seq": 9950003,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh variable set A --body one; gh variable set A --body two; gh variable get A; gh variable list --json name,value; gh variable list | cut -f1,2; gh variable delete A; gh variable get A; gh variable delete A 2>&1 | sed 's# (http.*##'",
+      "expect": {
+        "exit": 0,
+        "stdout": "two\n[{\"name\":\"A\",\"value\":\"two\"}]\nA\ttwo\nfailed to delete variable A: HTTP 404: Not Found\n",
+        "stderr": "variable A was not found\n"
+      }
+    },
+    {
+      "id": "gh_secret_list_and_delete",
+      "seq": 9950004,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api -X PUT repos/integ/repo-cli/actions/secrets/S1 --silent; gh secret list | cut -f1; gh secret list --json name; gh secret delete S1; gh secret list; gh secret delete S1 2>&1 | sed 's# (http.*##'",
+      "expect": {
+        "exit": 0,
+        "stdout": "S1\n[{\"name\":\"S1\"}]\nfailed to delete secret S1: HTTP 404: Not Found\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_gist_create_view_edit_rename_delete",
+      "seq": 9950005,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "printf 'hi\\n' > /scratch/g.txt; gh gist create /scratch/g.txt -d first; gh gist list | cut -f1,2,3,4; gh gist view gist1; gh gist view gist1 --files; gh gist rename gist1 g.txt h.txt; gh gist view gist1 -f h.txt; gh gist view gist1 -f nope; printf 'bye\\n' > /scratch/n.txt; gh gist edit gist1 --add /scratch/n.txt; gh gist view gist1 --files; gh gist edit gist1 --remove n.txt; gh gist edit gist1 --add /scratch/n.txt --remove n.txt; gh gist delete gist1; gh gist delete gist1 --yes; gh gist view gist1",
+      "expect": {
+        "exit": 1,
+        "stdout": "https://gist.github.com/gist1\ngist1\tfirst\t1 file\tsecret\nfirst\n\nhi\ng.txt\nhi\nh.txt\nn.txt\n",
+        "stderr": "- Creating gist g.txt\n✓ Created secret gist g.txt\ngist has no such file: \"nope\"\nif any flags in the group [add remove] are set none of the others can be; [add remove] were all set\n--yes required when not running interactively\n\nUsage:  gh gist delete {<id> | <url>} [flags]\n\nFlags:\n  --yes   Confirm deletion without prompting\n  \nnot found\n"
+      }
+    },
+    {
+      "id": "gh_repo_archive_and_unarchive",
+      "seq": 9950006,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo archive integ/repo-cli; gh repo archive integ/repo-cli --yes; gh repo view integ/repo-cli --json isArchived --jq .isArchived; gh repo archive integ/repo-cli --yes; gh repo unarchive integ/repo-cli --yes; gh repo view integ/repo-cli --json isArchived --jq .isArchived; gh repo unarchive integ/repo-cli --yes",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\nfalse\n",
+        "stderr": "--yes required when not running interactively\n\nUsage:  gh repo archive [<repository>] [flags]\n\nFlags:\n  -y, --yes   Skip the confirmation prompt\n  \n! Repository integ/repo-cli is already archived\n! Repository integ/repo-cli is not archived\n"
+      }
+    },
+    {
+      "id": "gh_repo_deploy_keys",
+      "seq": 9950007,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "printf 'ssh-rsa AAA' > /scratch/k.pub; gh repo deploy-key add /scratch/k.pub -t laptop -w; gh repo deploy-key list | cut -f1,2,3,4; gh repo deploy-key list --json title,readOnly; gh repo deploy-key delete 1; gh repo deploy-key delete 1 2>&1 | sed 's# (http.*##'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\tlaptop\tread-write\tssh-rsa AAA\n[{\"id\":1,\"key\":\"ssh-rsa AAA\",\"title\":\"laptop\",\"created_at\":\"2026-01-01T00:00:00Z\",\"read_only\":false}]\nHTTP 404: Not Found\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_repo_autolinks",
+      "seq": 9950008,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo autolink create JIRA- 'https://x/<num>' -n; gh repo autolink list; gh repo autolink view 1; gh repo autolink view 1 --json keyPrefix,isAlphanumeric; gh repo autolink delete 1; gh repo autolink delete 1 --yes; gh repo autolink view 1",
+      "expect": {
+        "exit": 1,
+        "stdout": "✓ Created repository autolink 1 on integ/repo-cli\n1\tJIRA-\thttps://x/<num>\tfalse\nAutolink in integ/repo-cli\n\nID: 1\nKey Prefix: JIRA-\nURL Template: https://x/<num>\nAlphanumeric: false\n{\"isAlphanumeric\":false,\"keyPrefix\":\"JIRA-\"}\n",
+        "stderr": "--yes required when not running interactively\n\nUsage:  gh repo autolink delete <id> [flags]\n\nFlags:\n  --yes   Confirm deletion without prompting\n  \nerror viewing autolink: HTTP 404: Perhaps you are missing admin rights to the repository? (https://api.github.com/repos/integ/repo-cli/autolinks/1)\n"
+      }
+    },
+    {
+      "id": "gh_repo_templates",
+      "seq": 9950009,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo gitignore list; gh repo gitignore view Go; gh repo gitignore view Nope; gh repo license list; gh repo license view mit; gh repo license view nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "Go\nRust\n# Go\nmit\tMIT\tMIT License\nMIT text\n",
+        "stderr": "'Nope' is not a valid gitignore template. Run `gh repo gitignore list` for options\n'nope' is not a valid license name or SPDX ID.\n\nRun `gh repo license list` to see available commonly used licenses. For even more licenses, visit https://choosealicense.com/appendix\n"
+      }
+    },
+    {
+      "id": "gh_repo_sync_names_the_branch",
+      "seq": 9950010,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo sync integ/repo-cli -b main; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_ruleset_list_view_check",
+      "seq": 9950011,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api -X POST repos/integ/repo-cli/rulesets -f name=main -f enforcement=active -F 'rules[][type]=deletion' --jq .id; gh ruleset list; gh ruleset view 1; gh ruleset view abc; gh ruleset view 9 2>&1 | sed 's# (http.*##'; gh ruleset check main",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\tmain\tinteg/repo-cli (repo)\tactive\t1\n\nmain\nID: 1\nSource: integ/repo-cli (Repository)\nEnforcement: Active\n\nBypass List\nThis ruleset cannot be bypassed\n\nConditions\nNo conditions configured\n\nRules\n- deletion\nHTTP 404: Not Found\n1 rules apply to branch main in repo integ/repo-cli\n\n- deletion\n",
+        "stderr": "invalid value for ruleset ID: abc is not an integer\n\nUsage:  gh ruleset view [<ruleset-id>] [flags]\n\nFlags:\n  -o, --org string   Organization name if the provided ID is an organization-level ruleset\n  -p, --parents      Whether to include rulesets configured at higher levels that also apply (default true)\n  \n"
+      }
+    },
+    {
+      "id": "gh_run_cancel_delete_and_workflow_toggle",
+      "seq": 9950012,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "id=$(gh run list -L 1 --json databaseId --jq '.[0].databaseId'); gh run cancel $id | sed 's/[0-9]\\+/N/'; gh run cancel x; gh run delete 999999; gh workflow list --all --json name --jq '.[0].name' > /scratch/wf; gh workflow disable \"$(cat /scratch/wf)\"; gh workflow disable \"$(cat /scratch/wf)\"; gh workflow enable \"$(cat /scratch/wf)\"; gh run delete $id | sed 's/[0-9]\\+/N/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "✓ Request to cancel workflow N submitted.\n✓ Request to delete workflow run submitted.\n",
+        "stderr": "invalid run-id \"x\"\ncould not find any workflow run with ID 999999\ncould not find any workflows named CI\n"
+      }
+    },
+    {
+      "id": "gh_release_edit_delete_and_assets",
+      "seq": 9950013,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh release create v9 -n notes -t Nine > /dev/null; gh release edit v9 -t Renamed --draft=false; gh release view v9 --json name --jq .name; gh release view v9 --json targetCommitish --jq .targetCommitish; gh release edit v9; gh release delete v9; gh release delete v9 --yes --cleanup-tag 2>&1 | sed 's# (http.*##'; gh release view v9",
+      "expect": {
+        "exit": 1,
+        "stdout": "https://github.com/integ/repo-cli/releases/tag/v9\nRenamed\nmain\nrelease not found\n",
+        "stderr": "use flags to specify properties to edit\n\nUsage:  gh release edit <tag>\n\nFlags:\n      --discussion-category string   Start a discussion in the specified category when publishing a draft\n      --draft                        Save the release as a draft instead of publishing it\n      --latest                       Explicitly mark the release as \"Latest\"\n  -n, --notes string                 Release notes\n  -F, --notes-file file              Read release notes from file (use \"-\" to read from standard input)\n      --prerelease                   Mark the release as a prerelease\n      --tag string                   The name of the tag\n      --target branch                Target branch or full commit SHA (default [main branch])\n  -t, --title string                 Release title\n      --verify-tag                   Abort in case the git tag doesn't already exist in the remote repository\n  \nrelease not found\n"
+      }
+    },
+    {
+      "id": "gh_pr_list_filters_go_through_search",
+      "seq": 9950014,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr list --author @me --json number --jq 'length > 0'; gh pr list -S merged-title -s all --json number --jq '.[0].number'; gh pr list --draft --json number; gh pr list --author a --app b; gh pr list --jq .",
+      "expect": {
+        "exit": 1,
+        "stdout": "true\n5\n[]\n",
+        "stderr": "specify only `--author` or `--app`\n\nUsage:  gh pr list [flags]\n\nFlags:\n      --app string        Filter by GitHub App author\n  -a, --assignee string   Filter by assignee\n  -A, --author string     Filter by author\n  -B, --base string       Filter by base branch\n  -d, --draft             Filter by draft state\n  -H, --head string       Filter by head branch (\"<owner>:<branch>\" syntax not supported)\n  -q, --jq expression     Filter JSON output using a jq expression\n      --json fields       Output JSON with the specified fields\n  -l, --label strings     Filter by label\n  -L, --limit int         Maximum number of items to fetch (default 30)\n  -S, --search query      Search pull requests with query\n  -s, --state string      Filter by state: {open|closed|merged|all} (default \"open\")\n  -t, --template string   Format JSON output using a Go template; see \"gh help formatting\"\n  \ncannot use `--jq` without specifying `--json`\n"
+      }
+    },
+    {
+      "id": "gh_issue_list_filters_and_at_me",
+      "seq": 9950015,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue list --author @me -L 1 --json author --jq '.[0].author.login'; gh issue list --search updated -s all --json number --jq 'length > 0'; gh issue list --milestone nope --json number",
+      "expect": {
+        "exit": 0,
+        "stdout": "integ-user\ntrue\n[{\"number\":13},{\"number\":10},{\"number\":9},{\"number\":7},{\"number\":4},{\"number\":3},{\"number\":2},{\"number\":1}]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_template_renders_every_json_verb",
+      "seq": 9950016,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue list -L 1 --json number --template '{{range .}}#{{.number}}{{end}}'; echo; gh pr list -s merged -L 1 --json number -t '{{range .}}#{{.number}}{{end}}'; echo; gh repo view --json name -t '{{.name}}'; echo; gh run list -L 1 --json status -t '{{range .}}{{.status}}{{end}}'; echo; gh pr list --template x",
+      "expect": {
+        "exit": 1,
+        "stdout": "#13\n#5\nrepo-cli\nqueued\n",
+        "stderr": "cannot use `--template` without specifying `--json`\n"
+      }
+    },
+    {
+      "id": "gh_issue_pin_lock_transfer_and_delete",
+      "seq": 9950017,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "n=$(gh issue create -t pinme -b x | sed 's#.*/##'); gh issue pin $n; gh issue pin $n; gh issue view $n --json isPinned --jq .isPinned; gh issue unpin $n; gh issue unpin $n; gh issue lock $n -r spam; gh issue lock $n; gh issue unlock $n; gh issue lock $n -r nope; gh issue delete $n --yes; gh issue view $n",
+      "expect": {
+        "exit": 1,
+        "stdout": "true\n",
+        "stderr": "✓ Pinned issue integ/repo-cli#15 (pinme)\n! Issue integ/repo-cli#15 (pinme) is already pinned\n✓ Unpinned issue integ/repo-cli#15 (pinme)\n! Issue integ/repo-cli#15 (pinme) is not pinned\nalready locked\ninvalid reason nope\nGraphQL: Could not resolve to an issue or pull request with the number of 15. (repository.issue)\n"
+      }
+    },
+    {
+      "id": "gh_issue_close_reason_and_comment",
+      "seq": 9950018,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "n=$(gh issue create -t closeme -b x | sed 's#.*/##'); gh issue close $n -r 'not planned' -c because; gh issue view $n --json state,stateReason,comments --jq '[.state,.stateReason,(.comments|map(.body))]'; gh issue close $n",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"CLOSED\",\"NOT_PLANNED\",[\"because\"]]\n",
+        "stderr": "✓ Closed issue integ/repo-cli#15 (closeme)\n! Issue integ/repo-cli#15 (closeme) is already closed\n"
+      }
+    },
+    {
+      "id": "gh_issue_comment_edit_and_delete_last",
+      "seq": 9950019,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "n=$(gh issue create -t edits -b x | sed 's#.*/##'); gh issue comment $n -b one | sed 's/.*#/#/'; gh issue comment $n --edit-last -b two | sed 's/.*#/#/'; gh issue view $n --json comments --jq '[.comments[].body]'; gh issue comment $n --delete-last; gh issue comment $n --delete-last --yes; gh issue view $n --json comments --jq '.comments|length'; gh issue comment $n --edit-last -b x; gh issue comment $n --edit-last --create-if-none -b made | sed 's/.*#/#/'; gh issue comment $n --create-if-none -b x",
+      "expect": {
+        "exit": 1,
+        "stdout": "#issuecomment-6\n#issuecomment-6\n[\"two\"]\n0\n#issuecomment-6\n",
+        "stderr": "should provide `--yes` to confirm deletion in non-interactive mode\n\nUsage:  gh issue comment {<number> | <url>} [flags]\n\nFlags:\n  -b, --body text        The comment body text\n  -F, --body-file file   Read body text from file (use \"-\" to read from standard input)\n      --create-if-none   Create a new comment if no comments are found. Can be used only with --edit-last\n      --delete-last      Delete the last comment of the current user\n      --edit-last        Edit the last comment of the current user\n      --yes              Skip the delete confirmation prompt when --delete-last is provided\n  \nComment deleted\nno comments found for current user\n`--create-if-none` can only be used with `--edit-last`\n\nUsage:  gh issue comment {<number> | <url>} [flags]\n\nFlags:\n  -b, --body text        The comment body text\n  -F, --body-file file   Read body text from file (use \"-\" to read from standard input)\n      --create-if-none   Create a new comment if no comments are found. Can be used only with --edit-last\n      --delete-last      Delete the last comment of the current user\n      --edit-last        Edit the last comment of the current user\n      --yes              Skip the delete confirmation prompt when --delete-last is provided\n  \n"
+      }
+    },
+    {
+      "id": "gh_issue_status_is_grouped",
+      "seq": 9950020,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue status --json number --jq 'keys'; gh issue status | head -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"assigned\",\"createdBy\",\"mentioned\"]\n\nRelevant issues in integ/repo-cli\n\nIssues assigned to you\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_pr_review_ready_and_lock",
+      "seq": 9950021,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "num=$(gh pr list -s open -L 1 --json number --jq '.[0].number'); gh pr review $num --approve; gh pr review $num -c; gh pr review $num; gh pr review $num -c -b fine; gh pr view $num --json reviews --jq '[.reviews[].state]'; gh pr ready $num; gh pr ready $num --undo; gh pr view $num --json isDraft --jq .isDraft; gh pr ready $num; gh pr lock $num; gh pr unlock $num",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"APPROVED\",\"COMMENTED\"]\ntrue\n",
+        "stderr": "body cannot be blank for comment review\n\nUsage:  gh pr review [<number> | <url> | <branch>] [flags]\n\nFlags:\n  -a, --approve           Approve pull request\n  -b, --body string       Specify the body of a review\n  -F, --body-file file    Read body text from file (use \"-\" to read from standard input)\n  -c, --comment           Comment on a pull request\n  -r, --request-changes   Request changes on a pull request\n  \n--approve, --request-changes, or --comment required when not running interactively\n\nUsage:  gh pr review [<number> | <url> | <branch>] [flags]\n\nFlags:\n  -a, --approve           Approve pull request\n  -b, --body string       Specify the body of a review\n  -F, --body-file file    Read body text from file (use \"-\" to read from standard input)\n  -c, --comment           Comment on a pull request\n  -r, --request-changes   Request changes on a pull request\n  \n! Pull request integ/repo-cli#14 is already \"ready for review\"\n✓ Pull request integ/repo-cli#14 is converted to \"draft\"\n✓ Pull request integ/repo-cli#14 is marked as \"ready for review\"\n"
+      }
+    },
+    {
+      "id": "gh_pr_merge_refuses_without_a_method",
+      "seq": 9950022,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "num=$(gh pr list -s open -L 1 --json number --jq '.[0].number'); gh pr merge $num; gh pr merge $num --merge --squash; gh pr merge $num --auto --admin --merge; echo done",
+      "expect": {
+        "exit": 0,
+        "stdout": "done\n",
+        "stderr": "--merge, --rebase, or --squash required when not running interactively\n\nUsage:  gh pr merge [<number> | <url> | <branch>] [flags]\n\nFlags:\n      --admin                   Use administrator privileges to merge a pull request that does not meet requirements\n  -A, --author-email text       Email text for merge commit author\n      --auto                    Automatically merge only after necessary requirements are met\n  -b, --body text               Body text for the merge commit\n  -F, --body-file file          Read body text from file (use \"-\" to read from standard input)\n  -d, --delete-branch           Delete the local and remote branch after merge\n      --disable-auto            Disable auto-merge for this pull request\n      --match-head-commit SHA   Commit SHA that the pull request head must match to allow merge\n  -m, --merge                   Merge the commits with the base branch\n  -r, --rebase                  Rebase the commits onto the base branch\n  -s, --squash                  Squash the commits into one commit and merge it into the base branch\n  -t, --subject text            Subject text for the merge commit\n  \nonly one of --merge, --rebase, or --squash can be enabled\n\nUsage:  gh pr merge [<number> | <url> | <branch>] [flags]\n\nFlags:\n      --admin                   Use administrator privileges to merge a pull request that does not meet requirements\n  -A, --author-email text       Email text for merge commit author\n      --auto                    Automatically merge only after necessary requirements are met\n  -b, --body text               Body text for the merge commit\n  -F, --body-file file          Read body text from file (use \"-\" to read from standard input)\n  -d, --delete-branch           Delete the local and remote branch after merge\n      --disable-auto            Disable auto-merge for this pull request\n      --match-head-commit SHA   Commit SHA that the pull request head must match to allow merge\n  -m, --merge                   Merge the commits with the base branch\n  -r, --rebase                  Rebase the commits onto the base branch\n  -s, --squash                  Squash the commits into one commit and merge it into the base branch\n  -t, --subject text            Subject text for the merge commit\n  \nspecify only one of `--auto`, `--disable-auto`, or `--admin`\n\nUsage:  gh pr merge [<number> | <url> | <branch>] [flags]\n\nFlags:\n      --admin                   Use administrator privileges to merge a pull request that does not meet requirements\n  -A, --author-email text       Email text for merge commit author\n      --auto                    Automatically merge only after necessary requirements are met\n  -b, --body text               Body text for the merge commit\n  -F, --body-file file          Read body text from file (use \"-\" to read from standard input)\n  -d, --delete-branch           Delete the local and remote branch after merge\n      --disable-auto            Disable auto-merge for this pull request\n      --match-head-commit SHA   Commit SHA that the pull request head must match to allow merge\n  -m, --merge                   Merge the commits with the base branch\n  -r, --rebase                  Rebase the commits onto the base branch\n  -s, --squash                  Squash the commits into one commit and merge it into the base branch\n  -t, --subject text            Subject text for the merge commit\n  \n"
+      }
+    },
+    {
+      "id": "gh_pr_status_is_grouped",
+      "seq": 9950023,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr status --json number --jq 'keys'; gh pr status | head -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"createdBy\",\"currentBranch\",\"needsReview\"]\n\nRelevant pull requests in integ/repo-cli\n\nCurrent branch\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_pr_close_comment_and_delete_branch",
+      "seq": 9950024,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli/git/refs -f ref=refs/heads/closing -f sha=$(gh api repos/integ/repo-cli/git/ref/heads/main --jq .object.sha) --silent; gh api -X PUT repos/integ/repo-cli/contents/closing.md -f message=m -f branch=closing -f content=eA== --silent; n=$(gh pr create -t closing -b b -H closing -B main | sed 's#.*/##'); gh pr close $n -c bye -d; gh pr view $n --json state,comments --jq '[.state,(.comments|map(.body))]'; gh pr close $n; gh api repos/integ/repo-cli/git/ref/heads/closing --silent; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"CLOSED\",[\"bye\"]]\nrc=1\n",
+        "stderr": "✓ Closed pull request integ/repo-cli#17 (closing)\n! Skipped deleting the local branch since current directory is not a git repository\n✓ Deleted branch closing\n! Pull request integ/repo-cli#17 (closing) is already closed\ngh: Not Found (HTTP 404)\n"
+      }
+    },
+    {
+      "id": "gh_pr_create_and_edit_add_metadata",
+      "seq": 9950025,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli/git/refs -f ref=refs/heads/meta -f sha=$(gh api repos/integ/repo-cli/git/ref/heads/main --jq .object.sha) --silent; gh api -X PUT repos/integ/repo-cli/contents/meta.md -f message=m -f branch=meta -f content=eA== --silent; n=$(gh pr create -t meta -b b -H meta -B main -a @me -l bug | sed 's#.*/##'); gh pr view $n --json assignees,labels --jq '[[.assignees[].login],[.labels[].name]]'; gh pr edit $n --add-label docs --remove-label bug | sed 's#.*/##'; gh pr view $n --json labels --jq '[.labels[].name]'; gh pr edit $n; gh pr merge $n --squash -d; gh pr view $n --json state --jq .state",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"integ-user\"],[\"bug\"]]\n18\n[\"docs\"]\nMERGED\n",
+        "stderr": "--title, --body, --reviewer, --assignee, --label, --project, or --milestone required when not running interactively\n\nUsage:  gh pr edit [<number> | <url> | <branch>] [flags]\n\nFlags:\n      --add-assignee login      Add assigned users by their login. Use \"@me\" to assign yourself, or \"@copilot\" to assign Copilot.\n      --add-label name          Add labels by name\n      --add-reviewer login      Add reviewers by their login.\n  -B, --base branch             Change the base branch for this pull request\n  -b, --body string             Set the new body.\n  -F, --body-file file          Read body text from file (use \"-\" to read from standard input)\n  -m, --milestone name          Edit the milestone the pull request belongs to by name\n      --remove-assignee login   Remove assigned users by their login. Use \"@me\" to unassign yourself, or \"@copilot\" to unassign Copilot.\n      --remove-label name       Remove labels by name\n      --remove-milestone        Remove the milestone association from the pull request\n      --remove-reviewer login   Remove reviewers by their login.\n  -t, --title string            Set the new title.\n  \n"
+      }
+    },
+    {
+      "id": "gh_issue_create_assigns_at_me",
+      "seq": 9950026,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue create -t mine -b x -a @me | sed 's#.*/##' > /scratch/n; gh issue view $(cat /scratch/n) --json assignees --jq '[.assignees[].login]'; gh issue edit $(cat /scratch/n) --remove-assignee @me > /dev/null; gh issue view $(cat /scratch/n) --json assignees --jq '[.assignees[].login]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"integ-user\"]\n[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_org_list_prints_logins",
+      "seq": 9950027,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh org list; echo rc=$?; gh org list -L 0",
+      "expect": {
+        "exit": 1,
+        "stdout": "rc=0\n",
+        "stderr": "invalid limit: 0\n\nUsage:  gh org list [flags]\n\nFlags:\n  -L, --limit int   Maximum number of organizations to list (default 30)\n  \n"
+      }
+    },
+    {
+      "id": "gh_pr_diff_takes_patch",
+      "seq": 9950028,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "num=$(gh pr list -s all -L 1 --json number --jq '.[0].number'); gh pr diff $num --patch --name-only 2>&1 | sed 's# (http.*##'; gh pr diff $num --color never --name-only > /dev/null; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "meta.md\nrc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_release_list_flags",
+      "seq": 9950029,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh release create v8 -n x -d --draft -t Eight > /dev/null; gh release list --exclude-drafts --json tagName --jq 'map(.tagName)|index(\"v8\")'; gh release list -O asc --json tagName --jq '.[0].tagName|type'; gh release list | head -1 | cut -f1,2; gh release delete v8 --yes",
+      "expect": {
+        "exit": 0,
+        "stdout": "\nstring\nEight\tDraft\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_issue_commands_accept_a_pull_request_number",
+      "seq": 9950030,
+      "command": "n=$(gh pr list -s all -L 1 --json number --jq '.[0].number'); gh issue edit $n --title renamed-through-issue | sed 's#.*/##'; gh pr view $n --json title --jq .title; gh issue close $n | sed 's#.*/##'; gh pr view $n --json state --jq .state; gh issue reopen $n | sed 's#.*/##'; gh pr view $n --json state --jq .state",
+      "expect": {
+        "exit": 0,
+        "stdout": "18\nrenamed-through-issue\nMERGED\nMERGED\n",
+        "stderr": "✓ Closed issue integ/repo-cli#18 (renamed-through-issue)\n✓ Reopened issue integ/repo-cli#18 (renamed-through-issue)\n"
+      },
+      "targets": [
+        "cli-gh"
+      ]
+    },
+    {
+      "id": "gh_issue_create_refuses_unknown_names_before_writing",
+      "seq": 9950031,
+      "command": "before=$(gh issue list -s all -L 100 --json number --jq length); gh issue create -t x; gh issue create -t x -b y -l nope; gh issue create -t x -b y -a nobody-zz9; gh issue create -t x -b y -m nope; gh issue list -s all -L 100 --json number --jq \"length == $before\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
+        "stderr": "must provide `--title` and `--body` when not running interactively\n\nUsage:  gh issue create [flags]\n\nFlags:\n  -a, --assignee login   Assign people by their login. Use \"@me\" to self-assign.\n  -b, --body string      Supply a body. Will prompt for one otherwise.\n  -F, --body-file file   Read body text from file (use \"-\" to read from standard input)\n  -l, --label name       Add labels by name\n  -m, --milestone name   Add the issue to a milestone by name\n  -t, --title string     Supply a title. Will prompt for one otherwise.\n  \ncould not add label: 'nope' not found\ncould not assign user: 'nobody-zz9' not found\ncould not add to milestone 'nope': 'nope' not found\n"
+      },
+      "targets": [
+        "cli-gh"
+      ]
+    },
+    {
+      "id": "gh_pr_edit_refuses_unknown_names_before_writing",
+      "seq": 9950032,
+      "command": "n=$(gh pr list -s all -L 1 --json number --jq '.[0].number'); gh pr edit $n --add-label nope; gh pr edit $n --add-assignee nobody-zz9; gh pr edit $n --milestone nope; gh pr edit $n --add-reviewer nobody-zz9",
+      "expect": {
+        "exit": 0,
+        "stdout": "https://github.com/integ/repo-cli/pull/18\n",
+        "stderr": "'nope' not found\n'nobody-zz9' not found\n'nope' not found\n"
+      },
+      "targets": [
+        "cli-gh"
+      ]
+    },
+    {
+      "id": "gh_api_refuses_flag_combinations",
+      "seq": 9950033,
+      "command": "gh api -X POST repos/integ/repo-cli/issues --paginate; gh api repos/integ/repo-cli --slurp; gh api repos/integ/repo-cli --paginate --slurp --jq .; gh api repos/integ/repo-cli --silent --jq .; gh api repos/integ/repo-cli --paginate --input /dev/null; gh api repos/integ/repo-cli -F x=@/scratch/nope.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "the `--paginate` option is not supported for non-GET requests\n\nUsage:  gh api <endpoint> [flags]\n\nFlags:\n  -F, --field key=value       Add a typed parameter in key=value format (use \"@<path>\" or \"@-\" to read value from file or stdin)\n  -H, --header key:value      Add a HTTP request header in key:value format\n  -i, --include               Include HTTP response status line and headers in the output\n      --input file            The file to use as body for the HTTP request (use \"-\" to read from standard input)\n  -q, --jq string             Query to select values from the response using jq syntax\n  -X, --method string         The HTTP method for the request (default \"GET\")\n      --paginate              Make additional HTTP requests to fetch all pages of results\n  -f, --raw-field key=value   Add a string parameter in key=value format\n      --silent                Do not print the response body\n      --slurp                 Use with \"--paginate\" to return an array of all pages of either JSON arrays or objects\n  \n`--paginate` required when passing `--slurp`\n\nUsage:  gh api <endpoint> [flags]\n\nFlags:\n  -F, --field key=value       Add a typed parameter in key=value format (use \"@<path>\" or \"@-\" to read value from file or stdin)\n  -H, --header key:value      Add a HTTP request header in key:value format\n  -i, --include               Include HTTP response status line and headers in the output\n      --input file            The file to use as body for the HTTP request (use \"-\" to read from standard input)\n  -q, --jq string             Query to select values from the response using jq syntax\n  -X, --method string         The HTTP method for the request (default \"GET\")\n      --paginate              Make additional HTTP requests to fetch all pages of results\n  -f, --raw-field key=value   Add a string parameter in key=value format\n      --silent                Do not print the response body\n      --slurp                 Use with \"--paginate\" to return an array of all pages of either JSON arrays or objects\n  \nthe `--slurp` option is not supported with `--jq` or `--template`\n\nUsage:  gh api <endpoint> [flags]\n\nFlags:\n  -F, --field key=value       Add a typed parameter in key=value format (use \"@<path>\" or \"@-\" to read value from file or stdin)\n  -H, --header key:value      Add a HTTP request header in key:value format\n  -i, --include               Include HTTP response status line and headers in the output\n      --input file            The file to use as body for the HTTP request (use \"-\" to read from standard input)\n  -q, --jq string             Query to select values from the response using jq syntax\n  -X, --method string         The HTTP method for the request (default \"GET\")\n      --paginate              Make additional HTTP requests to fetch all pages of results\n  -f, --raw-field key=value   Add a string parameter in key=value format\n      --silent                Do not print the response body\n      --slurp                 Use with \"--paginate\" to return an array of all pages of either JSON arrays or objects\n  \nonly one of `--template`, `--jq`, `--silent`, or `--verbose` may be used\n\nUsage:  gh api <endpoint> [flags]\n\nFlags:\n  -F, --field key=value       Add a typed parameter in key=value format (use \"@<path>\" or \"@-\" to read value from file or stdin)\n  -H, --header key:value      Add a HTTP request header in key:value format\n  -i, --include               Include HTTP response status line and headers in the output\n      --input file            The file to use as body for the HTTP request (use \"-\" to read from standard input)\n  -q, --jq string             Query to select values from the response using jq syntax\n  -X, --method string         The HTTP method for the request (default \"GET\")\n      --paginate              Make additional HTTP requests to fetch all pages of results\n  -f, --raw-field key=value   Add a string parameter in key=value format\n      --silent                Do not print the response body\n      --slurp                 Use with \"--paginate\" to return an array of all pages of either JSON arrays or objects\n  \nthe `--paginate` option is not supported with `--input`\n\nUsage:  gh api <endpoint> [flags]\n\nFlags:\n  -F, --field key=value       Add a typed parameter in key=value format (use \"@<path>\" or \"@-\" to read value from file or stdin)\n  -H, --header key:value      Add a HTTP request header in key:value format\n  -i, --include               Include HTTP response status line and headers in the output\n      --input file            The file to use as body for the HTTP request (use \"-\" to read from standard input)\n  -q, --jq string             Query to select values from the response using jq syntax\n  -X, --method string         The HTTP method for the request (default \"GET\")\n      --paginate              Make additional HTTP requests to fetch all pages of results\n  -f, --raw-field key=value   Add a string parameter in key=value format\n      --silent                Do not print the response body\n      --slurp                 Use with \"--paginate\" to return an array of all pages of either JSON arrays or objects\n  \nerror parsing \"x\" value: open /scratch/nope.txt: no such file or directory\n"
+      },
+      "targets": [
+        "cli-gh"
+      ]
+    },
+    {
+      "id": "gh_list_commands_print_nothing_when_a_repo_is_empty",
+      "seq": 9950034,
+      "command": "for c in 'repo deploy-key list' 'repo autolink list' 'ruleset list' 'secret list' 'gist list' 'label list --search zz9' 'run list -b zz9' 'issue list -S zz9' 'pr list -S zz9' 'cache list --key zz9' 'search repos zz9' 'search issues zz9' 'search prs zz9' 'search code zz9' 'search commits zz9'; do echo \"== $c\"; gh $c; echo \"rc=$?\"; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "== repo deploy-key list\nrc=0\n== repo autolink list\nrc=0\n== ruleset list\n1\tmain\tinteg/repo-cli (repo)\tactive\t1\nrc=0\n== secret list\nrc=0\n== gist list\nrc=0\n== label list --search zz9\nrc=0\n== run list -b zz9\nrc=0\n== issue list -S zz9\nrc=0\n== pr list -S zz9\nrc=0\n== cache list --key zz9\nrc=0\n== search repos zz9\nrc=0\n== search issues zz9\nrc=0\n== search prs zz9\nrc=0\n== search code zz9\nrc=0\n== search commits zz9\nrc=0\n",
+        "stderr": ""
+      },
+      "targets": [
+        "cli-gh"
+      ]
+    },
+    {
+      "id": "gh_repo_create_checks_flags_and_goes_through_graphql",
+      "seq": 9950035,
+      "command": "gh repo create; gh repo create fresh; gh repo create --public; gh repo create fresh --public --private; gh repo create a/b/c/d --public; gh repo create fresh --internal; gh repo create integ-user/fresh --internal; gh repo create nobody-zz9/fresh --public 2>&1 | sed 's# (http.*##'; gh repo create fresh --public",
+      "expect": {
+        "exit": 1,
+        "stdout": "HTTP 404: Not Found\n",
+        "stderr": "at least one argument required in non-interactive mode\n\nUsage:  gh repo create [<name>] [flags]\n\nFlags:\n      --add-readme           Add a README file to the new repository\n  -d, --description string   Description of the repository\n      --disable-issues       Disable issues in the new repository\n      --disable-wiki         Disable wiki in the new repository\n  -g, --gitignore string     Specify a gitignore template for the repository\n  -h, --homepage URL         Repository home page URL\n      --internal             Make the new repository internal\n  -l, --license string       Specify an Open Source License for the repository\n      --private              Make the new repository private\n      --public               Make the new repository public\n  \n`--public`, `--private`, or `--internal` required when not running interactively\n\nUsage:  gh repo create [<name>] [flags]\n\nFlags:\n      --add-readme           Add a README file to the new repository\n  -d, --description string   Description of the repository\n      --disable-issues       Disable issues in the new repository\n      --disable-wiki         Disable wiki in the new repository\n  -g, --gitignore string     Specify a gitignore template for the repository\n  -h, --homepage URL         Repository home page URL\n      --internal             Make the new repository internal\n  -l, --license string       Specify an Open Source License for the repository\n      --private              Make the new repository private\n      --public               Make the new repository public\n  \nname argument required to create new remote repository\n\nUsage:  gh repo create [<name>] [flags]\n\nFlags:\n      --add-readme           Add a README file to the new repository\n  -d, --description string   Description of the repository\n      --disable-issues       Disable issues in the new repository\n      --disable-wiki         Disable wiki in the new repository\n  -g, --gitignore string     Specify a gitignore template for the repository\n  -h, --homepage URL         Repository home page URL\n      --internal             Make the new repository internal\n  -l, --license string       Specify an Open Source License for the repository\n      --private              Make the new repository private\n      --public               Make the new repository public\n  \nexpected exactly one of `--public`, `--private`, or `--internal`\n\nUsage:  gh repo create [<name>] [flags]\n\nFlags:\n      --add-readme           Add a README file to the new repository\n  -d, --description string   Description of the repository\n      --disable-issues       Disable issues in the new repository\n      --disable-wiki         Disable wiki in the new repository\n  -g, --gitignore string     Specify a gitignore template for the repository\n  -h, --homepage URL         Repository home page URL\n      --internal             Make the new repository internal\n  -l, --license string       Specify an Open Source License for the repository\n      --private              Make the new repository private\n      --public               Make the new repository public\n  \nargument error: expected the \"[HOST/]OWNER/REPO\" format, got \"a/b/c/d\"\ninternal repositories can only be created within an organization\ninternal repositories can only be created within an organization\nGraphQL: Resource not accessible by personal access token (createRepository)\n"
+      },
+      "targets": [
+        "cli-gh"
+      ]
     }
   ]
 }

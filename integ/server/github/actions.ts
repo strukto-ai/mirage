@@ -131,6 +131,7 @@ function runJson(repo: RepoRow, row: RunRow): JsonValue {
     updated_at: row.updatedAt,
     run_started_at: row.runStartedAt,
     html_url: `https://github.com/${repo.fullName}/actions/runs/${String(row.id)}`,
+    jobs_url: `https://api.github.com/repos/${repo.fullName}/actions/runs/${String(row.id)}/jobs`,
   }
 }
 
@@ -245,6 +246,20 @@ async function findWorkflow(ctx: Ctx<C>, repo: RepoRow, value: string): Promise<
     (r) => value === String(r.id) || value === r.path.slice(r.path.lastIndexOf('/') + 1),
   )
   return match ?? null
+}
+
+export async function findWorkflowRow(
+  ctx: Ctx<C>,
+  repo: RepoRow,
+  value: string,
+): Promise<Workflow | null> {
+  return findWorkflow(ctx, repo, value)
+}
+
+export async function runRow(ctx: Ctx<C>, repo: RepoRow, id: number): Promise<RunRow | null> {
+  return (await ctx.db.githubRun.findFirst({
+    where: { ...scope(ctx.tenant), repo: repo.fullName, id },
+  })) as RunRow | null
 }
 
 // Runs come back newest first, which is where a dispatch inserts itself.
@@ -400,6 +415,15 @@ async function listJobs(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   )
 }
 
+async function getJob(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
+  const id = idParam(ctx, 'job_id')
+  for (const run of await runRows(ctx, repo)) {
+    const job = jobsOf(run).find((each) => each.id === id)
+    if (job !== undefined) return { status: 200, body: jobJson(repo, run, job) }
+  }
+  return fail(404, 'Not Found')
+}
+
 function jobLog(job: Job): Buffer {
   return Buffer.from(job.steps.map((step) => step.log).join(''), 'utf8')
 }
@@ -499,12 +523,12 @@ async function rerun(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const byJob = param(ctx, 'job_id') !== ''
   const id = idParam(ctx, 'run_id')
   const row = id === null ? null : await runById(ctx, repo, id)
-  if (row === null) return byJob ? { status: 201 } : fail(404, 'Not Found')
+  if (row === null) return byJob ? { status: 201, body: {} } : fail(404, 'Not Found')
   await ctx.db.githubRun.updateMany({
     where: { ...scope(ctx.tenant), repo: repo.fullName, id: row.id },
     data: { runAttempt: row.runAttempt + 1, status: 'queued', conclusion: null },
   })
-  return { status: 201 }
+  return { status: 201, body: {} }
 }
 
 // The commit a `commits/{ref}/...` route names: a branch's head, a tag's
@@ -639,6 +663,7 @@ export function actionRoutes(): KitRoute<C>[] {
       route<C>('GET', `${actions}/runs/:run_id`, authedRoute(withRepo(getRun))),
       route<C>('GET', `${actions}/runs/:run_id/jobs`, authedRoute(withRepo(listJobs))),
       route<C>('GET', `${actions}/runs/:run_id/logs`, authedRoute(withRepo(runLogs))),
+      route<C>('GET', `${actions}/jobs/:job_id`, authedRoute(withRepo(getJob))),
       route<C>('GET', `${actions}/jobs/:job_id/logs`, authedRoute(withRepo(jobLogs))),
       route<C>('POST', `${actions}/runs/:run_id/rerun`, authedRoute(withRepo(rerun)), {
         write: true,

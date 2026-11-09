@@ -26,6 +26,7 @@ class RepoEditField:
         kind (Literal["value", "toggle", "security"]): Value encoding.
         description (str): Help text.
         short (str | None): Optional short spelling.
+        metavar (str | None): The value's name in the usage block.
         choices (tuple[str, ...]): Allowed explicit values.
     """
 
@@ -35,3 +36,4 @@ class RepoEditField:
     description: str
     short: str | None = None
     choices: tuple[str, ...] = ()
+    metavar: str | None = None

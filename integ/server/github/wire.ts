@@ -112,6 +112,8 @@ export function page<T>(
   }
 }
 
+export const EMPTY_PAGE = { hasNextPage: false, endCursor: null }
+
 export function commitPerson(name: string, when: string): JsonValue {
   const handle = name.toLowerCase().replace(/ /g, '-')
   return { name, email: `${handle}@users.noreply.github.com`, date: when }

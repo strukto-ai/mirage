@@ -10,10 +10,16 @@ RULE = "-" * 72
 # Source adapted into rust/ from permissively licensed projects, which
 # cargo about cannot see because it is not a dependency.
 ADAPTED = [
+    ROOT / "licenses/third_party/cobra.txt",
+    ROOT / "licenses/third_party/gh.txt",
+    ROOT / "licenses/third_party/go-gh.txt",
+    ROOT / "licenses/third_party/go.txt",
+    ROOT / "licenses/third_party/gojq.txt",
     ROOT / "licenses/third_party/jq.txt",
     ROOT / "licenses/third_party/nfsserve.txt",
     ROOT / "licenses/third_party/oniguruma.txt",
     ROOT / "licenses/third_party/pcre2.txt",
+    ROOT / "licenses/third_party/pflag.txt",
     ROOT / "licenses/third_party/uutils-coreutils.txt",
     ROOT / "licenses/third_party/regex-automata.txt",
     ROOT / "licenses/third_party/ripgrep.txt",
@@ -22,10 +28,10 @@ ADAPTED = [
     ROOT / "licenses/third_party/tree-sitter-bash-parser.txt",
 ]
 CORE_LEAD = (
-    "The WebAssembly module embedded in this package (src/generated/"
-    "mirage_rs.ts,\nbuilt from rust/ in https://github.com/strukto-ai/mirage) "
-    "is compiled from the\nRust crates below, each listed under the license "
-    "it came with:"
+    "The WebAssembly modules embedded in this package (src/generated/"
+    "mirage_rs.ts,\nmirage_shell.ts and mirage_gh.ts, built from rust/ in\n"
+    "https://github.com/strukto-ai/mirage) are compiled from the Rust crates "
+    "below,\neach listed under the license it came with:"
 )
 WHEEL_LEAD = (
     "The native module in this package (mirage._rs, built from rust/ in\n"
@@ -84,7 +90,7 @@ def append(path: pathlib.Path, lead: str, manifest: str) -> None:
 
 def main() -> int:
     append(WHEEL, WHEEL_LEAD, "python/Cargo.toml")
-    append(CORE, CORE_LEAD, "wasm/Cargo.toml")
+    append(CORE, CORE_LEAD, "gh-wasm/Cargo.toml")
     print(f"wrote {WHEEL.relative_to(ROOT)}, {CORE.relative_to(ROOT)}")
     return 0
 

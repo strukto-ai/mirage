@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isPinned, lockReason } from './admin.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { API_PREFIXES, DEFAULT_LOGIN } from './config.ts'
 import type { C } from './config.ts'
@@ -182,7 +183,7 @@ async function listIssues(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   return pagedReply(ctx, await Promise.all(sorted.map((r) => r.json())))
 }
 
-async function createIssue(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
+export async function createIssue(ctx: Ctx<C>, repo: RepoRow): Promise<Reply> {
   const body = jsonBodyOf(ctx)
   const title = str(body, 'title').trim()
   if (title === '') return fail(422, 'Invalid request.\n\n"title" wasn\'t supplied.')
@@ -333,16 +334,22 @@ export function commentConnection(
   ctx: { db: C; tenant: string },
   repo: RepoRow,
   number: number,
-): (args: { first: number; after?: string | null }) => Promise<Record<string, unknown>> {
-  return async ({ first, after }) => {
-    if (first < 1 || first > 100) throw new Error('first must be between 1 and 100')
+): (args: {
+  first?: number | null
+  last?: number | null
+  after?: string | null
+}) => Promise<Record<string, unknown>> {
+  return async ({ first, last, after }) => {
+    const size = last ?? first ?? 0
+    if (size < 1 || size > 100) throw new Error('first must be between 1 and 100')
     const rows = await ctx.db.githubComment.findMany({
       where: { ...scope(ctx.tenant), repo: repo.fullName, issueNumber: number },
       orderBy: { seq: 'asc' },
     })
     const start = after ? rows.findIndex((row) => commentCursor(row.id) === after) + 1 : 0
     if (after && start === 0) throw new Error('Invalid cursor')
-    const page = rows.slice(start, start + first)
+    const from = typeof last === 'number' ? Math.max(rows.length - last, 0) : start
+    const page = rows.slice(from, from + size)
     return {
       nodes: page.map((row) => ({
         id: Buffer.from(`012:IssueComment${row.id}`).toString('base64'),
@@ -360,7 +367,7 @@ export function commentConnection(
       })),
       totalCount: rows.length,
       pageInfo: {
-        hasNextPage: start + first < rows.length,
+        hasNextPage: from + size < rows.length,
         endCursor: page.length ? commentCursor(page[page.length - 1]!.id) : null,
       },
     }
@@ -416,6 +423,8 @@ export async function issueNode(
     author: userNode(row.user),
     assignees: ({ first, after }: PageArgs) =>
       page(names(row.assigneesJson).map(userNode), first, after),
+    assignedActors: ({ first, after }: PageArgs) =>
+      page(names(row.assigneesJson).map(userNode), first, after),
     labels: ({ first, after }: PageArgs) =>
       page(
         names(row.labelsJson).map((name) => ({
@@ -429,7 +438,9 @@ export async function issueNode(
       ),
     milestone: null,
     reactionGroups: reactionGroups(),
-    isPinned: false,
+    isPinned: isPinned(ctx, repo.fullName, row.number),
+    locked: lockReason(ctx, repo.fullName, row.number).locked,
+    activeLockReason: lockReason(ctx, repo.fullName, row.number).reason,
     repository,
     comments: commentConnection(ctx, repo, row.number),
     projectCards: () => {

@@ -12,11 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-# Values from gh 2.85.0, go-gh v2.13.0, gojq v0.12.17 and Go 1.25.5
-# (MIT, MIT, MIT and BSD-3-Clause; see gh.txt, go-gh.txt, gojq.txt
-# and go.txt in licenses/third_party/).
-
-import re
+# Values from gh 2.85.0 (MIT; see licenses/third_party/gh.txt).
 
 from mirage.commands.cli.builtin.gh.types import RepoEditField
 
@@ -143,283 +139,207 @@ SEARCH_ALIASES = {
     "number-topics": "topics",
     "include-forks": "fork",
 }
-_ISSUE_PR_SORTS = [
-    "comments",
-    "created",
-    "interactions",
-    "reactions",
-    "reactions-+1",
-    "reactions--1",
-    "reactions-heart",
-    "reactions-smile",
-    "reactions-tada",
-    "reactions-thinking_face",
-    "updated",
-]
 SEARCH_SORTS = {
-    "issues": [*_ISSUE_PR_SORTS],
-    "prs": [*_ISSUE_PR_SORTS],
+    "issues": [
+        "comments",
+        "created",
+        "interactions",
+        "reactions",
+        "reactions-+1",
+        "reactions--1",
+        "reactions-heart",
+        "reactions-smile",
+        "reactions-tada",
+        "reactions-thinking_face",
+        "updated",
+    ],
+    "prs": [
+        "comments",
+        "reactions",
+        "reactions-+1",
+        "reactions--1",
+        "reactions-smile",
+        "reactions-thinking_face",
+        "reactions-heart",
+        "reactions-tada",
+        "interactions",
+        "created",
+        "updated",
+    ],
     "repos": ["forks", "help-wanted-issues", "stars", "updated"],
     "commits": ["author-date", "committer-date"],
 }
-_ISSUE_PR_FIELDS = [
-    "assignees",
-    "author",
-    "authorAssociation",
-    "body",
-    "closedAt",
-    "commentsCount",
-    "createdAt",
-    "id",
-    "isLocked",
-    "isPullRequest",
-    "labels",
-    "number",
-    "repository",
-    "state",
-    "title",
-    "updatedAt",
-    "url",
-]
-SEARCH_FIELDS = {
-    "issues": [*_ISSUE_PR_FIELDS],
-    "prs": [*_ISSUE_PR_FIELDS, "isDraft"],
-    "repos": [
-        "createdAt",
-        "defaultBranch",
-        "description",
-        "forksCount",
-        "fullName",
-        "hasDownloads",
-        "hasIssues",
-        "hasPages",
-        "hasProjects",
-        "hasWiki",
-        "homepage",
-        "id",
-        "isArchived",
-        "isDisabled",
-        "isFork",
-        "isPrivate",
-        "language",
-        "license",
-        "name",
-        "openIssuesCount",
-        "owner",
-        "pushedAt",
-        "size",
-        "stargazersCount",
-        "updatedAt",
-        "url",
-        "visibility",
-        "watchersCount",
-    ],
-    "code": ["path", "repository", "sha", "textMatches", "url"],
-    "commits": [
-        "author",
-        "commit",
-        "committer",
-        "sha",
-        "id",
-        "parents",
-        "repository",
-        "url",
-    ],
+SEARCH_QUERY_USE = {"code": "<query>"}
+SEARCH_USAGE: dict[str, tuple[str, str | None]] = {
+    "app": ("Filter by GitHub App author", None),
+    "archived": (
+        "Filter based on the repository archived state {true|false}",
+        None,
+    ),
+    "assignee": ("Filter by assignee", None),
+    "author": ("Filter by author", None),
+    "closed": ("Filter on closed at date", "date"),
+    "commenter": ("Filter based on comments by user", "user"),
+    "comments": ("Filter on number of comments", "number"),
+    "created": ("Filter based on created at date", "date"),
+    "interactions": ("Filter on number of reactions and comments", "number"),
+    "involves": ("Filter based on involvement of user", "user"),
+    "label": ("Filter on label", None),
+    "language": ("Filter based on the coding language", None),
+    "locked": ("Filter on locked conversation status", None),
+    "match": (
+        "Restrict search to specific field of issue: {title|body|comments}",
+        None,
+    ),
+    "mentions": ("Filter based on user mentions", "user"),
+    "milestone": ("Filter by milestone title", "title"),
+    "no-assignee": ("Filter on missing assignee", None),
+    "no-label": ("Filter on missing label", None),
+    "no-milestone": ("Filter on missing milestone", None),
+    "no-project": ("Filter on missing project", None),
+    "owner": ("Filter on repository owner", None),
+    "project": ("Filter on project board owner/number", "owner/number"),
+    "reactions": ("Filter on number of reactions", "number"),
+    "repo": ("Filter on repository", "strings"),
+    "state": ("Filter based on state", None),
+    "team-mentions": ("Filter based on team mentions", None),
+    "updated": ("Filter on last updated at date", "date"),
+    "visibility": (
+        "Filter based on repository visibility: {public|private|internal}",
+        None,
+    ),
+    "include-prs": ("Include pull requests in results", None),
+    "json": ("Output JSON with the specified fields", "fields"),
+    "jq": ("Filter JSON output using a jq expression", "expression"),
+    "template": (
+        'Format JSON output using a Go template; see "gh help formatting"',
+        None,
+    ),
+    "limit": ("Maximum number of results to fetch", None),
+    "sort": (
+        (
+            "Sort fetched results: "
+            "{comments|created|interactions|reactions|reactions-+1|"
+            "reactions--1|reactions-heart|reactions-smile|reactions-tada|"
+            "reactions-thinking_face|updated} "
+            '(default "best-match")'
+        ),
+        None,
+    ),
+    "order": (
+        (
+            "Order of results returned, ignored unless '--sort' flag is "
+            'specified: {asc|desc} (default "desc")'
+        ),
+        None,
+    ),
+    "base": ("Filter on base branch name", None),
+    "checks": ("Filter based on status of the checks", None),
+    "draft": ("Filter based on draft state", None),
+    "head": ("Filter on head branch name", None),
+    "merged": ("Filter based on merged state", None),
+    "merged-at": ("Filter on merged at date", "date"),
+    "review": ("Filter based on review status", None),
+    "review-requested": ("Filter on user or team requested to review", "user"),
+    "reviewed-by": ("Filter on user who reviewed", "user"),
+    "followers": ("Filter based on number of followers", "number"),
+    "forks": ("Filter on number of forks", "number"),
+    "good-first-issues": (
+        "Filter on number of issues with the 'good first issue' label",
+        "number",
+    ),
+    "help-wanted-issues": (
+        "Filter on number of issues with the 'help wanted' label",
+        "number",
+    ),
+    "include-forks": ("Include forks in fetched repositories", None),
+    "license": ("Filter based on license type", None),
+    "number-topics": ("Filter on number of topics", "number"),
+    "size": ("Filter on a size range, in kilobytes", None),
+    "stars": ("Filter on number of stars", "number"),
+    "topic": ("Filter on topic", None),
+    "extension": ("Filter on file extension", None),
+    "filename": ("Filter on filename", None),
+    "author-date": ("Filter based on authored date", "date"),
+    "author-email": ("Filter on author email", None),
+    "author-name": ("Filter on author name", None),
+    "committer": ("Filter by committer", None),
+    "committer-date": ("Filter based on committed date", "date"),
+    "committer-email": ("Filter on committer email", None),
+    "committer-name": ("Filter on committer name", None),
+    "hash": ("Filter by commit hash", None),
+    "merge": ("Filter on merge commits", None),
+    "parent": ("Filter by parent hash", None),
+    "tree": ("Filter by tree hash", None),
 }
-SEARCH_SHAPES = {
-    "Repository": [
-        ["createdAt", "created_at", "time.Time"],
-        ["defaultBranch", "default_branch", "string"],
-        ["description", "description", "string"],
-        ["forksCount", "forks_count", "int"],
-        ["fullName", "full_name", "string"],
-        ["hasDownloads", "has_downloads", "bool"],
-        ["hasIssues", "has_issues", "bool"],
-        ["hasPages", "has_pages", "bool"],
-        ["hasProjects", "has_projects", "bool"],
-        ["hasWiki", "has_wiki", "bool"],
-        ["homepage", "homepage", "string"],
-        ["id", "node_id", "string"],
-        ["isArchived", "archived", "bool"],
-        ["isDisabled", "disabled", "bool"],
-        ["isFork", "fork", "bool"],
-        ["isPrivate", "private", "bool"],
-        ["language", "language", "string"],
-        ["license", "license", "License"],
-        ["masterBranch", "master_branch", "string"],
-        ["name", "name", "string"],
-        ["openIssuesCount", "open_issues_count", "int"],
-        ["owner", "owner", "User"],
-        ["pushedAt", "pushed_at", "time.Time"],
-        ["size", "size", "int"],
-        ["stargazersCount", "stargazers_count", "int"],
-        ["url", "html_url", "string"],
-        ["updatedAt", "updated_at", "time.Time"],
-        ["visibility", "visibility", "string"],
-        ["watchersCount", "watchers_count", "int"],
-    ],
-    "User": [
-        ["gravatarID", "gravatar_id", "string"],
-        ["id", "node_id", "string"],
-        ["login", "login", "string"],
-        ["siteAdmin", "site_admin", "bool"],
-        ["type", "type", "string"],
-        ["url", "html_url", "string"],
-    ],
-    "CommitInfo": [
-        ["author", "author", "CommitUser"],
-        ["commentCount", "comment_count", "int"],
-        ["committer", "committer", "CommitUser"],
-        ["message", "message", "string"],
-        ["tree", "tree", "Tree"],
-    ],
-    "CommitUser": [
-        ["date", "date", "time.Time"],
-        ["email", "email", "string"],
-        ["name", "name", "string"],
-    ],
-    "Tree": [["sha", "sha", "string"]],
-    "Parent": [["sha", "sha", "string"], ["url", "html_url", "string"]],
-    "License": [
-        ["key", "key", "string"],
-        ["name", "name", "string"],
-        ["url", "url", "string"],
-    ],
-    "Label": [
-        ["color", "color", "string"],
-        ["description", "description", "string"],
-        ["id", "node_id", "string"],
-        ["name", "name", "string"],
-    ],
-    "Issue": [
-        ["assignees", "assignees", "[]User"],
-        ["author", "user", "User"],
-        ["authorAssociation", "author_association", "string"],
-        ["body", "body", "string"],
-        ["closedAt", "closed_at", "time.Time"],
-        ["commentsCount", "comments", "int"],
-        ["createdAt", "created_at", "time.Time"],
-        ["id", "node_id", "string"],
-        ["labels", "labels", "[]Label"],
-        ["isDraft", "draft", "*bool"],
-        ["isLocked", "locked", "bool"],
-        ["number", "number", "int"],
-        ["pullRequest", "pull_request", "PullRequest"],
-        ["repositoryURL", "repository_url", "string"],
-        ["stateInternal", "state", "string"],
-        ["stateReason", "state_reason", "string"],
-        ["title", "title", "string"],
-        ["url", "html_url", "string"],
-        ["updatedAt", "updated_at", "time.Time"],
-    ],
-    "Code": [
-        ["name", "name", "string"],
-        ["path", "path", "string"],
-        ["repository", "repository", "Repository"],
-        ["sha", "sha", "string"],
-        ["textMatches", "text_matches", "[]TextMatch"],
-        ["url", "html_url", "string"],
-    ],
-    "Commit": [
-        ["author", "author", "User"],
-        ["committer", "committer", "User"],
-        ["id", "node_id", "string"],
-        ["info", "commit", "CommitInfo"],
-        ["parents", "parents", "[]Parent"],
-        ["repo", "repository", "Repository"],
-        ["sha", "sha", "string"],
-        ["url", "html_url", "string"],
-    ],
+SEARCH_KIND_USAGE: dict[str, dict[str, tuple[str, str | None]]] = {
+    "prs": {
+        "sort": (
+            (
+                "Sort fetched results: "
+                "{comments|reactions|reactions-+1|reactions--1|"
+                "reactions-smile|reactions-thinking_face|reactions-heart|"
+                "reactions-tada|interactions|created|updated} "
+                '(default "best-match")'
+            ),
+            None,
+        ),
+    },
+    "repos": {
+        "match": (
+            (
+                "Restrict search to specific field of repository: "
+                "{name|description|readme}"
+            ),
+            None,
+        ),
+        "owner": ("Filter on owner", None),
+        "visibility": (
+            "Filter based on visibility: {public|private|internal}",
+            None,
+        ),
+        "limit": ("Maximum number of repositories to fetch", None),
+        "sort": (
+            (
+                "Sort fetched repositories: "
+                "{forks|help-wanted-issues|stars|updated} (default "
+                '"best-match")'
+            ),
+            None,
+        ),
+        "order": (
+            (
+                "Order of repositories returned, ignored unless '--sort' "
+                'flag is specified: {asc|desc} (default "desc")'
+            ),
+            None,
+        ),
+    },
+    "code": {
+        "language": ("Filter results by language", None),
+        "match": (
+            "Restrict search to file contents or file path: {file|path}",
+            None,
+        ),
+        "owner": ("Filter on owner", None),
+        "size": ("Filter on size range, in kilobytes", None),
+        "limit": ("Maximum number of code results to fetch", None),
+    },
+    "commits": {
+        "limit": ("Maximum number of commits to fetch", None),
+        "sort": (
+            'Sort fetched commits: {author-date|committer-date} (default "best-match")',
+            None,
+        ),
+        "order": (
+            (
+                "Order of commits returned, ignored unless '--sort' flag "
+                'is specified: {asc|desc} (default "desc")'
+            ),
+            None,
+        ),
+    },
 }
-
-# gh 2.85's `diffHeaderRegexp`, the `diff --git` header `--name-only`
-# reads a name from, with Go's `\s` and `.` spelled out so no host widens them.
-DIFF_HEADER = re.compile(
-    r'(?:^|\n)diff[\t\n\f\r ]--git[^\n]*[\t\n\f\r ](["]?)b/([^\n]*)'
-)
-
-TEMPLATE_TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|`[^`]*`|[^\s|]+|\|')
-TEMPLATE_ACTION = re.compile(r"{{(-?)\s*(.*?)\s*(-?)}}", re.S)
-TEMPLATE_DECLARATION = re.compile(
-    r"(\$\w+)\s*(?:,\s*(\$\w+)\s*)?(:?=)\s*(.*)", re.S
-)
-
-# The builtins gojq writes in jq, so each fails through `error` itself,
-# where jq 1.8.2's fail as builtins do: jq's message for each, and the one
-# gojq raises (gojq v0.12.17 builtin.jq).
-GOJQ_RAISED = {
-    "limit doesn't support negative count": "limit doesn't support negative count",
-    "skip doesn't support negative count": "skip doesn't support negative count",
-    "nth doesn't support negative indices": "nth doesn't support negative index",
-}
-
-# The reason phrase `gh api -i` prints after a status code: Go's
-# http.StatusText, which is what gh reports for a response that carries none.
-HTTP_REASONS: dict[int, str] = {
-    100: "Continue",
-    101: "Switching Protocols",
-    102: "Processing",
-    103: "Early Hints",
-    200: "OK",
-    201: "Created",
-    202: "Accepted",
-    203: "Non-Authoritative Information",
-    204: "No Content",
-    205: "Reset Content",
-    206: "Partial Content",
-    207: "Multi-Status",
-    208: "Already Reported",
-    226: "IM Used",
-    300: "Multiple Choices",
-    301: "Moved Permanently",
-    302: "Found",
-    303: "See Other",
-    304: "Not Modified",
-    305: "Use Proxy",
-    307: "Temporary Redirect",
-    308: "Permanent Redirect",
-    400: "Bad Request",
-    401: "Unauthorized",
-    402: "Payment Required",
-    403: "Forbidden",
-    404: "Not Found",
-    405: "Method Not Allowed",
-    406: "Not Acceptable",
-    407: "Proxy Authentication Required",
-    408: "Request Timeout",
-    409: "Conflict",
-    410: "Gone",
-    411: "Length Required",
-    412: "Precondition Failed",
-    413: "Request Entity Too Large",
-    414: "Request URI Too Long",
-    415: "Unsupported Media Type",
-    416: "Requested Range Not Satisfiable",
-    417: "Expectation Failed",
-    418: "I'm a teapot",
-    421: "Misdirected Request",
-    422: "Unprocessable Entity",
-    423: "Locked",
-    424: "Failed Dependency",
-    425: "Too Early",
-    426: "Upgrade Required",
-    428: "Precondition Required",
-    429: "Too Many Requests",
-    431: "Request Header Fields Too Large",
-    451: "Unavailable For Legal Reasons",
-    500: "Internal Server Error",
-    501: "Not Implemented",
-    502: "Bad Gateway",
-    503: "Service Unavailable",
-    504: "Gateway Timeout",
-    505: "HTTP Version Not Supported",
-    506: "Variant Also Negotiates",
-    507: "Insufficient Storage",
-    508: "Loop Detected",
-    510: "Not Extended",
-    511: "Network Authentication Required",
-}
-
 REPO_EDIT_FIELDS = (
     RepoEditField(
         flag="--description",
@@ -434,12 +354,14 @@ REPO_EDIT_FIELDS = (
         kind="value",
         description="Repository home page URL",
         short="-h",
+        metavar="URL",
     ),
     RepoEditField(
         flag="--default-branch",
         field="default_branch",
         kind="value",
         description="Set the default branch name for the repository",
+        metavar="name",
     ),
     RepoEditField(
         flag="--visibility",
@@ -521,7 +443,8 @@ REPO_EDIT_FIELDS = (
         flag="--enable-secret-scanning-push-protection",
         field="secret_scanning_push_protection",
         kind="security",
-        description="Enable secret scanning push protection in the repository",
+        description="Enable secret scanning push protection in the "
+        "repository. Secret scanning must be enabled first",
     ),
     RepoEditField(
         flag="--delete-branch-on-merge",
@@ -568,9 +491,8 @@ HELP_TOPICS: dict[str, str] = {
     ),
 }
 
+GIST_ORIGIN = "https://gist.github.com"
 GITHUB_HOST = "github.com"
 # How gh 2.46 refuses a list verb's --limit under 1, before any request:
 # `invalid limit: 0`, and `invalid value for --limit: 0` from pr list.
-INVALID_LIMIT = "invalid limit"
-PR_INVALID_LIMIT = "invalid value for --limit"
 CONNECT_HINT = "check your internet connection or https://githubstatus.com"

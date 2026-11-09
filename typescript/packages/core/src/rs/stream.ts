@@ -62,27 +62,82 @@ const RECYCLE_BYTES = 32 * 1024 * 1024
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
-let compiled: Promise<WebAssembly.Module> | undefined
-let compiledSync: WebAssembly.Module | undefined
-let current: Promise<Exports> | undefined
-let synchronous: Exports | undefined
 const movables = new WeakMap<Exports, Set<OpenStream>>()
 
-// The next stream gets a fresh instance; the movable streams still on this one
-// close, and `live` says so to their owners.
-function retire(exports: Exports, trapped: boolean): void {
-  current = undefined
-  if (synchronous === exports) synchronous = undefined
-  for (const stream of movables.get(exports) ?? []) stream.drop(!trapped)
-  movables.delete(exports)
-}
+type ModuleSource = string | WebAssembly.Module | (() => WebAssembly.Module)
 
-function moduleSource(
-  source: string | WebAssembly.Module | (() => WebAssembly.Module),
-): string | WebAssembly.Module {
+function moduleSource(source: ModuleSource): string | WebAssembly.Module {
   if (typeof source === 'string' || source instanceof WebAssembly.Module) return source
   return source()
 }
+
+/**
+ * One embedded streams module and the instance its streams run on. A module
+ * holds what it compiled, so each compiles once, and recycles its own instance.
+ */
+export class StreamModule {
+  private compiled: Promise<WebAssembly.Module> | undefined
+  private compiledSync: WebAssembly.Module | undefined
+  private current: Promise<Exports> | undefined
+  private synchronous: Exports | undefined
+
+  constructor(private readonly source: ModuleSource) {}
+
+  compiledModule(): Promise<WebAssembly.Module> {
+    const source = moduleSource(this.source)
+    this.compiled ??=
+      typeof source === 'string'
+        ? WebAssembly.compile(decodeBase64(source) as BufferSource)
+        : Promise.resolve(source)
+    return this.compiled
+  }
+
+  moduleSync(): WebAssembly.Module {
+    this.compiledSync ??= compileSync(this.source)
+    this.compiled ??= Promise.resolve(this.compiledSync)
+    return this.compiledSync
+  }
+
+  adopt(module: WebAssembly.Module): void {
+    this.compiledSync ??= module
+    this.compiled ??= Promise.resolve(module)
+  }
+
+  // The next stream gets a fresh instance; the movable streams still on this
+  // one close, and `live` says so to their owners.
+  retire(exports: Exports, trapped: boolean): void {
+    this.current = undefined
+    if (this.synchronous === exports) this.synchronous = undefined
+    for (const stream of movables.get(exports) ?? []) stream.drop(!trapped)
+    movables.delete(exports)
+  }
+
+  private async instance(): Promise<Exports> {
+    if (this.synchronous !== undefined) return this.synchronous
+    this.current ??= this.compiledModule().then((module) => {
+      this.compiledSync = module
+      this.synchronous ??= new WebAssembly.Instance(module, {}).exports as unknown as Exports
+      return this.synchronous
+    })
+    return this.current
+  }
+
+  async open(kind: string, config: Readonly<Record<string, util.JSONType>>): Promise<OpenStream> {
+    return open(await this.instance(), this, kind, config)
+  }
+
+  openSync(
+    kind: string,
+    config: Readonly<Record<string, util.JSONType>>,
+    movable: boolean,
+  ): OpenStream {
+    this.synchronous ??= new WebAssembly.Instance(this.moduleSync(), {})
+      .exports as unknown as Exports
+    return open(this.synchronous, this, kind, config, movable)
+  }
+}
+
+const MAIN = new StreamModule(MIRAGE_RS_WASM)
 
 /**
  * The compiled module, for the page to hand the workers it starts without a
@@ -92,18 +147,11 @@ function moduleSource(
  * base64 everywhere else.
  */
 export function compiledModule(): Promise<WebAssembly.Module> {
-  const source = moduleSource(MIRAGE_RS_WASM)
-  compiled ??=
-    typeof source === 'string'
-      ? WebAssembly.compile(decodeBase64(source) as BufferSource)
-      : Promise.resolve(source)
-  return compiled
+  return MAIN.compiledModule()
 }
 
 /** An embedded module (a `#mirage-*-wasm` import) compiled now, for a caller that cannot wait. */
-export function compileSync(
-  source: string | WebAssembly.Module | (() => WebAssembly.Module),
-): WebAssembly.Module {
+export function compileSync(source: ModuleSource): WebAssembly.Module {
   const module = moduleSource(source)
   return typeof module === 'string'
     ? new WebAssembly.Module(decodeBase64(module) as BufferSource)
@@ -112,9 +160,7 @@ export function compileSync(
 
 /** The compiled module, compiled now if no one has yet, for a caller that cannot wait. */
 export function moduleSync(): WebAssembly.Module {
-  compiledSync ??= compileSync(MIRAGE_RS_WASM)
-  compiled ??= Promise.resolve(compiledSync)
-  return compiledSync
+  return MAIN.moduleSync()
 }
 
 /**
@@ -123,18 +169,7 @@ export function moduleSync(): WebAssembly.Module {
  * in the `.wasm` its bundler loaded (`@struktoai/mirage-core/mirage_rs.wasm`).
  */
 export function adoptModule(module: WebAssembly.Module): void {
-  compiledSync ??= module
-  compiled ??= Promise.resolve(module)
-}
-
-async function instance(): Promise<Exports> {
-  if (synchronous !== undefined) return synchronous
-  current ??= compiledModule().then((module) => {
-    compiledSync = module
-    synchronous ??= new WebAssembly.Instance(module, {}).exports as unknown as Exports
-    return synchronous
-  })
-  return current
+  MAIN.adopt(module)
 }
 
 function bytesAt(exports: Exports, ptr: number, len: number): Uint8Array {
@@ -151,6 +186,7 @@ export class OpenStream {
 
   constructor(
     exports: Exports,
+    private readonly module: StreamModule,
     handle: number,
     readonly movable = false,
   ) {
@@ -303,7 +339,7 @@ export class OpenStream {
       this.exports.memory.buffer.byteLength > RECYCLE_BYTES &&
       ![...(held ?? [])].some((stream) => stream.busy())
     )
-      retire(this.exports, false)
+      this.module.retire(this.exports, false)
   }
 
   /** Close the handle, on the instance itself unless it trapped. */
@@ -323,7 +359,7 @@ export class OpenStream {
     } catch (err) {
       if (err instanceof WebAssembly.RuntimeError) {
         this.drop(false)
-        retire(this.exports, true)
+        this.module.retire(this.exports, true)
       }
       throw err
     }
@@ -414,8 +450,7 @@ export async function openStream(
   kind: string,
   config: Readonly<Record<string, util.JSONType>>,
 ): Promise<OpenStream> {
-  const exports = await instance()
-  return open(exports, kind, config)
+  return MAIN.open(kind, config)
 }
 
 /**
@@ -428,8 +463,7 @@ export function openStreamSync(
   config: Readonly<Record<string, util.JSONType>>,
   movable = false,
 ): OpenStream {
-  synchronous ??= new WebAssembly.Instance(moduleSync(), {}).exports as unknown as Exports
-  return open(synchronous, kind, config, movable)
+  return MAIN.openSync(kind, config, movable)
 }
 
 const movableFinalizer = new FinalizationRegistry<OpenStream>((stream) => {
@@ -476,6 +510,7 @@ export class MovableStream {
 
 function open(
   exports: Exports,
+  module: StreamModule,
   kind: string,
   config: Readonly<Record<string, util.JSONType>>,
   movable = false,
@@ -497,7 +532,7 @@ function open(
     )
     throw new StreamRefusal(message, new Uint8Array(), exports.mirage_rs_error_status(0))
   }
-  return new OpenStream(exports, handle, movable)
+  return new OpenStream(exports, module, handle, movable)
 }
 
 /**

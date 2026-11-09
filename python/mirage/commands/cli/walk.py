@@ -15,6 +15,12 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
+from mirage.commands.cli.cobra import (
+    COBRA_EXIT,
+    cobra_refusal,
+    group_message,
+    unknown_command,
+)
 from mirage.commands.cli.constants import (
     CLAP_EXIT,
     GIT_SYNOPSES,
@@ -399,6 +405,11 @@ def _usage_error(
             unrecognized option, which clap and git word their own way.
             None for the refusals whose wording the dialects share.
     """
+    if style is UsageStyle.COBRA:
+        text = cobra_refusal(group_message(message, token), name, node)
+        return WalkResult(
+            output=encode_text(text), stream="stderr", exit_code=COBRA_EXIT
+        )
     if style is UsageStyle.CLAP:
         first = (
             clap_unexpected_argument(token) if token is not None else message
@@ -833,7 +844,7 @@ def walk(
                 if spelling not in cs.dest and spelling != "--help":
                     candidates = (
                         _expand_group_long(node, cs, spelling)
-                        if node.allow_abbrev
+                        if node.allow_abbrev and style is not UsageStyle.COBRA
                         else ()
                     )
                     if len(candidates) == 1:
@@ -1017,6 +1028,15 @@ def walk(
             # `gws co` render as `gws checkout`).
             child = None if token.startswith("-") else find_child(node, token)
             if child is None:
+                if style is UsageStyle.COBRA:
+                    text = cobra_refusal(
+                        unknown_command(token, name, node), name, node
+                    )
+                    return WalkResult(
+                        output=encode_text(text),
+                        stream="stderr",
+                        exit_code=COBRA_EXIT,
+                    )
                 return _unknown_verb(head, name, token)
             node = child
             path = path + (child.name,)
@@ -1040,5 +1060,5 @@ def walk(
                 )
             ),
             stream="stdout",
-            exit_code=1,
+            exit_code=0 if style is UsageStyle.COBRA else 1,
         )

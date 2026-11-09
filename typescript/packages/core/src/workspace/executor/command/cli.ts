@@ -23,6 +23,7 @@ import { missCondition, pathStat } from '../../mount/namespace/probe.ts'
 import { FileType, wordText, PathSpec, type Limit } from '../../../types.ts'
 import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
 import type { ProcessView } from '../../../execution/process/view.ts'
+import { COBRA_EXIT, cobraRefusal, leafMessage } from '../../../commands/cli/cobra.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
 import type { CLI, CLIHandler } from '../../../commands/cli/types.ts'
 import type { CommandFnResult, Context } from '../../../commands/config.ts'
@@ -90,9 +91,13 @@ function parseSpecFor(
     const spec: CommandSpecInit = leaf
     return [new CommandSpec({ ...spec, arguments: [...leaf.arguments, PASSTHROUGH_REST] }), false]
   }
-  if (!leaf.addHelp || leaf.arguments.some((argument) => argument.names.includes('--help')))
-    return [leaf, false]
-  return [listedNode(leaf, style), true]
+  const grammar =
+    style === UsageStyle.COBRA
+      ? new CommandSpec({ ...(leaf as CommandSpecInit), allowAbbrev: false })
+      : leaf
+  if (!grammar.addHelp || grammar.arguments.some((argument) => argument.names.includes('--help')))
+    return [grammar, false]
+  return [listedNode(grammar, style), true]
 }
 
 /**
@@ -416,7 +421,7 @@ export async function walkLeaf(
     prog,
     session.cwd,
     envSnapshot(session),
-    true,
+    style !== UsageStyle.COBRA,
     abbreviations,
   )
   const { paths, texts, flagKwargs, warnings } = parsed
@@ -429,7 +434,14 @@ export async function walkLeaf(
   let msg: Uint8Array | null = null
   let shown: Uint8Array | null = null
   let code = 0
-  if (refusal !== null) {
+  const wording =
+    style === UsageStyle.COBRA && refusal !== null
+      ? leafMessage(parsed, leaf, result.argv, result.path.join(' '))
+      : null
+  if (wording !== null) {
+    msg = encodeText(cobraRefusal(wording, prog, leaf))
+    code = COBRA_EXIT
+  } else if (refusal !== null) {
     ;[msg, code, shown] = leafRefusal(style, refusal[0], parsed, result.path.join(' '), leaf)
   } else if (parsed.missingRequiredOperands.length > 0 && style === UsageStyle.CLAP) {
     msg = clapMissingOperands(

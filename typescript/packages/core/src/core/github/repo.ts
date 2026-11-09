@@ -15,11 +15,9 @@
 // Repository arguments are read as go-gh v2.13.0 reads them (MIT; see
 // licenses/third_party/go-gh.txt).
 
-import { decodeBase64 } from '../../utils/base64.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { GitHubApiError, type GitHubTransport } from './client.ts'
+import type { GitHubTransport } from './client.ts'
 import { GRAPHQL_PATH } from './constants.ts'
-import { githubPages } from './paginate.ts'
 
 export interface RepoRef {
   owner: string
@@ -113,10 +111,6 @@ export async function login(transport: GitHubTransport): Promise<string> {
   return me.login ?? ''
 }
 
-export function viewRepo(transport: GitHubTransport, ref: RepoRef): Promise<unknown> {
-  return transport.get(`/repos/${ref.owner}/${ref.repo}`)
-}
-
 /**
  * Run one GraphQL query and return its data, refusing the way gh does.
  *
@@ -155,155 +149,3 @@ export async function graphqlData(
  *   ref (RepoRef): the repository.
  *   selection (string): the GraphQL selection inside `repository { }`.
  */
-export async function repositoryFields(
-  transport: GitHubTransport,
-  ref: RepoRef,
-  selection: string,
-): Promise<Record<string, unknown>> {
-  const data = await graphqlData(
-    transport,
-    `query RepositoryInfo($owner: String!, $name: String!) {\n` +
-      `    repository(owner: $owner, name: $name) {${selection}}\n  }`,
-    { owner: ref.owner, name: ref.repo },
-  )
-  return (data.repository ?? {}) as Record<string, unknown>
-}
-
-/**
- * The selected fields of an owner's repositories, over GraphQL, as gh reads
- * them for `repo list --json`: the owner's own, most recently pushed first, a
- * page of up to 100 at a time until `limit`. No owner means the viewer.
- *
- * Args:
- *   transport (GitHubTransport): the API client.
- *   owner (string | undefined): the user or organization, or the viewer.
- *   limit (number): how many repositories at most.
- *   selection (string): the GraphQL selection for each repository.
- */
-export async function listRepositoryFields(
-  transport: GitHubTransport,
-  owner: string | undefined,
-  limit: number,
-  selection: string,
-): Promise<Record<string, unknown>[]> {
-  const head =
-    owner === undefined
-      ? 'query RepositoryList($perPage:Int!,$endCursor:String,$privacy:RepositoryPrivacy,' +
-        '$fork:Boolean) {\n    repositoryOwner: viewer {'
-      : 'query RepositoryList($perPage:Int!,$endCursor:String,$privacy:RepositoryPrivacy,' +
-        '$fork:Boolean,$owner:String!) {\n    repositoryOwner(login: $owner) {'
-  const query =
-    `${head}\n      login\n      repositories(first: $perPage, after: $endCursor, ` +
-    'privacy: $privacy, isFork: $fork, ownerAffiliations: OWNER, orderBy: { field: ' +
-    `PUSHED_AT, direction: DESC }) {\n        nodes{${selection}}\n        totalCount\n` +
-    '        pageInfo{hasNextPage,endCursor}\n      }\n    }\n  }'
-  const rows: Record<string, unknown>[] = []
-  let cursor: string | null = null
-  while (rows.length < limit) {
-    const variables: Record<string, unknown> = { perPage: Math.min(limit, 100) }
-    if (owner !== undefined) variables.owner = owner
-    if (cursor !== null) variables.endCursor = cursor
-    const data = await graphqlData(transport, query, variables)
-    const page = (
-      data.repositoryOwner as {
-        repositories?: {
-          nodes?: Record<string, unknown>[]
-          pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }
-        }
-      } | null
-    )?.repositories
-    for (const item of page?.nodes ?? []) rows.push(item)
-    const next = page?.pageInfo?.endCursor ?? null
-    if (page?.pageInfo?.hasNextPage !== true || next === null || next === cursor) break
-    cursor = next
-  }
-  return rows.slice(0, limit)
-}
-
-/**
- * The repository's README as text, or null when it has none.
- */
-export async function readReadme(transport: GitHubTransport, ref: RepoRef): Promise<string | null> {
-  let data: unknown
-  try {
-    data = await transport.get(`/repos/${ref.owner}/${ref.repo}/readme`)
-  } catch (err) {
-    if (err instanceof GitHubApiError && err.status === 404) return null
-    throw err
-  }
-  const content = (data as { content?: unknown } | null)?.content
-  if (typeof content !== 'string') return null
-  return new TextDecoder().decode(decodeBase64(content))
-}
-
-/** Fork a repository: `body` carries the request's `name`, `organization` and `default_branch_only`. */
-export function forkRepo(
-  transport: GitHubTransport,
-  ref: RepoRef,
-  body: Record<string, unknown> = {},
-): Promise<unknown> {
-  return transport.request('POST', `/repos/${ref.owner}/${ref.repo}/forks`, body)
-}
-
-/** Change a repository's settings: the one `PATCH` `gh repo edit` sends. */
-export function editRepo(
-  transport: GitHubTransport,
-  ref: RepoRef,
-  body: Record<string, unknown>,
-): Promise<unknown> {
-  return transport.request('PATCH', `/repos/${ref.owner}/${ref.repo}`, body)
-}
-
-/** A repository's topics, which GitHub keeps and replaces as one list. */
-export async function repoTopics(transport: GitHubTransport, ref: RepoRef): Promise<string[]> {
-  const data = (await transport.get(`/repos/${ref.owner}/${ref.repo}/topics`)) as {
-    names?: unknown
-  } | null
-  const names = data?.names
-  return Array.isArray(names) ? names.filter((n): n is string => typeof n === 'string') : []
-}
-
-export function setRepoTopics(
-  transport: GitHubTransport,
-  ref: RepoRef,
-  names: readonly string[],
-): Promise<unknown> {
-  return transport.request('PUT', `/repos/${ref.owner}/${ref.repo}/topics`, { names })
-}
-
-export function deleteRepo(transport: GitHubTransport, ref: RepoRef): Promise<unknown> {
-  return transport.request('DELETE', `/repos/${ref.owner}/${ref.repo}`)
-}
-
-export function renameRepo(
-  transport: GitHubTransport,
-  ref: RepoRef,
-  name: string,
-): Promise<unknown> {
-  return transport.request('PATCH', `/repos/${ref.owner}/${ref.repo}`, { name })
-}
-
-export async function listRepos(
-  transport: GitHubTransport,
-  owner: string | undefined,
-  limit: number,
-): Promise<Record<string, unknown>[]> {
-  let path = '/user/repos'
-  if (owner !== undefined) {
-    const account = (await transport.get(`/users/${owner}`)) as { type?: unknown }
-    const prefix = account.type === 'Organization' ? 'orgs' : 'users'
-    path = `/${prefix}/${owner}/repos`
-  }
-  return githubPages(transport, path, { params: { sort: 'pushed' }, limit })
-}
-
-export async function createRepo(
-  transport: GitHubTransport,
-  owner: string | undefined,
-  body: Record<string, unknown>,
-): Promise<unknown> {
-  const personal =
-    owner === undefined || owner.toLowerCase() === (await login(transport)).toLowerCase()
-  const path = personal ? '/user/repos' : `/orgs/${owner}/repos`
-  return transport.request('POST', path, body)
-}

@@ -18,7 +18,10 @@ import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts
 import { DEFAULT_LOGIN } from './config.ts'
 import type { C } from './config.ts'
 import { authedRoute, everywhere, jsonBodyOf, route, str } from './http.ts'
-import { ownedRepositories, repositoryNode } from './repos.ts'
+import { adminRoot, gistPage, MUTATIONS } from './admin.ts'
+import { commentConnection, issueNode } from './issues.ts'
+import { pullRequestNode } from './pulls.ts'
+import { createRepositoryRoot, ownedRepositories, repositoryNode } from './repos.ts'
 import { repoByName } from './store.ts'
 
 // The slice of the vendor's schema the clients here send: issue and pull
@@ -37,12 +40,25 @@ const SCHEMA = buildSchema(`
   type Query {
     repository(owner: String!, name: String!): Repository
     repositoryOwner(login: String!): RepositoryOwner
+    node(id: ID!): IssueOrPullRequest
     viewer: User!
+    search(query: String!, type: SearchType!, first: Int, last: Int, after: String): SearchConnection!
+    user(login: String!): UserOrgs
+    organization(login: String!): OrgRulesets
+  }
+  type UserOrgs {
+    login: String!
+    organizations(first: Int!, after: String): OrgConnection!
+  }
+  type OrgRulesets {
+    login: String!
+    rulesets(first: Int!, after: String, includeParents: Boolean): RulesetConnection!
   }
   enum IssueState { OPEN CLOSED }
   enum IssueStateReason { REOPENED NOT_PLANNED COMPLETED DUPLICATE }
   input IssueFilters {
-    assignee: String, createdBy: String, mentioned: String, labels: [String!]
+    assignee: String, createdBy: String, mentioned: String, labels: [String!],
+    states: [IssueState!]
   }
   enum PullRequestState { OPEN CLOSED MERGED }
   enum MilestoneState { OPEN CLOSED }
@@ -72,6 +88,7 @@ const SCHEMA = buildSchema(`
     databaseId: Int
     repositories(first: Int!, after: String, privacy: RepositoryPrivacy, isFork: Boolean,
       ownerAffiliations: [RepositoryAffiliation], orderBy: RepositoryOrder): RepositoryConnection!
+    gists(first: Int!, after: String, privacy: GistPrivacy, orderBy: GistOrder): GistConnection!
   }
   type Organization implements Actor & RepositoryOwner {
     id: ID!
@@ -102,12 +119,15 @@ const SCHEMA = buildSchema(`
   type LanguageConnection { edges: [LanguageEdge!]! }
   type IssueTemplate { name: String!, title: String, body: String, about: String }
   type PullRequestTemplate { body: String, filename: String }
-  type Label { id: ID!, color: String!, name: String!, description: String }
-  type LabelConnection { nodes: [Label!]!, totalCount: Int! }
-  type Milestone { number: Int!, title: String!, description: String, dueOn: String }
-  type MilestoneConnection { nodes: [Milestone!]! }
-  type Release { publishedAt: String, tagName: String!, name: String, url: String! }
-  type UserConnection { nodes: [User!]!, totalCount: Int! }
+  type Label {
+    id: ID!, color: String!, name: String!, description: String, url: String,
+    isDefault: Boolean, createdAt: String, updatedAt: String
+  }
+  type LabelConnection { nodes: [Label!]!, totalCount: Int!, pageInfo: PageInfo }
+  type Milestone { id: ID, number: Int!, title: String!, description: String, dueOn: String }
+  type MilestoneConnection { nodes: [Milestone!]!, pageInfo: PageInfo }
+  type Release { databaseId: Int, isDraft: Boolean, publishedAt: String, tagName: String!, name: String, url: String! }
+  type UserConnection { nodes: [User!]!, totalCount: Int!, pageInfo: PageInfo }
   type Project { id: ID!, name: String!, number: Int!, body: String, resourcePath: String! }
   type ProjectConnection { nodes: [Project!]! }
   type ProjectV2 { id: ID!, number: Int!, title: String!, resourcePath: String!,
@@ -178,10 +198,15 @@ const SCHEMA = buildSchema(`
     languages(first: Int): LanguageConnection
     issueTemplates: [IssueTemplate!]
     pullRequestTemplates: [PullRequestTemplate!]
-    labels(first: Int): LabelConnection
-    milestones(first: Int, states: [MilestoneState!]): MilestoneConnection
+    labels(first: Int, after: String, query: String, orderBy: LabelOrder): LabelConnection
+    milestones(first: Int, after: String, states: [MilestoneState!]): MilestoneConnection
+    milestone(number: Int!): Milestone
+    releases(first: Int, after: String, orderBy: ReleaseOrder): ReleaseConnection!
+    rulesets(first: Int!, after: String, includeParents: Boolean): RulesetConnection!
     latestRelease: Release
-    assignableUsers(first: Int): UserConnection!
+    release(tagName: String!): Release
+    assignableUsers(first: Int, after: String): UserConnection!
+    suggestedActors(first: Int, after: String, capabilities: [ActorCapability!]): AssignedActorConnection!
     mentionableUsers(first: Int): UserConnection!
     projects(first: Int, states: [ProjectState!]): ProjectConnection!
     projectsV2(first: Int, query: String): ProjectV2Connection!
@@ -207,14 +232,23 @@ const SCHEMA = buildSchema(`
     milestone: Milestone
     reactionGroups: [ReactionGroup!]
     isPinned: Boolean
+    locked: Boolean!
+    activeLockReason: String
     repository: Repository!
-    comments(first: Int!, after: String): IssueCommentConnection!
+    comments(first: Int, last: Int, after: String): IssueCommentConnection!
+    assignedActors(first: Int, after: String): AssignedActorConnection!
     projectCards(first: Int, after: String): ProjectCardConnection!
     projectItems(first: Int, after: String): ProjectV2ItemConnection!
     closedByPullRequestsReferences(first: Int, after: String): PullRequestConnection
   }
+  union AssignedActor = User | Bot
+  type AssignedActorConnection { nodes: [AssignedActor!]!, totalCount: Int!, pageInfo: PageInfo! }
+  enum ActorCapability { CAN_BE_ASSIGNED }
   type IssueConnection { nodes: [Issue!]!, totalCount: Int!, pageInfo: PageInfo! }
-  type PullRequestConnection { nodes: [PullRequest!]!, totalCount: Int!, pageInfo: PageInfo! }
+  type PullRequestEdge { node: PullRequest! }
+  type PullRequestConnection {
+    nodes: [PullRequest!]!, edges: [PullRequestEdge!]!, totalCount: Int!, pageInfo: PageInfo!
+  }
   type PullRequest {
     id: ID!
     repository: Repository!
@@ -234,6 +268,11 @@ const SCHEMA = buildSchema(`
     headRefName: String!
     headRefOid: String!
     isDraft: Boolean!
+    locked: Boolean!
+    activeLockReason: String
+    isInMergeQueue: Boolean!
+    isMergeQueueEnabled: Boolean!
+    baseRef: BaseRef
     isCrossRepository: Boolean!
     maintainerCanModify: Boolean!
     mergeable: MergeableState!
@@ -253,7 +292,8 @@ const SCHEMA = buildSchema(`
     assignees(first: Int, after: String): UserConnection!
     labels(first: Int, after: String): LabelConnection
     reactionGroups: [ReactionGroup!]
-    comments(first: Int!, after: String): IssueCommentConnection!
+    comments(first: Int, last: Int, after: String): IssueCommentConnection!
+    assignedActors(first: Int, after: String): AssignedActorConnection!
     reviews(first: Int, after: String): PullRequestReviewConnection
     latestReviews(first: Int, after: String): PullRequestReviewConnection
     reviewRequests(first: Int, after: String): ReviewRequestConnection
@@ -297,11 +337,12 @@ const SCHEMA = buildSchema(`
   type CheckSuite { workflowRun: WorkflowRun }
   type CheckRun {
     name: String!, status: String!, conclusion: String, startedAt: String,
-    completedAt: String, detailsUrl: String, checkSuite: CheckSuite!
+    completedAt: String, detailsUrl: String, checkSuite: CheckSuite!,
+    isRequired(pullRequestId: ID): Boolean
   }
   type StatusContext {
     context: String!, state: String!, targetUrl: String, createdAt: String!,
-    description: String
+    description: String, isRequired(pullRequestId: ID): Boolean
   }
   type PullRequestChangedFile {
     path: String!, additions: Int!, deletions: Int!, changeType: String!
@@ -340,6 +381,7 @@ const SCHEMA = buildSchema(`
     minimizedReason: String, reactionGroups: [ReactionGroup!]!, url: String!,
     viewerDidAuthor: Boolean!
   }
+  ${MUTATIONS}
 `)
 
 /**
@@ -365,7 +407,20 @@ async function answer(ctx: Ctx<C>): Promise<Reply> {
         return repositoryNode(ctx, repo)
       },
       repositoryOwner: ({ login }: { login: string }) => ownedRepositories(ctx, login),
-      viewer: () => ownedRepositories(ctx, DEFAULT_LOGIN),
+      viewer: async () => ({
+        ...(await ownedRepositories(ctx, DEFAULT_LOGIN)),
+        gists: gistPage(ctx),
+      }),
+      createRepository: createRepositoryRoot(ctx),
+      ...adminRoot(ctx, {
+        issue: async (repo, row) => issueNode(ctx, repo, row, await repositoryNode(ctx, repo)),
+        pull: async (repo, row) => ({
+          ...(await pullRequestNode(ctx, repo, row, await repositoryNode(ctx, repo), (other) =>
+            repositoryNode(ctx, other),
+          )),
+          comments: commentConnection(ctx, repo, row.number),
+        }),
+      }),
     },
   })
   return { status: 200, body: JSON.parse(JSON.stringify(result)) as JsonValue }
