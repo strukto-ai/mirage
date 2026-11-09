@@ -814,30 +814,28 @@ async def test_close_cancels_streamed_lines_in_the_order_they_started(
     assert cancelled[: len(started)] == started
 
 
-class _ReapedBox(MachineHandle):
-    """A machine ``reapbox:b1`` that records the processes it was asked
-    to reap, holds those of the pids in ``holds``, and does not answer
+class _StoppedBox(MachineHandle):
+    """A machine ``stopbox:b1`` that records the processes it was asked
+    to stop, holds those of the pids in ``holds``, and does not answer
     for pid 6."""
 
-    provider = "reapbox"
+    provider = "stopbox"
 
     def __init__(self, holds: tuple[int, ...]) -> None:
         super().__init__("b1")
         self.holds = holds
-        self.reaped: list[tuple[str, int]] = []
+        self.stopped: list[tuple[str, int]] = []
 
     async def connect(self) -> None:
         return None
 
-    async def stop_run(self, tag: str, signum: int) -> bool:
-        self.reaped.append((tag, signum))
+    async def stop(self, tag: str, signum: int) -> bool:
+        self.stopped.append((tag, signum))
         pid = int(tag.rpartition(":")[2])
-        if pid == 6:
-            raise RuntimeError("box not answering")
-        return pid in self.holds
+        return pid != 6 and pid in self.holds
 
 
-def _box_process(pid: int, machine: str = "reapbox:b1") -> dict:
+def _box_process(pid: int, machine: str = "stopbox:b1") -> dict:
     return {"pid": pid, "session": "s", "machine": machine, "runtime": "x"}
 
 
@@ -847,21 +845,23 @@ def _box_process(pid: int, machine: str = "reapbox:b1") -> dict:
 # whose machine did not answer, one on a machine this workspace does not
 # declare and a host program of another host are out of reach.
 @pytest.mark.asyncio
-async def test_a_workspace_reaps_the_programs_its_machines_reach():
-    box = _ReapedBox((2,))
+async def test_a_workspace_stops_the_programs_its_machines_reach():
+    box = _StoppedBox((2,))
     ws = Workspace({}, machines={"b1": box})
     try:
         wid = ws.process_table.workspace_id
-        assert await ws._stop_lapsed_run(_box_process(2), 15)
-        assert not await ws._stop_lapsed_run(_box_process(3), 15)
-        assert not await ws._stop_lapsed_run(_box_process(6), 15)
-        assert not await ws._stop_lapsed_run(_box_process(4, "other:b2"), 15)
+        assert await ws.job_table.run_stopper(_box_process(2), 15)
+        assert not await ws.job_table.run_stopper(_box_process(3), 15)
+        assert not await ws.job_table.run_stopper(_box_process(6), 15)
+        assert not await ws.job_table.run_stopper(
+            _box_process(4, "other:b2"), 15
+        )
         host = {
             **_box_process(5, "host:elsewhere"),
             "machine_pid": {"pid": 41, "started": 1.0, "exited": None},
         }
-        assert not await ws._stop_lapsed_run(host, 15)
-        assert box.reaped == [
+        assert not await ws.job_table.run_stopper(host, 15)
+        assert box.stopped == [
             (f"{wid}:2", 15),
             (f"{wid}:3", 15),
             (f"{wid}:6", 15),
@@ -873,8 +873,8 @@ async def test_a_workspace_reaps_the_programs_its_machines_reach():
 # A workspace stops what a lapsed instance left as it starts, before
 # anything lists processes.
 @pytest.mark.asyncio
-async def test_a_workspace_reaps_a_lapsed_instance_as_it_starts():
-    box = _ReapedBox((2,))
+async def test_a_workspace_stops_a_lapsed_instance_as_it_starts():
+    box = _StoppedBox((2,))
     ws = Workspace({}, machines={"b1": box})
     try:
         store = RAMExecutionStore(lease_seconds=30.0)
@@ -884,7 +884,7 @@ async def test_a_workspace_reaps_a_lapsed_instance_as_it_starts():
         async with asyncio.timeout(5):
             while "dead" in await store.processes():
                 await asyncio.sleep(0.01)
-        assert box.reaped == [(f"{ws.process_table.workspace_id}:2", 15)]
+        assert box.stopped == [(f"{ws.process_table.workspace_id}:2", 15)]
     finally:
         await ws.close()
 

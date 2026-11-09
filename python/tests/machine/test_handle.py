@@ -311,31 +311,30 @@ async def test_a_run_in_the_box_is_tagged_with_its_process():
 
 
 # A run another workspace left is stopped by its tag, the box reached
-# first if this runtime never was. The reap says whether the box held the
-# run: a box that holds none of it answers so, and a stop that failed
-# raises, so neither counts as having stopped it.
+# first if this runtime never was. The stop says whether the box held the
+# run: a box that holds none of it and a stop that failed both answer
+# False, so neither counts as having stopped it.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("code,held", [(0, True), (NOT_RUNNING_STATUS, False)])
-async def test_a_left_run_is_reaped_by_its_tag(code, held):
+async def test_a_left_run_is_stopped_by_its_tag(code, held):
     class AnsweringBox(RecordingMachine):
         async def exec_line(self, line, stdin, env, cwd) -> RunResult:
             await super().exec_line(line, stdin, env, cwd)
             return RunResult(stdout=b"", stderr=None, exit_code=code)
 
     box = AnsweringBox(captures=("yes",))
-    assert await box.stop_run("t1", 15) is held
+    assert await box.stop("t1", 15) is held
     assert box.connected == 1
     assert [line for line, _, _ in box.execs] == [stop_line("t1", 15)]
 
 
 @pytest.mark.asyncio
-async def test_a_failed_reap_raises():
+async def test_a_failed_stop_answers_false():
     class FailingBox(RecordingMachine):
         async def exec_line(self, line, stdin, env, cwd) -> RunResult:
             return RunResult(stdout=b"", stderr=None, exit_code=127)
 
-    with pytest.raises(RuntimeError):
-        await FailingBox(captures=("yes",)).stop_run("t1", 15)
+    assert await FailingBox(captures=("yes",)).stop("t1", 15) is False
 
 
 @pytest.mark.asyncio

@@ -1413,7 +1413,7 @@ def _ran(pid: int, machine: str = "docker:t") -> dict:
 # ran none (a shell) has nothing left to stop.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("unreached", [False, True])
-async def test_a_lapsed_daemons_programs_are_reaped(unreached):
+async def test_a_lapsed_daemons_programs_are_stopped(unreached):
     store = RAMExecutionStore(lease_seconds=30.0)
     host = {
         **_ran(2, "host:h"),
@@ -1423,19 +1423,19 @@ async def test_a_lapsed_daemons_programs_are_reaped(unreached):
     box = _ran(3)
     shell = {"pid": 4, "session": "s", "runtime": None}
     await store.publish("dead", {"2": host, "3": box, "4": shell})
-    reaped: list[tuple[dict, int]] = []
+    stopped: list[tuple[dict, int]] = []
 
     async def run_stopper(record: dict, signum: int) -> bool:
-        reaped.append((record, signum))
+        stopped.append((record, signum))
         return not (unreached and record["pid"] == 3)
 
     b = JobTable(store)
     b.run_stopper = run_stopper
     assert await b.remote_processes() == {}
     async with asyncio.timeout(5):
-        while b._reaping:
+        while b._stopping_runs:
             await asyncio.sleep(0.01)
-    assert reaped == [(host, 15), (box, 15)]
+    assert stopped == [(host, 15), (box, 15)]
     kept = await store.processes()
     assert kept == ({"dead": {"3": box}} if unreached else {})
     await b.close()
@@ -1458,23 +1458,23 @@ async def test_a_closed_table_drops_its_record_and_the_lease():
 # A daemon taking the lease stops the programs it left before a restart
 # and numbers its pids past the highest the store recorded.
 @pytest.mark.asyncio
-async def test_a_claim_reaps_this_daemons_programs_from_before_a_restart():
+async def test_a_claim_stops_this_daemons_programs_from_before_a_restart():
     store = RAMExecutionStore()
     pid = FIRST_PID + 6
     await store.publish("d", {str(pid): _ran(pid)}, pid)
-    reaped: list[dict] = []
+    stopped: list[dict] = []
 
     async def run_stopper(record: dict, signum: int) -> bool:
-        reaped.append(record)
+        stopped.append(record)
         return True
 
     a = JobTable(store, daemon="d")
     a.run_stopper = run_stopper
     await a.claim()
     async with asyncio.timeout(5):
-        while a._reaping:
+        while a._stopping_runs:
             await asyncio.sleep(0.01)
-    assert reaped == [_ran(pid)]
+    assert stopped == [_ran(pid)]
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
     assert job.pid == pid + 1
     await a.kill_all()
@@ -1549,33 +1549,33 @@ class _Revives(RAMExecutionStore):
         return "back" if self.asked > 1 else None
 
 
-# A daemon that takes the lease back while its programs are being reaped
+# A daemon that takes the lease back while its programs are being stopped
 # keeps them: the lease is read again before each is stopped.
 @pytest.mark.asyncio
 async def test_a_daemon_that_renews_keeps_its_programs():
     store = _Revives()
     await store.publish("back", {"2": _ran(2)})
-    reaped: list[dict] = []
+    stopped: list[dict] = []
 
     async def run_stopper(record: dict, signum: int) -> bool:
-        reaped.append(record)
+        stopped.append(record)
         return True
 
     b = JobTable(store)
     b.run_stopper = run_stopper
     assert await b.remote_processes() == {}
     async with asyncio.timeout(5):
-        while b._reaping:
+        while b._stopping_runs:
             await asyncio.sleep(0.01)
-    assert reaped == []
+    assert stopped == []
     assert "back" in await store.processes()
     await b.close()
 
 
-# Teardown stops the reaping, before the runtimes it goes through close:
-# a reap under way is cancelled and no listing starts another.
+# Teardown ends the stopping, before the runtimes it goes through close:
+# a stop under way is cancelled and no listing starts another.
 @pytest.mark.asyncio
-async def test_teardown_stops_the_reaping():
+async def test_teardown_ends_the_stopping():
     store = RAMExecutionStore(lease_seconds=30.0)
     await store.publish("dead", {"2": _ran(2)})
     started, cancelled = asyncio.Event(), asyncio.Event()
@@ -1594,39 +1594,39 @@ async def test_teardown_stops_the_reaping():
     await b.remote_processes()
     await asyncio.wait_for(started.wait(), 5)
     await b.kill_all()
-    assert cancelled.is_set() and not b._reaping
-    b._reaped.clear()
+    assert cancelled.is_set() and not b._stopping_runs
+    b._stopped_owners.clear()
     await b.remote_processes()
-    assert not b._reaping
+    assert not b._stopping_runs
     await b.close()
 
 
-# A start reaps the daemons on the store that lost the lease, and once more
+# A start stops the daemons on the store that lost the lease, and once more
 # a lease later: a daemon that still held it at the start, as one that died
-# just before it would, is reaped once it lapsed.
+# just before it would, is stopped once it lapsed.
 @pytest.mark.asyncio
-async def test_a_start_reaps_lapsed_daemons():
+async def test_a_start_stops_lapsed_daemons():
     store = RAMExecutionStore(lease_seconds=0.5)
     for owner in ("dead", "dying"):
         await store.publish(owner, {"2": _ran(2, f"docker:{owner}")})
     await store.lease("dying")
-    reaped: list[str] = []
+    stopped: list[str] = []
 
     async def run_stopper(record: dict, signum: int) -> bool:
-        reaped.append(record["machine"].partition(":")[2])
+        stopped.append(record["machine"].partition(":")[2])
         return True
 
     b = JobTable(store)
     b.run_stopper = run_stopper
-    b.reap_lapsed()
+    b.stop_lapsed()
     async with asyncio.timeout(5):
-        while not reaped:
+        while not stopped:
             await asyncio.sleep(0.01)
-    assert reaped == ["dead"]
+    assert stopped == ["dead"]
     async with asyncio.timeout(5):
-        while b._reaping:
+        while b._stopping_runs:
             await asyncio.sleep(0.01)
-    assert reaped == ["dead", "dying"]
+    assert stopped == ["dead", "dying"]
     assert await store.processes() == {}
     await b.close()
 
@@ -1637,14 +1637,14 @@ async def test_a_start_finishes_the_lease_wait_after_an_early_timer(
 ):
     clock = ManualClock()
     waits: list[float] = []
-    reaped: list[str] = []
+    stopped: list[str] = []
 
     async def sleep(seconds: float) -> None:
         waits.append(seconds)
         clock.advance(seconds - 0.001 if len(waits) == 1 else seconds)
 
     async def run_stopper(record: dict, signum: int) -> bool:
-        reaped.append(record["machine"].partition(":")[2])
+        stopped.append(record["machine"].partition(":")[2])
         return True
 
     monkeypatch.setattr(table_module.time, "monotonic", clock.monotonic)
@@ -1656,8 +1656,8 @@ async def test_a_start_finishes_the_lease_wait_after_an_early_timer(
     b.run_stopper = run_stopper
     try:
         await b._sweep()
-        await asyncio.gather(*b._reaping)
-        assert reaped == ["dying"]
+        await asyncio.gather(*b._stopping_runs)
+        assert stopped == ["dying"]
         assert await store.processes() == {}
         assert waits == pytest.approx([0.5, 0.001])
     finally:
@@ -1669,8 +1669,8 @@ async def test_a_start_finishes_the_lease_wait_after_an_early_timer(
 @pytest.mark.asyncio
 async def test_a_start_on_a_store_without_leases_sweeps_nothing():
     b = JobTable(RAMExecutionStore())
-    b.reap_lapsed()
-    assert not b._reaping
+    b.stop_lapsed()
+    assert not b._stopping_runs
     await b.close()
 
 
@@ -1681,12 +1681,12 @@ async def test_teardown_ends_the_sweep():
     await store.lease("live")
     await store.publish("live", {"2": {"pid": 2, "session": "s", "runs": []}})
     b = JobTable(store)
-    b.reap_lapsed()
+    b.stop_lapsed()
     await asyncio.sleep(0.05)
-    assert b._reaping
+    assert b._stopping_runs
     async with asyncio.timeout(5):
         await b.kill_all()
-    assert not b._reaping
+    assert not b._stopping_runs
     await b.close()
 
 
@@ -1832,17 +1832,17 @@ async def test_a_lease_taken_elsewhere_refuses_the_next_job():
     await b.close()
 
 
-# A claim reaps none of what its table runs now: a second claim waits for
+# A claim stops none of what its table runs now: a second claim waits for
 # the first, and a record of a process this table runs is its own, not
 # one left before a restart.
 @pytest.mark.asyncio
-async def test_a_claim_reaps_none_of_what_its_table_runs():
+async def test_a_claim_stops_none_of_what_its_table_runs():
     store = RAMExecutionStore()
     a = JobTable(store, daemon="d")
-    reaped: list[int] = []
+    stopped: list[int] = []
 
     async def run_stopper(record: dict, signum: int) -> bool:
-        reaped.append(record["pid"])
+        stopped.append(record["pid"])
         return True
 
     a.run_stopper = run_stopper
@@ -1856,9 +1856,9 @@ async def test_a_claim_reaps_none_of_what_its_table_runs():
     await store.publish("d", {str(runner.record.pid): own, "7": _ran(7)}, 7)
     await asyncio.gather(a.claim(), a.claim())
     async with asyncio.timeout(5):
-        while a._reaping:
+        while a._stopping_runs:
             await asyncio.sleep(0.01)
-    assert reaped == [7]
+    assert stopped == [7]
     runner.terminate()
     await runner.join()
     await a.close()

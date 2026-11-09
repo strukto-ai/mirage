@@ -19,7 +19,8 @@ import { CONTINUE_SIGNALS, STOP_SIGNALS } from '../../shell/constants.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import type { ProcessTable } from '../process/table.ts'
 import type { Process } from '../process/types.ts'
-import type { MachineId, MachinePid } from '../types.ts'
+import { ProcessId, type MachineId, type MachinePid } from '../types.ts'
+import type { RecordFields } from '../../workspace/record/types.ts'
 import type { Machine, MachineProcess, MachineState } from './types.ts'
 
 /** Scans the host programs' process groups, given each program's pid and tag. */
@@ -29,6 +30,11 @@ export type HostStatus = (
 
 /** Sends a signal to a host process. */
 export type HostSignal = (target: MachinePid, signum: number) => Promise<boolean>
+export type HostStop = (
+  target: MachinePid,
+  seenAt: number | null,
+  signum: number,
+) => Promise<boolean>
 
 // The table that holds each machine handle, so a second workspace cannot
 // take, and close, a handle another one runs on; a table's close lets go.
@@ -70,11 +76,14 @@ export class MachineTable {
    * @param scanHost scans the host programs' process groups; null leaves
    *   the host unscanned.
    * @param signalHost sends a signal to a host process; null sends none.
+   * @param stopHost stops a host program a lapsed workspace left; null
+   *   reaches none.
    */
   constructor(
     machines: Record<string, MachineHandle | Record<string, unknown>> = {},
     private readonly scanHost: HostStatus | null = null,
     private readonly signalHost: HostSignal | null = null,
+    private readonly stopHost: HostStop | null = null,
   ) {
     for (const [name, spec] of Object.entries(machines)) {
       const handle = buildMachine(name, spec)
@@ -276,6 +285,31 @@ export class MachineTable {
     }
     if (CONTINUE_SIGNALS.has(signum) || STOP_SIGNALS.has(signum)) return true
     return handle.terminate(signum, handle.record.parent !== null)
+  }
+
+  /**
+   * Stop the program a lapsed workspace's process ran past the workspace: a
+   * host program by its pid when it ran on this host, a machine's run through
+   * the machine it ran on, by its process's tag. Answers true once this
+   * workspace reached the program and it was stopped; false leaves it to a
+   * workspace that reaches its own. Mirrors Python's `MachineTable.stop`.
+   *
+   * @param processes this workspace's table.
+   * @param record the process, as its workspace published it.
+   * @param signum the first signal.
+   */
+  async stop(processes: ProcessTable, record: RecordFields, signum: number): Promise<boolean> {
+    const { machine, pid } = record
+    const found = record.machine_pid as MachinePid | null | undefined
+    const seen = record.seen_at
+    if (typeof pid !== 'number') return false
+    if (machine === processes.machine.toString() && found != null) {
+      if (this.stopHost === null) return false
+      return this.stopHost(found, typeof seen === 'number' ? seen : null, signum)
+    }
+    const handle = typeof machine === 'string' ? this.byId(machine) : null
+    if (handle === null) return false
+    return handle.stop(new ProcessId(processes.workspaceId, pid).toString(), signum)
   }
 
   /** Send `signum` to one process on `machine`. */

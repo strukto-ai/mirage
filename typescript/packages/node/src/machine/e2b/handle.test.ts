@@ -374,7 +374,7 @@ describe('E2BMachine', () => {
       disconnected: true,
     })
   })
-  // An untagged run (the reap's own line) that fails is killed and starts
+  // An untagged run (the stop's own line) that fails is killed and starts
   // nothing more.
   it.each([
     new Error('stdin transport failed'),
@@ -390,11 +390,11 @@ describe('E2BMachine', () => {
     expect(FakeMachine.last.commands.calls).toHaveLength(1)
   })
   // A kill reaches only the encoding shell, so a line run with no tag of its
-  // caller's gets its own and an aborted one is reaped by it.
-  it('reaps an aborted line by its own tag', async () => {
+  // caller's gets its own and an aborted one is stopped by it.
+  it('stops an aborted line by its own tag', async () => {
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('l-i-n-e-')
     const runtime = makeRuntime()
-    await runtime.connect()
+    await (runtime as unknown as { ensureConnected(): Promise<void> }).ensureConnected()
     const commands = FakeMachine.last.commands
     const abort = new AbortController()
     const run = runtime.execLine('sleep', null, {}, '/', abort.signal)
@@ -411,19 +411,16 @@ describe('E2BMachine', () => {
   })
   it('starts no other stop when a stop times out', async () => {
     const runtime = makeRuntime()
-    await runtime.connect()
+    await (runtime as unknown as { ensureConnected(): Promise<void> }).ensureConnected()
     vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => AbortSignal.abort())
-    const stopper = runtime as unknown as {
-      stopRunBounded(tag: string, signum: number): Promise<number | null>
-    }
-    expect(await stopper.stopRunBounded('t', 15)).toBeNull()
+    expect(await runtime.stop('t', 15)).toBe(false)
     expect(FakeMachine.last.commands.calls.length).toBeLessThanOrEqual(1)
   })
   // A kill reaches only the shell that encodes the output, so a tagged run
   // that fails for a reason other than a cancel is also stopped by its tag.
-  it('reaps a tagged run that fails by its tag', async () => {
+  it('stops a tagged run that fails by its tag', async () => {
     const runtime = makeRuntime()
-    await runtime.connect()
+    await (runtime as unknown as { ensureConnected(): Promise<void> }).ensureConnected()
     const commands = FakeMachine.last.commands
     commands.inputError = new Error('stdin transport failed')
     await expect(
@@ -485,13 +482,13 @@ describe('E2B cancellation and validation', () => {
   })
 
   // A kill that names a gentler signal leaves a run's tagged command to the
-  // reap, which sends it that signal first; an untagged one (mount setup, a
-  // direct exec) has no reap behind it and is killed. Either way the
-  // runtime runs nothing more: an aborted run is the caller's to reap.
+  // stop, which sends it that signal first; an untagged one (mount setup, a
+  // direct exec) has no stop behind it and is killed. Either way the
+  // runtime runs nothing more: an aborted run is the caller's to stop.
   it.each([
     [{ [PROCESS]: 'run' }, false],
     [{}, true],
-  ])('leaves only a tagged command to the reap on TERM: %j', async (env, killed) => {
+  ])('leaves only a tagged command to the stop on TERM: %j', async (env, killed) => {
     const runtime = makeRuntime()
     await runtime.connect()
     const abort = new AbortController()

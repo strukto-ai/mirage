@@ -70,14 +70,8 @@ import { ProcessInput, ProcessOutput } from '../../execution/process/stdio.ts'
 import { ProcessTable } from '../../execution/process/table.ts'
 import type { Process, ProcessState, SpawnRequest } from '../../execution/process/types.ts'
 import { LINE_STOP_SIGNAL, LOCAL_MACHINE } from '../../execution/constants.ts'
-import {
-  type JobId,
-  type LineId,
-  type MachineId,
-  type MachinePid,
-  ProcessId,
-} from '../../execution/types.ts'
-import type { RecordFields } from '../record/types.ts'
+import type { ProcessId } from '../../execution/types.ts'
+import { type JobId, type LineId, type MachineId, type MachinePid } from '../../execution/types.ts'
 import type { ProcessView } from '../../execution/process/view.ts'
 import { DiffPool } from '../../rs/diff_pool.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
@@ -387,7 +381,6 @@ export class Workspace {
       this.clock,
       options.daemonId ?? null,
     )
-    this.jobTable.runStopper = (record, signum) => this.stopLapsedRun(record, signum)
     this.jobTable.ended = (record) => {
       const machine =
         this.processTable.records().find((process) => process.id.pid === record.pid)?.machine ??
@@ -756,7 +749,10 @@ export class Workspace {
       options.machines,
       (groups) => this.scanHost(groups),
       (target, signum) => this.signalHost(target, signum),
+      (target, seenAt, signum) => this.stopHostRun(target, seenAt, signum),
     )
+    this.jobTable.runStopper = (record, signum) =>
+      this.machineTable.stop(this.processTable, record, signum)
     this.processTable.scanner = () => this.machineTable.scan(this.processTable, this.workspaceId)
     this.processTable.sender = (handle, signum) =>
       this.machineTable.send(this.processTable, handle, signum)
@@ -815,36 +811,6 @@ export class Workspace {
   /** The ordered runtime world, first capturer first. */
   runtimes(): readonly Runtime[] {
     return this.runtimeWorld.entries
-  }
-
-  /**
-   * Stop the program a lapsed workspace's process ran past the workspace,
-   * answering whether this workspace reached it: a host program by its pid
-   * when it ran on this host (`stopHostRun`), a machine's run through the
-   * machine it ran on, which stops what the process's tag marks there. It
-   * counts as reached only once the machine held it and it was stopped: one
-   * that holds none of it, or one that could not be reached, leaves it to a
-   * workspace that reaches its own. Mirrors Python's
-   * `Workspace._stop_lapsed_run`.
-   *
-   * @param record the process, as its workspace published it.
-   * @param signum the first signal.
-   */
-  private async stopLapsedRun(record: RecordFields, signum: number): Promise<boolean> {
-    const { machine, pid } = record
-    const found = record.machine_pid as MachinePid | null | undefined
-    const seen = record.seen_at
-    if (typeof pid !== 'number') return false
-    if (machine === this.processTable.machine.toString() && found != null)
-      return this.stopHostRun(found, typeof seen === 'number' ? seen : null, signum)
-    const handle = typeof machine === 'string' ? this.machineTable.byId(machine) : null
-    if (handle === null) return false
-    try {
-      return await handle.stopRun(new ProcessId(this.workspaceId, pid).toString(), signum)
-    } catch (err) {
-      console.debug(`${String(machine)}: run not reaped:`, err)
-      return false
-    }
   }
 
   /**
@@ -1600,11 +1566,11 @@ export class Workspace {
    * record resolves first so a minted default session id can adopt the
    * stored pointer before hydration keys off it. The first call also starts
    * stopping what lapsed instances of the workspace left running
-   * (`JobTable.reapLapsed`). Closing waits for the record's write in
+   * (`JobTable.stopLapsed`). Closing waits for the record's write in
    * flight, so it never races the state's drop.
    */
   async ensureSessionsLoaded(): Promise<void> {
-    this.jobTable.reapLapsed()
+    this.jobTable.stopLapsed()
     this.metaWrite ??= this.meta.ensure().finally(() => {
       this.metaWrite = null
     })

@@ -725,7 +725,7 @@ async def test_a_program_that_exits_first_marks_its_record(tmp_path):
 # group, while its PID still names the process it started; a PID that
 # names a later process is left alone.
 @pytest.mark.asyncio
-async def test_a_left_host_run_is_reaped_only_while_it_is_the_same(tmp_path):
+async def test_a_left_host_run_is_stopped_only_while_it_is_the_same(tmp_path):
     pid_file = tmp_path / "pid"
     child = await asyncio.create_subprocess_exec(
         "sh",
@@ -754,7 +754,7 @@ async def test_a_left_host_run_is_reaped_only_while_it_is_the_same(tmp_path):
 # proves that, which may have taken the id since, is left alone and out of
 # reach, so its record stays.
 @pytest.mark.asyncio
-async def test_a_left_host_run_whose_leader_exited_is_reaped(tmp_path):
+async def test_a_left_host_run_whose_leader_exited_is_stopped(tmp_path):
     pid_file = tmp_path / "pid"
     child = await asyncio.create_subprocess_exec(
         "sh",

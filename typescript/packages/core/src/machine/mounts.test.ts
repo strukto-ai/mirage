@@ -415,22 +415,9 @@ describe('MachineMounts', () => {
         'fake: the machine cannot see the working directory /notes; cd into a mount first\n',
       ])
       expect([sandbox.commands, sandbox.pipes]).toEqual([[], []])
+      const mounts = (sandbox as unknown as { mounts: { lines: unknown[] } }).mounts
+      expect(mounts.lines).toHaveLength(0)
     }
-    await ws.close()
-  })
-
-  it('refuses a cwd the machine cannot see before connecting', async () => {
-    const sandbox = new FakeMachine('ssh')
-    sandbox.connect = () => Promise.reject(new Error('offline'))
-    const ws = workspace(sandbox)
-    expect((await ws.shell('mkdir -p /notes')).exitCode).toBe(0)
-    const result = await ws.shell('cd /notes && python3 job.py')
-    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
-      126,
-      'fake: the machine cannot see the working directory /notes; cd into a mount first\n',
-    ])
-    const mounts = (sandbox as unknown as { mounts: { lines: unknown[] } }).mounts
-    expect(mounts.lines).toHaveLength(0)
     await ws.close()
   })
 

@@ -15,7 +15,7 @@
 export const KILLED_EXIT_CODE = 137
 
 // How long a killed job's runner is given to stop what it started (a
-// sandbox reaps for up to 5 s after a 1 s grace) before its console ends
+// machine stops a run for up to 5 s after a 1 s grace) before its console ends
 // with the status the kill recorded.
 export const STOP_WAIT_SECONDS = 10
 

@@ -305,7 +305,7 @@ async function guestPid(path: string): Promise<number> {
   throw new Error('guest command never started')
 }
 
-async function reaped(pid: number) {
+async function stopped(pid: number) {
   for (let i = 0; i < 60; i++) {
     if ((await raw(`test ! -e /proc/${pid}`)).exitCode === 0) return
     await delay(50)
@@ -377,7 +377,7 @@ class StopAfterProbe extends MicrosandboxMachine {
 
 async function lifecycleChecks() {
   const runtime = new MicrosandboxMachine('msb', { sandbox })
-  await check('storage_lock_does_not_block_exec_and_cancel_reaps_probe', async () => {
+  await check('storage_lock_does_not_block_exec_and_cancel_stops_probe', async () => {
     const digest = hash(enc.encode(sandbox)).slice(0, 32)
     const lock = join(
       process.env.MSB_HOME ?? join(homedir(), '.microsandbox'),
@@ -463,13 +463,13 @@ async function lifecycleChecks() {
       process.kill(hosts[0]!, 'SIGSTOP')
       await within(pipe.stop(), 8000)
       assert.deepEqual(await hostPids(marker), [])
-      await reaped(pid)
+      await stopped(pid)
     } finally {
       for (const host of await hostPids(marker)) process.kill(host, 'SIGCONT')
       await pipe.stop()
     }
   })
-  await check('cancelled_execution_reaps_guest', async () => {
+  await check('cancelled_execution_stops_guest', async () => {
     const path = '/tmp/mirage-cancel-' + randomUUID()
     const controller = new AbortController()
     const pending = runtime.execLine(
@@ -483,7 +483,7 @@ async function lifecycleChecks() {
       const pid = await guestPid(path)
       controller.abort()
       await assert.rejects(within(pending, 5000), (error: Error) => error.name === 'AbortError')
-      await reaped(pid)
+      await stopped(pid)
     } finally {
       controller.abort()
       await pending.catch(() => {})

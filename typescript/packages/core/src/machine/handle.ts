@@ -64,7 +64,7 @@ import { MachineMounts } from './mounts.ts'
  * workspace create` in the image entrypoint or by hand). Subclasses adapt
  * one provider by implementing connect() and execArgv(), and PipeTransport
  * for a `mountType`; everything Mirage does there derives from execArgv: a
- * program's run (`run`), a stop by tag (`reap`), the libfaketime probe.
+ * program's run (`run`), a stop by tag (`stop`), the libfaketime probe.
  * Constructed from the name the workspace gives it and its config, coerced
  * against the provider's own key list. Mirrors Python's `MachineHandle`.
  */
@@ -145,11 +145,11 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * deadline stopped the program or its exit's landing) is logged.
    */
   async settle(): Promise<void> {
-    for (const lost of (await this.mounts?.finishLine()) ?? []) console.warn(lost)
+    for (const lost of (await this.mounts?.sync()) ?? []) console.warn(lost)
   }
 
   /**
-   * Connect once, bring the served mounts in step, run, then land what sshfs
+   * Connect once, validate the line, run it, then land what sshfs
    * acknowledged, failing the run with a landing that failed.
    *
    * @param argv the program and its arguments.
@@ -169,12 +169,10 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     // Served here rather than in the constructor, which runs before a
     // subclass names itself.
     if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
-    const unseen = this.mounts?.beginLine(binding, ctx.cwd.virtual) ?? null
-    if (unseen !== null) return unseen
     await this.ensureConnected(ctx.signal)
-    const refusal = (await this.mounts?.prepareLine(binding, ctx.signal)) ?? null
+    const refusal = (await this.mounts?.validate(binding, ctx.cwd.virtual, ctx.signal)) ?? null
     if (refusal !== null) return refusal
-    const run = this.mounts?.withMountGuard(argv) ?? argv
+    const run = this.mounts?.guarded(argv) ?? argv
     const given = { ...this.config.env, ...ctx.env }
     const clock = await this.systemTimeEnv(given, ctx.signal)
     // A deadline that passed during the probe starts nothing.
@@ -197,15 +195,15 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       )
     } catch (error) {
       if (ctx.signal?.aborted === true)
-        await this.stopRunBounded(tag, runner?.signal ?? runner?.interrupted ?? 15)
+        await this.stop(tag, runner?.signal ?? runner?.interrupted ?? 15)
       throw error
     } finally {
       this.runs -= 1
     }
-    if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forgetMounts()
+    if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forget()
     // sshfs acknowledged the writes before they landed.
     const lost =
-      this.mounts === null ? [] : await abortable(this.mounts.landWrites(ctx.signal), ctx.signal)
+      this.mounts === null ? [] : await abortable(this.mounts.land(ctx.signal), ctx.signal)
     if (lost.length === 0) return done
     const said = new TextEncoder().encode(lost.map((line) => `${line}\n`).join(''))
     return {
@@ -271,37 +269,20 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 
   /**
-   * Stop a run a lapsed workspace left on the machine: every process its
-   * `PROCESS` tag marks gets `signum`, then KILL a second later. Connecting
-   * is bounded as the stop is (`MACHINE_STOP_WAIT_SECONDS`). Answers true once the
-   * machine held the run's processes and they were stopped, false when it
-   * holds none of them, as a machine other than the run's does; throws when
-   * the machine could not be reached or the stop failed.
+   * Stop a run: every process its `PROCESS` tag marks gets `signum`, then
+   * KILL a second later. Connecting and stopping take at most
+   * `MACHINE_STOP_WAIT_SECONDS`, so a machine that stopped answering never
+   * holds a cancel or an error. Answers true once the machine held the run's
+   * processes and they were stopped, false when it holds none of them, could
+   * not be reached, or the stop failed.
    *
    * @param tag the id of the process the run is, as `PROCESS` carries it.
    * @param signum the first signal.
    */
-  async stopRun(tag: string, signum: number): Promise<boolean> {
-    await this.ensureConnected(AbortSignal.timeout(MACHINE_STOP_WAIT_SECONDS * 1000))
-    const code = await this.stopRunBounded(tag, signum)
-    if (code !== 0 && code !== NOT_RUNNING_STATUS)
-      throw new Error(`${this.id.toString()}: run ${tag} not stopped`)
-    return code === 0
-  }
-
-  /**
-   * Stop what a cancelled or failed run left on the machine (`PROCESS`), for
-   * at most `MACHINE_STOP_WAIT_SECONDS`: a machine that stopped answering would hold
-   * the cancel or the error.
-   *
-   * @param tag the run's tag.
-   * @param signum the signal the run is stopped with first.
-   * @returns the stop line's status (`stopLine`); null when the machine did
-   *   not answer.
-   */
-  protected async stopRunBounded(tag: string, signum: number): Promise<number | null> {
+  async stop(tag: string, signum: number): Promise<boolean> {
     const signal = AbortSignal.timeout(MACHINE_STOP_WAIT_SECONDS * 1000)
     try {
+      await this.ensureConnected(signal)
       const done = await abortable(
         this.execArgv(
           ['/bin/sh', '-c', stopLine(tag, signum)],
@@ -319,10 +300,10 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
           `${this.id.toString()}: run ${tag} not stopped: exit ${String(done.exitCode)}`,
         )
       }
-      return done.exitCode
+      return done.exitCode === 0
     } catch (error) {
       console.debug(`${this.id.toString()}: run ${tag} not stopped: ${String(error)}`)
-      return null
+      return false
     }
   }
 
@@ -334,13 +315,13 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     this.mounts = new MachineMounts(
       this.provider,
       mountType,
-      this.controlLine.bind(this),
+      this.setup.bind(this),
       this.openPipe.bind(this),
     )
   }
 
   /** Run one of Mirage's own lines on the machine: its environment, at `/`. */
-  private controlLine(line: string, signal?: AbortSignal): Promise<RunResult> {
+  private setup(line: string, signal?: AbortSignal): Promise<RunResult> {
     return this.execLine(line, null, { ...this.config.env }, '/', signal)
   }
 
@@ -348,7 +329,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   private async connectedLine(line: string, seconds: number): Promise<RunResult> {
     const deadline = AbortSignal.timeout(seconds * 1000)
     await this.ensureConnected(deadline)
-    return abortable(this.controlLine(line, deadline), deadline)
+    return abortable(this.setup(line, deadline), deadline)
   }
 
   protected disconnected(): void {
@@ -372,7 +353,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       // Its own deadline, not the first caller's: every waiting run shares it.
       // It is also raced, as a provider may not stop a line on its signal.
       const deadline = AbortSignal.timeout(FAKETIME_PROBE_SECONDS * 1000)
-      probe = abortable(this.controlLine(faketimeProbe(), deadline), deadline).then((found) => {
+      probe = abortable(this.setup(faketimeProbe(), deadline), deadline).then((found) => {
         if (found.exitCode !== 0)
           throw new Error(
             `${this.id.toString()}: libfaketime probe exited ${String(found.exitCode)}`,

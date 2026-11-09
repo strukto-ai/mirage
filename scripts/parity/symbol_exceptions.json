@@ -1589,6 +1589,7 @@
    "typescript_only": {
     "HostStatus": "TypeScript names the function types of the host scan and signal the table's constructor takes; Python annotates the two callables inline.",
     "HostSignal": "TypeScript names the function types of the host scan and signal the table's constructor takes; Python annotates the two callables inline.",
+    "HostStop": "TypeScript names the function types of the host scan, signal and stop the table's constructor takes; Python annotates them inline.",
     "foundKey": "A Map compares object keys by identity, so TypeScript spells a found process's machine, pid and start as one string; Python keys its dict by the tuple."
    }
   },

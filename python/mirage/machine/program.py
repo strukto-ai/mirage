@@ -204,12 +204,12 @@ async def run_program(
         feed(stdin, write, end, lambda: process.returncode is not None)
     )
 
-    async def reap() -> None:
+    async def wait_exit() -> None:
         await process.wait()
         if not feeding.done():
             feeding.cancel()
 
-    waiting = asyncio.create_task(reap())
+    waiting = asyncio.create_task(wait_exit())
     reading = asyncio.create_task(read_into(process.stdout, output))
     erring = asyncio.create_task(read_into(process.stderr, errors))
     try:

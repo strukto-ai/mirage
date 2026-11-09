@@ -349,26 +349,7 @@ async def test_ssh_refuses_a_line_from_a_cwd_it_cannot_see(cwd, ran):
             "cd into a mount first\n",
         )
         assert (sandbox.commands, sandbox.pipes) == ([], [])
-    await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_cwd_the_sandbox_cannot_see_is_refused_before_connecting():
-    sandbox = FakeMachine("ssh")
-
-    async def offline() -> None:
-        raise ConnectionError("offline")
-
-    sandbox.connect = offline
-    ws = workspace(sandbox)
-    assert (await ws.shell("mkdir -p /notes")).exit_code == 0
-    result = await ws.shell("cd /notes && python3 job.py")
-    assert (result.exit_code, await result.stderr_str()) == (
-        126,
-        "fake: the machine cannot see the working directory /notes; "
-        "cd into a mount first\n",
-    )
-    assert sandbox._mounts._lines == []
+        assert sandbox._mounts._lines == []
     await ws.close()
 
 
@@ -859,7 +840,7 @@ async def test_a_landing_stopped_as_a_sync_returns_logs_its_failure(caplog):
 
     held = mounts.MachineMounts("fake", "ssh", None, None)
     held._served["/data"] = (None, None, Server(None, None, None))
-    landing.append(asyncio.create_task(held.land_writes()))
+    landing.append(asyncio.create_task(held.land()))
     with caplog.at_level("WARNING"):
         await asyncio.wait(landing)
     assert landing[0].cancelled()

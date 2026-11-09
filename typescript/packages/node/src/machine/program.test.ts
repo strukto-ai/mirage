@@ -700,7 +700,7 @@ describe('host runs', () => {
   // A program a lapsed workspace left on this host is stopped, its whole
   // group, while its PID still names the process it started; a PID that
   // names a later process is left alone.
-  it('reaps a left host run only while it is the same', async () => {
+  it('stops a left host run only while it is the same', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
     const child = spawn(
@@ -730,7 +730,7 @@ describe('host runs', () => {
   // group was last known to be the run's; a group none of whose members
   // proves that, which may have taken the id since, is left alone and out of
   // reach, so its record stays.
-  it('reaps a left host run whose leader exited', async () => {
+  it('stops a left host run whose leader exited', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
     const child = spawn('sh', ['-c', `sleep 30 & echo $! > ${pidFile}`], {

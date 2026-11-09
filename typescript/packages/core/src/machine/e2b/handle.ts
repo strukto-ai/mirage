@@ -228,15 +228,15 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
       } else {
         try {
           // A tagged command a kill stopped with a gentler signal is left
-          // to the caller's reap, which sends it that signal first.
+          // to the caller's stop, which sends it that signal first.
           if (env[PROCESS] === undefined || stopSignal(runner) === null) await handle.kill()
         } catch (cleanupError) {
           console.warn('Failed to stop the E2B command', cleanupError)
         }
         if (signal?.aborted) throw new DOMException('execute aborted', 'AbortError')
-        // The kill stops only the encoding shell; the caller reaps an abort.
+        // The kill stops only the encoding shell; the caller stops an abort.
         const tag = env[PROCESS]
-        if (tag !== undefined) await this.stopRunBounded(tag, 15)
+        if (tag !== undefined) await this.stop(tag, 15)
         throw error
       }
     } finally {
@@ -255,7 +255,7 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
   /**
    * Execute one shell line, under a `PROCESS` tag of its own when the
    * caller gave none: an abort kills only the encoding shell, so an aborted
-   * line is reaped by that tag.
+   * line is stopped by that tag.
    *
    * @param line the raw shell line.
    * @param stdin bytes piped into the line.
@@ -275,7 +275,7 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
     try {
       return await super.execLine(line, stdin, { ...env, [PROCESS]: tag }, cwd, signal)
     } catch (error) {
-      if (signal?.aborted === true) await this.stopRunBounded(tag, 15)
+      if (signal?.aborted === true) await this.stop(tag, 15)
       throw error
     }
   }

@@ -63,7 +63,7 @@ class MachineHandle:
     entrypoint or by hand). Subclasses adapt one provider by
     implementing connect() and _exec_argv(), and PipeTransportMixin for
     a ``mount_type``; everything Mirage does there derives from
-    _exec_argv: a program's run (``run``), a stop by tag (``reap``), the
+    _exec_argv: a program's run (``run``), a stop by tag (``stop``), the
     libfaketime probe. Constructed from the name the workspace gives it
     and its config, coerced through the provider's own config class.
 
@@ -108,7 +108,7 @@ class MachineHandle:
             self._mounts = MachineMounts(
                 self.provider,
                 self.config.mount_type,
-                self._control_line,
+                self._setup,
                 self.open_pipe,
             )
 
@@ -155,7 +155,7 @@ class MachineHandle:
         here (the deadline stopped the program or its exit's landing) is
         logged."""
         if self._mounts is not None:
-            for lost in await self._mounts.finish_line():
+            for lost in await self._mounts.sync():
                 logger.warning("%s", lost)
 
     async def run(
@@ -166,8 +166,8 @@ class MachineHandle:
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        """Connect once, bring the served mounts in step, run, then land
-        what sshfs acknowledged, failing the run with a landing that failed.
+        """Connect once, validate the line, run it, then land what sshfs
+        acknowledged, failing the run with a landing that failed.
 
         Args:
             argv (tuple[str, ...]): the program and its arguments.
@@ -177,17 +177,13 @@ class MachineHandle:
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
         """
-        if self._mounts is not None:
-            refusal = self._mounts.begin_line(binding, ctx.cwd.virtual)
-            if refusal is not None:
-                return refusal
         await self._ensure_connected()
         run = argv
         if self._mounts is not None:
-            refusal = await self._mounts.prepare_line(binding)
+            refusal = await self._mounts.validate(binding, ctx.cwd.virtual)
             if refusal is not None:
                 return refusal
-            run = self._mounts.with_mount_guard(argv)
+            run = self._mounts.guarded(argv)
         given = {**self.config.env, **(ctx.env or {})}
         clock = await self._system_time_env(given)
         # The run is the process it runs as, which its tag names; one run
@@ -212,26 +208,24 @@ class MachineHandle:
                     if runner.signal is not None
                     else runner.interrupted
                 )
-            await asyncio.shield(self._stop_run_bounded(tag, signum or 15))
+            await asyncio.shield(self.stop(tag, signum or 15))
             raise
         finally:
             self._executing -= 1
-        if (
-            self._mounts is not None
-            and done.exit_code == CANNOT_EXECUTE_STATUS
-        ):
-            self._mounts.forget_mounts()
-        if self._mounts is not None:
-            # sshfs acknowledged the writes before they landed.
-            lost = await self._mounts.land_writes()
-            if lost:
-                said = "".join(f"{line}\n" for line in lost).encode()
-                done = RunResult(
-                    stdout=done.stdout,
-                    stderr=(done.stderr or b"") + said,
-                    exit_code=done.exit_code or 1,
-                )
-        return done
+        if self._mounts is None:
+            return done
+        if done.exit_code == CANNOT_EXECUTE_STATUS:
+            self._mounts.forget()
+        # sshfs acknowledged the writes before they landed.
+        lost = await self._mounts.land()
+        if not lost:
+            return done
+        said = "".join(f"{line}\n" for line in lost).encode()
+        return RunResult(
+            stdout=done.stdout,
+            stderr=(done.stderr or b"") + said,
+            exit_code=done.exit_code or 1,
+        )
 
     async def check(self) -> bool:
         """Reach the machine and run the check line (``CHECK_LINE``),
@@ -303,11 +297,11 @@ class MachineHandle:
             )
         return done.exit_code == 0
 
-    async def stop_run(self, tag: str, signum: int) -> bool:
-        """Stop a run a lapsed workspace left on the machine: every process
-        its ``PROCESS`` tag marks gets ``signum``, then KILL a second
-        later. Connecting is bounded as the stop is
-        (``MACHINE_STOP_WAIT_SECONDS``).
+    async def stop(self, tag: str, signum: int) -> bool:
+        """Stop a run: every process its ``PROCESS`` tag marks gets
+        ``signum``, then KILL a second later. Connecting and stopping
+        take at most ``MACHINE_STOP_WAIT_SECONDS``, so a machine that
+        stopped answering never holds a cancel or an error.
 
         Args:
             tag (str): the id of the process the run is, as ``PROCESS``
@@ -316,35 +310,12 @@ class MachineHandle:
 
         Returns:
             bool: True once the machine held the run's processes and they
-            were stopped; False when it holds none of them, as a machine
-            other than the run's does.
-
-        Raises:
-            RuntimeError: the machine could not be reached, or the stop
-                failed.
-        """
-        async with asyncio.timeout(MACHINE_STOP_WAIT_SECONDS):
-            await self._ensure_connected()
-        code = await self._stop_run_bounded(tag, signum)
-        if code not in (0, NOT_RUNNING_STATUS):
-            raise RuntimeError(f"{self.id}: run {tag} not stopped")
-        return code == 0
-
-    async def _stop_run_bounded(self, tag: str, signum: int) -> int | None:
-        """Stop what a cancelled or failed run left on the machine
-        (``PROCESS``), for at most ``MACHINE_STOP_WAIT_SECONDS``: a machine that
-        stopped answering would otherwise hold the cancel or the error.
-
-        Args:
-            tag (str): the run's tag.
-            signum (int): the signal the run is stopped with first.
-
-        Returns:
-            int | None: the stop line's status (``stop_line``); None when
-            the machine did not answer.
+            were stopped; False when it holds none of them, could not be
+            reached, or the stop failed.
         """
         try:
             async with asyncio.timeout(MACHINE_STOP_WAIT_SECONDS):
+                await self._ensure_connected()
                 done = await self._exec_argv(
                     ("/bin/sh", "-c", stop_line(tag, signum)),
                     None,
@@ -355,7 +326,7 @@ class MachineHandle:
                 )
         except Exception:
             logger.debug("%s: run %s not stopped", self.id, tag, exc_info=True)
-            return None
+            return False
         if done.exit_code not in (0, NOT_RUNNING_STATUS):
             logger.debug(
                 "%s: run %s not stopped: exit %d",
@@ -363,7 +334,7 @@ class MachineHandle:
                 tag,
                 done.exit_code,
             )
-        return done.exit_code
+        return done.exit_code == 0
 
     async def _system_time_env(self, env: dict[str, str]) -> dict[str, str]:
         """What a program on this machine needs to read the running
@@ -391,7 +362,7 @@ class MachineHandle:
                 return
             try:
                 async with asyncio.timeout(FAKETIME_PROBE_SECONDS):
-                    found = await self._control_line(faketime_probe())
+                    found = await self._setup(faketime_probe())
             except Exception:
                 found = None
                 logger.debug(
@@ -415,7 +386,7 @@ class MachineHandle:
                     self.id,
                 )
 
-    async def _control_line(self, line: str) -> RunResult:
+    async def _setup(self, line: str) -> RunResult:
         """Run one of Mirage's own lines on the machine: its environment,
         at ``/``.
 
@@ -434,7 +405,7 @@ class MachineHandle:
         """
         async with asyncio.timeout(wait):
             await self._ensure_connected()
-            return await self._control_line(line)
+            return await self._setup(line)
 
     async def _ensure_connected(self) -> None:
         async with self._connect_lock:

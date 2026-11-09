@@ -157,12 +157,12 @@ export class JobTable {
   // The publisher's pending sleep, which a close ends at once.
   private publishTick: { timer: ReturnType<typeof setTimeout>; wake: () => void } | null = null
   private closed = false
-  private reaping = new Set<Promise<void>>()
-  // Lapsed daemons this table already set about reaping, so a listing that
+  private stoppingRuns = new Set<Promise<void>>()
+  // Lapsed daemons this table already set about stopping, so a listing that
   // finds one again does not stop its runs again; and whether teardown
-  // stopped the reaping, which its runtimes are closing for.
-  private reaped = new Set<string>()
-  private reapingStopped = false
+  // ended the stopping, which its runtimes are closing for.
+  private stoppedOwners = new Set<string>()
+  private stopsEnded = false
   private swept = false
   // The startup sweep's pending wait for a lease to pass, which a teardown
   // ends at once.
@@ -279,11 +279,11 @@ export class JobTable {
         console.debug('lost records not ended:', err)
       }
     }
-    if (Object.keys(earlier).length > 0 && !this.reapingStopped) {
-      const reaping = this.reapEarlier(earlier).finally(() => {
-        this.reaping.delete(reaping)
+    if (Object.keys(earlier).length > 0 && !this.stopsEnded) {
+      const stopping = this.stopEarlier(earlier).finally(() => {
+        this.stoppingRuns.delete(stopping)
       })
-      this.reaping.add(reaping)
+      this.stoppingRuns.add(stopping)
     }
     this.processesChanged()
   }
@@ -610,7 +610,7 @@ export class JobTable {
       await this.stopRunner(job, job.process, signal)
       return true
     }
-    if (!(await this.running(job.owner))) await this.reapOwner(job.owner)
+    if (!(await this.running(job.owner))) await this.stopOwner(job.owner)
     await markKilled(job.console, 128 + signal, signal)
     await this.refresh(job)
     return job.signal !== null
@@ -679,16 +679,16 @@ export class JobTable {
    * the ones that were running. Disowned jobs are stopped too: the shell
    * forgot them, the workspace did not, and a teardown that left them
    * running would leak tasks. Another workspace's jobs are its own to
-   * stop. The reaping of lapsed owners' runs stops here as well, before the
+   * stop. The stopping of lapsed owners' runs ends here as well, before the
    * runtimes it reaches them through close: none starts, and one under way
-   * is waited for, bounded as a reap is. */
+   * is waited for, bounded as a stop is. */
   async killAll(): Promise<JobHandle[]> {
-    this.reapingStopped = true
+    this.stopsEnded = true
     if (this.sweepTick !== null) {
       clearTimeout(this.sweepTick.timer)
       this.sweepTick.wake()
     }
-    await Promise.allSettled([...this.reaping])
+    await Promise.allSettled([...this.stoppingRuns])
     const running = this.allRunningJobs().filter((j) => j.process !== null)
     for (const job of [...running, ...this.disowned])
       if (job.state === 'running' && job.process !== null) await job.stop()
@@ -745,7 +745,7 @@ export class JobTable {
    *
    * A killed job's console ends once its runner has stopped, or
    * `STOP_WAIT_SECONDS` after the kill: what it started stops in that
-   * time (a handler finishes, a sandbox is reaped) and the status it
+   * time (a handler finishes, a machine's run is stopped) and the status it
    * leaves is the one answered, as bash's `wait` answers once the child
    * has gone. An ending another workspace wrote is taken at once, before
    * this table's watcher stops the runner. The runner is joined too, for
@@ -860,7 +860,7 @@ export class JobTable {
     for (const [daemon, records] of Object.entries(await this.store.processes())) {
       if (daemon === this.daemon || Object.keys(records).length === 0) continue
       if (await this.running(daemon)) found[daemon] = records
-      else this.reapLater(daemon)
+      else this.stopLater(daemon)
     }
     return found
   }
@@ -904,7 +904,7 @@ export class JobTable {
     const granted = permissions()
     if (granted === null || (granted.list === 'session' && !own)) return false
     if (lapsed) {
-      await this.reapOwner(found)
+      await this.stopOwner(found)
       return false
     }
     if (granted.kill === 'session' && !own)
@@ -1037,7 +1037,7 @@ export class JobTable {
     let outcome = await job.console.outcome()
     if (outcome === null) {
       if (await this.running(job.owner)) return
-      this.reapLater(job.owner)
+      this.stopLater(job.owner)
       await markKilled(job.console, HANGUP_EXIT_CODE, HANGUP_EXIT_CODE - 128)
       outcome = await job.console.outcome()
       if (outcome === null) return
@@ -1083,7 +1083,7 @@ export class JobTable {
   /**
    * Add a job to a session's list under the next number. Numbering
    * restarts at 1 once the list is empty, as GNU bash restarts it; without
-   * that, reaping after a targeted `wait` would leave a later `wait %1`
+   * that, stopping after a targeted `wait` would leave a later `wait %1`
    * pointing at nothing.
    */
   private async allocate(sessionId: string, entry: ListEntry): Promise<number> {
@@ -1285,7 +1285,7 @@ export class JobTable {
    * round costs. The record is written again every third of the lease, so
    * it outlives its store's expiry. Each record carries `seen_at`, when its
    * processes were read, the last time this daemon vouched for them and
-   * their native runs, on the host's clock, which a host reap compares with
+   * their native runs, on the host's clock, which a host stop compares with
    * `ps`. A failed round is logged and tried again the next one, and a stop
    * that fails leaves the others it came with to be applied; the sleep
    * between rounds keeps no host alive on its own.
@@ -1360,17 +1360,17 @@ export class JobTable {
    * ran stops before anything lists it. Once per table, and only on a store
    * whose leases lapse: on any other, no daemon loses one but by closing.
    */
-  reapLapsed(): void {
-    if (this.swept || this.reapingStopped || this.store.leaseSeconds === null) return
+  stopLapsed(): void {
+    if (this.swept || this.stopsEnded || this.store.leaseSeconds === null) return
     this.swept = true
     const sweeping = this.sweep().finally(() => {
-      this.reaping.delete(sweeping)
+      this.stoppingRuns.delete(sweeping)
     })
-    this.reaping.add(sweeping)
+    this.stoppingRuns.add(sweeping)
   }
 
   /**
-   * Reap the daemons that lost the lease, and once more a lease later while
+   * Stop the programs of the daemons that lost the lease, and once more a lease later while
    * another daemon still held it: one that died just before this one
    * started still holds it until then.
    */
@@ -1378,8 +1378,7 @@ export class JobTable {
     try {
       const live = await this.remoteProcesses()
       const lease = this.store.leaseSeconds
-      if (this.reapingStopped || this.closed || Object.keys(live).length === 0 || lease === null)
-        return
+      if (this.stopsEnded || this.closed || Object.keys(live).length === 0 || lease === null) return
       const deadline = performance.now() + lease * 1000
       let remaining = lease * 1000
       while (remaining > 0) {
@@ -1390,7 +1389,7 @@ export class JobTable {
         })
         this.sweepTick = null
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- a teardown may stop it across the await
-        if (this.reapingStopped || this.closed) return
+        if (this.stopsEnded || this.closed) return
         remaining = deadline - performance.now()
       }
       await this.remoteProcesses()
@@ -1400,29 +1399,29 @@ export class JobTable {
   }
 
   /** Stop the native runs a daemon that lost the lease left, without waiting. */
-  private reapLater(owner: string): void {
-    if (this.reapingStopped || this.reaped.has(owner)) return
-    this.reaped.add(owner)
-    const reaping = this.reapOwner(owner).finally(() => {
-      this.reaping.delete(reaping)
+  private stopLater(owner: string): void {
+    if (this.stopsEnded || this.stoppedOwners.has(owner)) return
+    this.stoppedOwners.add(owner)
+    const stopping = this.stopOwner(owner).finally(() => {
+      this.stoppingRuns.delete(stopping)
     })
-    this.reaping.add(reaping)
+    this.stoppingRuns.add(stopping)
   }
 
   /**
    * Stop the programs a daemon that lost the lease left, those this
    * workspace reaches, and keep its record holding only the rest, for a
    * daemon that reaches them. This table's own daemon's record is its own
-   * life's, so it is never reaped here.
+   * life's, so it is never stopped here.
    */
-  private async reapOwner(owner: string): Promise<void> {
+  private async stopOwner(owner: string): Promise<void> {
     if (owner === this.daemon) return
     try {
       const records = (await this.store.processes())[owner] ?? {}
-      const kept = await this.reapProcesses(owner, records)
+      const kept = await this.stopProcesses(owner, records)
       if (!(await this.running(owner))) await this.store.publish(owner, kept)
     } catch (err) {
-      console.debug(`lapsed daemon ${owner} not reaped:`, err)
+      console.debug(`lapsed daemon ${owner} not stopped:`, err)
     }
   }
 
@@ -1431,11 +1430,11 @@ export class JobTable {
    * found under its id. The ones the runStopper could not reach stay in this
    * life's record, as they were last vouched for.
    */
-  private async reapEarlier(records: Record<string, RecordFields>): Promise<void> {
+  private async stopEarlier(records: Record<string, RecordFields>): Promise<void> {
     try {
-      this.left = await this.reapProcesses(this.daemon, records)
+      this.left = await this.stopProcesses(this.daemon, records)
     } catch (err) {
-      console.debug('runs left before a restart not reaped:', err)
+      console.debug('runs left before a restart not stopped:', err)
       this.left = records
     }
     if (Object.keys(this.left).length > 0) this.processesChanged()
@@ -1448,7 +1447,7 @@ export class JobTable {
    * stopped, so a daemon that took it back meanwhile keeps its processes,
    * and its records as they are.
    */
-  private async reapProcesses(
+  private async stopProcesses(
     owner: string,
     records: Record<string, RecordFields>,
   ): Promise<Record<string, RecordFields>> {

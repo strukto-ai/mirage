@@ -330,14 +330,14 @@ async def test_a_cancelled_line_does_not_wait_for_the_remote_command():
 
 
 # A kill that names a gentler signal leaves a run's tagged command to the
-# reap, which sends it that signal first; an untagged one (mount setup, a
-# direct exec) has no reap behind it and is killed.
+# stop, which sends it that signal first; an untagged one (mount setup, a
+# direct exec) has no stop behind it and is killed.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "tagged,calls",
     [(True, ["eof", "close"]), (False, ["eof", "kill", "close"])],
 )
-async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
+async def test_a_term_kill_leaves_only_a_tagged_command_to_the_stop(
     tagged, calls
 ):
     process = HungProcess()

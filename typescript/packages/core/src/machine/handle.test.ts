@@ -493,13 +493,13 @@ describe('MachineHandle', () => {
   })
 
   // A run another workspace left is stopped by its tag, the box reached
-  // first if this runtime never was. The reap says whether the box held the
+  // first if this runtime never was. The stop says whether the box held the
   // run: a box that holds none of it answers so, and a stop that failed
   // throws, so neither counts as having stopped it.
   it.each([
     [0, true],
     [NOT_RUNNING_STATUS, false],
-  ])('reaps a left run by its tag (box answers %i)', async (code, held) => {
+  ])('stops a left run by its tag (box answers %i)', async (code, held) => {
     class AnsweringBox extends RecordingMachine {
       override async execLine(
         line: string,
@@ -512,18 +512,18 @@ describe('MachineHandle', () => {
       }
     }
     const box = new AnsweringBox({ captures: ['yes'] })
-    expect(await box.stopRun('t1', 15)).toBe(held)
+    expect(await box.stop('t1', 15)).toBe(held)
     expect(box.connectedCount).toBe(1)
     expect(box.execs.map(([line]) => line)).toEqual([stopLine('t1', 15)])
   })
 
-  it('throws for a reap that failed', async () => {
+  it('answers false for a stop that failed', async () => {
     class FailingBox extends RecordingMachine {
       override execLine(): Promise<RunResult> {
         return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 127 })
       }
     }
-    await expect(new FailingBox({ captures: ['yes'] }).stopRun('t1', 15)).rejects.toThrow()
+    expect(await new FailingBox({ captures: ['yes'] }).stop('t1', 15)).toBe(false)
   })
 
   it('holds a cancel only so long when the box stops answering', async () => {

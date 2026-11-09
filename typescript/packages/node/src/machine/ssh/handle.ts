@@ -129,7 +129,7 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
    * closes the channel.
    *
    * @param tagged whether the command carries its run's `PROCESS`, so a
-   *   cancelled run's reap stops it.
+   *   cancelled run's stop ends it.
    * @param errors receives stderr as it arrives, as `output` does stdout.
    */
   protected ssh(
@@ -160,7 +160,7 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
         }
         const abort = (): void => {
           // A tagged command a kill stopped with a gentler signal is left
-          // to the reap, which sends it that signal first.
+          // to the stop, which sends it that signal first.
           if (!state.done && (!tagged || stopSignal(runner) === null)) stream.signal('KILL')
           fail(makeAbortError(signal))
         }

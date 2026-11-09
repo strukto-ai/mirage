@@ -254,13 +254,23 @@ export class MachineMounts {
   }
 
   /**
-   * Record the line for `finishLine`, then refuse a cwd other than `/` that ssh
-   * serves no mount for (126), before connecting. Mirrors Python's
-   * `MachineMounts.enter`.
+   * Record the line for `sync`, bring the mounts in step, then refuse a line
+   * that may not run: one from a cwd other than `/` that ssh serves no mount
+   * for (126), one the session's restrictions reach past the dispatcher, as a
+   * policy refuses it (126), one the machine cannot serve because another
+   * session or another sshfs holds it, or another mount covers it (1), and
+   * one over a mount of the machine's own that is gone (126). Null when the
+   * line may run.
    */
-  beginLine(binding: WorkspaceBinding | null, cwd: string): RunResult | null {
+  async validate(
+    binding: WorkspaceBinding | null,
+    cwd: string,
+    signal?: AbortSignal,
+  ): Promise<RunResult | null> {
+    const files = binding?.files ?? null
+    const getSession = binding?.getSession ?? null
     const mountPrefixes = binding?.mountPrefixes ?? null
-    if (mountPrefixes === null) {
+    if (binding === null || files === null || getSession === null || mountPrefixes === null) {
       throw new Error(`${this.provider}: mountType needs the machine in a workspace`)
     }
     const { stop, writeHeld } = currentCaller()
@@ -278,27 +288,6 @@ export class MachineMounts {
         ),
         exitCode: CANNOT_EXECUTE_STATUS,
       }
-    return null
-  }
-
-  /**
-   * Bring the mounts in step, then refuse a line that may not run: one the
-   * session's restrictions reach past the dispatcher is refused as a policy
-   * refuses it (126), one the machine cannot serve because another session
-   * or another sshfs holds it, or another mount covers it, fails (1), and
-   * one over a mount of the machine's own that is gone is refused (126). Null
-   * when the line may run.
-   */
-  async prepareLine(
-    binding: WorkspaceBinding | null,
-    signal?: AbortSignal,
-  ): Promise<RunResult | null> {
-    const files = binding?.files ?? null
-    const getSession = binding?.getSession ?? null
-    const mountPrefixes = binding?.mountPrefixes ?? null
-    if (binding === null || files === null || getSession === null || mountPrefixes === null) {
-      throw new Error(`${this.provider}: mountType needs the machine in a workspace`)
-    }
     const current = getCurrentSession()
     const rules = current?.commands
     if (
@@ -367,7 +356,7 @@ export class MachineMounts {
    * `argv` under `MOUNT_GUARD`, holding every mount the machine had at the
    * line's admit; unchanged when it had none.
    */
-  withMountGuard(argv: readonly string[]): readonly string[] {
+  guarded(argv: readonly string[]): readonly string[] {
     const held = new Map<string, [string, string]>(
       [...this.served.keys()].map((p) => [p, [this.source(p), 'fuse.sshfs']]),
     )
@@ -388,7 +377,7 @@ export class MachineMounts {
    * Read the mounts again on the next line: a guarded line found one gone,
    * or its program exited as the guard does.
    */
-  forgetMounts(): void {
+  forget(): void {
     this.seen = null
   }
 
@@ -416,7 +405,7 @@ export class MachineMounts {
    * @returns one line per write that failed to land, naming its path and
    *   why.
    */
-  async landWrites(signal?: AbortSignal): Promise<string[]> {
+  async land(signal?: AbortSignal): Promise<string[]> {
     const { stop, writeHeld } = currentCaller()
     const lost: string[] = []
     try {
@@ -437,17 +426,17 @@ export class MachineMounts {
   }
 
   /**
-   * Land as `landWrites` does as the line ends, however it ended. Then the line
+   * Land as `land` does as the line ends, however it ended. Then the line
    * lends its admission to no more requests, and waits out the ones it lent
    * it to, so a capture never reads past one still running.
    *
    * @returns one line per write that failed to land, naming its path and
    *   why.
    */
-  async finishLine(): Promise<string[]> {
+  async sync(): Promise<string[]> {
     const { stop } = currentCaller()
     try {
-      return await this.landWrites()
+      return await this.land()
     } finally {
       const index = this.lines.findIndex((held) => held.stop === stop)
       const [line] = index >= 0 ? this.lines.splice(index, 1) : []
@@ -457,7 +446,7 @@ export class MachineMounts {
 
   /**
    * Run one served request with the write admission of the latest line
-   * running in the machine, from its `prepareLine` to its `finishLine`, and none
+   * running in the machine, from its `validate` to its `sync`, and none
    * between lines. A program's file op then counts as its line's, so a
    * capture waiting for that line lets it land rather than holding it while
    * the line waits on it.
@@ -497,7 +486,7 @@ export class MachineMounts {
    * Serve what the session sees and drop what it no longer does. Returns
    * why the line may not run, a prefix another sshfs still serves or another
    * mount covers, which is left alone and nothing new served, or null once
-   * in step, or with a mount of the machine's own gone, which `prepareLine`
+   * in step, or with a mount of the machine's own gone, which `validate`
    * refuses.
    */
   private async reconcile(

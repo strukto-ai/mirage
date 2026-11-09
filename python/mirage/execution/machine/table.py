@@ -28,10 +28,11 @@ from mirage.execution.process.constants import MAX_PROCESSES
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import Process, ProcessState
-from mirage.execution.types import MachineId, MachinePid
+from mirage.execution.types import MachineId, MachinePid, ProcessId
 from mirage.machine.handle import MachineHandle
 from mirage.machine.registry import build_machine
 from mirage.shell.constants import CONTINUE_SIGNALS, STOP_SIGNALS
+from mirage.workspace.record.types import RecordFields
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,9 @@ class MachineTable:
             None leaves the host unscanned.
         signal_host (Callable[[MachinePid, int], Awaitable[bool]] |
             None): sends a signal to a host process; None sends none.
+        stop_host (Callable[[MachinePid, float | None, int],
+            Awaitable[bool]] | None): stops a host program a lapsed
+            workspace left; None reaches none.
 
     Raises:
         ValueError: an entry no provider builds.
@@ -76,6 +80,8 @@ class MachineTable:
         | None = None,
         signal_host: Callable[[MachinePid, int], Awaitable[bool]]
         | None = None,
+        stop_host: Callable[[MachinePid, float | None, int], Awaitable[bool]]
+        | None = None,
     ) -> None:
         self._handles = {
             name: build_machine(name, spec)
@@ -89,6 +95,7 @@ class MachineTable:
                 )
         self._scan_host = scan_host
         self._signal_host = signal_host
+        self._stop_host = stop_host
         # The processes scans found, by machine, pid and start, each
         # with the event that ends it once a scan no longer sees it and
         # the tag of the run that started it.
@@ -320,6 +327,42 @@ class MachineTable:
             return True
         return handle.terminate(
             signum, children=handle.record.parent is not None
+        )
+
+    async def stop(
+        self, processes: ProcessTable, record: RecordFields, signum: int
+    ) -> bool:
+        """Stop the program a lapsed workspace's process ran past the
+        workspace: a host program by its pid when it ran on this host, a
+        machine's run through the machine it ran on, by its process's tag.
+
+        Args:
+            processes (ProcessTable): this workspace's table.
+            record (RecordFields): the process, as its workspace published
+                it.
+            signum (int): the first signal.
+
+        Returns:
+            bool: True once this workspace reached the program and it was
+            stopped; False leaves it to a workspace that reaches its own.
+        """
+        machine, pid = record.get("machine"), record.get("pid")
+        found, seen = record.get("machine_pid"), record.get("seen_at")
+        if not isinstance(pid, int):
+            return False
+        if machine == str(processes.machine) and isinstance(found, dict):
+            if self._stop_host is None:
+                return False
+            return await self._stop_host(
+                MachinePid(found["pid"], found["started"], found["exited"]),
+                seen,
+                signum,
+            )
+        handle = self.by_id(machine) if isinstance(machine, str) else None
+        if handle is None:
+            return False
+        return await handle.stop(
+            str(ProcessId(processes.workspace_id, pid)), signum
         )
 
     async def _signal_on(

@@ -127,7 +127,7 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
             tagged (bool): whether the command carries its run's
-                ``PROCESS``, so a cancelled run's reap stops it.
+                ``PROCESS``, so a cancelled run's stop ends it.
         """
         process = await self._conn.create_process(command, encoding=None)
         exited = asyncio.Event()
@@ -141,7 +141,7 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
 
         feeding = asyncio.create_task(feed(stdin, write, end, exited.is_set))
 
-        async def reap() -> Any:
+        async def wait_exit() -> Any:
             result = await process.wait(check=False)
             exited.set()
             if not feeding.done():
@@ -153,11 +153,11 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
                 read_into(process.stdout, output),
                 read_into(process.stderr, errors),
                 feeding,
-                reap(),
+                wait_exit(),
             )
         except asyncio.CancelledError:
             # A tagged command a kill stopped with a gentler signal is left
-            # to the reap, which sends it that signal first.
+            # to the stop, which sends it that signal first.
             if not tagged or stop_signal(current_caller().process) is None:
                 process.kill()
             raise

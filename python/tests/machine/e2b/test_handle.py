@@ -306,7 +306,7 @@ async def test_parallel_calls_connect_once_and_keep_input_separate():
     assert all(h.disconnected for h in FakeMachine.last.commands.handles)
 
 
-# An untagged run (the reap's own line) that fails is killed and starts
+# An untagged run (the stop's own line) that fails is killed and starts
 # nothing more.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -334,9 +334,9 @@ async def test_input_transport_failure_kills_only_its_command_and_disconnects(
 # A kill reaches only the shell that encodes the output, so a tagged run
 # that fails for a reason other than a cancel is also stopped by its tag.
 @pytest.mark.asyncio
-async def test_a_tagged_run_that_fails_is_reaped_by_its_tag():
+async def test_a_tagged_run_that_fails_is_stopped_by_its_tag():
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
-    await runtime.connect()
+    await runtime._ensure_connected()
     commands = FakeMachine.last.commands
     commands.input_error = RuntimeError("stdin transport failed")
     with pytest.raises(RuntimeError, match="stdin transport failed"):
@@ -365,9 +365,9 @@ async def test_streamed_stderr_goes_to_the_errors_callback():
 
 
 # A kill reaches only the encoding shell, so a line run with no tag of its
-# caller's gets its own and a cancelled one is reaped by it.
+# caller's gets its own and a cancelled one is stopped by it.
 @pytest.mark.asyncio
-async def test_a_cancelled_line_is_killed_and_reaped_by_its_own_tag(
+async def test_a_cancelled_line_is_killed_and_stopped_by_its_own_tag(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -375,7 +375,7 @@ async def test_a_cancelled_line_is_killed_and_reaped_by_its_own_tag(
         lambda: SimpleNamespace(hex="line"),
     )
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
-    await runtime.connect()
+    await runtime._ensure_connected()
     commands = FakeMachine.last.commands
     task = asyncio.create_task(
         runtime.exec_line("sleep", None, {}, "/workspace")
@@ -404,9 +404,9 @@ async def test_a_stop_that_times_out_starts_no_other_stop(monkeypatch):
         "mirage.machine.handle.MACHINE_STOP_WAIT_SECONDS", 0.01
     )
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
-    await runtime.connect()
+    await runtime._ensure_connected()
     async with asyncio.timeout(2):
-        assert await runtime._stop_run_bounded("t", 15) is None
+        assert await runtime.stop("t", 15) is False
     assert [
         shlex.split(command)[-1]
         for command, _ in FakeMachine.last.commands.calls
@@ -414,12 +414,12 @@ async def test_a_stop_that_times_out_starts_no_other_stop(monkeypatch):
 
 
 # A kill that names a gentler signal leaves a run's tagged command to the
-# reap, which sends it that signal first; an untagged one (mount setup, a
-# direct exec) has no reap behind it and is killed. Either way the runtime
-# runs nothing more: a cancelled run is the caller's to reap.
+# stop, which sends it that signal first; an untagged one (mount setup, a
+# direct exec) has no stop behind it and is killed. Either way the runtime
+# runs nothing more: a cancelled run is the caller's to stop.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("env,killed", [({PROCESS: "run"}, False), ({}, True)])
-async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
+async def test_a_term_kill_leaves_only_a_tagged_command_to_the_stop(
     env, killed
 ):
     runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})

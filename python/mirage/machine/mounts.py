@@ -214,7 +214,7 @@ class MachineMounts:
     the same machine does, refuses the line (1) rather than being taken,
     and one whose sshfs has gone is unmounted and served.
 
-    A machine may restart between a line's admit and its exec and come
+    A machine may restart between a line's ``validate`` and its exec and come
     back without its mounts, so each line runs under ``MOUNT_GUARD``,
     which checks every mount it holds in the boot the program runs in
     and exits 126 with nothing run when one is gone. The next line reads
@@ -265,21 +265,30 @@ class MachineMounts:
         """SSH mode serves every workspace prefix through the host's gate."""
         return self._mount_type == "ssh"
 
-    def begin_line(
+    async def validate(
         self, binding: WorkspaceBinding | None, cwd: str
     ) -> RunResult | None:
-        """Record the line for ``finish_line``, then refuse a cwd other than
-        ``/`` that ssh serves no mount for (126), before connecting.
+        """Record the line for ``sync``, bring the mounts in step, then
+        refuse a line that may not run: one from a cwd other than ``/``
+        that ssh serves no mount for (126), one the session's
+        restrictions reach past the dispatcher, as a policy refuses it
+        (126), one the machine cannot serve because another session or
+        another sshfs holds it, or another mount covers it (1), and one
+        over a mount of the machine's own that is gone (126).
 
         Args:
             binding (WorkspaceBinding | None): the runtime's workspace.
             cwd (str): the line's working directory.
 
         Returns:
-            RunResult | None: the refused run, None when the line may go
-            on to ``prepare_line``.
+            RunResult | None: the refused run, None when the line may run.
         """
-        if binding is None or binding.mount_prefixes is None:
+        if (
+            binding is None
+            or binding.files is None
+            or binding.get_session is None
+            or binding.mount_prefixes is None
+        ):
             raise RuntimeError(
                 f"{self._provider}: mount_type needs the machine in a workspace"
             )
@@ -302,33 +311,6 @@ class MachineMounts:
                     f"directory {seen}; cd into a mount first\n"
                 ).encode(),
                 exit_code=CANNOT_EXECUTE_STATUS,
-            )
-        return None
-
-    async def prepare_line(
-        self, binding: WorkspaceBinding | None
-    ) -> RunResult | None:
-        """Bring the mounts in step, then refuse a line that may not run:
-        one the session's restrictions reach past the dispatcher is
-        refused as a policy refuses it (126), one the machine cannot
-        serve because another session or another sshfs holds it, or
-        another mount covers it, fails (1), and one over a mount of the
-        machine's own that is gone is refused (126).
-
-        Args:
-            binding (WorkspaceBinding | None): the runtime's workspace.
-
-        Returns:
-            RunResult | None: the refused run, None when the line may run.
-        """
-        if (
-            binding is None
-            or binding.files is None
-            or binding.get_session is None
-            or binding.mount_prefixes is None
-        ):
-            raise RuntimeError(
-                f"{self._provider}: mount_type needs the machine in a workspace"
             )
         current = get_current_session()
         if current is None:
@@ -399,9 +381,9 @@ class MachineMounts:
             )
         return None
 
-    def with_mount_guard(self, argv: tuple[str, ...]) -> tuple[str, ...]:
+    def guarded(self, argv: tuple[str, ...]) -> tuple[str, ...]:
         """``argv`` under ``MOUNT_GUARD``, holding every mount the machine
-        had at the line's admit; unchanged when it had none.
+        had at the line's ``validate``; unchanged when it had none.
 
         Args:
             argv (tuple[str, ...]): the program and its arguments.
@@ -430,7 +412,7 @@ class MachineMounts:
             *argv,
         )
 
-    def forget_mounts(self) -> None:
+    def forget(self) -> None:
         """Read the mounts again on the next line: a guarded line found
         one gone, or its program exited as the guard does."""
         self._seen = None
@@ -441,7 +423,7 @@ class MachineMounts:
             await self._unmount()
             self._session = None
 
-    async def land_writes(self) -> list[str]:
+    async def land(self) -> list[str]:
         """Land every write a served prefix's server has acknowledged.
 
         sshfs answers close(2) once the file's writes are acknowledged and
@@ -488,8 +470,8 @@ class MachineMounts:
             for path, err in failed
         ]
 
-    async def finish_line(self) -> list[str]:
-        """Land as ``land_writes`` does as the line ends, however it ended. Then
+    async def sync(self) -> list[str]:
+        """Land as ``land`` does as the line ends, however it ended. Then
         the line lends its admission to no more requests, and waits out
         the ones it lent it to, so a capture never reads past one still
         running.
@@ -500,7 +482,7 @@ class MachineMounts:
         """
         line = current_caller()
         try:
-            return await self.land_writes()
+            return await self.land()
         finally:
             for index, (held, lent) in enumerate(self._lines):
                 if held.stop is line.stop:
@@ -511,7 +493,7 @@ class MachineMounts:
 
     async def _lend(self, op: Coroutine[Any, Any, T]) -> T:
         """Run one served request with the write admission of the latest
-        line running in the machine, from its ``prepare_line`` to its ``finish_line``,
+        line running in the machine, from its ``validate`` to its ``sync``,
         and none between lines.
 
         A program's file op then counts as its line's, so a capture
@@ -561,7 +543,7 @@ class MachineMounts:
             str | None: why the line may not run, a prefix another sshfs
             still serves or another mount covers, which is left alone and
             nothing new served; None once in step, or with a mount of the
-            machine's own gone, which ``prepare_line`` refuses.
+            machine's own gone, which ``validate`` refuses.
         """
         visible = frozenset(
             top_prefixes(binding.resolver.prefixes())
