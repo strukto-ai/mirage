@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
 from functools import partial
 from typing import Any
 
-from mirage._rs import Shell, ShellNode
+from mirage._rs import Shell, ShellNode, ShellTask
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.rs.session import ShellVars
@@ -98,8 +99,8 @@ class ExpandHost:
         context (EvaluationContext): the evaluation the word is in.
         execute_fn (ExecuteFn): evaluator for nested lines.
         call_stack (CallStack | None): shell call stack.
-        word (TSNodeLike): the word, whose program the nodes it names
-            belong to.
+        word (TSNodeLike | None): the word, whose program the nodes it
+            names belong to; None for an operation that names none.
     """
 
     def __init__(
@@ -107,7 +108,7 @@ class ExpandHost:
         context: EvaluationContext,
         execute_fn: ExecuteFn,
         call_stack: CallStack | None,
-        word: TSNodeLike,
+        word: TSNodeLike | None,
     ) -> None:
         self.context = context
         self.session = context.session
@@ -148,6 +149,11 @@ class ExpandHost:
         context.frame.cmdsub_status = io.exit_code
         record_status(context.session, io.exit_code, transparent=True)
         return stdout, stderr, io.exit_code
+
+    async def subscript(self, text: str) -> str:
+        return await expand_subscript(
+            text, self.context, self.execute_fn, self.call_stack
+        )
 
     async def process(self, shell: Shell, node: ShellNode) -> str:
         context = self.context
@@ -207,6 +213,28 @@ async def expand(
     task = session.vars.shell.expand(node, mode)
     host = ExpandHost(context, execute_fn, call_stack, word)
     return await drive(task, host, context.frame.diagnostics)
+
+
+async def run_on_shell(
+    start: Callable[[Shell], ShellTask],
+    context: EvaluationContext,
+    execute_fn: ExecuteFn,
+    call_stack: CallStack | None = None,
+) -> Any:
+    """Run an operation on the session's shell and answer what it asks.
+
+    Args:
+        start (Callable[[Shell], ShellTask]): starts it on the shell.
+        context (EvaluationContext): the evaluation's session and frame.
+        execute_fn (ExecuteFn): evaluator for nested lines.
+        call_stack (CallStack | None): shell call stack.
+    """
+    session = context.session
+    frame(session, call_stack)
+    host = ExpandHost(context, execute_fn, call_stack, None)
+    return await drive(
+        start(session.vars.shell), host, context.frame.diagnostics
+    )
 
 
 async def expand_node(

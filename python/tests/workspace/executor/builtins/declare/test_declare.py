@@ -3,6 +3,7 @@ import pytest
 from mirage.io.stream import materialize
 from mirage.shell.array import make_array
 from mirage.shell.variable import VarAttr
+from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.declare.declare import mark_names
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import seed_var, set_attr
@@ -10,6 +11,10 @@ from mirage.workspace.session.state import seed_var, set_attr
 
 def make_session() -> SessionState:
     return SessionState(session_id="s1")
+
+
+async def no_lines(*args, **kwargs):
+    raise AssertionError("no nested line runs here")
 
 
 @pytest.mark.asyncio
@@ -20,7 +25,9 @@ async def test_readonly_p_prints_scalars_and_arrays():
     set_attr(session, "ONLY", VarAttr.READONLY)
     seed_var(session, "AR", make_array(["a", "b c"]))
     set_attr(session, "AR", VarAttr.READONLY)
-    out, io, _ = await mark_names(["-p"], session, None, VarAttr.READONLY)
+    out, io, _ = await mark_names(
+        ["-p"], EvaluationContext(session), no_lines, None, VarAttr.READONLY
+    )
     assert io.exit_code == 0
     text = (await materialize(out)).decode()
     assert 'declare -ar AR=([0]="a" [1]="b c")\n' in text
@@ -34,6 +41,12 @@ async def test_readonly_f_and_A_list_nothing():
     seed_var(session, "VAL", "x")
     set_attr(session, "VAL", VarAttr.READONLY)
     for flag in ("-f", "-A"):
-        out, io, _ = await mark_names([flag], session, None, VarAttr.READONLY)
+        out, io, _ = await mark_names(
+            [flag],
+            EvaluationContext(session),
+            no_lines,
+            None,
+            VarAttr.READONLY,
+        )
         assert io.exit_code == 0
         assert await materialize(out) == b""

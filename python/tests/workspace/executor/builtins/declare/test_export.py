@@ -2,13 +2,28 @@ import pytest
 
 from mirage.io.stream import materialize
 from mirage.shell.variable import VarAttr
-from mirage.workspace.executor.builtins.declare import handle_export
+from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.builtins.declare.declare import mark_names
 from mirage.workspace.session.session import SessionState
-from mirage.workspace.session.state import seed_var, session_view, set_attr
+from mirage.workspace.session.state import seed_var, set_attr
 
 
 def make_session() -> SessionState:
     return SessionState(session_id="s1")
+
+
+async def no_lines(*args, **kwargs):
+    raise AssertionError("no nested line runs here")
+
+
+async def handle_export(assignments: list[str], session: SessionState):
+    return await mark_names(
+        assignments,
+        EvaluationContext(session),
+        no_lines,
+        None,
+        VarAttr.EXPORT,
+    )
 
 
 def seed_exported(session: SessionState, name: str, value: str) -> None:
@@ -59,21 +74,10 @@ async def test_export_bare_prints_like_p():
 
 
 @pytest.mark.asyncio
-async def test_export_write_requires_a_threaded_view():
-    # A write reached without the line's session view is a wiring bug,
-    # not a mode, so it raises rather than writing past the view.
-    session = make_session()
-    with pytest.raises(RuntimeError, match="gated session view"):
-        await handle_export(["SECRET=x"], session)
-
-
-@pytest.mark.asyncio
 async def test_export_p_with_name_does_not_print():
     session = make_session()
     seed_var(session, "KEEP", "1")
-    out, io, _ = await handle_export(
-        ["-p", "FOO=bar"], session, state=session_view(session)
-    )
+    out, io, _ = await handle_export(["-p", "FOO=bar"], session)
     assert io.exit_code == 0
     assert out is None
     assert session.env["FOO"] == "bar"

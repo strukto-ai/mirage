@@ -1815,10 +1815,6 @@ async def _execute_node(
                 registry,
                 namespace,
                 cs,
-                session_view(
-                    session,
-                    diagnostics=context.frame.diagnostics,
-                ),
                 declared,
             )
         bind_last_word(session, declared.words or ())

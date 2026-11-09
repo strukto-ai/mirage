@@ -123,6 +123,7 @@ class ShellTask:
         self, stdout: bytes, stderr: bytes, status: int
     ) -> None: ...
     def answer_path(self, path: Text) -> None: ...
+    def answer_subscript(self, text: Text | None, shell: Shell) -> None: ...
     def answer_resumed(self) -> None: ...
     def answer_failed(self) -> None: ...
     def finish(self) -> Outcome: ...
@@ -208,6 +209,25 @@ class Shell:
     @property
     def closed(self) -> bool: ...
     def expand(self, node: ShellNode, mode: str) -> ShellTask: ...
+    def declare(
+        self,
+        cmd: str,
+        flags: str,
+        plus: str,
+        operands: Sequence[str | tuple[str, bool, list[str]]],
+        temporaries: list[str],
+        subscripts: bool,
+    ) -> ShellTask: ...
+    def mark_names(
+        self,
+        cmd: str,
+        attr: str,
+        on: bool,
+        flags: str,
+        operands: Sequence[str | tuple[str, bool, list[str]]],
+        temporaries: list[str],
+        functions: bool,
+    ) -> ShellTask: ...
     def set(
         self,
         name: str,

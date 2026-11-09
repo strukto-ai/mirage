@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use mirage_rs::arith;
 use mirage_rs::interp::codec::{Args, Item, one};
+use mirage_rs::interp::declare::{Declaration, Marking, Operand};
 use mirage_rs::interp::expand::Substitution;
 use mirage_rs::interp::host::{self, Held};
 use mirage_rs::interp::job::{Job, Step};
@@ -31,6 +32,31 @@ unsafe extern "C" {
 }
 
 type Reply = Result<Item, String>;
+
+/// Declaration operands: a word, or `[name, append, items]`.
+fn operands_in(operands: Vec<Item>) -> Result<Vec<Operand>, String> {
+    operands
+        .into_iter()
+        .map(|operand| match operand {
+            Item::List(parts) | Item::Tuple(parts) => {
+                let mut parts = Args::new(parts);
+                Ok(Operand::Literal {
+                    name: parts.string()?,
+                    append: parts.flag()?,
+                    items: texts(parts.list()?)?,
+                })
+            }
+            word => Ok(Operand::Word(one(word, Args::bytes)?)),
+        })
+        .collect()
+}
+
+fn strings(items: Vec<Item>) -> Result<Vec<String>, String> {
+    items
+        .into_iter()
+        .map(|item| one(item, Args::string))
+        .collect()
+}
 
 fn running() -> String {
     "the shell is running a task".to_owned()
@@ -305,6 +331,35 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let mode: Mode = args.string()?.parse()?;
             let tree = shell_tree(tree).ok_or_else(|| format!("no tree {tree}"))?;
             return engine.start(handle, |inner| task::expand(inner, tree, node, mode));
+        }
+        "declare" => {
+            let declaration = Declaration {
+                cmd: args.string()?,
+                flags: args.bytes()?,
+                plus: args.bytes()?,
+                operands: operands_in(args.list()?)?,
+                temporaries: strings(args.list()?)?,
+                subscripts: args.flag()?,
+            };
+            return engine.start(handle, |inner| task::declare(inner, declaration));
+        }
+        "mark_names" => {
+            let cmd = args.string()?;
+            let attr = vars::attrs_of(&args.string()?);
+            let on = args.flag()?;
+            let flags = args.bytes()?;
+            let operands = operands_in(args.list()?)?;
+            let temporaries = strings(args.list()?)?;
+            let functions = args.flag()?;
+            let marking = Marking {
+                cmd,
+                attr,
+                on,
+                flags,
+                operands,
+                temporaries,
+            };
+            return engine.start(handle, |inner| task::mark_names(inner, marking, functions));
         }
         "set" => {
             let name = args.string()?;
@@ -668,6 +723,11 @@ fn ask_out(engine: &mut Engine, ask: Ask) -> Item {
             Item::int(engine.adopt(shell)),
             Item::int(node),
         ]),
+        Ask::Subscript { shell, text } => Item::list([
+            Item::text("subscript"),
+            Item::int(engine.adopt(shell)),
+            Item::text(text),
+        ]),
         Ask::Pause { view } => Item::list([
             Item::text("pause"),
             Item::int(engine.adopt(Inner::new(view))),
@@ -700,6 +760,22 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             status: status(args.int()?)?,
         }),
         "answer_path" => Answer::Path(args.bytes()?),
+        "answer_subscript" => {
+            let text = args
+                .maybe()?
+                .map(|item| one(item, Args::bytes))
+                .transpose()?;
+            let lent = args.handle()?;
+            let mut shell = engine
+                .shells
+                .remove(&lent)
+                .ok_or_else(|| format!("no shell {lent}"))?;
+            let inner = shell.0.take().ok_or_else(running)?;
+            Answer::Subscripted {
+                shell: Box::new(inner),
+                text,
+            }
+        }
         "answer_resumed" => Answer::Resumed,
         "answer_failed" => Answer::Failed(Fault::Host("the host failed")),
         other => return Err(format!("no task operation {other}")),

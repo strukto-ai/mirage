@@ -34,10 +34,6 @@ if TYPE_CHECKING:
     )
     from mirage.workspace.executor.builtins.declare import (
         handle_declare_functions,
-        handle_declare_print,
-        handle_export,
-        handle_local,
-        note_local_array,
     )
     from mirage.workspace.executor.builtins.df import handle_df
     from mirage.workspace.executor.builtins.dirs import handle_cd
@@ -172,10 +168,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     ),
     "mirage.workspace.executor.builtins.declare": (
         "handle_declare_functions",
-        "handle_declare_print",
-        "handle_export",
-        "handle_local",
-        "note_local_array",
     ),
 }
 
@@ -195,12 +187,9 @@ __all__ = [
     "handle_false",
     "handle_exec_command",
     "handle_declare_functions",
-    "handle_declare_print",
-    "handle_export",
     "handle_history",
     "handle_let",
     "handle_ln",
-    "handle_local",
     "handle_readlink",
     "accepts_line",
     "operand_follow",
@@ -236,7 +225,6 @@ __all__ = [
     "handle_umask",
     "handle_which",
     "handle_whoami",
-    "note_local_array",
     "handle_xargs",
     "interpret_escapes",
 ]

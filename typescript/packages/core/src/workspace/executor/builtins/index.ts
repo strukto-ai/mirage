@@ -31,13 +31,7 @@ export {
   handleSetfattr,
   handleTouch,
 } from './metadata/index.ts'
-export {
-  handleDeclareFunctions,
-  handleDeclarePrint,
-  handleExport,
-  handleLocal,
-  noteLocalArray,
-} from './declare/index.ts'
+export { handleDeclareFunctions } from './declare/index.ts'
 export { handleEnv } from './env/index.ts'
 export { handleGetopts } from './getopts/index.ts'
 export { handleLet } from './let/index.ts'

@@ -223,6 +223,8 @@
   },
   "rs/shell": {
    "typescript_only": {
+    "DeclarationItem": "The shape a declaration's operands cross the wasm engine ABI in; Python hands the PyO3 class its own tuples (mirage._rs.Shell.declare).",
+    "operandItem": "Encodes a declaration operand for the wasm engine ABI; Python hands the PyO3 class its own tuples (mirage._rs.Shell.declare).",
     "Ask": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
     "Item": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
     "Managed": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",

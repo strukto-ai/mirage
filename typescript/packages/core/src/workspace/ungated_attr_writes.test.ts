@@ -33,10 +33,6 @@ const SRC = dirname(dirname(fileURLToPath(import.meta.url)))
 // write covers it, or routes it through `view.mark` instead. This is
 // the mirror of `tests/workspace/test_ungated_attr_writes.py`.
 const ALLOWED: Record<string, string> = {
-  'workspace/executor/builtins/declare/declare.ts::markWritten':
-    "only when the name resolves where it did before the caller's " +
-    '`view.set` gated it; a write that re-aimed a `declare -n` ' +
-    'reference marks its new target through `view.mark`',
   'workspace/node/explain.ts::seeded':
     "the line pass's preview of a command's own prefix, on a fork of the " +
     'walked session that only policies read and nothing runs in; the run ' +

@@ -69,7 +69,7 @@ def result(
 
 
 def written(
-    cmd: str, pieces: Sequence[tuple[bool, str]], exit_code: int = 0
+    cmd: str, pieces: Sequence[tuple[bool, str | bytes]], exit_code: int = 0
 ) -> Result:
     """``result`` for a builtin whose output and errors take turns:
     each error goes out where it was written among the output, as bash
@@ -77,15 +77,15 @@ def written(
 
     Args:
         cmd (str): command name recorded on the ExecutionNode.
-        pieces (Sequence[tuple[bool, str]]): each piece of text in the
-            order written, True for stderr.
+        pieces (Sequence[tuple[bool, str | bytes]]): each piece of text
+            in the order written, True for stderr.
         exit_code (int): exit code for both IOResult and ExecutionNode.
     """
     out: list[bytes] = []
     size = 0
     notes: list[tuple[int, bytes]] = []
     for failed, text in pieces:
-        data = encode_text(text)
+        data = text if isinstance(text, bytes) else encode_text(text)
         if failed:
             notes.append((size, data))
         else:

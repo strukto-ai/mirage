@@ -18,22 +18,8 @@ export const EXPORT_FLAGS = new Set('aAfnp')
 export const READONLY_FLAGS = new Set('aAfp')
 
 /**
- * The attribute letters a no-name `declare` listing filters on: a name
- * carrying any of them is listed (`declare -ix` lists both kinds).
- */
-export const LISTED_ATTRIBUTES: ReadonlySet<string> = new Set('ilnrtux')
-
-/**
  * The declaration builtins that assign whichever variable is visible, a
  * function's local or else the global; `declare` and `local` make a new
  * local inside a function instead.
  */
 export const VISIBLE_SCOPE_BUILTINS: ReadonlySet<string> = new Set(['export', 'readonly'])
-
-// `arr[0]` and friends: a target that parses as an assignment but is
-// not a plain name, which the declaration builtins quote on its own.
-export const SUBSCRIPT_RE = /^[A-Za-z_][A-Za-z0-9_]*\[.*\]$/
-
-// The head of an element operand, `NAME[`, whose subscript runs to the
-// matching `]` (`operandParts`).
-export const NAME_BRACKET_RE = /^[A-Za-z_][A-Za-z0-9_]*\[/

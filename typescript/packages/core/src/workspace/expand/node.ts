@@ -14,7 +14,7 @@
 
 import type { IOResult } from '../../io/types.ts'
 import { ShellVars } from '../../rs/session.ts'
-import type { Item, Shell, ShellTreeNode } from '../../rs/shell.ts'
+import type { Item, Shell, ShellTask, ShellTreeNode } from '../../rs/shell.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { parse } from '../../shell/parse/parse.ts'
 import { ProgramNode, type ParsedProgram, shellNode } from '../../shell/parse/program.ts'
@@ -77,7 +77,7 @@ export class ExpandHost implements TaskHost {
     readonly context: EvaluationContext,
     readonly executeFn: ExecuteFn,
     readonly callStack: CallStack | null,
-    word: TSNodeLike,
+    word: TSNodeLike | null,
   ) {
     this.session = context.session
     this.program = word instanceof ProgramNode ? word.program : null
@@ -116,6 +116,10 @@ export class ExpandHost implements TaskHost {
     context.frame.cmdsubStatus = io.exitCode
     recordStatus(context.session, io.exitCode, true)
     return [stdout, stderr, io.exitCode]
+  }
+
+  subscript(text: string): Promise<string> {
+    return expandSubscript(text, this.context, this.executeFn, this.callStack)
   }
 
   async process(shell: Shell, node: ShellTreeNode): Promise<string> {
@@ -163,6 +167,22 @@ export async function expand(
   const task = session.vars.shell.expand(node, mode)
   const host = new ExpandHost(context, executeFn, callStack, word)
   return drive(task, host, context.frame.diagnostics)
+}
+
+/**
+ * Run an operation on the session's shell and answer what it asks. Mirrors
+ * Python's run_on_shell.
+ */
+export function runOnShell(
+  start: (shell: Shell) => ShellTask,
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null = null,
+): Promise<Item> {
+  const session = context.session
+  frame(session, callStack)
+  const host = new ExpandHost(context, executeFn, callStack, null)
+  return drive(start(session.vars.shell), host, context.frame.diagnostics)
 }
 
 /**
