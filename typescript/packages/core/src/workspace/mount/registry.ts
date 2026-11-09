@@ -41,7 +41,7 @@ import {
 import type { Observer } from '../../observe/observer.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { type Decisions, MountRootPolicy, Policies } from '../../policy/index.ts'
-import type { ProcessView } from '../../execution/process/view.ts'
+import type { SessionProcesses } from '../../execution/process/session.ts'
 import type { DiffComputer } from '../../rs/diff_types.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
@@ -123,7 +123,7 @@ export class MountRegistry {
   diff?: DiffComputer
   private readonly indexConfig: IndexConfig | undefined
   private readonly workspaceId: string | undefined
-  processView?: (session: SessionState) => ProcessView
+  sessionProcesses?: (session: SessionState) => SessionProcesses
   // Fetches the managed names a tree a mount serves reads, once the executor
   // has picked that mount; the workspace sets it.
   fillEnv?: (session: SessionState, names: ReadonlySet<string>) => Promise<void>

@@ -15,10 +15,52 @@
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { stopSignal } from '../../utils/abort.ts'
-import { ProcessHandle } from './handle.ts'
+import { newPauseGate, ProcessHandle } from './handle.ts'
 import type { Process } from './types.ts'
 import { LOCAL_MACHINE } from '../constants.ts'
 import { MachineId, ProcessId } from '../types.ts'
+
+describe('a program that stops or takes signals itself', () => {
+  const ignored = () => undefined
+  const running = () =>
+    new ProcessHandle(info(), () => new Promise<number>(ignored), ignored, ignored)
+
+  it('hears when it is held and let go', () => {
+    const handle = running()
+    const heard: boolean[] = []
+    const forget = handle.onHold((held) => heard.push(held))
+    expect(heard).toEqual([])
+    handle.pauses.set(7, newPauseGate())
+    handle.tellHeld()
+    handle.tellHeld()
+    expect(heard).toEqual([true])
+    handle.pauses.clear()
+    handle.tellHeld()
+    expect(heard).toEqual([true, false])
+    handle.pauses.set(7, newPauseGate())
+    handle.tellHeld()
+    forget()
+    expect(heard).toEqual([true, false, true, false])
+    const late: boolean[] = []
+    handle.onHold((held) => late.push(held))
+    expect(late).toEqual([true])
+  })
+
+  it('takes what is sent to a runner started for it, never KILL or STOP', () => {
+    const handle = running()
+    const taken: number[] = []
+    expect(handle.onSignal((signal) => taken.push(signal))).toBeTypeOf('function')
+    expect(handle.takeSignal(15)).toBe(false)
+    handle.oneCommand = true
+    const forget = handle.onSignal((signal) => taken.push(signal))
+    expect(handle.takeSignal(15)).toBe(true)
+    for (const signal of [9, 19]) expect(handle.takeSignal(signal)).toBe(false)
+    expect(handle.takeSignal(18)).toBe(true)
+    expect(taken).toEqual([15, 18])
+    forget()
+    expect(handle.takeSignal(15)).toBe(false)
+  })
+})
 
 function info(): Process {
   return {
@@ -362,4 +404,22 @@ describe('ProcessHandle', () => {
     waited.terminate()
     await expect(waited.reap(waiter.signal)).rejects.toMatchObject({ name: 'AbortError' })
   })
+})
+
+it('names TERM at a deadline and lets a stopped process go', async () => {
+  const handle = new ProcessHandle(
+    info(),
+    () => Promise.resolve(3),
+    () => undefined,
+    () => undefined,
+  )
+  const gate = newPauseGate()
+  handle.pauses.set(7, gate)
+  expect(handle.paused).toBe(true)
+  expect(handle.interrupted).toBeNull()
+  handle.expire()
+  await gate.promise
+  expect(handle.paused).toBe(false)
+  expect(handle.interrupted).toBe(15)
+  expect(handle.signal).toBeNull()
 })

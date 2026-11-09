@@ -24,9 +24,10 @@ export class PipeConsole extends JobConsole {
   constructor(
     private readonly pipeStderr = false,
     bufferBytes = CAPACITY,
+    gate: (() => Promise<void> | null) | null = null,
   ) {
     super()
-    this.pipe = new BytePipe(bufferBytes)
+    this.pipe = new BytePipe(bufferBytes, false, gate)
   }
 
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {

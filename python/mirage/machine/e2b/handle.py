@@ -25,6 +25,8 @@ from mirage.machine.constants import (
     PROCESS,
     decode_output,
     encode_output,
+    is_run,
+    run_tag,
     stop_signal,
     wrap_line,
 )
@@ -239,15 +241,16 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
             # to the caller's stop, which sends it that signal first.
             try:
                 if (
-                    PROCESS not in env
+                    not (PROCESS in env or is_run(argv))
                     or stop_signal(current_caller().process) is None
                 ):
                     await handle.kill()
             except Exception:
                 logger.warning("Failed to stop the E2B command", exc_info=True)
             # The kill stops only the encoding shell; the caller stops a cancel.
-            if PROCESS in env and not isinstance(exc, asyncio.CancelledError):
-                await self.stop(env[PROCESS], 15)
+            tag = run_tag(argv) if is_run(argv) else env.get(PROCESS)
+            if tag is not None and not isinstance(exc, asyncio.CancelledError):
+                await self.stop(tag, 15)
             raise
         finally:
             for task in (feeding, exiting):

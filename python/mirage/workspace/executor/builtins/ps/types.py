@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import tzinfo
 
@@ -21,8 +22,7 @@ class PsOptions:
     """What a ps line selects and prints.
 
     Args:
-        pids (frozenset[int]): ``-p`` selection, empty for none; a
-            number under ``FIRST_PID`` is a machine pid.
+        pids (frozenset[int]): ``-p`` selection, empty for none.
         all (bool): a letter that selects every process was given.
         columns (tuple[tuple[str, str], ...]): ``-o`` keys and headers.
         forest (bool): BSD ``f`` or ``--forest``, which draws each
@@ -46,6 +46,9 @@ class PsContext:
             and group.
         session_id (str): the calling session.
         shell_pid (int | None): the calling session's ``$$``.
+        running (int | None): the process running this ``ps``.
+        shown (Mapping[int, int]): each process's pid as the agent sees
+            it, by Mirage's own number for it.
     """
 
     now: float
@@ -53,3 +56,5 @@ class PsContext:
     group: str | None
     session_id: str
     shell_pid: int | None
+    running: int | None
+    shown: Mapping[int, int]

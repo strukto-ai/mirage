@@ -50,6 +50,20 @@ def get_text(node: TSNodeLike) -> str:
     return decode_text(node.text or b"")
 
 
+def ends_line(node: TSNodeLike) -> bool:
+    """Whether nothing but a separator follows ``node`` on its line,
+    so bash runs it last, as the shell.
+
+    Args:
+        node (TSNodeLike): the command.
+    """
+    root = node
+    while root.parent is not None:
+        root = root.parent
+    rest = (root.text or b"")[node.end_byte - root.start_byte :]
+    return not rest.strip(b" \t\r\n;")
+
+
 def same_line(root: TSNodeLike, before: TSNodeLike, after: TSNodeLike) -> bool:
     """Whether ``after`` stands on ``before``'s line within ``root``: no
     newline between them. The parse has joined continued lines and folded

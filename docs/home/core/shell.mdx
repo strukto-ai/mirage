@@ -24,7 +24,7 @@ Mirage's shell combines commands from [Core Tools](/home/core/tools) and [Data &
 | Branching and functions | `case`, `name() { ...; }`, `function`, and `return` |
 | Groups | `{ ...; }` shares the session; `( ... )` runs in an isolated session copy |
 | Process substitution | `<(command)` and `>(command)` as live `/dev/fd/N` pipes, streamed both ways |
-| Background work | `command &`, `jobs`, `wait`, `fg`, `kill`, `disown`, and `ps` |
+| Background work | `command &`, `jobs`, `wait`, `kill`, `disown`, and `ps` |
 | Timing | `time`, `time -p`, and `TIMEFORMAT`; CPU times are reported as zero |
 | Comments | `#` outside quotes |
 
@@ -78,19 +78,19 @@ outside Mirage: a sandbox program through a runtime on the same machine,
 or a host program on the same machine whose PID still matches.
 
 A program a runtime runs outside Mirage is a process of its own. `ps` shows
-the machine it runs on and its pid there, a host program's host PID or a
-[machine](/home/setup/machine/overview#processes-and-jobs)'s, where
-Mirage's own commands show `-`:
+its real pid and the machine it runs on, a host program's host PID or a
+[machine](/home/setup/machine/overview#processes-and-jobs)'s. Mirage's own
+commands show `mirage`:
 
 ```
-    PID MACHINE                            MPID CMD
-4194305 -                                     - ps
-4194306 -                                     - sleep 300
-4194307 host:my-laptop                    19443 python3 train.py
+    PID MACHINE                         CMD
+4194305 mirage                          ps
+4194306 mirage                          sleep 300
+  19443 host:my-laptop                  python3 train.py
 ```
 
-Mirage's pids start at 4194305. A smaller number given to `kill`, `wait` or
-`ps -p` is a machine pid.
+Mirage's pids start at 4194305, past any Linux pid, so `$!`, `kill`, `wait` and
+`ps -p` take either kind.
 
 ### Per-session mount modes
 
@@ -102,7 +102,7 @@ Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, 
 - `bg`, `complete`, `compgen`, `ulimit`, `coproc`, and `exec -a/-l` are not implemented.
 - A process substitution lives as long as the command naming it, which waits for its output consumers; `exec` onto one (`exec 3> >(command)`) fails with exit status `2`. Its `/dev/fd/N` paths are Mirage pipes, not host descriptors.
 - There is no interactive terminal or OS process job control. The supported job commands manage Mirage jobs: `cmd &`, `jobs`, `wait` and `kill`.
-- `kill` takes every Linux signal `kill -l` lists, by name or number, except `STOP`, which it refuses. A signal whose default is to be ignored or to pause a process (`CHLD`, `CONT`, `URG`, `WINCH`, `TSTP`, `TTIN`, `TTOU`) succeeds and changes nothing. A program a runtime started on a machine or on the host gets the signal as sent: one that handles it runs on, and the job ends when the program exits, with its status. `KILL` is sent only for `kill -9`, `timeout -k`, or when the workspace shuts down. Any other process stops, and `wait` reports 128 plus the signal, as in Bash. As in Bash, a background job ignores `INT` and `QUIT`. Unlike Bash, `kill` also stops the jobs a job started and theirs, even once the job between them has ended.
+- `kill` takes every Linux signal `kill -l` lists, by name or number. `STOP` pauses a job, which `ps` shows as `T`, and `CONT` lets it go on; a `TERM` sent meanwhile waits for the `CONT`. A Mirage command pauses at its next file operation, pipe write, sleep or loop turn, and in a browser `STOP` of one is refused. A Monty or Pyodide program pauses where it is, and a QuickJS or WASI program at its next file operation or output. Any other signal whose default is to be ignored or to pause a process (`CHLD`, `URG`, `WINCH`, `TSTP`, `TTIN`, `TTOU`) succeeds and changes nothing. A Pyodide program gets the signal as sent too, as does a program a runtime started on a machine or on the host: one that handles it runs on, and the job ends when the program exits, with its status. `KILL` is sent only for `kill -9`, `timeout -k`, or when the workspace shuts down. Any other process stops, and `wait` reports 128 plus the signal, as in Bash. As in Bash, a background job ignores `INT` and `QUIT`. Unlike Bash, `kill` also stops the jobs a job started and theirs, even once the job between them has ended.
 - Every line of a session runs as one shell process, `$$`, which leads the session's process group; its jobs, pipeline stages, subshells, command substitutions and nested shells are in it. A negative operand signals a whole group (`kill -TERM -- -$$`). A signal that stops `$$` ends the line with 128 plus the signal and leaves its jobs running. As in Bash, a shell ignores `QUIT`, which stops only the program it is running. A nested `bash -c` is a process of its own, with its own `$$`.
 - The shell's own errors start as a non-interactive Bash's do, `bash: line N: `, with `environment` in place of `bash` inside a function and the file's path inside a sourced file or a script. `$LINENO` is the running command's line and `$BASHPID` the process running it. When a signal ends a command, the shell prints Bash's report line after it, such as `bash: line 1:    12 Killed                  sleep 3`; for a background job, after the next program, subshell or pipeline it runs, or at `wait`. `TERM` prints `Terminated` for a command and nothing for a job, and `INT` and `PIPE` print nothing. A program a runtime runs in the foreground is not a process of its own, so no report line follows when a signal ends it; its status is still 128 plus the signal. A command substitution reports nothing.
 - A program a sandbox runs, or one the `local` runtime captures besides its own `python3`, writes its output and its stderr into a redirect's file as it prints them. So do most of Mirage's commands, such as `cat`, `grep`, `awk`, `sed`, `tee`, `sort` and `jq`, and the commands in a group, a loop or a function (`{ echo a; sleep 9; } > f`). A command that reads or changes that file meanwhile finds what was written before it, and `cat` and `grep` refuse to read the file their own output goes to, as GNU's do. The output follows the file through a rename the line makes, and the rest is lost once the line removes it or renames another file over it, as in Bash; a rename made from another session or through FUSE is not followed. What a stopped command wrote stays in the file, whether `kill`, `timeout` or a cancelled call stopped it. Others, such as `tar`, `gzip` and the `local` runtime's `python3`, write theirs when they end, as do a program a Daytona sandbox runs and a microsandbox program given piped input. A file on a RAM mount shows a streaming write within a tenth of a second; an object store such as S3 publishes it when the write ends.

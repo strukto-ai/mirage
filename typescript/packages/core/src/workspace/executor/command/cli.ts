@@ -22,7 +22,7 @@ import {
 import { missCondition, pathStat } from '../../mount/namespace/probe.ts'
 import { FileType, wordText, PathSpec, type Limit } from '../../../types.ts'
 import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
-import type { ProcessView } from '../../../execution/process/view.ts'
+import type { SessionProcesses } from '../../../execution/process/session.ts'
 import { COBRA_EXIT, cobraRefusal, leafMessage } from '../../../commands/cli/cobra.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
 import type { CLI, CLIHandler } from '../../../commands/cli/types.ts'
@@ -260,7 +260,7 @@ export interface CLIContext {
    */
   vfs?: Files
   session?: SessionView
-  processes?: ProcessView
+  processes?: SessionProcesses
   /** The line's placement, which a script leaf runs its program under. */
   routing?: RouteDecision<Runtime>
   /**

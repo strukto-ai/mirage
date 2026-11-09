@@ -374,7 +374,6 @@ class ShellBuiltin(StrEnum):
     HISTORY = "history"
     # -- job control
     WAIT = "wait"
-    FG = "fg"
     KILL = "kill"
     JOBS = "jobs"
     DISOWN = "disown"

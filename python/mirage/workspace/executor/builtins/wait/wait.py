@@ -16,7 +16,7 @@ import asyncio
 
 from mirage.context import get_current_evaluation
 from mirage.execution.job import JobHandle, JobState, JobTable
-from mirage.execution.process.constants import FIRST_PID
+from mirage.execution.job.constants import JUST_ENDED_SECONDS
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
@@ -27,10 +27,11 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.background import report_jobs
 from mirage.workspace.executor.builtins.constants import IDENTIFIER_RE
 from mirage.workspace.executor.builtins.jobspec import (
+    AMBIGUOUS_SPEC,
+    job_of_operand,
     job_result,
-    job_with_machine_pid,
-    process_view,
-    resolve_spec,
+    saved_on_machine,
+    scanning_while,
     session_of,
 )
 from mirage.workspace.executor.builtins.shared import (
@@ -101,9 +102,12 @@ async def handle_wait(
     its status, 127 when there is nothing to wait for; `-p VAR` stores
     the id of the job whose status is answered, and unsets VAR when
     none is (which is the bare form, since it reports no one job);
-    `-f` is accepted, since a mirage job cannot stop, only end.
+    `-f` is accepted, since waiting already lasts until a job ends;
+    `-m MACHINE` reads a pid as that machine's.
 
-    `-p` stores the managed PID, matching `$!` and `jobs -p`.
+    `-p` stores the PID `$!` and `jobs -p` show. While it waits it looks
+    at the machines every couple of seconds, so a program whose exec
+    stays open ends when it does.
     A spec naming no job is bash's own message and 127; a word that is
     neither is `not a pid or valid job spec` and 1.
 
@@ -117,6 +121,7 @@ async def handle_wait(
     sid = session_of(session)
     next_job = False
     var: str | None = None
+    machine: str | None = None
     specs: list[str] = []
     i = 1
     while i < len(parts):
@@ -135,20 +140,22 @@ async def handle_wait(
                 next_job = True
             elif ch == "f":
                 pass
-            elif ch == "p":
+            elif ch in ("p", "m"):
                 rest = word[j + 1 :]
-                if rest:
-                    var = rest
-                elif i + 1 < len(parts):
-                    i += 1
-                    var = parts[i]
-                else:
+                if not rest and i + 1 >= len(parts):
                     return job_result(
                         cmd_str,
-                        f"{shell_voice()}wait: -p: option requires an "
+                        f"{shell_voice()}wait: -{ch}: option requires an "
                         f"argument\n{builtin_usage('wait')}",
                         2,
                     )
+                if not rest:
+                    i += 1
+                    rest = parts[i]
+                if ch == "p":
+                    var = rest
+                else:
+                    machine = rest
                 break
             else:
                 return job_result(
@@ -178,23 +185,30 @@ async def handle_wait(
     picked: list[JobHandle] = []
     await job_table.sync(sid)
     visible = job_table.list_jobs(sid)
+    processes = job_table.processes
+    marks = job_table.job_marks(sid)
+    answered: int | None = None
+    answered_pid = 0
+    named: dict[int, int] = {}
     for spec in specs:
-        if spec.isdigit() and 0 < int(spec) < FIRST_PID:
-            job, ambiguous = await job_with_machine_pid(
-                process_view(job_table, session), visible, int(spec)
+        answered = None
+        job, refusal = await job_of_operand(
+            processes, visible, spec, marks, machine
+        )
+        if job is not None:
+            picked.append(job)
+            if spec.isdigit():
+                named[job.id] = int(spec)
+            continue
+        if spec.isdigit() and not refusal.endswith(AMBIGUOUS_SPEC):
+            answered_pid = int(spec)
+            answered, ambiguous = saved_on_machine(
+                job_table.saved_statuses(sid, answered_pid), machine
             )
             if ambiguous:
-                errors.append(
-                    f"{shell_voice()}wait: {spec}: ambiguous job spec"
-                )
-                continue
-            refusal = f"pid {spec} is not a child of this shell"
-        else:
-            job, refusal = resolve_spec(visible, spec)
-        if job is None:
+                refusal = f"{spec}: {AMBIGUOUS_SPEC}"
+        if answered is None:
             errors.append(f"{shell_voice()}wait: {refusal}")
-            continue
-        picked.append(job)
     err_text = ("\n".join(errors) + "\n") if errors else ""
     if next_job:
         candidates = picked if specs else visible
@@ -207,22 +221,36 @@ async def handle_wait(
                 IOResult(exit_code=code, stderr=encode_text(err_text) or None),
                 ExecutionNode(command=cmd_str, exit_code=code),
             )
-        job = await _wait_first(job_table, candidates)
+        job = await scanning_while(
+            processes, _wait_first(job_table, candidates)
+        )
         if var is not None and view is not None:
-            await view.set(var, str(job.pid))
+            await view.set(var, str(named.get(job.id, job.shown_pid)))
         told = _wait_reports(session, job_table)
         stdout, io, node = await _reaped(job_table, job, cmd_str)
         if err_text or told:
             io.stderr = encode_text(err_text) + told
         return stdout, io, node
     if not specs:
-        await job_table.wait_all(sid)
+        began = job_table.clock.now()
+        await scanning_while(processes, job_table.wait_all(sid))
+        keep = _left_listed(session, visible, began)
         told = _wait_reports(session, job_table)
-        await job_table.pop_completed(sid)
+        await job_table.pop_completed(sid, keep)
+        job_table.forget_statuses(sid)
         return (
             None,
             IOResult(stderr=told or None),
             ExecutionNode(command=cmd_str, exit_code=0),
+        )
+    if answered is not None and not picked:
+        code = answered
+        if var is not None and view is not None:
+            await view.set(var, str(answered_pid))
+        return (
+            None,
+            IOResult(exit_code=code, stderr=encode_text(err_text) or None),
+            ExecutionNode(command=cmd_str, exit_code=code),
         )
     if not picked:
         # Every spec was refused: bash answers 127 for a job it cannot
@@ -235,7 +263,10 @@ async def handle_wait(
             else NOT_FOUND_STATUS
         )
         return job_result(cmd_str, err_text, code)
-    finished = [await job_table.wait(job.id, sid) for job in picked]
+    finished = [
+        await scanning_while(processes, job_table.wait(job.id, sid))
+        for job in picked
+    ]
     told = _wait_reports(session, job_table)
     last_code = 0
     last_job: JobHandle | None = None
@@ -243,11 +274,18 @@ async def handle_wait(
         _, io, _ = await _reaped(job_table, job, cmd_str)
         last_code = io.exit_code
         last_job = job
+    if answered is not None:
+        last_code = answered
     # `wait id1 id2` answers with the last id's status, so `-p` names
     # that same job however many were waited for. Only the no-operand
     # form leaves the variable unset, since it reports no one job.
     if var is not None and view is not None and last_job is not None:
-        await view.set(var, str(last_job.pid))
+        pid = (
+            answered_pid
+            if answered is not None
+            else named.get(last_job.id, last_job.shown_pid)
+        )
+        await view.set(var, str(pid))
     return (
         None,
         IOResult(
@@ -255,6 +293,32 @@ async def handle_wait(
         ),
         ExecutionNode(command=cmd_str, exit_code=last_code),
     )
+
+
+def _left_listed(
+    session: SessionState | None, jobs: list[JobHandle], began: float
+) -> int | None:
+    """The job a bare ``wait`` leaves in the list for one ``jobs``: the
+    one ``$!`` names, if it ended while another job still ran, or before
+    the ``wait`` unless it is the only job and only just ended. A job
+    the ``wait`` ended on goes.
+
+    Args:
+        session (SessionState | None): the shell session, if any.
+        jobs (list[JobHandle]): the jobs as ``wait`` began.
+        began (float): when ``wait`` began.
+    """
+    last = session.last_bg_job_id if session is not None else None
+    job = next((j for j in jobs if j.last_pid == last), None)
+    if job is None or job.ended_at is None:
+        return None
+    if any(other.ending > job.ending for other in jobs):
+        return job.id
+    if job.ended_at > began:
+        return None
+    if len(jobs) == 1 and began - job.ended_at < JUST_ENDED_SECONDS:
+        return None
+    return job.id
 
 
 def _wait_reports(session: SessionState | None, job_table: JobTable) -> bytes:

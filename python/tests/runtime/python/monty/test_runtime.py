@@ -26,6 +26,39 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
+@pytest.mark.asyncio
+async def test_a_stop_holds_a_busy_program():
+    ws = Workspace(
+        {"/d": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=["monty", "workspace"],
+    )
+    program = (
+        "import time\n"
+        "start = time.monotonic()\n"
+        "last = start\n"
+        "worst = 0.0\n"
+        "while last - start < 3.0:\n"
+        "    now = time.monotonic()\n"
+        "    if now - last > worst:\n"
+        "        worst = now - last\n"
+        "    last = now\n"
+        "print(worst > 1.0)\n"
+    )
+    try:
+        await ws.shell(f"cat > /d/gap <<'EOF'\n{program}EOF")
+        await ws.shell("python3 /d/gap > /d/out & p=$!")
+        await asyncio.sleep(0.5)
+        said = await ws.shell("kill -STOP $p; ps -o stat= -p $p")
+        assert said.stdout.decode().strip() == "T"
+        await asyncio.sleep(1.5)
+        await ws.shell("kill -CONT $p")
+        said = await ws.shell("wait $p; echo $?; cat /d/out")
+        assert said.stdout == b"0\nTrue\n"
+    finally:
+        await ws.close()
+
+
 async def _run(rt: MontyRuntime, program: Program, **fields) -> RunResult:
     return await rt.interpret(await rt.engine(), program, Context(**fields))
 

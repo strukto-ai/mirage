@@ -39,4 +39,6 @@ export interface PsContext {
   group: string | null
   sessionId: string
   shellPid: number | null
+  running: number | null
+  shown: ReadonlyMap<number, number>
 }

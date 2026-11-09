@@ -19,7 +19,7 @@ from typing import Any
 from mirage.context.session_context import current_caller
 from mirage.io.stream import feed
 from mirage.io.types import ByteSource
-from mirage.machine.constants import PROCESS, stop_signal, wrap_line
+from mirage.machine.constants import is_run, stop_signal, wrap_line
 from mirage.machine.errors import ConnectionLostError
 from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
@@ -101,7 +101,7 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
             stdin,
             output,
             errors,
-            tagged=PROCESS in env,
+            tagged=is_run(argv),
         )
 
     async def _ssh(
@@ -127,8 +127,8 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
             stdin (ByteSource | None): the input, or None for none.
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
-            tagged (bool): whether the command carries its run's
-                ``PROCESS``, so a cancelled run's stop ends it.
+            tagged (bool): whether the command is a program's run, so a
+                cancelled run's stop ends it.
         """
         process = await self._conn.create_process(command, encoding=None)
         exited = asyncio.Event()
@@ -167,8 +167,8 @@ class SSHMachine(MachineHandle, PipeTransportMixin):
                 wait_exit(),
             )
         except asyncio.CancelledError:
-            # A tagged command a kill stopped with a gentler signal is left
-            # to the stop, which sends it that signal first.
+            # A run a kill stopped with a gentler signal is left to the
+            # stop, which sends it that signal first.
             if not tagged or stop_signal(current_caller().process) is None:
                 process.kill()
             raise

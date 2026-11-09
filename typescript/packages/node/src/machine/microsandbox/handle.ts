@@ -19,12 +19,12 @@ import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { MICROSANDBOX_CONFIG_FIELDS, type MicrosandboxConfig } from './config.ts'
-import { notRunningHint, PROCESS } from '@struktoai/mirage-core/machine/constants'
+import { EXEC_PRELUDE, notRunningHint } from '@struktoai/mirage-core/machine/constants'
 import {
   RUNNING_STATE,
   MICROSANDBOX_HINT,
   INSPECT_TIMEOUT_SECONDS,
-  TAGGED_PRELUDE,
+  ownSession,
 } from './constants.ts'
 import { execArgs, openProgramPipe, reportedState } from '../program.ts'
 import { ProgramMachine } from '../transport.ts'
@@ -102,21 +102,20 @@ export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
     // Piped stdin skips --stream: msb fails more runs that close it early.
     const [words, tail] = this.execWords()
     const head = stdin === null ? [...words, '--stream'] : words
-    const tag = env[PROCESS]
-    let args = execArgs(head, tail, env, cwd, argv)
-    if (tag !== undefined) {
-      const rest = Object.fromEntries(Object.entries(env).filter(([key]) => key !== PROCESS))
-      const command = [`${PROCESS}=${tag}`, ...argv]
-      args = execArgs(head, tail, rest, null, [
+    return this.execProgram(
+      execArgs(head, tail, env, null, [
         '/bin/sh',
         '-c',
-        TAGGED_PRELUDE,
+        EXEC_PRELUDE,
         'sh',
         cwd,
-        ...command,
-      ])
-    }
-    return this.execProgram(args, stdin, output, signal, errors)
+        ...ownSession(argv),
+      ]),
+      stdin,
+      output,
+      signal,
+      errors,
+    )
   }
 
   override async openPipe(command: string): Promise<MachinePipe> {

@@ -27,6 +27,7 @@ import type { WrapperOptions } from './types.ts'
 // still lookup to the shell layer so the error names a capability gap.
 export const UNSUPPORTED_BUILTINS: ReadonlySet<string> = new Set([
   'bg',
+  'fg',
   'complete',
   'compgen',
   'ulimit',

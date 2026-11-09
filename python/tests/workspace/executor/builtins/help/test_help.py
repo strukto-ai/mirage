@@ -68,7 +68,7 @@ def test_the_listing_heads_with_the_version_and_lays_out_two_columns():
     assert len(rows) == (len(TOPICS) + 1) // 2
     assert rows[0] == (
         " (( expression ))".ljust(40)
-        + " kill [-s sigspec | -n signum | -sigs>"
+        + " jobs [-lnprs] [jobspec ...] or jobs >"
     )
     assert max(len(row) for row in rows) == 78
 
@@ -87,7 +87,7 @@ def test_a_synopsis_too_long_for_its_column_is_cut_with_a_mark():
 def test_columns_sets_the_width_as_a_leading_integer(columns, width):
     out = _run(f"COLUMNS='{columns}' help")[0][0]
     first = out.split("\n")[7]
-    assert first.startswith(" (( expression ))".ljust(width) + " kill ")
+    assert first.startswith(" (( expression ))".ljust(width) + " jobs ")
 
 
 def test_a_command_the_profile_refuses_is_starred():
@@ -241,7 +241,8 @@ def test_help_past_the_first_word_is_an_operand():
         n
         for n in BUILTIN_TOPICS
         if n
-        not in ("break", "continue", "exit", "return", "shift", "fg", "eval")
+        not in ("bg", "break", "continue", "exit", "return", "shift", "fg")
+        and n != "eval"
         and n not in ("let", "local", "source", ".", "getopts", "help")
         and n != "kill"
     ),

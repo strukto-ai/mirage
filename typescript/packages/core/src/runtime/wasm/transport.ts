@@ -82,6 +82,7 @@ export function requestSync<T extends object>(
   post: (message: T & BridgeCall) => void,
   request: T,
   interrupt?: Int32Array,
+  whileWaiting?: () => void,
 ): unknown {
   const buffer = new SharedArrayBuffer(HEADER_BYTES + CAPACITY)
   const cells = new Int32Array(buffer, 0, 4)
@@ -98,6 +99,13 @@ export function requestSync<T extends object>(
         Atomics.store(cells, 0, -1)
         Atomics.notify(cells, 0)
         throw new Error("the guest worker's file request was interrupted")
+      }
+      try {
+        whileWaiting?.()
+      } catch (error) {
+        Atomics.store(cells, 0, -1)
+        Atomics.notify(cells, 0)
+        throw error
       }
       Atomics.wait(cells, 0, 0, 100)
     }

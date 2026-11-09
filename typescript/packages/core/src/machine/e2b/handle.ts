@@ -24,7 +24,15 @@ import type { OutputFn, PipeWriter, RunResult } from '../../runtime/types.ts'
 import type { ConfigFields } from '../../runtime/config.ts'
 import { concat } from '../../utils/bytes.ts'
 import { requireId } from '../config.ts'
-import { decodeOutput, encodeOutput, PROCESS, stopSignal, wrapLine } from '../constants.ts'
+import {
+  decodeOutput,
+  encodeOutput,
+  isRun,
+  PROCESS,
+  runTag,
+  stopSignal,
+  wrapLine,
+} from '../constants.ts'
 import { CLOSED_INPUT, PTY_MARK, PTY_RAW } from './constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_FIELDS, type E2BConfig } from './config.ts'
@@ -229,13 +237,14 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
         try {
           // A tagged command a kill stopped with a gentler signal is left
           // to the caller's stop, which sends it that signal first.
-          if (env[PROCESS] === undefined || stopSignal(runner) === null) await handle.kill()
+          if ((env[PROCESS] === undefined && !isRun(argv)) || stopSignal(runner) === null)
+            await handle.kill()
         } catch (cleanupError) {
           console.warn('Failed to stop the E2B command', cleanupError)
         }
         if (signal?.aborted) throw new DOMException('execute aborted', 'AbortError')
         // The kill stops only the encoding shell; the caller stops an abort.
-        const tag = env[PROCESS]
+        const tag = isRun(argv) ? runTag(argv) : env[PROCESS]
         if (tag !== undefined) await this.stop(tag, 15)
         throw error
       }

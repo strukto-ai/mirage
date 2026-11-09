@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.machine.constants import is_run
+
+RUN_PROGRAM_AT = 7
+
 MICROSANDBOX_HINT = (
     "the microsandbox machine needs `msb` on PATH "
     "(https://microsandbox.dev); start the sandbox before connecting"
@@ -20,14 +24,29 @@ MICROSANDBOX_HINT = (
 RUNNING_STATE = "Running"
 INSPECT_TIMEOUT_SECONDS = 10
 
-# msb reports 255 for a program a signal ended, so a run's program is a
-# child of this prelude rather than exec'd by it: the prelude carries no
-# ``PROCESS`` tag, so a signal by tag reaches the program, and it exits
-# with the program's status, 128 plus the signal for one a signal ended,
-# which msb reports as given. ``$1`` is the working directory (126 when
-# the box lacks it), ``$2`` the tag's assignment, which the prelude
-# exports for the command alone (a builtin, so a PATH without the
-# system tools still runs it), then the command.
-TAGGED_PRELUDE = (
-    'CDPATH= cd -- "$1" || exit 126; export "$2"; shift 2; "$@"; exit $?'
+# msb ends the session of an exec whose client goes, and a run's exec is let
+# go once its program has ended, so a program leads a session of its own:
+# what it left running stays, as on any machine. The run is not a group
+# leader there, so setsid keeps its pid.
+OWN_SESSION = (
+    'command -v setsid >/dev/null 2>&1 && exec setsid "$@"; exec "$@"'
 )
+
+
+def own_session(argv: tuple[str, ...]) -> tuple[str, ...]:
+    """Start a run's program in a session of its own (``OWN_SESSION``).
+    Mirage's own lines stay as they are.
+
+    Args:
+        argv (tuple[str, ...]): what the exec runs.
+    """
+    if not is_run(argv):
+        return argv
+    return (
+        *argv[:RUN_PROGRAM_AT],
+        "/bin/sh",
+        "-c",
+        OWN_SESSION,
+        "sh",
+        *argv[RUN_PROGRAM_AT:],
+    )

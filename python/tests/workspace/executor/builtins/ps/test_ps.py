@@ -28,15 +28,15 @@ from tests.fixtures.job_runners import (
     submit_settled,
 )
 
-HEADER = f"{'PID':>7} {'MACHINE':<31} {'MPID':>7} CMD"
+HEADER = f"{'PID':>7} {'MACHINE':<31} CMD"
 
 
 def _workspace() -> Workspace:
     return Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
 
 
-def _row(pid: int, command: str, machine: str = "-", mpid: str = "-") -> str:
-    return f"{pid:>7} {machine:<31} {mpid:>7} {command}"
+def _row(pid: int, command: str, machine: str = "mirage") -> str:
+    return f"{pid:>7} {machine:<31} {command}"
 
 
 @pytest.mark.asyncio
@@ -70,7 +70,7 @@ async def test_ps_lists_the_stages_of_a_pipeline_under_a_redirect(line):
     try:
         await ws.shell("echo x > /m/f")
         out = (await ws.shell(line)).stdout
-        commands = {row[48:] for row in out.splitlines()[1:]}
+        commands = {row[40:] for row in out.splitlines()[1:]}
         assert {b"ps", b"cat"} <= commands
     finally:
         await ws.close()
@@ -266,10 +266,29 @@ async def test_ps_shows_where_a_program_runs(host):
         own = (await ws.shell("ps", session_id="s")).stdout.decode()
         lines = own.splitlines()
         assert lines[0] == HEADER
-        assert (
-            _row(job.pid, "sleep 30", machine, "4242" if host else "-")
-            in lines
-        )
+        assert _row(4242 if host else job.pid, "sleep 30", machine) in lines
         await ws.shell("kill %1", session_id="s")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_ps_is_a_program_of_its_own_on_a_longer_line():
+    ws = _workspace()
+    try:
+        last = await ws.shell("echo a; ps -o pid=,cmd=")
+        shell = (await ws.shell("echo $$")).stdout.decode().strip()
+        assert last.stdout.decode().splitlines()[1].split(None, 1) == [
+            shell,
+            "ps -o pid=,cmd=",
+        ]
+        first = await ws.shell("ps -o ppid=,stat=,cmd=; echo b")
+        rows = [
+            row.split(None, 2) for row in first.stdout.decode().splitlines()
+        ]
+        assert rows[:2] == [
+            ["0", "Ss", "ps -o ppid=,stat=,cmd=; echo b"],
+            [shell, "R", "ps -o ppid=,stat=,cmd="],
+        ]
     finally:
         await ws.close()

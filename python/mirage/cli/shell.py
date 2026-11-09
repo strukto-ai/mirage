@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
+import stat
 import sys
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -27,6 +29,20 @@ from mirage.cli.vfs import WORKSPACE, answer, post
 app = typer.Typer(
     invoke_without_command=True, help="Run a shell line in a workspace."
 )
+
+
+def _has_input(fd: int) -> bool:
+    """Whether a descriptor that is no terminal may carry input for the
+    line: an empty file or the null device has none to send, and a line
+    without input can have what a machine's program prints streamed.
+
+    Args:
+        fd (int): the descriptor.
+    """
+    info = os.fstat(fd)
+    if stat.S_ISREG(info.st_mode):
+        return info.st_size > 0
+    return not os.path.samestat(info, os.stat(os.devnull))
 
 
 @app.callback(invoke_without_command=True)
@@ -87,7 +103,7 @@ def shell_cmd(
         emit(said, human=None if json_output else _format_explanation)
         return
     path = f"/v1/workspaces/{quote(workspace_id, safe='')}/shell"
-    piped = not sys.stdin.isatty()
+    piped = not sys.stdin.isatty() and _has_input(sys.stdin.fileno())
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         # Imported here, so other commands load no stream code.

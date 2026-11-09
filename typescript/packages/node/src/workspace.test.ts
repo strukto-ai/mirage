@@ -281,7 +281,7 @@ describe('a host scan', () => {
       "s.Popen(['sleep', '30'], stdin=s.DEVNULL, stdout=s.DEVNULL, stderr=s.DEVNULL)"
     try {
       expect((await ws.shell(`python3 -c "${spawn}"`)).exitCode).toBe(0)
-      const said = await ws.shell('ps -o machine=,mpid=,args=')
+      const said = await ws.shell('ps -o machine=,pid=,args=')
       const held = said.stdoutText
         .split('\n')
         .map((line) => line.trim().split(/\s+/))

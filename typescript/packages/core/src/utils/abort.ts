@@ -57,6 +57,26 @@ export function mergeSignals(
 // trap.
 const MAX_TIMEOUT_MS = 2_147_483_647
 
+/** Whether `work` settled within `seconds`. Leaves no timer behind. */
+export async function settledWithin(work: Promise<unknown>, seconds: number): Promise<boolean> {
+  const timer = new AbortController()
+  const expired = sleep(seconds * 1000, timer.signal).then(
+    () => false,
+    () => false,
+  )
+  try {
+    return await Promise.race([
+      work.then(
+        () => true,
+        () => true,
+      ),
+      expired,
+    ])
+  } finally {
+    timer.abort()
+  }
+}
+
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted === true) {

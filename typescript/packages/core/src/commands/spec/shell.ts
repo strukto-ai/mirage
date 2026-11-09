@@ -248,6 +248,12 @@ export const SHELL_SPECS = Object.freeze(
         }),
       ],
     }),
+    bg: new CommandSpec({
+      description:
+        'Resume jobs in the background.\n\n' +
+        'Lets each JOB_SPEC, or the current job, carry on behind the shell.',
+      epilog: 'Failure, in a shell without job control.',
+    }),
     break: new CommandSpec({
       description:
         'Leave a for, while, until or select loop.\n\n' +
@@ -391,7 +397,7 @@ export const SHELL_SPECS = Object.freeze(
       description:
         'Bring a job to the foreground.\n\n' +
         'Makes JOB_SPEC, or the current job, the foreground job and waits for it.',
-      epilog: 'The status of the job, or failure when JOB_SPEC is invalid.',
+      epilog: 'Failure, in a shell without job control.',
     }),
     for: new CommandSpec({
       description:

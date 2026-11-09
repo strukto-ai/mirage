@@ -72,7 +72,7 @@ import type { Process, ProcessState, SpawnRequest } from '../../execution/proces
 import { LINE_STOP_SIGNAL, LOCAL_MACHINE } from '../../execution/constants.ts'
 import type { ProcessId } from '../../execution/types.ts'
 import { type JobId, type LineId, type MachineId, type MachinePid } from '../../execution/types.ts'
-import type { ProcessView } from '../../execution/process/view.ts'
+import type { SessionProcesses } from '../../execution/process/session.ts'
 import { DiffPool } from '../../rs/diff_pool.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import {
@@ -406,7 +406,7 @@ export class Workspace {
       this.ids,
     )
     this.registry.diff = this.diffPool
-    this.registry.processView = (session) => this.processView(session)
+    this.registry.sessionProcesses = (session) => this.sessionProcesses(session)
     this.registry.fillEnv = (session, names) => this.fillTreeEnv(session, names)
     const stores = resolveControlStores(this.wsId, options)
     this.jobTable = new JobTable(
@@ -956,7 +956,7 @@ export class Workspace {
             { clock: this.clock },
           ),
           session: sessionView(session),
-          processes: this.processView(session),
+          processes: this.sessionProcesses(session),
           cwd: PathSpec.fromStrPath(session.cwd),
           env: envSnapshot(session),
         },
@@ -979,14 +979,14 @@ export class Workspace {
     )
   }
 
-  private processView(session: SessionState): ProcessView {
+  private sessionProcesses(session: SessionState): SessionProcesses {
     const parentPid = session.processId
-    const view = this.processTable.view(session.sessionId, () => session.processes)
+    const processes = this.processTable.forSession(session.sessionId, () => session.processes)
     return Object.freeze({
-      ...view,
+      ...processes,
       depth: session.processDepth,
       spawn: (request: SpawnRequest) => {
-        view.checkSpawn()
+        processes.checkSpawn()
         const child = session.fork()
         child.processId = parentPid
 
@@ -1030,7 +1030,7 @@ export class Workspace {
       abort = new AbortController()
     const env = request.env === undefined ? undefined : { ...request.env }
     const owner = this.sessionManager.get(session.sessionId)
-    const admission = this.processTable.view(session.sessionId, () => owner.processes)
+    const admission = this.processTable.forSession(session.sessionId, () => owner.processes)
     const process = this.processTable.start({
       sessionId: session.sessionId,
       command: shellJoin(argv),

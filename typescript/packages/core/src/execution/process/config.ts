@@ -4,7 +4,7 @@ import { MAX_PROCESSES } from './constants.ts'
 /**
  * How far past its own session a profile reaches into processes. A session
  * always sees and stops its own processes. `list` widens what `ps` and a
- * handler's process view see; `kill` widens what they may stop, and never
+ * handler's `ctx.processes` see; `kill` widens what they may stop, and never
  * past `list`. `max` caps the live processes the session holds, its
  * running line included, as `ulimit -u` counts the shell; `MAX_PROCESSES`
  * unless stated, null for no cap. The workspace states one for every

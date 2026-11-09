@@ -725,7 +725,7 @@ const CASES: [string, string, string, string, number][] = [
   [
     'jobs_r_running_only',
     'sleep 5 & echo hi & sleep 0.3; jobs -r',
-    'hi\n[1] running sleep 5\n',
+    'hi\n[1]-  Running                 sleep 5 &\n',
     '',
     0,
   ],
@@ -738,7 +738,7 @@ const CASES: [string, string, string, string, number][] = [
   ],
   [
     'jobs_l_pid_column',
-    'sleep 5 & p=$!; [ "$(jobs -l)" = "[1] $p running sleep 5" ] && echo row',
+    'sleep 5 & p=$!; [ "$(jobs -l)" = "[1]+ $p Running                 sleep 5 &" ] && echo row',
     'row\n',
     '',
     0,
@@ -747,14 +747,14 @@ const CASES: [string, string, string, string, number][] = [
   [
     'jobs_n_changed_then_none',
     'sleep 5 & echo hi & sleep 0.3; jobs -n; echo ---; jobs -n',
-    'hi\n[2] completed echo hi\n---\n',
+    'hi\n[1]-  Running                 sleep 5 &\n[2]+  Done                    echo hi\n---\n',
     '',
     0,
   ],
   [
     'jobs_spec_filters',
     'sleep 5 & sleep 5 & jobs %2; jobs 1',
-    '[2] running sleep 5\n[1] running sleep 5\n',
+    '[2]+  Running                 sleep 5 &\n[1]-  Running                 sleep 5 &\n',
     '',
     0,
   ],

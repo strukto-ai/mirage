@@ -25,6 +25,12 @@ export function getText(node: TSNodeLike): string {
   return node.text
 }
 
+/** Whether nothing but a separator follows `node` on its line, so bash runs it last, as the shell. */
+export function endsLine(node: TSNodeLike): boolean {
+  const root = treeRoot(node)
+  return /^[\s;]*$/.test(root.text.slice((node.endIndex ?? 0) - (root.startIndex ?? 0)))
+}
+
 /** The root of the tree `node` belongs to. */
 export function treeRoot(node: TSNodeLike): TSNodeLike {
   let root = node

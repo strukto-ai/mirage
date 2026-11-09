@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RUN_START_WAIT_SECONDS } from '../../machine/constants.ts'
 import { shellVoice } from '../../shell/voice.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import { type Caller, currentCaller, runWithCaller } from '../../context/session_context.ts'
@@ -42,7 +43,7 @@ import {
 } from '../../shell/constants.ts'
 import { signalReport, signalReported } from '../../shell/signals.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
-import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
+import { getPipelineStages, getRedirects, isBackgrounded } from '../../shell/helpers.ts'
 import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../execution/job/constants.ts'
 import type { JobHandle, JobTable } from '../../execution/job/index.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
@@ -221,25 +222,48 @@ function jobStreams(node: TSNodeLike, session: SessionState): Set<Channel | Owne
  * the job, so neither is one. Mirrors Python's `_one_program`.
  */
 export function oneProgram(left: TSNodeLike, session: SessionState): boolean {
-  if (!simpleCommand(left)) return false
+  return programWord(left, session) !== null
+}
+
+/** The word naming the program a job is, null when it is not one (`oneProgram`). */
+export function programWord(left: TSNodeLike, session: SessionState): string | null {
+  if (!simpleCommand(left)) return null
   const invocations = commandInvocations(left)
   const first = invocations[0]
-  if (invocations.length !== 1 || first === undefined) return false
+  if (invocations.length !== 1 || first === undefined) return null
   let words = [first[0], ...first[1]]
   while (words[0] === 'exec' || words[0] === 'command') {
     const wrapper = words[0]
     words = words.slice(1)
     while (words[0]?.startsWith('-') === true) {
-      if (wrapper === 'command' && /[vV]/.test(words[0])) return false
+      if (wrapper === 'command' && /[vV]/.test(words[0])) return null
       words = words.slice(words[0] === '-a' ? 2 : 1)
     }
   }
   const head = words[0] ?? null
+  if (
+    head === null ||
+    head.includes('\\') ||
+    (SHELL_NAMES.has(head) && !CAPTURABLE_BUILTINS.has(head)) ||
+    Object.hasOwn(session.functions, head)
+  )
+    return null
+  return head
+}
+
+/**
+ * Whether a job is one program a runtime past the workspace runs, which has
+ * a pid of its own there. Mirrors Python's `_on_a_machine`.
+ */
+function onAMachine(left: TSNodeLike, context: EvaluationContext): boolean {
+  const head = programWord(left, context.session)
+  const routing = context.frame.routing
+  if (head === null || routing === undefined) return false
+  const runtime = Object.hasOwn(routing.bindings, head) ? routing.bindings[head] : routing.fallback
   return (
-    head !== null &&
-    !head.includes('\\') &&
-    (!SHELL_NAMES.has(head) || CAPTURABLE_BUILTINS.has(head)) &&
-    !Object.hasOwn(session.functions, head)
+    runtime !== null &&
+    runtime !== undefined &&
+    (runtime as { reach?: string }).reach !== 'workspace'
   )
 }
 
@@ -350,7 +374,11 @@ export function reportJobs(context: EvaluationContext, jobTable: JobTable | null
     }
     const ended = job.signal ?? process.endedBy
     if (ended === null || ended < 1 || job.exitCode !== 128 + ended) continue
-    const report = signalReport(shellVoice(), [[job.pid, job.exitCode, ended, job.command]], false)
+    const report = signalReport(
+      shellVoice(),
+      [[job.shownPid, job.exitCode, ended, job.command]],
+      false,
+    )
     if (report !== '') {
       job.reported = true
       told.push(report)
@@ -447,6 +475,7 @@ export async function handleBackground(
   // builtin or a function its shell runs (`f &`) ends with that program on
   // INT, as bash's shell does of an INT its child died of.
   const command = left.type === NT.REDIRECTED_STATEMENT ? getRedirects(left)[0] : left
+  const piped = command !== null && command.type === NT.PIPELINE
   const oneCommand = command !== null && command.type === NT.COMMAND
   const ends = oneCommand && !forks(command, session)
   const inPlace = (oneCommand && !ends) || (command !== null && command.type === NT.SUBSHELL)
@@ -506,6 +535,7 @@ export async function handleBackground(
   const cmdStrInner = left.text
   const runBg = async (job: JobHandle): Promise<[IOResult, ExecutionNode]> => {
     childEvaluation.frame.shell = inPlace ? null : job.process
+    if (job.process !== null) job.process.pipeline = piped
     // What the job writes stays in its console and goes where its shell
     // writes as it is written: the terminal, or the substitution or pipe
     // it was started in.
@@ -591,7 +621,9 @@ export async function handleBackground(
       const seconds = childEvaluation.frame.lineTimeout
       const limit = seconds !== null && seconds > 0 ? seconds : null
       const expire = (): void => {
-        if (limit !== null) expiry.abort(new CommandTimeoutError(LINE_NAME, limit))
+        if (limit === null) return
+        job.process?.expire()
+        expiry.abort(new CommandTimeoutError(LINE_NAME, limit))
       }
       const disarm = limit === null ? undefined : atDeadline(limit, expire)
       let result: [IOResult, ExecutionNode]
@@ -705,7 +737,18 @@ export async function handleBackground(
     throw err
   }
   bgSession.processId = job.process?.record.id.pid ?? null
-  session.lastBgJobId = job.pid
+  // `$!` is the program's own pid, once it has started and has one, and a
+  // pipeline's the last stage's.
+  if (job.process !== null && (piped || onAMachine(left, context)))
+    await job.process.placed(RUN_START_WAIT_SECONDS)
+  const lastStage = job.process?.stages.at(-1)
+  const lastCommand =
+    lastStage === undefined || command === null
+      ? undefined
+      : getPipelineStages(command).commands.at(-1)
+  if (lastStage !== undefined && lastCommand !== undefined && onAMachine(lastCommand, context))
+    await lastStage.placed(RUN_START_WAIT_SECONDS)
+  session.lastBgJobId = job.lastPid
   if (session.jobWaits?.reaches(output, jobStreams(left, session)) === true)
     session.jobWaits.add(job)
 

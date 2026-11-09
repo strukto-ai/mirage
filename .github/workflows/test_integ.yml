@@ -2361,6 +2361,111 @@ jobs:
           docker compose ps -a || true
           docker compose logs --no-color --tail 60 || true
 
+  # The sandbox suites run on microsandbox too: its guests are libkrun
+  # microVMs, so this runner needs only /dev/kvm.
+  integ-microsandbox:
+    needs: [changes, typescript-build]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MSB_VERSION: v0.7.14
+      INTEG_RUNTIME_STRICT: "1"
+      # The shared sandbox cases, run through the microsandbox runtime only.
+      INTEG_RUNTIMES: microsandbox
+      MIRAGE_INTEG_MICROSANDBOX_SANDBOX: mirage-integ
+      MIRAGE_INTEG_BOX_MOUNTS: "1"
+      PYTHONFAULTHANDLER: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Open /dev/kvm to the runner user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install msb
+        run: |
+          mkdir -p "$HOME/.microsandbox/bin" "$HOME/.microsandbox/lib" "$RUNNER_TEMP/msb"
+          cd "$RUNNER_TEMP/msb"
+          curl -fsSL "https://github.com/superradcompany/microsandbox/releases/download/$MSB_VERSION/microsandbox-linux-x86_64.tar.gz" | tar -xz
+          install -m 755 msb "$HOME/.microsandbox/bin/msb"
+          install -m 644 libkrunfw.so.* "$HOME/.microsandbox/lib/"
+          ln -sf "$(basename libkrunfw.so.*)" "$HOME/.microsandbox/lib/libkrunfw.so.5"
+          ln -sf libkrunfw.so.5 "$HOME/.microsandbox/lib/libkrunfw.so"
+          echo "$HOME/.microsandbox/bin" >> "$GITHUB_PATH"
+          "$HOME/.microsandbox/bin/msb" --version
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: ./.github/actions/setup-uv
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras
+
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: '24'
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
+
+      - name: Download TypeScript build outputs
+        uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          name: integ-typescript-dist
+          path: typescript/packages
+
+      - name: Create a guest
+        timeout-minutes: 10
+        # sshfs, so mount_type can serve the workspace into the guest;
+        # /boxdata is a mount of its own, for `both`.
+        run: |
+          msb create python:3.12-slim-bookworm --name "$MIRAGE_INTEG_MICROSANDBOX_SANDBOX" --memory 1G
+          msb exec "$MIRAGE_INTEG_MICROSANDBOX_SANDBOX" --quiet -- sh -eu -c '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs procps >/dev/null
+            mkdir -p /boxdata
+            mount -t tmpfs tmpfs /boxdata
+            echo box > /boxdata/own.txt
+          ' </dev/null
+
+      - name: Run the sandbox suites on microsandbox (python)
+        run: ./python/.venv/bin/python integ/runtime/run.py sandbox
+
+      - name: Run the sandbox suites on microsandbox (typescript)
+        if: ${{ !cancelled() }}
+        working-directory: integ
+        run: pnpm exec tsx runtime/run.ts sandbox
+
+      - name: Run the sandbox suites on microsandbox through the CLI and both daemons
+        if: ${{ !cancelled() }}
+        run: |
+          bash integ/runtime/cli.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js" \
+            sandbox
+
+      - name: microsandbox logs
+        if: ${{ failure() }}
+        run: |
+          msb list || true
+          msb logs "$MIRAGE_INTEG_MICROSANDBOX_SANDBOX" || true
+
   integ-observability:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.observability == 'true') }}
@@ -2763,7 +2868,7 @@ jobs:
     name: integ-gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [changes, typescript-build, integ-edge, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-tidb-filesystem, integ-events, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
+    needs: [changes, typescript-build, integ-edge, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-tidb-filesystem, integ-events, integ-fuse, integ-observability, integ-facets, integ-microsandbox, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
     if: always()
     steps:
       - name: Check required jobs

@@ -13,15 +13,30 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from mirage.execution.job import JobHandle, JobTable
+import asyncio
+from collections.abc import Awaitable, Mapping
+from typing import TypeVar
+
+from mirage.execution.job import JobHandle
+from mirage.execution.process.config import ProcessPermissions
+from mirage.execution.process.constants import FIRST_PID
+from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import Process
-from mirage.execution.process.view import ProcessView
 from mirage.execution.types import MachinePid
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.machine.constants import RUN_WATCH_SECONDS
 from mirage.shell.bytes import encode_text
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
+
+T = TypeVar("T")
+
+AMBIGUOUS_SPEC = "ambiguous job spec"
+
+JobMarks = tuple[int | None, int | None]
+
+NO_MARKS: JobMarks = (None, None)
 
 
 def job_result(
@@ -52,36 +67,75 @@ def session_of(session: SessionState | None) -> str:
     return session.session_id if session is not None else ""
 
 
-def process_view(
-    job_table: JobTable, session: SessionState | None
-) -> ProcessView:
-    """The managed runners `ps` and numeric `kill` reach, scoped by the
-    session's profile.
+def grants_of(session: SessionState | None) -> ProcessPermissions:
+    """What `ps` and numeric `kill` may reach, by the session's profile.
 
     Args:
-        job_table (JobTable): the workspace's job table.
         session (SessionState | None): the shell session, if any.
     """
-    if session is None:
-        return job_table.processes.view("")
-    return job_table.processes.view(
-        session.session_id, lambda: session.processes
-    )
+    return session.processes if session is not None else ProcessPermissions()
+
+
+async def scanning_while(processes: ProcessTable, waiting: Awaitable[T]) -> T:
+    """Wait for ``waiting``, looking at the machines every
+    ``RUN_WATCH_SECONDS`` meanwhile, so a run whose exec stays open ends
+    when its program does.
+
+    Args:
+        processes (ProcessTable): the workspace's processes.
+        waiting (Awaitable[T]): what is waited for.
+    """
+    task = asyncio.ensure_future(waiting)
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=RUN_WATCH_SECONDS)
+            if done:
+                return task.result()
+            await processes.scan()
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
+
+
+def names_machine(shown: str, name: str | None) -> bool:
+    """Whether ``-m`` picks a machine: ``name`` as ``ps`` shows it, or
+    without the provider.
+
+    Args:
+        shown (str): the machine as ``ps`` shows it.
+        name (str | None): the option's value, None for no ``-m``.
+    """
+    return name is None or name in (shown, shown.rpartition(":")[2])
+
+
+def on_machine(process: Process, name: str | None) -> bool:
+    """Whether ``-m`` picks a process (``names_machine``).
+
+    Args:
+        process (Process): the process.
+        name (str | None): the option's value, None for no ``-m``.
+    """
+    return names_machine(process.shown_machine, name)
 
 
 async def machine_process(
-    processes: ProcessView, number: int
+    processes: ProcessTable,
+    session: SessionState | None,
+    number: int,
+    machine: str | None = None,
 ) -> tuple[Process | None, bool]:
     """The process a machine pid names: a number under ``FIRST_PID``,
     which kill, wait and ps read as the pid of a program on its machine.
-    The view is brought in step with the machines first (``scan``).
+    The table is brought in step with the machines first (``scan``).
 
     Args:
-        processes (ProcessView): the session's view of the processes.
+        processes (ProcessTable): the workspace's processes.
+        session (SessionState | None): the shell session, if any.
         number (int): the pid as typed.
+        machine (str | None): only that machine's (``on_machine``).
 
     Returns:
-        tuple[Process | None, bool]: the one process the view sees whose
+        tuple[Process | None, bool]: the one process it sees whose
         program has that pid on its machine, None for none, and whether
         processes on more than one machine have it, which bash's
         ``ambiguous job spec`` refuses.
@@ -89,10 +143,13 @@ async def machine_process(
     await processes.scan()
     found = [
         process
-        for process in processes.list()
+        for process in processes.visible(
+            session_of(session), grants_of(session)
+        )
         if process.machine_pid is not None
         and process.machine_pid.pid == number
         and process.machine_pid.exited is None
+        and on_machine(process, machine)
     ]
     machines = {str(process.machine) for process in found}
     if len(machines) > 1:
@@ -111,19 +168,19 @@ def job_numbered(jobs: list[JobHandle], job_id: int) -> JobHandle | None:
     return next((j for j in jobs if j.id == job_id and not j.reported), None)
 
 
-async def job_with_machine_pid(
-    processes: ProcessView, jobs: list[JobHandle], number: int
+def job_with_machine_pid(
+    jobs: list[JobHandle],
+    number: int,
+    machine: str | None = None,
 ) -> tuple[JobHandle | None, bool]:
     """The job whose own process ran the program a machine pid names,
     which ``wait`` reads as the pid of a program on its machine. A job
     whose program has ended still answers until the job is collected.
-    The view is brought in step with the machines first (``scan``),
-    which learns a program's pid there.
 
     Args:
-        processes (ProcessView): the session's view of the processes.
         jobs (list[JobHandle]): the jobs the builtin can see.
         number (int): the pid as typed.
+        machine (str | None): only that machine's (``on_machine``).
 
     Returns:
         tuple[JobHandle | None, bool]: the job, a running program's
@@ -131,14 +188,13 @@ async def job_with_machine_pid(
         than one machine ran a program with that pid, which bash's
         ``ambiguous job spec`` refuses.
     """
-    await processes.scan()
     held: list[tuple[JobHandle, MachinePid]] = []
     machines: set[str] = set()
     for job in jobs:
         record = job.process.record if job.process is not None else None
         if record is None or record.machine_pid is None:
             continue
-        if record.machine_pid.pid != number:
+        if record.machine_pid.pid != number or not on_machine(record, machine):
             continue
         held.append((job, record.machine_pid))
         machines.add(str(record.machine))
@@ -146,6 +202,107 @@ async def job_with_machine_pid(
         return None, True
     held.sort(key=lambda pair: pair[1].exited is not None)
     return (held[0][0] if held else None), False
+
+
+def job_with_stage(
+    jobs: list[JobHandle], pid: int, machine: str | None = None
+) -> tuple[JobHandle | None, bool]:
+    """The background pipeline one of whose stages a pid names, as ``ps``
+    shows it: bash waits for and forgets a job by any of its pids.
+
+    Args:
+        jobs (list[JobHandle]): the jobs the builtin can see.
+        pid (int): the pid as typed.
+        machine (str | None): only that machine's (``on_machine``).
+
+    Returns:
+        tuple[JobHandle | None, bool]: the job, None for none, and
+        whether stages on more than one machine have that pid, which
+        bash's ``ambiguous job spec`` refuses.
+    """
+    found = [
+        (job, stage.record)
+        for job in jobs
+        for stage in (() if job.process is None else job.process.stages)
+        if stage.record.shown_pid == pid and on_machine(stage.record, machine)
+    ]
+    if len({str(record.machine) for _, record in found}) > 1:
+        return None, True
+    return (found[0][0] if found else None), False
+
+
+def saved_on_machine(
+    saved: Mapping[str, int], machine: str | None
+) -> tuple[int | None, bool]:
+    """How a pid that has left the list ended, of the statuses each
+    machine that had it keeps.
+
+    Args:
+        saved (Mapping[str, int]): each machine's status for the pid.
+        machine (str | None): only that machine's (``names_machine``).
+
+    Returns:
+        tuple[int | None, bool]: the status, None for none, and whether
+        more than one machine had that pid, which bash's ``ambiguous job
+        spec`` refuses.
+    """
+    codes = [
+        code for shown, code in saved.items() if names_machine(shown, machine)
+    ]
+    if len(codes) > 1:
+        return None, True
+    return (codes[0] if codes else None), False
+
+
+def job_of_spec(
+    jobs: list[JobHandle],
+    spec: str,
+    marks: JobMarks = NO_MARKS,
+) -> tuple[JobHandle | None, str]:
+    """The job a ``%`` spec names: ``%N``; ``%%``, ``%+`` or a bare ``%``
+    for the job ``jobs`` marks ``+``, ``%-`` for the one it marks ``-``,
+    the ``+`` job when none is; ``%name`` for the job whose command
+    starts with ``name`` and ``%?text`` for the one whose command holds
+    ``text``.
+
+    Args:
+        jobs (list[JobHandle]): the jobs the builtin can see.
+        spec (str): the operand, ``%`` first.
+        marks (JobMarks): the jobs ``jobs`` marks
+            (``JobTable.job_marks``); none reads the newest two.
+
+    Returns:
+        tuple[JobHandle | None, str]: the job, or bash's refusal.
+    """
+    body = spec[1:]
+    missing = f"{spec}: no such job"
+    if body.isdigit():
+        numbered = job_numbered(jobs, int(body))
+        return numbered, "" if numbered is not None else missing
+    listed = sorted(
+        (job for job in jobs if not job.reported),
+        key=lambda job: job.id,
+        reverse=True,
+    )
+    if body in ("", "%", "+", "-"):
+        if not listed:
+            return None, missing
+        current, previous = marks
+        wanted = previous if body == "-" and previous is not None else current
+        marked = next((job for job in listed if job.id == wanted), None)
+        if marked is not None:
+            return marked, ""
+        return listed[1 if body == "-" and len(listed) > 1 else 0], ""
+    anywhere = body.startswith("?")
+    text = body[1:] if anywhere else body
+    named = [
+        job
+        for job in listed
+        if (text in job.command if anywhere else job.command.startswith(text))
+    ]
+    if len(named) > 1:
+        return None, f"{text}: {AMBIGUOUS_SPEC}"
+    return (named[0], "") if named else (None, missing)
 
 
 def job_with_pid(jobs: list[JobHandle], pid: int) -> JobHandle | None:
@@ -162,7 +319,13 @@ def job_with_pid(jobs: list[JobHandle], pid: int) -> JobHandle | None:
         pid (int): the PID as typed.
     """
     ran = next(
-        (j for j in jobs if j.process is not None and j.pid == pid), None
+        (
+            j
+            for j in jobs
+            if j.process is not None
+            and (j.pid == pid or pid in j.process.record.stages)
+        ),
+        None,
     )
     if ran is not None:
         return ran
@@ -170,7 +333,9 @@ def job_with_pid(jobs: list[JobHandle], pid: int) -> JobHandle | None:
 
 
 def resolve_spec(
-    jobs: list[JobHandle], spec: str
+    jobs: list[JobHandle],
+    spec: str,
+    marks: JobMarks = NO_MARKS,
 ) -> tuple[JobHandle | None, str]:
     """The job a `wait`/`disown` operand names, or bash's refusal.
 
@@ -182,14 +347,47 @@ def resolve_spec(
     Args:
         jobs (list[JobHandle]): the jobs the builtin can see.
         spec (str): the operand as typed.
+        marks (JobMarks): the jobs ``jobs`` marks.
     """
     if spec.startswith("%"):
-        raw = spec[1:]
-        job = job_numbered(jobs, int(raw)) if raw.isdigit() else None
-        return job, "" if job is not None else f"{spec}: no such job"
+        return job_of_spec(jobs, spec, marks)
     if spec.isdigit():
         job = job_with_pid(jobs, int(spec))
         return job, "" if job is not None else (
             f"pid {spec} is not a child of this shell"
         )
     return None, f"`{spec}': not a pid or valid job spec"
+
+
+async def job_of_operand(
+    processes: ProcessTable,
+    jobs: list[JobHandle],
+    spec: str,
+    marks: JobMarks = NO_MARKS,
+    machine: str | None = None,
+) -> tuple[JobHandle | None, str]:
+    """The job a ``wait`` or ``disown`` operand names, by every pid the
+    agent is shown for it, or bash's refusal: a pid any stage of a
+    pipeline has, then under ``FIRST_PID`` a program's on its machine,
+    then what ``resolve_spec`` reads. The table is brought in step with
+    the machines first (``scan``), which learns a program's pid there.
+
+    Args:
+        processes (ProcessTable): the workspace's processes.
+        jobs (list[JobHandle]): the jobs the builtin can see.
+        spec (str): the operand as typed.
+        marks (JobMarks): the jobs ``jobs`` marks.
+        machine (str | None): only that machine's (``on_machine``).
+    """
+    if not spec.isdigit():
+        return resolve_spec(jobs, spec, marks)
+    number = int(spec)
+    on_a_machine = 0 < number < FIRST_PID
+    if on_a_machine:
+        await processes.scan()
+    job, ambiguous = job_with_stage(jobs, number, machine)
+    if job is None and not ambiguous and on_a_machine:
+        job, ambiguous = job_with_machine_pid(jobs, number, machine)
+    if ambiguous:
+        return None, f"{spec}: {AMBIGUOUS_SPEC}"
+    return (job, "") if job is not None else resolve_spec(jobs, spec, marks)

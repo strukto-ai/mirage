@@ -77,6 +77,7 @@ from mirage.execution.machine.table import MachineTable
 from mirage.execution.machine.types import Machine, MachineState
 from mirage.execution.process.child import ChildProcess
 from mirage.execution.process.config import ProcessPermissions
+from mirage.execution.process.session import SessionProcesses
 from mirage.execution.process.stdio import ProcessInput, ProcessOutput
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import (
@@ -84,7 +85,6 @@ from mirage.execution.process.types import (
     ProcessState,
     SpawnRequest,
 )
-from mirage.execution.process.view import ProcessView
 from mirage.execution.types import (
     JobId,
     LineId,
@@ -398,7 +398,7 @@ class Workspace:
         )
         self._diff_pool = DiffPool()
         self._registry.diff = self._diff_pool
-        self._registry.process_view = self._process_view
+        self._registry.session_processes = self._session_processes
         self._registry.fill_env = self._fill_tree_env
         self._apply_limits(
             command_limits, max_body_bytes, ceilings, max_memory, max_env
@@ -1543,7 +1543,7 @@ class Workspace:
                         clock=self._clock,
                     ),
                     session=session_view(session),
-                    processes=self._process_view(session),
+                    processes=self._session_processes(session),
                     cwd=PathSpec.from_str_path(session.cwd),
                     env=env_snapshot(session),
                 ),
@@ -1571,18 +1571,18 @@ class Workspace:
         )
         return self._spawn_for_session(request, session)
 
-    def _process_view(self, session: SessionState) -> ProcessView:
+    def _session_processes(self, session: SessionState) -> SessionProcesses:
         parent_pid = session.process_id
-        view = self.process_table.view(
+        processes = self.process_table.for_session(
             session.session_id, lambda: session.processes
         )
 
         def spawn(request: SpawnRequest) -> ChildProcess:
-            view.check_spawn()
+            processes.check_spawn()
             child = session.fork(process_id=parent_pid)
             return self._spawn_for_session(request, child)
 
-        return replace(view, spawn=spawn, depth=session.process_depth)
+        return replace(processes, spawn=spawn, depth=session.process_depth)
 
     def _spawn_for_session(
         self, request: SpawnRequest, session: SessionState
@@ -1627,7 +1627,7 @@ class Workspace:
         )
         env = dict(request.env) if request.env is not None else None
         owner = self._session_mgr.get(session.session_id)
-        admission = self.process_table.view(
+        admission = self.process_table.for_session(
             session.session_id, lambda: owner.processes
         )
 

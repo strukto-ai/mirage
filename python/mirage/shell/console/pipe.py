@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.io.pipe import CAPACITY, BytePipe
 from mirage.shell.console.job_console import JobConsole
@@ -23,11 +23,14 @@ class PipeConsole(JobConsole):
     """Route a shell's piped channels through the shared bounded byte pipe."""
 
     def __init__(
-        self, pipe_stderr: bool = False, buffer_bytes: int = CAPACITY
+        self,
+        pipe_stderr: bool = False,
+        buffer_bytes: int = CAPACITY,
+        gate: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__()
         self._pipe_stderr = pipe_stderr
-        self._pipe = BytePipe(buffer_bytes)
+        self._pipe = BytePipe(buffer_bytes, gate)
 
     async def emit(self, channel: Channel, data: bytes) -> None:
         if channel != Channel.STDOUT and not self._pipe_stderr:

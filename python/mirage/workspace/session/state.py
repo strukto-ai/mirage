@@ -31,6 +31,7 @@ from mirage.rs.session import raw_value, var_of
 from mirage.shell.array import ShellArray, array_get
 from mirage.shell.bytes import join_bytes
 from mirage.shell.call_stack import CallStack
+from mirage.shell.constants import PPID
 from mirage.shell.variable import ShellValue, VarAttr
 from mirage.view.types import SessionView
 from mirage.workspace.session.budget import (
@@ -791,6 +792,19 @@ def bind_last_word(session: SessionState, words: Sequence[str]) -> None:
         words (Sequence[str]): the command's expanded words, name first.
     """
     seed_var(session, "_", words[-1] if words else "")
+
+
+def seed_parent(session: SessionState, pid: int) -> None:
+    """Start a shell's ``$PPID``, which no line of it can change: 0 for a
+    top shell, whose parent is nothing Mirage runs, as ``ps`` shows it.
+
+    Args:
+        session (SessionState): the shell.
+        pid (int): its parent's pid.
+    """
+    seed_var(session, PPID, str(pid))
+    set_attr(session, PPID, VarAttr.INTEGER)
+    set_attr(session, PPID, VarAttr.READONLY)
 
 
 def set_attr(

@@ -366,6 +366,7 @@ export class MachineTable {
         const known = handle.record.machinePid
         const root = programRow(run, pids, known)
         if (root !== null) {
+          handle.showState(root.state ?? 'R')
           placed.set(root.pid, handle.record.id.pid)
           if (known?.pid !== root.pid)
             handle.setMachinePid({ pid: root.pid, started: root.started, exited: null })
@@ -380,6 +381,7 @@ export class MachineTable {
           const parent = placed.get(row.ppid) ?? handle?.record.id.pid ?? null
           const found = this.placeFound(processes, machine, row, parent, owner)
           if (found !== null) {
+            found.showState(row.state ?? 'R')
             placed.set(row.pid, found.record.id.pid)
             seen.add(foundKey(machine, row))
           }
@@ -495,17 +497,20 @@ function foundKey(machine: MachineId, row: MachineProcess): string {
 }
 
 /**
- * The first process of a run: the one carrying its tag whose parent carries
- * none, the one already known if it still shows, else the first to start.
+ * The program of a run: the process its report names, else the one carrying
+ * its tag whose parent carries none, the one already known while it still
+ * shows, else the first to start. A program that has gone is none of what it
+ * left running.
  */
 function programRow(
   run: readonly MachineProcess[],
   pids: ReadonlySet<number>,
   known: MachinePid | null,
 ): MachineProcess | null {
+  const reported = run[0]?.program ?? null
+  if (reported !== null) return run.find((row) => row.pid === reported) ?? null
   const roots = run.filter((row) => !pids.has(row.ppid))
-  const kept = known === null ? undefined : roots.find((row) => row.pid === known.pid)
-  if (kept !== undefined) return kept
+  if (known !== null) return roots.find((row) => row.pid === known.pid) ?? null
   return roots.reduce<MachineProcess | null>(
     (first, row) => (first === null || row.started < first.started ? row : first),
     null,

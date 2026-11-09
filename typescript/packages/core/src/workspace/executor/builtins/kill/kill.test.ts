@@ -149,12 +149,9 @@ it('kill -0 checks signal permission without cancelling the process', async () =
     expect(result.exitCode).toBe(1)
     expect(stderrStr(result)).toContain('Operation not permitted')
     expect((await ws.shell(`kill -0 ${String(pid)}`, { sessionId: 'owner' })).exitCode).toBe(0)
-    expect(
-      ws.processTable
-        .view('owner')
-        .list()
-        .find((info) => info.id.pid === pid)?.state,
-    ).toBe('running')
+    expect(ws.processTable.visible('owner').find((info) => info.id.pid === pid)?.state).toBe(
+      'running',
+    )
   } finally {
     await ws.close()
   }

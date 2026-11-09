@@ -1,6 +1,6 @@
 import asyncio
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.errors import PipeClosed
@@ -16,7 +16,11 @@ class BytePipe:
     ending the producer lets the reader consume the remaining bytes first.
     """
 
-    def __init__(self, capacity: int = CAPACITY) -> None:
+    def __init__(
+        self,
+        capacity: int = CAPACITY,
+        gate: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         if (
             isinstance(capacity, bool)
             or not isinstance(capacity, int)
@@ -26,6 +30,7 @@ class BytePipe:
                 "pipe capacity must be an integer from 16384 to 9007199254740991"
             )
         self._capacity = capacity
+        self._gate = gate
         self._chunks: deque[bytes] = deque()
         self._bytes = 0
         self._ended = False
@@ -50,6 +55,8 @@ class BytePipe:
         Args:
             data (bytes): bytes owned by the caller.
         """
+        if self._gate is not None:
+            await self._gate()
         for start in range(0, len(data), CHUNK_SIZE):
             chunk = data[start : start + CHUNK_SIZE]
             while (
@@ -125,6 +132,8 @@ class BytePipe:
                         self._chunks.clear()
                     self._bytes -= len(chunk)
                     self._changed.set()
+                    if self._gate is not None:
+                        await self._gate()
                     yield chunk
                     self._accepted += count
                     self._changed.set()

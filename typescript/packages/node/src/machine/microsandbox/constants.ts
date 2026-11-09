@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isRun } from '@struktoai/mirage-core/machine/constants'
+
 export const MICROSANDBOX_HINT =
   'the microsandbox machine needs `msb` on PATH (https://microsandbox.dev); ' +
   'start the machine before connecting'
@@ -19,12 +21,28 @@ export const MICROSANDBOX_HINT =
 export const RUNNING_STATE = 'Running'
 export const INSPECT_TIMEOUT_SECONDS = 10
 
-// msb reports 255 for a program a signal ended, so a run's program is a
-// child of this prelude rather than exec'd by it: the prelude carries no
-// `PROCESS` tag, so a signal by tag reaches the program, and it exits with
-// the program's status, 128 plus the signal for one a signal ended, which
-// msb reports as given. `$1` is the working directory (126 when the box
-// lacks it), `$2` the tag's assignment, which the prelude exports for the
-// command alone (a builtin, so a PATH without the system tools still runs
-// it), then the command. Mirrors Python's `TAGGED_PRELUDE`.
-export const TAGGED_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; export "$2"; shift 2; "$@"; exit $?'
+const RUN_PROGRAM_AT = 7
+
+/**
+ * msb ends the session of an exec whose client goes, and a run's exec is let
+ * go once its program has ended, so a program leads a session of its own:
+ * what it left running stays, as on any machine. The run is not a group
+ * leader there, so setsid keeps its pid.
+ */
+export const OWN_SESSION = 'command -v setsid >/dev/null 2>&1 && exec setsid "$@"; exec "$@"'
+
+/**
+ * Start a run's program in a session of its own (`OWN_SESSION`). Mirage's
+ * own lines stay as they are. Mirrors Python's `own_session`.
+ */
+export function ownSession(argv: readonly string[]): readonly string[] {
+  if (!isRun(argv)) return argv
+  return [
+    ...argv.slice(0, RUN_PROGRAM_AT),
+    '/bin/sh',
+    '-c',
+    OWN_SESSION,
+    'sh',
+    ...argv.slice(RUN_PROGRAM_AT),
+  ]
+}

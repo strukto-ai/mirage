@@ -117,16 +117,13 @@ export const COLUMNS: Readonly<Record<string, readonly [string, number, boolean,
   nwchan: ['WCHAN', 6, true, 'dash'],
   label: ['LABEL', 31, false, 'dash'],
   machine: ['MACHINE', 31, false, 'machine'],
-  mpid: ['MPID', 7, true, 'mpid'],
 }
 
-// What ps prints without -o: each process's pid, the machine its program
-// runs on with that program's pid there (`-` for Mirage's own), and its
-// command. Mirrors Python's `PLAIN`.
+// What ps prints without -o: each process's pid, the machine it runs on
+// (`mirage` for Mirage's own) and its command. Mirrors Python's `PLAIN`.
 export const PLAIN: readonly (readonly [string, string])[] = [
   ['pid', 'PID'],
   ['machine', 'MACHINE'],
-  ['mpid', 'MPID'],
   ['cmd', 'CMD'],
 ]
 
@@ -153,11 +150,12 @@ export const FIXED: Readonly<Record<string, string>> = {
   cls: 'TS',
 }
 
-// A runner's state letter: live, being cancelled (still unwinding), or exited
-// and not yet reaped.
+// A runner's state letter: live and waiting, being cancelled (still
+// unwinding), or exited and not yet reaped. The one running ps is `R`, and
+// one paused or on a machine shows what it is doing.
 export const STATES: Readonly<Record<ProcessState, string>> = {
-  running: 'R',
-  stopping: 'R',
+  running: 'S',
+  stopping: 'S',
   exited: 'Z',
 }
 

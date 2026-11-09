@@ -32,6 +32,9 @@ from mirage.machine.constants import (
     MOUNT_GUARD,
     PROCESS,
     encode_output,
+    is_run,
+    run_argv,
+    run_status_path,
     stop_line,
     wrap_line,
 )
@@ -72,6 +75,7 @@ class FakeHandle:
         self.received = asyncio.Event()
         self.closed = asyncio.Event()
         self.input_error = None
+        self.on_stdout = None
         self.on_stderr = None
 
     async def send_stdin(self, data):
@@ -102,6 +106,8 @@ class FakeHandle:
             return FakeResult(b64(self.input.hex()), "", 0)
         if not self.eof:
             await self.closed.wait()
+        if self.on_stdout is not None:
+            await self.on_stdout(b64(self.input.hex()))
         if self.on_stderr is not None:
             await self.on_stderr(b64("warn"))
         return FakeResult(b64(self.input.hex()), b64("warn"), 0)
@@ -126,6 +132,7 @@ class FakeCommands:
         self.calls.append((command, stdin))
         handle = FakeHandle(shlex.split(command)[-1], stdin)
         handle.input_error = self.input_error
+        handle.on_stdout = on_stdout
         handle.on_stderr = on_stderr
         self.handles.append(handle)
         return handle
@@ -227,8 +234,13 @@ async def test_native_stdin_eof_and_command_are_preserved(data, monkeypatch):
         (
             encode_output(
                 wrap_line(
-                    ("/bin/sh", "-c", "wc -l | cat"),
-                    {"E": "1", PROCESS: "run"},
+                    run_argv(
+                        "run",
+                        run_status_path("run"),
+                        (),
+                        ("/bin/sh", "-c", "wc -l | cat"),
+                    ),
+                    {"E": "1"},
                     "/workspace",
                 )
             ),
@@ -524,6 +536,8 @@ class MountingE2BMachine(E2BMachine):
         self.lines: list[str] = []
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if is_run(argv):
+            argv = argv[7:]
         if argv[2:3] == (MOUNT_GUARD,):
             argv = argv[argv.index("--", 5) + 1 :]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)

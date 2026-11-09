@@ -42,8 +42,10 @@ export interface Machine {
  * Mirage process the run is, `pid` and `ppid` its own and its parent's pid
  * on the machine, `started` when it started (clock ticks after boot on a
  * machine, epoch seconds on the host), which tells it apart from a later
- * process given the same pid, and `args` its arguments, space separated.
- * Mirrors Python's `MachineProcess`.
+ * process given the same pid, `args` its arguments, space separated, `state`
+ * the letter `ps` shows for it, and `program` the pid of the program its run
+ * reported, absent while it has reported none. Mirrors Python's
+ * `MachineProcess`.
  */
 export interface MachineProcess {
   readonly tag: string
@@ -51,4 +53,6 @@ export interface MachineProcess {
   readonly ppid: number
   readonly started: number
   readonly args: string
+  readonly state?: string
+  readonly program?: number | null
 }

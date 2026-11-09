@@ -29,6 +29,7 @@ import {
   type CallerDispatchFn,
   callerSignal,
   currentCaller,
+  whilePaused,
   effectivePathMode,
   explaining,
   getCurrentSession,
@@ -797,6 +798,8 @@ export class Dispatcher {
 
   dispatch: CallerDispatchFn = async (name, path, args, kwargs, report, caller) => {
     try {
+      const held = whilePaused(caller ?? this.caller ?? undefined)
+      if (held !== null) await held
       const streamed = (caller ?? this.caller ?? currentCaller()).streamed
       if (streamed.length > 0) await this.handOver(streamed, name, path, args, kwargs)
       if (caller !== undefined && caller !== this.caller) {

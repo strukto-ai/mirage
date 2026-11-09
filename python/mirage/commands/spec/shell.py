@@ -426,6 +426,14 @@ SHELL_SPECS: dict[str, CommandSpec] = {
             ),
         ),
     ),
+    "bg": CommandSpec(
+        description=(
+            "Resume jobs in the background.\n\n"
+            "Lets each JOB_SPEC, or the current job, carry on behind the "
+            "shell."
+        ),
+        epilog="Failure, in a shell without job control.",
+    ),
     "break": CommandSpec(
         description=(
             "Leave a for, while, until or select loop.\n\n"
@@ -637,7 +645,7 @@ SHELL_SPECS: dict[str, CommandSpec] = {
             "Makes JOB_SPEC, or the current job, the foreground job and "
             "waits for it."
         ),
-        epilog="The status of the job, or failure when JOB_SPEC is invalid.",
+        epilog="Failure, in a shell without job control.",
     ),
     "for": CommandSpec(
         description=(

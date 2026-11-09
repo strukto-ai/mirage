@@ -17,6 +17,7 @@ import type { FlagValue } from '../../../commands/spec/types.ts'
 import type { PyodideInterface } from './loader.ts'
 import type { XattrOp } from './fs/types.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { type GuestSignals, guestSignals } from './interrupt.ts'
 
 interface PyProxy {
   destroy(): void
@@ -104,6 +105,9 @@ interface ExecutionRequest {
   filename: string | null
   // Whether the program was read from a script file.
   script: boolean
+  // The numbers the program sees for itself and its parent.
+  pid?: number | null
+  ppid?: number | null
 }
 
 export class PyodideExecution {
@@ -117,10 +121,12 @@ export class PyodideExecution {
       throw new Error('subprocess requires a Pyodide worker with shared memory')
     },
     seal: () => void = () => undefined,
+    signals: GuestSignals = guestSignals(undefined),
   ) {
     pyodide.registerJsModule('_mirage_xattr', { call: xattr })
     pyodide.registerJsModule('_mirage_process', { run: subprocess })
     pyodide.registerJsModule('_mirage_exit', { seal })
+    pyodide.registerJsModule('_mirage_signal', signals)
     // Numbers cross, not buffers: Pyodide's buffer conversion slices with
     // signed wasm32 addresses, so above 2 GiB it reads the wrong bytes.
     pyodide.registerJsModule('_mirage_stdio', {
@@ -144,13 +150,13 @@ export class PyodideExecution {
    *
    * @param request the program and what of the run's context it reads.
    * @param arm starts the run's interrupt countdown.
-   * @param disarm stops it.
+   * @param disarm stops it, and answers whether it had stopped the guest.
    * @param stdio the run's streams; absent reads `request.stdin`.
    */
   run(
     request: ExecutionRequest,
     arm: () => void,
-    disarm: () => void,
+    disarm: () => boolean,
     stdio?: GuestStdio,
   ): [Uint8Array, Uint8Array, number] {
     const kept = collected(request.stdin)
@@ -163,6 +169,8 @@ export class PyodideExecution {
           ...rest,
           piped: request.piped ?? stdin !== null,
           filename: request.filename ?? undefined,
+          pid: request.pid ?? undefined,
+          ppid: request.ppid ?? undefined,
         },
         arm,
         disarm,
@@ -171,6 +179,11 @@ export class PyodideExecution {
     } finally {
       this.stdio = collected(null)
     }
+  }
+
+  /** Have the guest act on the signals sent to it; answers whether that ends its call. */
+  takeSignals(): boolean {
+    return this.call('take_signals_waiting') as boolean
   }
 
   seedSysPath(paths: readonly string[]): string[] {

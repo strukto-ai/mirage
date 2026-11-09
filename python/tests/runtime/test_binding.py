@@ -297,7 +297,7 @@ async def test_adapters_use_each_execution_context_for_filesystem_callbacks(
 
 
 @pytest.mark.asyncio
-async def test_process_views_do_not_share_by_profile_or_follow_reused_sessions():
+async def test_session_processes_do_not_share_by_profile_or_follow_reused_sessions():
     with Workspace({}, runtimes=[], profiles={"agent": {}}) as ws:
         ws.create_session("one", profile="agent")
         ws.create_session("two", profile="agent")
@@ -315,12 +315,13 @@ async def test_process_views_do_not_share_by_profile_or_follow_reused_sessions()
             cwd=PathSpec.from_str_path("/"),
             run=run,
         )
-        assert one.list() == (process.record,)
-        assert two.list() == ()
+        pid = process.record.pid
+        assert one.probe(pid)
+        assert not two.probe(pid)
         await ws.close_session("one")
         ws.create_session("one", profile="agent")
-        assert one.list() == ()
-        assert ws.runtime_context("one").ctx.processes.list() == ()
+        assert not one.probe(pid)
+        assert not ws.runtime_context("one").ctx.processes.probe(pid)
         release.set()
         await process.join()
 

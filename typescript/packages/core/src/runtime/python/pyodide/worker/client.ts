@@ -31,8 +31,11 @@ import {
   respond,
   serviceWorkerBridge,
 } from '../../../wasm/transport.ts'
+import { STOP_GRACE_SECONDS, STOP_POLL_SECONDS, stopSignal } from '../../../../machine/constants.ts'
+import { SIGKILL } from '../../../../shell/constants.ts'
 import { GuestProcessTable } from './process.ts'
-import { mergeSignals } from '../../../../utils/abort.ts'
+import { clearSignals, endedOn, holdGuest, INTERRUPT_BYTES, sendSignal } from '../interrupt.ts'
+import { mergeSignals, stopSignal as namedBy } from '../../../../utils/abort.ts'
 import type {
   ExecuteRequest,
   HostStdio,
@@ -140,7 +143,7 @@ export class PyodideWorkerClient {
   // Null where no memory is shared: nothing then reaches a busy guest, and
   // an interrupted run ends with its worker.
   private readonly interruptBuffer =
-    typeof SharedArrayBuffer === 'undefined' ? null : new SharedArrayBuffer(16)
+    typeof SharedArrayBuffer === 'undefined' ? null : new SharedArrayBuffer(INTERRUPT_BYTES)
   private failure: Error | null = null
 
   private constructor(private readonly port: WorkerPort) {
@@ -201,10 +204,13 @@ export class PyodideWorkerClient {
     // A stdio call the guest left waiting (a read of input that has not
     // come, its deadline past) ends with the run.
     const ended = new AbortController()
-    const stop = mergeSignals(signal, ended.signal) ?? ended.signal
-    // The guest's calls stop once the run is cancelled; the run's end
-    // still closes what it left open through `files`.
-    const live = signal === undefined ? files : files.withSignal(signal)
+    // Set once the guest is stopped outright, which a signal it may handle
+    // leaves for after its grace.
+    const halted = new AbortController()
+    const stop = mergeSignals(halted.signal, ended.signal) ?? ended.signal
+    // The guest's calls stop once the run is halted; the run's end still
+    // closes what it left open through `files`.
+    const live = signal === undefined ? files : files.withSignal(halted.signal)
     // The run's caller, which each call the guest makes runs as.
     const caller = currentCaller()
     const responses = new Set<Promise<void>>()
@@ -223,8 +229,25 @@ export class PyodideWorkerClient {
           })
         : null
     const cells = this.interruptBuffer === null ? null : new Int32Array(this.interruptBuffer)
-    if (cells !== null) Atomics.store(cells, 3, 0)
-    const abort = (): void => {
+    if (cells !== null) {
+      Atomics.store(cells, 3, 0)
+      clearSignals(cells)
+    }
+    const runner = currentCaller().process ?? null
+    const release =
+      cells === null || runner === null
+        ? []
+        : [
+            runner.onHold((held) => {
+              holdGuest(cells, held)
+            }),
+            runner.onSignal((sent) => {
+              sendSignal(cells, sent)
+            }),
+          ]
+    const halt = (): void => {
+      clearInterval(grace)
+      halted.abort(signal?.reason)
       if (cells === null) {
         this.fail(new Error('pyodide worker interrupted'))
         this.port.terminate()
@@ -233,6 +256,21 @@ export class PyodideWorkerClient {
       Atomics.store(cells, 3, 1)
       Atomics.store(cells, 1, 2)
       Atomics.store(cells, 0, 2)
+    }
+    // A stop that names a signal gives the program its handlers and the
+    // grace a machine's program gets, unless a KILL comes first.
+    let grace: ReturnType<typeof setInterval> | undefined
+    const abort = (): void => {
+      const named = stopSignal(runner) ?? namedBy(signal)
+      if (cells === null || named === null || named === SIGKILL) {
+        halt()
+        return
+      }
+      sendSignal(cells, named)
+      const deadline = Date.now() + STOP_GRACE_SECONDS * 1000
+      grace = setInterval(() => {
+        if (Date.now() >= deadline || runner?.signal === SIGKILL) halt()
+      }, STOP_POLL_SECONDS * 1000)
     }
     if (signal?.aborted) abort()
     signal?.addEventListener('abort', abort, { once: true })
@@ -262,6 +300,8 @@ export class PyodideWorkerClient {
           })
           continue
         }
+        // A stopped program says nothing more.
+        if (halted.signal.aborted) return { stdout: new Uint8Array(), stderr: null, exitCode: 1 }
         if (message.kind === 'result') return message.value
         if (message.name === 'PyodideUnavailableError')
           throw new PyodideUnavailableError(message.message)
@@ -270,9 +310,13 @@ export class PyodideWorkerClient {
         throw new Error(message.message)
       }
     } finally {
+      clearInterval(grace)
       ended.abort()
       unwatch?.()
       signal?.removeEventListener('abort', abort)
+      for (const forget of release) forget()
+      const endedWith = cells === null ? 0 : endedOn(cells)
+      if (endedWith !== 0) runner?.programSignaled(endedWith)
       // An interrupted guest can finish while a backend mutation is still pending.
       // Keep the runtime queue closed until every response has finished.
       await processes.close()

@@ -109,30 +109,31 @@ mounts:
 ## Processes and jobs
 
 One session can run jobs on several machines at once. `jobs`, `wait`, `kill`
-and `ps` work across them. `ps` lists each program with its machine and its
-pid there, and what the program started under it:
+and `ps` ask the machines what is running, so they answer with what is true
+there now. `ps` lists each program with its real pid and its machine, and what
+the program started under it:
 
 ```text
-    PID MACHINE                            MPID CMD
-4194305 -                                     - ps
-4194306 docker:box                           13 python3 train.py
-4194307 docker:box                           19 sleep 300
-4194308 ssh:gpu                              13 python3 eval.py
+    PID MACHINE                         CMD
+4194305 mirage                          ps
+     13 docker:box                      python3 train.py
+     19 docker:box                      sleep 300
+     13 ssh:gpu                         python3 eval.py
 ```
 
-`ps -o machine,mpid` selects those columns, and `ps f` draws each command
-under its parent's.
+`ps -o pid,machine` selects those columns, and `ps f` draws each command
+under its parent's. `$!` is the program's real pid, and `STAT` is what the
+machine reports, `T` for a program `kill -STOP` paused.
 
 `kill` sends a signal to a program as you sent it: a program that traps `USR1`
 runs on, and one that `TERM` ends exits with its own status, which `wait`
 reports. KILL is sent only when you ask for it (`kill -9`, `timeout -k`) or
 when Mirage shuts the workspace down.
 
-In a Mirage shell a pid is Mirage's, starting at 4194305. A smaller number
-given to `kill`, `wait` or `ps -p` is a machine pid. One that two machines
-both have is refused as an ambiguous job spec, so use the Mirage pid. Inside a
-program on a machine, pids are that machine's. All of this follows the
-session's `processes` grants.
+Mirage's own commands have pids from 4194305 up. A pid two machines both have
+is refused as an ambiguous job spec, so name the machine with `-m`, as `ps`
+shows it or without the provider: `kill -m box 13` or `wait -m ssh:gpu 13`. All
+of this follows the session's `processes` grants.
 
 ## Machine states
 

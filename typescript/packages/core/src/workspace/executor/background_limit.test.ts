@@ -46,6 +46,20 @@ class Held extends JobConsole {
 const DEC = new TextDecoder()
 
 describe('a job past its limit', () => {
+  it('ends though a kill -STOP holds it', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, commandLimits: { '@line': new Limit({ timeoutSeconds: 0.2 }) } },
+    )
+    try {
+      await ws.shell('sleep 30 & p=$!; kill -STOP $p')
+      const job = await ws.jobTable.wait(1, ws.defaultSessionId)
+      expect(job.exitCode).toBe(124)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('ends while a reader holds its output', async () => {
     // Cold preflight must not spend the launcher's budget before it creates
     // a job; advance the unchanged deadline only after output is held.

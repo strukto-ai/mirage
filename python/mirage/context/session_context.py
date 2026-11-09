@@ -283,6 +283,26 @@ def current_caller() -> Caller:
     return _caller.get()
 
 
+async def while_paused(caller: Caller | None = None) -> None:
+    """Wait while a ``kill -STOP`` holds the process making this call,
+    which is how one Mirage runs itself pauses: at its next wait.
+
+    Args:
+        caller (Caller | None): who makes it; None for the current one.
+    """
+    process = (caller if caller is not None else current_caller()).process
+    if process is not None and process.paused:
+        await process.resumed()
+
+
+def expire_caller() -> None:
+    """Tell the process making this call its deadline is past
+    (``ProcessHandle.expire``)."""
+    process = current_caller().process
+    if process is not None:
+        process.expire()
+
+
 def bind_caller(caller: Caller) -> CallerToken:
     """Bind a caller to the current async context: a layer's own copy,
     or the record a stream pulled or a callback run after its command

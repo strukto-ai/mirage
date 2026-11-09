@@ -47,6 +47,7 @@ from mirage.context import (
     current_caller,
     hidden_refusal,
     reset_caller,
+    while_paused,
 )
 from mirage.context.session_context import (
     effective_path_mode,
@@ -1000,6 +1001,7 @@ class Dispatcher:
             **kwargs (Any): the op's own arguments.
         """
         await task_turn()
+        await while_paused(caller)
         memory = self._namespace.registry.memory
         network = self._namespace.registry.network
         system_clock = self._namespace.registry.system_clock

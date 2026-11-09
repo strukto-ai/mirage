@@ -27,7 +27,7 @@ import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type Ssh2Sdk } from './sdk.ts'
 import { SSH_RUNTIME_CONFIG_FIELDS, type SSHMachineConfig } from './config.ts'
-import { PROCESS, stopSignal, wrapLine } from '@struktoai/mirage-core/machine/constants'
+import { isRun, stopSignal, wrapLine } from '@struktoai/mirage-core/machine/constants'
 import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import { feed } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
@@ -108,14 +108,7 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
     errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    return this.ssh(
-      wrapLine(argv, env, cwd),
-      stdin,
-      output,
-      signal,
-      env[PROCESS] !== undefined,
-      errors,
-    )
+    return this.ssh(wrapLine(argv, env, cwd), stdin, output, signal, isRun(argv), errors)
   }
 
   /**
@@ -129,7 +122,7 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
    * sshd counts against its sessions per connection; any other failure
    * closes the channel.
    *
-   * @param tagged whether the command carries its run's `PROCESS`, so a
+   * @param tagged whether the command is a program's run, so a
    *   cancelled run's stop ends it.
    * @param errors receives stderr as it arrives, as `output` does stdout.
    */

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../../../commands/config.ts'
+import { currentCaller } from '../../../context/session_context.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { memoryRoom } from '../../../io/memory.ts'
 import type { StreamName } from '../../../io/types.ts'
@@ -66,6 +67,26 @@ function killWorker(pid: number | undefined): void {
   } catch {
     // the worker may already have exited; nothing left to reclaim
   }
+}
+
+/**
+ * Stop a monty worker for as long as a `kill -STOP` holds the process running
+ * it, which holds a program between its calls too. Answers what lets the
+ * worker go. Mirrors Python's `_held_worker`.
+ */
+function holdWorker(pid: number | undefined): () => void {
+  const proc = (globalThis as { process?: { kill?: (pid: number, signal?: string) => void } })
+    .process
+  const runner = currentCaller().process
+  if (pid === undefined || typeof proc?.kill !== 'function' || runner == null)
+    return () => undefined
+  return runner.onHold((held) => {
+    try {
+      proc.kill?.(pid, held ? 'SIGSTOP' : 'SIGCONT')
+    } catch (error) {
+      console.debug('monty worker already exited', error)
+    }
+  })
 }
 
 /**
@@ -240,6 +261,7 @@ export class MontyExecution {
         return this.interrupted(interruption, ctx)
       }
       const workerPid = session.workerPid
+      const letGo = holdWorker(workerPid)
       const prints = new Prints(output, errors)
       try {
         // The prints are handed on inside the race, so a deadline or a kill
@@ -278,6 +300,7 @@ export class MontyExecution {
         killWorker(workerPid)
         return this.interrupted(interruption, ctx)
       } finally {
+        letGo()
         await session.close()
       }
     } finally {

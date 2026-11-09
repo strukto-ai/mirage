@@ -1264,11 +1264,14 @@ async function routeArgv(
 
   // Unsupported bash builtins. Constructs the parser accepts but the
   // executor cannot honor. Returning a clear error lets LLMs detect a
-  // capability gap instead of treating it as a missing binary; `bg` says
-  // what bash -c says, which has no job control either.
+  // capability gap instead of treating it as a missing binary; `bg` and
+  // `fg` say what bash -c says, which has no job control either.
   if (UNSUPPORTED_BUILTINS.has(name)) {
-    const code = name === 'bg' ? 1 : 2
-    const why = name === 'bg' ? 'no job control' : 'not supported'
+    const helped = argv.args[0] === '--help' ? flagHelp(name) : null
+    if (helped !== null) return helped
+    const noControl = name === 'bg' || name === 'fg'
+    const code = noControl ? 1 : 2
+    const why = noControl ? 'no job control' : 'not supported'
     const err = encodeText(`${shellVoice()}${name}: ${why}\n`)
     return [
       null,

@@ -216,6 +216,26 @@ export function currentCaller(): Caller {
 }
 
 /**
+ * Wait while a `kill -STOP` holds the process making this call, which is how
+ * one Mirage runs itself pauses: at its next wait. A runtime that cannot
+ * tell which task is calling (`asyncContextIsolatesTasks`) never holds one.
+ * Null when nothing holds it, so a call that goes on costs its caller no
+ * turn of the event loop. Mirrors Python's `while_paused`.
+ *
+ * @param caller who makes it; the current one when absent.
+ */
+export function whilePaused(caller?: Caller): Promise<void> | null {
+  if (!asyncContextIsolatesTasks) return null
+  const process = (caller ?? currentCaller()).process
+  return process?.paused === true ? process.resumed() : null
+}
+
+/** Tell the process making this call its deadline is past (`ProcessHandle.expire`). */
+export function expireCaller(): void {
+  currentCaller().process?.expire()
+}
+
+/**
  * Every caller live in this context, oldest first: on an isolating
  * runtime the bound one alone, on the fallback storage every
  * concurrently bound one.

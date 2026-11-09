@@ -291,8 +291,8 @@ async def run_on_mount(
                     session,
                     diagnostics=context.frame.diagnostics,
                 ),
-                processes=registry.process_view(session)
-                if registry.process_view is not None
+                processes=registry.session_processes(session)
+                if registry.session_processes is not None
                 else None,
                 runtime=CommandRuntime(
                     bound=line_runtime,

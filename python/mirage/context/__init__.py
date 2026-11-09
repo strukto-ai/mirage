@@ -24,6 +24,7 @@ from mirage.context.session_context import (
     dotglob_active,
     effective_mount_mode,
     effective_path_mode,
+    expire_caller,
     explaining,
     extglob_active,
     get_admission,
@@ -64,6 +65,7 @@ from mirage.context.session_context import (
     strongest_under_session,
     syntax_head,
     voice_name,
+    while_paused,
 )
 
 __all__ = [
@@ -72,6 +74,8 @@ __all__ = [
     "CallerToken",
     "bind_caller",
     "current_caller",
+    "expire_caller",
+    "while_paused",
     "reset_caller",
     "dotglob_active",
     "extglob_active",
