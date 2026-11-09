@@ -646,7 +646,6 @@ impl Shell {
     /// Run a `declare`, `typeset` or `local` statement: `operands` each a
     /// word, or `(name, append, items)` for an array literal.
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     fn declare(
         slf: &Bound<'_, Self>,
         cmd: String,
