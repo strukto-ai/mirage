@@ -505,6 +505,15 @@ def build_app(
     app.state.exit_event = exit_event or asyncio.Event()
     app.state.on_idle_exit = on_idle_exit
     app.state.state_root = state_root_path(state_root)
+    app.state.state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        app.state.state_root.chmod(0o700)
+    except PermissionError:
+        logger.warning(
+            "state root %s is not owned by this user, so its mode is left "
+            "as it is; other local users may be able to read saved configs",
+            app.state.state_root,
+        )
     app.state.registry = WorkspaceRegistry(
         idle_grace_seconds=idle_grace_seconds,
         exit_event=app.state.exit_event,

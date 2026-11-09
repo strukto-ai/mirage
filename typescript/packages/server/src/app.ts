@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chmodSync, mkdirSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
@@ -232,6 +233,15 @@ export function buildApp(options: BuildAppOptions = {}) {
   const exitFn = options.onIdleExit ?? noop
   const authConfig = options.authConfig ?? resolveAuthConfig()
   const stateRoot = stateRootPath(options.stateRoot)
+  mkdirSync(stateRoot, { recursive: true, mode: 0o700 })
+  try {
+    chmodSync(stateRoot, 0o700)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EPERM') throw err
+    console.warn(
+      `state root ${stateRoot} is not owned by this user, so its mode is left as it is; other local users may be able to read saved configs`,
+    )
+  }
   const host: ServerHost = {
     Workspace,
     workspaceArgs: configToWorkspaceArgs,

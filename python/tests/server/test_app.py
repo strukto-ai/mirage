@@ -15,6 +15,7 @@
 import asyncio
 import os
 import signal
+from pathlib import Path
 
 import asyncssh
 import pytest
@@ -46,6 +47,33 @@ def test_build_app_roots_follow_mirage_home(monkeypatch, tmp_path):
     assert app.state.pid_file is None
     assert app.state.on_idle_exit is None
     assert app.state.state_root == tmp_path / "state"
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_build_app_makes_the_state_root_owner_only(
+    tmp_path, umask_022, existing
+):
+    # Saved configs hold credentials. An install that made the root 0755
+    # is tightened at the next start, which also closes the files under
+    # it that are never written again.
+    root = tmp_path / "state"
+    if existing:
+        root.mkdir(mode=0o755)
+    build_app(state_root=root)
+    assert os.stat(root).st_mode & 0o777 == 0o700
+
+
+def test_build_app_warns_when_it_cannot_tighten_the_state_root(
+    tmp_path, monkeypatch, caplog
+):
+    # A volume owned by another user (a k8s fsGroup mount) refuses the
+    # chmod; the daemon still starts, and says the root stays readable.
+    def refuse(self, mode):
+        raise PermissionError(1, "Operation not permitted", str(self))
+
+    monkeypatch.setattr(Path, "chmod", refuse)
+    build_app(state_root=tmp_path / "state")
+    assert "is not owned by this user" in caplog.text
 
 
 def test_write_and_remove_pid_file_creates_parents(tmp_path):

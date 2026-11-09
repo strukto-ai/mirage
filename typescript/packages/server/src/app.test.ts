@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import * as fs from 'node:fs'
+import { mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import ssh2 from 'ssh2'
@@ -23,23 +24,64 @@ import * as metrics from './metrics.ts'
 import type { SSHConfig } from './ssh/config.ts'
 import { mintKeyPair } from './ssh/keys.ts'
 
+vi.mock('node:fs', async (original) => {
+  const real = await original<typeof fs>()
+  return { ...real, chmodSync: vi.fn(real.chmodSync) }
+})
+
 describe('buildApp pid file wiring', () => {
   afterEach(() => {
     vi.unstubAllEnvs()
   })
 
   it('explicit pidFile option wins over home', async () => {
-    vi.stubEnv('MIRAGE_HOME', '/data/mirage')
+    vi.stubEnv('MIRAGE_HOME', mkdtempSync(join(tmpdir(), 'mirage-home-')))
     const app = buildApp({ pidFile: '/x/y.pid' })
     expect(app.pidFile).toBe('/x/y.pid')
     await app.close()
   })
 
   it('defaults under MIRAGE_HOME', async () => {
-    vi.stubEnv('MIRAGE_HOME', '/data/mirage')
+    const home = mkdtempSync(join(tmpdir(), 'mirage-home-'))
+    vi.stubEnv('MIRAGE_HOME', home)
     const app = buildApp()
-    expect(app.pidFile).toBe(join('/data/mirage', 'daemon.pid'))
+    expect(app.pidFile).toBe(join(home, 'daemon.pid'))
     await app.close()
+  })
+})
+
+describe('buildApp state root', () => {
+  // Saved configs hold credentials. An install that made the root 0755 is
+  // tightened at the next start, which also closes the files under it that
+  // are never written again.
+  it.each([false, true])('is owner-only (existing: %s)', async (existing) => {
+    const root = join(mkdtempSync(join(tmpdir(), 'mirage-state-')), 'state')
+    const umask = process.umask(0o022)
+    try {
+      if (existing) mkdirSync(root, { mode: 0o755 })
+      const app = buildApp({ stateRoot: root })
+      expect(statSync(root).mode & 0o777).toBe(0o700)
+      await app.close()
+    } finally {
+      process.umask(umask)
+    }
+  })
+  // A volume owned by another user (a k8s fsGroup mount) refuses the chmod;
+  // the daemon still starts, and says the root stays readable.
+  it('warns when it cannot tighten the root', async () => {
+    const refused = Object.assign(new Error('EPERM'), { code: 'EPERM' })
+    const chmod = vi.mocked(fs.chmodSync).mockImplementationOnce(() => {
+      throw refused
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const app = buildApp({ stateRoot: join(mkdtempSync(join(tmpdir(), 'mirage-state-')), 'state') })
+      expect(warn.mock.calls.flat().join(' ')).toMatch(/is not owned by this user/)
+      await app.close()
+    } finally {
+      warn.mockRestore()
+      chmod.mockReset()
+    }
   })
 })
 
